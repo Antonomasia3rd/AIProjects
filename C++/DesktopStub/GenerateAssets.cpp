@@ -1,5 +1,5 @@
-// GenerateAssets_Refactored (Option 3.5, C++17, MSYS2-UCRT64-safe)
-
+// compile command: cl /std:c++17 /EHsc /DUNICODE /D_UNICODE GenerateAssets.cpp /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib /SUBSYSTEM:WINDOWS
+#define NOMINMAX
 #include <windows.h>
 #include <gdiplus.h>
 #include <shlwapi.h>
@@ -12,15 +12,60 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <algorithm>
+#include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Management.Deployment.h>
+
+enum class FitMode {
+    Fill,
+    Fit,
+    Stretch,
+    Center,
+    Tile,
+    Span
+};
 
 using namespace Gdiplus;
 using namespace std::chrono;
+
+struct IniDefault {
+    const wchar_t* section;
+    const wchar_t* key;
+    const wchar_t* value;
+};
 
 // -----------------------------------------------------------------------------
 // Globals
 // -----------------------------------------------------------------------------
 static std::wstring g_iniPath, g_logPath, g_exePath;
 static std::atomic<bool> g_running(true), g_console(false), g_logging(true), g_tray(true);
+static std::atomic<bool> g_listenWallpaper(true);
+static std::atomic<bool> g_listenFit(true);
+static std::atomic<bool> g_generateOnStartup(true);
+static const IniDefault g_defaults[] = {
+    // Settings
+    {L"Settings", L"PollIntervalMs", L"2000"},
+    {L"Settings", L"ConfirmMs", L"800"},
+    {L"Settings", L"DebounceMinMs", L"1200"},
+    {L"Settings", L"Logging", L"1"},
+    {L"Settings", L"LogPath", L"logs.txt"},
+    {L"Settings", L"TrayIcon", L"1"},
+    {L"Settings", L"ShowConsole", L"0"},
+    {L"Settings", L"GenerateOnStartup", L"1"},
+    {L"Settings", L"ListenWallpaper", L"1"},
+    {L"Settings", L"ListenFit", L"1"},
+    {L"Settings", L"UsePowerShell", L"1"},
+
+    // Assets (IMPORTANT: correct defaults)
+    {L"Assets", L"StoreLogo", L"0"},
+    {L"Assets", L"MediumTile", L"1"},
+    {L"Assets", L"Square44x44Logo", L"0"},
+    {L"Assets", L"SmallTile", L"0"},
+    {L"Assets", L"WideTile", L"1"},
+    {L"Assets", L"LargeTile", L"1"},
+};
 
 // Logging buffer
 static std::mutex g_logMutex;
@@ -79,9 +124,55 @@ std::wstring IniReadS(const wchar_t* s, const wchar_t* k, const wchar_t* d)
 void IniWrite(const wchar_t* s, const wchar_t* k, const wchar_t* v)
 { WritePrivateProfileStringW(s, k, v, g_iniPath.c_str()); }
 
+void EnsureIniDefaults()
+{
+    for (const auto& d : g_defaults)
+    {
+        wchar_t buf[260];
+
+        GetPrivateProfileStringW(
+            d.section,
+            d.key,
+            L"",
+            buf,
+            260,
+            g_iniPath.c_str());
+
+        // If missing → write default
+        if (buf[0] == L'\0')
+        {
+            WritePrivateProfileStringW(
+                d.section,
+                d.key,
+                d.value,
+                g_iniPath.c_str());
+        }
+    }
+}
+
+bool UsePowerShell()
+{
+    return IniReadI(L"Settings", L"UsePowerShell", 1) != 0;
+}
+
+const wchar_t* FitModeToString(FitMode m)
+{
+    switch (m)
+    {
+    case FitMode::Fill:    return L"Fill";
+    case FitMode::Fit:     return L"Fit";
+    case FitMode::Stretch: return L"Stretch";
+    case FitMode::Center:  return L"Center";
+    case FitMode::Tile:    return L"Tile";
+    case FitMode::Span:    return L"Span";
+    default:               return L"?";
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Wallpaper
 // -----------------------------------------------------------------------------
+
 std::wstring GetWallpaper()
 {
     HKEY h; if (RegOpenKeyExW(HKEY_CURRENT_USER,
@@ -100,6 +191,39 @@ std::wstring GetWallpaper()
     const wchar_t* p = (wchar_t*)(buf.data()+24);
     size_t len = (sz-24)/sizeof(wchar_t);
     return std::wstring(p, wcsnlen(p, len));
+}
+
+FitMode GetWallpaperFit()
+{
+    HKEY h;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+        L"Control Panel\\Desktop", 0, KEY_READ, &h))
+        return FitMode::Fill;
+
+    wchar_t style[16] = {};
+    wchar_t tile[8] = {};
+
+    DWORD sz = sizeof(style);
+    RegQueryValueExW(h, L"WallpaperStyle", nullptr, nullptr, (LPBYTE)style, &sz);
+
+    sz = sizeof(tile);
+    RegQueryValueExW(h, L"TileWallpaper", nullptr, nullptr, (LPBYTE)tile, &sz);
+
+    RegCloseKey(h);
+
+    int s = _wtoi(style);
+    int t = _wtoi(tile);
+
+    if (t == 1) return FitMode::Tile;
+
+    switch (s)
+    {
+    case 10: return FitMode::Fill;
+    case 6:  return FitMode::Fit;
+    case 2:  return FitMode::Stretch;
+    case 22: return FitMode::Span;
+    default: return FitMode::Center;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -124,16 +248,86 @@ bool FindPngEncoder()
     return g_png.Data1 != 0;
 }
 
-Bitmap* ResizeCrop(Bitmap* src, int w, int h)
+Bitmap* ResizeWithFit(Bitmap* src, int w, int h, FitMode mode)
 {
     if (!src) return nullptr;
-    double S = std::max(double(w)/src->GetWidth(), double(h)/src->GetHeight());
-    int sw = int(src->GetWidth()*S + .5);
-    int sh = int(src->GetHeight()*S + .5);
 
-    auto* out = new Bitmap(w,h,PixelFormat32bppARGB);
-    Graphics g(out); g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
-    g.DrawImage(src, Rect((w-sw)/2,(h-sh)/2,sw,sh), 0,0,src->GetWidth(),src->GetHeight(),UnitPixel);
+    int sw = src->GetWidth();
+    int sh = src->GetHeight();
+
+    auto* out = new Bitmap(w, h, PixelFormat32bppARGB);
+    Graphics g(out);
+
+    g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+    g.Clear(Color(255, 0, 0, 0)); // black background
+
+    double scaleX = (double)w / sw;
+    double scaleY = (double)h / sh;
+
+    int dw = w, dh = h;
+    int dx = 0, dy = 0;
+
+    switch (mode)
+    {
+    case FitMode::Fill:
+    {
+        double s = std::max(scaleX, scaleY);
+        dw = int(sw * s + 0.5);
+        dh = int(sh * s + 0.5);
+        dx = (w - dw) / 2;
+        dy = (h - dh) / 2;
+        break;
+    }
+
+    case FitMode::Fit:
+    {
+        double s = std::min(scaleX, scaleY);
+        dw = int(sw * s + 0.5);
+        dh = int(sh * s + 0.5);
+        dx = (w - dw) / 2;
+        dy = (h - dh) / 2;
+        break;
+    }
+
+    case FitMode::Stretch:
+    {
+        dw = w;
+        dh = h;
+        dx = 0;
+        dy = 0;
+        break;
+    }
+
+    case FitMode::Center:
+    {
+        dw = sw;
+        dh = sh;
+        dx = (w - sw) / 2;
+        dy = (h - sh) / 2;
+        break;
+    }
+
+    case FitMode::Tile:
+    {
+        for (int y = 0; y < h; y += sh)
+            for (int x = 0; x < w; x += sw)
+                g.DrawImage(src, x, y, sw, sh);
+        return out;
+    }
+
+    case FitMode::Span:
+    {
+        // fallback: treat as Fill
+        double s = std::max(scaleX, scaleY);
+        dw = int(sw * s + 0.5);
+        dh = int(sh * s + 0.5);
+        dx = (w - dw) / 2;
+        dy = (h - dh) / 2;
+        break;
+    }
+    }
+
+    g.DrawImage(src, Rect(dx, dy, dw, dh), 0, 0, sw, sh, UnitPixel);
     return out;
 }
 
@@ -206,6 +400,51 @@ bool PS_Run(const std::wstring& cmd)
     return false;
 }
 
+bool Appx_Register_COM(const std::wstring& manifestPath)
+{
+    try
+    {
+        Log(L"[i] Using COM Appx registration...");
+
+        winrt::init_apartment(winrt::apartment_type::single_threaded);
+
+        using namespace winrt::Windows::Management::Deployment;
+        using namespace winrt::Windows::Foundation;
+        using namespace winrt::Windows::Foundation::Collections;
+
+        PackageManager pm;
+
+        Uri uri(manifestPath);
+
+        IVector<Uri> deps = winrt::single_threaded_vector<Uri>();
+
+        auto op = pm.RegisterPackageAsync(
+            uri,
+            deps,
+            DeploymentOptions::ForceUpdateFromAnyVersion
+        );
+
+        op.get(); // wait
+
+        if (op.Status() == winrt::Windows::Foundation::AsyncStatus::Completed)
+        {
+            Log(L"[i] COM registration success.");
+            return true;
+        }
+        else
+        {
+            Log(L"[!] COM registration failed (status=%d)", (int)op.Status());
+            return false;
+        }
+    }
+    catch (const winrt::hresult_error& e)
+    {
+        Log(L"[!] COM exception: 0x%08X", e.code().value);
+        Log(L"[!] Message: %s", e.message().c_str());
+        return false;
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Tile generation
 // -----------------------------------------------------------------------------
@@ -226,18 +465,18 @@ void Generate(const wchar_t* wp)
     Log(L"[i] Generating from: %s", wp);
     Bitmap* src = new Bitmap(wp);
     if (src->GetLastStatus()!=Ok){ Log(L"[!] Load fail."); delete src; return; }
-
+    FitMode mode = GetWallpaperFit();
     CreateDirectoryW(L"Assets", nullptr);
 
     for (auto& t: g_tiles)
     {
-        if (!IniReadI(L"Assets", t.name, 1)){
-            Log(L" ✖ %s disabled", t.name);
+        if (!IniReadI(L"Assets", t.name, 0)){
+            Log(L" [!] %s disabled", t.name);
             continue;
         }
-        auto* o = ResizeCrop(src, t.w,t.h);
+        auto* o = ResizeWithFit(src, t.w, t.h, mode);
         if (o){
-            if (SavePNG(o, t.file)) Log(L" ✔ %s", t.file);
+            if (SavePNG(o, t.file)) Log(L" [i] %s", t.file);
             else Log(L" [!] Fail %s", t.file);
             delete o;
         }
@@ -245,9 +484,29 @@ void Generate(const wchar_t* wp)
     delete src;
 
     Log(L"[i] Re-register AppxManifest...");
-    bool ok = PS_Run(L"Add-AppxPackage -Register .\\AppxManifest.xml -ForceUpdateFromAnyVersion");
-    if (ok) Log(L"[✓] Done.");
-    else    Log(L"[✖] Done with PS errors.");
+
+    wchar_t fullPath[MAX_PATH];
+    GetFullPathNameW(L".\\AppxManifest.xml", MAX_PATH, fullPath, nullptr);
+
+    bool ok = false;
+
+    if (!UsePowerShell())
+    {
+        ok = Appx_Register_COM(fullPath);
+
+        if (!ok)
+        {
+            Log(L"[!] COM failed, falling back to PowerShell...");
+            ok = PS_Run(L"Add-AppxPackage -Register .\\AppxManifest.xml -ForceUpdateFromAnyVersion");
+        }
+    }
+    else
+    {
+        ok = PS_Run(L"Add-AppxPackage -Register .\\AppxManifest.xml -ForceUpdateFromAnyVersion");
+    }
+
+    if (ok) Log(L"[i] Done.");
+    else    Log(L"[!] Registration failed.");
 }
 
 // -----------------------------------------------------------------------------
@@ -256,6 +515,7 @@ void Generate(const wchar_t* wp)
 void PollThread()
 {
     std::wstring last;
+    FitMode lastFit = GetWallpaperFit();
     auto lastGen = steady_clock::now() - seconds(5);
 
     while (g_running)
@@ -265,17 +525,33 @@ void PollThread()
         int deb = IniReadI(L"Settings",L"DebounceMinMs",1200);
 
         std::wstring cur = GetWallpaper();
+        FitMode curFit = GetWallpaperFit();
 
-        if (cur != last)
+        bool wallpaperChanged = (cur != last);
+        bool fitChanged = (curFit != lastFit);
+
+        if ((g_listenWallpaper && wallpaperChanged) ||
+            (g_listenFit && fitChanged))
         {
             std::this_thread::sleep_for(milliseconds(confirm));
-            if (GetWallpaper() != last)
+
+            std::wstring cur2 = GetWallpaper();
+            FitMode fit2 = GetWallpaperFit();
+
+            bool wallpaperChanged2 = (cur2 != last);
+            bool fitChanged2 = (fit2 != lastFit);
+
+            if ((g_listenWallpaper && wallpaperChanged2) ||
+                (g_listenFit && fitChanged2))
             {
                 auto now = steady_clock::now();
-                if (duration_cast<milliseconds>(now-lastGen).count() >= deb)
+
+                if (duration_cast<milliseconds>(now - lastGen).count() >= deb)
                 {
-                    last = cur;
-                    Generate(cur.c_str());
+                    last = cur2;
+                    lastFit = fit2;
+
+                    Generate(cur2.c_str());
                     lastGen = steady_clock::now();
                 }
             }
@@ -288,7 +564,19 @@ void PollThread()
 // Tray
 // -----------------------------------------------------------------------------
 enum {
-    ID_EXIT=1001, ID_CONSOLE, ID_LOG, ID_LOGFILE, ID_TRAYDISABLE, ID_PSLOG,
+    ID_EXIT=1001,
+
+    // General
+    ID_USE_PS,
+    ID_TRAYICON,
+    ID_CONSOLE,
+    ID_LOG,
+    ID_LOGFILE,
+    ID_GENERATE_NOW,
+    ID_LISTEN_WP,
+    ID_LISTEN_FIT,
+
+    // Assets
     ID_A1=2001, ID_A2, ID_A3, ID_A4, ID_A5, ID_A6
 };
 
@@ -320,31 +608,53 @@ void Menu(HWND h)
     HMENU m = CreatePopupMenu();
 
     auto add = [&](UINT id, const std::wstring& t, bool chk=false, bool en=true){
-        AppendMenuW(m, MF_STRING | (chk?MF_CHECKED:0) | (!en?MF_DISABLED:0), id, t.c_str());
+        AppendMenuW(m,
+            MF_STRING |
+            (chk ? MF_CHECKED : 0) |
+            (!en ? MF_DISABLED : 0),
+            id, t.c_str());
     };
 
-    add(ID_CONSOLE, GetConsoleWindow()?L"Hide Console":L"Show Console");
-    add(ID_LOG, g_logging?L"Disable Logging":L"Enable Logging");
+    // =====================
+    // General Section
+    // =====================
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, L"General:");
+    add(ID_LISTEN_WP, L"Listen Wallpaper", g_listenWallpaper);
+    add(ID_LISTEN_FIT, L"Listen Fit Mode", g_listenFit);
+    FitMode mode = GetWallpaperFit();
+    std::wstring fitLine = L"Fit Mode: ";
+    fitLine += FitModeToString(mode);
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, fitLine.c_str());
+    add(ID_USE_PS, L"Use PowerShell", UsePowerShell());
+    add(ID_TRAYICON, L"Tray Icon", g_tray);
+    add(ID_CONSOLE, L"Show Console", g_console);
+    add(ID_GENERATE_NOW, L"Generate now");
+    add(ID_LOG, L"Logging", g_logging);
     add(ID_LOGFILE, L"Change log path...");
-    add(ID_TRAYDISABLE, L"Disable tray icon...");
-    AppendMenuW(m,MF_SEPARATOR,0,nullptr);
 
-    if (g_psErr){
-        add(0, g_psMsg, false, false);
-        add(ID_PSLOG, L"View PowerShell output...");
-        AppendMenuW(m,MF_SEPARATOR,0,nullptr);
-    }
+    // Show current path (disabled)
+    std::wstring pathLine = L"Path: " + g_logPath;
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, pathLine.c_str());
 
-    AppendMenuW(m, MF_STRING|MF_DISABLED,0,L"Assets:");
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+
+    // =====================
+    // Assets Section
+    // =====================
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, L"Assets:");
+
     const wchar_t* keys[] = {
         L"StoreLogo",L"MediumTile",L"Square44x44Logo",
         L"SmallTile",L"WideTile",L"LargeTile"
     };
-    for (int i=0;i<6;i++)
-        add(ID_A1+i, keys[i], IniReadI(L"Assets",keys[i],1)!=0);
 
-    AppendMenuW(m,MF_SEPARATOR,0,nullptr);
-    add(ID_EXIT,L"Exit");
+    for (int i=0;i<6;i++)
+        add(ID_A1+i, keys[i], IniReadI(L"Assets",keys[i],0)!=0);
+
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+
+    // Exit
+    add(ID_EXIT, L"Exit");
 
     SetForegroundWindow(h);
     UINT cmd = TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,h,nullptr);
@@ -352,63 +662,119 @@ void Menu(HWND h)
 
     switch(cmd)
     {
-    case ID_EXIT:
-        g_running=false; TrayRemove(); PostQuitMessage(0); break;
+    case ID_USE_PS:
+    {
+        bool v = !UsePowerShell();
+        IniWrite(L"Settings", L"UsePowerShell", v ? L"1" : L"0");
+        Log(L"[i] UsePowerShell = %d", v);
+    }
+    break;
+
+    case ID_TRAYICON:
+    {
+        g_tray = !g_tray;
+        IniWrite(L"Settings", L"TrayIcon", g_tray ? L"1" : L"0");
+
+        if (!g_tray)
+        {
+            TrayRemove();
+        }
+        else
+        {
+            // recreate tray icon
+            g_nid.cbSize=sizeof(g_nid);
+            g_nid.hWnd=g_hwnd; g_nid.uID=1;
+            g_nid.uFlags= NIF_MESSAGE|NIF_ICON|NIF_TIP;
+            g_nid.uCallbackMessage=WM_USER+1;
+            g_nid.hIcon=LoadIconW(nullptr,IDI_APPLICATION);
+            wcscpy_s(g_nid.szTip,L"Desktop Tile Generator");
+            Shell_NotifyIconW(NIM_ADD,&g_nid);
+        }
+
+        Log(L"[i] Tray icon %s.", g_tray?L"enabled":L"disabled");
+    }
+    break;
 
     case ID_CONSOLE:
-        if (GetConsoleWindow()){ FreeConsole(); g_console=false; }
-        else {
+    {
+        g_console = !g_console;
+
+        if (g_console)
+        {
             AllocConsole();
             FILE* f;
             freopen_s(&f,"CONOUT$","w",stdout);
             freopen_s(&f,"CONOUT$","w",stderr);
             freopen_s(&f,"CONIN$","r",stdin);
             SetConsoleOutputCP(CP_UTF8);
-            g_console=true;
+
             std::lock_guard<std::mutex>lk(g_logMutex);
-            for (auto& l:g_logBuf) fwprintf(stdout,L"%ls\n",l.c_str());
+            for (auto& l:g_logBuf)
+                fwprintf(stdout,L"%ls\n",l.c_str());
         }
-        Log(L"[i] Console toggled.");
-        break;
+        else
+        {
+            FreeConsole();
+        }
+        IniWrite(L"Settings", L"ShowConsole", g_console ? L"1" : L"0");
+        Log(L"[i] Console %s.", g_console?L"on":L"off");
+    }
+    break;
 
     case ID_LOG:
+    {
         g_logging = !g_logging;
         IniWrite(L"Settings",L"Logging", g_logging?L"1":L"0");
         Log(L"[i] Logging %s.", g_logging?L"on":L"off");
-        break;
+    }
+    break;
 
-    case ID_LOGFILE: {
-        wchar_t fn[260]={0};
-        OPENFILENAMEW ofn{sizeof(ofn)};
-        ofn.hwndOwner=h; ofn.lpstrFile=fn; ofn.nMaxFile=260;
-        ofn.lpstrFilter=L"Log\0*.txt;*.log\0All\0*.*\0";
-        ofn.Flags=OFN_OVERWRITEPROMPT;
-        ofn.lpstrTitle=L"Select log file";
-        if (GetSaveFileNameW(&ofn)){
-            g_logPath=fn;
-            IniWrite(L"Settings",L"LogPath",fn);
-            Log(L"[i] Log path changed.");
+    case ID_GENERATE_NOW:
+    {
+        std::wstring wp = GetWallpaper();
+
+        if (wp.empty())
+        {
+            MessageBoxW(h,
+                L"Could not detect current wallpaper.",
+                L"Generate Now",
+                MB_OK | MB_ICONWARNING);
         }
-    } break;
-
-    case ID_TRAYDISABLE:
-        if (MessageBoxW(h,L"Disable tray icon?\nRe-enable via INI.",L"Confirm",
-            MB_YESNO|MB_ICONWARNING)==IDYES){
-            g_tray=false;
-            IniWrite(L"Settings",L"TrayIcon",L"0");
-            TrayRemove();
+        else
+        {
+            Log(L"[i] Manual generate triggered.");
+            Generate(wp.c_str());
         }
+    }
+    break;
+
+    case ID_EXIT:
+        g_running = false;
+        TrayRemove();
+        PostQuitMessage(0);
         break;
 
-    case ID_PSLOG:
-        ShowPSLog(h);
-        break;
+    case ID_LISTEN_WP:
+    {
+        g_listenWallpaper = !g_listenWallpaper;
+        IniWrite(L"Settings", L"ListenWallpaper", g_listenWallpaper ? L"1" : L"0");
+        Log(L"[i] ListenWallpaper = %d", (int)g_listenWallpaper);
+    }
+    break;
+
+    case ID_LISTEN_FIT:
+    {
+        g_listenFit = !g_listenFit;
+        IniWrite(L"Settings", L"ListenFit", g_listenFit ? L"1" : L"0");
+        Log(L"[i] ListenFit = %d", (int)g_listenFit);
+    }
+    break;
 
     default:
         if (cmd>=ID_A1 && cmd<=ID_A6){
             int i = cmd-ID_A1;
             const wchar_t* k = keys[i];
-            int nv = !IniReadI(L"Assets",k,1);
+            int nv = !IniReadI(L"Assets",k,0);
             IniWrite(L"Assets",k,nv?L"1":L"0");
             Log(L"[i] Asset %s %s.", k, nv?L"on":L"off");
         }
@@ -445,15 +811,38 @@ int WINAPI wWinMain(HINSTANCE hi,HINSTANCE, PWSTR, int)
     g_iniPath = dir + L"\\" + base + L".ini";
 
     // defaults
+    EnsureIniDefaults();
     g_logging = IniReadI(L"Settings",L"Logging",1)!=0;
     g_tray    = IniReadI(L"Settings",L"TrayIcon",1)!=0;
     g_logPath = IniReadS(L"Settings",L"LogPath",L"logs.txt");
+    g_console = IniReadI(L"Settings", L"ShowConsole", 0) != 0;
+    g_generateOnStartup = IniReadI(L"Settings", L"GenerateOnStartup", 1) != 0;
+    g_listenWallpaper = IniReadI(L"Settings", L"ListenWallpaper", 1) != 0;
+    g_listenFit       = IniReadI(L"Settings", L"ListenFit", 1) != 0;
 
     // GDI+
     GdiplusStartupInput in; ULONG_PTR tk;
     if (GdiplusStartup(&tk,&in,nullptr)!=Ok){ MessageBoxW(nullptr,L"GDI+",L"Error",0); return 1; }
 
-    Log(L"[i] Starting GenerateAssets (refactored).");
+    Log(L"[i] Program starting...");
+
+    // Console setting
+    if (g_console)
+    {
+        AllocConsole();
+
+        FILE* f;
+        freopen_s(&f,"CONOUT$","w",stdout);
+        freopen_s(&f,"CONOUT$","w",stderr);
+        freopen_s(&f,"CONIN$","r",stdin);
+
+        SetConsoleOutputCP(CP_UTF8);
+
+        // 👇 THIS is where it goes
+        std::lock_guard<std::mutex> lk(g_logMutex);
+        for (auto& l : g_logBuf)
+            fwprintf(stdout, L"%ls\n", l.c_str());
+    }
 
     // Window
     WNDCLASSW wc{}; wc.lpfnWndProc=WndProc; wc.hInstance=hi; wc.lpszClassName=L"TrayWndRef";
