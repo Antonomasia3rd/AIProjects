@@ -48,6 +48,7 @@ static std::atomic<bool> g_listenWallpaper(true);
 static std::atomic<bool> g_listenFit(true);
 static std::atomic<bool> g_disableFitting(false);
 static std::atomic<bool> g_generateOnStartup(true);
+static std::atomic<bool> g_hideDisabled(false);
 static const IniDefault g_defaults[] = {
     // Settings
     {L"Settings", L"PollIntervalMs", L"2000"},
@@ -62,6 +63,7 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"ListenFit", L"1"},
     {L"Settings", L"DisableFitting", L"0"},
     {L"Settings", L"UsePowerShell", L"1"},
+    {L"Settings", L"HideDisabledEntries", L"0"},
 
     // Assets (IMPORTANT: correct defaults)
     {L"Assets", L"StoreLogo", L"0"},
@@ -70,7 +72,94 @@ static const IniDefault g_defaults[] = {
     {L"Assets", L"SmallTile", L"0"},
     {L"Assets", L"WideTile", L"1"},
     {L"Assets", L"LargeTile", L"1"},
+
 };
+
+struct StringDefault {
+    const wchar_t* key;
+    const wchar_t* value;
+};
+
+static const StringDefault g_stringDefaults[] = {
+    {L"GeneralTitle", L"General:"},
+    {L"LoggingTitle", L"Logging:"},
+    {L"WallpaperFittingTitle", L"Wallpaper Fitting:"},
+    {L"AssetsTitle", L"Assets:"},
+    {L"ListenWallpaper", L"Listen Wallpaper"},
+    {L"TrayIcon", L"Tray Icon"},
+    {L"UsePowerShell", L"Use PowerShell"},
+    {L"GenerateOnStartup", L"Generate on Startup"},
+    {L"HideDisabledEntries", L"Hide disabled entries"},
+    {L"ShowConsole", L"Show Console"},
+    {L"GenerateNow", L"Generate now"},
+    {L"LoggingEnable", L"Enable"},
+    {L"ChangePath", L"Change path..."},
+    {L"RenamePath", L"Rename path..."},
+    {L"OpenInExplorer", L"Open in Explorer"},
+    {L"ResetDefault", L"Reset to default"},
+    {L"ShowPowerShellLog", L"Show PowerShell Log"},
+    {L"LogPathPrefix", L"Path: "},
+    {L"PSStatusPrefix", L"PS Status: "},
+    {L"DisableFitting", L"Disable Fitting"},
+    {L"ListenFit", L"Listen Fit Mode"},
+    {L"FitModePrefix", L"Fit Mode: "},
+    {L"FitModeForced", L"Fit Mode: Fill (forced)"},
+    {L"Exit", L"Exit"},
+    {L"RenameDialogTitle", L"Rename Log Path"},
+    {L"OKText", L"OK"},
+    {L"CancelText", L"Cancel"},
+    {L"ErrorTitle", L"Error"},
+    {L"PathCannotBeEmpty", L"Path cannot be empty."},
+    {L"NoPowerShellOutputTitle", L"PowerShell Output"},
+    {L"NoPowerShellOutput", L"No PowerShell output."},
+    {L"GenerateNowTitle", L"Generate Now"},
+    {L"WallpaperNotFound", L"Could not detect current wallpaper."},
+    {L"CurrentWallpaperNotFound", L"Could not detect current wallpaper."},
+    {L"ProgramStarting", L"Program starting..."},
+    {L"ManualGenerateTriggered", L"Manual generate triggered."},
+    {L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s."},
+    {L"WallpaperSource", L"Wallpaper source: %s"},
+    {L"FailedLoadWallpaper", L"Failed to load wallpaper image."},
+    {L"SkippingAssetDisabled", L"Skipping %s (disabled in settings)."},
+    {L"SavedAsset", L"Saved %s"},
+    {L"FailedSaveAsset", L"Failed to save %s"},
+    {L"ReRegisteringManifest", L"Re-registering AppxManifest due to regenerated assets."},
+    {L"ManifestPath", L"Manifest path: %s"},
+    {L"UsingComRegistration", L"Using COM Appx registration..."},
+    {L"InvalidManifestPath", L"Invalid manifest path."},
+    {L"ComRegistrationSuccess", L"COM registration success."},
+    {L"ComRegistrationFailed", L"COM registration failed; falling back to PowerShell registration."},
+    {L"ComRegistrationException", L"COM registration threw exception: 0x%08X"},
+    {L"ComExceptionMessage", L"COM message: %s"},
+    {L"ComFallbackToPowerShell", L"COM failed, falling back to PowerShell..."},
+    {L"LaunchingPowerShellRegistration", L"Launching PowerShell registration..."},
+    {L"PowerShellCommand", L"Command: %s"},
+    {L"PowerShellCompleted", L"PowerShell registration completed successfully."},
+    {L"PowerShellErrorSideloadDisabled", L"PowerShell error: Enable sideloading first!"},
+    {L"PowerShellErrorCode", L"PowerShell registration failed with exit code 0x%08X."},
+    {L"PowerShellOutputFollows", L"PowerShell output follows:"},
+    {L"PowerShellRegistrationFailed", L"PowerShell registration did not complete successfully."},
+    {L"AssetGenerationFinished", L"Asset generation and registration finished successfully."},
+    {L"AppRegistrationFailed", L"App registration did not complete successfully."},
+    {L"ChangeConfirmed", L"Change confirmed; regeneration allowed after debounce."},
+    {L"WallpaperAndFitChangeDetected", L"Wallpaper and fit mode change detected."},
+    {L"WallpaperChangeDetected", L"Wallpaper change detected."},
+    {L"FitModeChangeDetected", L"Fit mode change detected."},
+    {L"RegenerationAllowedAfterDebounce", L"Regeneration allowed after debounce."},
+};
+
+static void EnsureIniStringDefaults()
+{
+    for (const auto& d : g_stringDefaults)
+    {
+        wchar_t buf[260];
+        GetPrivateProfileStringW(L"Strings", d.key, L"", buf, 260, g_iniPath.c_str());
+        if (buf[0] == L'\0')
+        {
+            WritePrivateProfileStringW(L"Strings", d.key, d.value, g_iniPath.c_str());
+        }
+    }
+}
 
 // Logging buffer
 static std::mutex g_logMutex;
@@ -86,6 +175,87 @@ static bool g_psErr = false;
 static NOTIFYICONDATAW g_nid{};
 static HWND g_hwnd = nullptr;
 
+
+struct UiStrings
+{
+    std::wstring generalTitle;
+    std::wstring loggingTitle;
+    std::wstring wallpaperFittingTitle;
+    std::wstring assetsTitle;
+
+    std::wstring listenWallpaper;
+    std::wstring trayIcon;
+    std::wstring usePowerShell;
+    std::wstring generateOnStartup;
+    std::wstring hideDisabledEntries;
+    std::wstring showConsole;
+    std::wstring generateNow;
+
+    std::wstring loggingEnable;
+    std::wstring changePath;
+    std::wstring renamePath;
+    std::wstring openInExplorer;
+    std::wstring resetDefault;
+    std::wstring showPowerShellLog;
+
+    std::wstring logPathPrefix;
+    std::wstring psStatusPrefix;
+
+    std::wstring disableFitting;
+    std::wstring listenFit;
+    std::wstring fitModePrefix;
+    std::wstring fitModeForced;
+
+    std::wstring exitText;
+
+    std::wstring renameDialogTitle;
+    std::wstring okText;
+    std::wstring cancelText;
+    std::wstring errorTitle;
+    std::wstring pathCannotBeEmpty;
+
+    std::wstring noPowerShellOutputTitle;
+    std::wstring noPowerShellOutput;
+
+    std::wstring generateNowTitle;
+    std::wstring wallpaperNotFound;
+    std::wstring currentWallpaperNotFound;
+
+    std::wstring programStarting;
+    std::wstring manualGenerateTriggered;
+    std::wstring startingWallpaperGeneration;
+    std::wstring wallpaperSource;
+    std::wstring failedLoadWallpaper;
+    std::wstring skippingAssetDisabled;
+    std::wstring savedAsset;
+    std::wstring failedSaveAsset;
+    std::wstring reRegisteringManifest;
+    std::wstring manifestPath;
+    std::wstring usingComRegistration;
+    std::wstring invalidManifestPath;
+    std::wstring comRegistrationSuccess;
+    std::wstring comRegistrationFailed;
+    std::wstring comRegistrationException;
+    std::wstring comExceptionMessage;
+    std::wstring comFallbackToPowerShell;
+    std::wstring launchingPowerShellRegistration;
+    std::wstring powerShellCommand;
+    std::wstring powerShellCompleted;
+    std::wstring powerShellErrorSideloadDisabled;
+    std::wstring powerShellErrorCode;
+    std::wstring powerShellOutputFollows;
+    std::wstring powerShellRegistrationFailed;
+    std::wstring assetGenerationFinished;
+    std::wstring appRegistrationFailed;
+
+    std::wstring changeConfirmed;
+    std::wstring wallpaperAndFitChangeDetected;
+    std::wstring wallpaperChangeDetected;
+    std::wstring fitModeChangeDetected;
+    std::wstring regenerationAllowedAfterDebounce;
+};
+
+static UiStrings g_ui;
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
@@ -222,6 +392,87 @@ void EnsureIniDefaults()
     }
 }
 
+
+void LoadUiStrings()
+{
+    g_ui.generalTitle = IniReadS(L"Strings", L"GeneralTitle", L"General:");
+    g_ui.loggingTitle = IniReadS(L"Strings", L"LoggingTitle", L"Logging:");
+    g_ui.wallpaperFittingTitle = IniReadS(L"Strings", L"WallpaperFittingTitle", L"Wallpaper Fitting:");
+    g_ui.assetsTitle = IniReadS(L"Strings", L"AssetsTitle", L"Assets:");
+
+    g_ui.listenWallpaper = IniReadS(L"Strings", L"ListenWallpaper", L"Listen Wallpaper");
+    g_ui.trayIcon = IniReadS(L"Strings", L"TrayIcon", L"Tray Icon");
+    g_ui.usePowerShell = IniReadS(L"Strings", L"UsePowerShell", L"Use PowerShell");
+    g_ui.generateOnStartup = IniReadS(L"Strings", L"GenerateOnStartup", L"Generate on Startup");
+    g_ui.hideDisabledEntries = IniReadS(L"Strings", L"HideDisabledEntries", L"Hide disabled entries");
+    g_ui.showConsole = IniReadS(L"Strings", L"ShowConsole", L"Show Console");
+    g_ui.generateNow = IniReadS(L"Strings", L"GenerateNow", L"Generate now");
+
+    g_ui.loggingEnable = IniReadS(L"Strings", L"LoggingEnable", L"Enable");
+    g_ui.changePath = IniReadS(L"Strings", L"ChangePath", L"Change path...");
+    g_ui.renamePath = IniReadS(L"Strings", L"RenamePath", L"Rename path...");
+    g_ui.openInExplorer = IniReadS(L"Strings", L"OpenInExplorer", L"Open in Explorer");
+    g_ui.resetDefault = IniReadS(L"Strings", L"ResetDefault", L"Reset to default");
+    g_ui.showPowerShellLog = IniReadS(L"Strings", L"ShowPowerShellLog", L"Show PowerShell Log");
+
+    g_ui.logPathPrefix = IniReadS(L"Strings", L"LogPathPrefix", L"Path: ");
+    g_ui.psStatusPrefix = IniReadS(L"Strings", L"PSStatusPrefix", L"PS Status: ");
+
+    g_ui.disableFitting = IniReadS(L"Strings", L"DisableFitting", L"Disable Fitting");
+    g_ui.listenFit = IniReadS(L"Strings", L"ListenFit", L"Listen Fit Mode");
+    g_ui.fitModePrefix = IniReadS(L"Strings", L"FitModePrefix", L"Fit Mode: ");
+    g_ui.fitModeForced = IniReadS(L"Strings", L"FitModeForced", L"Fit Mode: Fill (forced)");
+
+    g_ui.exitText = IniReadS(L"Strings", L"Exit", L"Exit");
+
+    g_ui.renameDialogTitle = IniReadS(L"Strings", L"RenameDialogTitle", L"Rename Log Path");
+    g_ui.okText = IniReadS(L"Strings", L"OKText", L"OK");
+    g_ui.cancelText = IniReadS(L"Strings", L"CancelText", L"Cancel");
+    g_ui.errorTitle = IniReadS(L"Strings", L"ErrorTitle", L"Error");
+    g_ui.pathCannotBeEmpty = IniReadS(L"Strings", L"PathCannotBeEmpty", L"Path cannot be empty.");
+
+    g_ui.noPowerShellOutputTitle = IniReadS(L"Strings", L"NoPowerShellOutputTitle", L"PowerShell Output");
+    g_ui.noPowerShellOutput = IniReadS(L"Strings", L"NoPowerShellOutput", L"No PowerShell output.");
+
+    g_ui.generateNowTitle = IniReadS(L"Strings", L"GenerateNowTitle", L"Generate Now");
+    g_ui.wallpaperNotFound = IniReadS(L"Strings", L"WallpaperNotFound", L"Could not detect current wallpaper.");
+    g_ui.currentWallpaperNotFound = IniReadS(L"Strings", L"CurrentWallpaperNotFound", L"Could not detect current wallpaper.");
+
+    g_ui.programStarting = IniReadS(L"Strings", L"ProgramStarting", L"Program starting...");
+    g_ui.manualGenerateTriggered = IniReadS(L"Strings", L"ManualGenerateTriggered", L"Manual generate triggered.");
+    g_ui.startingWallpaperGeneration = IniReadS(L"Strings", L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s.");
+    g_ui.wallpaperSource = IniReadS(L"Strings", L"WallpaperSource", L"Wallpaper source: %s");
+    g_ui.failedLoadWallpaper = IniReadS(L"Strings", L"FailedLoadWallpaper", L"Failed to load wallpaper image.");
+    g_ui.skippingAssetDisabled = IniReadS(L"Strings", L"SkippingAssetDisabled", L"Skipping %s (disabled in settings).");
+    g_ui.savedAsset = IniReadS(L"Strings", L"SavedAsset", L"Saved %s");
+    g_ui.failedSaveAsset = IniReadS(L"Strings", L"FailedSaveAsset", L"Failed to save %s");
+    g_ui.reRegisteringManifest = IniReadS(L"Strings", L"ReRegisteringManifest", L"Re-registering AppxManifest due to regenerated assets.");
+    g_ui.manifestPath = IniReadS(L"Strings", L"ManifestPath", L"Manifest path: %s");
+    g_ui.usingComRegistration = IniReadS(L"Strings", L"UsingComRegistration", L"Using COM Appx registration...");
+    g_ui.invalidManifestPath = IniReadS(L"Strings", L"InvalidManifestPath", L"Invalid manifest path.");
+    g_ui.comRegistrationSuccess = IniReadS(L"Strings", L"ComRegistrationSuccess", L"COM registration success.");
+    g_ui.comRegistrationFailed = IniReadS(L"Strings", L"ComRegistrationFailed", L"COM registration failed; falling back to PowerShell registration.");
+    g_ui.comRegistrationException = IniReadS(L"Strings", L"ComRegistrationException", L"COM registration threw exception: 0x%08X");
+    g_ui.comExceptionMessage = IniReadS(L"Strings", L"ComExceptionMessage", L"COM message: %s");
+    g_ui.comFallbackToPowerShell = IniReadS(L"Strings", L"ComFallbackToPowerShell", L"COM failed, falling back to PowerShell...");
+    g_ui.launchingPowerShellRegistration = IniReadS(L"Strings", L"LaunchingPowerShellRegistration", L"Launching PowerShell registration...");
+    g_ui.powerShellCommand = IniReadS(L"Strings", L"PowerShellCommand", L"Command: %s");
+    g_ui.powerShellCompleted = IniReadS(L"Strings", L"PowerShellCompleted", L"PowerShell registration completed successfully.");
+    g_ui.powerShellErrorSideloadDisabled = IniReadS(L"Strings", L"PowerShellErrorSideloadDisabled", L"PowerShell error: Enable sideloading first!");
+    g_ui.powerShellErrorCode = IniReadS(L"Strings", L"PowerShellErrorCode", L"PowerShell registration failed with exit code 0x%08X.");
+    g_ui.powerShellOutputFollows = IniReadS(L"Strings", L"PowerShellOutputFollows", L"PowerShell output follows:");
+    g_ui.powerShellRegistrationFailed = IniReadS(L"Strings", L"PowerShellRegistrationFailed", L"PowerShell registration did not complete successfully.");
+    g_ui.assetGenerationFinished = IniReadS(L"Strings", L"AssetGenerationFinished", L"Asset generation and registration finished successfully.");
+    g_ui.appRegistrationFailed = IniReadS(L"Strings", L"AppRegistrationFailed", L"App registration did not complete successfully.");
+
+    g_ui.changeConfirmed = IniReadS(L"Strings", L"ChangeConfirmed", L"Change confirmed; regeneration allowed after debounce.");
+    g_ui.wallpaperAndFitChangeDetected = IniReadS(L"Strings", L"WallpaperAndFitChangeDetected", L"Wallpaper and fit mode change detected.");
+    g_ui.wallpaperChangeDetected = IniReadS(L"Strings", L"WallpaperChangeDetected", L"Wallpaper change detected.");
+    g_ui.fitModeChangeDetected = IniReadS(L"Strings", L"FitModeChangeDetected", L"Fit mode change detected.");
+    g_ui.regenerationAllowedAfterDebounce = IniReadS(L"Strings", L"RegenerationAllowedAfterDebounce", L"Regeneration allowed after debounce.");
+}
+
+
 bool UsePowerShell()
 {
     return IniReadI(L"Settings", L"UsePowerShell", 1) != 0;
@@ -256,7 +507,7 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
     *p++ = 0; // no menu
     *p++ = 0; // default class
 
-    const wchar_t title[] = L"Rename Log Path";
+    const wchar_t* title = g_ui.renameDialogTitle.c_str();
     wcscpy((wchar_t*)p, title);
     p += wcslen(title) + 1;
     *p++ = 9; // font size
@@ -282,7 +533,7 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
 
     p = (WORD*)(item + 1);
     *p++ = 0xFFFF; *p++ = 0x0080; // BUTTON
-    wcscpy((wchar_t*)p, L"OK");
+    wcscpy((wchar_t*)p, g_ui.okText.c_str());
     p += 3;
     *p++ = 0;
 
@@ -294,7 +545,7 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
 
     p = (WORD*)(item + 1);
     *p++ = 0xFFFF; *p++ = 0x0080;
-    wcscpy((wchar_t*)p, L"Cancel");
+    wcscpy((wchar_t*)p, g_ui.cancelText.c_str());
     p += 7;
     *p++ = 0;
 
@@ -479,8 +730,8 @@ void PS_Clear() { g_psErr=false; g_psOut.clear(); g_psMsg.clear(); g_psCode=0; }
 
 bool PS_Run(const std::wstring& cmd)
 {
-    Log(L"[i] Launching PowerShell registration...");
-    Log(L"[i] Command: %s", cmd.c_str());
+    Log(g_ui.launchingPowerShellRegistration.c_str());
+    Log(g_ui.powerShellCommand.c_str(), cmd.c_str());
     PS_Clear();
 
     SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
@@ -531,24 +782,24 @@ bool PS_Run(const std::wstring& cmd)
 
     g_psOut = out; g_psCode = ec;
     if (ec == 0) {
-        g_psMsg = L"PowerShell registration completed successfully.";
-        Log(L"[i] PowerShell registration completed successfully.");
+        g_psMsg = g_ui.powerShellCompleted;
+        Log(g_ui.powerShellCompleted.c_str());
         return true;
     }
 
     g_psErr = true;
 
     if (g_psOut.find(L"0x80073CFF") != std::wstring::npos) {
-        g_psMsg = L"PowerShell error: Enable sideloading first!";
+        g_psMsg = g_ui.powerShellErrorSideloadDisabled;
         Log(L"[!] PowerShell registration failed because sideloading is disabled (HRESULT 0x80073CFF).");
     } else {
         wchar_t msg[128];
-        swprintf(msg, 128, L"PowerShell error: 0x%08X", ec);
+        swprintf(msg, 128, g_ui.powerShellErrorCode.c_str(), ec);
         g_psMsg = msg;
-        Log(L"[!] PowerShell registration failed with exit code 0x%08X.", ec);
+        Log(g_ui.powerShellErrorCode.c_str(), ec);
     }
 
-    Log(L"[!] PowerShell output follows:");
+    Log(g_ui.powerShellOutputFollows.c_str());
     Log(L"%ls", out.c_str());
 
     return false;
@@ -558,7 +809,7 @@ bool Appx_Register_COM(const std::wstring& manifestPath)
 {
     try
     {
-        Log(L"[i] Using COM Appx registration...");
+        Log(g_ui.usingComRegistration.c_str());
 
         winrt::init_apartment(winrt::apartment_type::single_threaded);
 
@@ -571,7 +822,7 @@ bool Appx_Register_COM(const std::wstring& manifestPath)
         std::wstring uriStr = MakeFileUri(manifestPath);
         if (uriStr.empty())
         {
-            Log(L"[!] Invalid manifest path.");
+            Log(g_ui.invalidManifestPath.c_str());
             return false;
         }
         Uri uri{ winrt::hstring(uriStr) };
@@ -588,7 +839,7 @@ bool Appx_Register_COM(const std::wstring& manifestPath)
 
         if (op.Status() == winrt::Windows::Foundation::AsyncStatus::Completed)
         {
-            Log(L"[i] COM registration success.");
+            Log(g_ui.comRegistrationSuccess.c_str());
             return true;
         }
         else
@@ -599,8 +850,8 @@ bool Appx_Register_COM(const std::wstring& manifestPath)
     }
     catch (const winrt::hresult_error& e)
     {
-        Log(L"[!] COM registration threw exception: 0x%08X", e.code().value);
-        Log(L"[!] COM message: %s", e.message().c_str());
+        Log(g_ui.comRegistrationException.c_str(), e.code().value);
+        Log(g_ui.comExceptionMessage.c_str(), e.message().c_str());
         return false;
     }
 }
@@ -622,10 +873,10 @@ void Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 {
     if (!wp || !*wp){ Log(L"[!] Empty wallpaper."); return; }
 
-    Log(L"[i] Starting wallpaper generation due to %s.", reason && *reason ? reason : L"an unspecified reason");
-    Log(L"[i] Wallpaper source: %s", wp);
+    Log(g_ui.startingWallpaperGeneration.c_str(), reason && *reason ? reason : L"an unspecified reason");
+    Log(g_ui.wallpaperSource.c_str(), wp);
     Bitmap* src = new Bitmap(wp);
-    if (src->GetLastStatus()!=Ok){ Log(L"[!] Failed to load wallpaper image."); delete src; return; }
+    if (src->GetLastStatus()!=Ok){ Log(g_ui.failedLoadWallpaper.c_str()); delete src; return; }
     FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
 
     std::wstring exeDir = GetExeDir();
@@ -635,23 +886,23 @@ void Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
     for (auto& t: g_tiles)
     {
         if (!IniReadI(L"Assets", t.name, 0)){
-            Log(L" [i] Skipping %s (disabled in settings).", t.name);
+            Log(g_ui.skippingAssetDisabled.c_str(), t.name);
             continue;
         }
         auto* o = ResizeWithFit(src, t.w, t.h, mode);
         if (o){
             std::wstring outPath = exeDir + L"\\" + t.file;
-            if (SavePNG(o, outPath.c_str())) Log(L" [i] Saved %s", outPath.c_str());
-            else Log(L" [!] Failed to save %s", outPath.c_str());
+            if (SavePNG(o, outPath.c_str())) Log(g_ui.savedAsset.c_str(), outPath.c_str());
+            else Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
             delete o;
         }
     }
     delete src;
 
-    Log(L"[i] Re-registering AppxManifest due to regenerated assets.");
+    Log(g_ui.reRegisteringManifest.c_str());
 
     std::wstring manifestPath = exeDir + L"\\AppxManifest.xml";
-    Log(L"[i] Manifest path: %s", manifestPath.c_str());
+    Log(g_ui.manifestPath.c_str(), manifestPath.c_str());
 
     bool ok = false;
 
@@ -661,7 +912,7 @@ void Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 
         if (!ok)
         {
-            Log(L"[!] COM registration failed; falling back to PowerShell registration.");
+            Log(g_ui.comRegistrationFailed.c_str());
             std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
             ok = PS_Run(ps);
         }
@@ -672,8 +923,8 @@ void Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         ok = PS_Run(ps);
     }
 
-    if (ok) Log(L"[i] Asset generation and registration finished successfully.");
-    else    Log(L"[!] App registration did not complete successfully.");
+    if (ok) Log(g_ui.assetGenerationFinished.c_str());
+    else    Log(g_ui.appRegistrationFailed.c_str());
 }
 
 // -----------------------------------------------------------------------------
@@ -723,7 +974,7 @@ void PollThread()
                     else if (g_listenFit && fitChanged2)
                         reason = L"fit mode change detected";
 
-                    Log(L"[i] Change confirmed; regeneration allowed after debounce.");
+                    Log(g_ui.changeConfirmed.c_str());
                     last = cur2;
                     lastFit = fit2;
 
@@ -753,6 +1004,7 @@ enum {
     ID_LOG_RESET,
     ID_GENERATE_NOW,
     ID_GENERATE_STARTUP,
+    ID_HIDE_DISABLED,
     ID_SHOW_PSLOG,
     ID_LISTEN_WP,
     ID_LISTEN_FIT,
@@ -773,14 +1025,14 @@ void TrayRemove()
 void ShowPSLog(HWND h)
 {
     if (g_psOut.empty()){
-        MessageBoxW(h, L"No PowerShell output.", L"PowerShell Output", MB_OK | MB_ICONINFORMATION);
+        MessageBoxW(h, g_ui.noPowerShellOutput.c_str(), g_ui.noPowerShellOutputTitle.c_str(), MB_OK | MB_ICONINFORMATION);
         return;
     }
 
     const size_t CH=3000;
     for (size_t p=0;p<g_psOut.size();p+=CH){
         std::wstring s = g_psOut.substr(p,CH);
-        MessageBoxW(h, s.c_str(), L"PowerShell Output", MB_OK | MB_ICONERROR);
+        MessageBoxW(h, s.c_str(), g_ui.noPowerShellOutputTitle.c_str(), MB_OK | MB_ICONERROR);
     }
 }
 
@@ -812,7 +1064,7 @@ INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
             }
             else
             {
-                MessageBoxW(hDlg, L"Path cannot be empty.", L"Error", MB_OK | MB_ICONWARNING);
+                MessageBoxW(hDlg, g_ui.pathCannotBeEmpty.c_str(), g_ui.errorTitle.c_str(), MB_OK | MB_ICONWARNING);
             }
             return TRUE;
         }
@@ -832,6 +1084,8 @@ void Menu(HWND h)
     HMENU m = CreatePopupMenu();
 
     auto add = [&](UINT id, const std::wstring& t, bool chk=false, bool en=true){
+        if (g_hideDisabled && !en)
+            return;
         AppendMenuW(m,
             MF_STRING |
             (chk ? MF_CHECKED : 0) |
@@ -842,54 +1096,61 @@ void Menu(HWND h)
     // =====================
     // General
     // =====================
-    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, L"General:");
-    add(ID_LISTEN_WP, L"Listen Wallpaper", g_listenWallpaper);
-    add(ID_TRAYICON, L"Tray Icon", g_tray);
-    add(ID_USE_PS, L"Use PowerShell", UsePowerShell());
-    add(ID_CONSOLE, L"Show Console", g_console);
-    add(ID_GENERATE_NOW, L"Generate now");
-    add(ID_GENERATE_STARTUP, L"Generate on Startup", g_generateOnStartup);
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, g_ui.generalTitle.c_str());
+    add(ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
+    add(ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);
+    add(ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
+    add(ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
+    add(ID_HIDE_DISABLED, g_ui.hideDisabledEntries.c_str(), g_hideDisabled);
+    add(ID_CONSOLE, g_ui.showConsole.c_str(), g_console);
+    add(ID_GENERATE_NOW, g_ui.generateNow.c_str());
 
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
 
     // =====================
     // Logging
     // =====================
-    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, L"Logging:");
-    add(ID_LOG, L"Enable", g_logging);
-    add(ID_LOGFILE, L"Change path...", false, g_logging);
-    add(ID_LOG_RENAME, L"Rename path...", false, g_logging);
-    add(ID_LOG_OPEN, L"Open in Explorer", false, g_logging);
-    add(ID_LOG_RESET, L"Reset to default", false, g_logging);
-    add(ID_SHOW_PSLOG, L"Show PowerShell Log");
-    std::wstring psLine = L"PS Status: ";
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, g_ui.loggingTitle.c_str());
+    add(ID_LOG, g_ui.loggingEnable.c_str(), g_logging);
+    add(ID_LOGFILE, g_ui.changePath.c_str(), false, g_logging);
+    add(ID_LOG_RENAME, g_ui.renamePath.c_str(), false, g_logging);
+    add(ID_LOG_OPEN, g_ui.openInExplorer.c_str(), false, g_logging);
+    add(ID_LOG_RESET, g_ui.resetDefault.c_str(), false, g_logging);
+    add(ID_SHOW_PSLOG, g_ui.showPowerShellLog.c_str());
+
+    std::wstring pathLine = g_ui.logPathPrefix + g_logPath;
+    HMENU hPath = CreatePopupMenu();
+    AppendMenuW(hPath, MF_STRING | MF_DISABLED, 0, pathLine.c_str());
+    AppendMenuW(m, MF_POPUP, (UINT_PTR)hPath, L"Log Path");
+
+    std::wstring psLine = g_ui.psStatusPrefix;
     if (!g_psMsg.empty())
         psLine += g_psMsg;
     else if (g_psErr)
-        psLine += L"Error";
+        psLine += g_ui.errorTitle.c_str();
     else
-        psLine += L"OK";
-    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, psLine.c_str());
-    // Full path display (always disabled)
-    std::wstring pathLine = L"Path: " + g_logPath;
-    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, pathLine.c_str());
+        psLine += g_ui.okText.c_str();
+
+    HMENU hPs = CreatePopupMenu();
+    AppendMenuW(hPs, MF_STRING | MF_DISABLED, 0, psLine.c_str());
+    AppendMenuW(m, MF_POPUP, (UINT_PTR)hPs, L"PS Status");
 
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
 
     // =====================
     // Wallpaper Fitting
     // =====================
-    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, L"Wallpaper Fitting:");
-    add(ID_DISABLE_FIT, L"Disable Fitting", g_disableFitting);
-    add(ID_LISTEN_FIT, L"Listen Fit Mode", g_listenFit, !g_disableFitting);
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, g_ui.wallpaperFittingTitle.c_str());
+    add(ID_DISABLE_FIT, g_ui.disableFitting.c_str(), g_disableFitting);
+    add(ID_LISTEN_FIT, g_ui.listenFit.c_str(), g_listenFit, !g_disableFitting);
 
     // Fit mode display
     FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
     std::wstring fitLine;
     if (g_disableFitting)
-        fitLine = L"Fit Mode: Fill (forced)";
+        fitLine = g_ui.fitModeForced;
     else {
-        fitLine = L"Fit Mode: ";
+        fitLine = g_ui.fitModePrefix;
         fitLine += FitModeToString(mode);
     }
     AppendMenuW(m, MF_STRING | MF_DISABLED, 0, fitLine.c_str());
@@ -899,7 +1160,7 @@ void Menu(HWND h)
     // =====================
     // Assets
     // =====================
-    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, L"Assets:");
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, g_ui.assetsTitle.c_str());
 
     const wchar_t* keys[] = {
         L"StoreLogo",L"MediumTile",L"Square44x44Logo",
@@ -912,7 +1173,7 @@ void Menu(HWND h)
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
 
     // Exit
-    add(ID_EXIT, L"Exit");
+    add(ID_EXIT, g_ui.exitText.c_str());
 
     SetForegroundWindow(h);
     UINT cmd = TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,h,nullptr);
@@ -994,8 +1255,8 @@ void Menu(HWND h)
         if (wp.empty())
         {
             MessageBoxW(h,
-                L"Could not detect current wallpaper.",
-                L"Generate Now",
+                g_ui.currentWallpaperNotFound.c_str(),
+                g_ui.generateNowTitle.c_str(),
                 MB_OK | MB_ICONWARNING);
         }
         else
@@ -1011,6 +1272,14 @@ void Menu(HWND h)
         g_generateOnStartup = !g_generateOnStartup;
         IniWrite(L"Settings", L"GenerateOnStartup", g_generateOnStartup ? L"1" : L"0");
         Log(L"[i] GenerateOnStartup %s.", g_generateOnStartup ? L"enabled" : L"disabled");
+    }
+    break;
+
+    case ID_HIDE_DISABLED:
+    {
+        g_hideDisabled = !g_hideDisabled;
+        IniWrite(L"Settings", L"HideDisabledEntries", g_hideDisabled ? L"1" : L"0");
+        Log(L"[i] Hide disabled entries %s.", g_hideDisabled ? L"enabled" : L"disabled");
     }
     break;
 
@@ -1164,6 +1433,8 @@ int WINAPI wWinMain(HINSTANCE hi,HINSTANCE, PWSTR, int)
 
     // defaults
     EnsureIniDefaults();
+    EnsureIniStringDefaults();
+    LoadUiStrings();
     g_logging = IniReadI(L"Settings",L"Logging",1)!=0;
     g_tray    = IniReadI(L"Settings",L"TrayIcon",1)!=0;
     g_logPath = IniReadS(L"Settings", L"LogPath", L"");
@@ -1174,19 +1445,21 @@ int WINAPI wWinMain(HINSTANCE hi,HINSTANCE, PWSTR, int)
     }
     g_console = IniReadI(L"Settings", L"ShowConsole", 0) != 0;
     g_generateOnStartup = IniReadI(L"Settings", L"GenerateOnStartup", 1) != 0;
+    g_hideDisabled = IniReadI(L"Settings", L"HideDisabledEntries", 0) != 0;
     g_listenWallpaper = IniReadI(L"Settings", L"ListenWallpaper", 1) != 0;
     g_listenFit       = IniReadI(L"Settings", L"ListenFit", 1) != 0;
     g_disableFitting = IniReadI(L"Settings", L"DisableFitting", 0) != 0;
 
     // GDI+
     GdiplusStartupInput in; ULONG_PTR tk;
-    if (GdiplusStartup(&tk,&in,nullptr)!=Ok){ MessageBoxW(nullptr,L"GDI+",L"Error",0); return 1; }
+    if (GdiplusStartup(&tk,&in,nullptr)!=Ok){ MessageBoxW(nullptr,L"GDI+",g_ui.errorTitle.c_str(),0); return 1; }
 
-    Log(L"[i] Program starting...");
+    Log(g_ui.programStarting.c_str());
     Log(L"[i] EXE: %s", g_exePath.c_str());
     Log(L"[i] INI: %s", g_iniPath.c_str());
     Log(L"[i] Log file: %s", g_logPath.c_str());
     Log(L"[i] Generate on Startup: %s", g_generateOnStartup ? L"enabled" : L"disabled");
+    Log(L"[i] Hide disabled entries: %s", g_hideDisabled ? L"enabled" : L"disabled");
     Log(L"[i] Tray icon: %s", g_tray ? L"enabled" : L"disabled");
     Log(L"[i] PowerShell registration: %s", UsePowerShell() ? L"PowerShell enabled" : L"COM preferred with PowerShell fallback");
 
@@ -1209,20 +1482,6 @@ int WINAPI wWinMain(HINSTANCE hi,HINSTANCE, PWSTR, int)
         std::lock_guard<std::mutex> lk(g_logMutex);
         for (auto& l : g_logBuf)
             fwprintf(stdout, L"%ls\n", l.c_str());
-    }
-
-    if (g_generateOnStartup)
-    {
-        std::wstring wp = GetWallpaper();
-        if (!wp.empty())
-        {
-            Log(L"[i] Startup generation enabled.");
-            Generate(wp.c_str(), L"Generate on Startup is enabled");
-        }
-        else
-        {
-            Log(L"[!] Startup generation skipped: no wallpaper detected.");
-        }
     }
 
     // Window
@@ -1256,6 +1515,20 @@ int WINAPI wWinMain(HINSTANCE hi,HINSTANCE, PWSTR, int)
         {
             LogWin32Failure(L"Shell_NotifyIconW(NIM_ADD)");
             g_tray = false;
+        }
+    }
+
+    if (g_generateOnStartup)
+    {
+        std::wstring wp = GetWallpaper();
+        if (!wp.empty())
+        {
+            Log(L"[i] Startup generation enabled.");
+            Generate(wp.c_str(), L"Generate on Startup is enabled");
+        }
+        else
+        {
+            Log(L"[!] Startup generation skipped: no wallpaper detected.");
         }
     }
 
