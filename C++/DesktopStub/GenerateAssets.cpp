@@ -13,10 +13,13 @@
 #include <atomic>
 #include <chrono>
 #include <algorithm>
+#include <commdlg.h>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Management.Deployment.h>
+
+INT_PTR CALLBACK RenameDlgProc(HWND, UINT, WPARAM, LPARAM);
 
 enum class FitMode {
     Fill,
@@ -43,6 +46,7 @@ static std::wstring g_iniPath, g_logPath, g_exePath;
 static std::atomic<bool> g_running(true), g_console(false), g_logging(true), g_tray(true);
 static std::atomic<bool> g_listenWallpaper(true);
 static std::atomic<bool> g_listenFit(true);
+static std::atomic<bool> g_disableFitting(false);
 static std::atomic<bool> g_generateOnStartup(true);
 static const IniDefault g_defaults[] = {
     // Settings
@@ -50,12 +54,13 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"ConfirmMs", L"800"},
     {L"Settings", L"DebounceMinMs", L"1200"},
     {L"Settings", L"Logging", L"1"},
-    {L"Settings", L"LogPath", L"logs.txt"},
+    {L"Settings", L"LogPath", L""},
     {L"Settings", L"TrayIcon", L"1"},
     {L"Settings", L"ShowConsole", L"0"},
     {L"Settings", L"GenerateOnStartup", L"1"},
     {L"Settings", L"ListenWallpaper", L"1"},
     {L"Settings", L"ListenFit", L"1"},
+    {L"Settings", L"DisableFitting", L"0"},
     {L"Settings", L"UsePowerShell", L"1"},
 
     // Assets (IMPORTANT: correct defaults)
@@ -124,6 +129,73 @@ std::wstring IniReadS(const wchar_t* s, const wchar_t* k, const wchar_t* d)
 void IniWrite(const wchar_t* s, const wchar_t* k, const wchar_t* v)
 { WritePrivateProfileStringW(s, k, v, g_iniPath.c_str()); }
 
+std::wstring GetExeDir()
+{
+    size_t pos = g_exePath.find_last_of(L"\\/");
+    if (pos == std::wstring::npos) return L".";
+    return g_exePath.substr(0, pos);
+}
+
+std::wstring MakeFileUri(const std::wstring& path)
+{
+    wchar_t full[MAX_PATH];
+    DWORD n = GetFullPathNameW(path.c_str(), MAX_PATH, full, nullptr);
+    if (!n || n >= MAX_PATH) return L"";
+
+    std::wstring p = full;
+    std::replace(p.begin(), p.end(), L'\\', L'/');
+
+    std::wstring esc;
+    esc.reserve(p.size() * 3);
+    for (wchar_t ch : p)
+    {
+        switch (ch)
+        {
+        case L' ':  esc += L"%20"; break;
+        case L'#':  esc += L"%23"; break;
+        case L'%':  esc += L"%25"; break;
+        case L'?':  esc += L"%3F"; break;
+        case L'"':  esc += L"%22"; break;
+        case L'<':  esc += L"%3C"; break;
+        case L'>':  esc += L"%3E"; break;
+        case L'|':  esc += L"%7C"; break;
+        default:    esc.push_back(ch); break;
+        }
+    }
+
+    if (esc.size() >= 2 && esc[1] == L':')
+        esc.insert(esc.begin(), L'/');
+
+    return L"file://" + esc;
+}
+
+std::wstring Win32ErrorString(DWORD err)
+{
+    wchar_t* buf = nullptr;
+    DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+    DWORD len = FormatMessageW(flags, nullptr, err, 0, (LPWSTR)&buf, 0, nullptr);
+
+    std::wstring msg;
+    if (len && buf)
+    {
+        msg.assign(buf, buf + len);
+        while (!msg.empty() && (msg.back() == L'\r' || msg.back() == L'\n' || msg.back() == L'.' || msg.back() == L' '))
+            msg.pop_back();
+    }
+    else
+    {
+        msg = L"Unknown error";
+    }
+
+    if (buf) LocalFree(buf);
+    return msg;
+}
+
+void LogWin32Failure(const wchar_t* what, DWORD err = GetLastError())
+{
+    Log(L"[!] %s failed (error %lu: %s)", what, err, Win32ErrorString(err).c_str());
+}
+
 void EnsureIniDefaults()
 {
     for (const auto& d : g_defaults)
@@ -167,6 +239,72 @@ const wchar_t* FitModeToString(FitMode m)
     case FitMode::Span:    return L"Span";
     default:               return L"?";
     }
+}
+
+INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
+{
+    // Very small dialog template
+    BYTE tmpl[1024] = {};
+    DLGTEMPLATE* dlg = (DLGTEMPLATE*)tmpl;
+
+    dlg->style = WS_POPUP | WS_BORDER | WS_SYSMENU | DS_MODALFRAME | WS_CAPTION | DS_SETFONT;
+    dlg->cdit = 3;
+    dlg->x = 10; dlg->y = 10; dlg->cx = 200; dlg->cy = 60;
+
+    WORD* p = (WORD*)(dlg + 1);
+
+    *p++ = 0; // no menu
+    *p++ = 0; // default class
+
+    const wchar_t title[] = L"Rename Log Path";
+    wcscpy((wchar_t*)p, title);
+    p += wcslen(title) + 1;
+    *p++ = 9; // font size
+    const wchar_t fontName[] = L"Segoe UI";
+    wcscpy((wchar_t*)p, fontName);
+    p += wcslen(fontName) + 1;
+    // ---- Edit box ----
+    DLGITEMTEMPLATE* item = (DLGITEMTEMPLATE*)(((DWORD_PTR)p + 3) & ~3);
+    item->x = 5; item->y = 5; item->cx = 190; item->cy = 12;
+    item->id = 1001;
+    item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL;
+
+    p = (WORD*)(item + 1);
+    *p++ = 0xFFFF; *p++ = 0x0081; // EDIT class
+    *p++ = 0; // no text
+    *p++ = 0; // no extra data
+
+    // ---- OK button ----
+    item = (DLGITEMTEMPLATE*)(((DWORD_PTR)p + 3) & ~3);
+    item->x = 40; item->y = 25; item->cx = 50; item->cy = 14;
+    item->id = IDOK;
+    item->style = WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON;
+
+    p = (WORD*)(item + 1);
+    *p++ = 0xFFFF; *p++ = 0x0080; // BUTTON
+    wcscpy((wchar_t*)p, L"OK");
+    p += 3;
+    *p++ = 0;
+
+    // ---- Cancel button ----
+    item = (DLGITEMTEMPLATE*)(((DWORD_PTR)p + 3) & ~3);
+    item->x = 110; item->y = 25; item->cx = 50; item->cy = 14;
+    item->id = IDCANCEL;
+    item->style = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON;
+
+    p = (WORD*)(item + 1);
+    *p++ = 0xFFFF; *p++ = 0x0080;
+    wcscpy((wchar_t*)p, L"Cancel");
+    p += 7;
+    *p++ = 0;
+
+    return DialogBoxIndirectParamW(
+        GetModuleHandleW(nullptr),
+        dlg,
+        parent,
+        RenameDlgProc,
+        (LPARAM)&path
+    );
 }
 
 // -----------------------------------------------------------------------------
@@ -341,10 +479,17 @@ void PS_Clear() { g_psErr=false; g_psOut.clear(); g_psMsg.clear(); g_psCode=0; }
 
 bool PS_Run(const std::wstring& cmd)
 {
-    Log(L"[i] Run PS: %s", cmd.c_str());
+    Log(L"[i] Launching PowerShell registration...");
+    Log(L"[i] Command: %s", cmd.c_str());
+    PS_Clear();
 
     SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
-    HANDLE r=0,w=0; if (!CreatePipe(&r,&w,&sa,0)) return false;
+    HANDLE r=0,w=0;
+    if (!CreatePipe(&r,&w,&sa,0))
+    {
+        LogWin32Failure(L"CreatePipe");
+        return false;
+    }
     SetHandleInformation(r, HANDLE_FLAG_INHERIT, 0);
 
     STARTUPINFOW si{}; si.cb=sizeof(si);
@@ -358,7 +503,12 @@ bool PS_Run(const std::wstring& cmd)
         CREATE_NO_WINDOW, nullptr,nullptr, &si, &pi);
 
     CloseHandle(w);
-    if (!ok) { CloseHandle(r); return false; }
+    if (!ok)
+    {
+        LogWin32Failure(L"CreateProcessW");
+        CloseHandle(r);
+        return false;
+    }
 
     char buf[2048]; DWORD n;
     std::wstring out;
@@ -380,22 +530,26 @@ bool PS_Run(const std::wstring& cmd)
     CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
 
     g_psOut = out; g_psCode = ec;
-    if (ec==0){ PS_Clear(); return true; }
+    if (ec == 0) {
+        g_psMsg = L"PowerShell registration completed successfully.";
+        Log(L"[i] PowerShell registration completed successfully.");
+        return true;
+    }
 
     g_psErr = true;
 
-    // Special case: Sideloading disabled (HRESULT 0x80073CFF)
     if (g_psOut.find(L"0x80073CFF") != std::wstring::npos) {
         g_psMsg = L"PowerShell error: Enable sideloading first!";
-        Log(L"[!] PowerShell: sideloading disabled (HRESULT 0x80073CFF)");
+        Log(L"[!] PowerShell registration failed because sideloading is disabled (HRESULT 0x80073CFF).");
     } else {
-        wchar_t msg[64];
-        swprintf(msg, 64, L"PowerShell error: 0x%08X", ec);
+        wchar_t msg[128];
+        swprintf(msg, 128, L"PowerShell error: 0x%08X", ec);
         g_psMsg = msg;
+        Log(L"[!] PowerShell registration failed with exit code 0x%08X.", ec);
     }
 
-    Log(L"[!] PS error: %lu", ec);
-    Log(L"[!] Output:\n%ls", out.c_str());
+    Log(L"[!] PowerShell output follows:");
+    Log(L"%ls", out.c_str());
 
     return false;
 }
@@ -414,7 +568,13 @@ bool Appx_Register_COM(const std::wstring& manifestPath)
 
         PackageManager pm;
 
-        Uri uri(manifestPath);
+        std::wstring uriStr = MakeFileUri(manifestPath);
+        if (uriStr.empty())
+        {
+            Log(L"[!] Invalid manifest path.");
+            return false;
+        }
+        Uri uri{ winrt::hstring(uriStr) };
 
         IVector<Uri> deps = winrt::single_threaded_vector<Uri>();
 
@@ -439,8 +599,8 @@ bool Appx_Register_COM(const std::wstring& manifestPath)
     }
     catch (const winrt::hresult_error& e)
     {
-        Log(L"[!] COM exception: 0x%08X", e.code().value);
-        Log(L"[!] Message: %s", e.message().c_str());
+        Log(L"[!] COM registration threw exception: 0x%08X", e.code().value);
+        Log(L"[!] COM message: %s", e.message().c_str());
         return false;
     }
 }
@@ -458,55 +618,62 @@ static const Tile g_tiles[] = {
     {L"LargeTile",       L"Assets\\LargeTile.png",310,310},
 };
 
-void Generate(const wchar_t* wp)
+void Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 {
-    if (!wp||!*wp){ Log(L"[!] Empty wallpaper."); return; }
+    if (!wp || !*wp){ Log(L"[!] Empty wallpaper."); return; }
 
-    Log(L"[i] Generating from: %s", wp);
+    Log(L"[i] Starting wallpaper generation due to %s.", reason && *reason ? reason : L"an unspecified reason");
+    Log(L"[i] Wallpaper source: %s", wp);
     Bitmap* src = new Bitmap(wp);
-    if (src->GetLastStatus()!=Ok){ Log(L"[!] Load fail."); delete src; return; }
-    FitMode mode = GetWallpaperFit();
-    CreateDirectoryW(L"Assets", nullptr);
+    if (src->GetLastStatus()!=Ok){ Log(L"[!] Failed to load wallpaper image."); delete src; return; }
+    FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
+
+    std::wstring exeDir = GetExeDir();
+    std::wstring assetsDir = exeDir + L"\\Assets";
+    CreateDirectoryW(assetsDir.c_str(), nullptr);
 
     for (auto& t: g_tiles)
     {
         if (!IniReadI(L"Assets", t.name, 0)){
-            Log(L" [!] %s disabled", t.name);
+            Log(L" [i] Skipping %s (disabled in settings).", t.name);
             continue;
         }
         auto* o = ResizeWithFit(src, t.w, t.h, mode);
         if (o){
-            if (SavePNG(o, t.file)) Log(L" [i] %s", t.file);
-            else Log(L" [!] Fail %s", t.file);
+            std::wstring outPath = exeDir + L"\\" + t.file;
+            if (SavePNG(o, outPath.c_str())) Log(L" [i] Saved %s", outPath.c_str());
+            else Log(L" [!] Failed to save %s", outPath.c_str());
             delete o;
         }
     }
     delete src;
 
-    Log(L"[i] Re-register AppxManifest...");
+    Log(L"[i] Re-registering AppxManifest due to regenerated assets.");
 
-    wchar_t fullPath[MAX_PATH];
-    GetFullPathNameW(L".\\AppxManifest.xml", MAX_PATH, fullPath, nullptr);
+    std::wstring manifestPath = exeDir + L"\\AppxManifest.xml";
+    Log(L"[i] Manifest path: %s", manifestPath.c_str());
 
     bool ok = false;
 
     if (!UsePowerShell())
     {
-        ok = Appx_Register_COM(fullPath);
+        ok = Appx_Register_COM(manifestPath);
 
         if (!ok)
         {
-            Log(L"[!] COM failed, falling back to PowerShell...");
-            ok = PS_Run(L"Add-AppxPackage -Register .\\AppxManifest.xml -ForceUpdateFromAnyVersion");
+            Log(L"[!] COM registration failed; falling back to PowerShell registration.");
+            std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
+            ok = PS_Run(ps);
         }
     }
     else
     {
-        ok = PS_Run(L"Add-AppxPackage -Register .\\AppxManifest.xml -ForceUpdateFromAnyVersion");
+        std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
+        ok = PS_Run(ps);
     }
 
-    if (ok) Log(L"[i] Done.");
-    else    Log(L"[!] Registration failed.");
+    if (ok) Log(L"[i] Asset generation and registration finished successfully.");
+    else    Log(L"[!] App registration did not complete successfully.");
 }
 
 // -----------------------------------------------------------------------------
@@ -514,7 +681,7 @@ void Generate(const wchar_t* wp)
 // -----------------------------------------------------------------------------
 void PollThread()
 {
-    std::wstring last;
+    std::wstring last = GetWallpaper();
     FitMode lastFit = GetWallpaperFit();
     auto lastGen = steady_clock::now() - seconds(5);
 
@@ -528,7 +695,7 @@ void PollThread()
         FitMode curFit = GetWallpaperFit();
 
         bool wallpaperChanged = (cur != last);
-        bool fitChanged = (curFit != lastFit);
+        bool fitChanged = (!g_disableFitting && curFit != lastFit);
 
         if ((g_listenWallpaper && wallpaperChanged) ||
             (g_listenFit && fitChanged))
@@ -548,10 +715,19 @@ void PollThread()
 
                 if (duration_cast<milliseconds>(now - lastGen).count() >= deb)
                 {
+                    const wchar_t* reason = L"change detected";
+                    if (g_listenWallpaper && wallpaperChanged2 && g_listenFit && fitChanged2)
+                        reason = L"wallpaper and fit change detected";
+                    else if (g_listenWallpaper && wallpaperChanged2)
+                        reason = L"wallpaper change detected";
+                    else if (g_listenFit && fitChanged2)
+                        reason = L"fit mode change detected";
+
+                    Log(L"[i] Change confirmed; regeneration allowed after debounce.");
                     last = cur2;
                     lastFit = fit2;
 
-                    Generate(cur2.c_str());
+                    Generate(cur2.c_str(), reason);
                     lastGen = steady_clock::now();
                 }
             }
@@ -572,9 +748,15 @@ enum {
     ID_CONSOLE,
     ID_LOG,
     ID_LOGFILE,
+    ID_LOG_RENAME,
+    ID_LOG_OPEN,
+    ID_LOG_RESET,
     ID_GENERATE_NOW,
+    ID_GENERATE_STARTUP,
+    ID_SHOW_PSLOG,
     ID_LISTEN_WP,
     ID_LISTEN_FIT,
+    ID_DISABLE_FIT,
 
     // Assets
     ID_A1=2001, ID_A2, ID_A3, ID_A4, ID_A5, ID_A6
@@ -584,22 +766,64 @@ void TrayRemove()
 {
     if (g_nid.hWnd){
         Shell_NotifyIconW(NIM_DELETE,&g_nid);
-        if (g_nid.hIcon) DestroyIcon(g_nid.hIcon);
-        g_nid={};
+        g_nid = {};
     }
 }
 
 void ShowPSLog(HWND h)
 {
-    if (!g_psErr && g_psOut.empty()){
-        MessageBoxW(h, L"No PowerShell output.", L"PS Log", MB_OK | MB_ICONINFORMATION);
+    if (g_psOut.empty()){
+        MessageBoxW(h, L"No PowerShell output.", L"PowerShell Output", MB_OK | MB_ICONINFORMATION);
         return;
     }
+
     const size_t CH=3000;
     for (size_t p=0;p<g_psOut.size();p+=CH){
         std::wstring s = g_psOut.substr(p,CH);
         MessageBoxW(h, s.c_str(), L"PowerShell Output", MB_OK | MB_ICONERROR);
     }
+}
+
+INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    static std::wstring* pPath = nullptr;
+
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+    {
+        pPath = (std::wstring*)lParam;
+        SetDlgItemTextW(hDlg, 1001, pPath->c_str()); // edit box
+        return TRUE;
+    }
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam))
+        {
+        case IDOK:
+        {
+            wchar_t buf[MAX_PATH];
+            GetDlgItemTextW(hDlg, 1001, buf, MAX_PATH);
+
+            if (wcslen(buf) > 0)
+            {
+                *pPath = buf;
+                EndDialog(hDlg, IDOK);
+            }
+            else
+            {
+                MessageBoxW(hDlg, L"Path cannot be empty.", L"Error", MB_OK | MB_ICONWARNING);
+            }
+            return TRUE;
+        }
+
+        case IDCANCEL:
+            EndDialog(hDlg, IDCANCEL);
+            return TRUE;
+        }
+        break;
+    }
+    return FALSE;
 }
 
 void Menu(HWND h)
@@ -616,30 +840,64 @@ void Menu(HWND h)
     };
 
     // =====================
-    // General Section
+    // General
     // =====================
     AppendMenuW(m, MF_STRING | MF_DISABLED, 0, L"General:");
     add(ID_LISTEN_WP, L"Listen Wallpaper", g_listenWallpaper);
-    add(ID_LISTEN_FIT, L"Listen Fit Mode", g_listenFit);
-    FitMode mode = GetWallpaperFit();
-    std::wstring fitLine = L"Fit Mode: ";
-    fitLine += FitModeToString(mode);
-    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, fitLine.c_str());
-    add(ID_USE_PS, L"Use PowerShell", UsePowerShell());
     add(ID_TRAYICON, L"Tray Icon", g_tray);
+    add(ID_USE_PS, L"Use PowerShell", UsePowerShell());
     add(ID_CONSOLE, L"Show Console", g_console);
     add(ID_GENERATE_NOW, L"Generate now");
-    add(ID_LOG, L"Logging", g_logging);
-    add(ID_LOGFILE, L"Change log path...");
+    add(ID_GENERATE_STARTUP, L"Generate on Startup", g_generateOnStartup);
 
-    // Show current path (disabled)
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+
+    // =====================
+    // Logging
+    // =====================
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, L"Logging:");
+    add(ID_LOG, L"Enable", g_logging);
+    add(ID_LOGFILE, L"Change path...", false, g_logging);
+    add(ID_LOG_RENAME, L"Rename path...", false, g_logging);
+    add(ID_LOG_OPEN, L"Open in Explorer", false, g_logging);
+    add(ID_LOG_RESET, L"Reset to default", false, g_logging);
+    add(ID_SHOW_PSLOG, L"Show PowerShell Log");
+    std::wstring psLine = L"PS Status: ";
+    if (!g_psMsg.empty())
+        psLine += g_psMsg;
+    else if (g_psErr)
+        psLine += L"Error";
+    else
+        psLine += L"OK";
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, psLine.c_str());
+    // Full path display (always disabled)
     std::wstring pathLine = L"Path: " + g_logPath;
     AppendMenuW(m, MF_STRING | MF_DISABLED, 0, pathLine.c_str());
 
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
 
     // =====================
-    // Assets Section
+    // Wallpaper Fitting
+    // =====================
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, L"Wallpaper Fitting:");
+    add(ID_DISABLE_FIT, L"Disable Fitting", g_disableFitting);
+    add(ID_LISTEN_FIT, L"Listen Fit Mode", g_listenFit, !g_disableFitting);
+
+    // Fit mode display
+    FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
+    std::wstring fitLine;
+    if (g_disableFitting)
+        fitLine = L"Fit Mode: Fill (forced)";
+    else {
+        fitLine = L"Fit Mode: ";
+        fitLine += FitModeToString(mode);
+    }
+    AppendMenuW(m, MF_STRING | MF_DISABLED, 0, fitLine.c_str());
+
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+
+    // =====================
+    // Assets
     // =====================
     AppendMenuW(m, MF_STRING | MF_DISABLED, 0, L"Assets:");
 
@@ -666,7 +924,7 @@ void Menu(HWND h)
     {
         bool v = !UsePowerShell();
         IniWrite(L"Settings", L"UsePowerShell", v ? L"1" : L"0");
-        Log(L"[i] UsePowerShell = %d", v);
+        Log(L"[i] UsePowerShell = %d (PowerShell %s)", v, v ? L"enabled" : L"disabled; COM fallback will be used");
     }
     break;
 
@@ -742,11 +1000,23 @@ void Menu(HWND h)
         }
         else
         {
-            Log(L"[i] Manual generate triggered.");
-            Generate(wp.c_str());
+            Log(L"[i] Manual generation requested from the tray menu.");
+            Generate(wp.c_str(), L"user requested generation from the tray menu");
         }
     }
     break;
+
+    case ID_GENERATE_STARTUP:
+    {
+        g_generateOnStartup = !g_generateOnStartup;
+        IniWrite(L"Settings", L"GenerateOnStartup", g_generateOnStartup ? L"1" : L"0");
+        Log(L"[i] GenerateOnStartup %s.", g_generateOnStartup ? L"enabled" : L"disabled");
+    }
+    break;
+
+    case ID_SHOW_PSLOG:
+        ShowPSLog(h);
+        break;
 
     case ID_EXIT:
         g_running = false;
@@ -770,6 +1040,83 @@ void Menu(HWND h)
     }
     break;
 
+    case ID_DISABLE_FIT:
+    {
+        g_disableFitting = !g_disableFitting;
+        IniWrite(L"Settings", L"DisableFitting", g_disableFitting ? L"1" : L"0");
+        if (g_disableFitting)
+        {
+            // Turn off listener to save CPU
+            if (g_listenFit)
+            {
+                g_listenFit = false;
+                IniWrite(L"Settings", L"ListenFit", L"0");
+                Log(L"[i] ListenFit auto-disabled due to DisableFitting.");
+            }
+        }
+        Log(L"[i] DisableFitting = %d", (int)g_disableFitting);
+    }
+    break;
+
+    case ID_LOGFILE:
+    {
+        wchar_t file[MAX_PATH] = {};
+        // Start with current path
+        wcscpy_s(file, g_logPath.c_str());
+        OPENFILENAMEW ofn{};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = h;
+        ofn.lpstrFilter = L"Log files (*.log)\0*.log\0All files (*.*)\0*.*\0";
+        ofn.lpstrFile = file;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+        ofn.lpstrDefExt = L"log";
+        if (GetSaveFileNameW(&ofn))
+        {
+            g_logPath = file;
+            IniWrite(L"Settings", L"LogPath", g_logPath.c_str());
+
+            Log(L"[i] Log path changed to: %s", g_logPath.c_str());
+        Log(L"[i] Future log entries will be written to the new path.");
+        }
+    }
+    break;
+
+    case ID_LOG_RENAME:
+    {
+        std::wstring newPath = g_logPath;
+        if (ShowRenameDialog(h, newPath) == IDOK)
+        {
+            g_logPath = newPath;
+            IniWrite(L"Settings", L"LogPath", g_logPath.c_str());
+            Log(L"[i] Log path renamed to: %s", g_logPath.c_str());
+            Log(L"[i] Future log entries will be written to the renamed path.");
+        }
+    }
+    break;
+
+    case ID_LOG_OPEN:
+    {
+        if (!g_logPath.empty())
+        {
+            std::wstring param = L"/select,\"" + g_logPath + L"\"";
+            ShellExecuteW(nullptr, L"open", L"explorer.exe", param.c_str(), nullptr, SW_SHOW);
+        }
+    }
+    break;
+
+    case ID_LOG_RESET:
+    {
+        std::wstring base = g_exePath.substr(g_exePath.find_last_of(L"\\/") + 1);
+        base = base.substr(0, base.find_last_of(L'.'));
+        std::wstring dir = g_exePath.substr(0, g_exePath.find_last_of(L"\\/"));
+        g_logPath = dir + L"\\" + base + L".log";
+        IniWrite(L"Settings", L"LogPath", g_logPath.c_str());
+        Log(L"[i] Log path reset to default: %s", g_logPath.c_str());
+        Log(L"[i] Future log entries will be written to the default path.");
+    }
+    break;
+
     default:
         if (cmd>=ID_A1 && cmd<=ID_A6){
             int i = cmd-ID_A1;
@@ -788,10 +1135,15 @@ void Menu(HWND h)
 LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
 {
     if (m==WM_USER+1){
-        if (l==WM_RBUTTONUP || l==WM_CONTEXTMENU) Menu(h);
+        if (l==WM_RBUTTONUP || l==WM_CONTEXTMENU){
+            Menu(h);
+            return 0;
+        }
     }
     else if (m==WM_DESTROY){
-        TrayRemove(); PostQuitMessage(0);
+        TrayRemove();
+        PostQuitMessage(0);
+        return 0;
     }
     return DefWindowProcW(h,m,w,l);
 }
@@ -805,7 +1157,7 @@ int WINAPI wWinMain(HINSTANCE hi,HINSTANCE, PWSTR, int)
     GetModuleFileNameW(nullptr,buf,260);
     g_exePath = buf;
 
-    std::wstring dir = g_exePath.substr(0, g_exePath.find_last_of(L"\\/"));
+    std::wstring dir = GetExeDir();
     std::wstring base = g_exePath.substr(g_exePath.find_last_of(L"\\/")+1);
     base = base.substr(0, base.find_last_of(L'.'));
     g_iniPath = dir + L"\\" + base + L".ini";
@@ -814,22 +1166,37 @@ int WINAPI wWinMain(HINSTANCE hi,HINSTANCE, PWSTR, int)
     EnsureIniDefaults();
     g_logging = IniReadI(L"Settings",L"Logging",1)!=0;
     g_tray    = IniReadI(L"Settings",L"TrayIcon",1)!=0;
-    g_logPath = IniReadS(L"Settings",L"LogPath",L"logs.txt");
+    g_logPath = IniReadS(L"Settings", L"LogPath", L"");
+    if (g_logPath.empty())
+    {
+        g_logPath = dir + L"\\" + base + L".log";
+        IniWrite(L"Settings", L"LogPath", g_logPath.c_str());
+    }
     g_console = IniReadI(L"Settings", L"ShowConsole", 0) != 0;
     g_generateOnStartup = IniReadI(L"Settings", L"GenerateOnStartup", 1) != 0;
     g_listenWallpaper = IniReadI(L"Settings", L"ListenWallpaper", 1) != 0;
     g_listenFit       = IniReadI(L"Settings", L"ListenFit", 1) != 0;
+    g_disableFitting = IniReadI(L"Settings", L"DisableFitting", 0) != 0;
 
     // GDI+
     GdiplusStartupInput in; ULONG_PTR tk;
     if (GdiplusStartup(&tk,&in,nullptr)!=Ok){ MessageBoxW(nullptr,L"GDI+",L"Error",0); return 1; }
 
     Log(L"[i] Program starting...");
+    Log(L"[i] EXE: %s", g_exePath.c_str());
+    Log(L"[i] INI: %s", g_iniPath.c_str());
+    Log(L"[i] Log file: %s", g_logPath.c_str());
+    Log(L"[i] Generate on Startup: %s", g_generateOnStartup ? L"enabled" : L"disabled");
+    Log(L"[i] Tray icon: %s", g_tray ? L"enabled" : L"disabled");
+    Log(L"[i] PowerShell registration: %s", UsePowerShell() ? L"PowerShell enabled" : L"COM preferred with PowerShell fallback");
 
     // Console setting
     if (g_console)
     {
-        AllocConsole();
+        if (!AllocConsole())
+            LogWin32Failure(L"AllocConsole");
+        else
+            Log(L"[i] Console allocated.");
 
         FILE* f;
         freopen_s(&f,"CONOUT$","w",stdout);
@@ -844,10 +1211,35 @@ int WINAPI wWinMain(HINSTANCE hi,HINSTANCE, PWSTR, int)
             fwprintf(stdout, L"%ls\n", l.c_str());
     }
 
+    if (g_generateOnStartup)
+    {
+        std::wstring wp = GetWallpaper();
+        if (!wp.empty())
+        {
+            Log(L"[i] Startup generation enabled.");
+            Generate(wp.c_str(), L"Generate on Startup is enabled");
+        }
+        else
+        {
+            Log(L"[!] Startup generation skipped: no wallpaper detected.");
+        }
+    }
+
     // Window
     WNDCLASSW wc{}; wc.lpfnWndProc=WndProc; wc.hInstance=hi; wc.lpszClassName=L"TrayWndRef";
-    RegisterClassW(&wc);
+    if (!RegisterClassW(&wc))
+    {
+        LogWin32Failure(L"RegisterClassW");
+        GdiplusShutdown(tk);
+        return 1;
+    }
     g_hwnd = CreateWindowExW(0,L"TrayWndRef",L"",0,0,0,0,0,HWND_MESSAGE,nullptr,hi,nullptr);
+    if (!g_hwnd)
+    {
+        LogWin32Failure(L"CreateWindowExW");
+        GdiplusShutdown(tk);
+        return 1;
+    }
 
     // Tray
     if (g_tray){
@@ -856,9 +1248,15 @@ int WINAPI wWinMain(HINSTANCE hi,HINSTANCE, PWSTR, int)
         g_nid.uFlags= NIF_MESSAGE|NIF_ICON|NIF_TIP;
         g_nid.uCallbackMessage=WM_USER+1;
         HICON ic = LoadIconW(nullptr,IDI_APPLICATION);
+        if (!ic)
+            LogWin32Failure(L"LoadIconW");
         g_nid.hIcon=ic;
         wcscpy_s(g_nid.szTip,L"Desktop Tile Generator");
-        Shell_NotifyIconW(NIM_ADD,&g_nid);
+        if (!Shell_NotifyIconW(NIM_ADD,&g_nid))
+        {
+            LogWin32Failure(L"Shell_NotifyIconW(NIM_ADD)");
+            g_tray = false;
+        }
     }
 
     std::thread th(PollThread);
