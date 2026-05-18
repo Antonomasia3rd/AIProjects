@@ -1,21 +1,54 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 
 set "ROOT=%~dp0"
-set "VCVARS=D:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+set "VCVARS="
 
-if exist "%VCVARS%" goto HaveVcvars
-echo ERROR: vcvars64.bat not found:
-echo   "%VCVARS%"
+if defined VCINSTALLDIR if exist "%VCINSTALLDIR%\Auxiliary\Build\vcvars64.bat" set "VCVARS=%VCINSTALLDIR%\Auxiliary\Build\vcvars64.bat"
+if not defined VCVARS if defined VSINSTALLDIR if exist "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
+
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not defined VCVARS if exist "%VSWHERE%" (
+    for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+        if not defined VCVARS if exist "%%I\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=%%I\VC\Auxiliary\Build\vcvars64.bat"
+    )
+)
+
+for %%D in ("%ProgramFiles%" "%ProgramFiles(x86)%" "D:\Program Files" "D:\Program Files (x86)") do (
+    for %%Y in (2022 2019) do (
+        for %%E in (BuildTools Community Professional Enterprise) do (
+            if not defined VCVARS if exist "%%~D\Microsoft Visual Studio\%%Y\%%E\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=%%~D\Microsoft Visual Studio\%%Y\%%E\VC\Auxiliary\Build\vcvars64.bat"
+        )
+    )
+)
+
+if defined VCVARS goto HaveVcvars
+echo ERROR: vcvars64.bat not found. Install Visual Studio Build Tools with the C++ workload.
 exit /b 1
 
 :HaveVcvars
-
+echo Using "%VCVARS%"
 call "%VCVARS%" >nul
 if errorlevel 1 exit /b %errorlevel%
 
 pushd "%ROOT%" || exit /b 1
-cl /nologo /std:c++17 /EHsc /DUNICODE /D_UNICODE GenerateAssets.cpp /Fe:GenerateAssets.exe /Fo:GenerateAssets.obj /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib /SUBSYSTEM:WINDOWS
+if not exist "build" mkdir "build"
+if errorlevel 1 (
+    popd
+    exit /b %errorlevel%
+)
+if not exist "build\" (
+    echo ERROR: build exists but is not a directory.
+    popd
+    exit /b 1
+)
+if not exist "build\obj" mkdir "build\obj"
+if errorlevel 1 (
+    popd
+    exit /b %errorlevel%
+)
+
+cl /nologo /std:c++17 /EHsc /DUNICODE /D_UNICODE GenerateAssets.cpp /Fe:build\GenerateAssets.exe /Fo:build\obj\GenerateAssets.obj /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 
