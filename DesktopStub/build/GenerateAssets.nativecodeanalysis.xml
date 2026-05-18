@@ -1,0 +1,609 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DEFECTS>
+  <DEFECT>
+    <SFA>
+      <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+      <FILENAME>GdiplusFontCollection.h</FILENAME>
+      <LINE>83</LINE>
+      <COLUMN>43</COLUMN>
+    </SFA>
+    <DEFECTCODE>6385</DEFECTCODE>
+    <DESCRIPTION>Reading invalid data from 'gpfamilies':  the readable size is 'numSought*16' bytes, but '32' bytes may be read.</DESCRIPTION>
+    <FUNCTION>Gdiplus::FontCollection::GetFamilies</FUNCTION>
+    <DECORATED>?GetFamilies@FontCollection@Gdiplus@@QEBA?AW4Status@2@HPEAVFontFamily@2@PEAH@Z</DECORATED>
+    <FUNCLINE>55</FUNCLINE>
+    <PROBABILITY>1</PROBABILITY>
+    <RANK>4</RANK>
+    <CATEGORY>
+      <RULECATEGORY>mspft</RULECATEGORY>
+    </CATEGORY>
+    <PATH>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>55</LINE>
+        <COLUMN>16</COLUMN>
+        <KEYEVENT>
+          <ID>1</ID>
+          <KIND>declaration</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>'gpfamilies' is an array of 1 elements (16 bytes)</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>61</LINE>
+        <COLUMN>45</COLUMN>
+        <KEYEVENT>
+          <ID>2</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Skip this branch, (assume '&lt;branch condition&gt;' is false)</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>65</LINE>
+        <COLUMN>14</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>66</LINE>
+        <COLUMN>19</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>68</LINE>
+        <COLUMN>25</COLUMN>
+        <KEYEVENT>
+          <ID>3</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Skip this branch, (assume 'nativeFamilyList==0' is false)</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>73</LINE>
+        <COLUMN>11</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>79</LINE>
+        <COLUMN>15</COLUMN>
+        <KEYEVENT>
+          <ID>4</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Enter this branch, (assume 'status==Ok')</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>81</LINE>
+        <COLUMN>17</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>81</LINE>
+        <COLUMN>26</COLUMN>
+        <KEYEVENT>
+          <ID>5</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Enter this loop, (assume 'i&lt;*numFound')</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>83</LINE>
+        <COLUMN>43</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>81</LINE>
+        <COLUMN>40</COLUMN>
+        <KEYEVENT>
+          <ID>6</ID>
+          <KIND>declaration</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>'i' may equal 1</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>81</LINE>
+        <COLUMN>26</COLUMN>
+        <KEYEVENT>
+          <ID>7</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Continue this loop, (assume 'i&lt;*numFound')</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>83</LINE>
+        <COLUMN>43</COLUMN>
+        <KEYEVENT>
+          <ID>8</ID>
+          <KIND>declaration</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>'i' is an Output from 'Gdiplus::DllExports::GdipCloneFontFamily' (declared at d:\windows kits\10\include\10.0.22621.0\um\gdiplusflat.h:2386)</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>83</LINE>
+        <COLUMN>43</COLUMN>
+        <KEYEVENT>
+          <ID>9</ID>
+          <KIND>usage</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>Invalid read from 'gpfamilies[1]', (readable range is 0 to 0)</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+    </PATH>
+  </DEFECT>
+  <DEFECT>
+    <SFA>
+      <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+      <FILENAME>GdiplusFontCollection.h</FILENAME>
+      <LINE>83</LINE>
+      <COLUMN>43</COLUMN>
+    </SFA>
+    <DEFECTCODE>6385</DEFECTCODE>
+    <DESCRIPTION>Reading invalid data from 'nativeFamilyList':  the readable size is 'numSought*8' bytes, but '16' bytes may be read.</DESCRIPTION>
+    <FUNCTION>Gdiplus::FontCollection::GetFamilies</FUNCTION>
+    <DECORATED>?GetFamilies@FontCollection@Gdiplus@@QEBA?AW4Status@2@HPEAVFontFamily@2@PEAH@Z</DECORATED>
+    <FUNCLINE>55</FUNCLINE>
+    <PROBABILITY>1</PROBABILITY>
+    <RANK>4</RANK>
+    <CATEGORY>
+      <RULECATEGORY>mspft</RULECATEGORY>
+    </CATEGORY>
+    <PATH>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>61</LINE>
+        <COLUMN>45</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>65</LINE>
+        <COLUMN>14</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>66</LINE>
+        <COLUMN>19</COLUMN>
+        <KEYEVENT>
+          <ID>1</ID>
+          <KIND>declaration</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>'nativeFamilyList' is an array of 1 elements (8 bytes)</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>68</LINE>
+        <COLUMN>25</COLUMN>
+        <KEYEVENT>
+          <ID>2</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Skip this branch, (assume 'nativeFamilyList==0' is false)</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>73</LINE>
+        <COLUMN>11</COLUMN>
+        <KEYEVENT>
+          <ID>3</ID>
+          <KIND>usage</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>'nativeFamilyList' is an Input to 'Gdiplus::DllExports::GdipGetFontCollectionFamilyList' (declared at d:\windows kits\10\include\10.0.22621.0\um\gdiplusflat.h:2521)</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>79</LINE>
+        <COLUMN>15</COLUMN>
+        <KEYEVENT>
+          <ID>4</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Enter this branch, (assume 'status==Ok')</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>81</LINE>
+        <COLUMN>17</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>81</LINE>
+        <COLUMN>26</COLUMN>
+        <KEYEVENT>
+          <ID>5</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Enter this loop, (assume 'i&lt;*numFound')</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>83</LINE>
+        <COLUMN>43</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>81</LINE>
+        <COLUMN>40</COLUMN>
+        <KEYEVENT>
+          <ID>6</ID>
+          <KIND>declaration</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>'i' may equal 1</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>81</LINE>
+        <COLUMN>26</COLUMN>
+        <KEYEVENT>
+          <ID>7</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Continue this loop, (assume 'i&lt;*numFound')</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>83</LINE>
+        <COLUMN>43</COLUMN>
+        <KEYEVENT>
+          <ID>8</ID>
+          <KIND>declaration</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>'i' is an Output from 'Gdiplus::DllExports::GdipCloneFontFamily' (declared at d:\windows kits\10\include\10.0.22621.0\um\gdiplusflat.h:2386)</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>GdiplusFontCollection.h</FILENAME>
+        <LINE>83</LINE>
+        <COLUMN>43</COLUMN>
+        <KEYEVENT>
+          <ID>9</ID>
+          <KIND>usage</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>Invalid read from 'nativeFamilyList[1]', (readable range is 0 to 0)</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+    </PATH>
+  </DEFECT>
+  <DEFECT>
+    <SFA>
+      <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+      <FILENAME>GdiplusFontCollection.h</FILENAME>
+      <LINE>100</LINE>
+      <COLUMN>16</COLUMN>
+    </SFA>
+    <DEFECTCODE>28252</DEFECTCODE>
+    <DESCRIPTION>Inconsistent annotation for 'SetStatus': return/function has 'SAL_range(==,__formal(0,parameter0))' on the prior instance. See d:\windows kits\10\include\10.0.22621.0\um\gdiplusheaders.h(342). </DESCRIPTION>
+    <FUNCTION>Gdiplus::FontCollection::SetStatus</FUNCTION>
+    <DECORATED>?SetStatus@FontCollection@Gdiplus@@IEBA?AW4Status@2@W432@@Z</DECORATED>
+    <FUNCLINE>100</FUNCLINE>
+    <PATH></PATH>
+  </DEFECT>
+  <DEFECT>
+    <SFA>
+      <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+      <FILENAME>GdiplusFontCollection.h</FILENAME>
+      <LINE>100</LINE>
+      <COLUMN>16</COLUMN>
+    </SFA>
+    <DEFECTCODE>28253</DEFECTCODE>
+    <DESCRIPTION>Inconsistent annotation for 'SetStatus': return/function has 'SAL_satisfies(return==__formal(0,parameter0)) SAL_context(SAL_failed) SAL_post SAL_post SAL_satisfies(return==__formal(0,parameter0))' on this instance. See d:\windows kits\10\include\10.0.22621.0\um\gdiplusheaders.h(342). </DESCRIPTION>
+    <FUNCTION>Gdiplus::FontCollection::SetStatus</FUNCTION>
+    <DECORATED>?SetStatus@FontCollection@Gdiplus@@IEBA?AW4Status@2@W432@@Z</DECORATED>
+    <FUNCLINE>100</FUNCLINE>
+    <PATH></PATH>
+  </DEFECT>
+  <DEFECT>
+    <SFA>
+      <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+      <FILENAME>WindowsNumerics.inl</FILENAME>
+      <LINE>2375</LINE>
+      <COLUMN>34</COLUMN>
+    </SFA>
+    <DEFECTCODE>28253</DEFECTCODE>
+    <DESCRIPTION>Inconsistent annotation for 'decompose': return/function has 'SAL_success(return)' on this instance. See d:\windows kits\10\include\10.0.22621.0\um\windowsnumerics.impl.h(367). </DESCRIPTION>
+    <FUNCTION>winrt::Windows::Foundation::Numerics::decompose</FUNCTION>
+    <DECORATED>?decompose@Numerics@Foundation@Windows@winrt@@YA_NAEBUfloat4x4@1234@PEAUfloat3@1234@PEAUquaternion@1234@1@Z</DECORATED>
+    <FUNCLINE>2375</FUNCLINE>
+    <PATH></PATH>
+  </DEFECT>
+  <DEFECT>
+    <SFA>
+      <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+      <FILENAME>WindowsNumerics.inl</FILENAME>
+      <LINE>2375</LINE>
+      <COLUMN>34</COLUMN>
+    </SFA>
+    <DEFECTCODE>28253</DEFECTCODE>
+    <DESCRIPTION>Inconsistent annotation for 'decompose': _Param_(1) has 'SAL_pre SAL_notref SAL_null(__no) SAL_pre SAL_valid SAL_pre SAL_notref SAL_deref SAL_notref SAL_access(0x1)' on this instance. See d:\windows kits\10\include\10.0.22621.0\um\windowsnumerics.impl.h(367). </DESCRIPTION>
+    <FUNCTION>winrt::Windows::Foundation::Numerics::decompose</FUNCTION>
+    <DECORATED>?decompose@Numerics@Foundation@Windows@winrt@@YA_NAEBUfloat4x4@1234@PEAUfloat3@1234@PEAUquaternion@1234@1@Z</DECORATED>
+    <FUNCLINE>2375</FUNCLINE>
+    <PATH></PATH>
+  </DEFECT>
+  <DEFECT>
+    <SFA>
+      <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+      <FILENAME>WindowsNumerics.inl</FILENAME>
+      <LINE>2375</LINE>
+      <COLUMN>34</COLUMN>
+    </SFA>
+    <DEFECTCODE>6101</DEFECTCODE>
+    <DESCRIPTION>Returning uninitialized memory '*scale'.  A successful path through the function does not set the named _Out_ parameter. Annotate this function with _Success_(return) if returning FALSE indicates failure.</DESCRIPTION>
+    <FUNCTION>winrt::Windows::Foundation::Numerics::decompose</FUNCTION>
+    <DECORATED>?decompose@Numerics@Foundation@Windows@winrt@@YA_NAEBUfloat4x4@1234@PEAUfloat3@1234@PEAUquaternion@1234@1@Z</DECORATED>
+    <FUNCLINE>2375</FUNCLINE>
+    <PROBABILITY>1</PROBABILITY>
+    <RANK>3</RANK>
+    <CATEGORY>
+      <RULECATEGORY>mspft</RULECATEGORY>
+    </CATEGORY>
+    <PATH>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2375</LINE>
+        <COLUMN>34</COLUMN>
+        <KEYEVENT>
+          <ID>1</ID>
+          <KIND>declaration</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>'*scale' is not initialized</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2379</LINE>
+        <COLUMN>17</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2379</LINE>
+        <COLUMN>20</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2379</LINE>
+        <COLUMN>23</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2381</LINE>
+        <COLUMN>12</COLUMN>
+        <KEYEVENT>
+          <ID>2</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Enter this branch, (assume '&lt;branch condition&gt;')</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2383</LINE>
+        <COLUMN>12</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2375</LINE>
+        <COLUMN>34</COLUMN>
+        <KEYEVENT>
+          <ID>3</ID>
+          <KIND>usage</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>'*scale' is an _Out_ parameter that may not have been assigned to</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+    </PATH>
+  </DEFECT>
+  <DEFECT>
+    <SFA>
+      <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+      <FILENAME>WindowsNumerics.inl</FILENAME>
+      <LINE>2375</LINE>
+      <COLUMN>34</COLUMN>
+    </SFA>
+    <DEFECTCODE>6101</DEFECTCODE>
+    <DESCRIPTION>Returning uninitialized memory '*rotation'.  A successful path through the function does not set the named _Out_ parameter. Annotate this function with _Success_(return) if returning FALSE indicates failure.</DESCRIPTION>
+    <FUNCTION>winrt::Windows::Foundation::Numerics::decompose</FUNCTION>
+    <DECORATED>?decompose@Numerics@Foundation@Windows@winrt@@YA_NAEBUfloat4x4@1234@PEAUfloat3@1234@PEAUquaternion@1234@1@Z</DECORATED>
+    <FUNCLINE>2375</FUNCLINE>
+    <PROBABILITY>1</PROBABILITY>
+    <RANK>3</RANK>
+    <CATEGORY>
+      <RULECATEGORY>mspft</RULECATEGORY>
+    </CATEGORY>
+    <PATH>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2375</LINE>
+        <COLUMN>34</COLUMN>
+        <KEYEVENT>
+          <ID>1</ID>
+          <KIND>declaration</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>'*rotation' is not initialized</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2379</LINE>
+        <COLUMN>17</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2379</LINE>
+        <COLUMN>20</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2379</LINE>
+        <COLUMN>23</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2381</LINE>
+        <COLUMN>12</COLUMN>
+        <KEYEVENT>
+          <ID>2</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Enter this branch, (assume '&lt;branch condition&gt;')</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2383</LINE>
+        <COLUMN>12</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2375</LINE>
+        <COLUMN>34</COLUMN>
+        <KEYEVENT>
+          <ID>3</ID>
+          <KIND>usage</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>'*rotation' is an _Out_ parameter that may not have been assigned to</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+    </PATH>
+  </DEFECT>
+  <DEFECT>
+    <SFA>
+      <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+      <FILENAME>WindowsNumerics.inl</FILENAME>
+      <LINE>2375</LINE>
+      <COLUMN>34</COLUMN>
+    </SFA>
+    <DEFECTCODE>6101</DEFECTCODE>
+    <DESCRIPTION>Returning uninitialized memory '*translation'.  A successful path through the function does not set the named _Out_ parameter. Annotate this function with _Success_(return) if returning FALSE indicates failure.</DESCRIPTION>
+    <FUNCTION>winrt::Windows::Foundation::Numerics::decompose</FUNCTION>
+    <DECORATED>?decompose@Numerics@Foundation@Windows@winrt@@YA_NAEBUfloat4x4@1234@PEAUfloat3@1234@PEAUquaternion@1234@1@Z</DECORATED>
+    <FUNCLINE>2375</FUNCLINE>
+    <PROBABILITY>1</PROBABILITY>
+    <RANK>3</RANK>
+    <CATEGORY>
+      <RULECATEGORY>mspft</RULECATEGORY>
+    </CATEGORY>
+    <PATH>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2375</LINE>
+        <COLUMN>34</COLUMN>
+        <KEYEVENT>
+          <ID>1</ID>
+          <KIND>declaration</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>'*translation' is not initialized</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2379</LINE>
+        <COLUMN>17</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2379</LINE>
+        <COLUMN>20</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2379</LINE>
+        <COLUMN>23</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2381</LINE>
+        <COLUMN>12</COLUMN>
+        <KEYEVENT>
+          <ID>2</ID>
+          <KIND>branch</KIND>
+          <IMPORTANCE>Full</IMPORTANCE>
+          <MESSAGE>Enter this branch, (assume '&lt;branch condition&gt;')</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2383</LINE>
+        <COLUMN>12</COLUMN>
+      </SFA>
+      <SFA>
+        <FILEPATH>D:\Windows Kits\10\include\10.0.22621.0\um\</FILEPATH>
+        <FILENAME>WindowsNumerics.inl</FILENAME>
+        <LINE>2375</LINE>
+        <COLUMN>34</COLUMN>
+        <KEYEVENT>
+          <ID>3</ID>
+          <KIND>usage</KIND>
+          <IMPORTANCE>Essential</IMPORTANCE>
+          <MESSAGE>'*translation' is an _Out_ parameter that may not have been assigned to</MESSAGE>
+        </KEYEVENT>
+      </SFA>
+    </PATH>
+  </DEFECT>
+</DEFECTS>
