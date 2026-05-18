@@ -36,7 +36,7 @@ pwsh .\launch-packaged.ps1
 Pin the packaged app entry to Start:
 
 ```text
-shell:AppsFolder\Amiya.NowPlayingTile_8rrqb3h6kgfj4!App
+shell:AppsFolder\NowPlayingTile.App_<package-family-suffix>!App
 ```
 
 By default, launching the app opens no window. It runs in the background and

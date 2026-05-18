@@ -9,9 +9,9 @@ $manifest = Join-Path $root 'AppxManifest.xml'
 Write-Host "Registering development package..."
 Add-AppxPackage -Register $manifest -ForceApplicationShutdown -ExternalLocation $root
 
-$package = Get-AppxPackage -Name 'Amiya.NowPlayingTile'
+$package = Get-AppxPackage -Name 'NowPlayingTile.App'
 if ($null -eq $package) {
-    throw 'Package registration completed but Get-AppxPackage could not find Amiya.NowPlayingTile.'
+    throw 'Package registration completed but Get-AppxPackage could not find NowPlayingTile.App.'
 }
 
 Write-Host ''

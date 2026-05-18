@@ -1,8 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
-$package = Get-AppxPackage -Name 'Amiya.NowPlayingTile'
+$package = Get-AppxPackage -Name 'NowPlayingTile.App'
 if ($null -eq $package) {
-    Write-Host 'Amiya.NowPlayingTile is not registered.'
+    Write-Host 'NowPlayingTile.App is not registered.'
     exit 0
 }
 

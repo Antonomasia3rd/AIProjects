@@ -1,0 +1,37 @@
+# User-local and generated files
+*.log
+*.tmp
+*.bak
+*.user
+*.suo
+
+# Build products for projects that keep source outside build/
+**/build/*.exe
+**/build/*.obj
+**/build/*.pdb
+**/build/*.ilk
+**/build/*.idb
+**/build/*.exp
+**/build/*.lib
+**/build/*.nativecodeanalysis.xml
+**/build/*.log
+**/build/*.ini
+**/build/*.bak
+
+# DesktopStub runtime outputs
+DesktopStub/build/AppxManifest.xml
+DesktopStub/build/Assets/
+DesktopStub/build/GenerateAssets.md
+DesktopStub/build/microsoft.system.package.metadata
+DesktopStub/build/obj/
+
+# Runtime-only build folder in this project
+DNSAutoUpdate/build/
+
+# Local inventories and private runtime configuration
+LOCAL_TOOL_INVENTORY.md
+SecureDesktopLauncher/SecureDesktopLauncher.ini
+SecureDesktopLauncher/SecureDesktopPasswordLauncher.ini
+
+# External/drop-in experiments; structure is not clear enough to track as-is.
+RealTimeNotesDeskband/

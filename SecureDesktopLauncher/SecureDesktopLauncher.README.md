@@ -73,14 +73,14 @@ Examples:
 
 ```ini
 ; only one account
-IncludeUsers=ADDS\Amiya
+IncludeUsers=DOMAIN\UserName
 
 ; everyone except one user
-ExcludeUsers=nene
+ExcludeUsers=DOMAIN\ExcludedUser
 
 ; all domain users except test accounts
-IncludeUsers=ADDS\*
-ExcludeUsers=ADDS\test*
+IncludeUsers=DOMAIN\*
+ExcludeUsers=DOMAIN\test*
 ```
 
 ## Program Count
@@ -149,14 +149,14 @@ Desktop=WinSta0\Winlogon
 ShowWindow=1
 ```
 
-The main launcher config starts the gate only for `ADDS\Amiya`:
+The main launcher config starts the gate only for `DOMAIN\UserName`:
 
 ```ini
 [Program:CommandPromptGate]
 Enabled=1
-Path=D:\Users\Amiya\AppData\Local\Programs\Scripts\AIProjects\SecureDesktopLauncher\build\SecureDesktopPasswordLauncher.exe
-WorkingDirectory=D:\Users\Amiya\AppData\Local\Programs\Scripts\AIProjects\SecureDesktopLauncher\build
-IncludeUsers=ADDS\Amiya
+Path=C:\Tools\SecureDesktopLauncher\build\SecureDesktopPasswordLauncher.exe
+WorkingDirectory=C:\Tools\SecureDesktopLauncher\build
+IncludeUsers=DOMAIN\UserName
 PreventDuplicate=1
 StopOnServiceStop=1
 ```
@@ -164,7 +164,7 @@ StopOnServiceStop=1
 Set or reset the gate password from your normal desktop:
 
 ```cmd
-cd /d D:\Users\Amiya\AppData\Local\Programs\Scripts\AIProjects\SecureDesktopLauncher
+cd /d C:\Tools\SecureDesktopLauncher
 build\SecureDesktopPasswordLauncher.exe set-password
 ```
 

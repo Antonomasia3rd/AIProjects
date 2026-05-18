@@ -1,7 +1,12 @@
-$OldSID = "S-1-5-21-4166441615-362121406-1305389529-1001"
-$NewUser = "ADDS\Amiya"
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$OldSID,
 
-Write-Host "=== Task Migration START (SID → User) ===" -ForegroundColor Cyan
+    [Parameter(Mandatory = $true)]
+    [string]$NewUser
+)
+
+Write-Host "=== Task Migration START (SID -> User) ===" -ForegroundColor Cyan
 Write-Host "Old SID : $OldSID"
 Write-Host "New User: $NewUser"
 Write-Host ""

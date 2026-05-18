@@ -1,8 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
-$package = Get-AppxPackage -Name 'Amiya.NowPlayingTile'
+$package = Get-AppxPackage -Name 'NowPlayingTile.App'
 if ($null -eq $package) {
-    throw 'Amiya.NowPlayingTile is not registered. Run .\register-dev-package.ps1 first.'
+    throw 'NowPlayingTile.App is not registered. Run .\register-dev-package.ps1 first.'
 }
 
 Start-Process "shell:AppsFolder\$($package.PackageFamilyName)!App"

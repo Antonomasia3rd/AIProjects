@@ -24,7 +24,7 @@ internal static class Program
         if (!options.AllowMultiple)
         {
             bool createdNew;
-            singleInstance = new Mutex(true, "Local\\Amiya.NowPlayingTile", out createdNew);
+            singleInstance = new Mutex(true, "Local\\NowPlayingTile.App", out createdNew);
             ownsSingleInstance = createdNew;
             if (!createdNew)
             {
