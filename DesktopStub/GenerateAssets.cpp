@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <thread>
 #include <atomic>
+#include <exception>
 #include <chrono>
 #include <climits>
 #include <cerrno>
@@ -28,8 +29,9 @@
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Management.Deployment.h>
 
-INT_PTR CALLBACK RenameDlgProc(HWND, UINT, WPARAM, LPARAM);
-static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType);
+INT_PTR CALLBACK RenameDlgProc(HWND, UINT, WPARAM, LPARAM) noexcept;
+INT_PTR CALLBACK PowerShellOutputDlgProc(HWND, UINT, WPARAM, LPARAM) noexcept;
+static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) noexcept;
 
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)-4)
@@ -94,35 +96,61 @@ static bool IEquals(const std::wstring& a, const std::wstring& b)
 
 static bool ReadWholeFileBytes(const std::wstring& path, std::vector<BYTE>& bytes)
 {
+    bytes.clear();
     HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE)
         return false;
 
-    LARGE_INTEGER size{};
-    if (!GetFileSizeEx(h, &size) || size.QuadPart < 0 || size.QuadPart > 0x7fffffff)
+    auto fail = [&](DWORD err) -> bool
     {
         CloseHandle(h);
+        SetLastError(err == ERROR_SUCCESS ? ERROR_READ_FAULT : err);
+        bytes.clear();
         return false;
-    }
+    };
+
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(h, &size))
+        return fail(GetLastError());
+    if (size.QuadPart < 0)
+        return fail(ERROR_INVALID_DATA);
+    if (size.QuadPart > 0x7fffffff)
+        return fail(ERROR_FILE_TOO_LARGE);
 
     bytes.resize((size_t)size.QuadPart);
-    DWORD read = 0;
-    BOOL ok = TRUE;
-    if (!bytes.empty())
-        ok = ReadFile(h, bytes.data(), (DWORD)bytes.size(), &read, nullptr);
-    CloseHandle(h);
-    if (!ok || read != bytes.size())
+    BYTE* cursor = bytes.empty() ? nullptr : bytes.data();
+    size_t remaining = bytes.size();
+    while (remaining > 0)
+    {
+        DWORD chunk = static_cast<DWORD>(std::min<size_t>(remaining, 1024 * 1024));
+        DWORD read = 0;
+        if (!ReadFile(h, cursor, chunk, &read, nullptr))
+            return fail(GetLastError());
+        if (read == 0)
+            return fail(ERROR_HANDLE_EOF);
+        cursor += read;
+        remaining -= read;
+    }
+
+    if (!CloseHandle(h))
+    {
+        DWORD err = GetLastError();
+        bytes.clear();
+        SetLastError(err);
         return false;
+    }
     return true;
 }
 
 static std::wstring MakeTempSiblingPath(const std::wstring& path, const wchar_t* tag)
 {
-    wchar_t suffix[96];
-    swprintf(suffix, _countof(suffix), L".tmp.%lu.%llu.%s",
+    static std::atomic<unsigned long> counter(0);
+    wchar_t suffix[128];
+    swprintf(suffix, _countof(suffix), L".tmp.%lu.%llu.%lu.%s",
         GetCurrentProcessId(),
         static_cast<unsigned long long>(GetTickCount64()),
+        counter.fetch_add(1, std::memory_order_relaxed),
         tag ? tag : L"file");
     return path + suffix;
 }
@@ -136,12 +164,20 @@ static bool WriteWholeFileBytesDirect(const std::wstring& path, const std::vecto
     const BYTE* cursor = bytes.empty() ? nullptr : bytes.data();
     size_t remaining = bytes.size();
     bool ok = true;
+    DWORD savedErr = ERROR_SUCCESS;
     while (remaining > 0)
     {
         DWORD chunk = static_cast<DWORD>(std::min<size_t>(remaining, 1024 * 1024));
         DWORD wrote = 0;
-        if (!WriteFile(h, cursor, chunk, &wrote, nullptr) || wrote != chunk)
+        if (!WriteFile(h, cursor, chunk, &wrote, nullptr))
         {
+            savedErr = GetLastError();
+            ok = false;
+            break;
+        }
+        if (wrote != chunk)
+        {
+            savedErr = ERROR_WRITE_FAULT;
             ok = false;
             break;
         }
@@ -150,8 +186,22 @@ static bool WriteWholeFileBytesDirect(const std::wstring& path, const std::vecto
     }
 
     if (ok)
-        ok = FlushFileBuffers(h) != FALSE;
-    CloseHandle(h);
+    {
+        if (!FlushFileBuffers(h))
+        {
+            savedErr = GetLastError();
+            ok = false;
+        }
+    }
+
+    if (!CloseHandle(h) && ok)
+    {
+        SetLastError(GetLastError());
+        return false;
+    }
+
+    if (!ok)
+        SetLastError(savedErr == ERROR_SUCCESS ? ERROR_WRITE_FAULT : savedErr);
     return ok;
 }
 
@@ -232,7 +282,7 @@ static bool DecodeCodePageText(UINT codePage, const BYTE* data, size_t size, std
     if (need <= 0)
         return false;
 
-    out.resize(need);
+    out.resize(static_cast<size_t>(need));
     return MultiByteToWideChar(codePage, flags, (LPCCH)data, (int)size, &out[0], need) > 0;
 }
 
@@ -329,7 +379,13 @@ static bool ReadTextFile(const std::wstring& path, std::wstring& out)
 
 static bool WriteUtf8BomTextFile(const std::wstring& path, const std::wstring& text)
 {
-    return WriteWholeFileBytes(path, EncodeUtf8Text(text, true));
+    std::vector<BYTE> bytes = EncodeUtf8Text(text, true);
+    if (bytes.empty() && !text.empty())
+    {
+        SetLastError(ERROR_NO_UNICODE_TRANSLATION);
+        return false;
+    }
+    return WriteWholeFileBytes(path, bytes);
 }
 
 static bool AppendUtf8TextFile(const std::wstring& path, const std::wstring& text)
@@ -353,8 +409,13 @@ static bool AppendUtf8TextFile(const std::wstring& path, const std::wstring& tex
         {
             DWORD chunk = static_cast<DWORD>(std::min<size_t>(remaining, 1024 * 1024));
             DWORD wrote = 0;
-            if (!WriteFile(h, cursor, chunk, &wrote, nullptr) || wrote != chunk)
+            if (!WriteFile(h, cursor, chunk, &wrote, nullptr))
                 return false;
+            if (wrote != chunk)
+            {
+                SetLastError(ERROR_WRITE_FAULT);
+                return false;
+            }
             cursor += wrote;
             remaining -= wrote;
         }
@@ -387,21 +448,36 @@ static bool AppendUtf8TextFile(const std::wstring& path, const std::wstring& tex
     if (!writeAll(bytes))
         return fail(GetLastError());
 
-    CloseHandle(h);
+    if (!CloseHandle(h))
+        return false;
     return true;
 }
 
-static bool NormalizeTextFileToUtf8Bom(const std::wstring& path)
+enum class TextNormalizeResult
+{
+    NoChange,
+    Changed,
+    Failed
+};
+
+static TextNormalizeResult NormalizeTextFileToUtf8Bom(const std::wstring& path)
 {
     std::vector<BYTE> bytes;
-    if (!ReadWholeFileBytes(path, bytes) || bytes.empty() || HasUtf8Bom(bytes))
-        return false;
+    if (!ReadWholeFileBytes(path, bytes))
+        return TextNormalizeResult::Failed;
+    if (bytes.empty() || HasUtf8Bom(bytes))
+        return TextNormalizeResult::NoChange;
 
     std::wstring text;
     if (!DecodeTextBytes(bytes, text))
-        return false;
+    {
+        SetLastError(ERROR_INVALID_DATA);
+        return TextNormalizeResult::Failed;
+    }
 
-    return WriteUtf8BomTextFile(path, text);
+    return WriteUtf8BomTextFile(path, text)
+        ? TextNormalizeResult::Changed
+        : TextNormalizeResult::Failed;
 }
 
 static void ConfigureConsoleCP()
@@ -416,6 +492,7 @@ static void ConfigureDpiAwareness()
     if (user32)
     {
         using SetProcessDpiAwarenessContextFn = BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT);
+#pragma warning(suppress: 4191)
         auto setContext = (SetProcessDpiAwarenessContextFn)GetProcAddress(user32, "SetProcessDpiAwarenessContext");
         if (setContext && setContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
             return;
@@ -477,6 +554,247 @@ static void TrimTrailingEmptyLines(std::vector<std::wstring>& lines)
 {
     while (!lines.empty() && TrimCopy(lines.back()).empty())
         lines.pop_back();
+}
+
+static void StripLeadingBom(std::wstring& s);
+
+static int HexDigitValue(wchar_t ch)
+{
+    if (ch >= L'0' && ch <= L'9')
+        return (int)(ch - L'0');
+    if (ch >= L'a' && ch <= L'f')
+        return 10 + (int)(ch - L'a');
+    if (ch >= L'A' && ch <= L'F')
+        return 10 + (int)(ch - L'A');
+    return -1;
+}
+
+static bool StartsWithAt(const std::wstring& text, size_t pos, const wchar_t* needle)
+{
+    size_t len = wcslen(needle);
+    return pos <= text.size() && len <= text.size() - pos && text.compare(pos, len, needle) == 0;
+}
+
+static std::wstring DecodeXmlEntities(std::wstring value)
+{
+    struct Replacement { const wchar_t* from; const wchar_t* to; };
+    static const Replacement replacements[] = {
+        { L"&quot;", L"\"" },
+        { L"&apos;", L"'" },
+        { L"&lt;", L"<" },
+        { L"&gt;", L">" },
+        { L"&amp;", L"&" },
+    };
+
+    for (const auto& r : replacements)
+    {
+        size_t pos = 0;
+        while ((pos = value.find(r.from, pos)) != std::wstring::npos)
+        {
+            value.replace(pos, wcslen(r.from), r.to);
+            pos += wcslen(r.to);
+        }
+    }
+
+    std::wstring out;
+    out.reserve(value.size());
+    for (size_t i = 0; i < value.size(); ++i)
+    {
+        if (value[i] == L'&' && i + 2 < value.size() && value[i + 1] == L'#')
+        {
+            size_t pos = i + 2;
+            int radix = 10;
+            if (pos < value.size() && (value[pos] == L'x' || value[pos] == L'X'))
+            {
+                radix = 16;
+                ++pos;
+            }
+
+            unsigned int code = 0;
+            bool any = false;
+            while (pos < value.size() && value[pos] != L';')
+            {
+                int digit = radix == 16 ? HexDigitValue(value[pos])
+                    : (value[pos] >= L'0' && value[pos] <= L'9' ? (int)(value[pos] - L'0') : -1);
+                if (digit < 0 || digit >= radix)
+                    break;
+                code = code * (unsigned int)radix + (unsigned int)digit;
+                any = true;
+                ++pos;
+            }
+
+            if (any && pos < value.size() && value[pos] == L';' && code <= 0xFFFF)
+            {
+                out.push_back((wchar_t)code);
+                i = pos;
+                continue;
+            }
+        }
+
+        out.push_back(value[i]);
+    }
+    return out;
+}
+
+static std::wstring DecodePowerShellClixmlValue(const std::wstring& value)
+{
+    std::wstring xml = DecodeXmlEntities(value);
+    std::wstring out;
+    out.reserve(xml.size());
+
+    for (size_t i = 0; i < xml.size(); ++i)
+    {
+        if (i + 6 < xml.size() && xml[i] == L'_' && xml[i + 1] == L'x' && xml[i + 6] == L'_')
+        {
+            int d0 = HexDigitValue(xml[i + 2]);
+            int d1 = HexDigitValue(xml[i + 3]);
+            int d2 = HexDigitValue(xml[i + 4]);
+            int d3 = HexDigitValue(xml[i + 5]);
+            if (d0 >= 0 && d1 >= 0 && d2 >= 0 && d3 >= 0)
+            {
+                wchar_t ch = (wchar_t)((d0 << 12) | (d1 << 8) | (d2 << 4) | d3);
+                out.push_back(ch);
+                i += 6;
+                continue;
+            }
+        }
+
+        out.push_back(xml[i]);
+    }
+    return out;
+}
+
+static std::wstring NormalizePowerShellOutputText(const std::wstring& text)
+{
+    std::vector<std::wstring> lines;
+    int blankRun = 0;
+    for (std::wstring line : SplitLines(text))
+    {
+        while (!line.empty() && (line.back() == L' ' || line.back() == L'\t'))
+            line.pop_back();
+
+        if (TrimCopy(line).empty())
+        {
+            if (++blankRun <= 1)
+                lines.push_back(L"");
+            continue;
+        }
+
+        blankRun = 0;
+        lines.push_back(line);
+    }
+
+    TrimTrailingEmptyLines(lines);
+    return JoinLines(lines);
+}
+
+static bool LooksLikePowerShellClixml(std::wstring text)
+{
+    StripLeadingBom(text);
+    size_t pos = 0;
+    while (pos < text.size() && iswspace(text[pos]) != 0)
+        ++pos;
+
+    return StartsWithAt(text, pos, L"#< CLIXML")
+        || (text.find(L"<Objs") != std::wstring::npos && text.find(L"<S") != std::wstring::npos);
+}
+
+static bool ExtractPowerShellStringNode(const std::wstring& text, size_t& pos, std::wstring& tag, std::wstring& value)
+{
+    for (;;)
+    {
+        size_t open = text.find(L"<S", pos);
+        if (open == std::wstring::npos)
+            return false;
+        if (open + 2 >= text.size() || text[open + 2] == L'>' || iswspace(text[open + 2]) != 0)
+        {
+            size_t tagEnd = text.find(L'>', open + 2);
+            if (tagEnd == std::wstring::npos)
+                return false;
+            size_t close = text.find(L"</S>", tagEnd + 1);
+            if (close == std::wstring::npos)
+                return false;
+
+            tag = text.substr(open, tagEnd - open + 1);
+            value = text.substr(tagEnd + 1, close - tagEnd - 1);
+            pos = close + 4;
+            return true;
+        }
+        pos = open + 2;
+    }
+}
+
+static void AddPowerShellRecord(std::vector<std::wstring>& records, const std::wstring& value)
+{
+    std::wstring normalized = NormalizePowerShellOutputText(value);
+    if (TrimCopy(normalized).empty())
+        return;
+    if (!records.empty() && records.back() == normalized)
+        return;
+    records.push_back(normalized);
+}
+
+static void AppendPowerShellRecords(std::vector<std::wstring>& lines, const std::vector<std::wstring>& records)
+{
+    for (const std::wstring& record : records)
+    {
+        std::vector<std::wstring> recordLines = SplitLines(record);
+        lines.insert(lines.end(), recordLines.begin(), recordLines.end());
+    }
+}
+
+static std::wstring FormatPowerShellClixml(const std::wstring& text)
+{
+    std::vector<std::wstring> errors;
+    std::vector<std::wstring> other;
+    std::vector<std::wstring> progress;
+
+    size_t pos = 0;
+    std::wstring tag;
+    std::wstring rawValue;
+    while (ExtractPowerShellStringNode(text, pos, tag, rawValue))
+    {
+        std::wstring decoded = DecodePowerShellClixmlValue(rawValue);
+        std::wstring loweredTag = ToLowerCopy(tag);
+        if (loweredTag.find(L"s=\"error\"") != std::wstring::npos || loweredTag.find(L"s='error'") != std::wstring::npos)
+            AddPowerShellRecord(errors, decoded);
+        else if (loweredTag.find(L"s=\"progress\"") != std::wstring::npos || loweredTag.find(L"s='progress'") != std::wstring::npos)
+            AddPowerShellRecord(progress, decoded);
+        else
+            AddPowerShellRecord(other, decoded);
+    }
+
+    std::vector<std::wstring> lines;
+    if (!errors.empty())
+    {
+        AppendPowerShellRecords(lines, errors);
+        if (!other.empty())
+        {
+            lines.push_back(L"");
+            lines.push_back(L"Additional output:");
+            AppendPowerShellRecords(lines, other);
+        }
+    }
+    else if (!other.empty())
+    {
+        AppendPowerShellRecords(lines, other);
+    }
+    else
+    {
+        AppendPowerShellRecords(lines, progress);
+    }
+
+    if (!lines.empty())
+        return NormalizePowerShellOutputText(JoinLines(lines));
+
+    return NormalizePowerShellOutputText(DecodePowerShellClixmlValue(text));
+}
+
+static std::wstring FormatPowerShellOutput(const std::wstring& text)
+{
+    if (LooksLikePowerShellClixml(text))
+        return FormatPowerShellClixml(text);
+    return NormalizePowerShellOutputText(text);
 }
 
 static bool ReadIniFileAuto(std::wstring& text);
@@ -991,7 +1309,9 @@ static bool WriteIniValueToText(std::wstring& text, const wchar_t* s, const wcha
                 lines.push_back(newEntry);
             }
             else
-                lines.insert(lines.begin() + insertPos, newEntry);
+                lines.insert(
+                    lines.begin() + static_cast<std::vector<std::wstring>::difference_type>(insertPos),
+                    newEntry);
         }
         else
         {
@@ -1092,6 +1412,7 @@ static std::wstring g_generationQueuedWallpaper;
 static std::wstring g_generationQueuedReason;
 static std::mutex g_pollWakeMutex;
 static std::condition_variable g_pollWakeCv;
+static std::atomic<unsigned long> g_pollWakeGeneration(0);
 static constexpr UINT WM_APP_SHUTDOWN_READY = WM_APP + 1;
 static constexpr UINT WM_APP_REQUEST_SHUTDOWN = WM_APP + 2;
 static constexpr UINT_PTR SHUTDOWN_NOTICE_TIMER_ID = 1;
@@ -1155,17 +1476,31 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"PowerShellTimeoutMs", L"120000"},
     {L"Settings", L"PowerShellTerminateWaitMs", L"5000"},
     {L"Settings", L"RegistrationUnresolvedBlockMs", L"300000"},
-    {L"Settings", L"ManifestIdentityName", L""},
-    {L"Settings", L"ManifestPublisher", L""},
-    {L"Settings", L"ManifestPackageVersion", L"1.0.0.0"},
-    {L"Settings", L"ManifestDisplayName", L"Desktop"},
-    {L"Settings", L"ManifestPublisherDisplayName", L""},
-    {L"Settings", L"ManifestDescription", L"Desktop"},
-    {L"Settings", L"ManifestExecutable", L"rundll32.exe"},
-    {L"Settings", L"ManifestApplicationId", L"App"},
-    {L"Settings", L"ManifestMinVersion", L"10.0.15063.0"},
-    {L"Settings", L"ManifestMaxVersionTested", L"10.0.15063.0"},
-    {L"Settings", L"ManifestOverwriteExisting", L"0"},
+
+    // Manifest
+    {L"Manifest", L"IdentityName", L""},
+    {L"Manifest", L"Publisher", L""},
+    {L"Manifest", L"PackageVersion", L"1.0.0.0"},
+    {L"Manifest", L"DisplayName", L"Desktop"},
+    {L"Manifest", L"PublisherDisplayName", L""},
+    {L"Manifest", L"Description", L"Desktop"},
+    {L"Manifest", L"Executable", L"rundll32.exe"},
+    {L"Manifest", L"ApplicationId", L"App"},
+    {L"Manifest", L"TargetDeviceFamilyName", L"Windows.Desktop"},
+    {L"Manifest", L"MinVersion", L"10.0.15063.0"},
+    {L"Manifest", L"MaxVersionTested", L"10.0.15063.0"},
+    {L"Manifest", L"ResourceLanguage", L"en-us"},
+    {L"Manifest", L"PropertiesLogo", L"Assets\\StoreLogo.png"},
+    {L"Manifest", L"Square150x150Logo", L"Assets\\MediumTile.png"},
+    {L"Manifest", L"Square44x44Logo", L"Assets\\Square44x44Logo.png"},
+    {L"Manifest", L"Square71x71Logo", L"Assets\\SmallTile.png"},
+    {L"Manifest", L"Wide310x150Logo", L"Assets\\WideTile.png"},
+    {L"Manifest", L"Square310x310Logo", L"Assets\\LargeTile.png"},
+    {L"Manifest", L"BackgroundColor", L"transparent"},
+    {L"Manifest", L"ShowNameOnTiles", L"square150x150Logo,wide310x150Logo,square310x310Logo"},
+    {L"Manifest", L"EntryPoint", L"Windows.FullTrustApplication"},
+    {L"Manifest", L"RestrictedCapability", L"runFullTrust"},
+    {L"Manifest", L"OverwriteExisting", L"0"},
 
     // Assets (IMPORTANT: correct defaults)
     {L"Assets", L"StoreLogo", L"0"},
@@ -1279,6 +1614,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %d ms"},
     {L"PowerShellTerminateWaitMsLabel", L"PowerShell terminate wait: %d ms"},
     {L"RegistrationUnresolvedBlockMsLabel", L"Unresolved registration block: %d ms"},
+    {L"ManifestTitle", L"Manifest:"},
     {L"ManifestIdentityNameLabel", L"Manifest identity: %s"},
     {L"ManifestPublisherLabel", L"Manifest publisher: %s"},
     {L"ManifestPackageVersionLabel", L"Manifest version: %s"},
@@ -1287,12 +1623,25 @@ static const StringDefault g_stringDefaults[] = {
     {L"ManifestDescriptionLabel", L"Manifest description: %s"},
     {L"ManifestExecutableLabel", L"Manifest executable: %s"},
     {L"ManifestApplicationIdLabel", L"Manifest app id: %s"},
+    {L"ManifestTargetDeviceFamilyNameLabel", L"Manifest target family: %s"},
     {L"ManifestMinVersionLabel", L"Manifest min version: %s"},
     {L"ManifestMaxVersionTestedLabel", L"Manifest max tested: %s"},
+    {L"ManifestResourceLanguageLabel", L"Manifest resource language: %s"},
+    {L"ManifestPropertiesLogoLabel", L"Manifest properties logo: %s"},
+    {L"ManifestSquare150x150LogoLabel", L"Manifest square 150 logo: %s"},
+    {L"ManifestSquare44x44LogoLabel", L"Manifest square 44 logo: %s"},
+    {L"ManifestSquare71x71LogoLabel", L"Manifest square 71 logo: %s"},
+    {L"ManifestWide310x150LogoLabel", L"Manifest wide 310 logo: %s"},
+    {L"ManifestSquare310x310LogoLabel", L"Manifest square 310 logo: %s"},
+    {L"ManifestBackgroundColorLabel", L"Manifest background color: %s"},
+    {L"ManifestShowNameOnTilesLabel", L"Manifest show names on: %s"},
+    {L"ManifestEntryPointLabel", L"Manifest entry point: %s"},
+    {L"ManifestRestrictedCapabilityLabel", L"Manifest restricted capability: %s"},
     {L"ManifestSourceLabel", L"Manifest source: %s"},
     {L"ManifestSourceExisting", L"existing AppxManifest.xml"},
     {L"ManifestSourceGenerated", L"generated from INI if missing"},
     {L"ManifestOverwriteExistingLabel", L"Manifest overwrite existing: %s"},
+    {L"ManifestOverwriteExistingToggle", L"Overwrite existing AppxManifest.xml"},
     {L"WallpaperDetectionMethodLabel", L"Wallpaper detection method: %s"},
     {L"WallpaperDetectionFallback", L"Fallback when selected path is invalid"},
     {L"SingleInstanceFailureActionLabel", L"Single-instance failure action: %s"},
@@ -1432,6 +1781,11 @@ static const StringDefault g_stringDefaults[] = {
     {L"AssetGenerationFinished", L"Asset generation and registration finished successfully."},
     {L"AssetGenerationFailed", L"Asset generation did not complete successfully."},
     {L"AppRegistrationFailed", L"App registration did not complete successfully."},
+    {L"GenerationUnhandledException", L"[!] Generation worker caught an unhandled exception: %s"},
+    {L"GenerationThreadStartFailed", L"[!] Failed to start generation worker thread: %s"},
+    {L"PollThreadUnhandledException", L"[!] Wallpaper poll thread stopped after an unhandled exception: %s"},
+    {L"PollThreadStartFailed", L"[!] Failed to start wallpaper poll thread: %s"},
+    {L"UnknownException", L"unknown exception"},
     {L"SkippingRegistrationDueToAssetFailure", L"[!] Skipping Appx registration because asset generation failed."},
     {L"CreateAssetsDirectoryOperation", L"Create Assets directory"},
     {L"MissingManifestAssets", L"[!] Registration failed and manifest assets are missing or invalid: %s"},
@@ -1516,6 +1870,15 @@ static std::wstring BuildInitialIniTemplate()
     lines.push_back(L"; WallpaperDetectionMethod options:");
     lines.push_back(L"; TranscodedImageCache, SystemParametersInfo, DesktopWallpaperCOM,");
     lines.push_back(L"; TranscodedWallpaperFile, Auto.");
+    lines.push_back(L"");
+    lines.push_back(L"[Manifest]");
+    lines.push_back(L"; AppxManifest.xml generation. Existing legacy [Settings] Manifest*");
+    lines.push_back(L"; keys are still read as fallback.");
+    for (const auto& d : g_defaults)
+    {
+        if (wcscmp(d.section, L"Manifest") == 0)
+            lines.push_back(FormatIniAssignment(d.key, d.value));
+    }
     lines.push_back(L"");
     lines.push_back(L"[Assets]");
     lines.push_back(L"; Toggle which AppX tile/logo assets are generated.");
@@ -1748,6 +2111,11 @@ struct UiStrings
     std::wstring assetGenerationFinished;
     std::wstring assetGenerationFailed;
     std::wstring appRegistrationFailed;
+    std::wstring generationUnhandledException;
+    std::wstring generationThreadStartFailed;
+    std::wstring pollThreadUnhandledException;
+    std::wstring pollThreadStartFailed;
+    std::wstring unknownException;
     std::wstring skippingRegistrationDueToAssetFailure;
     std::wstring createAssetsDirectoryOperation;
     std::wstring missingManifestAssets;
@@ -1865,6 +2233,7 @@ struct UiStrings
     std::wstring powerShellTimeoutMsLabel;
     std::wstring powerShellTerminateWaitMsLabel;
     std::wstring registrationUnresolvedBlockMsLabel;
+    std::wstring manifestTitle;
     std::wstring manifestIdentityNameLabel;
     std::wstring manifestPublisherLabel;
     std::wstring manifestPackageVersionLabel;
@@ -1873,12 +2242,25 @@ struct UiStrings
     std::wstring manifestDescriptionLabel;
     std::wstring manifestExecutableLabel;
     std::wstring manifestApplicationIdLabel;
+    std::wstring manifestTargetDeviceFamilyNameLabel;
     std::wstring manifestMinVersionLabel;
     std::wstring manifestMaxVersionTestedLabel;
+    std::wstring manifestResourceLanguageLabel;
+    std::wstring manifestPropertiesLogoLabel;
+    std::wstring manifestSquare150x150LogoLabel;
+    std::wstring manifestSquare44x44LogoLabel;
+    std::wstring manifestSquare71x71LogoLabel;
+    std::wstring manifestWide310x150LogoLabel;
+    std::wstring manifestSquare310x310LogoLabel;
+    std::wstring manifestBackgroundColorLabel;
+    std::wstring manifestShowNameOnTilesLabel;
+    std::wstring manifestEntryPointLabel;
+    std::wstring manifestRestrictedCapabilityLabel;
     std::wstring manifestSourceLabel;
     std::wstring manifestSourceExisting;
     std::wstring manifestSourceGenerated;
     std::wstring manifestOverwriteExistingLabel;
+    std::wstring manifestOverwriteExistingToggle;
     std::wstring wallpaperDetectionMethodLabel;
     std::wstring singleInstanceFailureActionLabel;
     std::wstring singleInstanceActionIgnore;
@@ -1893,6 +2275,30 @@ struct UiStrings
 static UiStrings g_ui;
 static const wchar_t* StateEnabled(bool v) { return v ? g_ui.enabledText.c_str() : g_ui.disabledText.c_str(); }
 static const wchar_t* StateOn(bool v) { return v ? g_ui.onText.c_str() : g_ui.offText.c_str(); }
+
+static std::wstring ExceptionTextToWide(const std::exception& ex)
+{
+    const char* text = ex.what();
+    if (text && *text)
+    {
+        size_t len = 0;
+        while (text[len])
+            ++len;
+
+        const BYTE* begin = reinterpret_cast<const BYTE*>(text);
+        std::vector<BYTE> bytes(begin, begin + len);
+        std::wstring decoded = DecodeProcessOutput(bytes);
+        if (!decoded.empty())
+            return decoded;
+    }
+
+    return g_ui.unknownException.empty() ? L"unknown exception" : g_ui.unknownException;
+}
+
+static std::wstring UnknownExceptionText()
+{
+    return g_ui.unknownException.empty() ? L"unknown exception" : g_ui.unknownException;
+}
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
@@ -2170,12 +2576,38 @@ static std::wstring ExeBaseName()
     return name.empty() ? L"GenerateAssets" : name;
 }
 
-static std::wstring ManifestSetting(const wchar_t* key, const wchar_t* fallback)
+static std::wstring DefaultLogPath()
 {
-    std::wstring value = TrimCopy(IniReadS(L"Settings", key, L""));
+    return GetExeDir() + L"\\" + ExeBaseName() + L".log";
+}
+
+static std::wstring EffectiveConfiguredLogPath()
+{
+    std::wstring configured = TrimCopy(IniReadS(L"Settings", L"LogPath", L""));
+    return configured.empty() ? DefaultLogPath() : configured;
+}
+
+static std::wstring ManifestSetting(const wchar_t* key, const wchar_t* fallback, const wchar_t* legacySettingsKey = nullptr)
+{
+    std::wstring value = TrimCopy(IniReadS(L"Manifest", key, L""));
+    if (!value.empty())
+        return value;
+
+    if (legacySettingsKey)
+        value = TrimCopy(IniReadS(L"Settings", legacySettingsKey, L""));
     if (!value.empty())
         return value;
     return fallback ? fallback : L"";
+}
+
+static int ManifestSettingI(const wchar_t* key, int fallback, const wchar_t* legacySettingsKey = nullptr)
+{
+    std::wstring value = TrimCopy(IniReadS(L"Manifest", key, L""));
+    if (value.empty() && legacySettingsKey)
+        value = TrimCopy(IniReadS(L"Settings", legacySettingsKey, L""));
+    if (value.empty())
+        return fallback;
+    return _wtoi(value.c_str());
 }
 
 static std::wstring TrimNonAlnumEnds(std::wstring value)
@@ -2276,7 +2708,7 @@ static bool IsManifestVersion(const std::wstring& version)
 
 static std::wstring EffectiveManifestIdentityName()
 {
-    std::wstring configured = TrimCopy(IniReadS(L"Settings", L"ManifestIdentityName", L""));
+    std::wstring configured = ManifestSetting(L"IdentityName", L"", L"ManifestIdentityName");
     if (configured.empty())
         configured = L"dev.local." + ExeBaseName();
     return SanitizeManifestIdentityName(configured);
@@ -2284,7 +2716,7 @@ static std::wstring EffectiveManifestIdentityName()
 
 static std::wstring EffectiveManifestPublisher()
 {
-    std::wstring publisher = ManifestSetting(L"ManifestPublisher", L"CN=DesktopTileGenerator");
+    std::wstring publisher = ManifestSetting(L"Publisher", L"CN=DesktopTileGenerator", L"ManifestPublisher");
     if (ToLowerCopy(publisher).rfind(L"cn=", 0) != 0)
         publisher = L"CN=" + publisher;
     return publisher;
@@ -2292,45 +2724,104 @@ static std::wstring EffectiveManifestPublisher()
 
 static std::wstring EffectiveManifestPackageVersion()
 {
-    std::wstring version = ManifestSetting(L"ManifestPackageVersion", L"1.0.0.0");
+    std::wstring version = ManifestSetting(L"PackageVersion", L"1.0.0.0", L"ManifestPackageVersion");
     return IsManifestVersion(version) ? version : L"1.0.0.0";
 }
 
 static std::wstring EffectiveManifestDisplayName()
 {
-    return ManifestSetting(L"ManifestDisplayName", L"Desktop");
+    return ManifestSetting(L"DisplayName", L"Desktop", L"ManifestDisplayName");
 }
 
 static std::wstring EffectiveManifestPublisherDisplayName()
 {
-    return ManifestSetting(L"ManifestPublisherDisplayName", L"Desktop Tile Generator");
+    return ManifestSetting(L"PublisherDisplayName", L"Desktop Tile Generator", L"ManifestPublisherDisplayName");
 }
 
 static std::wstring EffectiveManifestDescription()
 {
-    return ManifestSetting(L"ManifestDescription", L"Desktop");
+    return ManifestSetting(L"Description", L"Desktop", L"ManifestDescription");
 }
 
 static std::wstring EffectiveManifestExecutable()
 {
-    return ManifestSetting(L"ManifestExecutable", L"rundll32.exe");
+    return ManifestSetting(L"Executable", L"rundll32.exe", L"ManifestExecutable");
 }
 
 static std::wstring EffectiveManifestApplicationId()
 {
-    return SanitizeManifestToken(ManifestSetting(L"ManifestApplicationId", L"App"), L"App");
+    return SanitizeManifestToken(ManifestSetting(L"ApplicationId", L"App", L"ManifestApplicationId"), L"App");
 }
 
 static std::wstring EffectiveManifestMinVersion()
 {
-    std::wstring version = ManifestSetting(L"ManifestMinVersion", L"10.0.15063.0");
+    std::wstring version = ManifestSetting(L"MinVersion", L"10.0.15063.0", L"ManifestMinVersion");
     return IsManifestVersion(version) ? version : L"10.0.15063.0";
 }
 
 static std::wstring EffectiveManifestMaxVersionTested()
 {
-    std::wstring version = ManifestSetting(L"ManifestMaxVersionTested", L"10.0.15063.0");
+    std::wstring version = ManifestSetting(L"MaxVersionTested", L"10.0.15063.0", L"ManifestMaxVersionTested");
     return IsManifestVersion(version) ? version : L"10.0.15063.0";
+}
+
+static std::wstring EffectiveManifestTargetDeviceFamilyName()
+{
+    return ManifestSetting(L"TargetDeviceFamilyName", L"Windows.Desktop", L"ManifestTargetDeviceFamilyName");
+}
+
+static std::wstring EffectiveManifestResourceLanguage()
+{
+    return ManifestSetting(L"ResourceLanguage", L"en-us", L"ManifestResourceLanguage");
+}
+
+static std::wstring EffectiveManifestPropertiesLogo()
+{
+    return ManifestSetting(L"PropertiesLogo", L"Assets\\StoreLogo.png", L"ManifestPropertiesLogo");
+}
+
+static std::wstring EffectiveManifestSquare150x150Logo()
+{
+    return ManifestSetting(L"Square150x150Logo", L"Assets\\MediumTile.png", L"ManifestSquare150x150Logo");
+}
+
+static std::wstring EffectiveManifestSquare44x44Logo()
+{
+    return ManifestSetting(L"Square44x44Logo", L"Assets\\Square44x44Logo.png", L"ManifestSquare44x44Logo");
+}
+
+static std::wstring EffectiveManifestSquare71x71Logo()
+{
+    return ManifestSetting(L"Square71x71Logo", L"Assets\\SmallTile.png", L"ManifestSquare71x71Logo");
+}
+
+static std::wstring EffectiveManifestWide310x150Logo()
+{
+    return ManifestSetting(L"Wide310x150Logo", L"Assets\\WideTile.png", L"ManifestWide310x150Logo");
+}
+
+static std::wstring EffectiveManifestSquare310x310Logo()
+{
+    return ManifestSetting(L"Square310x310Logo", L"Assets\\LargeTile.png", L"ManifestSquare310x310Logo");
+}
+
+static std::wstring EffectiveManifestBackgroundColor()
+{
+    return ManifestSetting(L"BackgroundColor", L"transparent", L"ManifestBackgroundColor");
+}
+
+static std::wstring EffectiveManifestEntryPoint()
+{
+    return ManifestSetting(L"EntryPoint", L"Windows.FullTrustApplication", L"ManifestEntryPoint");
+}
+
+static std::wstring EffectiveManifestRestrictedCapability()
+{
+    std::wstring value = ManifestSetting(L"RestrictedCapability", L"runFullTrust", L"ManifestRestrictedCapability");
+    std::wstring lowered = ToLowerCopy(TrimCopy(value));
+    if (lowered == L"0" || lowered == L"false" || lowered == L"off" || lowered == L"none")
+        return L"";
+    return value;
 }
 
 static std::wstring XmlEscape(const std::wstring& value)
@@ -2419,9 +2910,37 @@ static bool ExtractXmlElementText(const std::wstring& xml, const wchar_t* elemen
 
 static bool ManifestOverwriteExisting()
 {
-    return IniReadI(L"Settings", L"ManifestOverwriteExisting", 0) != 0;
+    return ManifestSettingI(L"OverwriteExisting", 0, L"ManifestOverwriteExisting") != 0;
 }
 
+static std::vector<std::wstring> EffectiveManifestShowNameOnTiles()
+{
+    std::wstring configured = ManifestSetting(
+        L"ShowNameOnTiles",
+        L"square150x150Logo,wide310x150Logo,square310x310Logo",
+        L"ManifestShowNameOnTiles");
+    std::wstring lowered = ToLowerCopy(TrimCopy(configured));
+    if (lowered == L"0" || lowered == L"false" || lowered == L"off" || lowered == L"none")
+        return {};
+
+    std::vector<std::wstring> tiles;
+    size_t pos = 0;
+    while (pos <= configured.size())
+    {
+        size_t comma = configured.find_first_of(L",;", pos);
+        size_t end = comma == std::wstring::npos ? configured.size() : comma;
+        std::wstring tile = TrimCopy(configured.substr(pos, end - pos));
+        if (!tile.empty())
+            tiles.push_back(tile);
+        if (comma == std::wstring::npos)
+            break;
+        pos = comma + 1;
+    }
+    return tiles;
+}
+
+#pragma warning(push)
+#pragma warning(disable: 4820) // Padding in this display-only struct is harmless.
 struct ManifestDisplayInfo
 {
     bool existing = false;
@@ -2433,9 +2952,22 @@ struct ManifestDisplayInfo
     std::wstring description;
     std::wstring executable;
     std::wstring applicationId;
+    std::wstring targetDeviceFamilyName;
     std::wstring minVersion;
     std::wstring maxVersionTested;
+    std::wstring resourceLanguage;
+    std::wstring propertiesLogo;
+    std::wstring square150x150Logo;
+    std::wstring square44x44Logo;
+    std::wstring square71x71Logo;
+    std::wstring wide310x150Logo;
+    std::wstring square310x310Logo;
+    std::wstring backgroundColor;
+    std::wstring showNameOnTiles;
+    std::wstring entryPoint;
+    std::wstring restrictedCapability;
 };
+#pragma warning(pop)
 
 static ManifestDisplayInfo CurrentManifestDisplayInfo()
 {
@@ -2448,8 +2980,20 @@ static ManifestDisplayInfo CurrentManifestDisplayInfo()
     info.description = EffectiveManifestDescription();
     info.executable = EffectiveManifestExecutable();
     info.applicationId = EffectiveManifestApplicationId();
+    info.targetDeviceFamilyName = EffectiveManifestTargetDeviceFamilyName();
     info.minVersion = EffectiveManifestMinVersion();
     info.maxVersionTested = EffectiveManifestMaxVersionTested();
+    info.resourceLanguage = EffectiveManifestResourceLanguage();
+    info.propertiesLogo = EffectiveManifestPropertiesLogo();
+    info.square150x150Logo = EffectiveManifestSquare150x150Logo();
+    info.square44x44Logo = EffectiveManifestSquare44x44Logo();
+    info.square71x71Logo = EffectiveManifestSquare71x71Logo();
+    info.wide310x150Logo = EffectiveManifestWide310x150Logo();
+    info.square310x310Logo = EffectiveManifestSquare310x310Logo();
+    info.backgroundColor = EffectiveManifestBackgroundColor();
+    info.showNameOnTiles = ManifestSetting(L"ShowNameOnTiles", L"square150x150Logo,wide310x150Logo,square310x310Logo", L"ManifestShowNameOnTiles");
+    info.entryPoint = EffectiveManifestEntryPoint();
+    info.restrictedCapability = EffectiveManifestRestrictedCapability();
 
     std::wstring manifestPath = GetExeDir() + L"\\AppxManifest.xml";
     DWORD attrs = GetFileAttributesW(manifestPath.c_str());
@@ -2468,9 +3012,20 @@ static ManifestDisplayInfo CurrentManifestDisplayInfo()
     ExtractXmlElementText(xml, L"PublisherDisplayName", info.publisherDisplayName);
     ExtractXmlAttributeFromTag(xml, L"<Application ", L"Executable", info.executable);
     ExtractXmlAttributeFromTag(xml, L"<Application ", L"Id", info.applicationId);
+    ExtractXmlAttributeFromTag(xml, L"<Application ", L"EntryPoint", info.entryPoint);
+    ExtractXmlAttributeFromTag(xml, L"<TargetDeviceFamily", L"Name", info.targetDeviceFamilyName);
     ExtractXmlAttributeFromTag(xml, L"<TargetDeviceFamily", L"MinVersion", info.minVersion);
     ExtractXmlAttributeFromTag(xml, L"<TargetDeviceFamily", L"MaxVersionTested", info.maxVersionTested);
+    ExtractXmlAttributeFromTag(xml, L"<Resource", L"Language", info.resourceLanguage);
+    ExtractXmlElementText(xml, L"Logo", info.propertiesLogo);
     ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Description", info.description);
+    ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Square150x150Logo", info.square150x150Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Square44x44Logo", info.square44x44Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"BackgroundColor", info.backgroundColor);
+    ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Square71x71Logo", info.square71x71Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Wide310x150Logo", info.wide310x150Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Square310x310Logo", info.square310x310Logo);
+    ExtractXmlAttributeFromTag(xml, L"<rescap:Capability", L"Name", info.restrictedCapability);
     return info;
 }
 
@@ -2484,8 +3039,20 @@ static std::wstring BuildDefaultAppxManifest()
     std::wstring description = XmlEscape(EffectiveManifestDescription());
     std::wstring executable = XmlEscape(EffectiveManifestExecutable());
     std::wstring appId = XmlEscape(EffectiveManifestApplicationId());
+    std::wstring targetDeviceFamilyName = XmlEscape(EffectiveManifestTargetDeviceFamilyName());
     std::wstring minVersion = XmlEscape(EffectiveManifestMinVersion());
     std::wstring maxVersionTested = XmlEscape(EffectiveManifestMaxVersionTested());
+    std::wstring resourceLanguage = XmlEscape(EffectiveManifestResourceLanguage());
+    std::wstring propertiesLogo = XmlEscape(EffectiveManifestPropertiesLogo());
+    std::wstring square150x150Logo = XmlEscape(EffectiveManifestSquare150x150Logo());
+    std::wstring square44x44Logo = XmlEscape(EffectiveManifestSquare44x44Logo());
+    std::wstring square71x71Logo = XmlEscape(EffectiveManifestSquare71x71Logo());
+    std::wstring wide310x150Logo = XmlEscape(EffectiveManifestWide310x150Logo());
+    std::wstring square310x310Logo = XmlEscape(EffectiveManifestSquare310x310Logo());
+    std::wstring backgroundColor = XmlEscape(EffectiveManifestBackgroundColor());
+    std::wstring entryPoint = XmlEscape(EffectiveManifestEntryPoint());
+    std::wstring restrictedCapability = XmlEscape(EffectiveManifestRestrictedCapability());
+    std::vector<std::wstring> showNameOnTiles = EffectiveManifestShowNameOnTiles();
 
     std::wstring manifest;
     manifest += L"<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n";
@@ -2501,42 +3068,47 @@ static std::wstring BuildDefaultAppxManifest()
     manifest += L"  <Properties>\r\n";
     manifest += L"    <DisplayName>" + displayName + L"</DisplayName>\r\n";
     manifest += L"    <PublisherDisplayName>" + publisherDisplayName + L"</PublisherDisplayName>\r\n";
-    manifest += L"    <Logo>Assets\\StoreLogo.png</Logo>\r\n";
+    manifest += L"    <Logo>" + propertiesLogo + L"</Logo>\r\n";
     manifest += L"  </Properties>\r\n\r\n";
     manifest += L"  <Dependencies>\r\n";
-    manifest += L"    <TargetDeviceFamily Name=\"Windows.Desktop\"\r\n";
+    manifest += L"    <TargetDeviceFamily Name=\"" + targetDeviceFamilyName + L"\"\r\n";
     manifest += L"                        MinVersion=\"" + minVersion + L"\"\r\n";
     manifest += L"                        MaxVersionTested=\"" + maxVersionTested + L"\" />\r\n";
     manifest += L"  </Dependencies>\r\n\r\n";
     manifest += L"  <Resources>\r\n";
-    manifest += L"    <Resource Language=\"en-us\" />\r\n";
+    manifest += L"    <Resource Language=\"" + resourceLanguage + L"\" />\r\n";
     manifest += L"  </Resources>\r\n\r\n";
     manifest += L"  <Applications>\r\n";
     manifest += L"    <Application Id=\"" + appId + L"\"\r\n";
     manifest += L"                 Executable=\"" + executable + L"\"\r\n";
-    manifest += L"                 EntryPoint=\"Windows.FullTrustApplication\">\r\n\r\n";
+    manifest += L"                 EntryPoint=\"" + entryPoint + L"\">\r\n\r\n";
     manifest += L"      <uap:VisualElements\r\n";
     manifest += L"        DisplayName=\"" + displayName + L"\"\r\n";
     manifest += L"        Description=\"" + description + L"\"\r\n";
-    manifest += L"        Square150x150Logo=\"Assets\\MediumTile.png\"\r\n";
-    manifest += L"        Square44x44Logo=\"Assets\\Square44x44Logo.png\"\r\n";
-    manifest += L"        BackgroundColor=\"transparent\">\r\n\r\n";
+    manifest += L"        Square150x150Logo=\"" + square150x150Logo + L"\"\r\n";
+    manifest += L"        Square44x44Logo=\"" + square44x44Logo + L"\"\r\n";
+    manifest += L"        BackgroundColor=\"" + backgroundColor + L"\">\r\n\r\n";
     manifest += L"        <uap:DefaultTile\r\n";
-    manifest += L"          Square71x71Logo=\"Assets\\SmallTile.png\"\r\n";
-    manifest += L"          Wide310x150Logo=\"Assets\\WideTile.png\"\r\n";
-    manifest += L"          Square310x310Logo=\"Assets\\LargeTile.png\">\r\n\r\n";
-    manifest += L"          <uap:ShowNameOnTiles>\r\n";
-    manifest += L"            <uap:ShowOn Tile=\"square150x150Logo\" />\r\n";
-    manifest += L"            <uap:ShowOn Tile=\"wide310x150Logo\" />\r\n";
-    manifest += L"            <uap:ShowOn Tile=\"square310x310Logo\" />\r\n";
-    manifest += L"          </uap:ShowNameOnTiles>\r\n\r\n";
+    manifest += L"          Square71x71Logo=\"" + square71x71Logo + L"\"\r\n";
+    manifest += L"          Wide310x150Logo=\"" + wide310x150Logo + L"\"\r\n";
+    manifest += L"          Square310x310Logo=\"" + square310x310Logo + L"\">\r\n\r\n";
+    if (!showNameOnTiles.empty())
+    {
+        manifest += L"          <uap:ShowNameOnTiles>\r\n";
+        for (const std::wstring& tile : showNameOnTiles)
+            manifest += L"            <uap:ShowOn Tile=\"" + XmlEscape(tile) + L"\" />\r\n";
+        manifest += L"          </uap:ShowNameOnTiles>\r\n\r\n";
+    }
     manifest += L"        </uap:DefaultTile>\r\n\r\n";
     manifest += L"      </uap:VisualElements>\r\n";
     manifest += L"    </Application>\r\n";
     manifest += L"  </Applications>\r\n\r\n";
-    manifest += L"  <Capabilities>\r\n";
-    manifest += L"    <rescap:Capability Name=\"runFullTrust\" />\r\n";
-    manifest += L"  </Capabilities>\r\n\r\n";
+    if (!restrictedCapability.empty())
+    {
+        manifest += L"  <Capabilities>\r\n";
+        manifest += L"    <rescap:Capability Name=\"" + restrictedCapability + L"\" />\r\n";
+        manifest += L"  </Capabilities>\r\n\r\n";
+    }
     manifest += L"</Package>\r\n";
     return manifest;
 }
@@ -2664,7 +3236,7 @@ void NotifyTrayBalloon(const std::wstring& title, const std::wstring& msg, DWORD
         LogWin32Failure(L"Shell_NotifyIconW(NIM_MODIFY)");
 }
 
-static bool NormalizeIniToUtf8BomIfNeeded()
+static TextNormalizeResult NormalizeIniToUtf8BomIfNeeded()
 {
     return NormalizeTextFileToUtf8Bom(g_iniPath);
 }
@@ -2855,6 +3427,11 @@ void LoadUiStrings()
     g_ui.assetGenerationFinished = IniReadS(L"Strings", L"AssetGenerationFinished", L"Asset generation and registration finished successfully.");
     g_ui.assetGenerationFailed = IniReadS(L"Strings", L"AssetGenerationFailed", L"Asset generation did not complete successfully.");
     g_ui.appRegistrationFailed = IniReadS(L"Strings", L"AppRegistrationFailed", L"App registration did not complete successfully.");
+    g_ui.generationUnhandledException = IniReadS(L"Strings", L"GenerationUnhandledException", L"[!] Generation worker caught an unhandled exception: %s");
+    g_ui.generationThreadStartFailed = IniReadS(L"Strings", L"GenerationThreadStartFailed", L"[!] Failed to start generation worker thread: %s");
+    g_ui.pollThreadUnhandledException = IniReadS(L"Strings", L"PollThreadUnhandledException", L"[!] Wallpaper poll thread stopped after an unhandled exception: %s");
+    g_ui.pollThreadStartFailed = IniReadS(L"Strings", L"PollThreadStartFailed", L"[!] Failed to start wallpaper poll thread: %s");
+    g_ui.unknownException = IniReadS(L"Strings", L"UnknownException", L"unknown exception");
     g_ui.skippingRegistrationDueToAssetFailure = IniReadS(L"Strings", L"SkippingRegistrationDueToAssetFailure", L"[!] Skipping Appx registration because asset generation failed.");
     g_ui.createAssetsDirectoryOperation = IniReadS(L"Strings", L"CreateAssetsDirectoryOperation", L"Create Assets directory");
     g_ui.missingManifestAssets = IniReadS(L"Strings", L"MissingManifestAssets", L"[!] Registration failed and manifest assets are missing or invalid: %s");
@@ -2970,6 +3547,7 @@ void LoadUiStrings()
     g_ui.powerShellTimeoutMsLabel = IniReadS(L"Strings", L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %d ms");
     g_ui.powerShellTerminateWaitMsLabel = IniReadS(L"Strings", L"PowerShellTerminateWaitMsLabel", L"PowerShell terminate wait: %d ms");
     g_ui.registrationUnresolvedBlockMsLabel = IniReadS(L"Strings", L"RegistrationUnresolvedBlockMsLabel", L"Unresolved registration block: %d ms");
+    g_ui.manifestTitle = IniReadS(L"Strings", L"ManifestTitle", L"Manifest:");
     g_ui.manifestIdentityNameLabel = IniReadS(L"Strings", L"ManifestIdentityNameLabel", L"Manifest identity: %s");
     g_ui.manifestPublisherLabel = IniReadS(L"Strings", L"ManifestPublisherLabel", L"Manifest publisher: %s");
     g_ui.manifestPackageVersionLabel = IniReadS(L"Strings", L"ManifestPackageVersionLabel", L"Manifest version: %s");
@@ -2978,12 +3556,25 @@ void LoadUiStrings()
     g_ui.manifestDescriptionLabel = IniReadS(L"Strings", L"ManifestDescriptionLabel", L"Manifest description: %s");
     g_ui.manifestExecutableLabel = IniReadS(L"Strings", L"ManifestExecutableLabel", L"Manifest executable: %s");
     g_ui.manifestApplicationIdLabel = IniReadS(L"Strings", L"ManifestApplicationIdLabel", L"Manifest app id: %s");
+    g_ui.manifestTargetDeviceFamilyNameLabel = IniReadS(L"Strings", L"ManifestTargetDeviceFamilyNameLabel", L"Manifest target family: %s");
     g_ui.manifestMinVersionLabel = IniReadS(L"Strings", L"ManifestMinVersionLabel", L"Manifest min version: %s");
     g_ui.manifestMaxVersionTestedLabel = IniReadS(L"Strings", L"ManifestMaxVersionTestedLabel", L"Manifest max tested: %s");
+    g_ui.manifestResourceLanguageLabel = IniReadS(L"Strings", L"ManifestResourceLanguageLabel", L"Manifest resource language: %s");
+    g_ui.manifestPropertiesLogoLabel = IniReadS(L"Strings", L"ManifestPropertiesLogoLabel", L"Manifest properties logo: %s");
+    g_ui.manifestSquare150x150LogoLabel = IniReadS(L"Strings", L"ManifestSquare150x150LogoLabel", L"Manifest square 150 logo: %s");
+    g_ui.manifestSquare44x44LogoLabel = IniReadS(L"Strings", L"ManifestSquare44x44LogoLabel", L"Manifest square 44 logo: %s");
+    g_ui.manifestSquare71x71LogoLabel = IniReadS(L"Strings", L"ManifestSquare71x71LogoLabel", L"Manifest square 71 logo: %s");
+    g_ui.manifestWide310x150LogoLabel = IniReadS(L"Strings", L"ManifestWide310x150LogoLabel", L"Manifest wide 310 logo: %s");
+    g_ui.manifestSquare310x310LogoLabel = IniReadS(L"Strings", L"ManifestSquare310x310LogoLabel", L"Manifest square 310 logo: %s");
+    g_ui.manifestBackgroundColorLabel = IniReadS(L"Strings", L"ManifestBackgroundColorLabel", L"Manifest background color: %s");
+    g_ui.manifestShowNameOnTilesLabel = IniReadS(L"Strings", L"ManifestShowNameOnTilesLabel", L"Manifest show names on: %s");
+    g_ui.manifestEntryPointLabel = IniReadS(L"Strings", L"ManifestEntryPointLabel", L"Manifest entry point: %s");
+    g_ui.manifestRestrictedCapabilityLabel = IniReadS(L"Strings", L"ManifestRestrictedCapabilityLabel", L"Manifest restricted capability: %s");
     g_ui.manifestSourceLabel = IniReadS(L"Strings", L"ManifestSourceLabel", L"Manifest source: %s");
     g_ui.manifestSourceExisting = IniReadS(L"Strings", L"ManifestSourceExisting", L"existing AppxManifest.xml");
     g_ui.manifestSourceGenerated = IniReadS(L"Strings", L"ManifestSourceGenerated", L"generated from INI if missing");
     g_ui.manifestOverwriteExistingLabel = IniReadS(L"Strings", L"ManifestOverwriteExistingLabel", L"Manifest overwrite existing: %s");
+    g_ui.manifestOverwriteExistingToggle = IniReadS(L"Strings", L"ManifestOverwriteExistingToggle", L"Overwrite existing AppxManifest.xml");
     g_ui.wallpaperDetectionMethodLabel = IniReadS(L"Strings", L"WallpaperDetectionMethodLabel", L"Wallpaper detection method: %s");
     g_ui.singleInstanceFailureActionLabel = IniReadS(L"Strings", L"SingleInstanceFailureActionLabel", L"Single-instance failure action: %s");
     g_ui.singleInstanceActionIgnore = IniReadS(L"Strings", L"SingleInstanceActionIgnore", L"Ignore");
@@ -3140,8 +3731,20 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.manifestDescriptionLabel, L"ManifestDescriptionLabel", { L"%s" });
     RequireFormat(g_ui.manifestExecutableLabel, L"ManifestExecutableLabel", { L"%s" });
     RequireFormat(g_ui.manifestApplicationIdLabel, L"ManifestApplicationIdLabel", { L"%s" });
+    RequireFormat(g_ui.manifestTargetDeviceFamilyNameLabel, L"ManifestTargetDeviceFamilyNameLabel", { L"%s" });
     RequireFormat(g_ui.manifestMinVersionLabel, L"ManifestMinVersionLabel", { L"%s" });
     RequireFormat(g_ui.manifestMaxVersionTestedLabel, L"ManifestMaxVersionTestedLabel", { L"%s" });
+    RequireFormat(g_ui.manifestResourceLanguageLabel, L"ManifestResourceLanguageLabel", { L"%s" });
+    RequireFormat(g_ui.manifestPropertiesLogoLabel, L"ManifestPropertiesLogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSquare150x150LogoLabel, L"ManifestSquare150x150LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSquare44x44LogoLabel, L"ManifestSquare44x44LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSquare71x71LogoLabel, L"ManifestSquare71x71LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestWide310x150LogoLabel, L"ManifestWide310x150LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSquare310x310LogoLabel, L"ManifestSquare310x310LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestBackgroundColorLabel, L"ManifestBackgroundColorLabel", { L"%s" });
+    RequireFormat(g_ui.manifestShowNameOnTilesLabel, L"ManifestShowNameOnTilesLabel", { L"%s" });
+    RequireFormat(g_ui.manifestEntryPointLabel, L"ManifestEntryPointLabel", { L"%s" });
+    RequireFormat(g_ui.manifestRestrictedCapabilityLabel, L"ManifestRestrictedCapabilityLabel", { L"%s" });
     RequireFormat(g_ui.manifestSourceLabel, L"ManifestSourceLabel", { L"%s" });
     RequireFormat(g_ui.manifestOverwriteExistingLabel, L"ManifestOverwriteExistingLabel", { L"%s" });
     RequireFormat(g_ui.wallpaperDetectionMethodLabel, L"WallpaperDetectionMethodLabel", { L"%s" });
@@ -3183,6 +3786,10 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.powerShellStillRunningAfterTimeout, L"PowerShellStillRunningAfterTimeout", { L"%lu" });
     RequireFormat(g_ui.powerShellTerminatedAfterTimeout, L"PowerShellTerminatedAfterTimeout", { L"%lu" });
     RequireFormat(g_ui.powerShellErrorCode, L"PowerShellErrorCode", { L"%08X" });
+    RequireFormat(g_ui.generationUnhandledException, L"GenerationUnhandledException", { L"%s" });
+    RequireFormat(g_ui.generationThreadStartFailed, L"GenerationThreadStartFailed", { L"%s" });
+    RequireFormat(g_ui.pollThreadUnhandledException, L"PollThreadUnhandledException", { L"%s" });
+    RequireFormat(g_ui.pollThreadStartFailed, L"PollThreadStartFailed", { L"%s" });
     RequireFormat(g_ui.missingManifestAssets, L"MissingManifestAssets", { L"%s" });
     RequireFormat(g_ui.registrationBlockedUnresolved, L"RegistrationBlockedUnresolved", { L"%s" });
     RequireFormat(g_ui.registrationUnresolvedMarked, L"RegistrationUnresolvedMarked", { L"%s" });
@@ -3263,7 +3870,7 @@ static HMONITOR GetPrimaryMonitorHandle()
     } search;
 
     EnumDisplayMonitors(nullptr, nullptr,
-        [](HMONITOR monitor, HDC, LPRECT, LPARAM param) -> BOOL
+        [](HMONITOR monitor, HDC, LPRECT, LPARAM param) noexcept -> BOOL
         {
             auto* search = reinterpret_cast<MonitorSearch*>(param);
             MONITORINFO mi{};
@@ -3306,6 +3913,7 @@ static int CurrentDpiPercent()
     if (shcore)
     {
         using GetDpiForMonitorFn = HRESULT(WINAPI*)(HMONITOR, int, UINT*, UINT*);
+#pragma warning(suppress: 4191)
         auto getDpiForMonitor = (GetDpiForMonitorFn)GetProcAddress(shcore, "GetDpiForMonitor");
         if (getDpiForMonitor)
         {
@@ -3323,6 +3931,7 @@ static int CurrentDpiPercent()
     if (user32)
     {
         using GetDpiForSystemFn = UINT(WINAPI*)();
+#pragma warning(suppress: 4191)
         auto getDpiForSystem = (GetDpiForSystemFn)GetProcAddress(user32, "GetDpiForSystem");
         if (getDpiForSystem)
         {
@@ -3431,6 +4040,70 @@ const wchar_t* FitModeToString(FitMode m)
     }
 }
 
+static void AppendDialogTemplateString(WORD*& dst, const std::wstring& text)
+{
+    memcpy(dst, text.c_str(), (text.size() + 1) * sizeof(wchar_t));
+    dst += text.size() + 1;
+}
+
+static DLGITEMTEMPLATE* AlignDialogItem(WORD*& p)
+{
+    DLGITEMTEMPLATE* item = (DLGITEMTEMPLATE*)(((DWORD_PTR)p + 3) & ~3);
+    p = (WORD*)item;
+    return item;
+}
+
+static bool ShowPowerShellOutputDialog(HWND parent, const std::wstring& text)
+{
+    constexpr int EDIT_ID = 1002;
+    size_t stringBytes =
+        (g_ui.noPowerShellOutputTitle.size() + g_ui.okText.size() + 64) * sizeof(wchar_t);
+    std::vector<BYTE> tmpl(8192 + stringBytes);
+    DLGTEMPLATE* dlg = (DLGTEMPLATE*)tmpl.data();
+
+    dlg->style = WS_POPUP | WS_BORDER | WS_SYSMENU | DS_MODALFRAME | WS_CAPTION | DS_SETFONT;
+    dlg->cdit = 2;
+    dlg->x = 10; dlg->y = 10; dlg->cx = 360; dlg->cy = 240;
+
+    WORD* p = (WORD*)(dlg + 1);
+    *p++ = 0; // no menu
+    *p++ = 0; // default class
+    AppendDialogTemplateString(p, g_ui.noPowerShellOutputTitle);
+    *p++ = 9; // font size
+    AppendDialogTemplateString(p, L"Segoe UI");
+
+    DLGITEMTEMPLATE* item = AlignDialogItem(p);
+    item->x = 6; item->y = 6; item->cx = 348; item->cy = 205;
+    item->id = EDIT_ID;
+    item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | WS_HSCROLL |
+        ES_LEFT | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_AUTOHSCROLL;
+    item->dwExtendedStyle = WS_EX_CLIENTEDGE;
+
+    p = (WORD*)(item + 1);
+    *p++ = 0xFFFF; *p++ = 0x0081; // EDIT class
+    *p++ = 0; // no text
+    *p++ = 0; // no extra data
+
+    item = AlignDialogItem(p);
+    item->x = 304; item->y = 220; item->cx = 50; item->cy = 14;
+    item->id = IDOK;
+    item->style = WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON;
+
+    p = (WORD*)(item + 1);
+    *p++ = 0xFFFF; *p++ = 0x0080; // BUTTON
+    AppendDialogTemplateString(p, g_ui.okText.empty() ? std::wstring(L"OK") : g_ui.okText);
+    *p++ = 0; // no extra data
+
+    INT_PTR result = DialogBoxIndirectParamW(
+        GetModuleHandleW(nullptr),
+        (DLGTEMPLATE*)tmpl.data(),
+        parent,
+        PowerShellOutputDlgProc,
+        (LPARAM)&text
+    );
+    return result != -1;
+}
+
 INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
 {
     size_t stringBytes =
@@ -3447,16 +4120,11 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
     *p++ = 0; // no menu
     *p++ = 0; // default class
 
-    auto appendString = [](WORD*& dst, const std::wstring& text) {
-        memcpy(dst, text.c_str(), (text.size() + 1) * sizeof(wchar_t));
-        dst += text.size() + 1;
-    };
-
-    appendString(p, g_ui.renameDialogTitle);
+    AppendDialogTemplateString(p, g_ui.renameDialogTitle);
     *p++ = 9; // font size
-    appendString(p, L"Segoe UI");
+    AppendDialogTemplateString(p, L"Segoe UI");
     // ---- Edit box ----
-    DLGITEMTEMPLATE* item = (DLGITEMTEMPLATE*)(((DWORD_PTR)p + 3) & ~3);
+    DLGITEMTEMPLATE* item = AlignDialogItem(p);
     item->x = 5; item->y = 5; item->cx = 190; item->cy = 12;
     item->id = 1001;
     item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL;
@@ -3467,25 +4135,25 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
     *p++ = 0; // no extra data
 
     // ---- OK button ----
-    item = (DLGITEMTEMPLATE*)(((DWORD_PTR)p + 3) & ~3);
+    item = AlignDialogItem(p);
     item->x = 40; item->y = 25; item->cx = 50; item->cy = 14;
     item->id = IDOK;
     item->style = WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON;
 
     p = (WORD*)(item + 1);
     *p++ = 0xFFFF; *p++ = 0x0080; // BUTTON
-    appendString(p, g_ui.okText);
+    AppendDialogTemplateString(p, g_ui.okText);
     *p++ = 0;
 
     // ---- Cancel button ----
-    item = (DLGITEMTEMPLATE*)(((DWORD_PTR)p + 3) & ~3);
+    item = AlignDialogItem(p);
     item->x = 110; item->y = 25; item->cx = 50; item->cy = 14;
     item->id = IDCANCEL;
     item->style = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON;
 
     p = (WORD*)(item + 1);
     *p++ = 0xFFFF; *p++ = 0x0080;
-    appendString(p, g_ui.cancelText);
+    AppendDialogTemplateString(p, g_ui.cancelText);
     *p++ = 0;
 
     return DialogBoxIndirectParamW(
@@ -3637,6 +4305,7 @@ static std::wstring GetWallpaperByMethod(WallpaperDetectionMethod method)
         return GetWallpaperFromDesktopWallpaperCOM();
     case WallpaperDetectionMethod::TranscodedWallpaperFile:
         return GetWallpaperFromTranscodedWallpaperFile();
+    case WallpaperDetectionMethod::Auto:
     case WallpaperDetectionMethod::TranscodedImageCache:
     default:
         return GetWallpaperFromTranscodedImageCache();
@@ -3801,13 +4470,26 @@ static bool GraphicsOk(Graphics& graphics, const wchar_t* operation)
     return GdiOk(graphics.GetLastStatus(), operation);
 }
 
+static bool BitmapDimensionsToInt(Bitmap* bitmap, int& width, int& height)
+{
+    if (!bitmap)
+        return false;
+
+    UINT bitmapWidth = bitmap->GetWidth();
+    UINT bitmapHeight = bitmap->GetHeight();
+    if (bitmapWidth == 0 || bitmapHeight == 0 || bitmapWidth > INT_MAX || bitmapHeight > INT_MAX)
+        return false;
+
+    width = static_cast<int>(bitmapWidth);
+    height = static_cast<int>(bitmapHeight);
+    return true;
+}
+
 static Bitmap* ResizeBitmapToMode(Bitmap* src, int w, int h, FitMode mode, Color background)
 {
-    if (!src) return nullptr;
-
-    int sw = src->GetWidth();
-    int sh = src->GetHeight();
-    if (sw <= 0 || sh <= 0 || w <= 0 || h <= 0)
+    int sw = 0;
+    int sh = 0;
+    if (!BitmapDimensionsToInt(src, sw, sh) || w <= 0 || h <= 0)
         return nullptr;
 
     auto* out = new Bitmap(w, h, PixelFormat32bppARGB);
@@ -3935,11 +4617,9 @@ static int FirstTileStart(int targetStart, int tileOrigin, int tileSize)
 
 static Bitmap* BuildTiledPrimaryBitmap(Bitmap* src)
 {
-    if (!src) return nullptr;
-
-    int sw = src->GetWidth();
-    int sh = src->GetHeight();
-    if (sw <= 0 || sh <= 0)
+    int sw = 0;
+    int sh = 0;
+    if (!BitmapDimensionsToInt(src, sw, sh))
         return nullptr;
 
     RECT primaryRect{};
@@ -4158,8 +4838,13 @@ static Bitmap* LoadEmbeddedDesktopIcon()
     Bitmap* bmp = nullptr;
     if (loaded && loaded->GetLastStatus() == Ok)
     {
-        Rect bounds(0, 0, loaded->GetWidth(), loaded->GetHeight());
-        bmp = loaded->Clone(bounds, PixelFormat32bppARGB);
+        int loadedW = 0;
+        int loadedH = 0;
+        if (BitmapDimensionsToInt(loaded, loadedW, loadedH))
+        {
+            Rect bounds(0, 0, loadedW, loadedH);
+            bmp = loaded->Clone(bounds, PixelFormat32bppARGB);
+        }
     }
     delete loaded;
     stream->Release();
@@ -4260,7 +4945,13 @@ bool PS_Run(const std::wstring& cmd)
         LogWin32Failure(L"CreatePipe");
         return false;
     }
-    SetHandleInformation(r, HANDLE_FLAG_INHERIT, 0);
+    if (!SetHandleInformation(r, HANDLE_FLAG_INHERIT, 0))
+    {
+        LogWin32Failure(L"SetHandleInformation(pipe read handle)");
+        CloseHandle(r);
+        CloseHandle(w);
+        return false;
+    }
 
     STARTUPINFOW si{}; si.cb=sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
@@ -4366,7 +5057,12 @@ bool PS_Run(const std::wstring& cmd)
     }
 
     CloseHandle(r);
-    DWORD ec=0; GetExitCodeProcess(pi.hProcess,&ec);
+    DWORD ec = STILL_ACTIVE;
+    if (!GetExitCodeProcess(pi.hProcess, &ec))
+    {
+        LogWin32Failure(L"GetExitCodeProcess(PowerShell)");
+        ec = 1;
+    }
     if (timedOut)
         ec = WAIT_TIMEOUT;
 
@@ -4389,7 +5085,7 @@ bool PS_Run(const std::wstring& cmd)
         CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
-    std::wstring out = DecodeProcessOutput(outBytes);
+    std::wstring out = FormatPowerShellOutput(DecodeProcessOutput(outBytes));
     std::wstring psMsg;
     bool psErr = false;
     if (ec == 0 && !timedOut) {
@@ -4428,9 +5124,7 @@ bool PS_Run(const std::wstring& cmd)
         }
         LogText(g_ui.powerShellErrorSideloadDisabled);
     } else {
-        wchar_t msg[128];
-        swprintf(msg, 128, g_ui.powerShellErrorCode.c_str(), ec);
-        psMsg = msg;
+        psMsg = FormatWide(g_ui.powerShellErrorCode.c_str(), ec);
         {
             std::lock_guard<std::mutex> lk(g_psMutex);
             g_psOut = out;
@@ -5120,13 +5814,19 @@ void TrayRemove();
 
 static void WakePollThread()
 {
+    g_pollWakeGeneration.fetch_add(1, std::memory_order_relaxed);
     g_pollWakeCv.notify_all();
 }
 
 static void PollSleepFor(milliseconds duration)
 {
+    unsigned long observedWake = g_pollWakeGeneration.load(std::memory_order_relaxed);
     std::unique_lock<std::mutex> lk(g_pollWakeMutex);
-    g_pollWakeCv.wait_for(lk, duration);
+    g_pollWakeCv.wait_for(lk, duration, [observedWake]
+    {
+        return g_pollWakeGeneration.load(std::memory_order_relaxed) != observedWake ||
+            !g_running.load();
+    });
 }
 
 static std::wstring CurrentGenerationReason()
@@ -5182,6 +5882,20 @@ static void MarkGenerationActive(bool active, const std::wstring& reason = L"")
     g_generationActive = active;
 }
 
+static bool SetShutdownNoticeTimer(HWND h, int delayMs, const wchar_t* operation)
+{
+    if (!h)
+        return false;
+
+    SetLastError(ERROR_SUCCESS);
+    if (!SetTimer(h, SHUTDOWN_NOTICE_TIMER_ID, static_cast<UINT>(ClampInt(delayMs, 250, 60000)), nullptr))
+    {
+        LogWin32Failure(operation);
+        return false;
+    }
+    return true;
+}
+
 static void RequestGracefulShutdown(HWND h)
 {
     if (g_shutdownRequested)
@@ -5195,7 +5909,7 @@ static void RequestGracefulShutdown(HWND h)
     {
         NotifyShutdownDelayed();
         if (h)
-            SetTimer(h, SHUTDOWN_NOTICE_TIMER_ID, static_cast<UINT>(ClampInt(g_shutdownInitialNoticeMs.load(), 250, 60000)), nullptr);
+            SetShutdownNoticeTimer(h, g_shutdownInitialNoticeMs.load(), L"SetTimer(SHUTDOWN_NOTICE_TIMER_ID initial)");
         return;
     }
 
@@ -5241,7 +5955,24 @@ static void GenerationWorkerThread()
             g_generationQueued = false;
         }
 
-        Generate(wallpaper.c_str(), reason.c_str());
+        try
+        {
+            Generate(wallpaper.c_str(), reason.c_str());
+        }
+        catch (const std::exception& ex)
+        {
+            std::wstring message = ExceptionTextToWide(ex);
+            Log(g_ui.generationUnhandledException.c_str(), message.c_str());
+            if (g_notifyOnFailure)
+                NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationFailed, NIIF_ERROR);
+        }
+        catch (...)
+        {
+            std::wstring message = UnknownExceptionText();
+            Log(g_ui.generationUnhandledException.c_str(), message.c_str());
+            if (g_notifyOnFailure)
+                NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationFailed, NIIF_ERROR);
+        }
         MarkGenerationActive(false);
         MaybeCompleteRequestedShutdown();
     }
@@ -5270,7 +6001,44 @@ static void QueueGenerate(std::wstring wallpaper, std::wstring reason)
     }
 
     if (startWorker)
-        g_generationWorker = std::thread(GenerationWorkerThread);
+    {
+        try
+        {
+            g_generationWorker = std::thread(GenerationWorkerThread);
+        }
+        catch (const std::exception& ex)
+        {
+            std::wstring message = ExceptionTextToWide(ex);
+            {
+                std::lock_guard<std::mutex> lk(g_generationQueueMutex);
+                g_generationWorkerStarted = false;
+                g_generationQueued = false;
+                g_generationQueuedWallpaper.clear();
+                g_generationQueuedReason.clear();
+            }
+            Log(g_ui.generationThreadStartFailed.c_str(), message.c_str());
+            if (g_notifyOnFailure)
+                NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationFailed, NIIF_ERROR);
+            MaybeCompleteRequestedShutdown();
+            return;
+        }
+        catch (...)
+        {
+            std::wstring message = UnknownExceptionText();
+            {
+                std::lock_guard<std::mutex> lk(g_generationQueueMutex);
+                g_generationWorkerStarted = false;
+                g_generationQueued = false;
+                g_generationQueuedWallpaper.clear();
+                g_generationQueuedReason.clear();
+            }
+            Log(g_ui.generationThreadStartFailed.c_str(), message.c_str());
+            if (g_notifyOnFailure)
+                NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationFailed, NIIF_ERROR);
+            MaybeCompleteRequestedShutdown();
+            return;
+        }
+    }
 
     g_generationQueueCv.notify_one();
 }
@@ -5294,6 +6062,8 @@ static void JoinQueuedGenerations()
 // -----------------------------------------------------------------------------
 void PollThread()
 {
+    try
+    {
     std::wstring last = GetWallpaper();
     FitMode lastFit = GetWallpaperFit();
     int lastDpiScale = CurrentAssetScale();
@@ -5376,6 +6146,17 @@ void PollThread()
         }
         PollSleepFor(milliseconds(poll));
     }
+    }
+    catch (const std::exception& ex)
+    {
+        std::wstring message = ExceptionTextToWide(ex);
+        Log(g_ui.pollThreadUnhandledException.c_str(), message.c_str());
+    }
+    catch (...)
+    {
+        std::wstring message = UnknownExceptionText();
+        Log(g_ui.pollThreadUnhandledException.c_str(), message.c_str());
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -5425,6 +6206,7 @@ enum {
     ID_SCALE_150,
     ID_SCALE_200,
     ID_SCALE_400,
+    ID_MANIFEST_OVERWRITE,
 
     // Assets
     ID_A1=2001, ID_A2, ID_A3, ID_A4, ID_A5, ID_A6
@@ -5476,7 +6258,13 @@ void TrayRemove()
 {
     std::lock_guard<std::mutex> lk(g_trayMutex);
     if (g_nid.hWnd){
-        Shell_NotifyIconW(NIM_DELETE,&g_nid);
+        SetLastError(ERROR_SUCCESS);
+        if (!Shell_NotifyIconW(NIM_DELETE,&g_nid))
+        {
+            DWORD err = GetLastError();
+            if (err != ERROR_SUCCESS)
+                LogWin32Failure(L"Shell_NotifyIconW(NIM_DELETE)", err);
+        }
         g_nid = {};
     }
 }
@@ -5500,11 +6288,15 @@ void ShowPSLog(HWND h)
         std::lock_guard<std::mutex> lk(g_psMutex);
         psOut = g_psOut;
     }
+    psOut = FormatPowerShellOutput(psOut);
 
     if (psOut.empty()){
         MessageBoxW(h, g_ui.noPowerShellOutput.c_str(), g_ui.noPowerShellOutputTitle.c_str(), MB_OK | MB_ICONINFORMATION);
         return;
     }
+
+    if (ShowPowerShellOutputDialog(h, psOut))
+        return;
 
     const size_t CH=3000;
     for (size_t p=0;p<psOut.size();p+=CH){
@@ -5513,7 +6305,40 @@ void ShowPSLog(HWND h)
     }
 }
 
-INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK PowerShellOutputDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) noexcept
+{
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+    {
+        const std::wstring* text = (const std::wstring*)lParam;
+        HWND edit = GetDlgItem(hDlg, 1002);
+        SetWindowTextW(edit, text ? text->c_str() : L"");
+        SendMessageW(edit, EM_SETSEL, 0, 0);
+        SetFocus(edit);
+        return FALSE;
+    }
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam))
+        {
+        case IDOK:
+        case IDCANCEL:
+            EndDialog(hDlg, LOWORD(wParam));
+            return TRUE;
+        default:
+            break;
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    return FALSE;
+}
+
+INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) noexcept
 {
     static std::wstring* pPath = nullptr;
 
@@ -5566,11 +6391,12 @@ void Menu(HWND h)
     auto addTo = [&](HMENU target, UINT id, const std::wstring& t, bool chk=false, bool en=true){
         if (g_hideDisabled && !en)
             return;
-        AppendMenuW(target,
-            MF_STRING |
-            (chk ? MF_CHECKED : 0) |
-            (!en ? MF_DISABLED : 0),
-            id, t.c_str());
+        UINT flags = MF_STRING;
+        if (chk)
+            flags |= MF_CHECKED;
+        if (!en)
+            flags |= MF_DISABLED;
+        AppendMenuW(target, flags, id, t.c_str());
     };
 
     if (g_shutdownRequested)
@@ -5589,7 +6415,7 @@ void Menu(HWND h)
         AppendMenuW(m, MF_STRING, ID_FORCE_SHUTDOWN, g_ui.forceShutdown.c_str());
 
         SetForegroundWindow(h);
-        UINT cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, h, nullptr);
+        UINT cmd = static_cast<UINT>(TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, h, nullptr));
         DestroyMenu(m);
 
         if (cmd == ID_CANCEL_SHUTDOWN)
@@ -5712,7 +6538,7 @@ void Menu(HWND h)
         L"SmallTile",L"WideTile",L"LargeTile"
     };
     for (int i=0;i<6;i++)
-        addTo(assetsMenu, ID_A1+i, keys[i], IniReadI(L"Assets",keys[i],0)!=0);
+        addTo(assetsMenu, static_cast<UINT>(ID_A1 + i), keys[i], IniReadI(L"Assets",keys[i],0)!=0);
     endSection(assetsMenu, g_ui.assetsTitle);
 
     HMENU scaleMenu = beginSection(g_ui.dpiScalesTitle);
@@ -5727,6 +6553,57 @@ void Menu(HWND h)
     std::wstring currentDpiLine = FormatWide(g_ui.currentDpiScaleLabel.c_str(), CurrentDpiPercent(), CurrentAssetScale());
     AppendMenuW(scaleMenu, MF_STRING | MF_DISABLED, 0, currentDpiLine.c_str());
     endSection(scaleMenu, g_ui.dpiScalesTitle);
+
+    HMENU manifestMenu = beginSection(g_ui.manifestTitle);
+    ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
+    std::wstring manifestSourceLine = FormatWide(g_ui.manifestSourceLabel.c_str(), manifestInfo.existing ? g_ui.manifestSourceExisting.c_str() : g_ui.manifestSourceGenerated.c_str());
+    std::wstring manifestIdentityLine = FormatWide(g_ui.manifestIdentityNameLabel.c_str(), manifestInfo.identityName.c_str());
+    std::wstring manifestPublisherLine = FormatWide(g_ui.manifestPublisherLabel.c_str(), manifestInfo.publisher.c_str());
+    std::wstring manifestPackageVersionLine = FormatWide(g_ui.manifestPackageVersionLabel.c_str(), manifestInfo.packageVersion.c_str());
+    std::wstring manifestDisplayNameLine = FormatWide(g_ui.manifestDisplayNameLabel.c_str(), manifestInfo.displayName.c_str());
+    std::wstring manifestPublisherDisplayNameLine = FormatWide(g_ui.manifestPublisherDisplayNameLabel.c_str(), manifestInfo.publisherDisplayName.c_str());
+    std::wstring manifestDescriptionLine = FormatWide(g_ui.manifestDescriptionLabel.c_str(), manifestInfo.description.c_str());
+    std::wstring manifestExecutableLine = FormatWide(g_ui.manifestExecutableLabel.c_str(), manifestInfo.executable.c_str());
+    std::wstring manifestApplicationIdLine = FormatWide(g_ui.manifestApplicationIdLabel.c_str(), manifestInfo.applicationId.c_str());
+    std::wstring manifestTargetDeviceFamilyNameLine = FormatWide(g_ui.manifestTargetDeviceFamilyNameLabel.c_str(), manifestInfo.targetDeviceFamilyName.c_str());
+    std::wstring manifestMinVersionLine = FormatWide(g_ui.manifestMinVersionLabel.c_str(), manifestInfo.minVersion.c_str());
+    std::wstring manifestMaxVersionTestedLine = FormatWide(g_ui.manifestMaxVersionTestedLabel.c_str(), manifestInfo.maxVersionTested.c_str());
+    std::wstring manifestResourceLanguageLine = FormatWide(g_ui.manifestResourceLanguageLabel.c_str(), manifestInfo.resourceLanguage.c_str());
+    std::wstring manifestPropertiesLogoLine = FormatWide(g_ui.manifestPropertiesLogoLabel.c_str(), manifestInfo.propertiesLogo.c_str());
+    std::wstring manifestSquare150x150LogoLine = FormatWide(g_ui.manifestSquare150x150LogoLabel.c_str(), manifestInfo.square150x150Logo.c_str());
+    std::wstring manifestSquare44x44LogoLine = FormatWide(g_ui.manifestSquare44x44LogoLabel.c_str(), manifestInfo.square44x44Logo.c_str());
+    std::wstring manifestSquare71x71LogoLine = FormatWide(g_ui.manifestSquare71x71LogoLabel.c_str(), manifestInfo.square71x71Logo.c_str());
+    std::wstring manifestWide310x150LogoLine = FormatWide(g_ui.manifestWide310x150LogoLabel.c_str(), manifestInfo.wide310x150Logo.c_str());
+    std::wstring manifestSquare310x310LogoLine = FormatWide(g_ui.manifestSquare310x310LogoLabel.c_str(), manifestInfo.square310x310Logo.c_str());
+    std::wstring manifestBackgroundColorLine = FormatWide(g_ui.manifestBackgroundColorLabel.c_str(), manifestInfo.backgroundColor.c_str());
+    std::wstring manifestShowNameOnTilesLine = FormatWide(g_ui.manifestShowNameOnTilesLabel.c_str(), manifestInfo.showNameOnTiles.c_str());
+    std::wstring manifestEntryPointLine = FormatWide(g_ui.manifestEntryPointLabel.c_str(), manifestInfo.entryPoint.c_str());
+    std::wstring manifestRestrictedCapabilityLine = FormatWide(g_ui.manifestRestrictedCapabilityLabel.c_str(), manifestInfo.restrictedCapability.c_str());
+    addTo(manifestMenu, ID_MANIFEST_OVERWRITE, g_ui.manifestOverwriteExistingToggle.c_str(), ManifestOverwriteExisting());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSourceLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestIdentityLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPackageVersionLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestDisplayNameLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherDisplayNameLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestDescriptionLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestExecutableLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestApplicationIdLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestTargetDeviceFamilyNameLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestMinVersionLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestMaxVersionTestedLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestResourceLanguageLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPropertiesLogoLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare150x150LogoLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare44x44LogoLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare71x71LogoLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestWide310x150LogoLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare310x310LogoLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestBackgroundColorLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestShowNameOnTilesLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestEntryPointLine.c_str());
+    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestRestrictedCapabilityLine.c_str());
+    endSection(manifestMenu, g_ui.manifestTitle);
 
     HMENU advancedMenu = beginSection(g_ui.advancedTitle);
     std::wstring pollLine = FormatWide(g_ui.pollIntervalLabel.c_str(), IniReadClampedI(L"Settings", L"PollIntervalMs", 2000, 250, 60000));
@@ -5748,19 +6625,6 @@ void Menu(HWND h)
     std::wstring powerShellTimeoutLine = FormatWide(g_ui.powerShellTimeoutMsLabel.c_str(), IniReadClampedI(L"Settings", L"PowerShellTimeoutMs", 120000, 0, 600000));
     std::wstring powerShellTerminateWaitLine = FormatWide(g_ui.powerShellTerminateWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"PowerShellTerminateWaitMs", 5000, 0, 60000));
     std::wstring registrationUnresolvedBlockLine = FormatWide(g_ui.registrationUnresolvedBlockMsLabel.c_str(), IniReadClampedI(L"Settings", L"RegistrationUnresolvedBlockMs", 300000, 0, 3600000));
-    ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
-    std::wstring manifestSourceLine = FormatWide(g_ui.manifestSourceLabel.c_str(), manifestInfo.existing ? g_ui.manifestSourceExisting.c_str() : g_ui.manifestSourceGenerated.c_str());
-    std::wstring manifestOverwriteLine = FormatWide(g_ui.manifestOverwriteExistingLabel.c_str(), StateEnabled(ManifestOverwriteExisting()));
-    std::wstring manifestIdentityLine = FormatWide(g_ui.manifestIdentityNameLabel.c_str(), manifestInfo.identityName.c_str());
-    std::wstring manifestPublisherLine = FormatWide(g_ui.manifestPublisherLabel.c_str(), manifestInfo.publisher.c_str());
-    std::wstring manifestPackageVersionLine = FormatWide(g_ui.manifestPackageVersionLabel.c_str(), manifestInfo.packageVersion.c_str());
-    std::wstring manifestDisplayNameLine = FormatWide(g_ui.manifestDisplayNameLabel.c_str(), manifestInfo.displayName.c_str());
-    std::wstring manifestPublisherDisplayNameLine = FormatWide(g_ui.manifestPublisherDisplayNameLabel.c_str(), manifestInfo.publisherDisplayName.c_str());
-    std::wstring manifestDescriptionLine = FormatWide(g_ui.manifestDescriptionLabel.c_str(), manifestInfo.description.c_str());
-    std::wstring manifestExecutableLine = FormatWide(g_ui.manifestExecutableLabel.c_str(), manifestInfo.executable.c_str());
-    std::wstring manifestApplicationIdLine = FormatWide(g_ui.manifestApplicationIdLabel.c_str(), manifestInfo.applicationId.c_str());
-    std::wstring manifestMinVersionLine = FormatWide(g_ui.manifestMinVersionLabel.c_str(), manifestInfo.minVersion.c_str());
-    std::wstring manifestMaxVersionTestedLine = FormatWide(g_ui.manifestMaxVersionTestedLabel.c_str(), manifestInfo.maxVersionTested.c_str());
     std::wstring singleInstanceLine = FormatWide(g_ui.singleInstanceFailureActionLabel.c_str(), ErrorActionName(CurrentSingleInstanceFailureAction()));
     AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, pollLine.c_str());
     AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, confirmLine.c_str());
@@ -5781,18 +6645,6 @@ void Menu(HWND h)
     AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellTimeoutLine.c_str());
     AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellTerminateWaitLine.c_str());
     AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, registrationUnresolvedBlockLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestSourceLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestOverwriteLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestIdentityLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestPackageVersionLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestDisplayNameLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherDisplayNameLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestDescriptionLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestExecutableLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestApplicationIdLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestMinVersionLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, manifestMaxVersionTestedLine.c_str());
     AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, singleInstanceLine.c_str());
     endSection(advancedMenu, g_ui.advancedTitle);
 
@@ -5801,7 +6653,7 @@ void Menu(HWND h)
     addTo(m, ID_EXIT, g_ui.exitText.c_str());
 
     SetForegroundWindow(h);
-    UINT cmd = TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,h,nullptr);
+    UINT cmd = static_cast<UINT>(TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,h,nullptr));
     DestroyMenu(m);
 
     switch(cmd)
@@ -5811,6 +6663,14 @@ void Menu(HWND h)
         bool v = !UsePowerShell();
         IniWrite(L"Settings", L"UsePowerShell", v ? L"1" : L"0");
         Log(g_ui.usePowerShellSummary.c_str(), v, v ? g_ui.powerShellEnabledMode.c_str() : g_ui.comPreferredMode.c_str());
+    }
+    break;
+
+    case ID_MANIFEST_OVERWRITE:
+    {
+        bool v = !ManifestOverwriteExisting();
+        IniWrite(L"Manifest", L"OverwriteExisting", v ? L"1" : L"0");
+        Log(g_ui.manifestOverwriteExistingLabel.c_str(), StateEnabled(v));
     }
     break;
 
@@ -6151,19 +7011,18 @@ void Menu(HWND h)
         if (!logPath.empty())
         {
             std::wstring param = L"/select,\"" + logPath + L"\"";
-            ShellExecuteW(nullptr, L"open", L"explorer.exe", param.c_str(), nullptr, SW_SHOW);
+            HINSTANCE result = ShellExecuteW(nullptr, L"open", L"explorer.exe", param.c_str(), nullptr, SW_SHOW);
+            if ((INT_PTR)result <= 32)
+                LogWin32Failure(L"ShellExecuteW(explorer.exe)", static_cast<DWORD>((INT_PTR)result));
         }
     }
     break;
 
     case ID_LOG_RESET:
     {
-        std::wstring base = g_exePath.substr(g_exePath.find_last_of(L"\\/") + 1);
-        base = base.substr(0, base.find_last_of(L'.'));
-        std::wstring dir = g_exePath.substr(0, g_exePath.find_last_of(L"\\/"));
-        std::wstring newLogPath = dir + L"\\" + base + L".log";
+        std::wstring newLogPath = DefaultLogPath();
         SetLogPathCopy(newLogPath);
-        IniWrite(L"Settings", L"LogPath", newLogPath.c_str());
+        IniWrite(L"Settings", L"LogPath", L"");
         Log(g_ui.logPathReset.c_str(), newLogPath.c_str());
         LogText(g_ui.futureLogEntriesDefaultPath);
     }
@@ -6171,9 +7030,9 @@ void Menu(HWND h)
 
     default:
         if (cmd>=ID_A1 && cmd<=ID_A6){
-            int i = cmd-ID_A1;
+            int i = static_cast<int>(cmd) - ID_A1;
             const wchar_t* k = keys[i];
-            int nv = !IniReadI(L"Assets",k,0);
+            bool nv = IniReadI(L"Assets",k,0) == 0;
             IniWrite(L"Assets",k,nv?L"1":L"0");
             Log(g_ui.assetToggleState.c_str(), k, StateOn(nv));
         }
@@ -6199,7 +7058,7 @@ static void HandleExistingInstanceRequest()
     const std::wstring& message = trayPersistsAfterRestart
         ? g_ui.notificationAlreadyRunningTrayPersistent
         : g_ui.notificationAlreadyRunningTraySession;
-    NotifyTrayBalloon(g_ui.notificationTitle, message, trayPersistsAfterRestart ? NIIF_INFO : NIIF_WARNING, true);
+    NotifyTrayBalloon(g_ui.notificationTitle, message, static_cast<DWORD>(trayPersistsAfterRestart ? NIIF_INFO : NIIF_WARNING), true);
 }
 
 static int HandleSingleInstanceMutexFailure(DWORD err)
@@ -6282,7 +7141,7 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
         }
 
         NotifyShutdownDelayed();
-        SetTimer(h, SHUTDOWN_NOTICE_TIMER_ID, static_cast<UINT>(ClampInt(g_shutdownRepeatNoticeMs.load(), 250, 60000)), nullptr);
+        SetShutdownNoticeTimer(h, g_shutdownRepeatNoticeMs.load(), L"SetTimer(SHUTDOWN_NOTICE_TIMER_ID repeat)");
         return 0;
     }
 
@@ -6371,7 +7230,7 @@ static std::wstring StartupString(const wchar_t* key, const wchar_t* fallback)
     return value.empty() ? std::wstring(fallback) : value;
 }
 
-static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType)
+static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) noexcept
 {
     switch (ctrlType)
     {
@@ -6410,8 +7269,18 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     bool consoleCtrlHandlerInstalled = SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE) != FALSE;
     DWORD consoleCtrlHandlerError = consoleCtrlHandlerInstalled ? ERROR_SUCCESS : GetLastError();
 
+    SetLastError(ERROR_SUCCESS);
     g_singleInstanceMessage = RegisterWindowMessageW(g_singleInstanceMessageName.c_str());
+    DWORD singleInstanceMessageError = g_singleInstanceMessage ? ERROR_SUCCESS : GetLastError();
+    if (!g_singleInstanceMessage && singleInstanceMessageError == ERROR_SUCCESS)
+        singleInstanceMessageError = ERROR_INVALID_DATA;
+
+    SetLastError(ERROR_SUCCESS);
     g_taskbarCreatedMessage = RegisterWindowMessageW(L"TaskbarCreated");
+    DWORD taskbarCreatedMessageError = g_taskbarCreatedMessage ? ERROR_SUCCESS : GetLastError();
+    if (!g_taskbarCreatedMessage && taskbarCreatedMessageError == ERROR_SUCCESS)
+        taskbarCreatedMessageError = ERROR_INVALID_DATA;
+
     SetLastError(ERROR_SUCCESS);
     g_singleInstanceMutex = CreateMutexW(nullptr, TRUE, g_singleInstanceMutexName.c_str());
     DWORD singleInstanceMutexLastError = GetLastError();
@@ -6442,7 +7311,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
     auto iniStart = steady_clock::now();
     bool initialIniCreated = EnsureInitialIniTemplate();
-    bool iniEncodingNormalized = initialIniCreated ? false : NormalizeIniToUtf8BomIfNeeded();
+    TextNormalizeResult iniEncodingNormalizeResult = initialIniCreated
+        ? TextNormalizeResult::NoChange
+        : NormalizeIniToUtf8BomIfNeeded();
+    if (iniEncodingNormalizeResult == TextNormalizeResult::Failed)
+        QueueStartupWarning(L"[!] Failed to normalize INI file to UTF-8 with BOM (error " + std::to_wstring(GetLastError()) + L").");
 
     // defaults
     EnsureIniDefaults();
@@ -6454,13 +7327,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     auto iniDone = steady_clock::now();
     g_logging = IniReadI(L"Settings",L"Logging",1)!=0;
     g_tray    = IniReadI(L"Settings",L"TrayIcon",1)!=0;
-    std::wstring configuredLogPath = IniReadS(L"Settings", L"LogPath", L"");
-    if (configuredLogPath.empty())
-    {
-        configuredLogPath = dir + L"\\" + base + L".log";
-        IniWrite(L"Settings", L"LogPath", configuredLogPath.c_str());
-    }
-    SetLogPathCopy(configuredLogPath);
+    SetLogPathCopy(EffectiveConfiguredLogPath());
     g_console = IniReadI(L"Settings", L"ShowConsole", 0) != 0;
     g_generateOnStartup = IniReadI(L"Settings", L"GenerateOnStartup", 1) != 0;
     g_generateOnStartupOnlyWhenChanged = IniReadI(L"Settings", L"GenerateOnStartupOnlyWhenChanged", 1) != 0;
@@ -6512,7 +7379,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.logFileLabel.c_str(), GetLogPathCopy().c_str());
     FlushStartupWarnings();
     Log(g_ui.singleInstanceScopeSummary.c_str(), g_singleInstanceMutexName.c_str());
-    if (iniEncodingNormalized)
+    if (iniEncodingNormalizeResult == TextNormalizeResult::Changed)
         LogText(g_ui.iniEncodingNormalized);
     if (startupManifestCreated)
         Log(g_ui.appxManifestCreated.c_str(), startupManifestPath.c_str());
@@ -6537,6 +7404,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.trayIconSummary.c_str(), StateEnabled(g_tray));
     Log(g_ui.powerShellRegistrationSummary.c_str(), UsePowerShell() ? g_ui.powerShellEnabledMode.c_str() : g_ui.comPreferredMode.c_str());
     Log(g_ui.wallpaperDetectionFallbackSummary.c_str(), StateEnabled(g_wallpaperDetectionFallbackOnInvalid));
+    if (singleInstanceMessageError != ERROR_SUCCESS)
+        LogWin32Failure(L"RegisterWindowMessageW(single-instance)", singleInstanceMessageError);
+    if (taskbarCreatedMessageError != ERROR_SUCCESS)
+        LogWin32Failure(L"RegisterWindowMessageW(TaskbarCreated)", taskbarCreatedMessageError);
     if (!consoleCtrlHandlerInstalled)
         LogWin32Failure(L"SetConsoleCtrlHandler", consoleCtrlHandlerError);
 
@@ -6626,7 +7497,21 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         }
     }
 
-    std::thread th(PollThread);
+    std::thread th;
+    try
+    {
+        th = std::thread(PollThread);
+    }
+    catch (const std::exception& ex)
+    {
+        std::wstring message = ExceptionTextToWide(ex);
+        Log(g_ui.pollThreadStartFailed.c_str(), message.c_str());
+    }
+    catch (...)
+    {
+        std::wstring message = UnknownExceptionText();
+        Log(g_ui.pollThreadStartFailed.c_str(), message.c_str());
+    }
 
     MSG msg;
     while (GetMessageW(&msg,nullptr,0,0))
