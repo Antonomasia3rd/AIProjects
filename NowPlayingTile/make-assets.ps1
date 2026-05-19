@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$assetDir = Join-Path $root 'Assets'
+$assetDir = Join-Path $root 'build\Assets'
 New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
 
 function New-TileAsset {

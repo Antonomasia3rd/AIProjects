@@ -25,6 +25,9 @@ DesktopStub/build/GenerateAssets.md
 DesktopStub/build/microsoft.system.package.metadata
 DesktopStub/build/obj/
 
+# NowPlayingTile generated package/build output
+NowPlayingTile/build/
+
 # Runtime-only build folder in this project
 DNSAutoUpdate/build/
 
