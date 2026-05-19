@@ -30,7 +30,7 @@ Prebuilt executables are published as GitHub releases when a project has a compi
 | `DNSAutoUpdate` | PowerShell script | Requires Windows DNS Server PowerShell cmdlets. |
 | `NowPlayingTile` | C# app plus loose Appx registration scripts | Builds generated files under `NowPlayingTile\build`. |
 | `PhotoCollage` | PowerShell script | Creates a simple image grid/collage. |
-| `RealTimeNotesDeskband` | Experimental/drop-in workspace | Ignored except for its top-level README. |
+| `RealTimeNotesDeskband` | C++ Win32 Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes; local upstream/reference dumps are ignored. |
 | `SecureDesktopLauncher` | C++ Windows service/tools | Detailed docs are in the project folder. |
 | `TaskSchedulerMigration` | PowerShell script | Re-registers scheduled tasks from an old SID to a new user. |
 | `YourPhoneHideBanner` | C# Windows service | Requires administrator rights to install and write Event Log sources. |
