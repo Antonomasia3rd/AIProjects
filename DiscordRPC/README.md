@@ -1,4 +1,6 @@
-# DiscordRPC C# build
+# DiscordRPC
+
+C# Discord Rich Presence utility with a tray-first configuration UI, Discord IPC mode, optional Gateway mode, and support for dynamic system/window placeholders.
 
 This is a C# replacement for the experimental Python `DiscordRPC.py`.
 
@@ -32,7 +34,7 @@ This is a C# replacement for the experimental Python `DiscordRPC.py`.
 
 ```powershell
 .\build.ps1
-.\DiscordRPC.exe
+.\build\DiscordRPC.exe
 ```
 
 Normal launches start the tray icon unless `[app] show_tray = false` is set. Right-click the tray icon to change most settings directly. The root menu is grouped into dropdown categories so it should not overflow the screen. A small edit dialog opens only for values that need typing, such as IDs, URLs, asset names, or replacement maps.
@@ -46,31 +48,39 @@ Use `[general] transport_mode = ipc`, `gateway`, or `auto` to choose how presenc
 The executable expects `config.ini` in the current directory. You can also pass a config path:
 
 ```powershell
-.\DiscordRPC.exe .\config.ini
+.\build\DiscordRPC.exe .\config.ini
 ```
 
 Validate config parsing and generated activity JSON without connecting to Discord:
 
 ```powershell
-.\DiscordRPC.exe --dry-run
+.\build\DiscordRPC.exe --dry-run
 ```
 
-Run one live Discord update, keep it visible briefly for diagnostics, and exit. For a persistent Rich Presence, run `.\DiscordRPC.exe` normally so the process stays alive:
+Run one live Discord update, keep it visible briefly for diagnostics, and exit. For a persistent Rich Presence, run `.\build\DiscordRPC.exe` normally so the process stays alive:
 
 ```powershell
-.\DiscordRPC.exe --once
+.\build\DiscordRPC.exe --once
 ```
 
 Include full IPC/Gateway JSON for debugging:
 
 ```powershell
-.\DiscordRPC.exe --once --verbose
+.\build\DiscordRPC.exe --once --verbose
 ```
 
 Run without the tray icon:
 
 ```powershell
-.\DiscordRPC.exe --no-tray
+.\build\DiscordRPC.exe --no-tray
 ```
 
 If Discord reports `Invalid Client ID`, update `[general] client_id` in `config.ini` with an existing application ID from the Discord Developer Portal.
+
+## Generated Files
+
+`build\DiscordRPC.exe` and runtime config/log files are generated output and should not be committed.
+
+## Release
+
+Prebuilt binary: [DiscordRPC v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/DiscordRPC-v1).

@@ -1,0 +1,31 @@
+# CharmTray
+
+Win32 tray launcher for the Windows 8/8.1 immersive shell charm flyouts: Search, Share, Start, Devices, and Settings.
+
+The implementation uses undocumented COM interfaces and GUID/vtable offsets derived from `CharmBar.exe`. It is not expected to work on Windows 10 or newer because the Windows 8 immersive shell charm infrastructure is no longer present.
+
+## Requirements
+
+- Windows 8 or Windows 8.1.
+- Visual Studio Build Tools with the C++ workload.
+
+## Build
+
+From a Visual Studio x64 developer command prompt:
+
+```cmd
+mkdir build 2>nul
+cl /nologo /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 CharmTray.cpp /Fe:build\CharmTray.exe /link user32.lib ole32.lib shell32.lib /SUBSYSTEM:WINDOWS
+```
+
+## Run
+
+```cmd
+build\CharmTray.exe
+```
+
+Right-click the tray icon and choose a charm flyout. The app is single-instance guarded by a mutex.
+
+## Release
+
+Prebuilt binary: [CharmTray v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/CharmTray-v1).
