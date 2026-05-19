@@ -5,4 +5,14 @@ if (-not (Test-Path $csc)) {
     throw "C# compiler not found at $csc"
 }
 
-& $csc /nologo /optimize+ /target:exe /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:DiscordRPC.exe DiscordRPC.cs
+$outDir = Join-Path $PSScriptRoot "build"
+New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+$out = Join-Path $outDir "DiscordRPC.exe"
+$source = Join-Path $PSScriptRoot "DiscordRPC.cs"
+
+& $csc /nologo /optimize+ /target:exe /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:$out $source
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+Write-Host "Built $out"

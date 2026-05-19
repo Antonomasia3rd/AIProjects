@@ -19,6 +19,12 @@ The build uses the .NET Framework C# compiler already installed at:
 C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe
 ```
 
+Output is written to:
+
+```text
+build\NowPlayingTile.exe
+```
+
 ## Run
 
 For Start Live Tile updates, register the dev package once:
@@ -130,3 +136,11 @@ Running `NowPlayingTile.exe` directly is still supported, but direct launches do
 not have package identity, so Start Live Tile updates are ignored. Launch via the
 registered `shell:AppsFolder\...!App` entry, or use `launch-packaged.ps1`, for
 tile updates.
+
+## Generated Files
+
+The `build` folder contains generated files: `NowPlayingTile.exe`, copied manifest output, and generated tile assets. The manifest template is tracked at `package\AppxManifest.xml`.
+
+## Release
+
+Prebuilt binary: [NowPlayingTile v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/NowPlayingTile-v1).
