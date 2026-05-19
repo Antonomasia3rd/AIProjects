@@ -36,6 +36,8 @@ LOCAL_TOOL_INVENTORY.md
 SecureDesktopLauncher/SecureDesktopLauncher.ini
 SecureDesktopLauncher/SecureDesktopPasswordLauncher.ini
 
-# External/drop-in experiments; keep only the local project note tracked.
-RealTimeNotesDeskband/*
-!RealTimeNotesDeskband/README.md
+# RealTimeNotesDeskband local-only references, secrets, and outputs
+RealTimeNotesDeskband/references/
+RealTimeNotesDeskband/build/
+RealTimeNotesDeskband/*.dll
+RealTimeNotesDeskband/*_cookie.json

@@ -1,0 +1,1894 @@
+#define UNICODE
+#define _UNICODE
+#define _WIN32_WINNT 0x0601
+#define _WIN32_IE 0x0700
+
+#include <windows.h>
+#include <windowsx.h>
+#include <shlobj.h>
+#include <shlwapi.h>
+#include <shobjidl.h>
+#include <comcat.h>
+#include <commctrl.h>
+#include <uxtheme.h>
+#include <winhttp.h>
+#include <wincrypt.h>
+#include <stdint.h>
+
+#include <algorithm>
+#include <cctype>
+#include <ctime>
+#include <random>
+#include <string>
+#include <vector>
+
+#ifdef _MSC_VER
+#pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "uxtheme.lib")
+#pragma comment(lib, "uuid.lib")
+#pragma comment(lib, "winhttp.lib")
+#endif
+
+// {8D1C2A67-39F0-497E-8D3C-0D27A4A41C1F}
+static const CLSID CLSID_RealTimeNotesDeskband =
+{ 0x8d1c2a67, 0x39f0, 0x497e, { 0x8d, 0x3c, 0x0d, 0x27, 0xa4, 0xa4, 0x1c, 0x1f } };
+
+static const wchar_t kBandName[] = L"Real Time Notes";
+static const wchar_t kClassName[] = L"RealTimeNotesDeskbandWindow";
+static const wchar_t kSettingsKey[] = L"Software\\RealTimeNotesDeskband";
+static const wchar_t kAccountsKey[] = L"Software\\RealTimeNotesDeskband\\Accounts";
+static const wchar_t kClassesClsidKey[] = L"Software\\Classes\\CLSID";
+static const wchar_t kDeskBandCatid[] = L"{00021492-0000-0000-C000-000000000046}";
+static const UINT_PTR kRefreshTimer = 1;
+static const UINT kStatusReadyMessage = WM_APP + 0x343;
+static const UINT kMinRefreshSeconds = 30;
+static const UINT kDefaultRefreshSeconds = 300;
+
+HMODULE g_module = nullptr;
+long g_objectCount = 0;
+long g_lockCount = 0;
+
+enum class ResourceKind
+{
+    Resin,
+    Stamina,
+    Charge
+};
+
+enum class StateKind
+{
+    Loading,
+    Ok,
+    Full,
+    Error
+};
+
+struct NoteState
+{
+    ResourceKind resource = ResourceKind::Resin;
+    StateKind state = StateKind::Loading;
+    std::wstring line1 = L"Loading";
+    std::wstring line2 = L"Real-Time Notes";
+    std::wstring tooltip = L"Real-Time Notes";
+    UINT refreshSeconds = kDefaultRefreshSeconds;
+};
+
+struct AppConfig
+{
+    std::string uid;
+    std::string ltoken;
+    std::string ltuid;
+    UINT refreshSeconds = kDefaultRefreshSeconds;
+};
+
+struct ResourceMetadata
+{
+    ResourceKind resource;
+    const wchar_t* registryValue;
+    const wchar_t* displayName;
+    const wchar_t* configFile;
+    const wchar_t* fullIcon;
+    const wchar_t* notFullIcon;
+    const wchar_t* errorIcon;
+    const wchar_t* host;
+    const wchar_t* path;
+};
+
+static const ResourceMetadata kResources[] = {
+    {
+        ResourceKind::Resin,
+        L"resin",
+        L"Resin",
+        L"genshin_cookie.json",
+        L"genshin\\resin_full.ico",
+        L"genshin\\resin_not_full.ico",
+        L"genshin\\resin_error.ico",
+        L"bbs-api-os.hoyolab.com",
+        L"/game_record/genshin/api/dailyNote"
+    },
+    {
+        ResourceKind::Stamina,
+        L"stamina",
+        L"Stamina",
+        L"hsr_cookie.json",
+        L"hsr\\stamina_full.ico",
+        L"hsr\\stamina_not_full.ico",
+        L"hsr\\stamina_error.ico",
+        L"bbs-api-os.hoyolab.com",
+        L"/game_record/hkrpg/api/note"
+    },
+    {
+        ResourceKind::Charge,
+        L"charge",
+        L"Charge",
+        L"zzz_cookie.json",
+        L"zzz\\charge_full.ico",
+        L"zzz\\charge_not_full.ico",
+        L"zzz\\charge_error.ico",
+        L"sg-act-nap-api.hoyolab.com",
+        L"/event/game_record_zzz/api/zzz/note"
+    },
+};
+
+static const ResourceMetadata& MetadataFor(ResourceKind resource)
+{
+    for (const auto& item : kResources)
+    {
+        if (item.resource == resource)
+        {
+            return item;
+        }
+    }
+    return kResources[0];
+}
+
+static std::wstring GuidToString(REFGUID guid)
+{
+    wchar_t buffer[64]{};
+    StringFromGUID2(guid, buffer, ARRAYSIZE(buffer));
+    return buffer;
+}
+
+static std::wstring ModulePath()
+{
+    wchar_t path[MAX_PATH]{};
+    GetModuleFileNameW(g_module, path, ARRAYSIZE(path));
+    return path;
+}
+
+static std::wstring ParentDirectoryOf(const std::wstring& path)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    if (slash == std::wstring::npos)
+    {
+        return L".";
+    }
+    return path.substr(0, slash);
+}
+
+static bool FileExists(const std::wstring& path)
+{
+    DWORD attr = GetFileAttributesW(path.c_str());
+    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static std::wstring JoinPath(const std::wstring& left, const std::wstring& right)
+{
+    if (left.empty())
+    {
+        return right;
+    }
+    if (left.back() == L'\\' || left.back() == L'/')
+    {
+        return left + right;
+    }
+    return left + L"\\" + right;
+}
+
+static bool HasAnyConfigFile(const std::wstring& directory)
+{
+    for (const auto& item : kResources)
+    {
+        if (FileExists(JoinPath(directory, item.configFile)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static std::wstring DefaultConfigDir(const std::wstring& installDir)
+{
+    if (HasAnyConfigFile(installDir))
+    {
+        return installDir;
+    }
+
+    std::wstring parent = ParentDirectoryOf(installDir);
+    if (parent != installDir && HasAnyConfigFile(parent))
+    {
+        return parent;
+    }
+
+    std::wstring localReference = JoinPath(installDir, L"references\\genshin-real-time-notes-0.0.8");
+    if (HasAnyConfigFile(localReference))
+    {
+        return localReference;
+    }
+
+    std::wstring parentReference = JoinPath(parent, L"references\\genshin-real-time-notes-0.0.8");
+    if (parent != installDir && HasAnyConfigFile(parentReference))
+    {
+        return parentReference;
+    }
+
+    return installDir;
+}
+
+static bool HasAnyAssetFile(const std::wstring& assetDir)
+{
+    for (const auto& item : kResources)
+    {
+        if (FileExists(JoinPath(assetDir, item.notFullIcon)) || FileExists(JoinPath(assetDir, item.fullIcon)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static std::wstring DefaultAssetDir(const std::wstring& installDir)
+{
+    std::wstring parent = ParentDirectoryOf(installDir);
+    std::wstring localReferenceAssets = JoinPath(installDir, L"references\\genshin-real-time-notes-0.0.8\\embedded\\assets");
+    if (HasAnyAssetFile(localReferenceAssets))
+    {
+        return localReferenceAssets;
+    }
+
+    std::wstring parentReferenceAssets = JoinPath(parent, L"references\\genshin-real-time-notes-0.0.8\\embedded\\assets");
+    if (parent != installDir && HasAnyAssetFile(parentReferenceAssets))
+    {
+        return parentReferenceAssets;
+    }
+
+    return localReferenceAssets;
+}
+
+static std::wstring Utf8ToWide(const std::string& text)
+{
+    if (text.empty())
+    {
+        return L"";
+    }
+    int len = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (len <= 0)
+    {
+        return L"";
+    }
+    std::wstring wide(len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), &wide[0], len);
+    return wide;
+}
+
+static std::string WideToUtf8(const std::wstring& text)
+{
+    if (text.empty())
+    {
+        return "";
+    }
+    int len = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    if (len <= 0)
+    {
+        return "";
+    }
+    std::string utf8(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), &utf8[0], len, nullptr, nullptr);
+    return utf8;
+}
+
+static std::wstring ReadRegString(HKEY root, const wchar_t* subkey, const wchar_t* valueName, const std::wstring& fallback)
+{
+    DWORD type = 0;
+    DWORD bytes = 0;
+    LONG result = RegGetValueW(root, subkey, valueName, RRF_RT_REG_SZ, &type, nullptr, &bytes);
+    if (result != ERROR_SUCCESS || bytes < sizeof(wchar_t))
+    {
+        return fallback;
+    }
+
+    std::wstring value(bytes / sizeof(wchar_t), L'\0');
+    result = RegGetValueW(root, subkey, valueName, RRF_RT_REG_SZ, &type, &value[0], &bytes);
+    if (result != ERROR_SUCCESS)
+    {
+        return fallback;
+    }
+    while (!value.empty() && value.back() == L'\0')
+    {
+        value.pop_back();
+    }
+    return value.empty() ? fallback : value;
+}
+
+static DWORD ReadRegDword(HKEY root, const wchar_t* subkey, const wchar_t* valueName, DWORD fallback)
+{
+    DWORD value = fallback;
+    DWORD bytes = sizeof(value);
+    if (RegGetValueW(root, subkey, valueName, RRF_RT_REG_DWORD, nullptr, &value, &bytes) == ERROR_SUCCESS)
+    {
+        return value;
+    }
+    return fallback;
+}
+
+static void WriteRegString(HKEY root, const wchar_t* subkey, const wchar_t* valueName, const std::wstring& value)
+{
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(root, subkey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS)
+    {
+        RegSetValueExW(key, valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+        RegCloseKey(key);
+    }
+}
+
+static std::wstring AccountKeyFor(ResourceKind resource)
+{
+    return std::wstring(kAccountsKey) + L"\\" + MetadataFor(resource).registryValue;
+}
+
+static std::wstring ReadAccountString(ResourceKind resource, const wchar_t* valueName, const wchar_t* fallbackValueName = nullptr)
+{
+    std::wstring key = AccountKeyFor(resource);
+    std::wstring value = ReadRegString(HKEY_CURRENT_USER, key.c_str(), valueName, L"");
+    if (value.empty() && fallbackValueName)
+    {
+        value = ReadRegString(HKEY_CURRENT_USER, key.c_str(), fallbackValueName, L"");
+    }
+    return value;
+}
+
+static bool HasRegistryConfig(ResourceKind resource)
+{
+    return !ReadAccountString(resource, L"UID", L"uid").empty() &&
+        !ReadAccountString(resource, L"LTokenV2", L"ltoken_v2").empty() &&
+        !ReadAccountString(resource, L"LTuidV2", L"ltuid_v2").empty();
+}
+
+static ResourceKind ResourceFromString(const std::wstring& value)
+{
+    std::wstring lower = value;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](wchar_t ch) { return static_cast<wchar_t>(towlower(ch)); });
+    for (const auto& item : kResources)
+    {
+        if (lower == item.registryValue)
+        {
+            return item.resource;
+        }
+    }
+    return ResourceKind::Resin;
+}
+
+static ResourceKind ReadResourceSetting(const std::wstring& configDir)
+{
+    std::wstring value = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", L"auto");
+    std::wstring lower = value;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](wchar_t ch) { return static_cast<wchar_t>(towlower(ch)); });
+    if (lower != L"auto")
+    {
+        return ResourceFromString(lower);
+    }
+
+    for (const auto& item : kResources)
+    {
+        if (HasRegistryConfig(item.resource))
+        {
+            return item.resource;
+        }
+    }
+
+    for (const auto& item : kResources)
+    {
+        if (FileExists(JoinPath(configDir, item.configFile)))
+        {
+            return item.resource;
+        }
+    }
+    return ResourceKind::Resin;
+}
+
+static std::string ReadFileUtf8(const std::wstring& path)
+{
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return "";
+    }
+
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0 || size.QuadPart > 1024 * 1024)
+    {
+        CloseHandle(file);
+        return "";
+    }
+
+    std::string data(static_cast<size_t>(size.QuadPart), '\0');
+    DWORD read = 0;
+    BOOL ok = ReadFile(file, &data[0], static_cast<DWORD>(data.size()), &read, nullptr);
+    CloseHandle(file);
+    if (!ok)
+    {
+        return "";
+    }
+    data.resize(read);
+    return data;
+}
+
+static size_t FindJsonValue(const std::string& json, const std::string& key, size_t start = 0)
+{
+    std::string pattern = "\"" + key + "\"";
+    size_t pos = json.find(pattern, start);
+    if (pos == std::string::npos)
+    {
+        return std::string::npos;
+    }
+    pos = json.find(':', pos + pattern.size());
+    if (pos == std::string::npos)
+    {
+        return std::string::npos;
+    }
+    ++pos;
+    while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos])))
+    {
+        ++pos;
+    }
+    return pos;
+}
+
+static bool JsonString(const std::string& json, const std::string& key, std::string& out)
+{
+    size_t pos = FindJsonValue(json, key);
+    if (pos == std::string::npos || pos >= json.size() || json[pos] != '"')
+    {
+        return false;
+    }
+    ++pos;
+
+    std::string value;
+    bool escaping = false;
+    for (; pos < json.size(); ++pos)
+    {
+        char ch = json[pos];
+        if (escaping)
+        {
+            switch (ch)
+            {
+            case '"': value.push_back('"'); break;
+            case '\\': value.push_back('\\'); break;
+            case '/': value.push_back('/'); break;
+            case 'b': value.push_back('\b'); break;
+            case 'f': value.push_back('\f'); break;
+            case 'n': value.push_back('\n'); break;
+            case 'r': value.push_back('\r'); break;
+            case 't': value.push_back('\t'); break;
+            default: value.push_back(ch); break;
+            }
+            escaping = false;
+            continue;
+        }
+        if (ch == '\\')
+        {
+            escaping = true;
+            continue;
+        }
+        if (ch == '"')
+        {
+            out = value;
+            return true;
+        }
+        value.push_back(ch);
+    }
+    return false;
+}
+
+static bool JsonInt(const std::string& json, const std::string& key, int& out)
+{
+    size_t pos = FindJsonValue(json, key);
+    if (pos == std::string::npos || pos >= json.size())
+    {
+        return false;
+    }
+
+    bool quoted = json[pos] == '"';
+    if (quoted)
+    {
+        ++pos;
+    }
+
+    bool negative = false;
+    if (pos < json.size() && json[pos] == '-')
+    {
+        negative = true;
+        ++pos;
+    }
+
+    if (pos >= json.size() || !std::isdigit(static_cast<unsigned char>(json[pos])))
+    {
+        return false;
+    }
+
+    int value = 0;
+    while (pos < json.size() && std::isdigit(static_cast<unsigned char>(json[pos])))
+    {
+        value = value * 10 + (json[pos] - '0');
+        ++pos;
+    }
+    out = negative ? -value : value;
+    return true;
+}
+
+static bool JsonObject(const std::string& json, const std::string& key, std::string& out)
+{
+    size_t pos = FindJsonValue(json, key);
+    if (pos == std::string::npos || pos >= json.size() || json[pos] != '{')
+    {
+        return false;
+    }
+
+    size_t start = pos;
+    int depth = 0;
+    bool inString = false;
+    bool escaping = false;
+    for (; pos < json.size(); ++pos)
+    {
+        char ch = json[pos];
+        if (inString)
+        {
+            if (escaping)
+            {
+                escaping = false;
+            }
+            else if (ch == '\\')
+            {
+                escaping = true;
+            }
+            else if (ch == '"')
+            {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (ch == '"')
+        {
+            inString = true;
+        }
+        else if (ch == '{')
+        {
+            ++depth;
+        }
+        else if (ch == '}')
+        {
+            --depth;
+            if (depth == 0)
+            {
+                out.assign(json.data() + start, pos - start + 1);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool LoadConfig(const std::wstring& path, AppConfig& cfg)
+{
+    cfg = AppConfig{};
+    std::string json = ReadFileUtf8(path);
+    if (json.empty())
+    {
+        return false;
+    }
+
+    JsonString(json, "uid", cfg.uid);
+    JsonString(json, "ltoken_v2", cfg.ltoken);
+    JsonString(json, "ltuid_v2", cfg.ltuid);
+
+    int refresh = 0;
+    if (JsonInt(json, "refresh_interval", refresh) && refresh > 0)
+    {
+        cfg.refreshSeconds = static_cast<UINT>(refresh);
+    }
+
+    return !cfg.uid.empty() && !cfg.ltoken.empty() && !cfg.ltuid.empty();
+}
+
+static bool LoadRegistryConfig(ResourceKind resource, AppConfig& cfg)
+{
+    cfg = AppConfig{};
+    std::wstring uid = ReadAccountString(resource, L"UID", L"uid");
+    std::wstring ltoken = ReadAccountString(resource, L"LTokenV2", L"ltoken_v2");
+    std::wstring ltuid = ReadAccountString(resource, L"LTuidV2", L"ltuid_v2");
+
+    cfg.uid = WideToUtf8(uid);
+    cfg.ltoken = WideToUtf8(ltoken);
+    cfg.ltuid = WideToUtf8(ltuid);
+
+    std::wstring key = AccountKeyFor(resource);
+    DWORD refresh = ReadRegDword(HKEY_CURRENT_USER, key.c_str(), L"RefreshIntervalSeconds", 0);
+    if (refresh == 0)
+    {
+        refresh = ReadRegDword(HKEY_CURRENT_USER, key.c_str(), L"refresh_interval", 0);
+    }
+    if (refresh > 0)
+    {
+        cfg.refreshSeconds = refresh;
+    }
+
+    return !cfg.uid.empty() && !cfg.ltoken.empty() && !cfg.ltuid.empty();
+}
+
+static std::string Md5Hex(const std::string& text)
+{
+    HCRYPTPROV provider = 0;
+    HCRYPTHASH hash = 0;
+    BYTE bytes[16]{};
+    DWORD byteCount = sizeof(bytes);
+
+    if (!CryptAcquireContextW(&provider, nullptr, nullptr, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
+    {
+        return "";
+    }
+    if (!CryptCreateHash(provider, CALG_MD5, 0, 0, &hash))
+    {
+        CryptReleaseContext(provider, 0);
+        return "";
+    }
+    if (!CryptHashData(hash, reinterpret_cast<const BYTE*>(text.data()), static_cast<DWORD>(text.size()), 0) ||
+        !CryptGetHashParam(hash, HP_HASHVAL, bytes, &byteCount, 0))
+    {
+        CryptDestroyHash(hash);
+        CryptReleaseContext(provider, 0);
+        return "";
+    }
+
+    static const char hex[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(32);
+    for (BYTE b : bytes)
+    {
+        result.push_back(hex[b >> 4]);
+        result.push_back(hex[b & 0x0F]);
+    }
+
+    CryptDestroyHash(hash);
+    CryptReleaseContext(provider, 0);
+    return result;
+}
+
+static std::string GenerateDS()
+{
+    static const char alphabet[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    static const char salt[] = "6s25p5ox5y14umn1p61aqyyvbvvl3lrt";
+
+    std::random_device randomDevice;
+    std::mt19937 generator(randomDevice());
+    std::uniform_int_distribution<int> distribution(0, static_cast<int>(sizeof(alphabet) - 2));
+
+    std::string random;
+    random.reserve(6);
+    for (int i = 0; i < 6; ++i)
+    {
+        random.push_back(alphabet[distribution(generator)]);
+    }
+
+    std::time_t now = std::time(nullptr);
+    std::string source = "salt=" + std::string(salt) + "&t=" + std::to_string(static_cast<long long>(now)) + "&r=" + random;
+    return std::to_string(static_cast<long long>(now)) + "," + random + "," + Md5Hex(source);
+}
+
+static bool HttpGet(const ResourceMetadata& metadata, const std::wstring& server, const std::string& uid, const AppConfig& cfg, std::string& response)
+{
+    std::wstring requestPath = std::wstring(metadata.path) + L"?server=" + server + L"&role_id=" + Utf8ToWide(uid);
+    std::wstring cookie = L"ltoken_v2=" + Utf8ToWide(cfg.ltoken) + L"; ltuid_v2=" + Utf8ToWide(cfg.ltuid);
+    std::wstring headers =
+        L"Accept: application/json, text/plain, */*\r\n"
+        L"Accept-Language: en-US,en;q=0.5\r\n"
+        L"x-rpc-client_type: 5\r\n"
+        L"x-rpc-app_version: 1.5.0\r\n"
+        L"x-rpc-language: en-us\r\n"
+        L"Origin: https://act.hoyolab.com\r\n"
+        L"Referer: https://act.hoyolab.com/\r\n"
+        L"Sec-Fetch-Dest: empty\r\n"
+        L"Sec-Fetch-Mode: cors\r\n"
+        L"Sec-Fetch-Site: same-site\r\n";
+    headers += L"Cookie: " + cookie + L"\r\n";
+    headers += L"DS: " + Utf8ToWide(GenerateDS()) + L"\r\n";
+
+    HINTERNET session = WinHttpOpen(L"RealTimeNotesDeskband/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!session)
+    {
+        return false;
+    }
+    WinHttpSetTimeouts(session, 5000, 5000, 5000, 10000);
+
+    HINTERNET connection = WinHttpConnect(session, metadata.host, INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if (!connection)
+    {
+        WinHttpCloseHandle(session);
+        return false;
+    }
+
+    HINTERNET request = WinHttpOpenRequest(connection, L"GET", requestPath.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (!request)
+    {
+        WinHttpCloseHandle(connection);
+        WinHttpCloseHandle(session);
+        return false;
+    }
+
+    BOOL ok = WinHttpAddRequestHeaders(request, headers.c_str(), static_cast<DWORD>(-1), WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE) &&
+        WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+        WinHttpReceiveResponse(request, nullptr);
+
+    if (ok)
+    {
+        DWORD status = 0;
+        DWORD statusBytes = sizeof(status);
+        WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &statusBytes, WINHTTP_NO_HEADER_INDEX);
+        ok = status >= 200 && status < 300;
+    }
+
+    if (ok)
+    {
+        response.clear();
+        for (;;)
+        {
+            DWORD available = 0;
+            if (!WinHttpQueryDataAvailable(request, &available))
+            {
+                ok = FALSE;
+                break;
+            }
+            if (available == 0)
+            {
+                break;
+            }
+            std::vector<char> buffer(available);
+            DWORD read = 0;
+            if (!WinHttpReadData(request, buffer.data(), available, &read))
+            {
+                ok = FALSE;
+                break;
+            }
+            response.append(buffer.data(), buffer.data() + read);
+        }
+    }
+
+    WinHttpCloseHandle(request);
+    WinHttpCloseHandle(connection);
+    WinHttpCloseHandle(session);
+    return ok == TRUE;
+}
+
+static bool GenshinServer(const std::string& uid, std::wstring& server)
+{
+    if (uid.empty())
+    {
+        return false;
+    }
+    switch (uid[0])
+    {
+    case '1':
+    case '2': server = L"cn_gf01"; return true;
+    case '5': server = L"cn_qd01"; return true;
+    case '6': server = L"os_usa"; return true;
+    case '7': server = L"os_euro"; return true;
+    case '8': server = L"os_asia"; return true;
+    case '9': server = L"os_cht"; return true;
+    default: return false;
+    }
+}
+
+static bool HsrServer(const std::string& uid, std::wstring& server)
+{
+    if (uid.empty())
+    {
+        return false;
+    }
+    switch (uid[0])
+    {
+    case '1':
+    case '2': server = L"prod_gf_cn"; return true;
+    case '5': server = L"prod_qd_cn"; return true;
+    case '6': server = L"prod_official_usa"; return true;
+    case '7': server = L"prod_official_eur"; return true;
+    case '8': server = L"prod_official_asia"; return true;
+    case '9': server = L"prod_official_cht"; return true;
+    default: return false;
+    }
+}
+
+static bool ZzzServer(const std::string& uid, std::wstring& server)
+{
+    if (uid.size() < 2)
+    {
+        return false;
+    }
+    switch (uid[1])
+    {
+    case '0': server = L"prod_gf_us"; return true;
+    case '3': server = L"prod_gf_jp"; return true;
+    case '5': server = L"prod_gf_eu"; return true;
+    case '7': server = L"prod_gf_sg"; return true;
+    default: return false;
+    }
+}
+
+static std::wstring FormatDuration(int seconds)
+{
+    if (seconds <= 0)
+    {
+        return L"Full";
+    }
+    int hours = seconds / 3600;
+    int minutes = (seconds / 60) - hours * 60;
+
+    wchar_t buffer[64]{};
+    if (hours > 0)
+    {
+        swprintf(buffer, ARRAYSIZE(buffer), L"%dh %dm", hours, minutes);
+    }
+    else
+    {
+        swprintf(buffer, ARRAYSIZE(buffer), L"%dm", minutes);
+    }
+    return buffer;
+}
+
+static UINT EffectiveRefreshSeconds(UINT configRefresh)
+{
+    DWORD registryRefresh = ReadRegDword(HKEY_CURRENT_USER, kSettingsKey, L"RefreshIntervalSeconds", 0);
+    UINT refresh = registryRefresh > 0 ? registryRefresh : configRefresh;
+    if (refresh < kMinRefreshSeconds)
+    {
+        refresh = kMinRefreshSeconds;
+    }
+    return refresh;
+}
+
+static NoteState ErrorState(ResourceKind resource, const std::wstring& line1, const std::wstring& line2, UINT refreshSeconds = kDefaultRefreshSeconds)
+{
+    NoteState state;
+    state.resource = resource;
+    state.state = StateKind::Error;
+    state.line1 = line1;
+    state.line2 = line2;
+    state.tooltip = line1 + L" - " + line2;
+    state.refreshSeconds = EffectiveRefreshSeconds(refreshSeconds);
+    return state;
+}
+
+static NoteState FetchState(const std::wstring& configDir)
+{
+    ResourceKind resource = ReadResourceSetting(configDir);
+    const auto& metadata = MetadataFor(resource);
+
+    AppConfig cfg;
+    if (!LoadRegistryConfig(resource, cfg) && !LoadConfig(JoinPath(configDir, metadata.configFile), cfg))
+    {
+        return ErrorState(resource, L"Login needed", L"Configure account");
+    }
+
+    std::wstring server;
+    bool serverOk = false;
+    if (resource == ResourceKind::Resin)
+    {
+        serverOk = GenshinServer(cfg.uid, server);
+    }
+    else if (resource == ResourceKind::Stamina)
+    {
+        serverOk = HsrServer(cfg.uid, server);
+    }
+    else
+    {
+        serverOk = ZzzServer(cfg.uid, server);
+    }
+    if (!serverOk)
+    {
+        return ErrorState(resource, L"Bad UID", Utf8ToWide(cfg.uid), cfg.refreshSeconds);
+    }
+
+    std::string body;
+    if (!HttpGet(metadata, server, cfg.uid, cfg, body))
+    {
+        return ErrorState(resource, L"Network error", metadata.displayName, cfg.refreshSeconds);
+    }
+
+    int retcode = -1;
+    JsonInt(body, "retcode", retcode);
+    if (retcode != 0)
+    {
+        std::string message;
+        JsonString(body, "message", message);
+        return ErrorState(resource, L"API error", message.empty() ? std::to_wstring(retcode) : Utf8ToWide(message), cfg.refreshSeconds);
+    }
+
+    int current = 0;
+    int max = 0;
+    int seconds = 0;
+    bool parsed = false;
+    if (resource == ResourceKind::Resin)
+    {
+        std::string recovery;
+        parsed = JsonInt(body, "current_resin", current) && JsonInt(body, "max_resin", max);
+        if (JsonString(body, "resin_recovery_time", recovery))
+        {
+            seconds = atoi(recovery.c_str());
+        }
+    }
+    else if (resource == ResourceKind::Stamina)
+    {
+        parsed = JsonInt(body, "current_stamina", current) && JsonInt(body, "max_stamina", max);
+        JsonInt(body, "stamina_recover_time", seconds);
+    }
+    else
+    {
+        std::string energy;
+        std::string progress;
+        parsed = JsonObject(body, "energy", energy) &&
+            JsonObject(energy, "progress", progress) &&
+            JsonInt(progress, "current", current) &&
+            JsonInt(progress, "max", max);
+        JsonInt(energy, "restore", seconds);
+    }
+
+    if (!parsed || max <= 0)
+    {
+        return ErrorState(resource, L"Parse error", metadata.displayName, cfg.refreshSeconds);
+    }
+
+    NoteState state;
+    state.resource = resource;
+    state.state = current >= max ? StateKind::Full : StateKind::Ok;
+    state.line1 = std::to_wstring(current) + L"/" + std::to_wstring(max);
+    state.line2 = FormatDuration(seconds);
+    state.tooltip = std::wstring(metadata.displayName) + L": " + state.line1 + L" - " + state.line2;
+    state.refreshSeconds = EffectiveRefreshSeconds(cfg.refreshSeconds);
+    return state;
+}
+
+static bool ShouldUseLightTaskbarText()
+{
+    DWORD colorPrevalence = ReadRegDword(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"ColorPrevalence", 0);
+    if (colorPrevalence)
+    {
+        return true;
+    }
+
+    DWORD systemUsesLightTheme = ReadRegDword(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"SystemUsesLightTheme", 1);
+    return systemUsesLightTheme == 0;
+}
+
+static HFONT CreateBandFont(int dpi)
+{
+    NONCLIENTMETRICSW metrics{};
+    metrics.cbSize = sizeof(metrics);
+    if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0))
+    {
+        metrics.lfMessageFont.lfWeight = FW_NORMAL;
+        metrics.lfMessageFont.lfQuality = CLEARTYPE_QUALITY;
+        return CreateFontIndirectW(&metrics.lfMessageFont);
+    }
+
+    return CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+}
+
+class RealTimeNotesBand final : public IDeskBand2, public IObjectWithSite, public IPersistStream, public IInputObject
+{
+public:
+    RealTimeNotesBand() : m_ref(1)
+    {
+        InterlockedIncrement(&g_objectCount);
+        InitializeCriticalSection(&m_stateLock);
+        m_installDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", ParentDirectoryOf(ModulePath()));
+        m_configDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", DefaultConfigDir(m_installDir));
+        m_assetDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"AssetDir", DefaultAssetDir(m_installDir));
+    }
+
+    ~RealTimeNotesBand()
+    {
+        CloseDW(0);
+        SetSite(nullptr);
+        DeleteCriticalSection(&m_stateLock);
+        InterlockedDecrement(&g_objectCount);
+    }
+
+    IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override
+    {
+        if (!ppv)
+        {
+            return E_POINTER;
+        }
+        *ppv = nullptr;
+
+        if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_IDeskBand) || IsEqualIID(riid, IID_IDeskBand2) || IsEqualIID(riid, IID_IOleWindow) || IsEqualIID(riid, IID_IDockingWindow))
+        {
+            *ppv = static_cast<IDeskBand2*>(this);
+        }
+        else if (IsEqualIID(riid, IID_IObjectWithSite))
+        {
+            *ppv = static_cast<IObjectWithSite*>(this);
+        }
+        else if (IsEqualIID(riid, IID_IPersist) || IsEqualIID(riid, IID_IPersistStream))
+        {
+            *ppv = static_cast<IPersistStream*>(this);
+        }
+        else if (IsEqualIID(riid, IID_IInputObject))
+        {
+            *ppv = static_cast<IInputObject*>(this);
+        }
+        else
+        {
+            return E_NOINTERFACE;
+        }
+
+        AddRef();
+        return S_OK;
+    }
+
+    IFACEMETHODIMP_(ULONG) AddRef() override
+    {
+        return InterlockedIncrement(&m_ref);
+    }
+
+    IFACEMETHODIMP_(ULONG) Release() override
+    {
+        ULONG count = InterlockedDecrement(&m_ref);
+        if (count == 0)
+        {
+            delete this;
+        }
+        return count;
+    }
+
+    IFACEMETHODIMP GetWindow(HWND* hwnd) override
+    {
+        if (!hwnd)
+        {
+            return E_POINTER;
+        }
+        *hwnd = m_hwnd;
+        return m_hwnd ? S_OK : E_FAIL;
+    }
+
+    IFACEMETHODIMP ContextSensitiveHelp(BOOL) override
+    {
+        return E_NOTIMPL;
+    }
+
+    IFACEMETHODIMP ShowDW(BOOL show) override
+    {
+        if (m_hwnd)
+        {
+            ShowWindow(m_hwnd, show ? SW_SHOW : SW_HIDE);
+        }
+        return S_OK;
+    }
+
+    IFACEMETHODIMP CloseDW(DWORD) override
+    {
+        if (m_hwnd)
+        {
+            KillTimer(m_hwnd, kRefreshTimer);
+            DestroyWindow(m_hwnd);
+            m_hwnd = nullptr;
+        }
+        return S_OK;
+    }
+
+    IFACEMETHODIMP ResizeBorderDW(LPCRECT, IUnknown*, BOOL) override
+    {
+        return E_NOTIMPL;
+    }
+
+    IFACEMETHODIMP GetBandInfo(DWORD bandId, DWORD viewMode, DESKBANDINFO* info) override
+    {
+        if (!info)
+        {
+            return E_INVALIDARG;
+        }
+
+        m_bandId = bandId;
+        m_viewMode = viewMode;
+        SIZE desired = DesiredSize();
+
+        if (info->dwMask & DBIM_MINSIZE)
+        {
+            info->ptMinSize.x = desired.cx;
+            info->ptMinSize.y = desired.cy;
+        }
+        if (info->dwMask & DBIM_MAXSIZE)
+        {
+            info->ptMaxSize.x = 260;
+            info->ptMaxSize.y = -1;
+        }
+        if (info->dwMask & DBIM_INTEGRAL)
+        {
+            info->ptIntegral.x = 1;
+            info->ptIntegral.y = 1;
+        }
+        if (info->dwMask & DBIM_ACTUAL)
+        {
+            info->ptActual.x = desired.cx;
+            info->ptActual.y = desired.cy;
+        }
+        if (info->dwMask & DBIM_TITLE)
+        {
+            info->dwMask &= ~DBIM_TITLE;
+        }
+        if (info->dwMask & DBIM_MODEFLAGS)
+        {
+            info->dwModeFlags = DBIMF_NORMAL | DBIMF_VARIABLEHEIGHT;
+        }
+        if (info->dwMask & DBIM_BKCOLOR)
+        {
+            info->dwMask &= ~DBIM_BKCOLOR;
+        }
+        return S_OK;
+    }
+
+    IFACEMETHODIMP CanRenderComposited(BOOL* canRenderComposited) override
+    {
+        if (!canRenderComposited)
+        {
+            return E_POINTER;
+        }
+        *canRenderComposited = TRUE;
+        return S_OK;
+    }
+
+    IFACEMETHODIMP SetCompositionState(BOOL compositionEnabled) override
+    {
+        m_compositionEnabled = compositionEnabled != FALSE;
+        if (m_hwnd)
+        {
+            InvalidateRect(m_hwnd, nullptr, TRUE);
+        }
+        return S_OK;
+    }
+
+    IFACEMETHODIMP GetCompositionState(BOOL* compositionEnabled) override
+    {
+        if (!compositionEnabled)
+        {
+            return E_POINTER;
+        }
+        *compositionEnabled = m_compositionEnabled ? TRUE : FALSE;
+        return S_OK;
+    }
+
+    IFACEMETHODIMP SetSite(IUnknown* site) override
+    {
+        if (!site)
+        {
+            if (m_inputSite)
+            {
+                m_inputSite->Release();
+                m_inputSite = nullptr;
+            }
+            if (m_site)
+            {
+                m_site->Release();
+                m_site = nullptr;
+            }
+            m_parent = nullptr;
+            return S_OK;
+        }
+
+        if (m_site)
+        {
+            m_site->Release();
+            m_site = nullptr;
+        }
+        if (m_inputSite)
+        {
+            m_inputSite->Release();
+            m_inputSite = nullptr;
+        }
+
+        site->AddRef();
+        m_site = site;
+
+        IOleWindow* oleWindow = nullptr;
+        HRESULT hr = site->QueryInterface(IID_IOleWindow, reinterpret_cast<void**>(&oleWindow));
+        if (SUCCEEDED(hr))
+        {
+            hr = oleWindow->GetWindow(&m_parent);
+            oleWindow->Release();
+        }
+        if (FAILED(hr))
+        {
+            return hr;
+        }
+
+        RegisterWindowClass();
+        if (!m_hwnd)
+        {
+            m_hwnd = CreateWindowExW(
+                0,
+                kClassName,
+                nullptr,
+                WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+                0,
+                0,
+                0,
+                0,
+                m_parent,
+                nullptr,
+                g_module,
+                this);
+            if (!m_hwnd)
+            {
+                return HRESULT_FROM_WIN32(GetLastError());
+            }
+        }
+
+        site->QueryInterface(IID_IInputObjectSite, reinterpret_cast<void**>(&m_inputSite));
+        BeginRefresh();
+        return S_OK;
+    }
+
+    IFACEMETHODIMP GetSite(REFIID riid, void** ppv) override
+    {
+        if (!ppv)
+        {
+            return E_POINTER;
+        }
+        *ppv = nullptr;
+        if (!m_site)
+        {
+            return E_FAIL;
+        }
+        return m_site->QueryInterface(riid, ppv);
+    }
+
+    IFACEMETHODIMP GetClassID(CLSID* clsid) override
+    {
+        if (!clsid)
+        {
+            return E_POINTER;
+        }
+        *clsid = CLSID_RealTimeNotesDeskband;
+        return S_OK;
+    }
+
+    IFACEMETHODIMP IsDirty() override
+    {
+        return S_FALSE;
+    }
+
+    IFACEMETHODIMP Load(IStream*) override
+    {
+        return S_OK;
+    }
+
+    IFACEMETHODIMP Save(IStream*, BOOL) override
+    {
+        return S_OK;
+    }
+
+    IFACEMETHODIMP GetSizeMax(ULARGE_INTEGER* size) override
+    {
+        if (size)
+        {
+            size->QuadPart = 0;
+        }
+        return S_OK;
+    }
+
+    IFACEMETHODIMP UIActivateIO(BOOL activate, MSG*) override
+    {
+        if (activate && m_hwnd)
+        {
+            SetFocus(m_hwnd);
+        }
+        return S_OK;
+    }
+
+    IFACEMETHODIMP HasFocusIO() override
+    {
+        return m_hasFocus ? S_OK : S_FALSE;
+    }
+
+    IFACEMETHODIMP TranslateAcceleratorIO(MSG*) override
+    {
+        return S_FALSE;
+    }
+
+private:
+    static void RegisterWindowClass()
+    {
+        static ATOM atom = 0;
+        if (atom)
+        {
+            return;
+        }
+
+        WNDCLASSW wc{};
+        wc.lpfnWndProc = WindowProc;
+        wc.hInstance = g_module;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.lpszClassName = kClassName;
+        wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+        atom = RegisterClassW(&wc);
+    }
+
+    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        RealTimeNotesBand* band = reinterpret_cast<RealTimeNotesBand*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (message == WM_NCCREATE)
+        {
+            auto create = reinterpret_cast<CREATESTRUCTW*>(lParam);
+            band = reinterpret_cast<RealTimeNotesBand*>(create->lpCreateParams);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(band));
+            band->m_hwnd = hwnd;
+        }
+
+        if (!band)
+        {
+            return DefWindowProcW(hwnd, message, wParam, lParam);
+        }
+
+        switch (message)
+        {
+        case WM_PAINT:
+            band->OnPaint();
+            return 0;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_TIMER:
+            if (wParam == kRefreshTimer)
+            {
+                band->BeginRefresh();
+                return 0;
+            }
+            break;
+        case WM_LBUTTONUP:
+            band->BeginRefresh();
+            return 0;
+        case WM_CONTEXTMENU:
+            band->ShowContextMenu(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        case WM_SETFOCUS:
+            band->m_hasFocus = true;
+            return 0;
+        case WM_KILLFOCUS:
+            band->m_hasFocus = false;
+            return 0;
+        case WM_SIZE:
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        case kStatusReadyMessage:
+            KillTimer(hwnd, kRefreshTimer);
+            SetTimer(hwnd, kRefreshTimer, band->CurrentRefreshSeconds() * 1000, nullptr);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            band->NotifyBandInfoChanged();
+            return 0;
+        case WM_NCDESTROY:
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            if (band->m_hwnd == hwnd)
+            {
+                band->m_hwnd = nullptr;
+            }
+            return 0;
+        default:
+            break;
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    void BeginRefresh()
+    {
+        if (InterlockedCompareExchange(&m_refreshing, 1, 0) != 0)
+        {
+            return;
+        }
+
+        AddRef();
+        HANDLE thread = CreateThread(nullptr, 0, RefreshThread, this, 0, nullptr);
+        if (!thread)
+        {
+            InterlockedExchange(&m_refreshing, 0);
+            Release();
+            return;
+        }
+        CloseHandle(thread);
+    }
+
+    static DWORD WINAPI RefreshThread(void* context)
+    {
+        auto band = static_cast<RealTimeNotesBand*>(context);
+        NoteState state = FetchState(band->m_configDir);
+
+        EnterCriticalSection(&band->m_stateLock);
+        band->m_state = state;
+        LeaveCriticalSection(&band->m_stateLock);
+
+        if (band->m_hwnd)
+        {
+            PostMessageW(band->m_hwnd, kStatusReadyMessage, 0, 0);
+        }
+
+        InterlockedExchange(&band->m_refreshing, 0);
+        band->Release();
+        return 0;
+    }
+
+    NoteState CurrentState()
+    {
+        EnterCriticalSection(&m_stateLock);
+        NoteState copy = m_state;
+        LeaveCriticalSection(&m_stateLock);
+        return copy;
+    }
+
+    UINT CurrentRefreshSeconds()
+    {
+        NoteState state = CurrentState();
+        return std::max(kMinRefreshSeconds, state.refreshSeconds);
+    }
+
+    int CurrentDpi() const
+    {
+        HDC hdc = m_hwnd ? GetDC(m_hwnd) : GetDC(nullptr);
+        int dpi = hdc ? GetDeviceCaps(hdc, LOGPIXELSX) : 96;
+        if (hdc)
+        {
+            ReleaseDC(m_hwnd, hdc);
+        }
+        return dpi > 0 ? dpi : 96;
+    }
+
+    SIZE DesiredSize()
+    {
+        NoteState state = CurrentState();
+        int dpi = CurrentDpi();
+        HDC hdc = GetDC(m_hwnd);
+        if (!hdc)
+        {
+            return { MulDiv(132, dpi, 96), MulDiv(34, dpi, 96) };
+        }
+
+        HFONT font = CreateBandFont(dpi);
+        HFONT oldFont = reinterpret_cast<HFONT>(SelectObject(hdc, font));
+
+        SIZE line1{};
+        SIZE line2{};
+        GetTextExtentPoint32W(hdc, state.line1.c_str(), static_cast<int>(state.line1.size()), &line1);
+        GetTextExtentPoint32W(hdc, state.line2.c_str(), static_cast<int>(state.line2.size()), &line2);
+        SelectObject(hdc, oldFont);
+        DeleteObject(font);
+        ReleaseDC(m_hwnd, hdc);
+
+        int icon = MulDiv(24, dpi, 96);
+        int margin = MulDiv(6, dpi, 96);
+        int width = icon + margin * 4 + std::max(line1.cx, line2.cx);
+        width = std::max(MulDiv(118, dpi, 96), std::min(MulDiv(230, dpi, 96), width));
+        int height = std::max(MulDiv(30, dpi, 96), icon + margin);
+        return { width, height };
+    }
+
+    std::wstring IconPathFor(const NoteState& state)
+    {
+        const auto& metadata = MetadataFor(state.resource);
+        std::wstring relative = metadata.notFullIcon;
+        if (state.state == StateKind::Full)
+        {
+            relative = metadata.fullIcon;
+        }
+        else if (state.state == StateKind::Error)
+        {
+            relative = metadata.errorIcon;
+        }
+
+        std::wstring iconPath = JoinPath(m_assetDir, relative);
+        if (FileExists(iconPath))
+        {
+            return iconPath;
+        }
+
+        std::wstring legacyPath = JoinPath(m_configDir, JoinPath(L"embedded\\assets", relative));
+        if (FileExists(legacyPath))
+        {
+            return legacyPath;
+        }
+
+        legacyPath = JoinPath(m_installDir, JoinPath(L"embedded\\assets", relative));
+        if (FileExists(legacyPath))
+        {
+            return legacyPath;
+        }
+
+        return iconPath;
+    }
+
+    void DrawFallbackIcon(HDC hdc, const RECT& rc, const NoteState& state, int dpi)
+    {
+        COLORREF fill = RGB(73, 115, 220);
+        if (state.resource == ResourceKind::Stamina)
+        {
+            fill = RGB(42, 120, 162);
+        }
+        else if (state.resource == ResourceKind::Charge)
+        {
+            fill = RGB(190, 130, 42);
+        }
+        if (state.state == StateKind::Error)
+        {
+            fill = RGB(192, 58, 58);
+        }
+        else if (state.state == StateKind::Full)
+        {
+            fill = RGB(54, 148, 80);
+        }
+
+        HBRUSH brush = CreateSolidBrush(fill);
+        HBRUSH oldBrush = reinterpret_cast<HBRUSH>(SelectObject(hdc, brush));
+        HPEN pen = CreatePen(PS_SOLID, MulDiv(1, dpi, 96), RGB(255, 255, 255));
+        HPEN oldPen = reinterpret_cast<HPEN>(SelectObject(hdc, pen));
+        Ellipse(hdc, rc.left, rc.top, rc.right, rc.bottom);
+        SelectObject(hdc, oldPen);
+        SelectObject(hdc, oldBrush);
+        DeleteObject(pen);
+        DeleteObject(brush);
+
+        wchar_t label[2] = { L'R', 0 };
+        if (state.state == StateKind::Error)
+        {
+            label[0] = L'!';
+        }
+        else if (state.resource == ResourceKind::Stamina)
+        {
+            label[0] = L'S';
+        }
+        else if (state.resource == ResourceKind::Charge)
+        {
+            label[0] = L'C';
+        }
+
+        HFONT font = CreateFontW(-MulDiv(10, dpi, 72), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        HFONT oldFont = reinterpret_cast<HFONT>(SelectObject(hdc, font));
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, RGB(255, 255, 255));
+        RECT textRc = rc;
+        DrawTextW(hdc, label, -1, &textRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(hdc, oldFont);
+        DeleteObject(font);
+    }
+
+    void OnPaint()
+    {
+        PAINTSTRUCT ps{};
+        HDC hdc = BeginPaint(m_hwnd, &ps);
+        if (!hdc)
+        {
+            return;
+        }
+
+        RECT rc{};
+        GetClientRect(m_hwnd, &rc);
+        if (FAILED(DrawThemeParentBackground(m_hwnd, hdc, &rc)))
+        {
+            FillRect(hdc, &rc, reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1));
+        }
+
+        NoteState state = CurrentState();
+        int dpi = CurrentDpi();
+        int margin = MulDiv(6, dpi, 96);
+        int iconSize = MulDiv(24, dpi, 96);
+        int iconY = rc.top + ((rc.bottom - rc.top) - iconSize) / 2;
+        std::wstring iconPath = IconPathFor(state);
+        HICON icon = reinterpret_cast<HICON>(LoadImageW(nullptr, iconPath.c_str(), IMAGE_ICON, iconSize, iconSize, LR_LOADFROMFILE));
+        RECT iconRc{ rc.left + margin, iconY, rc.left + margin + iconSize, iconY + iconSize };
+        if (icon)
+        {
+            DrawIconEx(hdc, iconRc.left, iconRc.top, icon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
+            DestroyIcon(icon);
+        }
+        else
+        {
+            DrawFallbackIcon(hdc, iconRc, state, dpi);
+        }
+
+        int textLeft = rc.left + margin * 2 + iconSize;
+        RECT textRc{ textLeft, rc.top, rc.right - margin, rc.bottom };
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, ShouldUseLightTaskbarText() ? RGB(255, 255, 255) : RGB(32, 32, 32));
+
+        HFONT font = CreateBandFont(dpi);
+        HFONT oldFont = reinterpret_cast<HFONT>(SelectObject(hdc, font));
+
+        RECT line1Rc = textRc;
+        line1Rc.bottom = rc.top + (rc.bottom - rc.top) / 2 + MulDiv(1, dpi, 96);
+        DrawTextW(hdc, state.line1.c_str(), -1, &line1Rc, DT_LEFT | DT_BOTTOM | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        RECT line2Rc = textRc;
+        line2Rc.top = rc.top + (rc.bottom - rc.top) / 2 - MulDiv(1, dpi, 96);
+        DrawTextW(hdc, state.line2.c_str(), -1, &line2Rc, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        SelectObject(hdc, oldFont);
+        DeleteObject(font);
+        EndPaint(m_hwnd, &ps);
+    }
+
+    void NotifyBandInfoChanged()
+    {
+        if (!m_site)
+        {
+            return;
+        }
+
+        IOleCommandTarget* commandTarget = nullptr;
+        if (SUCCEEDED(m_site->QueryInterface(IID_IOleCommandTarget, reinterpret_cast<void**>(&commandTarget))))
+        {
+            VARIANTARG var{};
+            VariantInit(&var);
+            var.vt = VT_I4;
+            var.lVal = static_cast<LONG>(m_bandId);
+            commandTarget->Exec(&CGID_DeskBand, DBID_BANDINFOCHANGED, 0, &var, nullptr);
+            commandTarget->Release();
+        }
+    }
+
+    void ShowContextMenu(int x, int y)
+    {
+        if (x == -1 && y == -1)
+        {
+            RECT rc{};
+            GetWindowRect(m_hwnd, &rc);
+            x = rc.left;
+            y = rc.bottom;
+        }
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return;
+        }
+
+        NoteState state = CurrentState();
+        AppendMenuW(menu, MF_STRING, 100, L"Refresh now");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        for (const auto& item : kResources)
+        {
+            UINT flags = MF_STRING;
+            if (state.resource == item.resource)
+            {
+                flags |= MF_CHECKED;
+            }
+            AppendMenuW(menu, flags, 200 + static_cast<UINT>(item.resource), item.displayName);
+        }
+
+        SetForegroundWindow(m_hwnd);
+        UINT command = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, m_hwnd, nullptr);
+        DestroyMenu(menu);
+
+        if (command == 100)
+        {
+            BeginRefresh();
+        }
+        else if (command >= 200 && command < 203)
+        {
+            ResourceKind resource = static_cast<ResourceKind>(command - 200);
+            WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", MetadataFor(resource).registryValue);
+            EnterCriticalSection(&m_stateLock);
+            m_state.resource = resource;
+            m_state.state = StateKind::Loading;
+            m_state.line1 = L"Loading";
+            m_state.line2 = MetadataFor(resource).displayName;
+            m_state.tooltip = L"Refreshing Real-Time Notes";
+            LeaveCriticalSection(&m_stateLock);
+            InvalidateRect(m_hwnd, nullptr, TRUE);
+            BeginRefresh();
+        }
+    }
+
+    long m_ref = 1;
+    IUnknown* m_site = nullptr;
+    IInputObjectSite* m_inputSite = nullptr;
+    HWND m_hwnd = nullptr;
+    HWND m_parent = nullptr;
+    DWORD m_bandId = 0;
+    DWORD m_viewMode = 0;
+    bool m_hasFocus = false;
+    bool m_compositionEnabled = false;
+    long m_refreshing = 0;
+    CRITICAL_SECTION m_stateLock{};
+    NoteState m_state{};
+    std::wstring m_installDir;
+    std::wstring m_configDir;
+    std::wstring m_assetDir;
+};
+
+class ClassFactory final : public IClassFactory
+{
+public:
+    IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override
+    {
+        if (!ppv)
+        {
+            return E_POINTER;
+        }
+        *ppv = nullptr;
+        if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_IClassFactory))
+        {
+            *ppv = static_cast<IClassFactory*>(this);
+            AddRef();
+            return S_OK;
+        }
+        return E_NOINTERFACE;
+    }
+
+    IFACEMETHODIMP_(ULONG) AddRef() override
+    {
+        return InterlockedIncrement(&m_ref);
+    }
+
+    IFACEMETHODIMP_(ULONG) Release() override
+    {
+        ULONG count = InterlockedDecrement(&m_ref);
+        if (count == 0)
+        {
+            delete this;
+        }
+        return count;
+    }
+
+    IFACEMETHODIMP CreateInstance(IUnknown* outer, REFIID riid, void** ppv) override
+    {
+        if (outer)
+        {
+            return CLASS_E_NOAGGREGATION;
+        }
+
+        auto band = new (std::nothrow) RealTimeNotesBand();
+        if (!band)
+        {
+            return E_OUTOFMEMORY;
+        }
+        HRESULT hr = band->QueryInterface(riid, ppv);
+        band->Release();
+        return hr;
+    }
+
+    IFACEMETHODIMP LockServer(BOOL lock) override
+    {
+        if (lock)
+        {
+            InterlockedIncrement(&g_lockCount);
+        }
+        else
+        {
+            InterlockedDecrement(&g_lockCount);
+        }
+        return S_OK;
+    }
+
+private:
+    long m_ref = 1;
+};
+
+static HRESULT SetRegValueString(HKEY root, const std::wstring& subkey, const wchar_t* valueName, const std::wstring& value)
+{
+    HKEY key = nullptr;
+    LONG result = RegCreateKeyExW(root, subkey.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr);
+    if (result != ERROR_SUCCESS)
+    {
+        return HRESULT_FROM_WIN32(result);
+    }
+    result = RegSetValueExW(key, valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(key);
+    return HRESULT_FROM_WIN32(result);
+}
+
+static HRESULT EnsureRegKey(HKEY root, const std::wstring& subkey)
+{
+    HKEY key = nullptr;
+    LONG result = RegCreateKeyExW(root, subkey.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr);
+    if (result == ERROR_SUCCESS)
+    {
+        RegCloseKey(key);
+    }
+    return HRESULT_FROM_WIN32(result);
+}
+
+static void DeleteCategoryCache()
+{
+    std::wstring base = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Discardable\\PostSetup\\Component Categories\\";
+    RegDeleteTreeW(HKEY_CURRENT_USER, (base + kDeskBandCatid + L"\\Enum").c_str());
+}
+
+extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void*)
+{
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        g_module = instance;
+        DisableThreadLibraryCalls(instance);
+    }
+    return TRUE;
+}
+
+extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllCanUnloadNow()
+{
+    return (g_objectCount == 0 && g_lockCount == 0) ? S_OK : S_FALSE;
+}
+
+extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllGetClassObject(REFCLSID clsid, REFIID riid, void** ppv)
+{
+    if (!IsEqualCLSID(clsid, CLSID_RealTimeNotesDeskband))
+    {
+        return CLASS_E_CLASSNOTAVAILABLE;
+    }
+
+    auto factory = new (std::nothrow) ClassFactory();
+    if (!factory)
+    {
+        return E_OUTOFMEMORY;
+    }
+    HRESULT hr = factory->QueryInterface(riid, ppv);
+    factory->Release();
+    return hr;
+}
+
+extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllRegisterServer()
+{
+    std::wstring clsid = GuidToString(CLSID_RealTimeNotesDeskband);
+    std::wstring clsidKey = std::wstring(kClassesClsidKey) + L"\\" + clsid;
+    std::wstring modulePath = ModulePath();
+    std::wstring installDir = ParentDirectoryOf(modulePath);
+    std::wstring configDir = DefaultConfigDir(installDir);
+    std::wstring assetDir = DefaultAssetDir(installDir);
+
+    HRESULT hr = SetRegValueString(HKEY_CURRENT_USER, clsidKey, nullptr, kBandName);
+    if (FAILED(hr)) return hr;
+    hr = SetRegValueString(HKEY_CURRENT_USER, clsidKey + L"\\InprocServer32", nullptr, modulePath);
+    if (FAILED(hr)) return hr;
+    hr = SetRegValueString(HKEY_CURRENT_USER, clsidKey + L"\\InprocServer32", L"ThreadingModel", L"Apartment");
+    if (FAILED(hr)) return hr;
+    hr = EnsureRegKey(HKEY_CURRENT_USER, clsidKey + L"\\Implemented Categories\\" + kDeskBandCatid);
+    if (FAILED(hr)) return hr;
+    hr = SetRegValueString(HKEY_CURRENT_USER, L"Software\\Classes\\Component Categories\\" + std::wstring(kDeskBandCatid), nullptr, L"Desk Band");
+    if (FAILED(hr)) return hr;
+
+    WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", installDir);
+    if (ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", L"").empty())
+    {
+        WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", configDir);
+    }
+    if (ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"AssetDir", L"").empty())
+    {
+        WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"AssetDir", assetDir);
+    }
+    if (ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", L"").empty())
+    {
+        WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", L"auto");
+    }
+
+    DeleteCategoryCache();
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllUnregisterServer()
+{
+    std::wstring clsid = GuidToString(CLSID_RealTimeNotesDeskband);
+    std::wstring clsidKey = std::wstring(kClassesClsidKey) + L"\\" + clsid;
+    RegDeleteTreeW(HKEY_CURRENT_USER, clsidKey.c_str());
+    DeleteCategoryCache();
+    return S_OK;
+}
