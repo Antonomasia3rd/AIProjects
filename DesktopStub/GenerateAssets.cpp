@@ -1,4 +1,4 @@
-// compile command: cl /std:c++17 /EHsc /DUNICODE /D_UNICODE GenerateAssets.cpp /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib /SUBSYSTEM:WINDOWS
+﻿// compile command: cl /std:c++17 /EHsc /DUNICODE /D_UNICODE GenerateAssets.cpp /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib /SUBSYSTEM:WINDOWS
 #define NOMINMAX
 #include <windows.h>
 #include <gdiplus.h>
@@ -61,9 +61,11 @@ enum class ErrorAction
 
 static const wchar_t* StateEnabled(bool v);
 static const wchar_t* StateOn(bool v);
+static int ClampInt(int value, int minValue, int maxValue);
 
 static std::wstring g_iniPath, g_logPath, g_exePath;
 static std::mutex g_pathMutex;
+static std::atomic<int> g_logAppendLockWaitMs(1000);
 static constexpr const wchar_t* WINDOW_CLASS_NAME = L"DesktopTileGeneratorTrayWnd";
 static constexpr const wchar_t* SINGLE_INSTANCE_MUTEX_BASE = L"Local\\DesktopTileGenerator.GenerateAssets";
 static constexpr const wchar_t* SINGLE_INSTANCE_MESSAGE_BASE = L"DesktopTileGenerator.RestoreRunningInstance";
@@ -195,7 +197,8 @@ static bool WriteWholeFileBytesDirect(const std::wstring& path, const std::vecto
 
     if (!CloseHandle(h) && ok)
     {
-        SetLastError(GetLastError());
+        DWORD err = GetLastError();
+        SetLastError(err);
         return false;
     }
 
@@ -393,8 +396,13 @@ static bool AppendUtf8TextFile(const std::wstring& path, const std::wstring& tex
     if (h == INVALID_HANDLE_VALUE)
         return false;
 
+    OVERLAPPED lockOv{};
+    bool locked = false;
+
     auto fail = [&](DWORD err) -> bool
     {
+        if (locked)
+            UnlockFileEx(h, 0, MAXDWORD, MAXDWORD, &lockOv);
         CloseHandle(h);
         SetLastError(err == ERROR_SUCCESS ? ERROR_WRITE_FAULT : err);
         return false;
@@ -420,6 +428,28 @@ static bool AppendUtf8TextFile(const std::wstring& path, const std::wstring& tex
         }
         return true;
     };
+
+    DWORD lockWaitMs = static_cast<DWORD>(ClampInt(g_logAppendLockWaitMs.load(), 0, 60000));
+    ULONGLONG lockStart = GetTickCount64();
+    for (;;)
+    {
+        if (LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, MAXDWORD, &lockOv))
+        {
+            locked = true;
+            break;
+        }
+
+        DWORD err = GetLastError();
+        if (err != ERROR_LOCK_VIOLATION)
+            return fail(err);
+
+        ULONGLONG elapsed = GetTickCount64() - lockStart;
+        if (lockWaitMs == 0 || elapsed >= lockWaitMs)
+            return fail(ERROR_LOCK_VIOLATION);
+
+        DWORD remaining = static_cast<DWORD>(lockWaitMs - elapsed);
+        Sleep(std::min<DWORD>(remaining, 25));
+    }
 
     LARGE_INTEGER sz{};
     if (!GetFileSizeEx(h, &sz))
@@ -447,8 +477,25 @@ static bool AppendUtf8TextFile(const std::wstring& path, const std::wstring& tex
     if (!writeAll(bytes))
         return fail(GetLastError());
 
+    if (locked)
+    {
+        if (!UnlockFileEx(h, 0, MAXDWORD, MAXDWORD, &lockOv))
+        {
+            DWORD err = GetLastError();
+            locked = false;
+            CloseHandle(h);
+            SetLastError(err == ERROR_SUCCESS ? ERROR_WRITE_FAULT : err);
+            return false;
+        }
+        locked = false;
+    }
+
     if (!CloseHandle(h))
+    {
+        DWORD err = GetLastError();
+        SetLastError(err);
         return false;
+    }
     return true;
 }
 
@@ -1480,6 +1527,7 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"Logging", L"1"},
     {L"Settings", L"LogPath", L""},
     {L"Settings", L"LogBufferLines", L"1024"},
+    {L"Settings", L"LogAppendLockWaitMs", L"1000"},
     {L"Settings", L"TrayIcon", L"1"},
     {L"Settings", L"TrayIconHiddenDelayMs", L"750"},
     {L"Settings", L"ShowConsole", L"0"},
@@ -1521,6 +1569,8 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"PowerShellTimeoutMs", L"120000"},
     {L"Settings", L"PowerShellTerminateWaitMs", L"5000"},
     {L"Settings", L"RegistrationUnresolvedBlockMs", L"300000"},
+    {L"Settings", L"SavePngReplaceRetries", L"3"},
+    {L"Settings", L"SavePngReplaceRetryDelayMs", L"75"},
 
     // Manifest
     {L"Manifest", L"IdentityName", L""},
@@ -1656,15 +1706,19 @@ static const StringDefault g_stringDefaults[] = {
     {L"ShutdownRepeatNoticeMsLabel", L"Shutdown repeat notice: %d ms"},
     {L"SingleInstanceSignalRetriesLabel", L"Single-instance signal retries: %d"},
     {L"SingleInstanceSignalDelayMsLabel", L"Single-instance signal delay: %d ms"},
-    {L"ComRegistrationTimeoutMsLabel", L"COM registration timeout: %d ms"},
+    {L"ComRegistrationTimeoutMsLabel", L"COM registration timeout: %s"},
     {L"ComRegistrationCancelWaitMsLabel", L"COM cancel wait: %d ms"},
     {L"TrayIconHiddenDelayMsLabel", L"Tray hide warning delay: %d ms"},
     {L"LogBufferLinesLabel", L"Log buffer lines: %d"},
+    {L"LogAppendLockWaitMsLabel", L"Log append lock wait: %d ms"},
     {L"PowerShellExeLabel", L"PowerShell executable: %s"},
     {L"PowerShellPollMsLabel", L"PowerShell poll: %d ms"},
-    {L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %d ms"},
+    {L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %s"},
     {L"PowerShellTerminateWaitMsLabel", L"PowerShell terminate wait: %d ms"},
     {L"RegistrationUnresolvedBlockMsLabel", L"Unresolved registration block: %d ms"},
+    {L"SavePngReplaceRetriesLabel", L"PNG replace retries: %d"},
+    {L"SavePngReplaceRetryDelayMsLabel", L"PNG replace retry delay: %d ms"},
+    {L"TimeoutInfiniteText", L"infinite"},
     {L"ManifestTitle", L"Manifest:"},
     {L"ManifestIdentityNameLabel", L"Manifest identity: %s"},
     {L"ManifestPublisherLabel", L"Manifest publisher: %s"},
@@ -1796,6 +1850,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"SavePngInvalidInput", L"[!] SavePNG skipped for %s: invalid bitmap, path, or PNG encoder."},
     {L"SavePngGdiFailure", L"[!] SavePNG GDI+ save failed for %s (status=%d)."},
     {L"SavePngReplaceFailed", L"[!] SavePNG replace failed for %s (temp=%s)."},
+    {L"SavePngReplaceRetrying", L"[!] SavePNG replace attempt %d/%d failed for %s (error %lu: %s); retrying in %d ms."},
     {L"DeletedDisabledAsset", L"[i] Deleted disabled asset file: %s"},
     {L"FailedDeleteDisabledAsset", L"[!] Failed to delete disabled asset file: %s"},
     {L"ReRegisteringManifest", L"Re-registering AppxManifest due to regenerated assets."},
@@ -1806,7 +1861,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"ManifestPath", L"Manifest path: %s"},
     {L"UsingComRegistration", L"Using COM Appx registration..."},
     {L"ComRegistrationUri", L"[i] COM registration URI: %s"},
-    {L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%d ms, cancel wait=%d ms"},
+    {L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%s, cancel wait=%d ms"},
     {L"InvalidManifestPath", L"Invalid manifest path."},
     {L"ComRegistrationSuccess", L"COM registration success."},
     {L"ComRegistrationTimedOut", L"COM registration timed out."},
@@ -1817,7 +1872,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"ComExceptionMessage", L"COM message: %s"},
     {L"LaunchingPowerShellRegistration", L"Launching PowerShell registration..."},
     {L"PowerShellCommand", L"Command: %s"},
-    {L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%d ms, poll=%d ms, terminate wait=%d ms)"},
+    {L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%s, poll=%d ms, terminate wait=%d ms)"},
     {L"PowerShellProcessStarted", L"[i] PowerShell process started (pid=%lu)."},
     {L"PowerShellTerminateRequested", L"[!] Terminating timed-out PowerShell process (pid=%lu)."},
     {L"PowerShellTerminateFailed", L"[!] Failed to terminate timed-out PowerShell process (pid=%lu)."},
@@ -1849,6 +1904,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"WallpaperAndFitChangeDetected", L"Wallpaper and fit mode change detected."},
     {L"WallpaperChangeDetected", L"Wallpaper change detected."},
     {L"WallpaperDetectionEmptyDuringPoll", L"[!] Wallpaper change ignored: wallpaper detection returned empty."},
+    {L"WallpaperDetectionEmptyUsingLast", L"[!] Wallpaper detection returned empty during a fit/DPI-only change; using the last valid wallpaper path: %s"},
     {L"WallpaperDetectionMethodFailed", L"[!] Wallpaper detection method %s did not return a wallpaper path."},
     {L"WallpaperDetectionMethodReturnedInvalid", L"[!] Wallpaper detection method %s returned an unusable path: %s"},
     {L"WallpaperDetectionFallbackSelected", L"[i] Wallpaper detection fallback selected %s: %s"},
@@ -2008,6 +2064,10 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"MissingManifestAssets", L"[!] Registration failed and manifest assets are missing: %s", L"[!] Registration failed and manifest assets are missing or invalid: %s");
     UpgradeStringDefaultIfUnmodified(L"NotificationMissingManifestAssets", L"Registration failed because one or more manifest assets are missing.", L"Registration failed; one or more manifest assets are missing or invalid.");
     UpgradeStringDefaultIfUnmodified(L"NotificationMissingManifestAssets", L"Registration failed because one or more manifest assets are missing or invalid.", L"Registration failed; one or more manifest assets are missing or invalid.");
+    UpgradeStringDefaultIfUnmodified(L"ComRegistrationTimeoutMsLabel", L"COM registration timeout: %d ms", L"COM registration timeout: %s");
+    UpgradeStringDefaultIfUnmodified(L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %d ms", L"PowerShell timeout: %s");
+    UpgradeStringDefaultIfUnmodified(L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%d ms, cancel wait=%d ms", L"[i] COM registration timeout=%s, cancel wait=%d ms");
+    UpgradeStringDefaultIfUnmodified(L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%d ms, poll=%d ms, terminate wait=%d ms)", L"[i] PowerShell executable: %s (timeout=%s, poll=%d ms, terminate wait=%d ms)");
 }
 
 // Logging buffer
@@ -2133,6 +2193,7 @@ struct UiStrings
     std::wstring savePngInvalidInput;
     std::wstring savePngGdiFailure;
     std::wstring savePngReplaceFailed;
+    std::wstring savePngReplaceRetrying;
     std::wstring deletedDisabledAsset;
     std::wstring failedDeleteDisabledAsset;
     std::wstring reRegisteringManifest;
@@ -2187,6 +2248,7 @@ struct UiStrings
     std::wstring wallpaperAndFitChangeDetected;
     std::wstring wallpaperChangeDetected;
     std::wstring wallpaperDetectionEmptyDuringPoll;
+    std::wstring wallpaperDetectionEmptyUsingLast;
     std::wstring wallpaperDetectionMethodFailed;
     std::wstring wallpaperDetectionMethodReturnedInvalid;
     std::wstring wallpaperDetectionFallbackSelected;
@@ -2286,11 +2348,15 @@ struct UiStrings
     std::wstring comRegistrationCancelWaitMsLabel;
     std::wstring trayIconHiddenDelayMsLabel;
     std::wstring logBufferLinesLabel;
+    std::wstring logAppendLockWaitMsLabel;
     std::wstring powerShellExeLabel;
     std::wstring powerShellPollMsLabel;
     std::wstring powerShellTimeoutMsLabel;
     std::wstring powerShellTerminateWaitMsLabel;
     std::wstring registrationUnresolvedBlockMsLabel;
+    std::wstring savePngReplaceRetriesLabel;
+    std::wstring savePngReplaceRetryDelayMsLabel;
+    std::wstring timeoutInfiniteText;
     std::wstring manifestTitle;
     std::wstring manifestIdentityNameLabel;
     std::wstring manifestPublisherLabel;
@@ -2520,6 +2586,13 @@ static std::wstring IntToWString(int value)
     wchar_t buf[32];
     swprintf(buf, _countof(buf), L"%d", value);
     return buf;
+}
+
+static std::wstring TimeoutDisplayText(int timeoutMs)
+{
+    if (timeoutMs <= 0)
+        return g_ui.timeoutInfiniteText.empty() ? L"infinite" : g_ui.timeoutInfiniteText;
+    return IntToWString(timeoutMs) + L" ms";
 }
 
 std::wstring IniReadS(const wchar_t* s, const wchar_t* k, const wchar_t* d)
@@ -3463,6 +3536,7 @@ void LoadUiStrings()
     g_ui.savePngInvalidInput = IniReadS(L"Strings", L"SavePngInvalidInput", L"[!] SavePNG skipped for %s: invalid bitmap, path, or PNG encoder.");
     g_ui.savePngGdiFailure = IniReadS(L"Strings", L"SavePngGdiFailure", L"[!] SavePNG GDI+ save failed for %s (status=%d).");
     g_ui.savePngReplaceFailed = IniReadS(L"Strings", L"SavePngReplaceFailed", L"[!] SavePNG replace failed for %s (temp=%s).");
+    g_ui.savePngReplaceRetrying = IniReadS(L"Strings", L"SavePngReplaceRetrying", L"[!] SavePNG replace attempt %d/%d failed for %s (error %lu: %s); retrying in %d ms.");
     g_ui.deletedDisabledAsset = IniReadS(L"Strings", L"DeletedDisabledAsset", L"[i] Deleted disabled asset file: %s");
     g_ui.failedDeleteDisabledAsset = IniReadS(L"Strings", L"FailedDeleteDisabledAsset", L"[!] Failed to delete disabled asset file: %s");
 
@@ -3474,7 +3548,7 @@ void LoadUiStrings()
     g_ui.manifestPath = IniReadS(L"Strings", L"ManifestPath", L"Manifest path: %s");
     g_ui.usingComRegistration = IniReadS(L"Strings", L"UsingComRegistration", L"Using COM Appx registration...");
     g_ui.comRegistrationUri = IniReadS(L"Strings", L"ComRegistrationUri", L"[i] COM registration URI: %s");
-    g_ui.comRegistrationTimeoutDetails = IniReadS(L"Strings", L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%d ms, cancel wait=%d ms");
+    g_ui.comRegistrationTimeoutDetails = IniReadS(L"Strings", L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%s, cancel wait=%d ms");
     g_ui.invalidManifestPath = IniReadS(L"Strings", L"InvalidManifestPath", L"Invalid manifest path.");
     g_ui.comRegistrationSuccess = IniReadS(L"Strings", L"ComRegistrationSuccess", L"COM registration success.");
     g_ui.comRegistrationTimedOut = IniReadS(L"Strings", L"ComRegistrationTimedOut", L"COM registration timed out.");
@@ -3485,7 +3559,7 @@ void LoadUiStrings()
     g_ui.comExceptionMessage = IniReadS(L"Strings", L"ComExceptionMessage", L"COM message: %s");
     g_ui.launchingPowerShellRegistration = IniReadS(L"Strings", L"LaunchingPowerShellRegistration", L"Launching PowerShell registration...");
     g_ui.powerShellCommand = IniReadS(L"Strings", L"PowerShellCommand", L"Command: %s");
-    g_ui.powerShellLaunchDetails = IniReadS(L"Strings", L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%d ms, poll=%d ms, terminate wait=%d ms)");
+    g_ui.powerShellLaunchDetails = IniReadS(L"Strings", L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%s, poll=%d ms, terminate wait=%d ms)");
     g_ui.powerShellProcessStarted = IniReadS(L"Strings", L"PowerShellProcessStarted", L"[i] PowerShell process started (pid=%lu).");
     g_ui.powerShellTerminateRequested = IniReadS(L"Strings", L"PowerShellTerminateRequested", L"[!] Terminating timed-out PowerShell process (pid=%lu).");
     g_ui.powerShellTerminateFailed = IniReadS(L"Strings", L"PowerShellTerminateFailed", L"[!] Failed to terminate timed-out PowerShell process (pid=%lu).");
@@ -3518,6 +3592,7 @@ void LoadUiStrings()
     g_ui.wallpaperAndFitChangeDetected = IniReadS(L"Strings", L"WallpaperAndFitChangeDetected", L"Wallpaper and fit mode change detected.");
     g_ui.wallpaperChangeDetected = IniReadS(L"Strings", L"WallpaperChangeDetected", L"Wallpaper change detected.");
     g_ui.wallpaperDetectionEmptyDuringPoll = IniReadS(L"Strings", L"WallpaperDetectionEmptyDuringPoll", L"[!] Wallpaper change ignored: wallpaper detection returned empty.");
+    g_ui.wallpaperDetectionEmptyUsingLast = IniReadS(L"Strings", L"WallpaperDetectionEmptyUsingLast", L"[!] Wallpaper detection returned empty during a fit/DPI-only change; using the last valid wallpaper path: %s");
     g_ui.wallpaperDetectionMethodFailed = IniReadS(L"Strings", L"WallpaperDetectionMethodFailed", L"[!] Wallpaper detection method %s did not return a wallpaper path.");
     g_ui.wallpaperDetectionMethodReturnedInvalid = IniReadS(L"Strings", L"WallpaperDetectionMethodReturnedInvalid", L"[!] Wallpaper detection method %s returned an unusable path: %s");
     g_ui.wallpaperDetectionFallbackSelected = IniReadS(L"Strings", L"WallpaperDetectionFallbackSelected", L"[i] Wallpaper detection fallback selected %s: %s");
@@ -3611,15 +3686,19 @@ void LoadUiStrings()
     g_ui.shutdownRepeatNoticeMsLabel = IniReadS(L"Strings", L"ShutdownRepeatNoticeMsLabel", L"Shutdown repeat notice: %d ms");
     g_ui.singleInstanceSignalRetriesLabel = IniReadS(L"Strings", L"SingleInstanceSignalRetriesLabel", L"Single-instance signal retries: %d");
     g_ui.singleInstanceSignalDelayMsLabel = IniReadS(L"Strings", L"SingleInstanceSignalDelayMsLabel", L"Single-instance signal delay: %d ms");
-    g_ui.comRegistrationTimeoutMsLabel = IniReadS(L"Strings", L"ComRegistrationTimeoutMsLabel", L"COM registration timeout: %d ms");
+    g_ui.comRegistrationTimeoutMsLabel = IniReadS(L"Strings", L"ComRegistrationTimeoutMsLabel", L"COM registration timeout: %s");
     g_ui.comRegistrationCancelWaitMsLabel = IniReadS(L"Strings", L"ComRegistrationCancelWaitMsLabel", L"COM cancel wait: %d ms");
     g_ui.trayIconHiddenDelayMsLabel = IniReadS(L"Strings", L"TrayIconHiddenDelayMsLabel", L"Tray hide warning delay: %d ms");
     g_ui.logBufferLinesLabel = IniReadS(L"Strings", L"LogBufferLinesLabel", L"Log buffer lines: %d");
+    g_ui.logAppendLockWaitMsLabel = IniReadS(L"Strings", L"LogAppendLockWaitMsLabel", L"Log append lock wait: %d ms");
     g_ui.powerShellExeLabel = IniReadS(L"Strings", L"PowerShellExeLabel", L"PowerShell executable: %s");
     g_ui.powerShellPollMsLabel = IniReadS(L"Strings", L"PowerShellPollMsLabel", L"PowerShell poll: %d ms");
-    g_ui.powerShellTimeoutMsLabel = IniReadS(L"Strings", L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %d ms");
+    g_ui.powerShellTimeoutMsLabel = IniReadS(L"Strings", L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %s");
     g_ui.powerShellTerminateWaitMsLabel = IniReadS(L"Strings", L"PowerShellTerminateWaitMsLabel", L"PowerShell terminate wait: %d ms");
     g_ui.registrationUnresolvedBlockMsLabel = IniReadS(L"Strings", L"RegistrationUnresolvedBlockMsLabel", L"Unresolved registration block: %d ms");
+    g_ui.savePngReplaceRetriesLabel = IniReadS(L"Strings", L"SavePngReplaceRetriesLabel", L"PNG replace retries: %d");
+    g_ui.savePngReplaceRetryDelayMsLabel = IniReadS(L"Strings", L"SavePngReplaceRetryDelayMsLabel", L"PNG replace retry delay: %d ms");
+    g_ui.timeoutInfiniteText = IniReadS(L"Strings", L"TimeoutInfiniteText", L"infinite");
     g_ui.manifestTitle = IniReadS(L"Strings", L"ManifestTitle", L"Manifest:");
     g_ui.manifestIdentityNameLabel = IniReadS(L"Strings", L"ManifestIdentityNameLabel", L"Manifest identity: %s");
     g_ui.manifestPublisherLabel = IniReadS(L"Strings", L"ManifestPublisherLabel", L"Manifest publisher: %s");
@@ -3787,15 +3866,18 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.shutdownRepeatNoticeMsLabel, L"ShutdownRepeatNoticeMsLabel", { L"%d" });
     RequireFormat(g_ui.singleInstanceSignalRetriesLabel, L"SingleInstanceSignalRetriesLabel", { L"%d" });
     RequireFormat(g_ui.singleInstanceSignalDelayMsLabel, L"SingleInstanceSignalDelayMsLabel", { L"%d" });
-    RequireFormat(g_ui.comRegistrationTimeoutMsLabel, L"ComRegistrationTimeoutMsLabel", { L"%d" });
+    RequireFormat(g_ui.comRegistrationTimeoutMsLabel, L"ComRegistrationTimeoutMsLabel", { L"%s" });
     RequireFormat(g_ui.comRegistrationCancelWaitMsLabel, L"ComRegistrationCancelWaitMsLabel", { L"%d" });
     RequireFormat(g_ui.trayIconHiddenDelayMsLabel, L"TrayIconHiddenDelayMsLabel", { L"%d" });
     RequireFormat(g_ui.logBufferLinesLabel, L"LogBufferLinesLabel", { L"%d" });
+    RequireFormat(g_ui.logAppendLockWaitMsLabel, L"LogAppendLockWaitMsLabel", { L"%d" });
     RequireFormat(g_ui.powerShellExeLabel, L"PowerShellExeLabel", { L"%s" });
     RequireFormat(g_ui.powerShellPollMsLabel, L"PowerShellPollMsLabel", { L"%d" });
-    RequireFormat(g_ui.powerShellTimeoutMsLabel, L"PowerShellTimeoutMsLabel", { L"%d" });
+    RequireFormat(g_ui.powerShellTimeoutMsLabel, L"PowerShellTimeoutMsLabel", { L"%s" });
     RequireFormat(g_ui.powerShellTerminateWaitMsLabel, L"PowerShellTerminateWaitMsLabel", { L"%d" });
     RequireFormat(g_ui.registrationUnresolvedBlockMsLabel, L"RegistrationUnresolvedBlockMsLabel", { L"%d" });
+    RequireFormat(g_ui.savePngReplaceRetriesLabel, L"SavePngReplaceRetriesLabel", { L"%d" });
+    RequireFormat(g_ui.savePngReplaceRetryDelayMsLabel, L"SavePngReplaceRetryDelayMsLabel", { L"%d" });
     RequireFormat(g_ui.manifestIdentityNameLabel, L"ManifestIdentityNameLabel", { L"%s" });
     RequireFormat(g_ui.manifestPublisherLabel, L"ManifestPublisherLabel", { L"%s" });
     RequireFormat(g_ui.manifestPackageVersionLabel, L"ManifestPackageVersionLabel", { L"%s" });
@@ -3840,6 +3922,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.savePngInvalidInput, L"SavePngInvalidInput", { L"%s" });
     RequireFormat(g_ui.savePngGdiFailure, L"SavePngGdiFailure", { L"%s", L"%d" });
     RequireFormat(g_ui.savePngReplaceFailed, L"SavePngReplaceFailed", { L"%s", L"%s" });
+    RequireFormat(g_ui.savePngReplaceRetrying, L"SavePngReplaceRetrying", { L"%d", L"%d", L"%s", L"%lu", L"%s", L"%d" });
     RequireFormat(g_ui.deletedDisabledAsset, L"DeletedDisabledAsset", { L"%s" });
     RequireFormat(g_ui.failedDeleteDisabledAsset, L"FailedDeleteDisabledAsset", { L"%s" });
     RequireFormat(g_ui.appxManifestCreated, L"AppxManifestCreated", { L"%s" });
@@ -3848,11 +3931,11 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.appxManifestCreateFailed, L"AppxManifestCreateFailed", { L"%s" });
     RequireFormat(g_ui.manifestPath, L"ManifestPath", { L"%s" });
     RequireFormat(g_ui.comRegistrationUri, L"ComRegistrationUri", { L"%s" });
-    RequireFormat(g_ui.comRegistrationTimeoutDetails, L"ComRegistrationTimeoutDetails", { L"%d", L"%d" });
+    RequireFormat(g_ui.comRegistrationTimeoutDetails, L"ComRegistrationTimeoutDetails", { L"%s", L"%d" });
     RequireFormat(g_ui.comRegistrationException, L"ComRegistrationException", { L"%08X" });
     RequireFormat(g_ui.comExceptionMessage, L"ComExceptionMessage", { L"%s" });
     RequireFormat(g_ui.powerShellCommand, L"PowerShellCommand", { L"%s" });
-    RequireFormat(g_ui.powerShellLaunchDetails, L"PowerShellLaunchDetails", { L"%s", L"%d", L"%d", L"%d" });
+    RequireFormat(g_ui.powerShellLaunchDetails, L"PowerShellLaunchDetails", { L"%s", L"%s", L"%d", L"%d" });
     RequireFormat(g_ui.powerShellProcessStarted, L"PowerShellProcessStarted", { L"%lu" });
     RequireFormat(g_ui.powerShellTerminateRequested, L"PowerShellTerminateRequested", { L"%lu" });
     RequireFormat(g_ui.powerShellTerminateFailed, L"PowerShellTerminateFailed", { L"%lu" });
@@ -3869,6 +3952,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.registrationUnresolvedCleared, L"RegistrationUnresolvedCleared", { L"%s" });
     RequireFormat(g_ui.registrationUnresolvedExpired, L"RegistrationUnresolvedExpired", { L"%s" });
     RequireFormat(g_ui.wallpaperDetectionMethodFailed, L"WallpaperDetectionMethodFailed", { L"%s" });
+    RequireFormat(g_ui.wallpaperDetectionEmptyUsingLast, L"WallpaperDetectionEmptyUsingLast", { L"%s" });
     RequireFormat(g_ui.wallpaperDetectionMethodReturnedInvalid, L"WallpaperDetectionMethodReturnedInvalid", { L"%s", L"%s" });
     RequireFormat(g_ui.wallpaperDetectionFallbackSelected, L"WallpaperDetectionFallbackSelected", { L"%s", L"%s" });
     RequireFormat(g_ui.wallpaperDetectionFallbackDisabled, L"WallpaperDetectionFallbackDisabled", { L"%s" });
@@ -4250,6 +4334,8 @@ static std::wstring GetWallpaperFromTranscodedImageCache()
     RegCloseKey(h);
     if (sz <= 24) return L"";
     size_t byteLen = sz - 24;
+    if ((byteLen % sizeof(wchar_t)) != 0)
+        return L"";
     size_t len = byteLen / sizeof(wchar_t);
     if (len == 0)
         return L"";
@@ -4808,16 +4894,32 @@ bool SavePNG(Bitmap* b, const wchar_t* f)
         return false;
     }
 
-    if (!MoveFileExW(tempPath.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    const int replaceRetries = IniReadClampedI(L"Settings", L"SavePngReplaceRetries", 3, 0, 20);
+    const int retryDelayMs = IniReadClampedI(L"Settings", L"SavePngReplaceRetryDelayMs", 75, 0, 5000);
+    const int maxAttempts = replaceRetries + 1;
+    DWORD finalErr = ERROR_SUCCESS;
+
+    for (int attempt = 1; attempt <= maxAttempts; ++attempt)
     {
-        DWORD err = GetLastError();
-        DeleteFileW(tempPath.c_str());
-        Log(g_ui.savePngReplaceFailed.c_str(), path.c_str(), tempPath.c_str());
-        LogWin32Failure(L"MoveFileExW", err);
-        return false;
+        if (MoveFileExW(tempPath.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            return true;
+
+        finalErr = GetLastError();
+        if (attempt < maxAttempts && retryDelayMs > 0)
+        {
+            Log(g_ui.savePngReplaceRetrying.c_str(), attempt, maxAttempts, path.c_str(), finalErr, Win32ErrorString(finalErr).c_str(), retryDelayMs);
+            Sleep(static_cast<DWORD>(retryDelayMs));
+        }
     }
 
-    return true;
+    if (finalErr == ERROR_SUCCESS)
+        finalErr = ERROR_WRITE_FAULT;
+
+    DeleteFileW(tempPath.c_str());
+    Log(g_ui.savePngReplaceFailed.c_str(), path.c_str(), tempPath.c_str());
+    LogWin32Failure(L"MoveFileExW", finalErr);
+    SetLastError(finalErr);
+    return false;
 }
 
 // Embedded 30x30 RGBA PNG — the Desktop icon written to disabled asset slots.
@@ -4948,11 +5050,56 @@ static std::wstring QuoteCommandLineArg(const std::wstring& arg)
     return out;
 }
 
-static bool ContainsCaseInsensitive(const std::wstring& haystack, const std::wstring& needle)
+static bool IsAsciiHexDigit(wchar_t ch)
 {
-    if (needle.empty())
+    return (ch >= L'0' && ch <= L'9') ||
+        (ch >= L'a' && ch <= L'f') ||
+        (ch >= L'A' && ch <= L'F');
+}
+
+static bool IsErrorCodeBoundary(const std::wstring& text, size_t pos)
+{
+    if (pos >= text.size())
         return true;
-    return ToLowerCopy(haystack).find(ToLowerCopy(needle)) != std::wstring::npos;
+
+    wchar_t ch = text[pos];
+    return !IsAsciiHexDigit(ch) && ch != L'x' && ch != L'X';
+}
+
+static bool HasErrorCodeBoundaryBefore(const std::wstring& text, size_t pos)
+{
+    return pos == 0 || IsErrorCodeBoundary(text, pos - 1);
+}
+
+static bool ContainsPowerShellErrorCode(const std::wstring& output, const std::wstring& codeWithPrefix, const std::wstring& codeWithoutPrefix)
+{
+    std::wstring haystack = ToLowerCopy(output);
+    std::wstring prefixed = ToLowerCopy(codeWithPrefix);
+    std::wstring bare = ToLowerCopy(codeWithoutPrefix);
+
+    size_t pos = 0;
+    while ((pos = haystack.find(prefixed, pos)) != std::wstring::npos)
+    {
+        if (HasErrorCodeBoundaryBefore(haystack, pos) &&
+            IsErrorCodeBoundary(haystack, pos + prefixed.size()))
+        {
+            return true;
+        }
+        ++pos;
+    }
+
+    pos = 0;
+    while ((pos = haystack.find(bare, pos)) != std::wstring::npos)
+    {
+        if (HasErrorCodeBoundaryBefore(haystack, pos) &&
+            IsErrorCodeBoundary(haystack, pos + bare.size()))
+        {
+            return true;
+        }
+        ++pos;
+    }
+
+    return false;
 }
 
 static bool NormalizePowerShellErrorCodeKey(const std::wstring& raw, std::wstring& withPrefix, std::wstring& withoutPrefix)
@@ -5001,7 +5148,7 @@ static bool LookupConfiguredPowerShellErrorMessage(const std::wstring& output, s
         if (!NormalizePowerShellErrorCodeKey(entry.key, codeWithPrefix, codeWithoutPrefix))
             continue;
 
-        if (ContainsCaseInsensitive(output, codeWithPrefix) || ContainsCaseInsensitive(output, codeWithoutPrefix))
+        if (ContainsPowerShellErrorCode(output, codeWithPrefix, codeWithoutPrefix))
         {
             message = value;
             return true;
@@ -5039,9 +5186,18 @@ bool PS_Run(const std::wstring& cmd)
         return false;
     }
 
+    HANDLE nulIn = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (nulIn == INVALID_HANDLE_VALUE)
+    {
+        LogWin32Failure(L"CreateFileW(NUL)");
+        CloseHandle(r);
+        CloseHandle(w);
+        return false;
+    }
+
     STARTUPINFOW si{}; si.cb=sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    si.wShowWindow=SW_HIDE; si.hStdOutput=w; si.hStdError=w;
+    si.wShowWindow=SW_HIDE; si.hStdInput=nulIn; si.hStdOutput=w; si.hStdError=w;
 
     PROCESS_INFORMATION pi{};
     std::wstring powerShellExe = IniReadS(L"Settings", L"PowerShellExe", L"powershell.exe");
@@ -5050,7 +5206,8 @@ bool PS_Run(const std::wstring& cmd)
     const int timeoutMs = IniReadClampedI(L"Settings", L"PowerShellTimeoutMs", 120000, 0, 600000);
     const int pollMs = IniReadClampedI(L"Settings", L"PowerShellPollMs", 50, 10, 1000);
     const int terminateWaitMs = IniReadClampedI(L"Settings", L"PowerShellTerminateWaitMs", 5000, 0, 60000);
-    Log(g_ui.powerShellLaunchDetails.c_str(), powerShellExe.c_str(), timeoutMs, pollMs, terminateWaitMs);
+    std::wstring timeoutDisplay = TimeoutDisplayText(timeoutMs);
+    Log(g_ui.powerShellLaunchDetails.c_str(), powerShellExe.c_str(), timeoutDisplay.c_str(), pollMs, terminateWaitMs);
 
     std::wstring cmdline = QuoteCommandLineArg(powerShellExe) + L" -NoProfile -ExecutionPolicy Bypass -EncodedCommand " + PowerShellEncodedCommand(PowerShellUtf8Preamble() + cmd);
 
@@ -5058,6 +5215,7 @@ bool PS_Run(const std::wstring& cmd)
         CREATE_NO_WINDOW, nullptr,nullptr, &si, &pi);
 
     CloseHandle(w);
+    CloseHandle(nulIn);
     if (!ok)
     {
         LogWin32Failure(L"CreateProcessW");
@@ -5286,7 +5444,8 @@ AppxRegistrationResult Appx_Register_COM(const std::wstring& manifestPath)
 
         int timeoutMs = IniReadClampedI(L"Settings", L"ComRegistrationTimeoutMs", 120000, 0, 600000);
         int cancelWaitMs = IniReadClampedI(L"Settings", L"ComRegistrationCancelWaitMs", 5000, 0, 60000);
-        Log(g_ui.comRegistrationTimeoutDetails.c_str(), timeoutMs, cancelWaitMs);
+        std::wstring timeoutDisplay = TimeoutDisplayText(timeoutMs);
+        Log(g_ui.comRegistrationTimeoutDetails.c_str(), timeoutDisplay.c_str(), cancelWaitMs);
         if (timeoutMs > 0)
         {
             auto status = op.wait_for(std::chrono::milliseconds(timeoutMs));
@@ -5364,17 +5523,68 @@ static bool IsValidGeneratedPng(const std::wstring& path)
     return probe.GetLastStatus() == Ok && probe.GetWidth() > 0 && probe.GetHeight() > 0;
 }
 
+static bool LooksLikeUriPath(const std::wstring& path)
+{
+    size_t colon = path.find(L':');
+    if (colon == std::wstring::npos)
+        return false;
+
+    size_t slash = path.find_first_of(L"\\/");
+    if (slash != std::wstring::npos && slash < colon)
+        return false;
+
+    return !(colon == 1 && path.size() > 2 && (path[2] == L'\\' || path[2] == L'/'));
+}
+
+static void AddUniqueManifestAsset(std::vector<std::wstring>& assets, const std::wstring& rawPath)
+{
+    std::wstring path = TrimCopy(rawPath);
+    if (path.empty() || LooksLikeUriPath(path))
+        return;
+
+    for (const auto& existing : assets)
+    {
+        if (IEquals(existing, path))
+            return;
+    }
+    assets.push_back(path);
+}
+
+static std::vector<std::wstring> CurrentManifestAssetPaths()
+{
+    ManifestDisplayInfo info = CurrentManifestDisplayInfo();
+    std::vector<std::wstring> assets;
+    AddUniqueManifestAsset(assets, info.propertiesLogo);
+    AddUniqueManifestAsset(assets, info.square150x150Logo);
+    AddUniqueManifestAsset(assets, info.square44x44Logo);
+    AddUniqueManifestAsset(assets, info.square71x71Logo);
+    AddUniqueManifestAsset(assets, info.wide310x150Logo);
+    AddUniqueManifestAsset(assets, info.square310x310Logo);
+    return assets;
+}
+
+static std::wstring ResolveManifestAssetPath(const std::wstring& exeDir, const std::wstring& assetPath)
+{
+    if (!PathIsRelativeW(assetPath.c_str()))
+        return assetPath;
+
+    if (assetPath.size() >= 1 && (assetPath[0] == L'\\' || assetPath[0] == L'/'))
+        return exeDir + assetPath;
+
+    return exeDir + L"\\" + assetPath;
+}
+
 static std::wstring FindMissingManifestAssets(const std::wstring& exeDir)
 {
     std::wstring missing;
-    for (const auto& t : g_tiles)
+    for (const auto& assetPath : CurrentManifestAssetPaths())
     {
-        std::wstring path = exeDir + L"\\" + t.file;
+        std::wstring path = ResolveManifestAssetPath(exeDir, assetPath);
         if (!IsValidGeneratedPng(path))
         {
             if (!missing.empty())
                 missing += L", ";
-            missing += t.file;
+            missing += assetPath;
         }
     }
     return missing;
@@ -6149,9 +6359,10 @@ void PollThread()
 {
     try
     {
-    std::wstring last = GetWallpaper();
-    FitMode lastFit = GetWallpaperFit();
-    int lastDpiScale = CurrentAssetScale();
+    std::wstring last;
+    FitMode lastFit = FitMode::Fill;
+    int lastDpiScale = 100;
+    bool baselineReady = false;
     auto lastGen = steady_clock::now() - milliseconds(ClampInt(g_pollInitialDebounceBypassMs.load(), 0, 60000));
     bool emptyWallpaperAlreadyReported = false;
 
@@ -6167,16 +6378,36 @@ void PollThread()
             continue;
         }
 
+        bool wallpaperListening = g_listenWallpaper;
+        bool fitListening = g_listenFit && !g_disableFitting;
+        bool dpiListening = g_generateScaleAuto;
+        if (!wallpaperListening && !fitListening && !dpiListening)
+        {
+            baselineReady = false;
+            PollSleepFor(milliseconds(poll));
+            continue;
+        }
+
+        if (!baselineReady)
+        {
+            last = GetWallpaper();
+            lastFit = GetWallpaperFit();
+            lastDpiScale = CurrentAssetScale();
+            baselineReady = true;
+            PollSleepFor(milliseconds(poll));
+            continue;
+        }
+
         std::wstring cur = GetWallpaper();
         FitMode curFit = GetWallpaperFit();
         int curDpiScale = CurrentAssetScale();
 
         bool wallpaperChanged = (cur != last);
-        bool fitChanged = (!g_disableFitting && curFit != lastFit);
-        bool dpiScaleChanged = (g_generateScaleAuto && curDpiScale != lastDpiScale);
+        bool fitChanged = (fitListening && curFit != lastFit);
+        bool dpiScaleChanged = (dpiListening && curDpiScale != lastDpiScale);
 
-        if ((g_listenWallpaper && wallpaperChanged) ||
-            (g_listenFit && fitChanged) ||
+        if ((wallpaperListening && wallpaperChanged) ||
+            fitChanged ||
             dpiScaleChanged)
         {
             PollSleepFor(milliseconds(confirm));
@@ -6188,18 +6419,27 @@ void PollThread()
             int dpiScale2 = CurrentAssetScale();
 
             bool wallpaperChanged2 = (cur2 != last);
-            bool fitChanged2 = (!g_disableFitting && fit2 != lastFit);
-            bool dpiScaleChanged2 = (g_generateScaleAuto && dpiScale2 != lastDpiScale);
+            bool fitChanged2 = (fitListening && fit2 != lastFit);
+            bool dpiScaleChanged2 = (dpiListening && dpiScale2 != lastDpiScale);
 
-            if ((g_listenWallpaper && wallpaperChanged2) ||
-                (g_listenFit && fitChanged2) ||
+            if ((wallpaperListening && wallpaperChanged2) ||
+                fitChanged2 ||
                 dpiScaleChanged2)
             {
                 auto now = steady_clock::now();
 
                 if (duration_cast<milliseconds>(now - lastGen).count() >= deb)
                 {
-                    if (cur2.empty())
+                    std::wstring generationWallpaper = cur2;
+                    bool wallpaperChangeConfirmed = wallpaperListening && wallpaperChanged2;
+                    bool onlyNonWallpaperChange = !wallpaperChangeConfirmed && (fitChanged2 || dpiScaleChanged2);
+                    if (generationWallpaper.empty() && onlyNonWallpaperChange && IsUsableWallpaperPath(last))
+                    {
+                        generationWallpaper = last;
+                        Log(g_ui.wallpaperDetectionEmptyUsingLast.c_str(), generationWallpaper.c_str());
+                    }
+
+                    if (generationWallpaper.empty())
                     {
                         if (!emptyWallpaperAlreadyReported)
                             LogText(g_ui.wallpaperDetectionEmptyDuringPoll);
@@ -6209,20 +6449,20 @@ void PollThread()
                     }
 
                     const wchar_t* reason = g_ui.changeDetected.c_str();
-                    if (dpiScaleChanged2 && !(g_listenWallpaper && wallpaperChanged2) && !(g_listenFit && fitChanged2))
+                    if (dpiScaleChanged2 && !wallpaperChangeConfirmed && !fitChanged2)
                         reason = g_ui.dpiScaleChangeDetected.c_str();
-                    else if (g_listenWallpaper && wallpaperChanged2 && g_listenFit && fitChanged2)
+                    else if (wallpaperChangeConfirmed && fitChanged2)
                         reason = g_ui.wallpaperAndFitChangeDetected.c_str();
-                    else if (g_listenWallpaper && wallpaperChanged2)
+                    else if (wallpaperChangeConfirmed)
                         reason = g_ui.wallpaperChangeDetected.c_str();
-                    else if (g_listenFit && fitChanged2)
+                    else if (fitChanged2)
                         reason = g_ui.fitModeChangeDetected.c_str();
 
                     LogText(g_ui.changeConfirmed);
 
-                    QueueGenerate(cur2, reason);
+                    QueueGenerate(generationWallpaper, reason);
                     emptyWallpaperAlreadyReported = false;
-                    last = cur2;
+                    last = generationWallpaper;
                     lastFit = fit2;
                     lastDpiScale = dpiScale2;
                     lastGen = steady_clock::now();
@@ -6431,10 +6671,33 @@ INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
     return FALSE;
 }
 
+static bool AppendMenuChecked(HMENU menu, UINT flags, UINT_PTR id, const wchar_t* text)
+{
+    if (!menu)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        LogWin32Failure(L"AppendMenuW");
+        return false;
+    }
+
+    if (!AppendMenuW(menu, flags, id, text))
+    {
+        LogWin32Failure(L"AppendMenuW");
+        return false;
+    }
+
+    return true;
+}
+
 void Menu(HWND h)
 {
     POINT pt; GetCursorPos(&pt);
     HMENU m = CreatePopupMenu();
+    if (!m)
+    {
+        LogWin32Failure(L"CreatePopupMenu(root)");
+        return;
+    }
     bool showMenuAsDropdown = g_showMenuAsDropdown;
 
     auto addTo = [&](HMENU target, UINT id, const std::wstring& t, bool chk=false, bool en=true){
@@ -6445,7 +6708,7 @@ void Menu(HWND h)
             flags |= MF_CHECKED;
         if (!en)
             flags |= MF_DISABLED;
-        AppendMenuW(target, flags, id, t.c_str());
+        AppendMenuChecked(target, flags, id, t.c_str());
     };
 
     if (g_shutdownRequested)
@@ -6458,10 +6721,10 @@ void Menu(HWND h)
         }
 
         std::wstring reason = FormatWide(g_ui.shutdownPendingReason.c_str(), CurrentGenerationReason().c_str());
-        AppendMenuW(m, MF_STRING | MF_DISABLED, 0, g_ui.shutdownPendingTitle.c_str());
-        AppendMenuW(m, MF_STRING | MF_DISABLED, 0, reason.c_str());
-        AppendMenuW(m, MF_STRING, ID_CANCEL_SHUTDOWN, g_ui.cancelShutdown.c_str());
-        AppendMenuW(m, MF_STRING, ID_FORCE_SHUTDOWN, g_ui.forceShutdown.c_str());
+        AppendMenuChecked(m, MF_STRING | MF_DISABLED, 0, g_ui.shutdownPendingTitle.c_str());
+        AppendMenuChecked(m, MF_STRING | MF_DISABLED, 0, reason.c_str());
+        AppendMenuChecked(m, MF_STRING, ID_CANCEL_SHUTDOWN, g_ui.cancelShutdown.c_str());
+        AppendMenuChecked(m, MF_STRING, ID_FORCE_SHUTDOWN, g_ui.forceShutdown.c_str());
 
         SetForegroundWindow(h);
         UINT cmd = static_cast<UINT>(TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, h, nullptr));
@@ -6483,25 +6746,36 @@ void Menu(HWND h)
 
     auto beginSection = [&](const std::wstring& title) -> HMENU {
         if (showMenuAsDropdown)
-            return CreatePopupMenu();
-        AppendMenuW(m, MF_STRING | MF_DISABLED, 0, title.c_str());
+        {
+            HMENU submenu = CreatePopupMenu();
+            if (!submenu)
+            {
+                LogWin32Failure(L"CreatePopupMenu(section)");
+                return m;
+            }
+            return submenu;
+        }
+        AppendMenuChecked(m, MF_STRING | MF_DISABLED, 0, title.c_str());
         return m;
     };
 
     auto endSection = [&](HMENU target, const std::wstring& title) {
         if (showMenuAsDropdown)
         {
+            if (!target || target == m)
+                return;
             std::wstring popupTitle = menuTitle(title);
-            AppendMenuW(m, MF_POPUP, (UINT_PTR)target, popupTitle.c_str());
+            if (!AppendMenuChecked(m, MF_POPUP, (UINT_PTR)target, popupTitle.c_str()))
+                DestroyMenu(target);
         }
         else
         {
-            AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+            AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
         }
     };
 
     addTo(m, ID_SHOW_MENU_DROPDOWN, g_ui.showMenuAsDropdown.c_str(), showMenuAsDropdown);
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
 
     HMENU generalMenu = beginSection(g_ui.generalTitle);
     addTo(generalMenu, ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
@@ -6534,8 +6808,14 @@ void Menu(HWND h)
 
     std::wstring pathLine = g_ui.logPathPrefix + GetLogPathCopy();
     HMENU hPath = CreatePopupMenu();
-    AppendMenuW(hPath, MF_STRING | MF_DISABLED, 0, pathLine.c_str());
-    AppendMenuW(loggingMenu, MF_POPUP, (UINT_PTR)hPath, g_ui.logPathTitle.c_str());
+    if (!hPath)
+        LogWin32Failure(L"CreatePopupMenu(log path)");
+    else
+    {
+        AppendMenuChecked(hPath, MF_STRING | MF_DISABLED, 0, pathLine.c_str());
+        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPath, g_ui.logPathTitle.c_str()))
+            DestroyMenu(hPath);
+    }
 
     std::wstring psLine = g_ui.psStatusPrefix;
     {
@@ -6549,8 +6829,14 @@ void Menu(HWND h)
     }
 
     HMENU hPs = CreatePopupMenu();
-    AppendMenuW(hPs, MF_STRING | MF_DISABLED, 0, psLine.c_str());
-    AppendMenuW(loggingMenu, MF_POPUP, (UINT_PTR)hPs, g_ui.psStatusTitle.c_str());
+    if (!hPs)
+        LogWin32Failure(L"CreatePopupMenu(PowerShell status)");
+    else
+    {
+        AppendMenuChecked(hPs, MF_STRING | MF_DISABLED, 0, psLine.c_str());
+        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPs, g_ui.psStatusTitle.c_str()))
+            DestroyMenu(hPs);
+    }
     endSection(loggingMenu, g_ui.loggingTitle);
 
     HMENU fittingMenu = beginSection(g_ui.wallpaperFittingTitle);
@@ -6564,7 +6850,7 @@ void Menu(HWND h)
         fitLine = g_ui.fitModePrefix;
         fitLine += FitModeToString(mode);
     }
-    AppendMenuW(fittingMenu, MF_STRING | MF_DISABLED, 0, fitLine.c_str());
+    AppendMenuChecked(fittingMenu, MF_STRING | MF_DISABLED, 0, fitLine.c_str());
     endSection(fittingMenu, g_ui.wallpaperFittingTitle);
 
     HMENU methodsMenu = beginSection(g_ui.methodsTitle);
@@ -6576,7 +6862,7 @@ void Menu(HWND h)
     addTo(methodsMenu, ID_WP_METHOD_AUTO, WallpaperDetectionMethodName(WallpaperDetectionMethod::Auto), wallpaperMethod == WallpaperDetectionMethod::Auto);
     addTo(methodsMenu, ID_WP_METHOD_FALLBACK, g_ui.wallpaperDetectionFallback.c_str(), g_wallpaperDetectionFallbackOnInvalid);
     std::wstring wallpaperDetectionLine = FormatWide(g_ui.wallpaperDetectionMethodLabel.c_str(), WallpaperDetectionMethodName(wallpaperMethod));
-    AppendMenuW(methodsMenu, MF_STRING | MF_DISABLED, 0, wallpaperDetectionLine.c_str());
+    AppendMenuChecked(methodsMenu, MF_STRING | MF_DISABLED, 0, wallpaperDetectionLine.c_str());
     endSection(methodsMenu, g_ui.methodsTitle);
 
     HMENU assetsMenu = beginSection(g_ui.assetsTitle);
@@ -6600,7 +6886,7 @@ void Menu(HWND h)
     addTo(scaleMenu, ID_SCALE_200, g_ui.generateScale200.c_str(), g_generateScale200, manualScalesEnabled);
     addTo(scaleMenu, ID_SCALE_400, g_ui.generateScale400.c_str(), g_generateScale400, manualScalesEnabled);
     std::wstring currentDpiLine = FormatWide(g_ui.currentDpiScaleLabel.c_str(), CurrentDpiPercent(), CurrentAssetScale());
-    AppendMenuW(scaleMenu, MF_STRING | MF_DISABLED, 0, currentDpiLine.c_str());
+    AppendMenuChecked(scaleMenu, MF_STRING | MF_DISABLED, 0, currentDpiLine.c_str());
     endSection(scaleMenu, g_ui.dpiScalesTitle);
 
     HMENU manifestMenu = beginSection(g_ui.manifestTitle);
@@ -6629,29 +6915,29 @@ void Menu(HWND h)
     std::wstring manifestEntryPointLine = FormatWide(g_ui.manifestEntryPointLabel.c_str(), manifestInfo.entryPoint.c_str());
     std::wstring manifestRestrictedCapabilityLine = FormatWide(g_ui.manifestRestrictedCapabilityLabel.c_str(), manifestInfo.restrictedCapability.c_str());
     addTo(manifestMenu, ID_MANIFEST_OVERWRITE, g_ui.manifestOverwriteExistingToggle.c_str(), ManifestOverwriteExisting());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSourceLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestIdentityLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPackageVersionLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestDisplayNameLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherDisplayNameLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestDescriptionLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestExecutableLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestApplicationIdLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestTargetDeviceFamilyNameLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestMinVersionLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestMaxVersionTestedLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestResourceLanguageLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPropertiesLogoLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare150x150LogoLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare44x44LogoLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare71x71LogoLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestWide310x150LogoLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare310x310LogoLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestBackgroundColorLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestShowNameOnTilesLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestEntryPointLine.c_str());
-    AppendMenuW(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestRestrictedCapabilityLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSourceLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestIdentityLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPackageVersionLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestDisplayNameLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherDisplayNameLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestDescriptionLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestExecutableLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestApplicationIdLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestTargetDeviceFamilyNameLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestMinVersionLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestMaxVersionTestedLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestResourceLanguageLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPropertiesLogoLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare150x150LogoLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare44x44LogoLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare71x71LogoLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestWide310x150LogoLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare310x310LogoLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestBackgroundColorLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestShowNameOnTilesLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestEntryPointLine.c_str());
+    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestRestrictedCapabilityLine.c_str());
     endSection(manifestMenu, g_ui.manifestTitle);
 
     HMENU advancedMenu = beginSection(g_ui.advancedTitle);
@@ -6665,40 +6951,50 @@ void Menu(HWND h)
     std::wstring shutdownRepeatLine = FormatWide(g_ui.shutdownRepeatNoticeMsLabel.c_str(), IniReadClampedI(L"Settings", L"ShutdownRepeatNoticeMs", 5000, 250, 60000));
     std::wstring signalRetriesLine = FormatWide(g_ui.singleInstanceSignalRetriesLabel.c_str(), IniReadClampedI(L"Settings", L"SingleInstanceSignalRetries", 50, 0, 200));
     std::wstring signalDelayLine = FormatWide(g_ui.singleInstanceSignalDelayMsLabel.c_str(), IniReadClampedI(L"Settings", L"SingleInstanceSignalDelayMs", 100, 0, 5000));
-    std::wstring comRegistrationTimeoutLine = FormatWide(g_ui.comRegistrationTimeoutMsLabel.c_str(), IniReadClampedI(L"Settings", L"ComRegistrationTimeoutMs", 120000, 0, 600000));
+    int comRegistrationTimeoutMs = IniReadClampedI(L"Settings", L"ComRegistrationTimeoutMs", 120000, 0, 600000);
+    int powerShellTimeoutMs = IniReadClampedI(L"Settings", L"PowerShellTimeoutMs", 120000, 0, 600000);
+    std::wstring comRegistrationTimeoutText = TimeoutDisplayText(comRegistrationTimeoutMs);
+    std::wstring powerShellTimeoutText = TimeoutDisplayText(powerShellTimeoutMs);
+    std::wstring comRegistrationTimeoutLine = FormatWide(g_ui.comRegistrationTimeoutMsLabel.c_str(), comRegistrationTimeoutText.c_str());
     std::wstring comRegistrationCancelWaitLine = FormatWide(g_ui.comRegistrationCancelWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"ComRegistrationCancelWaitMs", 5000, 0, 60000));
     std::wstring trayHideDelayLine = FormatWide(g_ui.trayIconHiddenDelayMsLabel.c_str(), IniReadClampedI(L"Settings", L"TrayIconHiddenDelayMs", 750, 0, 10000));
     std::wstring logBufferLine = FormatWide(g_ui.logBufferLinesLabel.c_str(), IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000));
+    std::wstring logAppendLockWaitLine = FormatWide(g_ui.logAppendLockWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000));
     std::wstring powerShellExeLine = FormatWide(g_ui.powerShellExeLabel.c_str(), IniReadS(L"Settings", L"PowerShellExe", L"powershell.exe").c_str());
     std::wstring powerShellPollLine = FormatWide(g_ui.powerShellPollMsLabel.c_str(), IniReadClampedI(L"Settings", L"PowerShellPollMs", 50, 10, 1000));
-    std::wstring powerShellTimeoutLine = FormatWide(g_ui.powerShellTimeoutMsLabel.c_str(), IniReadClampedI(L"Settings", L"PowerShellTimeoutMs", 120000, 0, 600000));
+    std::wstring powerShellTimeoutLine = FormatWide(g_ui.powerShellTimeoutMsLabel.c_str(), powerShellTimeoutText.c_str());
     std::wstring powerShellTerminateWaitLine = FormatWide(g_ui.powerShellTerminateWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"PowerShellTerminateWaitMs", 5000, 0, 60000));
     std::wstring registrationUnresolvedBlockLine = FormatWide(g_ui.registrationUnresolvedBlockMsLabel.c_str(), IniReadClampedI(L"Settings", L"RegistrationUnresolvedBlockMs", 300000, 0, 3600000));
+    std::wstring savePngReplaceRetriesLine = FormatWide(g_ui.savePngReplaceRetriesLabel.c_str(), IniReadClampedI(L"Settings", L"SavePngReplaceRetries", 3, 0, 20));
+    std::wstring savePngReplaceRetryDelayLine = FormatWide(g_ui.savePngReplaceRetryDelayMsLabel.c_str(), IniReadClampedI(L"Settings", L"SavePngReplaceRetryDelayMs", 75, 0, 5000));
     std::wstring singleInstanceLine = FormatWide(g_ui.singleInstanceFailureActionLabel.c_str(), ErrorActionName(CurrentSingleInstanceFailureAction()));
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, pollLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, confirmLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, debounceLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, pollInitialBypassLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, iniCacheRefreshLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, notificationTimeoutLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, shutdownInitialLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, shutdownRepeatLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, signalRetriesLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, signalDelayLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, comRegistrationTimeoutLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, comRegistrationCancelWaitLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, trayHideDelayLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, logBufferLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellExeLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellPollLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellTimeoutLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellTerminateWaitLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, registrationUnresolvedBlockLine.c_str());
-    AppendMenuW(advancedMenu, MF_STRING | MF_DISABLED, 0, singleInstanceLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, pollLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, confirmLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, debounceLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, pollInitialBypassLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, iniCacheRefreshLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, notificationTimeoutLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, shutdownInitialLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, shutdownRepeatLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, signalRetriesLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, signalDelayLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, comRegistrationTimeoutLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, comRegistrationCancelWaitLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, trayHideDelayLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, logBufferLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, logAppendLockWaitLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellExeLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellPollLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellTimeoutLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellTerminateWaitLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, registrationUnresolvedBlockLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, savePngReplaceRetriesLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, savePngReplaceRetryDelayLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, singleInstanceLine.c_str());
     endSection(advancedMenu, g_ui.advancedTitle);
 
     if (showMenuAsDropdown)
-        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+        AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
     addTo(m, ID_EXIT, g_ui.exitText.c_str());
 
     SetForegroundWindow(h);
@@ -7406,13 +7702,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     g_shutdownRepeatNoticeMs = IniReadClampedI(L"Settings", L"ShutdownRepeatNoticeMs", 5000, 250, 60000);
     g_trayIconHiddenDelayMs = IniReadClampedI(L"Settings", L"TrayIconHiddenDelayMs", 750, 0, 10000);
     g_logBufferLines = IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000);
+    g_logAppendLockWaitMs = IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000);
     g_pollInitialDebounceBypassMs = IniReadClampedI(L"Settings", L"PollInitialDebounceBypassMs", 5000, 0, 60000);
     g_iniCacheRefreshMs = IniReadClampedI(L"Settings", L"IniCacheRefreshMs", 250, 0, 60000);
-
-    std::wstring startupManifestPath;
-    bool startupManifestCreated = false;
-    DWORD startupManifestError = ERROR_SUCCESS;
-    bool startupManifestReady = EnsureAppxManifest(startupManifestPath, startupManifestCreated, startupManifestError);
 
     // GDI+
     GdiplusStartupInput in; ULONG_PTR tk;
@@ -7427,6 +7719,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.iniLabel.c_str(), g_iniPath.c_str());
     Log(g_ui.logFileLabel.c_str(), GetLogPathCopy().c_str());
     FlushStartupWarnings();
+
+    std::wstring startupManifestPath;
+    bool startupManifestCreated = false;
+    DWORD startupManifestError = ERROR_SUCCESS;
+    bool startupManifestReady = EnsureAppxManifest(startupManifestPath, startupManifestCreated, startupManifestError);
+
     Log(g_ui.singleInstanceScopeSummary.c_str(), g_singleInstanceMutexName.c_str());
     if (iniEncodingNormalizeResult == TextNormalizeResult::Changed)
         LogText(g_ui.iniEncodingNormalized);
