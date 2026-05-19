@@ -30,7 +30,6 @@
 #include <winrt/Windows.Management.Deployment.h>
 
 INT_PTR CALLBACK RenameDlgProc(HWND, UINT, WPARAM, LPARAM) noexcept;
-INT_PTR CALLBACK PowerShellOutputDlgProc(HWND, UINT, WPARAM, LPARAM) noexcept;
 static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) noexcept;
 
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
@@ -1126,6 +1125,21 @@ static bool ReadIniValueFromDoc(const std::vector<IniSectionData>& doc, const wc
     return false;
 }
 
+static bool ReadIniSectionFromDoc(const std::vector<IniSectionData>& doc, const wchar_t* s, std::vector<IniEntry>& out)
+{
+    std::wstring sectionName = s ? s : L"";
+    for (const auto& sec : doc)
+    {
+        if (IEquals(sec.name, sectionName))
+        {
+            out = sec.entries;
+            return true;
+        }
+    }
+    out.clear();
+    return false;
+}
+
 static void SetIniCacheUnlocked(const std::wstring& text)
 {
     g_iniCacheText = text;
@@ -1243,6 +1257,35 @@ static bool ReadIniValueCached(const wchar_t* s, const wchar_t* k, std::wstring&
     return ReadIniValueFromDoc(g_iniCacheDoc, s, k, out);
 }
 
+static bool ReadIniSectionCached(const wchar_t* s, std::vector<IniEntry>& out)
+{
+    std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+
+    int refreshMs = g_iniCacheRefreshMs.load();
+    if (refreshMs < 0) refreshMs = 0;
+    if (refreshMs > 60000) refreshMs = 60000;
+
+    auto now = steady_clock::now();
+    bool cacheFreshEnough = g_iniCacheLoaded && refreshMs > 0 &&
+        duration_cast<milliseconds>(now - g_iniCacheLastCheck).count() < refreshMs;
+
+    if (!cacheFreshEnough)
+    {
+        FILETIME ft{};
+        bool haveTime = GetFileWriteTime(g_iniPath, ft);
+        g_iniCacheLastCheck = now;
+        if (!g_iniCacheLoaded || !haveTime || !FileTimeEquals(ft, g_iniCacheWriteTime))
+        {
+            std::wstring fresh;
+            if (!ReadTextFile(g_iniPath, fresh))
+                return false;
+            SetIniCacheUnlocked(fresh);
+        }
+    }
+
+    return ReadIniSectionFromDoc(g_iniCacheDoc, s, out);
+}
+
 static bool WriteIniValueToText(std::wstring& text, const wchar_t* s, const wchar_t* k, const wchar_t* v)
 {
     std::wstring sectionName = s ? s : L"";
@@ -1355,6 +1398,8 @@ struct IniDefault {
     const wchar_t* key;
     const wchar_t* value;
 };
+
+static constexpr const wchar_t* POWERSHELL_ERROR_MESSAGES_SECTION = L"PowerShellErrorMessages";
 
 // -----------------------------------------------------------------------------
 // Globals
@@ -1510,6 +1555,12 @@ static const IniDefault g_defaults[] = {
     {L"Assets", L"WideTile", L"1"},
     {L"Assets", L"LargeTile", L"1"},
 
+};
+
+static const IniDefault g_powerShellErrorMessageDefaults[] = {
+    {POWERSHELL_ERROR_MESSAGES_SECTION, L"0x80073CFF", L"PowerShell error: Enable sideloading first!"},
+    {POWERSHELL_ERROR_MESSAGES_SECTION, L"0x80073CF9", L"PowerShell error: AppX install failed. If output also shows 0x80070002, a file referenced by AppxManifest.xml is missing or the manifest/assets path cannot be found."},
+    {POWERSHELL_ERROR_MESSAGES_SECTION, L"0x80070002", L"PowerShell error: file not found during AppX registration. Check that AppxManifest.xml and every referenced asset file exist."},
 };
 
 struct StringDefault {
@@ -1870,6 +1921,13 @@ static std::wstring BuildInitialIniTemplate()
     lines.push_back(L"; WallpaperDetectionMethod options:");
     lines.push_back(L"; TranscodedImageCache, SystemParametersInfo, DesktopWallpaperCOM,");
     lines.push_back(L"; TranscodedWallpaperFile, Auto.");
+    lines.push_back(L"");
+    lines.push_back(L"[PowerShellErrorMessages]");
+    lines.push_back(L"; Optional HRESULT/error-code matches for PowerShell registration failures.");
+    lines.push_back(L"; Add lines like \"0x80070002\" = \"Readable reason\".");
+    lines.push_back(L"; Delete an entry, or set its value empty, to stop using that special case.");
+    for (const auto& d : g_powerShellErrorMessageDefaults)
+        lines.push_back(FormatIniAssignment(d.key, d.value));
     lines.push_back(L"");
     lines.push_back(L"[Manifest]");
     lines.push_back(L"; AppxManifest.xml generation. Existing legacy [Settings] Manifest*");
@@ -3272,6 +3330,21 @@ void EnsureIniDefaults()
         }
     }
 
+    std::vector<IniEntry> powerShellErrorEntries;
+    if (!ReadIniSectionFromDoc(doc, POWERSHELL_ERROR_MESSAGES_SECTION, powerShellErrorEntries))
+    {
+        for (const auto& d : g_powerShellErrorMessageDefaults)
+        {
+            if (!WriteIniValueToText(iniText, d.section, d.key, d.value))
+            {
+                QueueStartupWarning(L"[!] Failed to update INI PowerShell error default: [" + std::wstring(d.section ? d.section : L"") + L"] " + std::wstring(d.key ? d.key : L""));
+                return;
+            }
+            changed = true;
+            doc = ParseIniDocument(iniText);
+        }
+    }
+
     if (changed && !WriteUtf8BomTextFile(g_iniPath, iniText))
     {
         QueueStartupWarning(L"[!] Failed to write INI setting defaults (error " + std::to_wstring(GetLastError()) + L").");
@@ -4051,57 +4124,6 @@ static DLGITEMTEMPLATE* AlignDialogItem(WORD*& p)
     DLGITEMTEMPLATE* item = (DLGITEMTEMPLATE*)(((DWORD_PTR)p + 3) & ~3);
     p = (WORD*)item;
     return item;
-}
-
-static bool ShowPowerShellOutputDialog(HWND parent, const std::wstring& text)
-{
-    constexpr int EDIT_ID = 1002;
-    size_t stringBytes =
-        (g_ui.noPowerShellOutputTitle.size() + g_ui.okText.size() + 64) * sizeof(wchar_t);
-    std::vector<BYTE> tmpl(8192 + stringBytes);
-    DLGTEMPLATE* dlg = (DLGTEMPLATE*)tmpl.data();
-
-    dlg->style = WS_POPUP | WS_BORDER | WS_SYSMENU | DS_MODALFRAME | WS_CAPTION | DS_SETFONT;
-    dlg->cdit = 2;
-    dlg->x = 10; dlg->y = 10; dlg->cx = 360; dlg->cy = 240;
-
-    WORD* p = (WORD*)(dlg + 1);
-    *p++ = 0; // no menu
-    *p++ = 0; // default class
-    AppendDialogTemplateString(p, g_ui.noPowerShellOutputTitle);
-    *p++ = 9; // font size
-    AppendDialogTemplateString(p, L"Segoe UI");
-
-    DLGITEMTEMPLATE* item = AlignDialogItem(p);
-    item->x = 6; item->y = 6; item->cx = 348; item->cy = 205;
-    item->id = EDIT_ID;
-    item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | WS_HSCROLL |
-        ES_LEFT | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_AUTOHSCROLL;
-    item->dwExtendedStyle = WS_EX_CLIENTEDGE;
-
-    p = (WORD*)(item + 1);
-    *p++ = 0xFFFF; *p++ = 0x0081; // EDIT class
-    *p++ = 0; // no text
-    *p++ = 0; // no extra data
-
-    item = AlignDialogItem(p);
-    item->x = 304; item->y = 220; item->cx = 50; item->cy = 14;
-    item->id = IDOK;
-    item->style = WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON;
-
-    p = (WORD*)(item + 1);
-    *p++ = 0xFFFF; *p++ = 0x0080; // BUTTON
-    AppendDialogTemplateString(p, g_ui.okText.empty() ? std::wstring(L"OK") : g_ui.okText);
-    *p++ = 0; // no extra data
-
-    INT_PTR result = DialogBoxIndirectParamW(
-        GetModuleHandleW(nullptr),
-        (DLGTEMPLATE*)tmpl.data(),
-        parent,
-        PowerShellOutputDlgProc,
-        (LPARAM)&text
-    );
-    return result != -1;
 }
 
 INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
@@ -4926,6 +4948,70 @@ static std::wstring QuoteCommandLineArg(const std::wstring& arg)
     return out;
 }
 
+static bool ContainsCaseInsensitive(const std::wstring& haystack, const std::wstring& needle)
+{
+    if (needle.empty())
+        return true;
+    return ToLowerCopy(haystack).find(ToLowerCopy(needle)) != std::wstring::npos;
+}
+
+static bool NormalizePowerShellErrorCodeKey(const std::wstring& raw, std::wstring& withPrefix, std::wstring& withoutPrefix)
+{
+    std::wstring code = TrimCopy(raw);
+    if (code.size() >= 2 && code[0] == L'0' && (code[1] == L'x' || code[1] == L'X'))
+        code.erase(0, 2);
+    if (code.empty() || code.size() > 8)
+        return false;
+
+    errno = 0;
+    wchar_t* end = nullptr;
+    unsigned long parsed = wcstoul(code.c_str(), &end, 16);
+    if (end == code.c_str() || errno == ERANGE)
+        return false;
+    while (end && *end && iswspace(*end) != 0)
+        ++end;
+    if (end && *end)
+        return false;
+
+    wchar_t buf[16];
+    swprintf(buf, _countof(buf), L"%08lX", parsed);
+    withoutPrefix = buf;
+    withPrefix = L"0x" + withoutPrefix;
+    return true;
+}
+
+static bool LookupConfiguredPowerShellErrorMessage(const std::wstring& output, std::wstring& message)
+{
+    std::vector<IniEntry> entries;
+    bool hasConfiguredSection = ReadIniSectionCached(POWERSHELL_ERROR_MESSAGES_SECTION, entries);
+    if (!hasConfiguredSection)
+    {
+        for (const auto& d : g_powerShellErrorMessageDefaults)
+            entries.push_back(IniEntry{ d.key, d.value });
+    }
+
+    for (const auto& entry : entries)
+    {
+        std::wstring value = TrimCopy(entry.value);
+        if (value.empty())
+            continue;
+
+        std::wstring codeWithPrefix;
+        std::wstring codeWithoutPrefix;
+        if (!NormalizePowerShellErrorCodeKey(entry.key, codeWithPrefix, codeWithoutPrefix))
+            continue;
+
+        if (ContainsCaseInsensitive(output, codeWithPrefix) || ContainsCaseInsensitive(output, codeWithoutPrefix))
+        {
+            message = value;
+            return true;
+        }
+    }
+
+    message.clear();
+    return false;
+}
+
 void PS_Clear()
 {
     std::lock_guard<std::mutex> lk(g_psMutex);
@@ -5113,8 +5199,7 @@ bool PS_Run(const std::wstring& cmd)
             g_psMsg = psMsg;
         }
         LogText(g_ui.powerShellTimedOut);
-    } else if (out.find(L"0x80073CFF") != std::wstring::npos) {
-        psMsg = g_ui.powerShellErrorSideloadDisabled;
+    } else if (LookupConfiguredPowerShellErrorMessage(out, psMsg)) {
         {
             std::lock_guard<std::mutex> lk(g_psMutex);
             g_psOut = out;
@@ -5122,7 +5207,7 @@ bool PS_Run(const std::wstring& cmd)
             g_psErr = psErr;
             g_psMsg = psMsg;
         }
-        LogText(g_ui.powerShellErrorSideloadDisabled);
+        LogText(psMsg);
     } else {
         psMsg = FormatWide(g_ui.powerShellErrorCode.c_str(), ec);
         {
@@ -6295,47 +6380,11 @@ void ShowPSLog(HWND h)
         return;
     }
 
-    if (ShowPowerShellOutputDialog(h, psOut))
-        return;
-
     const size_t CH=3000;
     for (size_t p=0;p<psOut.size();p+=CH){
         std::wstring s = psOut.substr(p,CH);
         MessageBoxW(h, s.c_str(), g_ui.noPowerShellOutputTitle.c_str(), MB_OK | MB_ICONERROR);
     }
-}
-
-INT_PTR CALLBACK PowerShellOutputDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) noexcept
-{
-    switch (msg)
-    {
-    case WM_INITDIALOG:
-    {
-        const std::wstring* text = (const std::wstring*)lParam;
-        HWND edit = GetDlgItem(hDlg, 1002);
-        SetWindowTextW(edit, text ? text->c_str() : L"");
-        SendMessageW(edit, EM_SETSEL, 0, 0);
-        SetFocus(edit);
-        return FALSE;
-    }
-
-    case WM_COMMAND:
-        switch (LOWORD(wParam))
-        {
-        case IDOK:
-        case IDCANCEL:
-            EndDialog(hDlg, LOWORD(wParam));
-            return TRUE;
-        default:
-            break;
-        }
-        break;
-
-    default:
-        break;
-    }
-
-    return FALSE;
 }
 
 INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) noexcept
