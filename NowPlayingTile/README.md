@@ -62,7 +62,7 @@ pwsh .\launch-widget.ps1
 Or directly:
 
 ```powershell
-.\NowPlayingTile.exe --widget
+.\build\NowPlayingTile.exe --widget
 ```
 
 Right-click the widget for refresh, always-on-top, and exit. Drag the window by

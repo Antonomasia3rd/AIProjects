@@ -1,13 +1,16 @@
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$manifest = Join-Path $root 'AppxManifest.xml'
+$buildDir = Join-Path $root 'build'
+$manifestTemplate = Join-Path $root 'package\AppxManifest.xml'
+$manifest = Join-Path $buildDir 'AppxManifest.xml'
 
 & (Join-Path $root 'build.ps1')
 & (Join-Path $root 'make-assets.ps1')
+Copy-Item -LiteralPath $manifestTemplate -Destination $manifest -Force
 
 Write-Host "Registering development package..."
-Add-AppxPackage -Register $manifest -ForceApplicationShutdown -ExternalLocation $root
+Add-AppxPackage -Register $manifest -ForceApplicationShutdown -ExternalLocation $buildDir
 
 $package = Get-AppxPackage -Name 'NowPlayingTile.App'
 if ($null -eq $package) {
