@@ -247,6 +247,7 @@ if (-not (Test-SkipProject 'NowPlayingTile')) {
     New-Package -Name 'NowPlayingTile' -Project 'NowPlayingTile' -Paths @('build\NowPlayingTile.exe') -ExtraPaths @('register-dev-package.ps1', 'unregister-dev-package.ps1', 'launch-packaged.ps1', 'launch-widget.ps1', 'install-startup.ps1', 'uninstall-startup.ps1', 'open-settings.ps1', 'package')
 }
 if (-not (Test-SkipProject 'GenerateAssets')) {
+    Invoke-External 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'TestGenerateAssetsSource.ps1') (Join-Path $RepoRoot 'DesktopStub')
     Build-CmdProject -Project 'DesktopStub' -Command 'BuildGenerateAssets.cmd'
     New-Package -Name 'GenerateAssets' -Project 'DesktopStub' -Paths @('build\GenerateAssets.exe')
 }

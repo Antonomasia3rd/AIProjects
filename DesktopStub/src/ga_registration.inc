@@ -410,6 +410,46 @@ enum class AppxRegistrationResult
 
 static constexpr const wchar_t* COM_REGISTRATION_HELPER_ARG = L"--ga-com-register";
 
+using DeploymentResult = winrt::Windows::Management::Deployment::DeploymentResult;
+using DeploymentProgress = winrt::Windows::Management::Deployment::DeploymentProgress;
+using DeploymentOperation = winrt::Windows::Foundation::IAsyncOperationWithProgress<DeploymentResult, DeploymentProgress>;
+using FoundationAsyncStatus = winrt::Windows::Foundation::AsyncStatus;
+
+static void LogComRegistrationDeploymentResult(const DeploymentResult& result)
+{
+    HRESULT extendedError = result.ExtendedErrorCode().value;
+    if (extendedError != S_OK)
+        Log(g_ui.comRegistrationDeploymentError.c_str(), static_cast<unsigned int>(extendedError));
+
+    std::wstring errorText = result.ErrorText().c_str();
+    if (!TrimCopy(errorText).empty())
+        Log(g_ui.comRegistrationDeploymentMessage.c_str(), errorText.c_str());
+}
+
+static void LogComRegistrationOperationFailure(
+    const DeploymentOperation& op,
+    FoundationAsyncStatus status)
+{
+    Log(g_ui.comRegistrationStatusFailed.c_str(), static_cast<int>(status));
+
+    HRESULT asyncError = op.ErrorCode().value;
+    if (asyncError != S_OK)
+        Log(g_ui.comRegistrationAsyncError.c_str(), static_cast<unsigned int>(asyncError));
+
+    try
+    {
+        LogComRegistrationDeploymentResult(op.GetResults());
+    }
+    catch (const winrt::hresult_error& e)
+    {
+        HRESULT getResultsError = e.code().value;
+        if (getResultsError != S_OK && getResultsError != asyncError)
+            Log(g_ui.comRegistrationAsyncError.c_str(), static_cast<unsigned int>(getResultsError));
+        if (!std::wstring(e.message().c_str()).empty())
+            Log(g_ui.comExceptionMessage.c_str(), e.message().c_str());
+    }
+}
+
 struct WinrtApartmentGuard
 {
     bool initialized = false;
@@ -485,21 +525,27 @@ static AppxRegistrationResult Appx_Register_COM_InProcess(const std::wstring& ma
             }
             if (status == winrt::Windows::Foundation::AsyncStatus::Canceled)
             {
-                Log(g_ui.comRegistrationStatusFailed.c_str(), (int)status);
+                LogComRegistrationOperationFailure(op, status);
+                return AppxRegistrationResult::Failed;
+            }
+            if (status == winrt::Windows::Foundation::AsyncStatus::Error)
+            {
+                LogComRegistrationOperationFailure(op, status);
                 return AppxRegistrationResult::Failed;
             }
         }
 
-        op.get(); // wait/throw if Windows deployment reports an error
+        DeploymentResult result = op.get(); // wait/throw if Windows deployment reports an error
 
         if (op.Status() == winrt::Windows::Foundation::AsyncStatus::Completed)
         {
+            LogComRegistrationDeploymentResult(result);
             LogText(g_ui.comRegistrationSuccess);
             return AppxRegistrationResult::Success;
         }
         else
         {
-            Log(g_ui.comRegistrationStatusFailed.c_str(), (int)op.Status());
+            LogComRegistrationOperationFailure(op, op.Status());
             return AppxRegistrationResult::Failed;
         }
     }
