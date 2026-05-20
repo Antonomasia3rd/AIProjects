@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-windows:
     name: Build Windows binaries
-    runs-on: windows-2025
+    runs-on: windows-2022
 
     steps:
       - name: Check out repository
