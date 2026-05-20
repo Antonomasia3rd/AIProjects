@@ -851,6 +851,150 @@ static int ManifestSettingI(const wchar_t* key, int fallback, const wchar_t* leg
     return fallback;
 }
 
+static bool IsManifestSimpleTokenChar(wchar_t ch)
+{
+    return IsAsciiAlnum(ch) || ch == L'_' || ch == L'-';
+}
+
+static bool IsManifestNonEmptyDottedToken(const std::wstring& value)
+{
+    std::wstring v = TrimCopy(value);
+    if (v.empty() || v.front() == L'.' || v.back() == L'.')
+        return false;
+
+    bool previousDot = false;
+    for (wchar_t ch : v)
+    {
+        if (ch == L'.')
+        {
+            if (previousDot)
+                return false;
+            previousDot = true;
+            continue;
+        }
+        if (!IsManifestSimpleTokenChar(ch))
+            return false;
+        previousDot = false;
+    }
+    return true;
+}
+
+static bool IsManifestOptionalDottedToken(const std::wstring& value)
+{
+    std::wstring v = TrimCopy(value);
+    return v.empty() || IsManifestNonEmptyDottedToken(v);
+}
+
+static bool IsManifestResourceLanguageValue(const std::wstring& value)
+{
+    std::wstring v = TrimCopy(value);
+    if (v.empty() || v.front() == L'-' || v.back() == L'-')
+        return false;
+
+    bool previousDash = false;
+    for (wchar_t ch : v)
+    {
+        if (ch == L'-')
+        {
+            if (previousDash)
+                return false;
+            previousDash = true;
+            continue;
+        }
+        if (!IsAsciiAlnum(ch))
+            return false;
+        previousDash = false;
+    }
+    return true;
+}
+
+static bool IsManifestExecutableValue(const std::wstring& value)
+{
+    std::wstring v = TrimCopy(value);
+    if (v.empty() || v.front() == L'\\' || v.front() == L'/')
+        return false;
+    if (!PathIsRelativeW(v.c_str()))
+        return false;
+
+    for (wchar_t ch : v)
+    {
+        if (ch < 32 || ch == L'<' || ch == L'>' || ch == L'"' || ch == L'|' || ch == L'?' || ch == L'*' || ch == L':')
+            return false;
+    }
+    return true;
+}
+
+static bool IsManifestRelativeAssetPath(const std::wstring& value)
+{
+    std::wstring v = TrimCopy(value);
+    if (v.empty() || v.front() == L'\\' || v.front() == L'/')
+        return false;
+    if (!PathIsRelativeW(v.c_str()))
+        return false;
+
+    size_t segmentStart = 0;
+    bool sawFileName = false;
+    for (size_t i = 0; i <= v.size(); ++i)
+    {
+        wchar_t ch = (i < v.size()) ? v[i] : L'\\';
+        if (i < v.size() && (ch < 32 || ch == L'<' || ch == L'>' || ch == L'"' || ch == L'|' || ch == L'?' || ch == L'*' || ch == L':'))
+            return false;
+
+        if (ch != L'\\' && ch != L'/')
+            continue;
+
+        std::wstring segment = v.substr(segmentStart, i - segmentStart);
+        if (segment.empty() || segment == L"." || segment == L"..")
+            return false;
+        sawFileName = true;
+        segmentStart = i + 1;
+    }
+
+    return sawFileName;
+}
+
+static bool IsManifestBackgroundColorValue(const std::wstring& value)
+{
+    std::wstring v = ToLowerCopy(TrimCopy(value));
+    if (v == L"transparent")
+        return true;
+    if (v.size() != 7 && v.size() != 9)
+        return false;
+    if (v.front() != L'#')
+        return false;
+    for (size_t i = 1; i < v.size(); ++i)
+    {
+        if (HexDigitValue(v[i]) < 0)
+            return false;
+    }
+    return true;
+}
+
+static bool IsManifestPublisherValue(const std::wstring& value)
+{
+    std::wstring v = TrimCopy(value);
+    if (v.empty())
+        return false;
+    for (wchar_t ch : v)
+    {
+        if (ch < 32 || ch == L'<' || ch == L'>')
+            return false;
+    }
+    return true;
+}
+
+static std::wstring ManifestSettingValidated(
+    const wchar_t* key,
+    const wchar_t* fallback,
+    const wchar_t* legacySettingsKey,
+    bool (*validator)(const std::wstring&))
+{
+    std::wstring value = ManifestSetting(key, fallback, legacySettingsKey);
+    if (!validator || validator(value))
+        return value;
+    return fallback ? fallback : L"";
+}
+
 static std::wstring TrimNonAlnumEnds(std::wstring value)
 {
     while (!value.empty() && !IsAsciiAlnum(value.front()))
@@ -957,7 +1101,7 @@ static std::wstring EffectiveManifestIdentityName()
 
 static std::wstring EffectiveManifestPublisher()
 {
-    std::wstring publisher = ManifestSetting(L"Publisher", L"CN=DesktopTileGenerator", L"ManifestPublisher");
+    std::wstring publisher = ManifestSettingValidated(L"Publisher", L"CN=DesktopTileGenerator", L"ManifestPublisher", IsManifestPublisherValue);
     if (ToLowerCopy(publisher).rfind(L"cn=", 0) != 0)
         publisher = L"CN=" + publisher;
     return publisher;
@@ -986,7 +1130,7 @@ static std::wstring EffectiveManifestDescription()
 
 static std::wstring EffectiveManifestExecutable()
 {
-    return ManifestSetting(L"Executable", L"rundll32.exe", L"ManifestExecutable");
+    return ManifestSettingValidated(L"Executable", L"rundll32.exe", L"ManifestExecutable", IsManifestExecutableValue);
 }
 
 static std::wstring EffectiveManifestApplicationId()
@@ -1008,52 +1152,52 @@ static std::wstring EffectiveManifestMaxVersionTested()
 
 static std::wstring EffectiveManifestTargetDeviceFamilyName()
 {
-    return ManifestSetting(L"TargetDeviceFamilyName", L"Windows.Desktop", L"ManifestTargetDeviceFamilyName");
+    return ManifestSettingValidated(L"TargetDeviceFamilyName", L"Windows.Desktop", L"ManifestTargetDeviceFamilyName", IsManifestNonEmptyDottedToken);
 }
 
 static std::wstring EffectiveManifestResourceLanguage()
 {
-    return ManifestSetting(L"ResourceLanguage", L"en-us", L"ManifestResourceLanguage");
+    return ManifestSettingValidated(L"ResourceLanguage", L"en-us", L"ManifestResourceLanguage", IsManifestResourceLanguageValue);
 }
 
 static std::wstring EffectiveManifestPropertiesLogo()
 {
-    return ManifestSetting(L"PropertiesLogo", L"Assets\\StoreLogo.png", L"ManifestPropertiesLogo");
+    return ManifestSettingValidated(L"PropertiesLogo", L"Assets\\StoreLogo.png", L"ManifestPropertiesLogo", IsManifestRelativeAssetPath);
 }
 
 static std::wstring EffectiveManifestSquare150x150Logo()
 {
-    return ManifestSetting(L"Square150x150Logo", L"Assets\\MediumTile.png", L"ManifestSquare150x150Logo");
+    return ManifestSettingValidated(L"Square150x150Logo", L"Assets\\MediumTile.png", L"ManifestSquare150x150Logo", IsManifestRelativeAssetPath);
 }
 
 static std::wstring EffectiveManifestSquare44x44Logo()
 {
-    return ManifestSetting(L"Square44x44Logo", L"Assets\\Square44x44Logo.png", L"ManifestSquare44x44Logo");
+    return ManifestSettingValidated(L"Square44x44Logo", L"Assets\\Square44x44Logo.png", L"ManifestSquare44x44Logo", IsManifestRelativeAssetPath);
 }
 
 static std::wstring EffectiveManifestSquare71x71Logo()
 {
-    return ManifestSetting(L"Square71x71Logo", L"Assets\\SmallTile.png", L"ManifestSquare71x71Logo");
+    return ManifestSettingValidated(L"Square71x71Logo", L"Assets\\SmallTile.png", L"ManifestSquare71x71Logo", IsManifestRelativeAssetPath);
 }
 
 static std::wstring EffectiveManifestWide310x150Logo()
 {
-    return ManifestSetting(L"Wide310x150Logo", L"Assets\\WideTile.png", L"ManifestWide310x150Logo");
+    return ManifestSettingValidated(L"Wide310x150Logo", L"Assets\\WideTile.png", L"ManifestWide310x150Logo", IsManifestRelativeAssetPath);
 }
 
 static std::wstring EffectiveManifestSquare310x310Logo()
 {
-    return ManifestSetting(L"Square310x310Logo", L"Assets\\LargeTile.png", L"ManifestSquare310x310Logo");
+    return ManifestSettingValidated(L"Square310x310Logo", L"Assets\\LargeTile.png", L"ManifestSquare310x310Logo", IsManifestRelativeAssetPath);
 }
 
 static std::wstring EffectiveManifestBackgroundColor()
 {
-    return ManifestSetting(L"BackgroundColor", L"transparent", L"ManifestBackgroundColor");
+    return ManifestSettingValidated(L"BackgroundColor", L"transparent", L"ManifestBackgroundColor", IsManifestBackgroundColorValue);
 }
 
 static std::wstring EffectiveManifestEntryPoint()
 {
-    return ManifestSetting(L"EntryPoint", L"Windows.FullTrustApplication", L"ManifestEntryPoint");
+    return ManifestSettingValidated(L"EntryPoint", L"Windows.FullTrustApplication", L"ManifestEntryPoint", IsManifestNonEmptyDottedToken);
 }
 
 static std::wstring EffectiveManifestRestrictedCapability()
@@ -1062,7 +1206,7 @@ static std::wstring EffectiveManifestRestrictedCapability()
     std::wstring lowered = ToLowerCopy(TrimCopy(value));
     if (lowered == L"0" || lowered == L"false" || lowered == L"off" || lowered == L"none")
         return L"";
-    return value;
+    return IsManifestOptionalDottedToken(value) ? value : L"runFullTrust";
 }
 
 static std::wstring XmlEscape(const std::wstring& value)
@@ -1330,8 +1474,18 @@ static std::vector<std::wstring> EffectiveManifestShowNameOnTiles()
         size_t comma = configured.find_first_of(L",;", pos);
         size_t end = comma == std::wstring::npos ? configured.size() : comma;
         std::wstring tile = TrimCopy(configured.substr(pos, end - pos));
-        if (!tile.empty())
-            tiles.push_back(tile);
+        std::wstring loweredTile = ToLowerCopy(tile);
+        if (loweredTile == L"square150x150logo")
+            tiles.push_back(L"square150x150Logo");
+        else if (loweredTile == L"wide310x150logo")
+            tiles.push_back(L"wide310x150Logo");
+        else if (loweredTile == L"square310x310logo")
+            tiles.push_back(L"square310x310Logo");
+        else if (!tile.empty())
+        {
+            // Ignore invalid ShowNameOnTiles entries instead of creating a
+            // manifest that only fails later during AppX registration.
+        }
         if (comma == std::wstring::npos)
             break;
         pos = comma + 1;
@@ -2509,9 +2663,9 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
     std::vector<BYTE> tmpl(4096 + stringBytes);
     DLGTEMPLATE* dlg = (DLGTEMPLATE*)tmpl.data();
 
-    dlg->style = WS_POPUP | WS_BORDER | WS_SYSMENU | DS_MODALFRAME | WS_CAPTION | DS_SETFONT;
+    dlg->style = WS_POPUP | WS_BORDER | WS_SYSMENU | DS_MODALFRAME | WS_CAPTION | DS_SETFONT | DS_CENTER;
     dlg->cdit = 3;
-    dlg->x = 10; dlg->y = 10; dlg->cx = 200; dlg->cy = 60;
+    dlg->x = 10; dlg->y = 10; dlg->cx = 320; dlg->cy = 72;
 
     WORD* p = (WORD*)(dlg + 1);
 
@@ -2523,7 +2677,7 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
     AppendDialogTemplateString(p, L"Segoe UI");
     // ---- Edit box ----
     DLGITEMTEMPLATE* item = AlignDialogItem(p);
-    item->x = 5; item->y = 5; item->cx = 190; item->cy = 12;
+    item->x = 6; item->y = 6; item->cx = 308; item->cy = 14;
     item->id = 1001;
     item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL;
 
@@ -2534,7 +2688,7 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
 
     // ---- OK button ----
     item = AlignDialogItem(p);
-    item->x = 40; item->y = 25; item->cx = 50; item->cy = 14;
+    item->x = 188; item->y = 32; item->cx = 58; item->cy = 16;
     item->id = IDOK;
     item->style = WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON;
 
@@ -2545,7 +2699,7 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
 
     // ---- Cancel button ----
     item = AlignDialogItem(p);
-    item->x = 110; item->y = 25; item->cx = 50; item->cy = 14;
+    item->x = 256; item->y = 32; item->cx = 58; item->cy = 16;
     item->id = IDCANCEL;
     item->style = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON;
 

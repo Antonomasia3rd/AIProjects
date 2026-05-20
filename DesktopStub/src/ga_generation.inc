@@ -11,6 +11,66 @@ static const Tile g_tiles[] = {
     {L"LargeTile",       L"Assets\\LargeTile.png",310,310},
 };
 
+struct GenerationCompletionRecord
+{
+    unsigned long long id = 0;
+    bool success = false;
+};
+
+static std::atomic<unsigned long long> g_generationNextRequestId(1);
+static std::mutex g_generationCompletionMutex;
+static std::vector<GenerationCompletionRecord> g_generationCompletions;
+static unsigned long long g_generationQueuedId = 0;
+
+static void WakePollThread();
+
+static std::wstring ManifestAssetPathForTile(const ManifestDisplayInfo& info, const Tile& tile)
+{
+    std::wstring path;
+    if (wcscmp(tile.name, L"StoreLogo") == 0)
+        path = info.propertiesLogo;
+    else if (wcscmp(tile.name, L"MediumTile") == 0)
+        path = info.square150x150Logo;
+    else if (wcscmp(tile.name, L"Square44x44Logo") == 0)
+        path = info.square44x44Logo;
+    else if (wcscmp(tile.name, L"SmallTile") == 0)
+        path = info.square71x71Logo;
+    else if (wcscmp(tile.name, L"WideTile") == 0)
+        path = info.wide310x150Logo;
+    else if (wcscmp(tile.name, L"LargeTile") == 0)
+        path = info.square310x310Logo;
+
+    return IsManifestRelativeAssetPath(path) ? path : tile.file;
+}
+
+static void RecordGenerationCompletion(unsigned long long id, bool success)
+{
+    if (id == 0)
+        return;
+
+    {
+        std::lock_guard<std::mutex> lk(g_generationCompletionMutex);
+        g_generationCompletions.push_back({ id, success });
+        if (g_generationCompletions.size() > 64)
+            g_generationCompletions.erase(g_generationCompletions.begin());
+    }
+    WakePollThread();
+}
+
+static bool TryGetGenerationCompletion(unsigned long long id, bool& success)
+{
+    std::lock_guard<std::mutex> lk(g_generationCompletionMutex);
+    for (const auto& record : g_generationCompletions)
+    {
+        if (record.id == id)
+        {
+            success = record.success;
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool IsValidGeneratedPng(const std::wstring& path)
 {
     WIN32_FILE_ATTRIBUTE_DATA data{};
@@ -374,15 +434,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
     Log(g_ui.renderModeSummary.c_str(), FitModeToString(renderMode));
 
     std::wstring exeDir = GetExeDir();
-    std::wstring assetsDir = exeDir + L"\\Assets";
-    DWORD assetsDirError = ERROR_SUCCESS;
-    bool assetsDirReady = EnsureDirectoryExists(assetsDir, &assetsDirError);
-    if (!assetsDirReady)
-        LogWin32Failure(g_ui.createAssetsDirectoryOperation.c_str(), assetsDirError);
-    else
-        Log(g_ui.assetsDirectoryReady.c_str(), assetsDir.c_str());
-
-    bool assetsOk = assetsDirReady;
+    ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
+    bool assetsOk = true;
     std::vector<int> scales = GetConfiguredScales();
     {
         std::wstring scaleList;
@@ -393,93 +446,116 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         }
         Log(g_ui.activeScales.c_str(), scaleList.c_str());
     }
-    if (assetsDirReady)
+    std::vector<std::wstring> loggedAssetDirs;
+    for (auto& t : g_tiles)
     {
-        for (auto& t : g_tiles)
+        std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
+        std::wstring outPath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
+        DWORD assetDirError = ERROR_SUCCESS;
+        if (!EnsureParentDirectoryForFile(outPath, &assetDirError))
         {
-            std::wstring outPath = exeDir + L"\\" + t.file;
-            if (!IniReadI(L"Assets", t.name, 0))
+            assetsOk = false;
+            LogWin32Failure(g_ui.createAssetsDirectoryOperation.c_str(), assetDirError);
+            Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+            continue;
+        }
+        std::wstring assetDir = ParentDirectoryOfPath(outPath);
+        bool directoryAlreadyLogged = false;
+        for (const auto& loggedDir : loggedAssetDirs)
+        {
+            if (IEquals(loggedDir, assetDir))
             {
-                if (!g_generateDesktopIconForDisabledEntries)
-                {
-                    Log(g_ui.skippingAssetDisabled.c_str(), t.name);
-                    if (g_deleteDisabledAssets && !DeleteDisabledAssetFiles(outPath))
-                        assetsOk = false;
-                    continue;
-                }
+                directoryAlreadyLogged = true;
+                break;
+            }
+        }
+        if (!directoryAlreadyLogged)
+        {
+            loggedAssetDirs.push_back(assetDir);
+            Log(g_ui.assetsDirectoryReady.c_str(), assetDir.c_str());
+        }
 
-                // Decode the embedded 30x30 icon and write it as-is to the base path,
-                // then write the same 30x30 image to each scaled variant path.
-                {
-                    Bitmap* icon = LoadEmbeddedDesktopIcon();
-                    if (!icon)
-                    {
-                        assetsOk = false;
-                        Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
-                        continue;
-                    }
-
-                    bool ok = SavePNG(icon, outPath.c_str());
-                    if (ok)
-                        Log(g_ui.generatedDesktopIconAsset.c_str(), outPath.c_str());
-                    else
-                        Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
-
-                    for (int scale : scales)
-                    {
-                        std::wstring scaledPath = ScaleAssetPath(outPath, scale);
-                        bool scaledOk = SavePNG(icon, scaledPath.c_str());
-                        if (scaledOk)
-                            Log(g_ui.savedScaledAsset.c_str(), scaledPath.c_str(), scale);
-                        else
-                            Log(g_ui.failedSaveScaledAsset.c_str(), scaledPath.c_str(), scale);
-                        ok = ok && scaledOk;
-                    }
-
-                    delete icon;
-                    if (!ok) assetsOk = false;
-                }
+        if (!IniReadI(L"Assets", t.name, 0))
+        {
+            if (!g_generateDesktopIconForDisabledEntries)
+            {
+                Log(g_ui.skippingAssetDisabled.c_str(), t.name);
+                if (g_deleteDisabledAssets && !DeleteDisabledAssetFiles(outPath))
+                    assetsOk = false;
                 continue;
             }
 
-            auto* o = ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0));
-            bool saved = false;
-            if (o)
+            // Decode the embedded 30x30 icon and write it as-is to the base path,
+            // then write the same 30x30 image to each scaled variant path.
             {
-                saved = SavePNG(o, outPath.c_str());
-                if (saved)
-                    Log(g_ui.savedAsset.c_str(), outPath.c_str());
+                Bitmap* icon = LoadEmbeddedDesktopIcon();
+                if (!icon)
+                {
+                    assetsOk = false;
+                    Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+                    continue;
+                }
+
+                bool ok = SavePNG(icon, outPath.c_str());
+                if (ok)
+                    Log(g_ui.generatedDesktopIconAsset.c_str(), outPath.c_str());
                 else
                     Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
-                delete o;
-            }
 
-            for (int scale : scales)
-            {
-                int scaledW = ScalePixels(t.w, scale);
-                int scaledH = ScalePixels(t.h, scale);
-                auto* scaled = ResizeBitmapToMode(renderSource, scaledW, scaledH, renderMode, Color(255, 0, 0, 0));
-                std::wstring scaledPath = ScaleAssetPath(outPath, scale);
-                if (scaled)
+                for (int scale : scales)
                 {
-                    bool scaledSaved = SavePNG(scaled, scaledPath.c_str());
-                    if (scaledSaved)
+                    std::wstring scaledPath = ScaleAssetPath(outPath, scale);
+                    bool scaledOk = SavePNG(icon, scaledPath.c_str());
+                    if (scaledOk)
                         Log(g_ui.savedScaledAsset.c_str(), scaledPath.c_str(), scale);
                     else
                         Log(g_ui.failedSaveScaledAsset.c_str(), scaledPath.c_str(), scale);
-                    saved = scaledSaved && saved;
-                    delete scaled;
+                    ok = ok && scaledOk;
                 }
-                else
-                {
-                    Log(g_ui.failedSaveScaledAsset.c_str(), scaledPath.c_str(), scale);
-                    saved = false;
-                }
-            }
 
-            if (!saved)
-                assetsOk = false;
+                delete icon;
+                if (!ok) assetsOk = false;
+            }
+            continue;
         }
+
+        auto* o = ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0));
+        bool saved = false;
+        if (o)
+        {
+            saved = SavePNG(o, outPath.c_str());
+            if (saved)
+                Log(g_ui.savedAsset.c_str(), outPath.c_str());
+            else
+                Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+            delete o;
+        }
+
+        for (int scale : scales)
+        {
+            int scaledW = ScalePixels(t.w, scale);
+            int scaledH = ScalePixels(t.h, scale);
+            auto* scaled = ResizeBitmapToMode(renderSource, scaledW, scaledH, renderMode, Color(255, 0, 0, 0));
+            std::wstring scaledPath = ScaleAssetPath(outPath, scale);
+            if (scaled)
+            {
+                bool scaledSaved = SavePNG(scaled, scaledPath.c_str());
+                if (scaledSaved)
+                    Log(g_ui.savedScaledAsset.c_str(), scaledPath.c_str(), scale);
+                else
+                    Log(g_ui.failedSaveScaledAsset.c_str(), scaledPath.c_str(), scale);
+                saved = scaledSaved && saved;
+                delete scaled;
+            }
+            else
+            {
+                Log(g_ui.failedSaveScaledAsset.c_str(), scaledPath.c_str(), scale);
+                saved = false;
+            }
+        }
+
+        if (!saved)
+            assetsOk = false;
     }
     delete preparedWallpaper;
     delete src;
@@ -744,6 +820,7 @@ static void GenerationWorkerThread()
     {
         std::wstring wallpaper;
         std::wstring reason;
+        unsigned long long requestId = 0;
 
         {
             std::unique_lock<std::mutex> lk(g_generationQueueMutex);
@@ -754,13 +831,16 @@ static void GenerationWorkerThread()
 
             wallpaper = std::move(g_generationQueuedWallpaper);
             reason = std::move(g_generationQueuedReason);
+            requestId = g_generationQueuedId;
             MarkGenerationActive(true, reason);
             g_generationQueued = false;
+            g_generationQueuedId = 0;
         }
 
+        bool ok = false;
         try
         {
-            Generate(wallpaper.c_str(), reason.c_str());
+            ok = Generate(wallpaper.c_str(), reason.c_str());
         }
         catch (const std::exception& ex)
         {
@@ -776,24 +856,32 @@ static void GenerationWorkerThread()
             if (g_notifyOnFailure)
                 NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationFailed, NIIF_ERROR);
         }
+        RecordGenerationCompletion(requestId, ok);
         MarkGenerationActive(false);
         MaybeCompleteRequestedShutdown();
     }
 }
 
-static void QueueGenerate(std::wstring wallpaper, std::wstring reason)
+static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring reason)
 {
     if (g_shutdownRequested)
-        return;
+        return 0;
 
     bool startWorker = false;
+    unsigned long long requestId = g_generationNextRequestId.fetch_add(1, std::memory_order_relaxed);
+    if (requestId == 0)
+        requestId = g_generationNextRequestId.fetch_add(1, std::memory_order_relaxed);
+    unsigned long long droppedRequestId = 0;
     {
         std::lock_guard<std::mutex> lk(g_generationQueueMutex);
         if (g_generationWorkerStop || g_shutdownRequested)
-            return;
+            return 0;
 
+        if (g_generationQueued && g_generationQueuedId != 0)
+            droppedRequestId = g_generationQueuedId;
         g_generationQueuedWallpaper = std::move(wallpaper);
         g_generationQueuedReason = std::move(reason);
+        g_generationQueuedId = requestId;
         g_generationQueued = true;
 
         if (!g_generationWorkerStarted)
@@ -816,14 +904,16 @@ static void QueueGenerate(std::wstring wallpaper, std::wstring reason)
                 std::lock_guard<std::mutex> lk(g_generationQueueMutex);
                 g_generationWorkerStarted = false;
                 g_generationQueued = false;
+                g_generationQueuedId = 0;
                 g_generationQueuedWallpaper.clear();
                 g_generationQueuedReason.clear();
             }
+            RecordGenerationCompletion(requestId, false);
             Log(g_ui.generationThreadStartFailed.c_str(), message.c_str());
             if (g_notifyOnFailure)
                 NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationFailed, NIIF_ERROR);
             MaybeCompleteRequestedShutdown();
-            return;
+            return 0;
         }
         catch (...)
         {
@@ -832,18 +922,23 @@ static void QueueGenerate(std::wstring wallpaper, std::wstring reason)
                 std::lock_guard<std::mutex> lk(g_generationQueueMutex);
                 g_generationWorkerStarted = false;
                 g_generationQueued = false;
+                g_generationQueuedId = 0;
                 g_generationQueuedWallpaper.clear();
                 g_generationQueuedReason.clear();
             }
+            RecordGenerationCompletion(requestId, false);
             Log(g_ui.generationThreadStartFailed.c_str(), message.c_str());
             if (g_notifyOnFailure)
                 NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationFailed, NIIF_ERROR);
             MaybeCompleteRequestedShutdown();
-            return;
+            return 0;
         }
     }
 
+    if (droppedRequestId != 0)
+        RecordGenerationCompletion(droppedRequestId, false);
     g_generationQueueCv.notify_one();
+    return requestId;
 }
 
 static void JoinQueuedGenerations()
@@ -873,6 +968,11 @@ void PollThread()
     bool baselineReady = false;
     auto lastGen = steady_clock::now() - milliseconds(ClampInt(g_pollInitialDebounceBypassMs.load(), 0, 60000));
     bool emptyWallpaperAlreadyReported = false;
+    bool pendingPollGeneration = false;
+    unsigned long long pendingPollGenerationId = 0;
+    std::wstring pendingWallpaper;
+    FitMode pendingFit = FitMode::Fill;
+    int pendingDpiScale = 100;
 
     while (g_running)
     {
@@ -880,6 +980,25 @@ void PollThread()
         int confirm = IniReadClampedI(L"Settings", L"ConfirmMs", 800, 0, 10000);
         int deb = IniReadClampedI(L"Settings", L"DebounceMinMs", 1200, 0, 60000);
         ReloadRuntimeSettingsFromIni();
+
+        if (pendingPollGeneration)
+        {
+            bool generationSucceeded = false;
+            if (TryGetGenerationCompletion(pendingPollGenerationId, generationSucceeded))
+            {
+                if (generationSucceeded)
+                {
+                    last = pendingWallpaper;
+                    lastFit = pendingFit;
+                    lastDpiScale = pendingDpiScale;
+                    emptyWallpaperAlreadyReported = false;
+                }
+
+                pendingPollGeneration = false;
+                pendingPollGenerationId = 0;
+                pendingWallpaper.clear();
+            }
+        }
 
         if (g_shutdownRequested)
         {
@@ -893,6 +1012,12 @@ void PollThread()
         if (!wallpaperListening && !fitListening && !dpiListening)
         {
             baselineReady = false;
+            PollSleepFor(milliseconds(poll));
+            continue;
+        }
+
+        if (pendingPollGeneration)
+        {
             PollSleepFor(milliseconds(poll));
             continue;
         }
@@ -969,11 +1094,16 @@ void PollThread()
 
                     LogText(g_ui.changeConfirmed);
 
-                    QueueGenerate(generationWallpaper, reason);
-                    emptyWallpaperAlreadyReported = false;
-                    last = generationWallpaper;
-                    lastFit = fit2;
-                    lastDpiScale = dpiScale2;
+                    unsigned long long requestId = QueueGenerate(generationWallpaper, reason);
+                    if (requestId != 0)
+                    {
+                        pendingPollGeneration = true;
+                        pendingPollGenerationId = requestId;
+                        pendingWallpaper = generationWallpaper;
+                        pendingFit = fit2;
+                        pendingDpiScale = dpiScale2;
+                        emptyWallpaperAlreadyReported = false;
+                    }
                     lastGen = steady_clock::now();
                 }
             }

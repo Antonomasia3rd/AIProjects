@@ -123,11 +123,21 @@ static void ForgetTrayIconHandle()
 void ShowPSLog(HWND h)
 {
     std::wstring psOut;
+    std::wstring psMsg;
+    bool psErr = false;
     {
         std::lock_guard<std::mutex> lk(g_psMutex);
         psOut = g_psOut;
+        psMsg = g_psMsg;
+        psErr = g_psErr;
     }
     psOut = FormatPowerShellOutput(psOut);
+    psMsg = FormatPowerShellOutput(psMsg);
+
+    if (psOut.empty() && !psMsg.empty())
+        psOut = psMsg;
+    else if (!psOut.empty() && !psMsg.empty() && psOut.find(psMsg) == std::wstring::npos)
+        psOut = psMsg + L"\r\n\r\n" + psOut;
 
     if (psOut.empty()){
         MessageBoxW(h, g_ui.noPowerShellOutput.c_str(), g_ui.noPowerShellOutputTitle.c_str(), MB_OK | MB_ICONINFORMATION);
@@ -142,7 +152,7 @@ void ShowPSLog(HWND h)
         psOut += L"\r\n\r\n";
         psOut += FormatWide(g_ui.powerShellOutputTruncated.c_str(), static_cast<int>(std::min<size_t>(hidden, INT_MAX)));
     }
-    MessageBoxW(h, psOut.c_str(), g_ui.noPowerShellOutputTitle.c_str(), MB_OK | MB_ICONERROR);
+    MessageBoxW(h, psOut.c_str(), g_ui.noPowerShellOutputTitle.c_str(), MB_OK | (psErr ? MB_ICONERROR : MB_ICONINFORMATION));
 }
 
 INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) noexcept
