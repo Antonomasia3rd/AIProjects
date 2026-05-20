@@ -23,7 +23,14 @@ function Assert-Matches {
 
 $generation = Read-Source 'src\ga_generation.inc'
 $registration = Read-Source 'src\ga_registration.inc'
-$uiLogging = Read-Source 'src\ga_ui_logging.inc'
+$uiLogging = @(
+    Read-Source 'src\ga_ui_logging.inc'
+    Read-Source 'src\ga_ui_state.inc'
+    Read-Source 'src\ga_logging_core.inc'
+    Read-Source 'src\ga_manifest.inc'
+    Read-Source 'src\ga_ui_strings.inc'
+    Read-Source 'src\ga_runtime_helpers.inc'
+) -join "`n"
 $defaults = Read-Source 'src\ga_config_defaults.inc'
 
 Assert-Matches $generation `
