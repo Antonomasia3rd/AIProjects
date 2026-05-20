@@ -24,6 +24,21 @@ Output:
 DesktopStub\build\GenerateAssets.exe
 ```
 
+## Developer Checks
+
+`TestGenerateAssetsSource.ps1` is a maintainer-only regression guard. It does not
+build or launch `GenerateAssets.exe`; it scans the source for specific safety
+fixes that should not be accidentally removed.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File DesktopStub\TestGenerateAssetsSource.ps1
+```
+
+Use `-ListChecks` to print the guardrails it currently enforces without running
+the assertions.
+
+Normal users do not need this script to build or run the app.
+
 ## Source Layout
 
 `GenerateAssets.cpp` is the single translation-unit entry point. Most implementation code is split into ordered fragments under `DesktopStub\src` to keep the codebase reviewable without changing linker behavior:
