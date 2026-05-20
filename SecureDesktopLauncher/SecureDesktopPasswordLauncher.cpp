@@ -1487,12 +1487,6 @@ static LRESULT CALLBACK ControlWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
     case WM_CLOSE:
         ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
         return 0;
-    case WM_CTLCOLORSTATIC: {
-        HDC dc = reinterpret_cast<HDC>(wParam);
-        SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
-        return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
-    }
     case WM_DESTROY:
         KillTimer(hwnd, kAutoLockTimerId);
         PostQuitMessage(0);
