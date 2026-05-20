@@ -19,10 +19,10 @@ RealTimeNotesDeskband\
   build\                         generated DLLs, ignored
   references\                    local upstream/reference source, ignored
   BuildDeskband.cmd
+  ConfigureDeskband.cmd
+  RegisterDeskband.cmd
+  UnregisterDeskband.cmd
   RealTimeNotesDeskband.cpp
-  configure-deskband.ps1
-  register-deskband.ps1
-  unregister-deskband.ps1
 ```
 
 The `references\` folder may contain local copies of ExplorerPatcher and the original Real-Time Notes tray app, but those copies are not part of this publishable project.
@@ -33,30 +33,6 @@ The `references\` folder may contain local copies of ExplorerPatcher and the ori
 - MinGW-w64 `g++` on `PATH`. Strawberry Perl's bundled MinGW works.
 
 The stock Windows 11 taskbar does not expose classic taskbar toolbars.
-
-## Configure Credentials
-
-The Deskband reads HoYoLAB credentials from its own per-user registry keys. It does not need the old tray program to be running.
-
-Manual setup:
-
-```powershell
-.\configure-deskband.ps1 -Resource resin -UID <uid> -LTokenV2 <ltoken_v2> -LTuidV2 <ltuid_v2>
-```
-
-Import from one existing cookie JSON:
-
-```powershell
-.\configure-deskband.ps1 -Resource resin -ImportFromJson "D:\path\to\genshin_cookie.json"
-```
-
-Import every supported cookie JSON from a directory:
-
-```powershell
-.\configure-deskband.ps1 -Resource all -ImportFromDir "D:\path\to\Real-Time Notes" -NoSelect
-```
-
-The imported fields are `uid`, `ltoken_v2`, `ltuid_v2`, and optional `refresh_interval`.
 
 ## Build
 
@@ -80,14 +56,14 @@ Outputs are written to `build\`.
 
 ## Install
 
-```powershell
-.\register-deskband.ps1
+```cmd
+RegisterDeskband.cmd
 ```
 
 To register a side-by-side DLL built with `BuildDeskband.cmd new`:
 
-```powershell
-.\register-deskband.ps1 -DllPath .\build\RealTimeNotesDeskband.12345.dll
+```cmd
+RegisterDeskband.cmd build\RealTimeNotesDeskband.12345.dll
 ```
 
 Then right-click the taskbar and enable:
@@ -98,10 +74,48 @@ Toolbars > Real Time Notes
 
 If it does not appear immediately, restart File Explorer from ExplorerPatcher Properties.
 
+## Configure Credentials
+
+No PowerShell is required. Configure credentials from the deskband context menu:
+
+- right-click the deskband and choose `Configure selected account...`
+- choose the game resource
+- enter `UID`, `ltoken_v2`, and `ltuid_v2`
+- optionally set a per-account refresh interval in seconds
+- choose `Import cookie JSON for selected...` if you already have a compatible cookie JSON file
+
+You can also open the same native configuration dialog without Explorer loaded:
+
+```cmd
+ConfigureDeskband.cmd
+```
+
+The imported JSON fields are `uid`, `ltoken_v2`, `ltuid_v2`, and optional `refresh_interval`.
+
+## Context Menu
+
+The deskband menu includes:
+
+- current game detail rows matching the original tray menu where the API exposes them
+- `Refresh now`
+- selected account configuration/import/clear actions
+- `Open HoYoLAB login page`
+- `Resource` selection, including automatic selection
+- per-resource account configuration and import commands
+- config/asset directory open and change commands under `Advanced`
+
+The deskband asks Explorer to resize when status text changes, so the toolbar width follows the current content instead of staying at a fixed size.
+
 ## Uninstall
 
-```powershell
-.\unregister-deskband.ps1
+```cmd
+UnregisterDeskband.cmd
+```
+
+If the registered DLL was a side-by-side build, the unregister script detects the registered path automatically. You can also pass it explicitly:
+
+```cmd
+UnregisterDeskband.cmd build\RealTimeNotesDeskband.12345.dll
 ```
 
 ## Settings
