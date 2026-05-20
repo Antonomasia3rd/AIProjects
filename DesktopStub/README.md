@@ -30,7 +30,12 @@ DesktopStub\build\GenerateAssets.exe
 
 - `ga_core.inc`: low-level file, text, INI, and process-output helpers.
 - `ga_config_defaults.inc`: runtime globals and generated INI/string defaults.
-- `ga_ui_logging.inc`: UI strings, logging, runtime setting reload, manifest generation/display.
+- `ga_ui_logging.inc`: ordered UI/logging aggregator for smaller fragments.
+- `ga_ui_state.inc`: UI string state, logging/tray globals, and shared state labels.
+- `ga_logging_core.inc`: logging, console, INI access wrappers, and runtime logging settings.
+- `ga_manifest.inc`: manifest settings, XML helpers, and generated manifest output.
+- `ga_ui_strings.inc`: localized string loading, defaults validation, and format-token checks.
+- `ga_runtime_helpers.inc`: runtime option parsing, DPI scale helpers, cleanup policy, and rename dialog.
 - `ga_wallpaper.inc`: wallpaper and fit/DPI detection.
 - `ga_image.inc`: GDI+ image generation and PNG saving.
 - `ga_registration.inc`: AppX registration and PowerShell fallback handling.
