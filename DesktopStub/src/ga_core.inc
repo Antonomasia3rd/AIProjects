@@ -1,0 +1,1372 @@
+﻿static std::wstring TrimCopy(std::wstring s)
+{
+    auto notSpace = [](wchar_t ch) { return !iswspace(ch); };
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), notSpace));
+    s.erase(std::find_if(s.rbegin(), s.rend(), notSpace).base(), s.end());
+    return s;
+}
+
+static std::wstring ToLowerCopy(std::wstring s)
+{
+    std::transform(s.begin(), s.end(), s.begin(), [](wchar_t ch) { return (wchar_t)towlower(ch); });
+    return s;
+}
+
+static bool IEquals(const std::wstring& a, const std::wstring& b)
+{
+    return ToLowerCopy(a) == ToLowerCopy(b);
+}
+
+static bool ReadWholeFileBytes(const std::wstring& path, std::vector<BYTE>& bytes)
+{
+    bytes.clear();
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        return false;
+
+    auto fail = [&](DWORD err) -> bool
+    {
+        CloseHandle(h);
+        SetLastError(err == ERROR_SUCCESS ? ERROR_READ_FAULT : err);
+        bytes.clear();
+        return false;
+    };
+
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(h, &size))
+        return fail(GetLastError());
+    if (size.QuadPart < 0)
+        return fail(ERROR_INVALID_DATA);
+    if (size.QuadPart > 0x7fffffff)
+        return fail(ERROR_FILE_TOO_LARGE);
+
+    bytes.resize((size_t)size.QuadPart);
+    BYTE* cursor = bytes.empty() ? nullptr : bytes.data();
+    size_t remaining = bytes.size();
+    while (remaining > 0)
+    {
+        DWORD chunk = static_cast<DWORD>(std::min<size_t>(remaining, 1024 * 1024));
+        DWORD read = 0;
+        if (!ReadFile(h, cursor, chunk, &read, nullptr))
+            return fail(GetLastError());
+        if (read == 0)
+            return fail(ERROR_HANDLE_EOF);
+        cursor += read;
+        remaining -= read;
+    }
+
+    if (!CloseHandle(h))
+    {
+        DWORD err = GetLastError();
+        bytes.clear();
+        SetLastError(err);
+        return false;
+    }
+    return true;
+}
+
+static std::wstring MakeTempSiblingPath(const std::wstring& path, const wchar_t* tag)
+{
+    static std::atomic<unsigned long> counter(0);
+    wchar_t suffix[128];
+    swprintf(suffix, _countof(suffix), L".tmp.%lu.%llu.%lu.%s",
+        GetCurrentProcessId(),
+        static_cast<unsigned long long>(GetTickCount64()),
+        counter.fetch_add(1, std::memory_order_relaxed),
+        tag ? tag : L"file");
+    return path + suffix;
+}
+
+static bool WriteWholeFileBytesDirect(const std::wstring& path, const std::vector<BYTE>& bytes)
+{
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        return false;
+
+    const BYTE* cursor = bytes.empty() ? nullptr : bytes.data();
+    size_t remaining = bytes.size();
+    bool ok = true;
+    DWORD savedErr = ERROR_SUCCESS;
+    while (remaining > 0)
+    {
+        DWORD chunk = static_cast<DWORD>(std::min<size_t>(remaining, 1024 * 1024));
+        DWORD wrote = 0;
+        if (!WriteFile(h, cursor, chunk, &wrote, nullptr))
+        {
+            savedErr = GetLastError();
+            ok = false;
+            break;
+        }
+        if (wrote != chunk)
+        {
+            savedErr = ERROR_WRITE_FAULT;
+            ok = false;
+            break;
+        }
+        cursor += wrote;
+        remaining -= wrote;
+    }
+
+    if (ok)
+    {
+        if (!FlushFileBuffers(h))
+        {
+            savedErr = GetLastError();
+            ok = false;
+        }
+    }
+
+    if (!CloseHandle(h) && ok)
+    {
+        DWORD err = GetLastError();
+        SetLastError(err);
+        return false;
+    }
+
+    if (!ok)
+        SetLastError(savedErr == ERROR_SUCCESS ? ERROR_WRITE_FAULT : savedErr);
+    return ok;
+}
+
+static bool WriteWholeFileBytes(const std::wstring& path, const std::vector<BYTE>& bytes)
+{
+    std::wstring tempPath = MakeTempSiblingPath(path, L"text");
+    DeleteFileW(tempPath.c_str());
+
+    if (!WriteWholeFileBytesDirect(tempPath, bytes))
+    {
+        DWORD err = GetLastError();
+        DeleteFileW(tempPath.c_str());
+        SetLastError(err);
+        return false;
+    }
+
+    if (!MoveFileExW(tempPath.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        DWORD err = GetLastError();
+        DeleteFileW(tempPath.c_str());
+        SetLastError(err);
+        return false;
+    }
+
+    return true;
+}
+
+static bool EnsureDirectoryExists(const std::wstring& path, DWORD* error = nullptr)
+{
+    if (error)
+        *error = ERROR_SUCCESS;
+
+    DWORD attrs = GetFileAttributesW(path.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES)
+    {
+        if ((attrs & FILE_ATTRIBUTE_DIRECTORY) != 0)
+            return true;
+
+        if (error)
+            *error = ERROR_ALREADY_EXISTS;
+        SetLastError(ERROR_ALREADY_EXISTS);
+        return false;
+    }
+
+    if (CreateDirectoryW(path.c_str(), nullptr))
+        return true;
+
+    DWORD err = GetLastError();
+    if (err == ERROR_ALREADY_EXISTS)
+    {
+        attrs = GetFileAttributesW(path.c_str());
+        if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0)
+            return true;
+    }
+
+    if (error)
+        *error = err == ERROR_SUCCESS ? ERROR_CANNOT_MAKE : err;
+    SetLastError(error ? *error : err);
+    return false;
+}
+
+static bool HasUtf8Bom(const std::vector<BYTE>& bytes)
+{
+    return bytes.size() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+}
+
+static bool DecodeCodePageText(UINT codePage, const BYTE* data, size_t size, std::wstring& out, DWORD flags = 0)
+{
+    if (size > INT_MAX)
+        return false;
+    if (size == 0)
+    {
+        out.clear();
+        return true;
+    }
+
+    int need = MultiByteToWideChar(codePage, flags, (LPCCH)data, (int)size, nullptr, 0);
+    if (need <= 0)
+        return false;
+
+    out.resize(static_cast<size_t>(need));
+    return MultiByteToWideChar(codePage, flags, (LPCCH)data, (int)size, &out[0], need) > 0;
+}
+
+static bool DecodeTextBytes(const std::vector<BYTE>& bytes, std::wstring& out)
+{
+    if (bytes.empty())
+    {
+        out.clear();
+        return true;
+    }
+
+    if (HasUtf8Bom(bytes))
+        return DecodeCodePageText(CP_UTF8, bytes.data() + 3, bytes.size() - 3, out, MB_ERR_INVALID_CHARS);
+
+    if (bytes.size() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+    {
+        if ((bytes.size() - 2) % 2 != 0)
+            return false;
+        size_t n = (bytes.size() - 2) / 2;
+        out.resize(n);
+        if (n)
+            memcpy(out.data(), bytes.data() + 2, n * sizeof(wchar_t));
+        return true;
+    }
+
+    if (bytes.size() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+    {
+        if ((bytes.size() - 2) % 2 != 0)
+            return false;
+        size_t n = (bytes.size() - 2) / 2;
+        out.resize(n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            BYTE hi = bytes[2 + i * 2 + 0];
+            BYTE lo = bytes[2 + i * 2 + 1];
+            out[i] = (wchar_t)((hi << 8) | lo);
+        }
+        return true;
+    }
+
+    if (DecodeCodePageText(CP_UTF8, bytes.data(), bytes.size(), out, MB_ERR_INVALID_CHARS))
+        return true;
+
+    // Some users edit INI files with the system ANSI code page. Decode that
+    // instead of treating the file as unreadable and rebuilding it from empty.
+    return DecodeCodePageText(CP_ACP, bytes.data(), bytes.size(), out, 0);
+}
+
+static std::wstring DecodeProcessOutput(const std::vector<BYTE>& bytes)
+{
+    std::wstring out;
+    if (DecodeTextBytes(bytes, out))
+        return out;
+
+    if (DecodeCodePageText(CP_UTF8, bytes.data(), bytes.size(), out, 0))
+        return out;
+
+    if (DecodeCodePageText(CP_ACP, bytes.data(), bytes.size(), out, 0))
+        return out;
+
+    return L"";
+}
+
+static std::vector<BYTE> EncodeUtf8Text(const std::wstring& text, bool includeBom)
+{
+    std::vector<BYTE> out;
+    if (text.size() > INT_MAX)
+        return out;
+
+    int need = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), nullptr, 0, nullptr, nullptr);
+    if (need <= 0 && !text.empty())
+        return out;
+
+    if (includeBom)
+    {
+        static const BYTE bom[] = { 0xEF, 0xBB, 0xBF };
+        out.insert(out.end(), bom, bom + sizeof(bom));
+    }
+
+    size_t offset = out.size();
+    out.resize(offset + (size_t)need);
+    if (need > 0)
+        WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), (LPSTR)(out.data() + offset), need, nullptr, nullptr);
+    return out;
+}
+
+static bool ReadTextFile(const std::wstring& path, std::wstring& out)
+{
+    std::vector<BYTE> bytes;
+    if (!ReadWholeFileBytes(path, bytes))
+        return false;
+    return DecodeTextBytes(bytes, out);
+}
+
+static bool WriteUtf8BomTextFile(const std::wstring& path, const std::wstring& text)
+{
+    std::vector<BYTE> bytes = EncodeUtf8Text(text, true);
+    if (bytes.empty() && !text.empty())
+    {
+        SetLastError(ERROR_NO_UNICODE_TRANSLATION);
+        return false;
+    }
+    return WriteWholeFileBytes(path, bytes);
+}
+
+static bool AppendUtf8TextFile(const std::wstring& path, const std::wstring& text)
+{
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        return false;
+
+    OVERLAPPED lockOv{};
+    bool locked = false;
+
+    auto fail = [&](DWORD err) -> bool
+    {
+        if (locked)
+            UnlockFileEx(h, 0, MAXDWORD, MAXDWORD, &lockOv);
+        CloseHandle(h);
+        SetLastError(err == ERROR_SUCCESS ? ERROR_WRITE_FAULT : err);
+        return false;
+    };
+
+    auto writeAll = [&](const std::vector<BYTE>& bytes) -> bool
+    {
+        const BYTE* cursor = bytes.empty() ? nullptr : bytes.data();
+        size_t remaining = bytes.size();
+        while (remaining > 0)
+        {
+            DWORD chunk = static_cast<DWORD>(std::min<size_t>(remaining, 1024 * 1024));
+            DWORD wrote = 0;
+            if (!WriteFile(h, cursor, chunk, &wrote, nullptr))
+                return false;
+            if (wrote != chunk)
+            {
+                SetLastError(ERROR_WRITE_FAULT);
+                return false;
+            }
+            cursor += wrote;
+            remaining -= wrote;
+        }
+        return true;
+    };
+
+    DWORD lockWaitMs = static_cast<DWORD>(ClampInt(g_logAppendLockWaitMs.load(), 0, 60000));
+    ULONGLONG lockStart = GetTickCount64();
+    for (;;)
+    {
+        if (LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, MAXDWORD, &lockOv))
+        {
+            locked = true;
+            break;
+        }
+
+        DWORD err = GetLastError();
+        if (err != ERROR_LOCK_VIOLATION)
+            return fail(err);
+
+        ULONGLONG elapsed = GetTickCount64() - lockStart;
+        if (lockWaitMs == 0 || elapsed >= lockWaitMs)
+            return fail(ERROR_LOCK_VIOLATION);
+
+        DWORD remaining = static_cast<DWORD>(lockWaitMs - elapsed);
+        Sleep(std::min<DWORD>(remaining, 25));
+    }
+
+    LARGE_INTEGER sz{};
+    if (!GetFileSizeEx(h, &sz))
+        return fail(GetLastError());
+    if (sz.QuadPart == 0)
+    {
+        std::vector<BYTE> bom = EncodeUtf8Text(L"", true);
+        if (bom.empty())
+            return fail(ERROR_NO_UNICODE_TRANSLATION);
+        if (!writeAll(bom))
+            return fail(GetLastError());
+    }
+    else if (sz.QuadPart < 0)
+    {
+        return fail(ERROR_INVALID_DATA);
+    }
+
+    LARGE_INTEGER end{};
+    if (!SetFilePointerEx(h, end, nullptr, FILE_END))
+        return fail(GetLastError());
+
+    std::vector<BYTE> bytes = EncodeUtf8Text(text, false);
+    if (bytes.empty() && !text.empty())
+        return fail(ERROR_NO_UNICODE_TRANSLATION);
+    if (!writeAll(bytes))
+        return fail(GetLastError());
+
+    if (locked)
+    {
+        if (!UnlockFileEx(h, 0, MAXDWORD, MAXDWORD, &lockOv))
+        {
+            DWORD err = GetLastError();
+            locked = false;
+            CloseHandle(h);
+            SetLastError(err == ERROR_SUCCESS ? ERROR_WRITE_FAULT : err);
+            return false;
+        }
+        locked = false;
+    }
+
+    if (!CloseHandle(h))
+    {
+        DWORD err = GetLastError();
+        SetLastError(err);
+        return false;
+    }
+    return true;
+}
+
+enum class TextNormalizeResult
+{
+    NoChange,
+    Changed,
+    Failed
+};
+
+static TextNormalizeResult NormalizeTextFileToUtf8Bom(const std::wstring& path)
+{
+    std::vector<BYTE> bytes;
+    if (!ReadWholeFileBytes(path, bytes))
+        return TextNormalizeResult::Failed;
+    if (bytes.empty() || HasUtf8Bom(bytes))
+        return TextNormalizeResult::NoChange;
+
+    std::wstring text;
+    if (!DecodeTextBytes(bytes, text))
+    {
+        SetLastError(ERROR_INVALID_DATA);
+        return TextNormalizeResult::Failed;
+    }
+
+    return WriteUtf8BomTextFile(path, text)
+        ? TextNormalizeResult::Changed
+        : TextNormalizeResult::Failed;
+}
+
+static void ConfigureConsoleCP()
+{
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+}
+
+static void ConfigureDpiAwareness()
+{
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (user32)
+    {
+        using SetProcessDpiAwarenessContextFn = BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT);
+#pragma warning(suppress: 4191)
+        auto setContext = (SetProcessDpiAwarenessContextFn)GetProcAddress(user32, "SetProcessDpiAwarenessContext");
+        if (setContext && setContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+            return;
+    }
+
+    SetProcessDPIAware();
+}
+
+static std::wstring GetModulePath()
+{
+    DWORD size = 1024;
+    for (;;)
+    {
+        std::vector<wchar_t> buf(size);
+        SetLastError(ERROR_SUCCESS);
+        DWORD n = GetModuleFileNameW(nullptr, buf.data(), (DWORD)buf.size());
+        if (!n)
+            return L"";
+        if (n < buf.size() - 1)
+            return std::wstring(buf.data(), n);
+        if (size >= 32768)
+            return L"";
+        size *= 2;
+    }
+}
+
+static std::vector<std::wstring> SplitLines(const std::wstring& text)
+{
+    std::vector<std::wstring> lines;
+    if (text.empty())
+        return lines;
+
+    size_t i = 0;
+    while (i <= text.size())
+    {
+        size_t j = i;
+        while (j < text.size() && text[j] != L'\r' && text[j] != L'\n') ++j;
+        lines.push_back(text.substr(i, j - i));
+        if (j >= text.size()) break;
+        if (text[j] == L'\r' && j + 1 < text.size() && text[j + 1] == L'\n') j += 2;
+        else ++j;
+        i = j;
+    }
+    return lines;
+}
+
+static std::wstring JoinLines(const std::vector<std::wstring>& lines)
+{
+    std::wstring text;
+    for (size_t i = 0; i < lines.size(); ++i)
+    {
+        if (i) text += L"\r\n";
+        text += lines[i];
+    }
+    return text;
+}
+
+static void TrimTrailingEmptyLines(std::vector<std::wstring>& lines)
+{
+    while (!lines.empty() && TrimCopy(lines.back()).empty())
+        lines.pop_back();
+}
+
+static void StripLeadingBom(std::wstring& s);
+
+static int HexDigitValue(wchar_t ch)
+{
+    if (ch >= L'0' && ch <= L'9')
+        return (int)(ch - L'0');
+    if (ch >= L'a' && ch <= L'f')
+        return 10 + (int)(ch - L'a');
+    if (ch >= L'A' && ch <= L'F')
+        return 10 + (int)(ch - L'A');
+    return -1;
+}
+
+static bool StartsWithAt(const std::wstring& text, size_t pos, const wchar_t* needle)
+{
+    size_t len = wcslen(needle);
+    return pos <= text.size() && len <= text.size() - pos && text.compare(pos, len, needle) == 0;
+}
+
+static std::wstring DecodeXmlEntities(std::wstring value)
+{
+    struct Replacement { const wchar_t* from; const wchar_t* to; };
+    static const Replacement replacements[] = {
+        { L"&quot;", L"\"" },
+        { L"&apos;", L"'" },
+        { L"&lt;", L"<" },
+        { L"&gt;", L">" },
+        { L"&amp;", L"&" },
+    };
+
+    for (const auto& r : replacements)
+    {
+        size_t pos = 0;
+        while ((pos = value.find(r.from, pos)) != std::wstring::npos)
+        {
+            value.replace(pos, wcslen(r.from), r.to);
+            pos += wcslen(r.to);
+        }
+    }
+
+    std::wstring out;
+    out.reserve(value.size());
+    for (size_t i = 0; i < value.size(); ++i)
+    {
+        if (value[i] == L'&' && i + 2 < value.size() && value[i + 1] == L'#')
+        {
+            size_t pos = i + 2;
+            int radix = 10;
+            if (pos < value.size() && (value[pos] == L'x' || value[pos] == L'X'))
+            {
+                radix = 16;
+                ++pos;
+            }
+
+            unsigned int code = 0;
+            bool any = false;
+            while (pos < value.size() && value[pos] != L';')
+            {
+                int digit = radix == 16 ? HexDigitValue(value[pos])
+                    : (value[pos] >= L'0' && value[pos] <= L'9' ? (int)(value[pos] - L'0') : -1);
+                if (digit < 0 || digit >= radix)
+                    break;
+                code = code * (unsigned int)radix + (unsigned int)digit;
+                any = true;
+                ++pos;
+            }
+
+            if (any && pos < value.size() && value[pos] == L';' && code <= 0xFFFF)
+            {
+                out.push_back((wchar_t)code);
+                i = pos;
+                continue;
+            }
+        }
+
+        out.push_back(value[i]);
+    }
+    return out;
+}
+
+static std::wstring DecodePowerShellClixmlValue(const std::wstring& value)
+{
+    std::wstring xml = DecodeXmlEntities(value);
+    std::wstring out;
+    out.reserve(xml.size());
+
+    for (size_t i = 0; i < xml.size(); ++i)
+    {
+        if (i + 6 < xml.size() && xml[i] == L'_' && xml[i + 1] == L'x' && xml[i + 6] == L'_')
+        {
+            int d0 = HexDigitValue(xml[i + 2]);
+            int d1 = HexDigitValue(xml[i + 3]);
+            int d2 = HexDigitValue(xml[i + 4]);
+            int d3 = HexDigitValue(xml[i + 5]);
+            if (d0 >= 0 && d1 >= 0 && d2 >= 0 && d3 >= 0)
+            {
+                wchar_t ch = (wchar_t)((d0 << 12) | (d1 << 8) | (d2 << 4) | d3);
+                out.push_back(ch);
+                i += 6;
+                continue;
+            }
+        }
+
+        out.push_back(xml[i]);
+    }
+    return out;
+}
+
+static std::wstring NormalizePowerShellOutputText(const std::wstring& text)
+{
+    std::vector<std::wstring> lines;
+    int blankRun = 0;
+    for (std::wstring line : SplitLines(text))
+    {
+        while (!line.empty() && (line.back() == L' ' || line.back() == L'\t'))
+            line.pop_back();
+
+        if (TrimCopy(line).empty())
+        {
+            if (++blankRun <= 1)
+                lines.push_back(L"");
+            continue;
+        }
+
+        blankRun = 0;
+        lines.push_back(line);
+    }
+
+    TrimTrailingEmptyLines(lines);
+    return JoinLines(lines);
+}
+
+static bool LooksLikePowerShellClixml(std::wstring text)
+{
+    StripLeadingBom(text);
+    size_t pos = 0;
+    while (pos < text.size() && iswspace(text[pos]) != 0)
+        ++pos;
+
+    return StartsWithAt(text, pos, L"#< CLIXML")
+        || (text.find(L"<Objs") != std::wstring::npos && text.find(L"<S") != std::wstring::npos);
+}
+
+static bool ExtractPowerShellStringNode(const std::wstring& text, size_t& pos, std::wstring& tag, std::wstring& value)
+{
+    for (;;)
+    {
+        size_t open = text.find(L"<S", pos);
+        if (open == std::wstring::npos)
+            return false;
+        if (open + 2 >= text.size() || text[open + 2] == L'>' || iswspace(text[open + 2]) != 0)
+        {
+            size_t tagEnd = text.find(L'>', open + 2);
+            if (tagEnd == std::wstring::npos)
+                return false;
+            size_t close = text.find(L"</S>", tagEnd + 1);
+            if (close == std::wstring::npos)
+                return false;
+
+            tag = text.substr(open, tagEnd - open + 1);
+            value = text.substr(tagEnd + 1, close - tagEnd - 1);
+            pos = close + 4;
+            return true;
+        }
+        pos = open + 2;
+    }
+}
+
+static void AddPowerShellRecord(std::vector<std::wstring>& records, const std::wstring& value)
+{
+    std::wstring normalized = NormalizePowerShellOutputText(value);
+    if (TrimCopy(normalized).empty())
+        return;
+    if (!records.empty() && records.back() == normalized)
+        return;
+    records.push_back(normalized);
+}
+
+static void AppendPowerShellRecords(std::vector<std::wstring>& lines, const std::vector<std::wstring>& records)
+{
+    for (const std::wstring& record : records)
+    {
+        std::vector<std::wstring> recordLines = SplitLines(record);
+        lines.insert(lines.end(), recordLines.begin(), recordLines.end());
+    }
+}
+
+static std::wstring FormatPowerShellClixml(const std::wstring& text)
+{
+    std::vector<std::wstring> errors;
+    std::vector<std::wstring> other;
+    std::vector<std::wstring> progress;
+
+    size_t pos = 0;
+    std::wstring tag;
+    std::wstring rawValue;
+    while (ExtractPowerShellStringNode(text, pos, tag, rawValue))
+    {
+        std::wstring decoded = DecodePowerShellClixmlValue(rawValue);
+        std::wstring loweredTag = ToLowerCopy(tag);
+        if (loweredTag.find(L"s=\"error\"") != std::wstring::npos || loweredTag.find(L"s='error'") != std::wstring::npos)
+            AddPowerShellRecord(errors, decoded);
+        else if (loweredTag.find(L"s=\"progress\"") != std::wstring::npos || loweredTag.find(L"s='progress'") != std::wstring::npos)
+            AddPowerShellRecord(progress, decoded);
+        else
+            AddPowerShellRecord(other, decoded);
+    }
+
+    std::vector<std::wstring> lines;
+    if (!errors.empty())
+    {
+        AppendPowerShellRecords(lines, errors);
+        if (!other.empty())
+        {
+            lines.push_back(L"");
+            lines.push_back(L"Additional output:");
+            AppendPowerShellRecords(lines, other);
+        }
+    }
+    else if (!other.empty())
+    {
+        AppendPowerShellRecords(lines, other);
+    }
+    else
+    {
+        AppendPowerShellRecords(lines, progress);
+    }
+
+    if (!lines.empty())
+        return NormalizePowerShellOutputText(JoinLines(lines));
+
+    return NormalizePowerShellOutputText(DecodePowerShellClixmlValue(text));
+}
+
+static std::wstring FormatPowerShellOutput(const std::wstring& text)
+{
+    if (LooksLikePowerShellClixml(text))
+        return FormatPowerShellClixml(text);
+    return NormalizePowerShellOutputText(text);
+}
+
+static bool ReadIniFileAuto(std::wstring& text);
+static bool WriteIniValueToText(std::wstring& text, const wchar_t* s, const wchar_t* k, const wchar_t* v);
+
+static void StripLeadingBom(std::wstring& s)
+{
+    if (!s.empty() && s.front() == 0xFEFF)
+        s.erase(s.begin());
+}
+
+static bool IsIniInlineCommentStart(const std::wstring& value, size_t pos, bool requireLeadingWhitespace)
+{
+    wchar_t ch = value[pos];
+    if (ch != L';' && ch != L'#')
+        return false;
+
+    if (!requireLeadingWhitespace)
+        return true;
+
+    // Preserve values like URLs/fragments/paths that contain # or ; as data.
+    return pos == 0 || iswspace(value[pos - 1]) != 0;
+}
+
+static std::wstring StripIniInlineComment(std::wstring value, bool requireLeadingWhitespace = true)
+{
+    bool inQuote = false;
+    wchar_t quoteChar = 0;
+
+    for (size_t i = 0; i < value.size(); ++i)
+    {
+        wchar_t ch = value[i];
+        bool escaped = i > 0 && value[i - 1] == L'\\';
+
+        if (!escaped && (ch == L'"' || ch == L'\''))
+        {
+            if (!inQuote)
+            {
+                inQuote = true;
+                quoteChar = ch;
+            }
+            else if (quoteChar == ch)
+            {
+                inQuote = false;
+                quoteChar = 0;
+            }
+            continue;
+        }
+
+        if (!inQuote && IsIniInlineCommentStart(value, i, requireLeadingWhitespace))
+        {
+            value.erase(i);
+            break;
+        }
+    }
+
+    while (!value.empty() && iswspace(value.back()) != 0)
+        value.pop_back();
+    return value;
+}
+
+static std::wstring UnquoteIniString(const std::wstring& text)
+{
+    std::wstring s = TrimCopy(text);
+    if (s.size() < 2)
+        return s;
+
+    wchar_t quote = s.front();
+    if ((quote != L'"' && quote != L'\'') || s.back() != quote)
+        return s;
+
+    std::wstring out;
+    out.reserve(s.size() - 2);
+    for (size_t i = 1; i + 1 < s.size(); ++i)
+    {
+        if (s[i] == L'\\' && i + 2 < s.size() && s[i + 1] == quote)
+        {
+            out.push_back(quote);
+            ++i;
+        }
+        else
+        {
+            out.push_back(s[i]);
+        }
+    }
+    return out;
+}
+
+static bool HasLaterQuote(const std::wstring& text, size_t start, wchar_t quote)
+{
+    for (size_t i = start; i < text.size(); ++i)
+    {
+        if (text[i] == quote)
+            return true;
+    }
+    return false;
+}
+
+static std::wstring ParseIniName(std::wstring text)
+{
+    return UnquoteIniString(text);
+}
+
+static bool TryParseIniSectionHeader(std::wstring line, std::wstring& name)
+{
+    StripLeadingBom(line);
+    std::wstring s = TrimCopy(line);
+    if (s.empty() || s.front() == L';' || s.front() == L'#' || s.front() != L'[')
+        return false;
+
+    bool inQuote = false;
+    wchar_t quoteChar = 0;
+    for (size_t i = 1; i < s.size(); ++i)
+    {
+        wchar_t ch = s[i];
+        bool escaped = i > 0 && s[i - 1] == L'\\';
+        if (!escaped && (ch == L'"' || ch == L'\''))
+        {
+            if (!inQuote)
+            {
+                inQuote = true;
+                quoteChar = ch;
+            }
+            else if (quoteChar == ch)
+            {
+                inQuote = false;
+                quoteChar = 0;
+            }
+            continue;
+        }
+
+        if (!inQuote && ch == L']')
+        {
+            std::wstring rest = TrimCopy(s.substr(i + 1));
+            if (!rest.empty() && rest.front() != L';' && rest.front() != L'#')
+                return false;
+
+            name = ParseIniName(s.substr(1, i - 1));
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static std::wstring ParseIniValue(std::wstring text)
+{
+    std::wstring s = TrimCopy(text);
+    if (s.empty())
+        return s;
+
+    wchar_t quote = s.front();
+    if (quote != L'"' && quote != L'\'')
+        return UnquoteIniString(StripIniInlineComment(std::move(text), false));
+
+    std::wstring out;
+    for (size_t i = 1; i < s.size(); ++i)
+    {
+        wchar_t ch = s[i];
+        if (ch == L'\\' && i + 1 < s.size() && (s[i + 1] == quote || s[i + 1] == L'\\'))
+        {
+            // Treat \" as escaped only when another quote remains to close the
+            // value. This keeps Windows paths ending in backslash parseable:
+            // "C:\Temp\" ; comment
+            if (s[i + 1] == quote && !HasLaterQuote(s, i + 2, quote))
+            {
+                out.push_back(ch);
+                continue;
+            }
+            out.push_back(s[i + 1]);
+            ++i;
+            continue;
+        }
+
+        if (ch == quote)
+            return out;
+
+        out.push_back(ch);
+    }
+
+    return UnquoteIniString(StripIniInlineComment(std::move(text)));
+}
+
+static std::wstring QuoteIniString(const std::wstring& text)
+{
+    std::wstring out;
+    out.reserve(text.size() + 2);
+    out.push_back(L'"');
+    for (wchar_t ch : text)
+    {
+        if (ch == L'"' || ch == L'\\')
+            out.push_back(L'\\');
+        out.push_back(ch);
+    }
+    out.push_back(L'"');
+    return out;
+}
+
+static std::wstring FormatIniAssignment(const std::wstring& key, const std::wstring& value)
+{
+    return QuoteIniString(key) + L" = " + QuoteIniString(value);
+}
+
+struct IniEntry
+{
+    std::wstring key;
+    std::wstring value;
+};
+
+struct IniSectionData
+{
+    std::wstring name;
+    std::vector<IniEntry> entries;
+};
+
+static std::mutex g_iniWriteMutex;
+static std::mutex g_iniCacheMutex;
+static bool g_iniCacheLoaded = false;
+static FILETIME g_iniCacheWriteTime{};
+static std::wstring g_iniCacheText;
+static std::vector<IniSectionData> g_iniCacheDoc;
+static std::atomic<int> g_iniCacheRefreshMs(250);
+static steady_clock::time_point g_iniCacheLastCheck{};
+
+static bool FileTimeEquals(const FILETIME& a, const FILETIME& b)
+{
+    return a.dwLowDateTime == b.dwLowDateTime && a.dwHighDateTime == b.dwHighDateTime;
+}
+
+static bool GetFileWriteTime(const std::wstring& path, FILETIME& out)
+{
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data))
+        return false;
+    out = data.ftLastWriteTime;
+    return true;
+}
+
+static std::vector<IniSectionData> ParseIniDocument(const std::wstring& text)
+{
+    std::vector<IniSectionData> doc;
+    IniSectionData* current = nullptr;
+
+    auto findSection = [&](const std::wstring& name) -> IniSectionData*
+    {
+        for (auto& sec : doc)
+        {
+            if (IEquals(sec.name, name))
+                return &sec;
+        }
+        return nullptr;
+    };
+
+    auto findKey = [](IniSectionData& sec, const std::wstring& key) -> IniEntry*
+    {
+        for (auto& e : sec.entries)
+        {
+            if (IEquals(e.key, key))
+                return &e;
+        }
+        return nullptr;
+    };
+
+    auto lines = SplitLines(text);
+    for (size_t i = 0; i < lines.size(); ++i)
+    {
+        std::wstring line = lines[i];
+        if (i == 0)
+            StripLeadingBom(line);
+
+        std::wstring trimmed = TrimCopy(line);
+        if (trimmed.empty() || trimmed.front() == L';' || trimmed.front() == L'#')
+            continue;
+
+        std::wstring sectionHeaderName;
+        if (TryParseIniSectionHeader(line, sectionHeaderName))
+        {
+            if (IniSectionData* existing = findSection(sectionHeaderName))
+            {
+                current = existing;
+            }
+            else
+            {
+                doc.push_back(IniSectionData{ sectionHeaderName, {} });
+                current = &doc.back();
+            }
+            continue;
+        }
+
+        if (!current)
+            continue;
+
+        size_t eq = line.find(L'=');
+        if (eq == std::wstring::npos)
+            continue;
+
+        std::wstring key = ParseIniName(line.substr(0, eq));
+        std::wstring value = ParseIniValue(line.substr(eq + 1));
+
+        if (IniEntry* existing = findKey(*current, key))
+            existing->value = value;
+        else
+            current->entries.push_back(IniEntry{ key, value });
+    }
+
+    return doc;
+}
+
+static bool ReadIniValueFromDoc(const std::vector<IniSectionData>& doc, const wchar_t* s, const wchar_t* k, std::wstring& out)
+{
+    std::wstring sectionName = s ? s : L"";
+    std::wstring keyName = k ? k : L"";
+
+    for (const auto& sec : doc)
+    {
+        if (!IEquals(sec.name, sectionName))
+            continue;
+
+        for (const auto& entry : sec.entries)
+        {
+            if (IEquals(entry.key, keyName))
+            {
+                out = entry.value;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static bool ReadIniSectionFromDoc(const std::vector<IniSectionData>& doc, const wchar_t* s, std::vector<IniEntry>& out)
+{
+    std::wstring sectionName = s ? s : L"";
+    for (const auto& sec : doc)
+    {
+        if (IEquals(sec.name, sectionName))
+        {
+            out = sec.entries;
+            return true;
+        }
+    }
+    out.clear();
+    return false;
+}
+
+static void SetIniCacheUnlocked(const std::wstring& text)
+{
+    g_iniCacheText = text;
+    g_iniCacheDoc = ParseIniDocument(text);
+    g_iniCacheLoaded = true;
+    g_iniCacheLastCheck = steady_clock::now();
+    FILETIME ft{};
+    if (GetFileWriteTime(g_iniPath, ft))
+        g_iniCacheWriteTime = ft;
+    else
+        g_iniCacheWriteTime = {};
+}
+
+static bool ReadIniFileAuto(std::wstring& text)
+{
+    std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+
+    FILETIME ft{};
+    bool haveTime = GetFileWriteTime(g_iniPath, ft);
+    if (g_iniCacheLoaded && haveTime && FileTimeEquals(ft, g_iniCacheWriteTime))
+    {
+        text = g_iniCacheText;
+        return true;
+    }
+
+    std::wstring fresh;
+    if (!ReadTextFile(g_iniPath, fresh))
+        return false;
+
+    SetIniCacheUnlocked(fresh);
+    text = g_iniCacheText;
+    return true;
+}
+
+static bool IsMissingFileError(DWORD err)
+{
+    return err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND || err == ERROR_INVALID_NAME;
+}
+
+static bool ReadIniFileForMutation(std::wstring& text)
+{
+    if (ReadIniFileAuto(text))
+        return true;
+
+    DWORD attrs = GetFileAttributesW(g_iniPath.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES)
+    {
+        DWORD err = GetLastError();
+        if (IsMissingFileError(err))
+        {
+            text.clear();
+            SetLastError(ERROR_SUCCESS);
+            return true;
+        }
+        SetLastError(err);
+        return false;
+    }
+
+    if ((attrs & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return false;
+    }
+
+    std::vector<BYTE> bytes;
+    if (!ReadWholeFileBytes(g_iniPath, bytes))
+        return false;
+
+    if (bytes.empty())
+    {
+        text.clear();
+        SetLastError(ERROR_SUCCESS);
+        return true;
+    }
+
+    if (!DecodeTextBytes(bytes, text))
+    {
+        SetLastError(ERROR_INVALID_DATA);
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+        SetIniCacheUnlocked(text);
+    }
+    return true;
+}
+
+static bool ReadIniValueCached(const wchar_t* s, const wchar_t* k, std::wstring& out)
+{
+    std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+
+    int refreshMs = g_iniCacheRefreshMs.load();
+    if (refreshMs < 0) refreshMs = 0;
+    if (refreshMs > 60000) refreshMs = 60000;
+
+    auto now = steady_clock::now();
+    bool cacheFreshEnough = g_iniCacheLoaded && refreshMs > 0 &&
+        duration_cast<milliseconds>(now - g_iniCacheLastCheck).count() < refreshMs;
+
+    if (!cacheFreshEnough)
+    {
+        FILETIME ft{};
+        bool haveTime = GetFileWriteTime(g_iniPath, ft);
+        g_iniCacheLastCheck = now;
+        if (!g_iniCacheLoaded || !haveTime || !FileTimeEquals(ft, g_iniCacheWriteTime))
+        {
+            std::wstring fresh;
+            if (!ReadTextFile(g_iniPath, fresh))
+                return false;
+            SetIniCacheUnlocked(fresh);
+        }
+    }
+
+    return ReadIniValueFromDoc(g_iniCacheDoc, s, k, out);
+}
+
+static bool ReadIniSectionCached(const wchar_t* s, std::vector<IniEntry>& out)
+{
+    std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+
+    int refreshMs = g_iniCacheRefreshMs.load();
+    if (refreshMs < 0) refreshMs = 0;
+    if (refreshMs > 60000) refreshMs = 60000;
+
+    auto now = steady_clock::now();
+    bool cacheFreshEnough = g_iniCacheLoaded && refreshMs > 0 &&
+        duration_cast<milliseconds>(now - g_iniCacheLastCheck).count() < refreshMs;
+
+    if (!cacheFreshEnough)
+    {
+        FILETIME ft{};
+        bool haveTime = GetFileWriteTime(g_iniPath, ft);
+        g_iniCacheLastCheck = now;
+        if (!g_iniCacheLoaded || !haveTime || !FileTimeEquals(ft, g_iniCacheWriteTime))
+        {
+            std::wstring fresh;
+            if (!ReadTextFile(g_iniPath, fresh))
+                return false;
+            SetIniCacheUnlocked(fresh);
+        }
+    }
+
+    return ReadIniSectionFromDoc(g_iniCacheDoc, s, out);
+}
+
+static bool WriteIniValueToText(std::wstring& text, const wchar_t* s, const wchar_t* k, const wchar_t* v)
+{
+    std::wstring sectionName = s ? s : L"";
+    std::wstring keyName = k ? k : L"";
+    std::wstring value = v ? v : L"";
+    std::vector<std::wstring> lines = SplitLines(text);
+    if (!lines.empty())
+        StripLeadingBom(lines[0]);
+
+    bool inTargetSection = false;
+    bool sawTargetSection = false;
+    bool updated = false;
+    size_t insertPos = lines.size();
+
+    for (size_t i = 0; i < lines.size(); ++i)
+    {
+        std::wstring trimmed = TrimCopy(lines[i]);
+        if (trimmed.empty() || trimmed.front() == L';' || trimmed.front() == L'#')
+            continue;
+
+        std::wstring sectionHeaderName;
+        if (TryParseIniSectionHeader(lines[i], sectionHeaderName))
+        {
+            if (inTargetSection && insertPos == lines.size())
+                insertPos = i;
+
+            inTargetSection = IEquals(sectionHeaderName, sectionName);
+            if (inTargetSection && !sawTargetSection)
+            {
+                sawTargetSection = true;
+                insertPos = lines.size();
+            }
+            continue;
+        }
+
+        if (!inTargetSection)
+            continue;
+
+        size_t eq = lines[i].find(L'=');
+        if (eq == std::wstring::npos)
+            continue;
+
+        std::wstring key = ParseIniName(lines[i].substr(0, eq));
+        if (IEquals(key, keyName))
+        {
+            lines[i] = FormatIniAssignment(keyName, value);
+            updated = true;
+        }
+    }
+
+    if (!updated)
+    {
+        std::wstring newEntry = FormatIniAssignment(keyName, value);
+        if (sawTargetSection)
+        {
+            if (insertPos == lines.size())
+            {
+                // Strip any trailing blank lines that result from the file's
+                // terminating \r\n being parsed as an empty element by
+                // SplitLines. Without this, each sequential IniWrite call
+                // inserts the new key *after* that empty element, producing
+                // a blank line between every consecutive key written.
+                TrimTrailingEmptyLines(lines);
+                lines.push_back(newEntry);
+            }
+            else
+                lines.insert(
+                    lines.begin() + static_cast<std::vector<std::wstring>::difference_type>(insertPos),
+                    newEntry);
+        }
+        else
+        {
+            if (!lines.empty() && !lines.back().empty())
+                lines.push_back(L"");
+            lines.push_back(L"[" + sectionName + L"]");
+            lines.push_back(newEntry);
+        }
+    }
+
+    TrimTrailingEmptyLines(lines);
+    text = JoinLines(lines);
+    if (!text.empty())
+        text += L"\r\n";
+    return true;
+}
+
+static bool WriteIniValue(const wchar_t* s, const wchar_t* k, const wchar_t* v)
+{
+    std::lock_guard<std::mutex> writeLock(g_iniWriteMutex);
+
+    std::wstring text;
+    if (!ReadIniFileForMutation(text))
+        return false;
+
+    if (!WriteIniValueToText(text, s, k, v))
+        return false;
+
+    if (!WriteUtf8BomTextFile(g_iniPath, text))
+        return false;
+
+    {
+        std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+        SetIniCacheUnlocked(text);
+    }
+    return true;
+}
+
+struct IniDefault {
+    const wchar_t* section;
+    const wchar_t* key;
+    const wchar_t* value;
+};
+
+static constexpr const wchar_t* POWERSHELL_ERROR_MESSAGES_SECTION = L"PowerShellErrorMessages";
+

@@ -24,6 +24,20 @@ Output:
 DesktopStub\build\GenerateAssets.exe
 ```
 
+## Source Layout
+
+`GenerateAssets.cpp` is the single translation-unit entry point. Most implementation code is split into ordered fragments under `DesktopStub\src` to keep the codebase reviewable without changing linker behavior:
+
+- `ga_core.inc`: low-level file, text, INI, and process-output helpers.
+- `ga_config_defaults.inc`: runtime globals and generated INI/string defaults.
+- `ga_ui_logging.inc`: UI strings, logging, runtime setting reload, manifest generation/display.
+- `ga_wallpaper.inc`: wallpaper and fit/DPI detection.
+- `ga_image.inc`: GDI+ image generation and PNG saving.
+- `ga_registration.inc`: AppX registration and PowerShell fallback handling.
+- `ga_generation.inc`: asset generation, polling, and shutdown coordination.
+- `ga_tray.inc`: tray menu and tray notifications.
+- `ga_app.inc`: window procedure and application startup/shutdown.
+
 ## Run
 
 ```cmd
