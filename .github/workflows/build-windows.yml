@@ -13,7 +13,9 @@ on:
       - published
 
 permissions:
+  attestations: write
   contents: write
+  id-token: write
 
 jobs:
   build-windows:
@@ -47,11 +49,26 @@ jobs:
         shell: pwsh
         run: .\.github\scripts\build-windows.ps1
 
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          Get-FileHash artifacts\*.zip -Algorithm SHA256 |
+            Sort-Object Path |
+            ForEach-Object {
+              "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))"
+            } |
+            Set-Content -LiteralPath artifacts\SHA256SUMS.txt -Encoding ascii
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: artifacts/*
+
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
           name: AIProjects-Windows-${{ github.sha }}
-          path: artifacts/*.zip
+          path: artifacts/*
           if-no-files-found: error
 
       - name: Upload release assets
@@ -71,4 +88,4 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
-          gh release upload $env:RELEASE_TAG artifacts\*.zip --clobber
+          gh release upload $env:RELEASE_TAG artifacts\* --clobber
