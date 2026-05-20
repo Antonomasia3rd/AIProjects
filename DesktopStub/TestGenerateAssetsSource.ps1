@@ -22,6 +22,7 @@ function Assert-Matches {
 }
 
 $generation = Read-Source 'src\ga_generation.inc'
+$app = Read-Source 'src\ga_app.inc'
 $registration = Read-Source 'src\ga_registration.inc'
 $uiLogging = @(
     Read-Source 'src\ga_ui_logging.inc'
@@ -44,6 +45,14 @@ Assert-Matches $registration `
 Assert-Matches $registration `
     'AsyncStatus::Error' `
     'COM registration must handle failed async status before op.get() can hide status diagnostics'
+
+Assert-Matches $generation `
+    '(?s)static void ForceShutdownNow\(\).*RecordForceShutdownPendingCleanup\(\).*ExitProcess\(0\)' `
+    'force shutdown must persist skipped-cleanup details before bypassing normal shutdown'
+
+Assert-Matches $app `
+    '(?s)ConsumePreviousForceShutdownCleanupWarning\(previousForceShutdownCleanupWarning\).*QueueStartupWarning\(previousForceShutdownCleanupWarning\).*MessageBoxW\(' `
+    'startup must warn the user when a previous force shutdown skipped cleanup'
 
 foreach ($key in @(
     'ComRegistrationAsyncError',

@@ -658,6 +658,7 @@ static AppxRegistrationResult Appx_Register_COM_OutOfProcess(const std::wstring&
     if (waitResult == WAIT_TIMEOUT)
     {
         LogText(g_ui.comRegistrationHelperTimedOut);
+        bool helperExitConfirmed = false;
         if (!TerminateProcess(pi.hProcess, 3))
         {
             Log(g_ui.comRegistrationHelperTerminateFailed.c_str(), pi.dwProcessId);
@@ -670,11 +671,38 @@ static AppxRegistrationResult Appx_Register_COM_OutOfProcess(const std::wstring&
             else if (terminateWait == WAIT_FAILED)
                 LogWin32Failure(L"WaitForSingleObject(COM registration helper terminate)");
             else
+            {
+                helperExitConfirmed = true;
                 Log(g_ui.comRegistrationHelperTerminated.c_str(), pi.dwProcessId);
+            }
+        }
+        else if (WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0)
+        {
+            helperExitConfirmed = true;
+            Log(g_ui.comRegistrationHelperTerminated.c_str(), pi.dwProcessId);
+        }
+
+        if (!helperExitConfirmed)
+        {
+            DWORD finalWait = WaitForSingleObject(pi.hProcess, 0);
+            if (finalWait == WAIT_OBJECT_0)
+            {
+                Log(g_ui.comRegistrationHelperTerminated.c_str(), pi.dwProcessId);
+            }
+            else if (finalWait == WAIT_FAILED)
+            {
+                LogWin32Failure(L"WaitForSingleObject(COM registration helper final)");
+            }
+            else
+            {
+                MarkRegistrationUnresolved(g_ui.comRegistrationHelperTimedOut, pi.hProcess, pi.dwProcessId);
+                pi.hProcess = nullptr;
+            }
         }
 
         CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
+        if (pi.hProcess)
+            CloseHandle(pi.hProcess);
         return AppxRegistrationResult::TimeoutUncertain;
     }
 

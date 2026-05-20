@@ -23,6 +23,7 @@
 #include <initializer_list>
 #include <utility>
 #include <cstdint>
+#include <memory>
 #include <commdlg.h>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>

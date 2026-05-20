@@ -189,6 +189,12 @@ static void MarkRegistrationUnresolved(const std::wstring& reason, HANDLE proces
     Log(g_ui.registrationUnresolvedMarked.c_str(), storedReason.c_str());
 }
 
+static bool RegistrationUnresolvedRecorded()
+{
+    std::lock_guard<std::mutex> lk(g_registrationUnresolvedMutex);
+    return g_registrationUnresolved;
+}
+
 static bool RegistrationBlockedByUnresolved(std::wstring& reason)
 {
     std::wstring clearedReason;
@@ -403,29 +409,28 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
     if (g_notifyOnStart)
         NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationStarted, NIIF_INFO);
 
-    Bitmap* src = new Bitmap(wp);
+    auto src = std::make_unique<Bitmap>(wp);
     if (src->GetLastStatus() != Ok)
     {
         LogText(g_ui.failedLoadWallpaper);
         if (g_notifyOnFailure)
             NotifyTrayBalloon(g_ui.notificationTitle, g_ui.failedLoadWallpaper, NIIF_ERROR);
-        delete src;
         return false;
     }
     Log(g_ui.wallpaperImageLoaded.c_str(), static_cast<int>(src->GetWidth()), static_cast<int>(src->GetHeight()));
 
     FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
-    Bitmap* preparedWallpaper = nullptr;
-    Bitmap* renderSource = src;
+    std::unique_ptr<Bitmap> preparedWallpaper;
+    Bitmap* renderSource = src.get();
     FitMode renderMode = mode;
     if (mode == FitMode::Tile || mode == FitMode::Span)
     {
-        preparedWallpaper = (mode == FitMode::Tile)
-            ? BuildTiledPrimaryBitmap(src)
-            : BuildSpannedPrimaryBitmap(src);
+        preparedWallpaper.reset((mode == FitMode::Tile)
+            ? BuildTiledPrimaryBitmap(src.get())
+            : BuildSpannedPrimaryBitmap(src.get()));
         if (preparedWallpaper)
         {
-            renderSource = preparedWallpaper;
+            renderSource = preparedWallpaper.get();
             renderMode = FitMode::Fill;
         }
         else
@@ -490,7 +495,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
             // Decode the embedded 30x30 icon and write it as-is to the base path,
             // then write the same 30x30 image to each scaled variant path.
             {
-                Bitmap* icon = LoadEmbeddedDesktopIcon();
+                std::unique_ptr<Bitmap> icon(LoadEmbeddedDesktopIcon());
                 if (!icon)
                 {
                     assetsOk = false;
@@ -498,7 +503,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
                     continue;
                 }
 
-                bool ok = SavePNG(icon, outPath.c_str());
+                bool ok = SavePNG(icon.get(), outPath.c_str());
                 if (ok)
                     Log(g_ui.generatedDesktopIconAsset.c_str(), outPath.c_str());
                 else
@@ -507,7 +512,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
                 for (int scale : scales)
                 {
                     std::wstring scaledPath = ScaleAssetPath(outPath, scale);
-                    bool scaledOk = SavePNG(icon, scaledPath.c_str());
+                    bool scaledOk = SavePNG(icon.get(), scaledPath.c_str());
                     if (scaledOk)
                         Log(g_ui.savedScaledAsset.c_str(), scaledPath.c_str(), scale);
                     else
@@ -515,39 +520,36 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
                     ok = ok && scaledOk;
                 }
 
-                delete icon;
                 if (!ok) assetsOk = false;
             }
             continue;
         }
 
-        auto* o = ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0));
+        std::unique_ptr<Bitmap> o(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0)));
         bool saved = false;
         if (o)
         {
-            saved = SavePNG(o, outPath.c_str());
+            saved = SavePNG(o.get(), outPath.c_str());
             if (saved)
                 Log(g_ui.savedAsset.c_str(), outPath.c_str());
             else
                 Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
-            delete o;
         }
 
         for (int scale : scales)
         {
             int scaledW = ScalePixels(t.w, scale);
             int scaledH = ScalePixels(t.h, scale);
-            auto* scaled = ResizeBitmapToMode(renderSource, scaledW, scaledH, renderMode, Color(255, 0, 0, 0));
+            std::unique_ptr<Bitmap> scaled(ResizeBitmapToMode(renderSource, scaledW, scaledH, renderMode, Color(255, 0, 0, 0)));
             std::wstring scaledPath = ScaleAssetPath(outPath, scale);
             if (scaled)
             {
-                bool scaledSaved = SavePNG(scaled, scaledPath.c_str());
+                bool scaledSaved = SavePNG(scaled.get(), scaledPath.c_str());
                 if (scaledSaved)
                     Log(g_ui.savedScaledAsset.c_str(), scaledPath.c_str(), scale);
                 else
                     Log(g_ui.failedSaveScaledAsset.c_str(), scaledPath.c_str(), scale);
                 saved = scaledSaved && saved;
-                delete scaled;
             }
             else
             {
@@ -559,8 +561,6 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         if (!saved)
             assetsOk = false;
     }
-    delete preparedWallpaper;
-    delete src;
 
     auto assetsDone = steady_clock::now();
     Log(g_ui.timingLog.c_str(), g_ui.timingAssetGeneration.c_str(), ElapsedMs(generationStart, assetsDone));
@@ -633,7 +633,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
             else if (comResult == AppxRegistrationResult::TimeoutUncertain)
             {
                 LogText(g_ui.comRegistrationFallbackSkippedAfterTimeout);
-                MarkRegistrationUnresolved(g_ui.comRegistrationFallbackSkippedAfterTimeout, nullptr, 0);
+                if (!RegistrationUnresolvedRecorded())
+                    MarkRegistrationUnresolved(g_ui.comRegistrationFallbackSkippedAfterTimeout, nullptr, 0);
                 registrationFailureMessage = g_ui.comRegistrationFallbackSkippedAfterTimeout;
             }
         }
@@ -735,6 +736,55 @@ static bool GenerationWorkPending()
     return g_generationQueued || g_generationActive;
 }
 
+static std::wstring ForceShutdownSkippedCleanupSummary()
+{
+    return L"generation/registration worker completion, poll-thread stop/join, normal GDI+ shutdown, and normal single-instance mutex release";
+}
+
+static std::wstring ForceShutdownCleanupDownsideSummary()
+{
+    return L"in-progress tile PNGs, AppxManifest.xml, or AppX registration may be incomplete; a temporary .tmp PNG can remain next to an asset; Windows will reclaim process handles/GDI+ memory, but normal cleanup logs may be missing";
+}
+
+static void RecordForceShutdownPendingCleanup()
+{
+    std::wstring reason = GenerationWorkPending() ? CurrentGenerationReason() : g_ui.unspecifiedReason;
+    std::wstring skipped = ForceShutdownSkippedCleanupSummary();
+    std::wstring downside = ForceShutdownCleanupDownsideSummary();
+
+    IniWrite(L"State", L"ForceShutdownPendingCleanup", L"1");
+    IniWrite(L"State", L"ForceShutdownReason", reason.c_str());
+    IniWrite(L"State", L"ForceShutdownSkippedCleanup", skipped.c_str());
+    IniWrite(L"State", L"ForceShutdownDownside", downside.c_str());
+}
+
+static bool ConsumePreviousForceShutdownCleanupWarning(std::wstring& warning)
+{
+    warning.clear();
+    if (IniReadI(L"State", L"ForceShutdownPendingCleanup", 0) == 0)
+        return false;
+
+    std::wstring reason = IniReadS(L"State", L"ForceShutdownReason", L"");
+    if (TrimCopy(reason).empty())
+        reason = g_ui.unspecifiedReason;
+
+    std::wstring skipped = IniReadS(L"State", L"ForceShutdownSkippedCleanup", L"");
+    if (TrimCopy(skipped).empty())
+        skipped = ForceShutdownSkippedCleanupSummary();
+
+    std::wstring downside = IniReadS(L"State", L"ForceShutdownDownside", L"");
+    if (TrimCopy(downside).empty())
+        downside = ForceShutdownCleanupDownsideSummary();
+
+    warning = FormatWide(g_ui.previousForceShutdownCleanupWarning.c_str(), reason.c_str(), skipped.c_str(), downside.c_str());
+
+    IniWrite(L"State", L"ForceShutdownPendingCleanup", L"0");
+    IniWrite(L"State", L"ForceShutdownReason", L"");
+    IniWrite(L"State", L"ForceShutdownSkippedCleanup", L"");
+    IniWrite(L"State", L"ForceShutdownDownside", L"");
+    return true;
+}
+
 static void NotifyShutdownDelayed()
 {
     std::wstring reason = CurrentGenerationReason();
@@ -812,6 +862,7 @@ static void CancelRequestedShutdown(HWND h)
 static void ForceShutdownNow()
 {
     LogText(g_ui.forceShutdownRequested);
+    RecordForceShutdownPendingCleanup();
     TrayRemove();
     ExitProcess(0);
 }

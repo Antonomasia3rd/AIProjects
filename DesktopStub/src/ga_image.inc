@@ -8,15 +8,14 @@ bool FindPngEncoder()
 
     UINT n=0, sz=0;
     if (GetImageEncodersSize(&n, &sz) != Ok || !sz) return false;
-    auto* p = (ImageCodecInfo*)malloc(sz);
-    if (!p) return false;
+    auto buffer = std::make_unique<BYTE[]>(sz);
+    auto* p = reinterpret_cast<ImageCodecInfo*>(buffer.get());
 
     if (GetImageEncoders(n, sz, p) == Ok)
         for (UINT i=0;i<n;i++)
             if (wcscmp(p[i].MimeType, L"image/png")==0)
                 g_png = p[i].Clsid;
 
-    free(p);
     return g_png.Data1 != 0;
 }
 
@@ -61,26 +60,17 @@ static Bitmap* ResizeBitmapToMode(Bitmap* src, int w, int h, FitMode mode, Color
     if (!BitmapDimensionsToInt(src, sw, sh) || w <= 0 || h <= 0)
         return nullptr;
 
-    auto* out = new Bitmap(w, h, PixelFormat32bppARGB);
-    if (!BitmapOk(out, L"create resized bitmap"))
-    {
-        delete out;
+    auto out = std::make_unique<Bitmap>(w, h, PixelFormat32bppARGB);
+    if (!BitmapOk(out.get(), L"create resized bitmap"))
         return nullptr;
-    }
 
-    Graphics g(out);
+    Graphics g(out.get());
     if (!GraphicsOk(g, L"create resize graphics"))
-    {
-        delete out;
         return nullptr;
-    }
 
     if (!GdiOk(g.SetInterpolationMode(InterpolationModeHighQualityBicubic), L"set resize interpolation") ||
         !GdiOk(g.Clear(background), L"clear resized bitmap"))
-    {
-        delete out;
         return nullptr;
-    }
 
     double scaleX = (double)w / sw;
     double scaleY = (double)h / sh;
@@ -145,11 +135,9 @@ static Bitmap* ResizeBitmapToMode(Bitmap* src, int w, int h, FitMode mode, Color
     }
 
     if (!GdiOk(g.DrawImage(src, Rect(dx, dy, dw, dh), 0, 0, sw, sh, UnitPixel), L"draw resized bitmap"))
-    {
-        delete out;
         return nullptr;
-    }
-    return out;
+
+    return out.release();
 }
 
 static bool GetVirtualDesktopRect(RECT& rect)
@@ -209,21 +197,15 @@ static Bitmap* BuildTiledPrimaryBitmap(Bitmap* src)
     if (primaryW <= 0 || primaryH <= 0)
         return nullptr;
 
-    auto* out = new Bitmap(primaryW, primaryH, PixelFormat32bppARGB);
-    if (!BitmapOk(out, L"create tiled bitmap"))
-    {
-        delete out;
+    auto out = std::make_unique<Bitmap>(primaryW, primaryH, PixelFormat32bppARGB);
+    if (!BitmapOk(out.get(), L"create tiled bitmap"))
         return nullptr;
-    }
 
-    Graphics g(out);
+    Graphics g(out.get());
     if (!GraphicsOk(g, L"create tiled graphics") ||
         !GdiOk(g.SetInterpolationMode(InterpolationModeHighQualityBicubic), L"set tiled interpolation") ||
         !GdiOk(g.Clear(Color(255, 0, 0, 0)), L"clear tiled bitmap"))
-    {
-        delete out;
         return nullptr;
-    }
 
     TextureBrush brush(src, WrapModeTile);
     Matrix transform;
@@ -234,7 +216,7 @@ static Bitmap* BuildTiledPrimaryBitmap(Bitmap* src)
         brush.SetTransform(&transform) == Ok &&
         g.FillRectangle(&brush, 0, 0, primaryW, primaryH) == Ok)
     {
-        return out;
+        return out.release();
     }
 
     int firstX = FirstTileStart(primaryRect.left, virtualRect.left, sw);
@@ -244,14 +226,11 @@ static Bitmap* BuildTiledPrimaryBitmap(Bitmap* src)
         for (int x = firstX; x < primaryRect.right; x += sw)
         {
             if (!GdiOk(g.DrawImage(src, x - primaryRect.left, y - primaryRect.top, sw, sh), L"draw tiled bitmap"))
-            {
-                delete out;
                 return nullptr;
-            }
         }
     }
 
-    return out;
+    return out.release();
 }
 
 static Bitmap* BuildSpannedPrimaryBitmap(Bitmap* src)
@@ -278,44 +257,35 @@ static Bitmap* BuildSpannedPrimaryBitmap(Bitmap* src)
     if (primaryW <= 0 || primaryH <= 0 || virtualW <= 0 || virtualH <= 0)
         return nullptr;
 
-    Bitmap* virtualWallpaper = ResizeBitmapToMode(src, virtualW, virtualH, FitMode::Fill, Color(255, 0, 0, 0));
+    std::unique_ptr<Bitmap> virtualWallpaper(ResizeBitmapToMode(src, virtualW, virtualH, FitMode::Fill, Color(255, 0, 0, 0)));
     if (!virtualWallpaper)
         return nullptr;
 
     if (primaryW == virtualW && primaryH == virtualH &&
         primaryRect.left == virtualRect.left && primaryRect.top == virtualRect.top)
     {
-        return virtualWallpaper;
+        return virtualWallpaper.release();
     }
 
-    auto* out = new Bitmap(primaryW, primaryH, PixelFormat32bppARGB);
-    if (!BitmapOk(out, L"create spanned bitmap"))
-    {
-        delete virtualWallpaper;
-        delete out;
+    auto out = std::make_unique<Bitmap>(primaryW, primaryH, PixelFormat32bppARGB);
+    if (!BitmapOk(out.get(), L"create spanned bitmap"))
         return nullptr;
-    }
 
-    Graphics g(out);
+    Graphics g(out.get());
     if (!GraphicsOk(g, L"create spanned graphics") ||
         !GdiOk(g.SetInterpolationMode(InterpolationModeHighQualityBicubic), L"set spanned interpolation") ||
         !GdiOk(g.Clear(Color(255, 0, 0, 0)), L"clear spanned bitmap") ||
         !GdiOk(g.DrawImage(
-        virtualWallpaper,
+        virtualWallpaper.get(),
         Rect(0, 0, primaryW, primaryH),
         primaryRect.left - virtualRect.left,
         primaryRect.top - virtualRect.top,
         primaryW,
         primaryH,
         UnitPixel), L"draw spanned bitmap"))
-    {
-        delete virtualWallpaper;
-        delete out;
         return nullptr;
-    }
-    delete virtualWallpaper;
 
-    return out;
+    return out.release();
 }
 
 Bitmap* ResizeWithFit(Bitmap* src, int w, int h, FitMode mode)
@@ -323,15 +293,13 @@ Bitmap* ResizeWithFit(Bitmap* src, int w, int h, FitMode mode)
     if (mode != FitMode::Tile && mode != FitMode::Span)
         return ResizeBitmapToMode(src, w, h, mode, Color(255, 0, 0, 0));
 
-    Bitmap* primaryWallpaper = (mode == FitMode::Tile)
+    std::unique_ptr<Bitmap> primaryWallpaper((mode == FitMode::Tile)
         ? BuildTiledPrimaryBitmap(src)
-        : BuildSpannedPrimaryBitmap(src);
+        : BuildSpannedPrimaryBitmap(src));
     if (!primaryWallpaper)
         return nullptr;
 
-    Bitmap* out = ResizeBitmapToMode(primaryWallpaper, w, h, FitMode::Fill, Color(255, 0, 0, 0));
-    delete primaryWallpaper;
-    return out;
+    return ResizeBitmapToMode(primaryWallpaper.get(), w, h, FitMode::Fill, Color(255, 0, 0, 0));
 }
 
 bool SavePNG(Bitmap* b, const wchar_t* f)
@@ -411,34 +379,39 @@ static Bitmap* LoadEmbeddedDesktopIcon()
     memcpy(pMem, g_desktopIconPng, sizeof(g_desktopIconPng));
     GlobalUnlock(hMem);
 
-    IStream* stream = nullptr;
-    if (CreateStreamOnHGlobal(hMem, TRUE, &stream) != S_OK)
+    IStream* rawStream = nullptr;
+    if (CreateStreamOnHGlobal(hMem, TRUE, &rawStream) != S_OK)
     {
         GlobalFree(hMem);
         return nullptr;
     }
+    struct StreamReleaser
+    {
+        void operator()(IStream* stream) const noexcept
+        {
+            if (stream)
+                stream->Release();
+        }
+    };
+    std::unique_ptr<IStream, StreamReleaser> stream(rawStream);
 
     // Clone before releasing the stream; GDI+ bitmaps can retain stream-backed state.
-    Bitmap* loaded = Bitmap::FromStream(stream);
-    Bitmap* bmp = nullptr;
+    std::unique_ptr<Bitmap> loaded(Bitmap::FromStream(stream.get()));
+    std::unique_ptr<Bitmap> bmp;
     if (loaded && loaded->GetLastStatus() == Ok)
     {
         int loadedW = 0;
         int loadedH = 0;
-        if (BitmapDimensionsToInt(loaded, loadedW, loadedH))
+        if (BitmapDimensionsToInt(loaded.get(), loadedW, loadedH))
         {
             Rect bounds(0, 0, loadedW, loadedH);
-            bmp = loaded->Clone(bounds, PixelFormat32bppARGB);
+            bmp.reset(loaded->Clone(bounds, PixelFormat32bppARGB));
         }
     }
-    delete loaded;
-    stream->Release();
 
     if (!bmp || bmp->GetLastStatus() != Ok)
-    {
-        delete bmp;
         return nullptr;
-    }
-    return bmp;
+
+    return bmp.release();
 }
 

@@ -78,6 +78,8 @@ struct UiStrings
     std::wstring shutdownRequested;
     std::wstring shutdownCancelled;
     std::wstring forceShutdownRequested;
+    std::wstring previousForceShutdownCleanupTitle;
+    std::wstring previousForceShutdownCleanupWarning;
 
     std::wstring renameDialogTitle;
     std::wstring okText;
