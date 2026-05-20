@@ -4,15 +4,24 @@
 *.bak
 *.user
 *.suo
+*.pdb
+artifacts/
+build/github-artifacts/
 
 # Build products for projects that keep source outside build/
 **/build/*.exe
+**/build/**/*.exe
 **/build/*.obj
+**/build/**/*.obj
 **/build/*.pdb
+**/build/**/*.pdb
 **/build/*.ilk
+**/build/**/*.ilk
 **/build/*.idb
 **/build/*.exp
 **/build/*.lib
+**/build/*.map
+**/build/**/*.map
 **/build/*.nativecodeanalysis.xml
 **/build/*.log
 **/build/*.ini
