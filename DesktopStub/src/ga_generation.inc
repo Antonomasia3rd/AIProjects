@@ -248,19 +248,21 @@ static bool RegistrationBlockedByUnresolved(std::wstring& reason)
 
 static bool StartupGeneratedAssetsPresent(const std::wstring& exeDir)
 {
+    ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
     std::vector<int> scales = GetConfiguredScales();
     for (const auto& t : g_tiles)
     {
-        std::wstring basePath = exeDir + L"\\" + t.file;
+        std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
+        std::wstring basePath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
+
+        if (!IsValidGeneratedPng(basePath))
+            return false;
 
         bool generatedByCurrentConfig =
             IniReadI(L"Assets", t.name, 0) != 0 ||
             g_generateDesktopIconForDisabledEntries;
         if (!generatedByCurrentConfig)
             continue;
-
-        if (!IsValidGeneratedPng(basePath))
-            return false;
 
         for (int scale : scales)
         {

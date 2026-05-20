@@ -241,6 +241,9 @@ struct UiStrings
     std::wstring disableFittingState;
     std::wstring assetToggleState;
     std::wstring comRegistrationStatusFailed;
+    std::wstring comRegistrationAsyncError;
+    std::wstring comRegistrationDeploymentError;
+    std::wstring comRegistrationDeploymentMessage;
     std::wstring gdiPlusStartupFailedTitle;
     std::wstring gdiPlusStartupFailedMessage;
     std::wstring gdiPlusOperationFailed;
@@ -2079,6 +2082,9 @@ void LoadUiStrings()
     g_ui.disableFittingState = IniReadS(L"Strings", L"DisableFittingState", L"[i] DisableFitting = %d");
     g_ui.assetToggleState = IniReadS(L"Strings", L"AssetToggleState", L"[i] Asset %s %s.");
     g_ui.comRegistrationStatusFailed = IniReadS(L"Strings", L"ComRegistrationStatusFailed", L"[!] COM registration failed (status=%d)");
+    g_ui.comRegistrationAsyncError = IniReadS(L"Strings", L"ComRegistrationAsyncError", L"[!] COM registration async error: 0x%08X");
+    g_ui.comRegistrationDeploymentError = IniReadS(L"Strings", L"ComRegistrationDeploymentError", L"[!] COM deployment error: 0x%08X");
+    g_ui.comRegistrationDeploymentMessage = IniReadS(L"Strings", L"ComRegistrationDeploymentMessage", L"COM deployment message: %s");
     g_ui.gdiPlusStartupFailedTitle = IniReadS(L"Strings", L"GdiPlusStartupFailedTitle", L"GDI+");
     g_ui.gdiPlusStartupFailedMessage = IniReadS(L"Strings", L"GdiPlusStartupFailedMessage", L"GDI+ startup failed");
     g_ui.gdiPlusOperationFailed = IniReadS(L"Strings", L"GdiPlusOperationFailed", L"[!] GDI+ %s failed (status=%d).");
@@ -2276,6 +2282,9 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.disableFittingState, L"DisableFittingState", { L"%d" });
     RequireFormat(g_ui.assetToggleState, L"AssetToggleState", { L"%s", L"%s" });
     RequireFormat(g_ui.comRegistrationStatusFailed, L"ComRegistrationStatusFailed", { L"%d" });
+    RequireFormat(g_ui.comRegistrationAsyncError, L"ComRegistrationAsyncError", { L"%08X" });
+    RequireFormat(g_ui.comRegistrationDeploymentError, L"ComRegistrationDeploymentError", { L"%08X" });
+    RequireFormat(g_ui.comRegistrationDeploymentMessage, L"ComRegistrationDeploymentMessage", { L"%s" });
     RequireFormat(g_ui.gdiPlusOperationFailed, L"GdiPlusOperationFailed", { L"%s", L"%d" });
     RequireFormat(g_ui.win32FailureFmt, L"Win32FailureFmt", { L"%s", L"%lu", L"%s" });
     RequireFormat(g_ui.logPathChanged, L"LogPathChanged", { L"%s" });
