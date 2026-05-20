@@ -293,17 +293,19 @@ FitMode GetWallpaperFit()
     wchar_t tile[8] = {};
 
     DWORD sz = sizeof(style);
-    RegQueryValueExW(h, L"WallpaperStyle", nullptr, nullptr, (LPBYTE)style, &sz);
+    LSTATUS styleStatus = RegQueryValueExW(h, L"WallpaperStyle", nullptr, nullptr, (LPBYTE)style, &sz);
 
     sz = sizeof(tile);
-    RegQueryValueExW(h, L"TileWallpaper", nullptr, nullptr, (LPBYTE)tile, &sz);
+    LSTATUS tileStatus = RegQueryValueExW(h, L"TileWallpaper", nullptr, nullptr, (LPBYTE)tile, &sz);
 
     RegCloseKey(h);
+    if (styleStatus != ERROR_SUCCESS || tileStatus != ERROR_SUCCESS)
+        return FitMode::Fill;
 
     int s = 0;
     int t = 0;
-    TryParseIntStrict(style, s);
-    TryParseIntStrict(tile, t);
+    if (!TryParseIntStrict(style, s) || !TryParseIntStrict(tile, t))
+        return FitMode::Fill;
 
     if (t == 1) return FitMode::Tile;
 

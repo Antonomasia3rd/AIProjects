@@ -187,6 +187,53 @@ static bool EnsureDirectoryExists(const std::wstring& path, DWORD* error = nullp
     return false;
 }
 
+static std::wstring ParentDirectoryOfPath(const std::wstring& path)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    if (slash == std::wstring::npos)
+        return L"";
+    if (slash == 0)
+        return path.substr(0, 1);
+    return path.substr(0, slash);
+}
+
+static bool EnsureDirectoryTreeExists(const std::wstring& path, DWORD* error = nullptr)
+{
+    if (path.empty())
+    {
+        if (error)
+            *error = ERROR_SUCCESS;
+        return true;
+    }
+
+    DWORD attrs = GetFileAttributesW(path.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES)
+    {
+        if ((attrs & FILE_ATTRIBUTE_DIRECTORY) != 0)
+        {
+            if (error)
+                *error = ERROR_SUCCESS;
+            return true;
+        }
+
+        if (error)
+            *error = ERROR_ALREADY_EXISTS;
+        SetLastError(ERROR_ALREADY_EXISTS);
+        return false;
+    }
+
+    std::wstring parent = ParentDirectoryOfPath(path);
+    if (!parent.empty() && parent != path && !EnsureDirectoryTreeExists(parent, error))
+        return false;
+
+    return EnsureDirectoryExists(path, error);
+}
+
+static bool EnsureParentDirectoryForFile(const std::wstring& path, DWORD* error = nullptr)
+{
+    return EnsureDirectoryTreeExists(ParentDirectoryOfPath(path), error);
+}
+
 static bool HasUtf8Bom(const std::vector<BYTE>& bytes)
 {
     return bytes.size() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
@@ -543,6 +590,17 @@ static bool StartsWithAt(const std::wstring& text, size_t pos, const wchar_t* ne
     return pos <= text.size() && len <= text.size() - pos && text.compare(pos, len, needle) == 0;
 }
 
+static bool IsBackslashEscaped(const std::wstring& text, size_t pos)
+{
+    size_t count = 0;
+    while (pos > 0 && text[pos - 1] == L'\\')
+    {
+        --pos;
+        ++count;
+    }
+    return (count % 2) != 0;
+}
+
 static std::wstring DecodeXmlEntities(std::wstring value)
 {
     struct Replacement { const wchar_t* from; const wchar_t* to; };
@@ -679,13 +737,16 @@ static bool ExtractPowerShellStringNode(const std::wstring& text, size_t& pos, s
             size_t tagEnd = text.find(L'>', open + 2);
             if (tagEnd == std::wstring::npos)
                 return false;
-            size_t close = text.find(L"</S>", tagEnd + 1);
+            size_t close = text.find(L"</S", tagEnd + 1);
             if (close == std::wstring::npos)
+                return false;
+            size_t closeEnd = text.find(L'>', close + 3);
+            if (closeEnd == std::wstring::npos)
                 return false;
 
             tag = text.substr(open, tagEnd - open + 1);
             value = text.substr(tagEnd + 1, close - tagEnd - 1);
-            pos = close + 4;
+            pos = closeEnd + 1;
             return true;
         }
         pos = open + 2;
@@ -795,7 +856,7 @@ static std::wstring StripIniInlineComment(std::wstring value, bool requireLeadin
     for (size_t i = 0; i < value.size(); ++i)
     {
         wchar_t ch = value[i];
-        bool escaped = i > 0 && value[i - 1] == L'\\';
+        bool escaped = IsBackslashEscaped(value, i);
 
         if (!escaped && (ch == L'"' || ch == L'\''))
         {
@@ -855,7 +916,7 @@ static bool HasLaterQuote(const std::wstring& text, size_t start, wchar_t quote)
 {
     for (size_t i = start; i < text.size(); ++i)
     {
-        if (text[i] == quote)
+        if (text[i] == quote && !IsBackslashEscaped(text, i))
             return true;
     }
     return false;
@@ -878,7 +939,7 @@ static bool TryParseIniSectionHeader(std::wstring line, std::wstring& name)
     for (size_t i = 1; i < s.size(); ++i)
     {
         wchar_t ch = s[i];
-        bool escaped = i > 0 && s[i - 1] == L'\\';
+        bool escaped = IsBackslashEscaped(s, i);
         if (!escaped && (ch == L'"' || ch == L'\''))
         {
             if (!inQuote)
