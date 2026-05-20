@@ -49,26 +49,56 @@ jobs:
         shell: pwsh
         run: .\.github\scripts\build-windows.ps1
 
-      - name: Generate SHA256 checksums
-        shell: pwsh
-        run: |
-          Get-FileHash artifacts\*.zip -Algorithm SHA256 |
-            Sort-Object Path |
-            ForEach-Object {
-              "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))"
-            } |
-            Set-Content -LiteralPath artifacts\SHA256SUMS.txt -Encoding ascii
-
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: artifacts/*
+          subject-path: |
+            AllowContentAboveLock/build/AllowContentAboveLock.exe
+            AllowContentAboveLock/build/AllowContentAboveLock.exe.sha256
+            asusblink/build/asusblink.exe
+            asusblink/build/asusblink.exe.sha256
+            capsblink/build/capsblink.exe
+            capsblink/build/capsblink.exe.sha256
+            YourPhoneHideBanner/build/YourPhoneHideBanner.exe
+            YourPhoneHideBanner/build/YourPhoneHideBanner.exe.sha256
+            DiscordRPC/build/DiscordRPC.exe
+            DiscordRPC/build/DiscordRPC.exe.sha256
+            NowPlayingTile/build/NowPlayingTile-windows-x64.zip
+            NowPlayingTile/build/NowPlayingTile-windows-x64.zip.sha256
+            DesktopStub/build/GenerateAssets.exe
+            DesktopStub/build/GenerateAssets.exe.sha256
+            CharmTray/build/CharmTray.exe
+            CharmTray/build/CharmTray.exe.sha256
+            SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip
+            SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip.sha256
+            RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip
+            RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip.sha256
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
           name: AIProjects-Windows-${{ github.sha }}
-          path: artifacts/*
+          path: |
+            AllowContentAboveLock/build/AllowContentAboveLock.exe
+            AllowContentAboveLock/build/AllowContentAboveLock.exe.sha256
+            asusblink/build/asusblink.exe
+            asusblink/build/asusblink.exe.sha256
+            capsblink/build/capsblink.exe
+            capsblink/build/capsblink.exe.sha256
+            YourPhoneHideBanner/build/YourPhoneHideBanner.exe
+            YourPhoneHideBanner/build/YourPhoneHideBanner.exe.sha256
+            DiscordRPC/build/DiscordRPC.exe
+            DiscordRPC/build/DiscordRPC.exe.sha256
+            NowPlayingTile/build/NowPlayingTile-windows-x64.zip
+            NowPlayingTile/build/NowPlayingTile-windows-x64.zip.sha256
+            DesktopStub/build/GenerateAssets.exe
+            DesktopStub/build/GenerateAssets.exe.sha256
+            CharmTray/build/CharmTray.exe
+            CharmTray/build/CharmTray.exe.sha256
+            SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip
+            SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip.sha256
+            RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip
+            RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip.sha256
           if-no-files-found: error
 
       - name: Upload release assets
@@ -88,4 +118,31 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
-          gh release upload $env:RELEASE_TAG artifacts\* --clobber
+          $assets = @(
+            'AllowContentAboveLock/build/AllowContentAboveLock.exe',
+            'AllowContentAboveLock/build/AllowContentAboveLock.exe.sha256',
+            'asusblink/build/asusblink.exe',
+            'asusblink/build/asusblink.exe.sha256',
+            'capsblink/build/capsblink.exe',
+            'capsblink/build/capsblink.exe.sha256',
+            'YourPhoneHideBanner/build/YourPhoneHideBanner.exe',
+            'YourPhoneHideBanner/build/YourPhoneHideBanner.exe.sha256',
+            'DiscordRPC/build/DiscordRPC.exe',
+            'DiscordRPC/build/DiscordRPC.exe.sha256',
+            'NowPlayingTile/build/NowPlayingTile-windows-x64.zip',
+            'NowPlayingTile/build/NowPlayingTile-windows-x64.zip.sha256',
+            'DesktopStub/build/GenerateAssets.exe',
+            'DesktopStub/build/GenerateAssets.exe.sha256',
+            'CharmTray/build/CharmTray.exe',
+            'CharmTray/build/CharmTray.exe.sha256',
+            'SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip',
+            'SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip.sha256',
+            'RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip',
+            'RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip.sha256'
+          ) | Where-Object { Test-Path $_ }
+
+          if (-not $assets) {
+            throw 'No release assets were found.'
+          }
+
+          gh release upload $env:RELEASE_TAG @assets --clobber

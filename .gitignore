@@ -5,8 +5,6 @@
 *.user
 *.suo
 *.pdb
-artifacts/
-build/github-artifacts/
 
 # Build products for projects that keep source outside build/
 **/build/*.exe
@@ -20,6 +18,8 @@ build/github-artifacts/
 **/build/*.idb
 **/build/*.exp
 **/build/*.lib
+**/build/*.zip
+**/build/*.sha256
 **/build/*.map
 **/build/**/*.map
 **/build/*.nativecodeanalysis.xml
