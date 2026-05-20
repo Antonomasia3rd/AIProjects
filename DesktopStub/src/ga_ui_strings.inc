@@ -203,6 +203,8 @@ void LoadUiStrings()
     g_ui.shutdownRequested = IniReadS(L"Strings", L"ShutdownRequested", L"[i] Shutdown requested.");
     g_ui.shutdownCancelled = IniReadS(L"Strings", L"ShutdownCancelled", L"[i] Shutdown cancelled.");
     g_ui.forceShutdownRequested = IniReadS(L"Strings", L"ForceShutdownRequested", L"[!] Force shutdown requested.");
+    g_ui.previousForceShutdownCleanupTitle = IniReadS(L"Strings", L"PreviousForceShutdownCleanupTitle", L"Previous force shutdown");
+    g_ui.previousForceShutdownCleanupWarning = IniReadS(L"Strings", L"PreviousForceShutdownCleanupWarning", L"Previous run used Force shutdown while work was pending (%s). Skipped cleanup: %s. Downside: %s");
 
     g_ui.renameDialogTitle = IniReadS(L"Strings", L"RenameDialogTitle", L"Rename Log Path");
     g_ui.okText = IniReadS(L"Strings", L"OKText", L"OK");
@@ -637,6 +639,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.singleInstanceFailureActionLabel, L"SingleInstanceFailureActionLabel", { L"%s" });
     RequireFormat(g_ui.shutdownPendingReason, L"ShutdownPendingReason", { L"%s" });
     RequireFormat(g_ui.shutdownDelayedNotification, L"ShutdownDelayedNotification", { L"%s" });
+    RequireFormat(g_ui.previousForceShutdownCleanupWarning, L"PreviousForceShutdownCleanupWarning", { L"%s", L"%s", L"%s" });
 
     RequireFormat(g_ui.startingWallpaperGeneration, L"StartingWallpaperGeneration", { L"%s" });
     RequireFormat(g_ui.wallpaperSource, L"WallpaperSource", { L"%s" });

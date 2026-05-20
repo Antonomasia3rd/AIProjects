@@ -375,6 +375,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"ShutdownRequested", L"[i] Shutdown requested."},
     {L"ShutdownCancelled", L"[i] Shutdown cancelled."},
     {L"ForceShutdownRequested", L"[!] Force shutdown requested."},
+    {L"PreviousForceShutdownCleanupTitle", L"Previous force shutdown"},
+    {L"PreviousForceShutdownCleanupWarning", L"Previous run used Force shutdown while work was pending (%s). Skipped cleanup: %s. Downside: %s"},
     {L"RenameDialogTitle", L"Rename Log Path"},
     {L"OKText", L"OK"},
     {L"CancelText", L"Cancel"},

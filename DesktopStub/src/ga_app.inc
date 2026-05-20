@@ -245,6 +245,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     GdiplusStartupInput in; ULONG_PTR tk;
     if (GdiplusStartup(&tk,&in,nullptr)!=Ok){ MessageBoxW(nullptr, g_ui.gdiPlusStartupFailedMessage.c_str(), g_ui.gdiPlusStartupFailedTitle.c_str(), 0); return 1; }
     auto gdiDone = steady_clock::now();
+    std::wstring previousForceShutdownCleanupWarning;
+    if (ConsumePreviousForceShutdownCleanupWarning(previousForceShutdownCleanupWarning))
+        QueueStartupWarning(previousForceShutdownCleanupWarning);
 
     LogText(g_ui.programStarting);
     Log(g_ui.timingLog.c_str(), g_ui.timingPreLogInitialization.c_str(), ElapsedMs(appStart, gdiDone));
@@ -319,6 +322,15 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             LogWin32Failure(L"Shell_NotifyIconW(NIM_ADD)", err);
             g_tray = false;
         }
+    }
+
+    if (!previousForceShutdownCleanupWarning.empty())
+    {
+        MessageBoxW(
+            g_hwnd,
+            previousForceShutdownCleanupWarning.c_str(),
+            g_ui.previousForceShutdownCleanupTitle.c_str(),
+            MB_OK | MB_ICONWARNING);
     }
 
     if (g_consoleControlShutdownPending.exchange(false))
