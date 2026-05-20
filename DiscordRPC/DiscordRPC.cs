@@ -18,6 +18,7 @@ internal static class Program
 {
     private static volatile bool stopping;
     private static CpuSampler cpuSampler = new CpuSampler();
+    private static Mutex singleInstanceMutex;
 
     private static int Main(string[] args)
     {
@@ -35,12 +36,19 @@ internal static class Program
         bool forceTray = false;
         bool forceShowConsole = false;
         bool forceHideConsole = false;
+        bool dryRunFull = false;
         string configPath = "config.ini";
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i].Equals("--dry-run", StringComparison.OrdinalIgnoreCase))
             {
                 dryRun = true;
+            }
+            else if (args[i].Equals("--dry-run-full", StringComparison.OrdinalIgnoreCase) ||
+                     args[i].Equals("--dry-run-unredacted", StringComparison.OrdinalIgnoreCase))
+            {
+                dryRun = true;
+                dryRunFull = true;
             }
             else if (args[i].Equals("--verbose", StringComparison.OrdinalIgnoreCase))
             {
@@ -101,7 +109,7 @@ internal static class Program
         }
 
         string startupTransportMode = NormalizeTransportMode(config.Get("general", "transport_mode", "ipc"));
-        string token = config.Get("general", "token", "").Trim();
+        string token = ResolveDiscordToken(config);
         string startupClientId = config.Get("general", "client_id", "").Trim();
 
         if (dryRun)
@@ -114,12 +122,21 @@ internal static class Program
 
             TemplateContext dryCtx;
             Dictionary<string, object> dryActivity = BuildActivity(config, out dryCtx);
+            bool redactDryRun = !dryRunFull && config.GetBool("app", "dry_run_redact_sensitive", true);
+            if (redactDryRun)
+            {
+                dryActivity = RedactActivityForDryRun(dryActivity, dryCtx);
+            }
 
             Console.WriteLine("=== Activity JSON ===");
             Console.WriteLine(Json.Serialize(dryActivity));
             Console.WriteLine();
             Console.WriteLine("=== Available template tokens ===");
-            foreach (KeyValuePair<string, string> kv in dryCtx.GetTokens())
+            if (redactDryRun)
+            {
+                Console.WriteLine("  Sensitive local tokens are redacted. Use --dry-run-full to show raw values.");
+            }
+            foreach (KeyValuePair<string, string> kv in dryCtx.GetTokens(redactDryRun))
             {
                 Console.WriteLine("  {" + kv.Key + "} = " + kv.Value);
             }
@@ -145,14 +162,23 @@ internal static class Program
                     }
                     if (tokenRequired && token.Length == 0)
                     {
-                        Logger.Error("Missing [general] token in " + Path.GetFullPath(configPath));
+                        Logger.Error("Missing [general] token or token_env in " + Path.GetFullPath(configPath));
                     }
                 }
                 return 1;
             }
 
             string existingClientId = config.Get("general", "client_id", "").Trim();
-            if (!SetupDialog.TrySetup(configPath, token, existingClientId, startupTransportMode, out token))
+            string setupExistingToken = config.Get("general", "token", "").Trim();
+            if (setupExistingToken.Length == 0 && token.Length > 0)
+            {
+                string setupTokenEnv = config.Get("general", "token_env", "").Trim();
+                if (setupTokenEnv.Length > 0)
+                {
+                    setupExistingToken = "env:" + setupTokenEnv;
+                }
+            }
+            if (!SetupDialog.TrySetup(configPath, setupExistingToken, existingClientId, startupTransportMode, out token))
             {
                 return 1;   // user cancelled
             }
@@ -181,7 +207,13 @@ internal static class Program
 
         string fullConfigPath = Path.GetFullPath(configPath);
         AppState.ConfigPath = fullConfigPath;
+        Logger.ConfigureFile(fullConfigPath, config);
         AppState.ApplyConfig(config);
+
+        if (!once && !AcquireSingleInstance(fullConfigPath, config))
+        {
+            return 0;
+        }
 
         bool trayEnabled = !once && !noTray && (forceTray || config.GetBool("app", "show_tray", true));
         bool showConsole = config.GetBool("app", "show_console", true);
@@ -210,11 +242,19 @@ internal static class Program
         Logger.Info("Update interval: " + Math.Max(5, config.GetInt("general", "update_interval", 5)).ToString(CultureInfo.InvariantCulture) + "s");
         AppState.Notify("DiscordRPC started", "Rich Presence is running.", ToolTipIcon.Info, NotificationEventKind.Start);
 
-        int exitCode = RunPresenceLoop(fullConfigPath, config, verbose, once);
-
-        if (trayHost != null)
+        int exitCode = 0;
+        try
         {
-            trayHost.Stop();
+            exitCode = RunPresenceLoop(fullConfigPath, config, verbose, once);
+        }
+        finally
+        {
+            if (trayHost != null)
+            {
+                trayHost.Stop();
+            }
+
+            ReleaseSingleInstance();
         }
 
         Logger.Info("Stopped.");
@@ -226,9 +266,81 @@ internal static class Program
         stopping = true;
     }
 
+    private static bool AcquireSingleInstance(string configPath, IniConfig config)
+    {
+        if (!config.GetBool("app", "single_instance", true))
+        {
+            Logger.Info("Single-instance protection disabled.");
+            return true;
+        }
+
+        string mutexName = "Local\\DiscordRPC." + StableHash(configPath.ToUpperInvariant());
+        bool createdNew;
+        try
+        {
+            singleInstanceMutex = new Mutex(true, mutexName, out createdNew);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Single-instance protection failed: " + ex.Message);
+            return true;
+        }
+
+        if (createdNew)
+        {
+            Logger.Info("Single-instance scope: " + mutexName);
+            return true;
+        }
+
+        Logger.Error("DiscordRPC is already running for this config.");
+        try
+        {
+            MessageBox.Show(
+                "DiscordRPC is already running for this config.",
+                "DiscordRPC",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch
+        {
+        }
+
+        ReleaseSingleInstance();
+        return false;
+    }
+
+    private static void ReleaseSingleInstance()
+    {
+        Mutex mutex = singleInstanceMutex;
+        singleInstanceMutex = null;
+        if (mutex == null)
+        {
+            return;
+        }
+
+        try { mutex.ReleaseMutex(); } catch { }
+        try { mutex.Dispose(); } catch { }
+    }
+
+    private static string StableHash(string value)
+    {
+        unchecked
+        {
+            ulong hash = 1469598103934665603UL;
+            string text = value ?? "";
+            for (int i = 0; i < text.Length; i++)
+            {
+                hash ^= text[i];
+                hash *= 1099511628211UL;
+            }
+
+            return hash.ToString("X16", CultureInfo.InvariantCulture);
+        }
+    }
+
     private static int RunPresenceLoop(string configPath, IniConfig config, bool verbose, bool once)
     {
-        string token = config.Get("general", "token", "").Trim();
+        string token = ResolveDiscordToken(config);
         string clientId = config.Get("general", "client_id", "").Trim();
         string transportMode = NormalizeTransportMode(config.Get("general", "transport_mode", "ipc"));
         string lastStatus = NormalizeStatus(config.Get("general", "status", "online"));
@@ -253,7 +365,7 @@ internal static class Program
                     try
                     {
                         IniConfig reloadedConfig = ConfigDefaults.EnsureAndReload(configPath, IniConfig.Load(configPath));
-                        string reloadedToken = reloadedConfig.Get("general", "token", "").Trim();
+                        string reloadedToken = ResolveDiscordToken(reloadedConfig);
                         string reloadedClientId = reloadedConfig.Get("general", "client_id", "").Trim();
                         string reloadedTransportMode = NormalizeTransportMode(reloadedConfig.Get("general", "transport_mode", "ipc"));
                         bool reconnectNeeded =
@@ -336,7 +448,7 @@ internal static class Program
                             if (!reportedGatewayConnectFailure)
                             {
                                 Logger.Error("Gateway skipped: missing [general] token.");
-                                AppState.Notify("DiscordRPC Gateway skipped", "Missing Discord token.", ToolTipIcon.Warning, NotificationEventKind.Failure);
+                                AppState.Notify("DiscordRPC Gateway skipped", "Missing Discord token or token_env.", ToolTipIcon.Warning, NotificationEventKind.Failure);
                                 reportedGatewayConnectFailure = true;
                             }
                         }
@@ -346,7 +458,7 @@ internal static class Program
                             {
                                 if (gateway == null)
                                 {
-                                    gateway = new DiscordGatewayClient(token, verbose);
+                                    gateway = new DiscordGatewayClient(token, verbose, GatewayOptions.FromConfig(config));
                                 }
 
                                 if (!gateway.IsConnected)
@@ -376,6 +488,7 @@ internal static class Program
                                         ex.Message.IndexOf("Authentication failed", StringComparison.OrdinalIgnoreCase) >= 0)
                                     {
                                         Logger.Error("Invalid token. Check [general] token in your config.");
+                                        Logger.Error("If you use token_env, verify that the environment variable is set for this process.");
                                         AppState.Notify("DiscordRPC auth error", "Invalid Discord token.", ToolTipIcon.Error, NotificationEventKind.Failure);
                                         return 1;
                                     }
@@ -400,7 +513,7 @@ internal static class Program
                         {
                             if (ipc == null)
                             {
-                                ipc = new DiscordIpcClient(clientId, verbose);
+                                ipc = new DiscordIpcClient(clientId, verbose, IpcOptions.FromConfig(config));
                             }
 
                             try
@@ -454,7 +567,7 @@ internal static class Program
                             if (!reportedGatewayConnectFailure)
                             {
                                 Logger.Error("Gateway fallback skipped: missing [general] token.");
-                                AppState.Notify("DiscordRPC Gateway skipped", "Missing Discord token.", ToolTipIcon.Warning, NotificationEventKind.Failure);
+                                AppState.Notify("DiscordRPC Gateway skipped", "Missing Discord token or token_env.", ToolTipIcon.Warning, NotificationEventKind.Failure);
                                 reportedGatewayConnectFailure = true;
                             }
                         }
@@ -464,7 +577,7 @@ internal static class Program
                             {
                                 if (gateway == null)
                                 {
-                                    gateway = new DiscordGatewayClient(token, verbose);
+                                    gateway = new DiscordGatewayClient(token, verbose, GatewayOptions.FromConfig(config));
                                 }
 
                                 if (!gateway.IsConnected)
@@ -494,6 +607,7 @@ internal static class Program
                                         ex.Message.IndexOf("Authentication failed", StringComparison.OrdinalIgnoreCase) >= 0)
                                     {
                                         Logger.Error("Invalid token. Check [general] token in your config.");
+                                        Logger.Error("If you use token_env, verify that the environment variable is set for this process.");
                                         AppState.Notify("DiscordRPC auth error", "Invalid Discord token.", ToolTipIcon.Error, NotificationEventKind.Failure);
                                     }
                                     else
@@ -612,6 +726,41 @@ internal static class Program
         return "online";
     }
 
+    internal static string ResolveDiscordToken(IniConfig config)
+    {
+        string tokenEnv = config.Get("general", "token_env", "").Trim();
+        if (tokenEnv.Length > 0)
+        {
+            string envToken = Environment.GetEnvironmentVariable(tokenEnv);
+            if (!string.IsNullOrEmpty(envToken))
+            {
+                return envToken.Trim();
+            }
+
+            Logger.Error("Configured Discord token environment variable is empty or missing: " + tokenEnv);
+        }
+
+        string token = config.Get("general", "token", "").Trim();
+        if (token.StartsWith("env:", StringComparison.OrdinalIgnoreCase))
+        {
+            string inlineEnv = token.Substring(4).Trim();
+            if (inlineEnv.Length > 0)
+            {
+                string envToken = Environment.GetEnvironmentVariable(inlineEnv);
+                if (!string.IsNullOrEmpty(envToken))
+                {
+                    return envToken.Trim();
+                }
+
+                Logger.Error("Configured Discord token environment variable is empty or missing: " + inlineEnv);
+            }
+
+            return "";
+        }
+
+        return token;
+    }
+
     private static bool TransportAllowsIpc(string mode)
     {
         return mode == "ipc" || mode == "auto";
@@ -621,6 +770,64 @@ internal static class Program
     {
         TemplateContext unusedContext;
         return BuildActivity(config, out unusedContext);
+    }
+
+    private static Dictionary<string, object> RedactActivityForDryRun(Dictionary<string, object> activity, TemplateContext ctx)
+    {
+        Dictionary<string, string> sensitiveValues = ctx.GetSensitiveTokenValues();
+        object redacted = RedactObjectForDryRun(activity, sensitiveValues);
+        Dictionary<string, object> redactedActivity = redacted as Dictionary<string, object>;
+        return redactedActivity ?? activity;
+    }
+
+    private static object RedactObjectForDryRun(object value, Dictionary<string, string> sensitiveValues)
+    {
+        string text = value as string;
+        if (text != null)
+        {
+            return RedactStringForDryRun(text, sensitiveValues);
+        }
+
+        IDictionary<string, object> dict = value as IDictionary<string, object>;
+        if (dict != null)
+        {
+            Dictionary<string, object> copy = new Dictionary<string, object>();
+            foreach (KeyValuePair<string, object> item in dict)
+            {
+                copy[item.Key] = RedactObjectForDryRun(item.Value, sensitiveValues);
+            }
+            return copy;
+        }
+
+        IEnumerable enumerable = value as IEnumerable;
+        if (enumerable != null && !(value is string))
+        {
+            List<object> copy = new List<object>();
+            foreach (object item in enumerable)
+            {
+                copy.Add(RedactObjectForDryRun(item, sensitiveValues));
+            }
+            return copy;
+        }
+
+        return value;
+    }
+
+    private static string RedactStringForDryRun(string value, Dictionary<string, string> sensitiveValues)
+    {
+        string result = value ?? "";
+        foreach (KeyValuePair<string, string> entry in sensitiveValues)
+        {
+            string sensitive = entry.Value;
+            if (string.IsNullOrEmpty(sensitive))
+            {
+                continue;
+            }
+
+            result = result.Replace(sensitive, "<redacted:" + entry.Key + ">");
+        }
+
+        return result;
     }
 
     private static Dictionary<string, object> BuildActivity(IniConfig config, out TemplateContext ctx)
@@ -1014,6 +1221,7 @@ internal static class AppState
     public static void ApplyConfig(IniConfig config)
     {
         UiStrings.Load(config);
+        Logger.ConfigureFile(ConfigPath, config);
         NotificationsEnabled = config.GetBool("app", "notifications_enabled", true);
         NotifyOnStart = config.GetBool("app", "notify_on_start", false);
         NotifyOnSuccess = config.GetBool("app", "notify_on_success", false);
@@ -1124,6 +1332,7 @@ internal static class UiStrings
         { "category_afk", "AFK" },
         { "category_notifications", "Notifications" },
         { "category_logging", "Logging" },
+        { "category_methods", "Methods" },
         { "category_advanced", "Advanced" },
 
         { "enable_window_detection", "Enable window detection" },
@@ -1132,6 +1341,7 @@ internal static class UiStrings
         { "transport_mode_gateway", "Gateway fallback (no Discord desktop required)" },
         { "transport_mode_ipc", "Discord IPC (default)" },
         { "transport_mode_auto", "Auto (IPC, then Gateway fallback)" },
+        { "token_env", "Discord token environment variable" },
         { "update_interval", "Update interval" },
         { "idle_message", "Idle message" },
         { "fallback_details", "Fallback details" },
@@ -1169,8 +1379,31 @@ internal static class UiStrings
         { "verbose_ipc_logging", "Verbose logging" },
         { "show_console", "Show console" },
         { "show_recent_log", "Show recent log" },
+        { "file_logging", "File logging" },
+        { "log_path", "Log path" },
+        { "open_log_folder", "Open log folder" },
+        { "backup_config_on_save", "Config backups on save" },
         { "tray_icon", "Tray icon" },
+        { "show_menu_as_dropdown", "Show menu as dropdown" },
+        { "single_instance", "Single-instance protection" },
         { "hide_disabled_entries", "Hide disabled entries" },
+        { "redact_dry_run", "Redact sensitive dry-run output" },
+        { "ipc_connect_timeout", "IPC connect timeout" },
+        { "ipc_response_timeout", "IPC response timeout" },
+        { "gateway_system_locale", "Gateway system locale" },
+        { "gateway_browser_user_agent", "Gateway browser user agent" },
+        { "gateway_browser_version", "Gateway browser version" },
+        { "gateway_os_version", "Gateway OS version" },
+        { "gateway_release_channel", "Gateway release channel" },
+        { "gateway_client_build_number", "Gateway client build number" },
+        { "gateway_capabilities", "Gateway capabilities" },
+        { "gateway_connect_timeout", "Gateway connect timeout" },
+        { "gateway_hello_timeout", "Gateway HELLO timeout" },
+        { "gateway_ready_timeout", "Gateway READY timeout" },
+        { "gateway_send_timeout", "Gateway send timeout" },
+        { "gateway_close_timeout", "Gateway close timeout" },
+        { "gateway_asset_fetch_timeout", "Gateway asset fetch timeout" },
+        { "gateway_asset_fetch_user_agent", "Gateway asset fetch user agent" },
         { "restart_message", "Restart message" },
         { "reload_configuration", "Reload configuration" },
         { "exit", "Exit" },
@@ -1285,6 +1518,7 @@ internal static class ConfigDefaults
     internal const string DefaultFallbackDetails = "Foreground program detection is disabled.";
     internal const string DefaultStaticDetails = "Using my PC";
     internal const string DefaultStaticState = "Online";
+    internal const string DefaultGatewayBrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9181 Chrome/128.0.6613.186 Electron/32.2.7 Safari/537.36";
 
     public static IniConfig EnsureAndReload(string path, IniConfig config)
     {
@@ -1363,6 +1597,7 @@ internal static class ConfigDefaults
         Add(defaults, "general", "status", "online");
         Add(defaults, "general", "details_template", DefaultDetailsTemplate);
         Add(defaults, "general", "state_template", DefaultStateTemplate);
+        Add(defaults, "general", "token_env", "");
 
         Add(defaults, "censor_map", "rule_order", "full_replace, word_replace, pattern_replace");
         Add(defaults, "censor_map", "full_replace", "");
@@ -1395,6 +1630,8 @@ internal static class ConfigDefaults
         Add(defaults, "messages", "rpc_restarted_message", "Rich Presence has been restarted.");
 
         Add(defaults, "app", "show_tray", "true");
+        Add(defaults, "app", "show_menu_as_dropdown", "true");
+        Add(defaults, "app", "single_instance", "true");
         Add(defaults, "app", "show_console", "false");
         Add(defaults, "app", "notifications_enabled", "true");
         Add(defaults, "app", "notify_on_start", "false");
@@ -1402,8 +1639,30 @@ internal static class ConfigDefaults
         Add(defaults, "app", "notify_on_failure", "true");
         Add(defaults, "app", "notify_on_reload", "true");
         Add(defaults, "app", "logging_enabled", "true");
+        Add(defaults, "app", "file_logging_enabled", "true");
+        Add(defaults, "app", "log_path", "");
+        Add(defaults, "app", "backup_config_on_save", "false");
         Add(defaults, "app", "verbose_logging", "false");
         Add(defaults, "app", "hide_disabled_entries", "false");
+        Add(defaults, "app", "dry_run_redact_sensitive", "true");
+
+        Add(defaults, "ipc", "connect_timeout_ms", "250");
+        Add(defaults, "ipc", "response_timeout_ms", "5000");
+
+        Add(defaults, "gateway", "system_locale", "en-US");
+        Add(defaults, "gateway", "browser_user_agent", DefaultGatewayBrowserUserAgent);
+        Add(defaults, "gateway", "browser_version", "32.2.7");
+        Add(defaults, "gateway", "os_version", "10.0.26100");
+        Add(defaults, "gateway", "release_channel", "stable");
+        Add(defaults, "gateway", "client_build_number", "390000");
+        Add(defaults, "gateway", "capabilities", "65");
+        Add(defaults, "gateway", "connect_timeout_ms", "10000");
+        Add(defaults, "gateway", "hello_timeout_ms", "10000");
+        Add(defaults, "gateway", "ready_timeout_ms", "30000");
+        Add(defaults, "gateway", "send_timeout_ms", "10000");
+        Add(defaults, "gateway", "close_timeout_ms", "2000");
+        Add(defaults, "gateway", "asset_fetch_timeout_ms", "10000");
+        Add(defaults, "gateway", "asset_fetch_user_agent", "DiscordBot (https://github.com, 1)");
 
         UiStrings.AddDefaultConfigEntries(defaults);
         AddGuiDefaults(defaults);
@@ -1441,6 +1700,7 @@ internal static class ConfigDefaults
     {
         Add(target, "gui", "fallback_details", "text");
         Add(target, "gui", "transport_mode", "choice");
+        Add(target, "gui", "token_env", "text");
         Add(target, "gui", "details_template", "text");
         Add(target, "gui", "state_template", "text");
         Add(target, "gui", "rule_order", "text");
@@ -1492,6 +1752,8 @@ internal static class ConfigDefaults
         Add(target, "gui", "idle_text", "text");
         Add(target, "gui", "rpc_restarted_message", "text");
         Add(target, "gui", "show_tray", "bool");
+        Add(target, "gui", "show_menu_as_dropdown", "bool");
+        Add(target, "gui", "single_instance", "bool");
         Add(target, "gui", "show_console", "bool");
         Add(target, "gui", "notifications_enabled", "bool");
         Add(target, "gui", "notify_on_start", "bool");
@@ -1499,8 +1761,28 @@ internal static class ConfigDefaults
         Add(target, "gui", "notify_on_failure", "bool");
         Add(target, "gui", "notify_on_reload", "bool");
         Add(target, "gui", "logging_enabled", "bool");
+        Add(target, "gui", "file_logging_enabled", "bool");
+        Add(target, "gui", "log_path", "text");
+        Add(target, "gui", "backup_config_on_save", "bool");
         Add(target, "gui", "verbose_logging", "bool");
         Add(target, "gui", "hide_disabled_entries", "bool");
+        Add(target, "gui", "dry_run_redact_sensitive", "bool");
+        Add(target, "gui", "connect_timeout_ms", "number");
+        Add(target, "gui", "response_timeout_ms", "number");
+        Add(target, "gui", "system_locale", "text");
+        Add(target, "gui", "browser_user_agent", "text");
+        Add(target, "gui", "browser_version", "text");
+        Add(target, "gui", "os_version", "text");
+        Add(target, "gui", "release_channel", "text");
+        Add(target, "gui", "client_build_number", "number");
+        Add(target, "gui", "capabilities", "number");
+        Add(target, "gui", "gateway.connect_timeout_ms", "number");
+        Add(target, "gui", "hello_timeout_ms", "number");
+        Add(target, "gui", "ready_timeout_ms", "number");
+        Add(target, "gui", "send_timeout_ms", "number");
+        Add(target, "gui", "close_timeout_ms", "number");
+        Add(target, "gui", "asset_fetch_timeout_ms", "number");
+        Add(target, "gui", "asset_fetch_user_agent", "text");
         Add(target, "gui", "save_shortcut", "<Control-s>");
         Add(target, "gui", "exit_shortcut", "<Control-q>");
         Add(target, "gui", "reload_shortcut", "<Control-r>");
@@ -1634,72 +1916,101 @@ internal sealed class TrayApplicationContext : ApplicationContext
         IniConfig config = LoadConfigForMenu();
         UiStrings.Load(config);
 
-        ToolStripMenuItem general = AddCategory(UiStrings.Get("category_general"));
-        AddToggle(general.DropDownItems, UiStrings.Get("enable_window_detection"), config, "general", "window_title_detection_enabled", true, true);
-        AddEdit(general.DropDownItems, UiStrings.Get("application_id"), config, "general", "client_id", UiStrings.Get("application_id"), false, false);
-        AddTransportMode(general.DropDownItems, config);
-        AddEdit(general.DropDownItems, UiStrings.Get("update_interval"), config, "general", "update_interval", UiStrings.Get("update_interval"), false, true);
-        AddEdit(general.DropDownItems, UiStrings.Get("idle_message"), config, "general", "idle_message", UiStrings.Get("idle_message"), false, false);
-        AddEdit(general.DropDownItems, UiStrings.Get("fallback_details"), config, "general", "fallback_details", UiStrings.Get("fallback_details"), false, false);
+        bool showDropdown = config.GetBool("app", "show_menu_as_dropdown", true);
+        AddToggle(menu.Items, UiStrings.Get("show_menu_as_dropdown"), config, "app", "show_menu_as_dropdown", true, false);
+        menu.Items.Add(new ToolStripSeparator());
 
-        ToolStripMenuItem layout = AddCategory(UiStrings.Get("category_presence_layout"));
-        AddToggle(layout.DropDownItems, UiStrings.Get("details_field"), config, "layout", "details_field", true, true);
-        AddEdit(layout.DropDownItems, UiStrings.Get("details_template"), config, "general", "details_template", UiStrings.Get("details_template"), false, false);
-        AddToggle(layout.DropDownItems, UiStrings.Get("state_field"), config, "layout", "state_field", true, true);
-        AddEdit(layout.DropDownItems, UiStrings.Get("state_template"), config, "general", "state_template", UiStrings.Get("state_template"), false, false);
-        AddToggle(layout.DropDownItems, UiStrings.Get("large_image"), config, "layout", "show_large_image", true, true);
-        AddToggle(layout.DropDownItems, UiStrings.Get("small_image"), config, "layout", "show_small_image", true, true);
-        AddToggle(layout.DropDownItems, UiStrings.Get("buttons"), config, "layout", "show_buttons", true, true);
+        ToolStripItemCollection general = AddCategory(UiStrings.Get("category_general"), showDropdown);
+        AddToggle(general, UiStrings.Get("enable_window_detection"), config, "general", "window_title_detection_enabled", true, true);
+        AddEdit(general, UiStrings.Get("application_id"), config, "general", "client_id", UiStrings.Get("application_id"), false, false);
+        AddTransportMode(general, config);
+        AddEdit(general, UiStrings.Get("token_env"), config, "general", "token_env", UiStrings.Get("token_env"), false, false);
+        AddEdit(general, UiStrings.Get("update_interval"), config, "general", "update_interval", UiStrings.Get("update_interval"), false, true);
+        AddEdit(general, UiStrings.Get("idle_message"), config, "general", "idle_message", UiStrings.Get("idle_message"), false, false);
+        AddEdit(general, UiStrings.Get("fallback_details"), config, "general", "fallback_details", UiStrings.Get("fallback_details"), false, false);
 
-        ToolStripMenuItem censoring = AddCategory(UiStrings.Get("category_censoring"));
-        AddToggle(censoring.DropDownItems, UiStrings.Get("apply_regex_raw"), config, "censor_map", "apply_pattern_on_raw", false, true);
-        AddEdit(censoring.DropDownItems, UiStrings.Get("rule_order"), config, "censor_map", "rule_order", UiStrings.Get("rule_order"), false, false);
-        AddEdit(censoring.DropDownItems, UiStrings.Get("full_replace_map"), config, "censor_map", "full_replace", UiStrings.Get("full_replace_map"), true, false);
-        AddEdit(censoring.DropDownItems, UiStrings.Get("word_replace_map"), config, "censor_map", "word_replace", UiStrings.Get("word_replace_map"), true, false);
-        AddEdit(censoring.DropDownItems, UiStrings.Get("regex_replace_map"), config, "censor_map", "pattern_replace", UiStrings.Get("regex_replace_map"), true, false);
+        ToolStripItemCollection layout = AddCategory(UiStrings.Get("category_presence_layout"), showDropdown);
+        AddToggle(layout, UiStrings.Get("details_field"), config, "layout", "details_field", true, true);
+        AddEdit(layout, UiStrings.Get("details_template"), config, "general", "details_template", UiStrings.Get("details_template"), false, false);
+        AddToggle(layout, UiStrings.Get("state_field"), config, "layout", "state_field", true, true);
+        AddEdit(layout, UiStrings.Get("state_template"), config, "general", "state_template", UiStrings.Get("state_template"), false, false);
+        AddToggle(layout, UiStrings.Get("large_image"), config, "layout", "show_large_image", true, true);
+        AddToggle(layout, UiStrings.Get("small_image"), config, "layout", "show_small_image", true, true);
+        AddToggle(layout, UiStrings.Get("buttons"), config, "layout", "show_buttons", true, true);
 
-        ToolStripMenuItem assets = AddCategory(UiStrings.Get("category_assets_time"));
-        assets.DropDownItems.Add(CreateTimeRangeMenu(UiStrings.Get("large_time_ranges"), config, "large_time_ranges"));
-        assets.DropDownItems.Add(CreateTimeRangeMenu(UiStrings.Get("small_time_ranges"), config, "small_time_ranges"));
-        assets.DropDownItems.Add(CreateAssetMenu(UiStrings.Get("large_assets"), config, "large_assets"));
-        assets.DropDownItems.Add(CreateAssetMenu(UiStrings.Get("small_assets"), config, "small_assets"));
+        ToolStripItemCollection censoring = AddCategory(UiStrings.Get("category_censoring"), showDropdown);
+        AddToggle(censoring, UiStrings.Get("apply_regex_raw"), config, "censor_map", "apply_pattern_on_raw", false, true);
+        AddEdit(censoring, UiStrings.Get("rule_order"), config, "censor_map", "rule_order", UiStrings.Get("rule_order"), false, false);
+        AddEdit(censoring, UiStrings.Get("full_replace_map"), config, "censor_map", "full_replace", UiStrings.Get("full_replace_map"), true, false);
+        AddEdit(censoring, UiStrings.Get("word_replace_map"), config, "censor_map", "word_replace", UiStrings.Get("word_replace_map"), true, false);
+        AddEdit(censoring, UiStrings.Get("regex_replace_map"), config, "censor_map", "pattern_replace", UiStrings.Get("regex_replace_map"), true, false);
 
-        ToolStripMenuItem buttons = AddCategory(UiStrings.Get("category_buttons"));
-        AddEdit(buttons.DropDownItems, UiStrings.Get("button_1_label"), config, "buttons", "button_1_label", UiStrings.Get("button_1_label"), false, false);
-        AddEdit(buttons.DropDownItems, UiStrings.Get("button_1_url"), config, "buttons", "button_1_url", UiStrings.Get("button_1_url"), false, false);
-        AddEdit(buttons.DropDownItems, UiStrings.Get("button_2_label"), config, "buttons", "button_2_label", UiStrings.Get("button_2_label"), false, false);
-        AddEdit(buttons.DropDownItems, UiStrings.Get("button_2_url"), config, "buttons", "button_2_url", UiStrings.Get("button_2_url"), false, false);
+        ToolStripItemCollection assets = AddCategory(UiStrings.Get("category_assets_time"), showDropdown);
+        assets.Add(CreateTimeRangeMenu(UiStrings.Get("large_time_ranges"), config, "large_time_ranges"));
+        assets.Add(CreateTimeRangeMenu(UiStrings.Get("small_time_ranges"), config, "small_time_ranges"));
+        assets.Add(CreateAssetMenu(UiStrings.Get("large_assets"), config, "large_assets"));
+        assets.Add(CreateAssetMenu(UiStrings.Get("small_assets"), config, "small_assets"));
 
-        ToolStripMenuItem afk = AddCategory(UiStrings.Get("category_afk"));
-        AddEdit(afk.DropDownItems, UiStrings.Get("idle_threshold"), config, "afk", "idle_threshold", UiStrings.Get("idle_threshold"), false, true);
-        AddEdit(afk.DropDownItems, UiStrings.Get("afk_message"), config, "afk", "afk_message", UiStrings.Get("afk_message"), false, false);
-        AddEdit(afk.DropDownItems, UiStrings.Get("afk_image"), config, "afk", "afk_image", UiStrings.Get("afk_image"), false, false);
-        AddToggle(afk.DropDownItems, UiStrings.Get("show_idle_time"), config, "afk", "show_idle_time", true, true);
-        AddEdit(afk.DropDownItems, UiStrings.Get("idle_text"), config, "afk", "idle_text", UiStrings.Get("idle_text"), false, false);
+        ToolStripItemCollection buttons = AddCategory(UiStrings.Get("category_buttons"), showDropdown);
+        AddEdit(buttons, UiStrings.Get("button_1_label"), config, "buttons", "button_1_label", UiStrings.Get("button_1_label"), false, false);
+        AddEdit(buttons, UiStrings.Get("button_1_url"), config, "buttons", "button_1_url", UiStrings.Get("button_1_url"), false, false);
+        AddEdit(buttons, UiStrings.Get("button_2_label"), config, "buttons", "button_2_label", UiStrings.Get("button_2_label"), false, false);
+        AddEdit(buttons, UiStrings.Get("button_2_url"), config, "buttons", "button_2_url", UiStrings.Get("button_2_url"), false, false);
 
-        ToolStripMenuItem notifications = AddCategory(UiStrings.Get("category_notifications"));
-        AddToggle(notifications.DropDownItems, UiStrings.Get("enable_notifications"), config, "app", "notifications_enabled", true, false);
+        ToolStripItemCollection afk = AddCategory(UiStrings.Get("category_afk"), showDropdown);
+        AddEdit(afk, UiStrings.Get("idle_threshold"), config, "afk", "idle_threshold", UiStrings.Get("idle_threshold"), false, true);
+        AddEdit(afk, UiStrings.Get("afk_message"), config, "afk", "afk_message", UiStrings.Get("afk_message"), false, false);
+        AddEdit(afk, UiStrings.Get("afk_image"), config, "afk", "afk_image", UiStrings.Get("afk_image"), false, false);
+        AddToggle(afk, UiStrings.Get("show_idle_time"), config, "afk", "show_idle_time", true, true);
+        AddEdit(afk, UiStrings.Get("idle_text"), config, "afk", "idle_text", UiStrings.Get("idle_text"), false, false);
+
+        ToolStripItemCollection notifications = AddCategory(UiStrings.Get("category_notifications"), showDropdown);
+        AddToggle(notifications, UiStrings.Get("enable_notifications"), config, "app", "notifications_enabled", true, false);
         bool notificationsEnabled = config.GetBool("app", "notifications_enabled", true);
-        AddToggle(notifications.DropDownItems, UiStrings.Get("notify_on_start"), config, "app", "notify_on_start", false, false, notificationsEnabled);
-        AddToggle(notifications.DropDownItems, UiStrings.Get("notify_on_success"), config, "app", "notify_on_success", false, false, notificationsEnabled);
-        AddToggle(notifications.DropDownItems, UiStrings.Get("notify_on_failure"), config, "app", "notify_on_failure", true, false, notificationsEnabled);
-        AddToggle(notifications.DropDownItems, UiStrings.Get("notify_on_reload"), config, "app", "notify_on_reload", true, false, notificationsEnabled);
+        AddToggle(notifications, UiStrings.Get("notify_on_start"), config, "app", "notify_on_start", false, false, notificationsEnabled);
+        AddToggle(notifications, UiStrings.Get("notify_on_success"), config, "app", "notify_on_success", false, false, notificationsEnabled);
+        AddToggle(notifications, UiStrings.Get("notify_on_failure"), config, "app", "notify_on_failure", true, false, notificationsEnabled);
+        AddToggle(notifications, UiStrings.Get("notify_on_reload"), config, "app", "notify_on_reload", true, false, notificationsEnabled);
 
-        ToolStripMenuItem logging = AddCategory(UiStrings.Get("category_logging"));
-        AddToggle(logging.DropDownItems, UiStrings.Get("enable_logging"), config, "app", "logging_enabled", true, false);
-        AddToggle(logging.DropDownItems, UiStrings.Get("verbose_ipc_logging"), config, "app", "verbose_logging", false, true, config.GetBool("app", "logging_enabled", true));
-        AddConsoleToggle(logging.DropDownItems);
-        AddStatus(logging.DropDownItems, UiStrings.Format("console_state_format", ConsoleWindow.IsVisible() ? UiStrings.Get("enabled_text") : UiStrings.Get("disabled_text")));
-        AddRecentLog(logging.DropDownItems);
+        ToolStripItemCollection logging = AddCategory(UiStrings.Get("category_logging"), showDropdown);
+        AddToggle(logging, UiStrings.Get("enable_logging"), config, "app", "logging_enabled", true, false);
+        AddToggle(logging, UiStrings.Get("file_logging"), config, "app", "file_logging_enabled", true, false);
+        AddToggle(logging, UiStrings.Get("verbose_ipc_logging"), config, "app", "verbose_logging", false, true, config.GetBool("app", "logging_enabled", true));
+        AddConsoleToggle(logging);
+        AddStatus(logging, UiStrings.Format("console_state_format", ConsoleWindow.IsVisible() ? UiStrings.Get("enabled_text") : UiStrings.Get("disabled_text")));
+        AddEdit(logging, UiStrings.Get("log_path"), config, "app", "log_path", UiStrings.Get("log_path"), false, false);
+        AddOpenLogFolder(logging);
+        AddRecentLog(logging);
 
-        ToolStripMenuItem advanced = AddCategory(UiStrings.Get("category_advanced"));
-        AddToggle(advanced.DropDownItems, UiStrings.Get("tray_icon"), config, "app", "show_tray", true, false);
-        AddToggle(advanced.DropDownItems, UiStrings.Get("hide_disabled_entries"), config, "app", "hide_disabled_entries", false, false);
-        AddEdit(advanced.DropDownItems, UiStrings.Get("restart_message"), config, "messages", "rpc_restarted_message", UiStrings.Get("restart_message"), false, false);
-        AddStatus(advanced.DropDownItems, UiStrings.Format("config_path_format", TrimForMenu(configPath, 120)));
+        ToolStripItemCollection methods = AddCategory(UiStrings.Get("category_methods"), showDropdown);
+        AddEdit(methods, UiStrings.Get("ipc_connect_timeout"), config, "ipc", "connect_timeout_ms", UiStrings.Get("ipc_connect_timeout"), false, true);
+        AddEdit(methods, UiStrings.Get("ipc_response_timeout"), config, "ipc", "response_timeout_ms", UiStrings.Get("ipc_response_timeout"), false, true);
+        AddEdit(methods, UiStrings.Get("gateway_connect_timeout"), config, "gateway", "connect_timeout_ms", UiStrings.Get("gateway_connect_timeout"), false, true);
+        AddEdit(methods, UiStrings.Get("gateway_hello_timeout"), config, "gateway", "hello_timeout_ms", UiStrings.Get("gateway_hello_timeout"), false, true);
+        AddEdit(methods, UiStrings.Get("gateway_ready_timeout"), config, "gateway", "ready_timeout_ms", UiStrings.Get("gateway_ready_timeout"), false, true);
+        AddEdit(methods, UiStrings.Get("gateway_send_timeout"), config, "gateway", "send_timeout_ms", UiStrings.Get("gateway_send_timeout"), false, true);
+        AddEdit(methods, UiStrings.Get("gateway_close_timeout"), config, "gateway", "close_timeout_ms", UiStrings.Get("gateway_close_timeout"), false, true);
+        AddEdit(methods, UiStrings.Get("gateway_asset_fetch_timeout"), config, "gateway", "asset_fetch_timeout_ms", UiStrings.Get("gateway_asset_fetch_timeout"), false, true);
+        AddEdit(methods, UiStrings.Get("gateway_system_locale"), config, "gateway", "system_locale", UiStrings.Get("gateway_system_locale"), false, false);
+        AddEdit(methods, UiStrings.Get("gateway_browser_user_agent"), config, "gateway", "browser_user_agent", UiStrings.Get("gateway_browser_user_agent"), false, false);
+        AddEdit(methods, UiStrings.Get("gateway_browser_version"), config, "gateway", "browser_version", UiStrings.Get("gateway_browser_version"), false, false);
+        AddEdit(methods, UiStrings.Get("gateway_os_version"), config, "gateway", "os_version", UiStrings.Get("gateway_os_version"), false, false);
+        AddEdit(methods, UiStrings.Get("gateway_release_channel"), config, "gateway", "release_channel", UiStrings.Get("gateway_release_channel"), false, false);
+        AddEdit(methods, UiStrings.Get("gateway_client_build_number"), config, "gateway", "client_build_number", UiStrings.Get("gateway_client_build_number"), false, true);
+        AddEdit(methods, UiStrings.Get("gateway_capabilities"), config, "gateway", "capabilities", UiStrings.Get("gateway_capabilities"), false, true);
+        AddEdit(methods, UiStrings.Get("gateway_asset_fetch_user_agent"), config, "gateway", "asset_fetch_user_agent", UiStrings.Get("gateway_asset_fetch_user_agent"), false, false);
+
+        ToolStripItemCollection advanced = AddCategory(UiStrings.Get("category_advanced"), showDropdown);
+        AddToggle(advanced, UiStrings.Get("tray_icon"), config, "app", "show_tray", true, false);
+        AddToggle(advanced, UiStrings.Get("single_instance"), config, "app", "single_instance", true, false);
+        AddToggle(advanced, UiStrings.Get("hide_disabled_entries"), config, "app", "hide_disabled_entries", false, false);
+        AddToggle(advanced, UiStrings.Get("redact_dry_run"), config, "app", "dry_run_redact_sensitive", true, false);
+        AddToggle(advanced, UiStrings.Get("backup_config_on_save"), config, "app", "backup_config_on_save", false, false);
+        AddEdit(advanced, UiStrings.Get("restart_message"), config, "messages", "rpc_restarted_message", UiStrings.Get("restart_message"), false, false);
+        AddStatus(advanced, UiStrings.Format("config_path_format", TrimForMenu(configPath, 120)));
         ToolStripMenuItem reload = new ToolStripMenuItem(UiStrings.Get("reload_configuration"));
         reload.Click += delegate { AppState.RequestReload(); };
-        advanced.DropDownItems.Add(reload);
+        advanced.Add(reload);
 
         menu.Items.Add(new ToolStripSeparator());
 
@@ -1733,12 +2044,22 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private ToolStripMenuItem AddCategory(string text)
+    private ToolStripItemCollection AddCategory(string text, bool showDropdown)
     {
-        ToolStripMenuItem parent = new ToolStripMenuItem(text);
-        AddHeader(parent.DropDownItems, HeaderText(text));
-        menu.Items.Add(parent);
-        return parent;
+        if (showDropdown)
+        {
+            ToolStripMenuItem parent = new ToolStripMenuItem(text);
+            AddHeader(parent.DropDownItems, HeaderText(text));
+            menu.Items.Add(parent);
+            return parent.DropDownItems;
+        }
+
+        if (menu.Items.Count > 0 && !(menu.Items[menu.Items.Count - 1] is ToolStripSeparator))
+        {
+            menu.Items.Add(new ToolStripSeparator());
+        }
+        AddHeader(menu.Items, HeaderText(text));
+        return menu.Items;
     }
 
     private void AddHeader(ToolStripItemCollection items, string text)
@@ -1899,11 +2220,41 @@ internal sealed class TrayApplicationContext : ApplicationContext
         items.Add(recentLog);
     }
 
+    private void AddOpenLogFolder(ToolStripItemCollection items)
+    {
+        ToolStripMenuItem openLogFolder = new ToolStripMenuItem(UiStrings.Get("open_log_folder"));
+        openLogFolder.Click += delegate
+        {
+            string logPath = Logger.FilePath;
+            if (logPath.Length == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                string fullPath = Path.GetFullPath(logPath);
+                string args = File.Exists(fullPath)
+                    ? "/select,\"" + fullPath + "\""
+                    : "\"" + (Path.GetDirectoryName(fullPath) ?? ".") + "\"";
+                Process.Start("explorer.exe", args);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(owner, ex.Message, UiStrings.Get("config_update_error_title"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+        items.Add(openLogFolder);
+    }
+
     private void SaveValue(string section, string key, string value, bool reload)
     {
         try
         {
-            File.Copy(configPath, configPath + ".bak", true);
+            if (ShouldWriteConfigBackup())
+            {
+                File.Copy(configPath, configPath + ".bak", true);
+            }
             IniConfigFile.WriteValue(configPath, section, key, value);
             Logger.Info("Config updated: [" + section + "] " + key);
             if (reload)
@@ -1915,6 +2266,18 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             Logger.Error("Failed to update config: " + ex.Message);
             MessageBox.Show(owner, UiStrings.Format("config_update_error_format", ex.Message), UiStrings.Get("config_update_error_title"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private bool ShouldWriteConfigBackup()
+    {
+        try
+        {
+            return IniConfig.Load(configPath).GetBool("app", "backup_config_on_save", false);
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -2262,7 +2625,7 @@ internal sealed class SetupDialog : Form
         y += 24;
 
         Label tokenHint = new Label();
-        tokenHint.Text = "Treat your token as a password. Do not share config.ini or verbose logs.";
+        tokenHint.Text = "Treat your token as a password. For safer storage, set [general] token_env or enter env:VARIABLE_NAME here.";
         tokenHint.Left = x + 126; tokenHint.Top = y;
         tokenHint.Width = w - 126; tokenHint.Height = 18;
         tokenHint.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
@@ -2591,7 +2954,7 @@ internal static class IniConfigFile
             string raw = lines[i];
             string trimmed = raw.Trim();
 
-            if (skipContinuation && raw.Length > 0 && char.IsWhiteSpace(raw[0]))
+            if (skipContinuation && IsContinuationLine(raw))
             {
                 continue;
             }
@@ -2602,30 +2965,31 @@ internal static class IniConfigFile
             }
             skipContinuation = false;
 
-            if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
+            string sectionHeaderName;
+            if (TryParseSectionHeader(raw, out sectionHeaderName))
             {
                 if (currentSection != null)
                 {
                     AppendMissingForSection(output, updates, written, currentSection);
                 }
 
-                currentSection = trimmed.Substring(1, trimmed.Length - 2).Trim();
+                currentSection = sectionHeaderName;
                 seenSections.Add(currentSection);
                 output.Add(raw);
                 continue;
             }
 
-            if (currentSection != null && raw.IndexOf('=') >= 0 && !trimmed.StartsWith("#", StringComparison.Ordinal) && !trimmed.StartsWith(";", StringComparison.Ordinal))
+            int separator = FindAssignmentSeparator(raw);
+            if (currentSection != null && separator >= 0 && !trimmed.StartsWith("#", StringComparison.Ordinal) && !trimmed.StartsWith(";", StringComparison.Ordinal))
             {
-                int separator = raw.IndexOf('=');
-                string key = raw.Substring(0, separator).Trim();
+                string key = ParseIniName(raw.Substring(0, separator));
                 string combined = MakeKey(currentSection, key);
                 string value;
                 if (updates.TryGetValue(combined, out value))
                 {
-                    WriteEntry(output, raw.Substring(0, separator), value);
+                    WriteEntry(output, key, value);
                     written.Add(combined);
-                    skipContinuation = value.IndexOf('\n') >= 0;
+                    skipContinuation = true;
                     continue;
                 }
             }
@@ -2662,28 +3026,26 @@ internal static class IniConfigFile
             written.Add(update.Key);
         }
 
+        TrimTrailingEmptyLines(output);
         WriteTextFile(path, output.ToArray(), file);
     }
 
     private static void WriteEntry(List<string> output, string keyPrefix, string value)
     {
-        keyPrefix = keyPrefix.TrimEnd();
+        keyPrefix = ParseIniName(keyPrefix);
         string normalized = (value ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
         if (normalized.IndexOf('\n') >= 0)
         {
-            output.Add(keyPrefix + " = ");
+            output.Add(FormatIniAssignment(keyPrefix, ""));
             string[] parts = normalized.Split('\n');
             for (int i = 0; i < parts.Length; i++)
             {
-                if (parts[i].Length > 0)
-                {
-                    output.Add("    " + parts[i]);
-                }
+                output.Add("    " + QuoteIniString(parts[i]));
             }
         }
         else
         {
-            output.Add(keyPrefix + " = " + normalized);
+            output.Add(FormatIniAssignment(keyPrefix, normalized));
         }
     }
 
@@ -2706,6 +3068,318 @@ internal static class IniConfigFile
 
             WriteEntry(output, updateKey, update.Value);
             written.Add(update.Key);
+        }
+    }
+
+    public static bool IsContinuationLine(string raw)
+    {
+        if (raw == null || raw.Length == 0 || !char.IsWhiteSpace(raw[0]))
+        {
+            return false;
+        }
+
+        string trimmed = raw.Trim();
+        return trimmed.Length > 0 &&
+            !trimmed.StartsWith("#", StringComparison.Ordinal) &&
+            !trimmed.StartsWith(";", StringComparison.Ordinal);
+    }
+
+    private static bool IsInlineCommentStart(string value, int pos, bool requireLeadingWhitespace)
+    {
+        char ch = value[pos];
+        if (ch != ';' && ch != '#')
+        {
+            return false;
+        }
+
+        return !requireLeadingWhitespace || pos == 0 || char.IsWhiteSpace(value[pos - 1]);
+    }
+
+    private static string StripInlineComment(string value, bool requireLeadingWhitespace)
+    {
+        if (value == null)
+        {
+            return "";
+        }
+
+        bool inQuote = false;
+        char quoteChar = '\0';
+        bool escaped = false;
+        for (int i = 0; i < value.Length; i++)
+        {
+            char ch = value[i];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (ch == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (ch == '"' || ch == '\'')
+            {
+                if (!inQuote)
+                {
+                    inQuote = true;
+                    quoteChar = ch;
+                }
+                else if (quoteChar == ch)
+                {
+                    inQuote = false;
+                    quoteChar = '\0';
+                }
+                continue;
+            }
+
+            if (!inQuote && IsInlineCommentStart(value, i, requireLeadingWhitespace))
+            {
+                return value.Substring(0, i).TrimEnd();
+            }
+        }
+
+        return value.TrimEnd();
+    }
+
+    public static string ParseIniName(string text)
+    {
+        return UnquoteIniString(text);
+    }
+
+    public static string ParseIniValue(string text)
+    {
+        string s = (text ?? "").Trim();
+        if (s.Length == 0)
+        {
+            return "";
+        }
+
+        char quote = s[0];
+        if (quote != '"' && quote != '\'')
+        {
+            return UnquoteIniString(StripInlineComment(text ?? "", true));
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (int i = 1; i < s.Length; i++)
+        {
+            char ch = s[i];
+            if (ch == '\\' && i + 1 < s.Length && (s[i + 1] == quote || s[i + 1] == '\\'))
+            {
+                if (s[i + 1] == quote && !HasLaterQuote(s, i + 2, quote))
+                {
+                    builder.Append(ch);
+                    continue;
+                }
+
+                builder.Append(s[i + 1]);
+                i++;
+                continue;
+            }
+
+            if (ch == quote)
+            {
+                return builder.ToString();
+            }
+
+            builder.Append(ch);
+        }
+
+        return UnquoteIniString(StripInlineComment(text ?? "", true));
+    }
+
+    public static bool TryParseSectionHeader(string line, out string name)
+    {
+        name = null;
+        string s = StripLeadingBom(line ?? "").Trim();
+        if (s.Length == 0 || s[0] == ';' || s[0] == '#' || s[0] != '[')
+        {
+            return false;
+        }
+
+        bool inQuote = false;
+        char quoteChar = '\0';
+        bool escaped = false;
+        for (int i = 1; i < s.Length; i++)
+        {
+            char ch = s[i];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (ch == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (ch == '"' || ch == '\'')
+            {
+                if (!inQuote)
+                {
+                    inQuote = true;
+                    quoteChar = ch;
+                }
+                else if (quoteChar == ch)
+                {
+                    inQuote = false;
+                    quoteChar = '\0';
+                }
+                continue;
+            }
+
+            if (!inQuote && ch == ']')
+            {
+                string rest = s.Substring(i + 1).Trim();
+                if (rest.Length > 0 && rest[0] != ';' && rest[0] != '#')
+                {
+                    return false;
+                }
+
+                name = ParseIniName(s.Substring(1, i - 1));
+                return name.Length > 0;
+            }
+        }
+
+        return false;
+    }
+
+    public static int FindAssignmentSeparator(string line)
+    {
+        if (line == null)
+        {
+            return -1;
+        }
+
+        bool inQuote = false;
+        char quoteChar = '\0';
+        bool escaped = false;
+        for (int i = 0; i < line.Length; i++)
+        {
+            char ch = line[i];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (ch == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (ch == '"' || ch == '\'')
+            {
+                if (!inQuote)
+                {
+                    inQuote = true;
+                    quoteChar = ch;
+                }
+                else if (quoteChar == ch)
+                {
+                    inQuote = false;
+                    quoteChar = '\0';
+                }
+                continue;
+            }
+
+            if (!inQuote && ch == '=')
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string UnquoteIniString(string text)
+    {
+        string s = (text ?? "").Trim();
+        if (s.Length < 2)
+        {
+            return s;
+        }
+
+        char quote = s[0];
+        if ((quote != '"' && quote != '\'') || s[s.Length - 1] != quote)
+        {
+            return s;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (int i = 1; i + 1 < s.Length; i++)
+        {
+            if (s[i] == '\\' && i + 2 < s.Length && (s[i + 1] == quote || s[i + 1] == '\\'))
+            {
+                builder.Append(s[i + 1]);
+                i++;
+            }
+            else
+            {
+                builder.Append(s[i]);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool HasLaterQuote(string text, int start, char quote)
+    {
+        for (int i = start; i < text.Length; i++)
+        {
+            if (text[i] == quote)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string QuoteIniString(string text)
+    {
+        StringBuilder builder = new StringBuilder();
+        builder.Append('"');
+        string value = text ?? "";
+        for (int i = 0; i < value.Length; i++)
+        {
+            char ch = value[i];
+            if (ch == '"' || ch == '\\')
+            {
+                builder.Append('\\');
+            }
+            builder.Append(ch);
+        }
+        builder.Append('"');
+        return builder.ToString();
+    }
+
+    private static string FormatIniAssignment(string key, string value)
+    {
+        return QuoteIniString(key) + " = " + QuoteIniString(value);
+    }
+
+    private static string StripLeadingBom(string value)
+    {
+        if (!string.IsNullOrEmpty(value) && value[0] == '\ufeff')
+        {
+            return value.Substring(1);
+        }
+
+        return value ?? "";
+    }
+
+    private static void TrimTrailingEmptyLines(List<string> lines)
+    {
+        while (lines.Count > 0 && lines[lines.Count - 1].Trim().Length == 0)
+        {
+            lines.RemoveAt(lines.Count - 1);
         }
     }
 
@@ -2848,6 +3522,119 @@ internal static class IniConfigFile
     }
 }
 
+internal sealed class IpcOptions
+{
+    public readonly int ConnectTimeoutMs;
+    public readonly int ResponseTimeoutMs;
+
+    private IpcOptions(int connectTimeoutMs, int responseTimeoutMs)
+    {
+        ConnectTimeoutMs = connectTimeoutMs;
+        ResponseTimeoutMs = responseTimeoutMs;
+    }
+
+    public static IpcOptions FromConfig(IniConfig config)
+    {
+        return new IpcOptions(
+            ClampMs(config.GetInt("ipc", "connect_timeout_ms", 250), 50, 60000),
+            ClampMs(config.GetInt("ipc", "response_timeout_ms", 5000), 250, 120000));
+    }
+
+    private static int ClampMs(int value, int min, int max)
+    {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
+    }
+}
+
+internal sealed class GatewayOptions
+{
+    public readonly string SystemLocale;
+    public readonly string BrowserUserAgent;
+    public readonly string BrowserVersion;
+    public readonly string OsVersion;
+    public readonly string ReleaseChannel;
+    public readonly int ClientBuildNumber;
+    public readonly int Capabilities;
+    public readonly int ConnectTimeoutMs;
+    public readonly int HelloTimeoutMs;
+    public readonly int ReadyTimeoutMs;
+    public readonly int SendTimeoutMs;
+    public readonly int CloseTimeoutMs;
+    public readonly int AssetFetchTimeoutMs;
+    public readonly string AssetFetchUserAgent;
+
+    private GatewayOptions(IniConfig config)
+    {
+        SystemLocale = NonEmpty(config.Get("gateway", "system_locale", "en-US"), "en-US");
+        BrowserUserAgent = NonEmpty(config.Get("gateway", "browser_user_agent", ConfigDefaults.DefaultGatewayBrowserUserAgent), ConfigDefaults.DefaultGatewayBrowserUserAgent);
+        BrowserVersion = NonEmpty(config.Get("gateway", "browser_version", "32.2.7"), "32.2.7");
+        OsVersion = NonEmpty(config.Get("gateway", "os_version", "10.0.26100"), "10.0.26100");
+        ReleaseChannel = NonEmpty(config.Get("gateway", "release_channel", "stable"), "stable");
+        ClientBuildNumber = ClampInt(config.GetInt("gateway", "client_build_number", 390000), 1, int.MaxValue);
+        Capabilities = ClampInt(config.GetInt("gateway", "capabilities", 65), 0, int.MaxValue);
+        ConnectTimeoutMs = ClampMs(config.GetInt("gateway", "connect_timeout_ms", 10000), 1000, 120000);
+        HelloTimeoutMs = ClampMs(config.GetInt("gateway", "hello_timeout_ms", 10000), 1000, 120000);
+        ReadyTimeoutMs = ClampMs(config.GetInt("gateway", "ready_timeout_ms", 30000), 1000, 180000);
+        SendTimeoutMs = ClampMs(config.GetInt("gateway", "send_timeout_ms", 10000), 1000, 120000);
+        CloseTimeoutMs = ClampMs(config.GetInt("gateway", "close_timeout_ms", 2000), 0, 30000);
+        AssetFetchTimeoutMs = ClampMs(config.GetInt("gateway", "asset_fetch_timeout_ms", 10000), 1000, 120000);
+        AssetFetchUserAgent = NonEmpty(config.Get("gateway", "asset_fetch_user_agent", "DiscordBot (https://github.com, 1)"), "DiscordBot (https://github.com, 1)");
+    }
+
+    public static GatewayOptions FromConfig(IniConfig config)
+    {
+        return new GatewayOptions(config);
+    }
+
+    private static string NonEmpty(string value, string fallback)
+    {
+        string text = (value ?? "").Trim();
+        return text.Length == 0 ? fallback : text;
+    }
+
+    private static int ClampMs(int value, int min, int max)
+    {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
+    }
+
+    private static int ClampInt(int value, int min, int max)
+    {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
+    }
+}
+
+internal sealed class TimeoutWebClient : WebClient
+{
+    private readonly int timeoutMs;
+
+    public TimeoutWebClient(int timeoutMs)
+    {
+        this.timeoutMs = timeoutMs;
+    }
+
+    protected override WebRequest GetWebRequest(Uri address)
+    {
+        WebRequest request = base.GetWebRequest(address);
+        if (request != null)
+        {
+            request.Timeout = timeoutMs;
+            HttpWebRequest http = request as HttpWebRequest;
+            if (http != null)
+            {
+                http.ReadWriteTimeout = timeoutMs;
+            }
+        }
+
+        return request;
+    }
+}
+
 internal sealed class DiscordGatewayClient : IDisposable
 {
     // Discord Gateway v10 endpoint
@@ -2863,6 +3650,7 @@ internal sealed class DiscordGatewayClient : IDisposable
 
     private readonly string token;
     private readonly bool verbose;
+    private readonly GatewayOptions options;
     private readonly object sendLock = new object();
 
     // Asset name -> asset ID cache, populated once per application_id at startup.
@@ -2882,10 +3670,11 @@ internal sealed class DiscordGatewayClient : IDisposable
     private int? lastSequence;
     private string lastConnectError;
 
-    public DiscordGatewayClient(string token, bool verbose)
+    public DiscordGatewayClient(string token, bool verbose, GatewayOptions options)
     {
         this.token = token;
         this.verbose = verbose;
+        this.options = options ?? GatewayOptions.FromConfig(new IniConfig());
     }
 
     public bool IsConnected
@@ -2907,7 +3696,12 @@ internal sealed class DiscordGatewayClient : IDisposable
         try
         {
             Logger.Info("Connecting to Discord Gateway...");
-            candidate.ConnectAsync(new Uri(GatewayUrl), CancellationToken.None).Wait();
+            System.Threading.Tasks.Task connectTask = candidate.ConnectAsync(new Uri(GatewayUrl), CancellationToken.None);
+            if (!connectTask.Wait(options.ConnectTimeoutMs))
+            {
+                throw new TimeoutException("Gateway connect timed out after " + options.ConnectTimeoutMs.ToString(CultureInfo.InvariantCulture) + " ms.");
+            }
+            connectTask.Wait();
         }
         catch (Exception ex)
         {
@@ -2934,7 +3728,7 @@ internal sealed class DiscordGatewayClient : IDisposable
 
         // Wait for HELLO (sets heartbeatIntervalMs)
         Stopwatch sw = Stopwatch.StartNew();
-        while (heartbeatIntervalMs == 0 && sw.ElapsedMilliseconds < 10000 && connected)
+        while (heartbeatIntervalMs == 0 && sw.ElapsedMilliseconds < options.HelloTimeoutMs && connected)
         {
             Thread.Sleep(50);
         }
@@ -2942,7 +3736,7 @@ internal sealed class DiscordGatewayClient : IDisposable
         if (heartbeatIntervalMs == 0)
         {
             Close();
-            throw new IOException("Did not receive Gateway HELLO within 10 seconds.");
+            throw new IOException("Did not receive Gateway HELLO within " + options.HelloTimeoutMs.ToString(CultureInfo.InvariantCulture) + " ms.");
         }
 
         // Send first heartbeat immediately then start the loop
@@ -2959,7 +3753,7 @@ internal sealed class DiscordGatewayClient : IDisposable
         // Wait for READY dispatch. User sessions can receive a large READY payload,
         // so allow enough time for slower accounts/connections.
         sw.Restart();
-        while (!identified && sw.ElapsedMilliseconds < 30000 && connected)
+        while (!identified && sw.ElapsedMilliseconds < options.ReadyTimeoutMs && connected)
         {
             Thread.Sleep(50);
         }
@@ -2974,7 +3768,7 @@ internal sealed class DiscordGatewayClient : IDisposable
         if (!identified)
         {
             Close();
-            throw new IOException("Did not receive Gateway READY within 30 seconds.");
+            throw new IOException("Did not receive Gateway READY within " + options.ReadyTimeoutMs.ToString(CultureInfo.InvariantCulture) + " ms.");
         }
 
         Logger.Info("Connected to Discord Gateway and identified.");
@@ -2990,12 +3784,12 @@ internal sealed class DiscordGatewayClient : IDisposable
         properties["os"]                        = "Windows";
         properties["browser"]                   = "Discord Client";
         properties["device"]                    = "";
-        properties["system_locale"]             = "en-US";
-        properties["browser_user_agent"]        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9181 Chrome/128.0.6613.186 Electron/32.2.7 Safari/537.36";
-        properties["browser_version"]           = "32.2.7";
-        properties["os_version"]                = "10.0.26100";
-        properties["release_channel"]           = "stable";
-        properties["client_build_number"]       = 390000;
+        properties["system_locale"]             = options.SystemLocale;
+        properties["browser_user_agent"]        = options.BrowserUserAgent;
+        properties["browser_version"]           = options.BrowserVersion;
+        properties["os_version"]                = options.OsVersion;
+        properties["release_channel"]           = options.ReleaseChannel;
+        properties["client_build_number"]       = options.ClientBuildNumber;
         properties["client_event_source"]       = null;
 
         // capabilities is a feature-support bitmask expected by Discord for user-account
@@ -3013,7 +3807,7 @@ internal sealed class DiscordGatewayClient : IDisposable
 
         Dictionary<string, object> d = new Dictionary<string, object>();
         d["token"]        = token;
-        d["capabilities"] = 65;
+        d["capabilities"] = options.Capabilities;
         d["properties"]   = properties;
         d["compress"]     = false;
         d["client_state"] = clientState;
@@ -3255,9 +4049,9 @@ internal sealed class DiscordGatewayClient : IDisposable
             // returns [] for user tokens, which is why we were getting 0 assets.
             string apiUrl = "https://discord.com/api/v10/oauth2/applications/" + applicationId + "/assets";
             string responseJson;
-            using (WebClient wc = new WebClient())
+            using (TimeoutWebClient wc = new TimeoutWebClient(options.AssetFetchTimeoutMs))
             {
-                wc.Headers["User-Agent"] = "DiscordBot (https://github.com, 1)";
+                wc.Headers["User-Agent"] = options.AssetFetchUserAgent;
                 responseJson = wc.DownloadString(apiUrl);
             }
             // Log the raw response so we can see exactly what Discord returns.
@@ -3395,7 +4189,7 @@ internal sealed class DiscordGatewayClient : IDisposable
             {
                 if (oldWs.State == WebSocketState.Open)
                 {
-                    oldWs.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None).Wait(2000);
+                    oldWs.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None).Wait(options.CloseTimeoutMs);
                 }
             }
             catch { }
@@ -3427,12 +4221,18 @@ internal sealed class DiscordGatewayClient : IDisposable
                 throw new IOException("Gateway WebSocket is not connected.");
             }
 
-            ws.SendAsync(
+            System.Threading.Tasks.Task sendTask = ws.SendAsync(
                 new ArraySegment<byte>(bytes),
                 WebSocketMessageType.Text,
                 true,
                 CancellationToken.None
-            ).Wait();
+            );
+            if (!sendTask.Wait(options.SendTimeoutMs))
+            {
+                Close();
+                throw new IOException("Gateway send timed out after " + options.SendTimeoutMs.ToString(CultureInfo.InvariantCulture) + " ms.");
+            }
+            sendTask.Wait();
         }
     }
 
@@ -3452,12 +4252,18 @@ internal sealed class DiscordGatewayClient : IDisposable
         {
             if (!IsConnected) return;
 
-            ws.SendAsync(
+            System.Threading.Tasks.Task sendTask = ws.SendAsync(
                 new ArraySegment<byte>(bytes),
                 WebSocketMessageType.Text,
                 true,
                 CancellationToken.None
-            ).Wait();
+            );
+            if (!sendTask.Wait(options.SendTimeoutMs))
+            {
+                Close();
+                throw new IOException("Gateway heartbeat timed out after " + options.SendTimeoutMs.ToString(CultureInfo.InvariantCulture) + " ms.");
+            }
+            sendTask.Wait();
         }
 
         if (verbose) Logger.Debug("Heartbeat sent (seq=" + (lastSequence.HasValue ? lastSequence.Value.ToString() : "null") + ")");
@@ -3791,10 +4597,68 @@ internal sealed class DiscordGatewayClient : IDisposable
         int start = colon + 1;
         while (start < json.Length && json[start] == ' ') start++;
         if (start >= json.Length || json[start] != '"') return null;
-        start++;
-        int end = json.IndexOf('"', start);
-        if (end < 0) return null;
-        return json.Substring(start, end - start);
+        return DecodeJsonStringAt(json, start);
+    }
+
+    private static string DecodeJsonStringAt(string json, int quoteIndex)
+    {
+        if (quoteIndex < 0 || quoteIndex >= json.Length || json[quoteIndex] != '"')
+        {
+            return null;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (int i = quoteIndex + 1; i < json.Length; i++)
+        {
+            char ch = json[i];
+            if (ch == '"')
+            {
+                return builder.ToString();
+            }
+
+            if (ch != '\\')
+            {
+                builder.Append(ch);
+                continue;
+            }
+
+            if (++i >= json.Length)
+            {
+                return null;
+            }
+
+            char escaped = json[i];
+            switch (escaped)
+            {
+                case '"': builder.Append('"'); break;
+                case '\\': builder.Append('\\'); break;
+                case '/': builder.Append('/'); break;
+                case 'b': builder.Append('\b'); break;
+                case 'f': builder.Append('\f'); break;
+                case 'n': builder.Append('\n'); break;
+                case 'r': builder.Append('\r'); break;
+                case 't': builder.Append('\t'); break;
+                case 'u':
+                    if (i + 4 >= json.Length)
+                    {
+                        return null;
+                    }
+                    string hex = json.Substring(i + 1, 4);
+                    int codePoint;
+                    if (!int.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out codePoint))
+                    {
+                        return null;
+                    }
+                    builder.Append((char)codePoint);
+                    i += 4;
+                    break;
+                default:
+                    builder.Append(escaped);
+                    break;
+            }
+        }
+
+        return null;
     }
 }
 
@@ -3824,26 +4688,27 @@ internal sealed class IniConfig
                 continue;
             }
 
-            if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
+            string sectionHeaderName;
+            if (IniConfigFile.TryParseSectionHeader(raw, out sectionHeaderName))
             {
-                currentSection = trimmed.Substring(1, trimmed.Length - 2).Trim();
+                currentSection = sectionHeaderName;
                 config.EnsureSection(currentSection);
                 currentKey = null;
                 continue;
             }
 
-            if (currentSection != null && currentKey != null && char.IsWhiteSpace(raw[0]))
+            if (currentSection != null && currentKey != null && IniConfigFile.IsContinuationLine(raw))
             {
                 Dictionary<string, string> section = config.sections[currentSection];
-                section[currentKey] = section[currentKey] + "\n" + trimmed;
+                section[currentKey] = section[currentKey] + "\n" + IniConfigFile.ParseIniValue(trimmed);
                 continue;
             }
 
-            int separator = raw.IndexOf('=');
+            int separator = IniConfigFile.FindAssignmentSeparator(raw);
             if (currentSection != null && separator >= 0)
             {
-                string key = raw.Substring(0, separator).Trim();
-                string value = raw.Substring(separator + 1).Trim();
+                string key = IniConfigFile.ParseIniName(raw.Substring(0, separator));
+                string value = IniConfigFile.ParseIniValue(raw.Substring(separator + 1));
                 config.Set(currentSection, key, value);
                 currentKey = key;
             }
@@ -3934,14 +4799,16 @@ internal sealed class DiscordIpcClient : IDisposable
 
     private readonly string clientId;
     private readonly bool verbose;
+    private readonly IpcOptions options;
     private readonly object pipeLock = new object();
     private NamedPipeClientStream pipe;
     private string pipeName;
 
-    public DiscordIpcClient(string clientId, bool verbose)
+    public DiscordIpcClient(string clientId, bool verbose, IpcOptions options)
     {
         this.clientId = clientId;
         this.verbose = verbose;
+        this.options = options ?? IpcOptions.FromConfig(new IniConfig());
     }
 
     public bool IsConnected
@@ -3970,7 +4837,7 @@ internal sealed class DiscordIpcClient : IDisposable
 
             try
             {
-                candidate.Connect(250);
+                candidate.Connect(options.ConnectTimeoutMs);
                 pipe = candidate;
                 pipeName = candidateName;
 
@@ -3979,7 +4846,7 @@ internal sealed class DiscordIpcClient : IDisposable
                 handshake["client_id"] = clientId.Trim();
                 SendFrame(OpHandshake, handshake);
 
-                string response = ReadFrame(5000);
+                string response = ReadFrame(options.ResponseTimeoutMs);
                 if (response.IndexOf("\"evt\":\"READY\"", StringComparison.Ordinal) < 0 &&
                     response.IndexOf("\"cmd\":\"DISPATCH\"", StringComparison.Ordinal) < 0)
                 {
@@ -4019,7 +4886,7 @@ internal sealed class DiscordIpcClient : IDisposable
         payload["nonce"] = Guid.NewGuid().ToString("D");
 
         SendFrame(OpFrame, payload);
-        string response = ReadFrame(5000);
+        string response = ReadFrame(options.ResponseTimeoutMs);
         ThrowIfError(response);
         Logger.Info("Presence updated via Discord IPC.");
     }
@@ -4158,6 +5025,7 @@ internal sealed class DiscordIpcClient : IDisposable
         {
             if (!asyncResult.AsyncWaitHandle.WaitOne(timeoutMs))
             {
+                Close();
                 throw new IOException("Timed out waiting for Discord IPC response.");
             }
 
@@ -4265,7 +5133,34 @@ internal sealed class DiscordIpcClient : IDisposable
             char ch = json[i];
             if (escaped)
             {
-                builder.Append(ch);
+                switch (ch)
+                {
+                    case '"': builder.Append('"'); break;
+                    case '\\': builder.Append('\\'); break;
+                    case '/': builder.Append('/'); break;
+                    case 'b': builder.Append('\b'); break;
+                    case 'f': builder.Append('\f'); break;
+                    case 'n': builder.Append('\n'); break;
+                    case 'r': builder.Append('\r'); break;
+                    case 't': builder.Append('\t'); break;
+                    case 'u':
+                        if (i + 4 >= json.Length)
+                        {
+                            return null;
+                        }
+                        string hex = json.Substring(i + 1, 4);
+                        int codePoint;
+                        if (!int.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out codePoint))
+                        {
+                            return null;
+                        }
+                        builder.Append((char)codePoint);
+                        i += 4;
+                        break;
+                    default:
+                        builder.Append(ch);
+                        break;
+                }
                 escaped = false;
                 continue;
             }
@@ -4727,6 +5622,55 @@ internal sealed class TemplateContext
     {
         return tokens;
     }
+
+    public IEnumerable<KeyValuePair<string, string>> GetTokens(bool redactSensitive)
+    {
+        if (!redactSensitive)
+        {
+            return GetTokens();
+        }
+
+        Dictionary<string, string> copy = new Dictionary<string, string>(tokens, StringComparer.OrdinalIgnoreCase);
+        foreach (string key in SensitiveTokenKeys())
+        {
+            if (copy.ContainsKey(key) && copy[key].Length > 0)
+            {
+                copy[key] = "<redacted:" + key + ">";
+            }
+        }
+
+        return copy;
+    }
+
+    public Dictionary<string, string> GetSensitiveTokenValues()
+    {
+        Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string key in SensitiveTokenKeys())
+        {
+            string value;
+            if (tokens.TryGetValue(key, out value) && !string.IsNullOrEmpty(value))
+            {
+                values[key] = value;
+            }
+        }
+
+        return values;
+    }
+
+    private static string[] SensitiveTokenKeys()
+    {
+        return new string[]
+        {
+            "win_title",
+            "win_class",
+            "win_exe",
+            "win_exe_path",
+            "win_pid",
+            "computer",
+            "username",
+            "os"
+        };
+    }
 }
 
 internal sealed class AssetInfo
@@ -4746,9 +5690,52 @@ internal static class Logger
     private static readonly object SyncRoot = new object();
     private static readonly Queue<string> RecentLines = new Queue<string>();
     private const int RecentLimit = 250;
+    private static string filePath;
+    private static bool fileLoggingEnabled;
 
     public static bool Verbose;
     public static bool LoggingEnabled = true;
+
+    public static string FilePath
+    {
+        get
+        {
+            lock (SyncRoot)
+            {
+                return filePath ?? "";
+            }
+        }
+    }
+
+    public static void ConfigureFile(string configPath, IniConfig config)
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        bool enabled = config.GetBool("app", "file_logging_enabled", true);
+        string configured = config.Get("app", "log_path", "").Trim();
+        string path = configured;
+        if (path.Length == 0)
+        {
+            string fullConfigPath = Path.GetFullPath(configPath ?? "config.ini");
+            string dir = Path.GetDirectoryName(fullConfigPath);
+            string name = Path.GetFileNameWithoutExtension(fullConfigPath);
+            path = Path.Combine(dir ?? ".", (name.Length == 0 ? "DiscordRPC" : name) + ".log");
+        }
+        else if (!Path.IsPathRooted(path))
+        {
+            string fullConfigPath = Path.GetFullPath(configPath ?? "config.ini");
+            path = Path.Combine(Path.GetDirectoryName(fullConfigPath) ?? ".", path);
+        }
+
+        lock (SyncRoot)
+        {
+            fileLoggingEnabled = enabled;
+            filePath = path;
+        }
+    }
 
     public static void Info(string message)
     {
@@ -4809,6 +5796,23 @@ internal static class Logger
             }
 
             writer.WriteLine(line);
+
+            if (fileLoggingEnabled && filePath != null && filePath.Length > 0)
+            {
+                try
+                {
+                    string dir = Path.GetDirectoryName(filePath);
+                    if (dir != null && dir.Length > 0)
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+
+                    File.AppendAllText(filePath, line + Environment.NewLine, Encoding.UTF8);
+                }
+                catch
+                {
+                }
+            }
         }
     }
 }
