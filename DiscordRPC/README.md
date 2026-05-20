@@ -20,7 +20,7 @@ This is a C# replacement for the experimental Python `DiscordRPC.py`.
 - Supports AFK image/text with `<hours>`, `<minutes>`, and `<seconds>`.
 - Supports up to two Discord activity buttons. Discord only shows buttons to other users, not to the account that owns the activity.
 - Reconnects when Discord IPC is unavailable or restarts.
-- Adds a tray-first configuration menu with dropdown categories, disabled current-value rows, checked toggles, small edit dialogs, reload, console visibility, granular notifications, recent logs, and exit controls.
+- Adds a tray-first configuration menu with dropdown or flat GenerateAssets-style categories, disabled current-value rows, checked toggles, small edit dialogs, reload, console visibility, granular notifications, recent logs, log-folder access, and exit controls.
 
 ## Intentional fixes
 
@@ -57,6 +57,12 @@ Validate config parsing and generated activity JSON without connecting to Discor
 .\build\DiscordRPC.exe --dry-run
 ```
 
+By default, dry-run output redacts sensitive local tokens such as foreground window titles, usernames, computer names, process IDs, and executable paths. Use the full mode only when you are keeping the output private:
+
+```powershell
+.\build\DiscordRPC.exe --dry-run-full
+```
+
 Run one live Discord update, keep it visible briefly for diagnostics, and exit. For a persistent Rich Presence, run `.\build\DiscordRPC.exe` normally so the process stays alive:
 
 ```powershell
@@ -74,6 +80,17 @@ Run without the tray icon:
 ```powershell
 .\build\DiscordRPC.exe --no-tray
 ```
+
+## Configuration notes
+
+- INI keys and values written by the app are quoted, for example `"show_menu_as_dropdown" = "true"`. This keeps `;` and `#` usable as literal text inside values while still allowing inline comments outside quotes.
+- `[app] show_menu_as_dropdown` switches between dropdown category menus and a flat sectioned menu similar to GenerateAssets.
+- `[app] single_instance` prevents two persistent instances from fighting over the same Discord presence.
+- `[app] file_logging_enabled` and `[app] log_path` control the runtime log file. The default log path is next to `config.ini`.
+- `[app] backup_config_on_save` is off by default to avoid duplicating plaintext Gateway tokens into `.bak` files.
+- `[general] token_env` can point to an environment variable containing the Discord token, avoiding plaintext token storage in `config.ini`.
+- `[ipc] connect_timeout_ms` and `response_timeout_ms` tune Discord IPC waits.
+- `[gateway]` contains the Discord Gateway client identity and timeout values. Gateway mode is still the unofficial/user-token path; IPC remains the recommended default.
 
 If Discord reports `Invalid Client ID`, update `[general] client_id` in `config.ini` with an existing application ID from the Discord Developer Portal.
 
