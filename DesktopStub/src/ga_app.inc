@@ -176,6 +176,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     g_iniPath = dir + L"\\" + base + L".ini";
     ConfigureSingleInstanceIdentity(dir);
 
+    std::wstring comHelperManifestPath;
+    if (TryGetComRegistrationHelperArgument(comHelperManifestPath))
+        return RunComRegistrationHelper(comHelperManifestPath);
+
     bool consoleCtrlHandlerInstalled = SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE) != FALSE;
     DWORD consoleCtrlHandlerError = consoleCtrlHandlerInstalled ? ERROR_SUCCESS : GetLastError();
 
@@ -281,6 +285,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.notificationsSummary.c_str(), StateEnabled(g_notificationsEnabled), StateOn(g_notifyOnStart), StateOn(g_notifyOnSuccess), StateOn(g_notifyOnFailure), StateOn(g_notifyOnBusy), StateOn(g_notifyOnAlreadyRunning), StateOn(g_notifyOnSingleInstanceFailure));
     Log(g_ui.trayIconSummary.c_str(), StateEnabled(g_tray));
     Log(g_ui.powerShellRegistrationSummary.c_str(), UsePowerShell() ? g_ui.powerShellEnabledMode.c_str() : g_ui.comPreferredMode.c_str());
+    Log(g_ui.comRegistrationHelperSummary.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 1) != 0));
     Log(g_ui.wallpaperDetectionFallbackSummary.c_str(), StateEnabled(g_wallpaperDetectionFallbackOnInvalid));
     if (singleInstanceMessageError != ERROR_SUCCESS)
         LogWin32Failure(L"RegisterWindowMessageW(single-instance)", singleInstanceMessageError);

@@ -119,6 +119,7 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"SingleInstanceFailureAction", L"Warn"},
     {L"Settings", L"ComRegistrationTimeoutMs", L"120000"},
     {L"Settings", L"ComRegistrationCancelWaitMs", L"5000"},
+    {L"Settings", L"ComRegistrationUseHelper", L"1"},
     {L"Settings", L"PowerShellExe", L"powershell.exe"},
     {L"Settings", L"PowerShellPollMs", L"50"},
     {L"Settings", L"PowerShellTimeoutMs", L"120000"},
@@ -265,6 +266,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"SingleInstanceSignalDelayMsLabel", L"Single-instance signal delay: %d ms"},
     {L"ComRegistrationTimeoutMsLabel", L"COM registration timeout: %s"},
     {L"ComRegistrationCancelWaitMsLabel", L"COM cancel wait: %d ms"},
+    {L"ComRegistrationHelperLabel", L"COM isolation helper: %s"},
     {L"TrayIconHiddenDelayMsLabel", L"Tray hide warning delay: %d ms"},
     {L"LogBufferLinesLabel", L"Log buffer lines: %d"},
     {L"LogAppendLockWaitMsLabel", L"Log append lock wait: %d ms"},
@@ -377,7 +379,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"PathCannotBeEmpty", L"Path cannot be empty."},
     {L"NoPowerShellOutputTitle", L"PowerShell Output"},
     {L"NoPowerShellOutput", L"No PowerShell output."},
-    {L"PowerShellOutputTruncated", L"\r\n\r\n[i] Output truncated for display; see the log for the full output (%d characters hidden)."},
+    {L"PowerShellOutputTruncated", L"[i] Output truncated for display; see the log for the full output (%d characters hidden)."},
     {L"GenerateNowTitle", L"Generate Now"},
     {L"WallpaperNotFound", L"Could not detect current wallpaper."},
     {L"CurrentWallpaperNotFound", L"Could not detect current wallpaper."},
@@ -421,6 +423,14 @@ static const StringDefault g_stringDefaults[] = {
     {L"UsingComRegistration", L"Using COM Appx registration..."},
     {L"ComRegistrationUri", L"[i] COM registration URI: %s"},
     {L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%s, cancel wait=%d ms"},
+    {L"ComRegistrationHelperSummary", L"[i] COM registration isolation helper: %s"},
+    {L"ComRegistrationHelperStarted", L"[i] COM registration helper started (pid=%lu)."},
+    {L"ComRegistrationHelperExitCode", L"[i] COM registration helper exited with code 0x%08X."},
+    {L"ComRegistrationHelperCrashed", L"[!] COM registration helper crashed or was terminated (exit code 0x%08X)."},
+    {L"ComRegistrationHelperTimedOut", L"[!] COM registration helper timed out."},
+    {L"ComRegistrationHelperTerminateFailed", L"[!] Failed to terminate timed-out COM registration helper (pid=%lu)."},
+    {L"ComRegistrationHelperStillRunning", L"[!] COM registration helper is still running after terminate wait (pid=%lu)."},
+    {L"ComRegistrationHelperTerminated", L"[i] COM registration helper terminated after timeout (pid=%lu)."},
     {L"InvalidManifestPath", L"Invalid manifest path."},
     {L"ComRegistrationSuccess", L"COM registration success."},
     {L"ComRegistrationTimedOut", L"COM registration timed out."},
@@ -616,13 +626,88 @@ static void UpgradeStringDefaultIfUnmodified(const wchar_t* key, const wchar_t* 
         IniWrite(L"Strings", key, newValue);
 }
 
+static void RepairBrokenPowerShellOutputTruncatedDefault()
+{
+    std::lock_guard<std::mutex> writeLock(g_iniWriteMutex);
+
+    std::wstring iniText;
+    if (!ReadIniFileForMutation(iniText))
+        return;
+
+    std::vector<std::wstring> lines = SplitLines(iniText);
+    if (!lines.empty())
+        StripLeadingBom(lines[0]);
+
+    bool inStrings = false;
+    bool changed = false;
+    const std::wstring repaired = FormatIniAssignment(
+        L"PowerShellOutputTruncated",
+        L"[i] Output truncated for display; see the log for the full output (%d characters hidden).");
+
+    for (size_t i = 0; i < lines.size(); ++i)
+    {
+        std::wstring trimmed = TrimCopy(lines[i]);
+        if (trimmed.empty() || trimmed.front() == L';' || trimmed.front() == L'#')
+            continue;
+
+        std::wstring sectionName;
+        if (TryParseIniSectionHeader(lines[i], sectionName))
+        {
+            inStrings = IEquals(sectionName, L"Strings");
+            continue;
+        }
+
+        if (!inStrings)
+            continue;
+
+        size_t eq = lines[i].find(L'=');
+        if (eq == std::wstring::npos)
+            continue;
+
+        std::wstring key = ParseIniName(lines[i].substr(0, eq));
+        if (!IEquals(key, L"PowerShellOutputTruncated"))
+            continue;
+
+        if (TrimCopy(lines[i].substr(eq + 1)) != L"\"")
+            break;
+
+        lines[i] = repaired;
+        changed = true;
+
+        size_t j = i + 1;
+        if (j < lines.size() && TrimCopy(lines[j]).empty())
+            lines.erase(lines.begin() + static_cast<std::vector<std::wstring>::difference_type>(j));
+        if (j < lines.size() && lines[j].find(L"[i] Output truncated for display;") != std::wstring::npos)
+            lines.erase(lines.begin() + static_cast<std::vector<std::wstring>::difference_type>(j));
+        if (j < lines.size() && lines[j].find(L"characters hidden).\"") != std::wstring::npos)
+            lines.erase(lines.begin() + static_cast<std::vector<std::wstring>::difference_type>(j));
+        break;
+    }
+
+    if (!changed)
+        return;
+
+    TrimTrailingEmptyLines(lines);
+    std::wstring text = JoinLines(lines);
+    if (!text.empty())
+        text += L"\r\n";
+    if (!WriteUtf8BomTextFile(g_iniPath, text))
+        return;
+
+    std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+    SetIniCacheUnlocked(text);
+}
+
 static void UpgradeRenamedStringDefaults()
 {
+    RepairBrokenPowerShellOutputTruncatedDefault();
     UpgradeStringDefaultIfUnmodified(L"UsePowerShell", L"Use PowerShell", L"PowerShell only");
     UpgradeStringDefaultIfUnmodified(L"TrayIcon", L"Tray Icon", L"Tray Icon (this session)");
     UpgradeStringDefaultIfUnmodified(L"MissingManifestAssets", L"[!] Registration failed and manifest assets are missing: %s", L"[!] Registration failed and manifest assets are missing or invalid: %s");
     UpgradeStringDefaultIfUnmodified(L"NotificationMissingManifestAssets", L"Registration failed because one or more manifest assets are missing.", L"Registration failed; one or more manifest assets are missing or invalid.");
     UpgradeStringDefaultIfUnmodified(L"NotificationMissingManifestAssets", L"Registration failed because one or more manifest assets are missing or invalid.", L"Registration failed; one or more manifest assets are missing or invalid.");
+    UpgradeStringDefaultIfUnmodified(L"PowerShellOutputTruncated", L"\"", L"[i] Output truncated for display; see the log for the full output (%d characters hidden).");
+    UpgradeStringDefaultIfUnmodified(L"PowerShellOutputTruncated", L"\r\n\r\n[i] Output truncated for display; see the log for the full output (%d characters hidden).", L"[i] Output truncated for display; see the log for the full output (%d characters hidden).");
     UpgradeStringDefaultIfUnmodified(L"ComRegistrationTimeoutMsLabel", L"COM registration timeout: %d ms", L"COM registration timeout: %s");
     UpgradeStringDefaultIfUnmodified(L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %d ms", L"PowerShell timeout: %s");
     UpgradeStringDefaultIfUnmodified(L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%d ms, cancel wait=%d ms", L"[i] COM registration timeout=%s, cancel wait=%d ms");

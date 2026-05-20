@@ -408,6 +408,8 @@ enum class AppxRegistrationResult
     TimeoutUncertain
 };
 
+static constexpr const wchar_t* COM_REGISTRATION_HELPER_ARG = L"--ga-com-register";
+
 struct WinrtApartmentGuard
 {
     bool initialized = false;
@@ -428,7 +430,7 @@ struct WinrtApartmentGuard
     WinrtApartmentGuard& operator=(const WinrtApartmentGuard&) = delete;
 };
 
-AppxRegistrationResult Appx_Register_COM(const std::wstring& manifestPath)
+static AppxRegistrationResult Appx_Register_COM_InProcess(const std::wstring& manifestPath)
 {
     try
     {
@@ -509,3 +511,160 @@ AppxRegistrationResult Appx_Register_COM(const std::wstring& manifestPath)
     }
 }
 
+static void InitializeComRegistrationHelperRuntime()
+{
+    bool initialIniCreated = EnsureInitialIniTemplate();
+    if (!initialIniCreated)
+        NormalizeIniToUtf8BomIfNeeded();
+
+    EnsureIniDefaults();
+    EnsureIniStringDefaults();
+    UpgradeRenamedStringDefaults();
+    LoadUiStrings();
+    ValidateFormatStrings();
+    NormalizeSeparatorStrings();
+
+    g_logging = IniReadI(L"Settings", L"Logging", 1) != 0;
+    SetLogPathCopy(EffectiveConfiguredLogPath());
+    g_logBufferLines = IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000);
+    g_logAppendLockWaitMs = IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000);
+    g_iniCacheRefreshMs = IniReadClampedI(L"Settings", L"IniCacheRefreshMs", 250, 0, 60000);
+    FlushStartupWarnings();
+}
+
+static bool TryGetComRegistrationHelperArgument(std::wstring& manifestPath)
+{
+    manifestPath.clear();
+
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv)
+        return false;
+
+    bool helperMode = argc == 3 && IEquals(argv[1], COM_REGISTRATION_HELPER_ARG);
+    if (helperMode)
+        manifestPath = argv[2];
+
+    LocalFree(argv);
+    return helperMode;
+}
+
+static int RunComRegistrationHelper(const std::wstring& manifestPath)
+{
+    InitializeComRegistrationHelperRuntime();
+
+    if (TrimCopy(manifestPath).empty())
+    {
+        LogText(g_ui.invalidManifestPath);
+        return 1;
+    }
+
+    AppxRegistrationResult result = Appx_Register_COM_InProcess(manifestPath);
+    switch (result)
+    {
+    case AppxRegistrationResult::Success:
+        return 0;
+    case AppxRegistrationResult::TimeoutUncertain:
+        return 2;
+    case AppxRegistrationResult::Failed:
+    default:
+        return 1;
+    }
+}
+
+static AppxRegistrationResult Appx_Register_COM_OutOfProcess(const std::wstring& manifestPath)
+{
+    LogText(g_ui.usingComRegistration);
+
+    const int timeoutMs = IniReadClampedI(L"Settings", L"ComRegistrationTimeoutMs", 120000, 0, 600000);
+    const int cancelWaitMs = IniReadClampedI(L"Settings", L"ComRegistrationCancelWaitMs", 5000, 0, 60000);
+    std::wstring timeoutDisplay = TimeoutDisplayText(timeoutMs);
+    Log(g_ui.comRegistrationTimeoutDetails.c_str(), timeoutDisplay.c_str(), cancelWaitMs);
+
+    if (g_exePath.empty())
+    {
+        LogWin32Failure(L"GetModuleFileNameW", ERROR_INVALID_DATA);
+        return AppxRegistrationResult::Failed;
+    }
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi{};
+    std::wstring cmdline = QuoteCommandLineArg(g_exePath) + L" " +
+        COM_REGISTRATION_HELPER_ARG + L" " + QuoteCommandLineArg(manifestPath);
+    std::wstring workingDir = GetExeDir();
+
+    BOOL ok = CreateProcessW(g_exePath.c_str(), &cmdline[0], nullptr, nullptr, FALSE,
+        CREATE_NO_WINDOW, nullptr, workingDir.empty() ? nullptr : workingDir.c_str(), &si, &pi);
+    if (!ok)
+    {
+        LogWin32Failure(L"CreateProcessW(COM registration helper)");
+        return AppxRegistrationResult::Failed;
+    }
+
+    Log(g_ui.comRegistrationHelperStarted.c_str(), pi.dwProcessId);
+
+    DWORD waitMs = timeoutMs > 0 ? static_cast<DWORD>(timeoutMs) : INFINITE;
+    DWORD waitResult = WaitForSingleObject(pi.hProcess, waitMs);
+    if (waitResult == WAIT_TIMEOUT)
+    {
+        LogText(g_ui.comRegistrationHelperTimedOut);
+        if (!TerminateProcess(pi.hProcess, 3))
+        {
+            Log(g_ui.comRegistrationHelperTerminateFailed.c_str(), pi.dwProcessId);
+        }
+        else if (cancelWaitMs > 0)
+        {
+            DWORD terminateWait = WaitForSingleObject(pi.hProcess, static_cast<DWORD>(cancelWaitMs));
+            if (terminateWait == WAIT_TIMEOUT)
+                Log(g_ui.comRegistrationHelperStillRunning.c_str(), pi.dwProcessId);
+            else if (terminateWait == WAIT_FAILED)
+                LogWin32Failure(L"WaitForSingleObject(COM registration helper terminate)");
+            else
+                Log(g_ui.comRegistrationHelperTerminated.c_str(), pi.dwProcessId);
+        }
+
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return AppxRegistrationResult::TimeoutUncertain;
+    }
+
+    if (waitResult == WAIT_FAILED)
+    {
+        LogWin32Failure(L"WaitForSingleObject(COM registration helper)");
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return AppxRegistrationResult::Failed;
+    }
+
+    DWORD exitCode = 1;
+    if (!GetExitCodeProcess(pi.hProcess, &exitCode))
+    {
+        LogWin32Failure(L"GetExitCodeProcess(COM registration helper)");
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return AppxRegistrationResult::Failed;
+    }
+
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    Log(g_ui.comRegistrationHelperExitCode.c_str(), exitCode);
+    if (exitCode == 0)
+        return AppxRegistrationResult::Success;
+    if (exitCode == 2)
+        return AppxRegistrationResult::TimeoutUncertain;
+    if ((exitCode & 0x80000000UL) != 0)
+        Log(g_ui.comRegistrationHelperCrashed.c_str(), exitCode);
+    return AppxRegistrationResult::Failed;
+}
+
+AppxRegistrationResult Appx_Register_COM(const std::wstring& manifestPath)
+{
+    if (IniReadI(L"Settings", L"ComRegistrationUseHelper", 1) != 0)
+        return Appx_Register_COM_OutOfProcess(manifestPath);
+    return Appx_Register_COM_InProcess(manifestPath);
+}
