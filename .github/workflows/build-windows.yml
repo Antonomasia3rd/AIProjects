@@ -1,0 +1,74 @@
+name: Build Windows binaries
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+  pull_request:
+  workflow_dispatch:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows binaries
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Ensure MinGW-w64 for deskband build
+        shell: pwsh
+        run: |
+          if (Get-Command g++ -ErrorAction SilentlyContinue) {
+            g++ --version | Select-Object -First 1
+            exit 0
+          }
+
+          choco install mingw -y --no-progress
+          $mingwBin = 'C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin'
+          if (-not (Test-Path $mingwBin)) {
+            $mingwBin = Get-ChildItem 'C:\ProgramData\chocolatey\lib\mingw\tools\install' -Directory -Recurse -Filter bin |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $mingwBin -or -not (Test-Path $mingwBin)) {
+            throw 'MinGW-w64 was installed, but g++.exe could not be located.'
+          }
+          $mingwBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build and package
+        shell: pwsh
+        run: .\.github\scripts\build-windows.ps1
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIProjects-Windows-${{ github.sha }}
+          path: artifacts/*.zip
+          if-no-files-found: error
+
+      - name: Upload release assets
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          if (-not $env:RELEASE_TAG) {
+            throw 'Release tag was not resolved.'
+          }
+
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:RELEASE_TAG --title $env:RELEASE_TAG --notes "Automated Windows binaries built by GitHub Actions."
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+          gh release upload $env:RELEASE_TAG artifacts\*.zip --clobber

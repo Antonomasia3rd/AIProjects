@@ -39,6 +39,8 @@ Prebuilt executables are published as GitHub releases when a project has a compi
 
 Generated outputs belong in project `build` folders and are ignored by git. Source files, scripts, manifests/templates, and READMEs are tracked. Prebuilt binaries should be distributed through GitHub Releases rather than committed to the repository.
 
+GitHub Actions builds Windows binaries on GitHub-hosted runners. Each run uploads zipped workflow artifacts, and tag/release builds attach those same ZIP files to the matching GitHub Release. This keeps published binaries tied to a public workflow run and commit instead of a local machine build.
+
 Common prerequisites:
 
 - Windows 10/11 for most projects, except `CharmTray`, which targets Windows 8/8.1 shell internals.
