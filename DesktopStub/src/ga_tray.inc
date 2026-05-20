@@ -139,6 +139,7 @@ void ShowPSLog(HWND h)
     {
         size_t hidden = psOut.size() - static_cast<size_t>(maxChars);
         psOut = psOut.substr(0, static_cast<size_t>(maxChars));
+        psOut += L"\r\n\r\n";
         psOut += FormatWide(g_ui.powerShellOutputTruncated.c_str(), static_cast<int>(std::min<size_t>(hidden, INT_MAX)));
     }
     MessageBoxW(h, psOut.c_str(), g_ui.noPowerShellOutputTitle.c_str(), MB_OK | MB_ICONERROR);
@@ -477,6 +478,7 @@ void Menu(HWND h)
     std::wstring powerShellTimeoutText = TimeoutDisplayText(powerShellTimeoutMs);
     std::wstring comRegistrationTimeoutLine = FormatWide(g_ui.comRegistrationTimeoutMsLabel.c_str(), comRegistrationTimeoutText.c_str());
     std::wstring comRegistrationCancelWaitLine = FormatWide(g_ui.comRegistrationCancelWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"ComRegistrationCancelWaitMs", 5000, 0, 60000));
+    std::wstring comRegistrationHelperLine = FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 1) != 0));
     std::wstring trayHideDelayLine = FormatWide(g_ui.trayIconHiddenDelayMsLabel.c_str(), IniReadClampedI(L"Settings", L"TrayIconHiddenDelayMs", 750, 0, 10000));
     std::wstring logBufferLine = FormatWide(g_ui.logBufferLinesLabel.c_str(), IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000));
     std::wstring logAppendLockWaitLine = FormatWide(g_ui.logAppendLockWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000));
@@ -502,6 +504,7 @@ void Menu(HWND h)
     AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, signalDelayLine.c_str());
     AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, comRegistrationTimeoutLine.c_str());
     AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, comRegistrationCancelWaitLine.c_str());
+    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, comRegistrationHelperLine.c_str());
     AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, trayHideDelayLine.c_str());
     AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, logBufferLine.c_str());
     AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, logAppendLockWaitLine.c_str());

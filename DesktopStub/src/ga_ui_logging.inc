@@ -134,6 +134,14 @@ struct UiStrings
     std::wstring usingComRegistration;
     std::wstring comRegistrationUri;
     std::wstring comRegistrationTimeoutDetails;
+    std::wstring comRegistrationHelperSummary;
+    std::wstring comRegistrationHelperStarted;
+    std::wstring comRegistrationHelperExitCode;
+    std::wstring comRegistrationHelperCrashed;
+    std::wstring comRegistrationHelperTimedOut;
+    std::wstring comRegistrationHelperTerminateFailed;
+    std::wstring comRegistrationHelperStillRunning;
+    std::wstring comRegistrationHelperTerminated;
     std::wstring invalidManifestPath;
     std::wstring comRegistrationSuccess;
     std::wstring comRegistrationTimedOut;
@@ -276,6 +284,7 @@ struct UiStrings
     std::wstring singleInstanceSignalDelayMsLabel;
     std::wstring comRegistrationTimeoutMsLabel;
     std::wstring comRegistrationCancelWaitMsLabel;
+    std::wstring comRegistrationHelperLabel;
     std::wstring trayIconHiddenDelayMsLabel;
     std::wstring logBufferLinesLabel;
     std::wstring logAppendLockWaitMsLabel;
@@ -1762,7 +1771,7 @@ void LoadUiStrings()
 
     g_ui.noPowerShellOutputTitle = IniReadS(L"Strings", L"NoPowerShellOutputTitle", L"PowerShell Output");
     g_ui.noPowerShellOutput = IniReadS(L"Strings", L"NoPowerShellOutput", L"No PowerShell output.");
-    g_ui.powerShellOutputTruncated = IniReadS(L"Strings", L"PowerShellOutputTruncated", L"\r\n\r\n[i] Output truncated for display; see the log for the full output (%d characters hidden).");
+    g_ui.powerShellOutputTruncated = IniReadS(L"Strings", L"PowerShellOutputTruncated", L"[i] Output truncated for display; see the log for the full output (%d characters hidden).");
 
     g_ui.generateNowTitle = IniReadS(L"Strings", L"GenerateNowTitle", L"Generate Now");
     g_ui.wallpaperNotFound = IniReadS(L"Strings", L"WallpaperNotFound", L"Could not detect current wallpaper.");
@@ -1810,6 +1819,14 @@ void LoadUiStrings()
     g_ui.usingComRegistration = IniReadS(L"Strings", L"UsingComRegistration", L"Using COM Appx registration...");
     g_ui.comRegistrationUri = IniReadS(L"Strings", L"ComRegistrationUri", L"[i] COM registration URI: %s");
     g_ui.comRegistrationTimeoutDetails = IniReadS(L"Strings", L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%s, cancel wait=%d ms");
+    g_ui.comRegistrationHelperSummary = IniReadS(L"Strings", L"ComRegistrationHelperSummary", L"[i] COM registration isolation helper: %s");
+    g_ui.comRegistrationHelperStarted = IniReadS(L"Strings", L"ComRegistrationHelperStarted", L"[i] COM registration helper started (pid=%lu).");
+    g_ui.comRegistrationHelperExitCode = IniReadS(L"Strings", L"ComRegistrationHelperExitCode", L"[i] COM registration helper exited with code 0x%08X.");
+    g_ui.comRegistrationHelperCrashed = IniReadS(L"Strings", L"ComRegistrationHelperCrashed", L"[!] COM registration helper crashed or was terminated (exit code 0x%08X).");
+    g_ui.comRegistrationHelperTimedOut = IniReadS(L"Strings", L"ComRegistrationHelperTimedOut", L"[!] COM registration helper timed out.");
+    g_ui.comRegistrationHelperTerminateFailed = IniReadS(L"Strings", L"ComRegistrationHelperTerminateFailed", L"[!] Failed to terminate timed-out COM registration helper (pid=%lu).");
+    g_ui.comRegistrationHelperStillRunning = IniReadS(L"Strings", L"ComRegistrationHelperStillRunning", L"[!] COM registration helper is still running after terminate wait (pid=%lu).");
+    g_ui.comRegistrationHelperTerminated = IniReadS(L"Strings", L"ComRegistrationHelperTerminated", L"[i] COM registration helper terminated after timeout (pid=%lu).");
     g_ui.invalidManifestPath = IniReadS(L"Strings", L"InvalidManifestPath", L"Invalid manifest path.");
     g_ui.comRegistrationSuccess = IniReadS(L"Strings", L"ComRegistrationSuccess", L"COM registration success.");
     g_ui.comRegistrationTimedOut = IniReadS(L"Strings", L"ComRegistrationTimedOut", L"COM registration timed out.");
@@ -1950,6 +1967,7 @@ void LoadUiStrings()
     g_ui.singleInstanceSignalDelayMsLabel = IniReadS(L"Strings", L"SingleInstanceSignalDelayMsLabel", L"Single-instance signal delay: %d ms");
     g_ui.comRegistrationTimeoutMsLabel = IniReadS(L"Strings", L"ComRegistrationTimeoutMsLabel", L"COM registration timeout: %s");
     g_ui.comRegistrationCancelWaitMsLabel = IniReadS(L"Strings", L"ComRegistrationCancelWaitMsLabel", L"COM cancel wait: %d ms");
+    g_ui.comRegistrationHelperLabel = IniReadS(L"Strings", L"ComRegistrationHelperLabel", L"COM isolation helper: %s");
     g_ui.trayIconHiddenDelayMsLabel = IniReadS(L"Strings", L"TrayIconHiddenDelayMsLabel", L"Tray hide warning delay: %d ms");
     g_ui.logBufferLinesLabel = IniReadS(L"Strings", L"LogBufferLinesLabel", L"Log buffer lines: %d");
     g_ui.logAppendLockWaitMsLabel = IniReadS(L"Strings", L"LogAppendLockWaitMsLabel", L"Log append lock wait: %d ms");
@@ -2132,6 +2150,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.singleInstanceSignalDelayMsLabel, L"SingleInstanceSignalDelayMsLabel", { L"%d" });
     RequireFormat(g_ui.comRegistrationTimeoutMsLabel, L"ComRegistrationTimeoutMsLabel", { L"%s" });
     RequireFormat(g_ui.comRegistrationCancelWaitMsLabel, L"ComRegistrationCancelWaitMsLabel", { L"%d" });
+    RequireFormat(g_ui.comRegistrationHelperLabel, L"ComRegistrationHelperLabel", { L"%s" });
     RequireFormat(g_ui.trayIconHiddenDelayMsLabel, L"TrayIconHiddenDelayMsLabel", { L"%d" });
     RequireFormat(g_ui.logBufferLinesLabel, L"LogBufferLinesLabel", { L"%d" });
     RequireFormat(g_ui.logAppendLockWaitMsLabel, L"LogAppendLockWaitMsLabel", { L"%d" });
@@ -2197,6 +2216,13 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.manifestPath, L"ManifestPath", { L"%s" });
     RequireFormat(g_ui.comRegistrationUri, L"ComRegistrationUri", { L"%s" });
     RequireFormat(g_ui.comRegistrationTimeoutDetails, L"ComRegistrationTimeoutDetails", { L"%s", L"%d" });
+    RequireFormat(g_ui.comRegistrationHelperSummary, L"ComRegistrationHelperSummary", { L"%s" });
+    RequireFormat(g_ui.comRegistrationHelperStarted, L"ComRegistrationHelperStarted", { L"%lu" });
+    RequireFormat(g_ui.comRegistrationHelperExitCode, L"ComRegistrationHelperExitCode", { L"%08X" });
+    RequireFormat(g_ui.comRegistrationHelperCrashed, L"ComRegistrationHelperCrashed", { L"%08X" });
+    RequireFormat(g_ui.comRegistrationHelperTerminateFailed, L"ComRegistrationHelperTerminateFailed", { L"%lu" });
+    RequireFormat(g_ui.comRegistrationHelperStillRunning, L"ComRegistrationHelperStillRunning", { L"%lu" });
+    RequireFormat(g_ui.comRegistrationHelperTerminated, L"ComRegistrationHelperTerminated", { L"%lu" });
     RequireFormat(g_ui.comRegistrationException, L"ComRegistrationException", { L"%08X" });
     RequireFormat(g_ui.comExceptionMessage, L"ComExceptionMessage", { L"%s" });
     RequireFormat(g_ui.powerShellCommand, L"PowerShellCommand", { L"%s" });
