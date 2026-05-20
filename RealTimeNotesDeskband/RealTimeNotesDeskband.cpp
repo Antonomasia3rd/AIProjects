@@ -7,16 +7,22 @@
 #include <windowsx.h>
 #include <shlobj.h>
 #include <shlwapi.h>
+#include <shellapi.h>
 #include <shobjidl.h>
 #include <comcat.h>
 #include <commctrl.h>
+#include <commdlg.h>
 #include <uxtheme.h>
 #include <winhttp.h>
 #include <wincrypt.h>
 #include <stdint.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
+#include <climits>
+#include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <random>
 #include <string>
@@ -24,9 +30,11 @@
 
 #ifdef _MSC_VER
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "uuid.lib")
@@ -43,10 +51,12 @@ static const wchar_t kSettingsKey[] = L"Software\\RealTimeNotesDeskband";
 static const wchar_t kAccountsKey[] = L"Software\\RealTimeNotesDeskband\\Accounts";
 static const wchar_t kClassesClsidKey[] = L"Software\\Classes\\CLSID";
 static const wchar_t kDeskBandCatid[] = L"{00021492-0000-0000-C000-000000000046}";
+static const wchar_t kConfigWindowClassName[] = L"RealTimeNotesDeskbandConfigWindow";
 static const UINT_PTR kRefreshTimer = 1;
 static const UINT kStatusReadyMessage = WM_APP + 0x343;
 static const UINT kMinRefreshSeconds = 30;
 static const UINT kDefaultRefreshSeconds = 300;
+static const UINT kMaxRefreshSeconds = 24 * 60 * 60;
 
 HMODULE g_module = nullptr;
 long g_objectCount = 0;
@@ -74,6 +84,7 @@ struct NoteState
     std::wstring line1 = L"Loading";
     std::wstring line2 = L"Real-Time Notes";
     std::wstring tooltip = L"Real-Time Notes";
+    std::vector<std::wstring> menuLines;
     UINT refreshSeconds = kDefaultRefreshSeconds;
 };
 
@@ -187,6 +198,39 @@ static std::wstring JoinPath(const std::wstring& left, const std::wstring& right
         return left + right;
     }
     return left + L"\\" + right;
+}
+
+static std::wstring TrimWide(std::wstring value)
+{
+    auto isNotSpace = [](wchar_t ch) { return iswspace(ch) == 0; };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), isNotSpace));
+    value.erase(std::find_if(value.rbegin(), value.rend(), isNotSpace).base(), value.end());
+    return value;
+}
+
+static UINT ClampRefreshSeconds(UINT seconds)
+{
+    return std::max(kMinRefreshSeconds, std::min(kMaxRefreshSeconds, seconds));
+}
+
+static std::wstring WindowText(HWND hwnd)
+{
+    int length = GetWindowTextLengthW(hwnd);
+    if (length <= 0)
+    {
+        return L"";
+    }
+
+    std::wstring text(static_cast<size_t>(length) + 1, L'\0');
+    GetWindowTextW(hwnd, &text[0], length + 1);
+    text.resize(static_cast<size_t>(length));
+    return text;
+}
+
+static void ApplyGuiFont(HWND hwnd)
+{
+    HFONT font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    SendMessageW(hwnd, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
 }
 
 static bool HasAnyConfigFile(const std::wstring& directory)
@@ -335,6 +379,26 @@ static void WriteRegString(HKEY root, const wchar_t* subkey, const wchar_t* valu
     }
 }
 
+static void WriteRegDword(HKEY root, const wchar_t* subkey, const wchar_t* valueName, DWORD value)
+{
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(root, subkey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS)
+    {
+        RegSetValueExW(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+        RegCloseKey(key);
+    }
+}
+
+static void DeleteRegValue(HKEY root, const wchar_t* subkey, const wchar_t* valueName)
+{
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(root, subkey, 0, KEY_SET_VALUE, &key) == ERROR_SUCCESS)
+    {
+        RegDeleteValueW(key, valueName);
+        RegCloseKey(key);
+    }
+}
+
 static std::wstring AccountKeyFor(ResourceKind resource)
 {
     return std::wstring(kAccountsKey) + L"\\" + MetadataFor(resource).registryValue;
@@ -356,6 +420,28 @@ static bool HasRegistryConfig(ResourceKind resource)
     return !ReadAccountString(resource, L"UID", L"uid").empty() &&
         !ReadAccountString(resource, L"LTokenV2", L"ltoken_v2").empty() &&
         !ReadAccountString(resource, L"LTuidV2", L"ltuid_v2").empty();
+}
+
+static void SaveRegistryConfig(ResourceKind resource, const AppConfig& cfg)
+{
+    std::wstring key = AccountKeyFor(resource);
+    WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"UID", Utf8ToWide(cfg.uid));
+    WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"LTokenV2", Utf8ToWide(cfg.ltoken));
+    WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"LTuidV2", Utf8ToWide(cfg.ltuid));
+    if (cfg.refreshSeconds > 0)
+    {
+        WriteRegDword(HKEY_CURRENT_USER, key.c_str(), L"RefreshIntervalSeconds", cfg.refreshSeconds);
+    }
+    else
+    {
+        DeleteRegValue(HKEY_CURRENT_USER, key.c_str(), L"RefreshIntervalSeconds");
+    }
+}
+
+static void DeleteRegistryConfig(ResourceKind resource)
+{
+    std::wstring key = AccountKeyFor(resource);
+    RegDeleteTreeW(HKEY_CURRENT_USER, key.c_str());
 }
 
 static ResourceKind ResourceFromString(const std::wstring& value)
@@ -520,13 +606,26 @@ static bool JsonInt(const std::string& json, const std::string& key, int& out)
         return false;
     }
 
-    int value = 0;
+    long long value = 0;
     while (pos < json.size() && std::isdigit(static_cast<unsigned char>(json[pos])))
     {
-        value = value * 10 + (json[pos] - '0');
+        int digit = json[pos] - '0';
+        if (value > (static_cast<long long>(INT_MAX) + (negative ? 1LL : 0LL) - digit) / 10)
+        {
+            return false;
+        }
+        value = value * 10 + digit;
         ++pos;
     }
-    out = negative ? -value : value;
+    if (negative)
+    {
+        value = -value;
+        if (value < INT_MIN)
+        {
+            return false;
+        }
+    }
+    out = static_cast<int>(value);
     return true;
 }
 
@@ -571,6 +670,59 @@ static bool JsonObject(const std::string& json, const std::string& key, std::str
             ++depth;
         }
         else if (ch == '}')
+        {
+            --depth;
+            if (depth == 0)
+            {
+                out.assign(json.data() + start, pos - start + 1);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool JsonArray(const std::string& json, const std::string& key, std::string& out)
+{
+    size_t pos = FindJsonValue(json, key);
+    if (pos == std::string::npos || pos >= json.size() || json[pos] != '[')
+    {
+        return false;
+    }
+
+    size_t start = pos;
+    int depth = 0;
+    bool inString = false;
+    bool escaping = false;
+    for (; pos < json.size(); ++pos)
+    {
+        char ch = json[pos];
+        if (inString)
+        {
+            if (escaping)
+            {
+                escaping = false;
+            }
+            else if (ch == '\\')
+            {
+                escaping = true;
+            }
+            else if (ch == '"')
+            {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (ch == '"')
+        {
+            inString = true;
+        }
+        else if (ch == '[')
+        {
+            ++depth;
+        }
+        else if (ch == ']')
         {
             --depth;
             if (depth == 0)
@@ -848,15 +1000,80 @@ static std::wstring FormatDuration(int seconds)
     return buffer;
 }
 
+static std::wstring FormatCount(int current, int max)
+{
+    return std::to_wstring(current) + L"/" + std::to_wstring(max);
+}
+
+static std::wstring FormatCountWithRecovery(int current, int max, int seconds)
+{
+    std::wstring value = FormatCount(current, max);
+    if (seconds > 0)
+    {
+        value += L" [";
+        value += FormatDuration(seconds);
+        value += L"]";
+    }
+    return value;
+}
+
+static std::wstring FormatMenuLine(const wchar_t* label, int current, int max)
+{
+    return std::wstring(label) + L": " + FormatCount(current, max);
+}
+
+static size_t CountSubstring(const std::string& text, const std::string& pattern)
+{
+    if (pattern.empty())
+    {
+        return 0;
+    }
+
+    size_t count = 0;
+    size_t pos = 0;
+    while ((pos = text.find(pattern, pos)) != std::string::npos)
+    {
+        ++count;
+        pos += pattern.size();
+    }
+    return count;
+}
+
+static std::wstring ZzzSaleStateText(const std::string& saleState)
+{
+    if (saleState == "SaleStateDoing")
+    {
+        return L"Open";
+    }
+    if (saleState == "SaleStateNo")
+    {
+        return L"Closed";
+    }
+    if (saleState == "SaleStateDone")
+    {
+        return L"Done";
+    }
+    return L"ERROR";
+}
+
+static std::wstring ZzzCardStateText(const std::string& cardSign)
+{
+    if (cardSign == "CardSignNo")
+    {
+        return L"Incomplete";
+    }
+    if (cardSign == "CardSignDone")
+    {
+        return L"Done";
+    }
+    return L"ERROR";
+}
+
 static UINT EffectiveRefreshSeconds(UINT configRefresh)
 {
     DWORD registryRefresh = ReadRegDword(HKEY_CURRENT_USER, kSettingsKey, L"RefreshIntervalSeconds", 0);
     UINT refresh = registryRefresh > 0 ? registryRefresh : configRefresh;
-    if (refresh < kMinRefreshSeconds)
-    {
-        refresh = kMinRefreshSeconds;
-    }
-    return refresh;
+    return ClampRefreshSeconds(refresh);
 }
 
 static NoteState ErrorState(ResourceKind resource, const std::wstring& line1, const std::wstring& line2, UINT refreshSeconds = kDefaultRefreshSeconds)
@@ -953,10 +1170,99 @@ static NoteState FetchState(const std::wstring& configDir)
     NoteState state;
     state.resource = resource;
     state.state = current >= max ? StateKind::Full : StateKind::Ok;
-    state.line1 = std::to_wstring(current) + L"/" + std::to_wstring(max);
+    state.line1 = FormatCount(current, max);
     state.line2 = FormatDuration(seconds);
     state.tooltip = std::wstring(metadata.displayName) + L": " + state.line1 + L" - " + state.line2;
     state.refreshSeconds = EffectiveRefreshSeconds(cfg.refreshSeconds);
+
+    if (resource == ResourceKind::Resin)
+    {
+        state.menuLines.push_back(L"Resin: " + FormatCountWithRecovery(current, max, seconds));
+
+        int finishedTasks = 0;
+        int totalTasks = 0;
+        if (JsonInt(body, "finished_task_num", finishedTasks) && JsonInt(body, "total_task_num", totalTasks))
+        {
+            state.menuLines.push_back(FormatMenuLine(L"Commissions", finishedTasks, totalTasks));
+        }
+
+        std::string expeditions;
+        int maxExpeditions = 0;
+        if (JsonArray(body, "expeditions", expeditions) && JsonInt(body, "max_expedition_num", maxExpeditions))
+        {
+            state.menuLines.push_back(FormatMenuLine(L"Expeditions", static_cast<int>(CountSubstring(expeditions, "\"Finished\"")), maxExpeditions));
+        }
+
+        int currentHomeCoin = 0;
+        int maxHomeCoin = 0;
+        if (JsonInt(body, "current_home_coin", currentHomeCoin) && JsonInt(body, "max_home_coin", maxHomeCoin))
+        {
+            state.menuLines.push_back(FormatMenuLine(L"Realm", currentHomeCoin, maxHomeCoin));
+        }
+
+        int remainBosses = 0;
+        int bossLimit = 0;
+        if (JsonInt(body, "remain_resin_discount_num", remainBosses) && JsonInt(body, "resin_discount_num_limit", bossLimit))
+        {
+            state.menuLines.push_back(FormatMenuLine(L"Weekly Bosses", remainBosses, bossLimit));
+        }
+    }
+    else if (resource == ResourceKind::Stamina)
+    {
+        state.menuLines.push_back(L"Stamina: " + FormatCountWithRecovery(current, max, seconds));
+
+        int currentTrain = 0;
+        int maxTrain = 0;
+        if (JsonInt(body, "current_train_score", currentTrain) && JsonInt(body, "max_train_score", maxTrain))
+        {
+            state.menuLines.push_back(FormatMenuLine(L"Training", currentTrain, maxTrain));
+        }
+
+        std::string expeditions;
+        int totalExpeditions = 0;
+        if (JsonArray(body, "expeditions", expeditions) && JsonInt(body, "total_expedition_num", totalExpeditions))
+        {
+            state.menuLines.push_back(FormatMenuLine(L"Expeditions", static_cast<int>(CountSubstring(expeditions, "\"Finished\"")), totalExpeditions));
+        }
+
+        int reserve = 0;
+        if (JsonInt(body, "current_reserve_stamina", reserve))
+        {
+            state.menuLines.push_back(FormatMenuLine(L"Reserve", reserve, 2400));
+        }
+
+        int cocoon = 0;
+        int cocoonLimit = 0;
+        if (JsonInt(body, "weekly_cocoon_cnt", cocoon) && JsonInt(body, "weekly_cocoon_limit", cocoonLimit))
+        {
+            state.menuLines.push_back(FormatMenuLine(L"Echo of War", cocoon, cocoonLimit));
+        }
+    }
+    else
+    {
+        state.menuLines.push_back(L"Charge: " + FormatCountWithRecovery(current, max, seconds));
+
+        std::string vitality;
+        int currentVitality = 0;
+        int maxVitality = 0;
+        if (JsonObject(body, "vitality", vitality) && JsonInt(vitality, "current", currentVitality) && JsonInt(vitality, "max", maxVitality))
+        {
+            state.menuLines.push_back(FormatMenuLine(L"Engagement", currentVitality, maxVitality));
+        }
+
+        std::string cardSign;
+        if (JsonString(body, "card_sign", cardSign))
+        {
+            state.menuLines.push_back(L"Scratch Card: " + ZzzCardStateText(cardSign));
+        }
+
+        std::string vhsSale;
+        std::string saleState;
+        if (JsonObject(body, "vhs_sale", vhsSale) && JsonString(vhsSale, "sale_state", saleState))
+        {
+            state.menuLines.push_back(L"Video Store: " + ZzzSaleStateText(saleState));
+        }
+    }
     return state;
 }
 
@@ -985,6 +1291,361 @@ static HFONT CreateBandFont(int dpi)
 
     return CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+}
+
+static bool BrowseForFolder(HWND owner, const wchar_t* title, std::wstring& out)
+{
+    BROWSEINFOW browse{};
+    browse.hwndOwner = owner;
+    browse.lpszTitle = title;
+    browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_USENEWUI;
+
+    PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&browse);
+    if (!pidl)
+    {
+        return false;
+    }
+
+    wchar_t path[MAX_PATH]{};
+    bool ok = SHGetPathFromIDListW(pidl, path) != FALSE;
+    CoTaskMemFree(pidl);
+    if (!ok || !path[0])
+    {
+        return false;
+    }
+
+    out = path;
+    return true;
+}
+
+static bool OpenCookieJson(HWND owner, ResourceKind resource, AppConfig& cfg)
+{
+    wchar_t fileName[MAX_PATH]{};
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = owner;
+    ofn.lpstrFilter = L"Cookie JSON (*.json)\0*.json\0All files (*.*)\0*.*\0";
+    ofn.lpstrFile = fileName;
+    ofn.nMaxFile = ARRAYSIZE(fileName);
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.lpstrTitle = L"Import HoYoLAB cookie JSON";
+    ofn.lpstrDefExt = L"json";
+
+    if (!GetOpenFileNameW(&ofn))
+    {
+        return false;
+    }
+
+    AppConfig imported;
+    if (!LoadConfig(fileName, imported))
+    {
+        MessageBoxW(owner, L"The selected JSON does not contain uid, ltoken_v2, and ltuid_v2.", L"Import Cookie JSON", MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    cfg = imported;
+    SaveRegistryConfig(resource, cfg);
+    return true;
+}
+
+struct AccountDialogState
+{
+    HWND hwnd = nullptr;
+    HWND comboResource = nullptr;
+    HWND editUid = nullptr;
+    HWND editLToken = nullptr;
+    HWND editLTuid = nullptr;
+    HWND editRefresh = nullptr;
+    ResourceKind initialResource = ResourceKind::Resin;
+    bool selectAfterSave = true;
+    bool saved = false;
+};
+
+static int DpiScale(HWND hwnd, int value)
+{
+    HDC hdc = GetDC(hwnd);
+    int dpi = hdc ? GetDeviceCaps(hdc, LOGPIXELSX) : 96;
+    if (hdc)
+    {
+        ReleaseDC(hwnd, hdc);
+    }
+    return MulDiv(value, dpi > 0 ? dpi : 96, 96);
+}
+
+static void SetAccountDialogFields(AccountDialogState* state, ResourceKind resource)
+{
+    AppConfig cfg;
+    std::wstring installDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", ParentDirectoryOf(ModulePath()));
+    std::wstring configDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", DefaultConfigDir(installDir));
+    if (!LoadRegistryConfig(resource, cfg))
+    {
+        LoadConfig(JoinPath(configDir, MetadataFor(resource).configFile), cfg);
+    }
+
+    SetWindowTextW(state->editUid, Utf8ToWide(cfg.uid).c_str());
+    SetWindowTextW(state->editLToken, Utf8ToWide(cfg.ltoken).c_str());
+    SetWindowTextW(state->editLTuid, Utf8ToWide(cfg.ltuid).c_str());
+    std::wstring refresh = cfg.refreshSeconds > 0 ? std::to_wstring(ClampRefreshSeconds(cfg.refreshSeconds)) : L"";
+    SetWindowTextW(state->editRefresh, refresh.c_str());
+}
+
+static ResourceKind AccountDialogSelectedResource(AccountDialogState* state)
+{
+    LRESULT selection = SendMessageW(state->comboResource, CB_GETCURSEL, 0, 0);
+    if (selection >= 0 && selection < static_cast<LRESULT>(ARRAYSIZE(kResources)))
+    {
+        return kResources[selection].resource;
+    }
+    return state->initialResource;
+}
+
+static bool ParseRefreshEdit(HWND owner, const std::wstring& text, UINT& refresh)
+{
+    std::wstring trimmed = TrimWide(text);
+    refresh = 0;
+    if (trimmed.empty())
+    {
+        return true;
+    }
+
+    errno = 0;
+    wchar_t* end = nullptr;
+    unsigned long parsed = wcstoul(trimmed.c_str(), &end, 10);
+    while (end && *end && iswspace(*end) != 0)
+    {
+        ++end;
+    }
+    if (end == trimmed.c_str() || (end && *end) || errno == ERANGE || parsed > kMaxRefreshSeconds)
+    {
+        MessageBoxW(owner, L"Refresh interval must be blank or a number from 30 to 86400 seconds.", L"Configure Account", MB_OK | MB_ICONWARNING);
+        return false;
+    }
+
+    refresh = ClampRefreshSeconds(static_cast<UINT>(parsed));
+    return true;
+}
+
+static bool SaveAccountDialog(AccountDialogState* state)
+{
+    ResourceKind resource = AccountDialogSelectedResource(state);
+    std::wstring uid = TrimWide(WindowText(state->editUid));
+    std::wstring ltoken = TrimWide(WindowText(state->editLToken));
+    std::wstring ltuid = TrimWide(WindowText(state->editLTuid));
+
+    if (uid.empty() || ltoken.empty() || ltuid.empty())
+    {
+        MessageBoxW(state->hwnd, L"UID, ltoken_v2, and ltuid_v2 are required.", L"Configure Account", MB_OK | MB_ICONWARNING);
+        return false;
+    }
+
+    UINT refresh = 0;
+    if (!ParseRefreshEdit(state->hwnd, WindowText(state->editRefresh), refresh))
+    {
+        return false;
+    }
+
+    AppConfig cfg;
+    cfg.uid = WideToUtf8(uid);
+    cfg.ltoken = WideToUtf8(ltoken);
+    cfg.ltuid = WideToUtf8(ltuid);
+    cfg.refreshSeconds = refresh;
+    SaveRegistryConfig(resource, cfg);
+    if (state->selectAfterSave)
+    {
+        WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", MetadataFor(resource).registryValue);
+    }
+
+    state->saved = true;
+    DestroyWindow(state->hwnd);
+    return true;
+}
+
+static HWND CreateDialogControl(HWND parent, const wchar_t* cls, const wchar_t* text, DWORD style, DWORD exStyle, int x, int y, int w, int h, int id)
+{
+    HWND control = CreateWindowExW(exStyle, cls, text, WS_CHILD | WS_VISIBLE | style,
+        DpiScale(parent, x), DpiScale(parent, y), DpiScale(parent, w), DpiScale(parent, h),
+        parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), g_module, nullptr);
+    if (control)
+    {
+        ApplyGuiFont(control);
+    }
+    return control;
+}
+
+static void CreateAccountDialogControls(AccountDialogState* state)
+{
+    HWND hwnd = state->hwnd;
+    CreateDialogControl(hwnd, L"STATIC", L"Resource:", 0, 0, 14, 18, 95, 20, 0);
+    state->comboResource = CreateDialogControl(hwnd, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 0, 118, 14, 290, 120, 101);
+    int initialIndex = 0;
+    for (int i = 0; i < static_cast<int>(ARRAYSIZE(kResources)); ++i)
+    {
+        SendMessageW(state->comboResource, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(kResources[i].displayName));
+        if (kResources[i].resource == state->initialResource)
+        {
+            initialIndex = i;
+        }
+    }
+    SendMessageW(state->comboResource, CB_SETCURSEL, initialIndex, 0);
+
+    CreateDialogControl(hwnd, L"STATIC", L"UID:", 0, 0, 14, 52, 95, 20, 0);
+    state->editUid = CreateDialogControl(hwnd, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, 118, 48, 290, 24, 102);
+    CreateDialogControl(hwnd, L"STATIC", L"ltoken_v2:", 0, 0, 14, 84, 95, 20, 0);
+    state->editLToken = CreateDialogControl(hwnd, L"EDIT", L"", ES_AUTOHSCROLL | ES_PASSWORD | WS_TABSTOP, WS_EX_CLIENTEDGE, 118, 80, 290, 24, 103);
+    CreateDialogControl(hwnd, L"STATIC", L"ltuid_v2:", 0, 0, 14, 116, 95, 20, 0);
+    state->editLTuid = CreateDialogControl(hwnd, L"EDIT", L"", ES_AUTOHSCROLL | ES_PASSWORD | WS_TABSTOP, WS_EX_CLIENTEDGE, 118, 112, 290, 24, 104);
+    CreateDialogControl(hwnd, L"STATIC", L"Refresh seconds:", 0, 0, 14, 148, 95, 20, 0);
+    state->editRefresh = CreateDialogControl(hwnd, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, 118, 144, 120, 24, 105);
+
+    CreateDialogControl(hwnd, L"BUTTON", L"Import JSON...", BS_PUSHBUTTON | WS_TABSTOP, 0, 14, 184, 116, 28, 106);
+    CreateDialogControl(hwnd, L"BUTTON", L"Open HoYoLAB", BS_PUSHBUTTON | WS_TABSTOP, 0, 138, 184, 116, 28, 107);
+    CreateDialogControl(hwnd, L"BUTTON", L"Save", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 262, 184, 70, 28, IDOK);
+    CreateDialogControl(hwnd, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 0, 338, 184, 70, 28, IDCANCEL);
+
+    SetAccountDialogFields(state, state->initialResource);
+}
+
+static LRESULT CALLBACK AccountDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    AccountDialogState* state = reinterpret_cast<AccountDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (message == WM_NCCREATE)
+    {
+        auto create = reinterpret_cast<CREATESTRUCTW*>(lParam);
+        state = reinterpret_cast<AccountDialogState*>(create->lpCreateParams);
+        state->hwnd = hwnd;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+    }
+
+    switch (message)
+    {
+    case WM_CREATE:
+        CreateAccountDialogControls(state);
+        return 0;
+    case WM_COMMAND:
+    {
+        int id = LOWORD(wParam);
+        int notify = HIWORD(wParam);
+        if (id == IDOK)
+        {
+            SaveAccountDialog(state);
+            return 0;
+        }
+        if (id == IDCANCEL)
+        {
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        if (id == 101 && notify == CBN_SELCHANGE)
+        {
+            SetAccountDialogFields(state, AccountDialogSelectedResource(state));
+            return 0;
+        }
+        if (id == 106)
+        {
+            ResourceKind resource = AccountDialogSelectedResource(state);
+            AppConfig cfg;
+            if (OpenCookieJson(hwnd, resource, cfg))
+            {
+                SetWindowTextW(state->editUid, Utf8ToWide(cfg.uid).c_str());
+                SetWindowTextW(state->editLToken, Utf8ToWide(cfg.ltoken).c_str());
+                SetWindowTextW(state->editLTuid, Utf8ToWide(cfg.ltuid).c_str());
+                SetWindowTextW(state->editRefresh, std::to_wstring(ClampRefreshSeconds(cfg.refreshSeconds)).c_str());
+            }
+            return 0;
+        }
+        if (id == 107)
+        {
+            ShellExecuteW(hwnd, L"open", L"https://www.hoyolab.com/home", nullptr, nullptr, SW_SHOWNORMAL);
+            return 0;
+        }
+        break;
+    }
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+    default:
+        break;
+    }
+
+    return DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+static void RegisterAccountDialogClass()
+{
+    static ATOM atom = 0;
+    if (atom)
+    {
+        return;
+    }
+
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = AccountDialogProc;
+    wc.hInstance = g_module;
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
+    wc.lpszClassName = kConfigWindowClassName;
+    atom = RegisterClassW(&wc);
+}
+
+static bool ShowAccountDialog(HWND owner, ResourceKind initialResource, bool selectAfterSave)
+{
+    RegisterAccountDialogClass();
+    InitCommonControls();
+
+    AccountDialogState state;
+    state.initialResource = initialResource;
+    state.selectAfterSave = selectAfterSave;
+
+    HWND modalOwner = owner ? GetAncestor(owner, GA_ROOT) : nullptr;
+    HWND hwnd = CreateWindowExW(
+        WS_EX_DLGMODALFRAME,
+        kConfigWindowClassName,
+        L"Configure Real-Time Notes Account",
+        WS_CAPTION | WS_SYSMENU,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        DpiScale(owner ? owner : GetDesktopWindow(), 440),
+        DpiScale(owner ? owner : GetDesktopWindow(), 270),
+        modalOwner,
+        nullptr,
+        g_module,
+        &state);
+    if (!hwnd)
+    {
+        return false;
+    }
+
+    bool ownerWasEnabled = false;
+    if (modalOwner && IsWindowEnabled(modalOwner))
+    {
+        ownerWasEnabled = true;
+        EnableWindow(modalOwner, FALSE);
+    }
+
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+
+    MSG msg{};
+    while (IsWindow(hwnd))
+    {
+        BOOL got = GetMessageW(&msg, nullptr, 0, 0);
+        if (got <= 0)
+        {
+            break;
+        }
+        if (!IsDialogMessageW(hwnd, &msg))
+        {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    if (ownerWasEnabled)
+    {
+        EnableWindow(modalOwner, TRUE);
+        SetActiveWindow(modalOwner);
+    }
+    return state.saved;
 }
 
 class RealTimeNotesBand final : public IDeskBand2, public IObjectWithSite, public IPersistStream, public IInputObject
@@ -1113,8 +1774,8 @@ public:
         }
         if (info->dwMask & DBIM_MAXSIZE)
         {
-            info->ptMaxSize.x = 260;
-            info->ptMaxSize.y = -1;
+            info->ptMaxSize.x = desired.cx;
+            info->ptMaxSize.y = desired.cy;
         }
         if (info->dwMask & DBIM_INTEGRAL)
         {
@@ -1175,6 +1836,7 @@ public:
     {
         if (!site)
         {
+            CloseDW(0);
             if (m_inputSite)
             {
                 m_inputSite->Release();
@@ -1440,7 +2102,7 @@ private:
     UINT CurrentRefreshSeconds()
     {
         NoteState state = CurrentState();
-        return std::max(kMinRefreshSeconds, state.refreshSeconds);
+        return ClampRefreshSeconds(state.refreshSeconds);
     }
 
     int CurrentDpi() const
@@ -1478,7 +2140,7 @@ private:
         int icon = MulDiv(24, dpi, 96);
         int margin = MulDiv(6, dpi, 96);
         int width = icon + margin * 4 + std::max(line1.cx, line2.cx);
-        width = std::max(MulDiv(118, dpi, 96), std::min(MulDiv(230, dpi, 96), width));
+        width = std::max(MulDiv(118, dpi, 96), width);
         int height = std::max(MulDiv(30, dpi, 96), icon + margin);
         return { width, height };
     }
@@ -1646,6 +2308,90 @@ private:
         }
     }
 
+    void ReloadSettings()
+    {
+        m_installDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", ParentDirectoryOf(ModulePath()));
+        m_configDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", DefaultConfigDir(m_installDir));
+        m_assetDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"AssetDir", DefaultAssetDir(m_installDir));
+    }
+
+    void SetLoadingState(ResourceKind resource, const wchar_t* detail)
+    {
+        UINT refreshSeconds = CurrentRefreshSeconds();
+        EnterCriticalSection(&m_stateLock);
+        m_state.resource = resource;
+        m_state.state = StateKind::Loading;
+        m_state.line1 = L"Loading";
+        m_state.line2 = detail && detail[0] ? detail : MetadataFor(resource).displayName;
+        m_state.tooltip = L"Refreshing Real-Time Notes";
+        m_state.menuLines.clear();
+        m_state.refreshSeconds = refreshSeconds;
+        LeaveCriticalSection(&m_stateLock);
+
+        if (m_hwnd)
+        {
+            InvalidateRect(m_hwnd, nullptr, TRUE);
+        }
+        NotifyBandInfoChanged();
+    }
+
+    void BeginRefreshWithCurrentSettings()
+    {
+        ReloadSettings();
+        ResourceKind resource = ReadResourceSetting(m_configDir);
+        SetLoadingState(resource, MetadataFor(resource).displayName);
+        BeginRefresh();
+    }
+
+    void ConfigureAccount(ResourceKind resource)
+    {
+        if (ShowAccountDialog(m_hwnd, resource, true))
+        {
+            BeginRefreshWithCurrentSettings();
+        }
+    }
+
+    void ImportCookie(ResourceKind resource)
+    {
+        AppConfig cfg;
+        if (OpenCookieJson(m_hwnd, resource, cfg))
+        {
+            WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", MetadataFor(resource).registryValue);
+            BeginRefreshWithCurrentSettings();
+        }
+    }
+
+    void ClearAccount(ResourceKind resource)
+    {
+        std::wstring message = L"Remove saved credentials for ";
+        message += MetadataFor(resource).displayName;
+        message += L"?";
+        if (MessageBoxW(m_hwnd, message.c_str(), L"Clear Account", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES)
+        {
+            DeleteRegistryConfig(resource);
+            BeginRefreshWithCurrentSettings();
+        }
+    }
+
+    void OpenDirectory(const std::wstring& path)
+    {
+        HINSTANCE result = ShellExecuteW(m_hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (reinterpret_cast<INT_PTR>(result) <= 32)
+        {
+            MessageBoxW(m_hwnd, path.c_str(), L"Could not open directory", MB_OK | MB_ICONERROR);
+        }
+    }
+
+    void ChangeDirectorySetting(const wchar_t* valueName, const wchar_t* title)
+    {
+        std::wstring directory;
+        if (BrowseForFolder(m_hwnd, title, directory))
+        {
+            WriteRegString(HKEY_CURRENT_USER, kSettingsKey, valueName, directory);
+            BeginRefreshWithCurrentSettings();
+        }
+    }
+
     void ShowContextMenu(int x, int y)
     {
         if (x == -1 && y == -1)
@@ -1663,39 +2409,180 @@ private:
         }
 
         NoteState state = CurrentState();
-        AppendMenuW(menu, MF_STRING, 100, L"Refresh now");
+        constexpr UINT kCommandRefresh = 100;
+        constexpr UINT kCommandConfigureSelected = 101;
+        constexpr UINT kCommandImportSelected = 102;
+        constexpr UINT kCommandOpenLogin = 103;
+        constexpr UINT kCommandClearSelected = 104;
+        constexpr UINT kCommandResourceAuto = 190;
+        constexpr UINT kCommandResourceBase = 200;
+        constexpr UINT kCommandConfigureBase = 220;
+        constexpr UINT kCommandImportBase = 240;
+        constexpr UINT kCommandClearBase = 260;
+        constexpr UINT kCommandOpenConfigDir = 300;
+        constexpr UINT kCommandOpenAssetDir = 301;
+        constexpr UINT kCommandChangeConfigDir = 302;
+        constexpr UINT kCommandChangeAssetDir = 303;
+        constexpr UINT kCommandAbout = 304;
+
+        std::wstring configuredResource = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", L"auto");
+        std::transform(configuredResource.begin(), configuredResource.end(), configuredResource.begin(), [](wchar_t ch) { return static_cast<wchar_t>(towlower(ch)); });
+        bool resourceAuto = configuredResource.empty() || configuredResource == L"auto";
+        ResourceKind selectedResource = state.resource;
+
+        std::wstring status = L"Status: ";
+        status += state.tooltip.empty() ? (state.line1 + L" - " + state.line2) : state.tooltip;
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, status.c_str());
+        for (const auto& line : state.menuLines)
+        {
+            AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, line.c_str());
+        }
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, kCommandRefresh, L"Refresh now");
+        AppendMenuW(menu, MF_STRING, kCommandConfigureSelected, L"Configure selected account...");
+        AppendMenuW(menu, MF_STRING, kCommandImportSelected, L"Import cookie JSON for selected...");
+        AppendMenuW(menu, MF_STRING, kCommandOpenLogin, L"Open HoYoLAB login page");
+        AppendMenuW(menu, MF_STRING, kCommandClearSelected, L"Clear selected account...");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+        HMENU resourceMenu = CreatePopupMenu();
+        if (resourceMenu)
+        {
+            AppendMenuW(resourceMenu, MF_STRING | (resourceAuto ? MF_CHECKED : 0), kCommandResourceAuto, L"Select automatically");
+            AppendMenuW(resourceMenu, MF_SEPARATOR, 0, nullptr);
+            for (const auto& item : kResources)
+            {
+                UINT flags = MF_STRING;
+                if (!resourceAuto && selectedResource == item.resource)
+                {
+                    flags |= MF_CHECKED;
+                }
+                AppendMenuW(resourceMenu, flags, kCommandResourceBase + static_cast<UINT>(item.resource), item.displayName);
+            }
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(resourceMenu), L"Resource");
+        }
+
+        HMENU accountsMenu = CreatePopupMenu();
+        if (accountsMenu)
+        {
+            for (const auto& item : kResources)
+            {
+                std::wstring configure = L"Configure ";
+                configure += item.displayName;
+                configure += L"...";
+                AppendMenuW(accountsMenu, MF_STRING, kCommandConfigureBase + static_cast<UINT>(item.resource), configure.c_str());
+
+                std::wstring import = L"Import ";
+                import += item.displayName;
+                import += L" JSON...";
+                AppendMenuW(accountsMenu, MF_STRING, kCommandImportBase + static_cast<UINT>(item.resource), import.c_str());
+            }
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(accountsMenu), L"Accounts");
+        }
+
+        HMENU clearMenu = CreatePopupMenu();
+        if (clearMenu)
+        {
+            for (const auto& item : kResources)
+            {
+                AppendMenuW(clearMenu, MF_STRING, kCommandClearBase + static_cast<UINT>(item.resource), item.displayName);
+            }
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(clearMenu), L"Clear Account");
+        }
+
+        HMENU advancedMenu = CreatePopupMenu();
+        if (advancedMenu)
+        {
+            AppendMenuW(advancedMenu, MF_STRING, kCommandOpenConfigDir, L"Open config directory");
+            AppendMenuW(advancedMenu, MF_STRING, kCommandOpenAssetDir, L"Open asset directory");
+            AppendMenuW(advancedMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(advancedMenu, MF_STRING, kCommandChangeConfigDir, L"Change config directory...");
+            AppendMenuW(advancedMenu, MF_STRING, kCommandChangeAssetDir, L"Change asset directory...");
+            AppendMenuW(advancedMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(advancedMenu, MF_STRING, kCommandAbout, L"About");
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedMenu), L"Advanced");
+        }
+
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         for (const auto& item : kResources)
         {
             UINT flags = MF_STRING;
-            if (state.resource == item.resource)
+            if (!resourceAuto && selectedResource == item.resource)
             {
                 flags |= MF_CHECKED;
             }
-            AppendMenuW(menu, flags, 200 + static_cast<UINT>(item.resource), item.displayName);
+            AppendMenuW(menu, flags, kCommandResourceBase + static_cast<UINT>(item.resource), item.displayName);
         }
 
         SetForegroundWindow(m_hwnd);
         UINT command = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, m_hwnd, nullptr);
         DestroyMenu(menu);
 
-        if (command == 100)
+        if (command == kCommandRefresh)
         {
-            BeginRefresh();
+            BeginRefreshWithCurrentSettings();
         }
-        else if (command >= 200 && command < 203)
+        else if (command == kCommandConfigureSelected)
         {
-            ResourceKind resource = static_cast<ResourceKind>(command - 200);
+            ConfigureAccount(selectedResource);
+        }
+        else if (command == kCommandImportSelected)
+        {
+            ImportCookie(selectedResource);
+        }
+        else if (command == kCommandOpenLogin)
+        {
+            ShellExecuteW(m_hwnd, L"open", L"https://www.hoyolab.com/home", nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        else if (command == kCommandClearSelected)
+        {
+            ClearAccount(selectedResource);
+        }
+        else if (command == kCommandResourceAuto)
+        {
+            WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", L"auto");
+            BeginRefreshWithCurrentSettings();
+        }
+        else if (command >= kCommandResourceBase && command < kCommandResourceBase + ARRAYSIZE(kResources))
+        {
+            ResourceKind resource = static_cast<ResourceKind>(command - kCommandResourceBase);
             WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", MetadataFor(resource).registryValue);
-            EnterCriticalSection(&m_stateLock);
-            m_state.resource = resource;
-            m_state.state = StateKind::Loading;
-            m_state.line1 = L"Loading";
-            m_state.line2 = MetadataFor(resource).displayName;
-            m_state.tooltip = L"Refreshing Real-Time Notes";
-            LeaveCriticalSection(&m_stateLock);
-            InvalidateRect(m_hwnd, nullptr, TRUE);
-            BeginRefresh();
+            SetLoadingState(resource, MetadataFor(resource).displayName);
+            BeginRefreshWithCurrentSettings();
+        }
+        else if (command >= kCommandConfigureBase && command < kCommandConfigureBase + ARRAYSIZE(kResources))
+        {
+            ConfigureAccount(static_cast<ResourceKind>(command - kCommandConfigureBase));
+        }
+        else if (command >= kCommandImportBase && command < kCommandImportBase + ARRAYSIZE(kResources))
+        {
+            ImportCookie(static_cast<ResourceKind>(command - kCommandImportBase));
+        }
+        else if (command >= kCommandClearBase && command < kCommandClearBase + ARRAYSIZE(kResources))
+        {
+            ClearAccount(static_cast<ResourceKind>(command - kCommandClearBase));
+        }
+        else if (command == kCommandOpenConfigDir)
+        {
+            ReloadSettings();
+            OpenDirectory(m_configDir);
+        }
+        else if (command == kCommandOpenAssetDir)
+        {
+            ReloadSettings();
+            OpenDirectory(m_assetDir);
+        }
+        else if (command == kCommandChangeConfigDir)
+        {
+            ChangeDirectorySetting(L"ConfigDir", L"Select Real-Time Notes config directory");
+        }
+        else if (command == kCommandChangeAssetDir)
+        {
+            ChangeDirectorySetting(L"AssetDir", L"Select Deskband asset directory");
+        }
+        else if (command == kCommandAbout)
+        {
+            MessageBoxW(m_hwnd, L"RealTimeNotesDeskband\nNative HoYoLAB Real-Time Notes deskband.", L"About Real Time Notes", MB_OK | MB_ICONINFORMATION);
         }
     }
 
@@ -1844,6 +2731,13 @@ extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllGetClassObject(REFCLS
     HRESULT hr = factory->QueryInterface(riid, ppv);
     factory->Release();
     return hr;
+}
+
+extern "C" __declspec(dllexport) void CALLBACK ConfigureDeskband(HWND hwnd, HINSTANCE, LPSTR, int)
+{
+    std::wstring installDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", ParentDirectoryOf(ModulePath()));
+    std::wstring configDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", DefaultConfigDir(installDir));
+    ShowAccountDialog(hwnd, ReadResourceSetting(configDir), true);
 }
 
 extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllRegisterServer()

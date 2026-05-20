@@ -13,7 +13,7 @@ if errorlevel 1 (
 if not exist build mkdir build
 
 set "SOURCE=RealTimeNotesDeskband.cpp"
-set "LIBS=-lole32 -loleaut32 -luuid -lshlwapi -lwinhttp -lcomctl32 -luxtheme -lgdi32 -ladvapi32"
+set "LIBS=-lole32 -loleaut32 -luuid -lshlwapi -lwinhttp -lcomctl32 -luxtheme -lgdi32 -ladvapi32 -lcomdlg32 -lshell32"
 set "CXXFLAGS=-std=c++17 -O2"
 
 if /i "%~1"=="check" (
