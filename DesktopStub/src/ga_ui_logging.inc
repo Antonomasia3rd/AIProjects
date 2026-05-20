@@ -1,0 +1,2539 @@
+﻿// Logging buffer
+static std::mutex g_logMutex;
+static std::vector<std::wstring> g_logBuf;
+static std::atomic<bool> g_logWriteFailureReported(false);
+
+// PowerShell status
+static std::mutex g_psMutex;
+static std::wstring g_psOut, g_psMsg;
+static DWORD g_psCode = 0;
+static bool g_psErr = false;
+
+// Tray
+static std::mutex g_trayMutex;
+static NOTIFYICONDATAW g_nid{};
+static HWND g_hwnd = nullptr;
+
+
+struct UiStrings
+{
+    std::wstring generalTitle;
+    std::wstring loggingTitle;
+    std::wstring wallpaperFittingTitle;
+    std::wstring methodsTitle;
+    std::wstring assetsTitle;
+    std::wstring dpiScalesTitle;
+
+    std::wstring listenWallpaper;
+    std::wstring trayIcon;
+    std::wstring usePowerShell;
+    std::wstring generateOnStartup;
+    std::wstring generateOnStartupOnlyWhenChanged;
+    std::wstring hideDisabledEntries;
+    std::wstring generateDesktopIconForDisabledEntries;
+    std::wstring deleteDisabledAssets;
+    std::wstring wallpaperDetectionFallback;
+    std::wstring generateScaleAuto;
+    std::wstring generateScale100;
+    std::wstring generateScale125;
+    std::wstring generateScale150;
+    std::wstring generateScale200;
+    std::wstring generateScale400;
+    std::wstring currentDpiScaleLabel;
+    std::wstring showMenuAsDropdown;
+    std::wstring notificationsTitle;
+    std::wstring notificationsEnabled;
+    std::wstring notifyOnStart;
+    std::wstring notifyOnSuccess;
+    std::wstring notifyOnFailure;
+    std::wstring notifyOnBusy;
+    std::wstring notifyOnAlreadyRunning;
+    std::wstring notifyOnSingleInstanceFailure;
+    std::wstring showConsole;
+    std::wstring generateNow;
+
+    std::wstring loggingEnable;
+    std::wstring changePath;
+    std::wstring renamePath;
+    std::wstring openInExplorer;
+    std::wstring resetDefault;
+    std::wstring showPowerShellLog;
+
+    std::wstring logPathPrefix;
+    std::wstring logPathTitle;
+    std::wstring psStatusPrefix;
+    std::wstring psStatusTitle;
+
+    std::wstring disableFitting;
+    std::wstring listenFit;
+    std::wstring fitModePrefix;
+    std::wstring fitModeForced;
+
+    std::wstring exitText;
+    std::wstring shutdownPendingTitle;
+    std::wstring shutdownPendingReason;
+    std::wstring cancelShutdown;
+    std::wstring forceShutdown;
+    std::wstring shutdownDelayedNotification;
+    std::wstring shutdownRequested;
+    std::wstring shutdownCancelled;
+    std::wstring forceShutdownRequested;
+
+    std::wstring renameDialogTitle;
+    std::wstring okText;
+    std::wstring cancelText;
+    std::wstring errorTitle;
+    std::wstring pathCannotBeEmpty;
+
+    std::wstring noPowerShellOutputTitle;
+    std::wstring noPowerShellOutput;
+    std::wstring powerShellOutputTruncated;
+
+    std::wstring generateNowTitle;
+    std::wstring wallpaperNotFound;
+    std::wstring currentWallpaperNotFound;
+
+    std::wstring programStarting;
+    std::wstring notificationTitle;
+    std::wstring notificationGenerationStarted;
+    std::wstring notificationGenerationSuccess;
+    std::wstring notificationGenerationFailed;
+    std::wstring notificationGenerationBusy;
+    std::wstring notificationAlreadyRunning;
+    std::wstring notificationAlreadyRunningTrayPersistent;
+    std::wstring notificationAlreadyRunningTraySession;
+    std::wstring notificationSingleInstanceFailure;
+    std::wstring notificationTrayIconHidden;
+    std::wstring manualGenerateTriggered;
+    std::wstring startingWallpaperGeneration;
+    std::wstring wallpaperSource;
+    std::wstring wallpaperImageLoaded;
+    std::wstring renderModeSummary;
+    std::wstring assetsDirectoryReady;
+    std::wstring failedLoadWallpaper;
+    std::wstring iniEncodingNormalized;
+    std::wstring skippingAssetDisabled;
+    std::wstring generatedDesktopIconAsset;
+    std::wstring activeScales;
+    std::wstring savedAsset;
+    std::wstring savedScaledAsset;
+    std::wstring failedSaveAsset;
+    std::wstring failedSaveScaledAsset;
+    std::wstring savePngInvalidInput;
+    std::wstring savePngGdiFailure;
+    std::wstring savePngReplaceFailed;
+    std::wstring savePngReplaceRetrying;
+    std::wstring deletedDisabledAsset;
+    std::wstring failedDeleteDisabledAsset;
+    std::wstring reRegisteringManifest;
+    std::wstring appxManifestCreated;
+    std::wstring appxManifestExisting;
+    std::wstring appxManifestOverwritten;
+    std::wstring appxManifestCreateFailed;
+    std::wstring manifestPath;
+    std::wstring usingComRegistration;
+    std::wstring comRegistrationUri;
+    std::wstring comRegistrationTimeoutDetails;
+    std::wstring invalidManifestPath;
+    std::wstring comRegistrationSuccess;
+    std::wstring comRegistrationTimedOut;
+    std::wstring comRegistrationFailed;
+    std::wstring comRegistrationCancelStillRunning;
+    std::wstring comRegistrationFallbackSkippedAfterTimeout;
+    std::wstring comRegistrationException;
+    std::wstring comExceptionMessage;
+    std::wstring launchingPowerShellRegistration;
+    std::wstring powerShellCommand;
+    std::wstring powerShellLaunchDetails;
+    std::wstring powerShellProcessStarted;
+    std::wstring powerShellTerminateRequested;
+    std::wstring powerShellTerminateFailed;
+    std::wstring powerShellStillRunningAfterTimeout;
+    std::wstring powerShellTerminatedAfterTimeout;
+    std::wstring powerShellCompleted;
+    std::wstring powerShellTimedOut;
+    std::wstring powerShellErrorSideloadDisabled;
+    std::wstring powerShellErrorCode;
+    std::wstring powerShellOutputFollows;
+    std::wstring powerShellRegistrationFailed;
+    std::wstring assetGenerationFinished;
+    std::wstring assetGenerationFailed;
+    std::wstring appRegistrationFailed;
+    std::wstring generationUnhandledException;
+    std::wstring generationThreadStartFailed;
+    std::wstring pollThreadUnhandledException;
+    std::wstring pollThreadStartFailed;
+    std::wstring unknownException;
+    std::wstring skippingRegistrationDueToAssetFailure;
+    std::wstring createAssetsDirectoryOperation;
+    std::wstring missingManifestAssets;
+    std::wstring notificationMissingManifestAssets;
+    std::wstring registrationBlockedUnresolved;
+    std::wstring registrationUnresolvedMarked;
+    std::wstring registrationUnresolvedCleared;
+    std::wstring registrationUnresolvedExpired;
+
+    std::wstring changeConfirmed;
+    std::wstring wallpaperAndFitChangeDetected;
+    std::wstring wallpaperChangeDetected;
+    std::wstring wallpaperDetectionEmptyDuringPoll;
+    std::wstring wallpaperDetectionEmptyUsingLast;
+    std::wstring wallpaperDetectionMethodFailed;
+    std::wstring wallpaperDetectionMethodReturnedInvalid;
+    std::wstring wallpaperDetectionFallbackSelected;
+    std::wstring wallpaperDetectionFallbackDisabled;
+    std::wstring fitModeChangeDetected;
+    std::wstring dpiScaleChangeDetected;
+
+    std::wstring enabledText;
+    std::wstring disabledText;
+    std::wstring onText;
+    std::wstring offText;
+
+    std::wstring trayTip;
+    std::wstring exeLabel;
+    std::wstring iniLabel;
+    std::wstring logFileLabel;
+    std::wstring timingLog;
+    std::wstring timingPreLogInitialization;
+    std::wstring timingIniDefaultStringLoading;
+    std::wstring timingGdiStartup;
+    std::wstring timingAssetGeneration;
+    std::wstring timingAppRegistration;
+    std::wstring timingGenerationTotal;
+    std::wstring powerShellRegistrationSummary;
+    std::wstring usePowerShellSummary;
+    std::wstring wallpaperDetectionFallbackSummary;
+    std::wstring trayIconSummary;
+    std::wstring consoleSummary;
+    std::wstring loggingSummary;
+    std::wstring generateOnStartupSummary;
+    std::wstring generateOnStartupOnlyWhenChangedSummary;
+    std::wstring hideDisabledEntriesSummary;
+    std::wstring generateDesktopIconForDisabledEntriesSummary;
+    std::wstring deleteDisabledAssetsSummary;
+    std::wstring generateScaleAutoSummary;
+    std::wstring generateScaleSummary;
+    std::wstring showMenuAsDropdownSummary;
+    std::wstring notificationsSummary;
+    std::wstring powerShellEnabledMode;
+    std::wstring comPreferredMode;
+    std::wstring consoleAllocated;
+    std::wstring startupGenerationEnabled;
+    std::wstring startupGenerationSkippedUnchanged;
+    std::wstring startupGenerationSkippedNoWallpaper;
+    std::wstring manualGenerationRequested;
+    std::wstring generationRequestBusy;
+    std::wstring emptyWallpaper;
+    std::wstring futureLogEntriesNewPath;
+    std::wstring futureLogEntriesRenamedPath;
+    std::wstring futureLogEntriesDefaultPath;
+    std::wstring listenWallpaperState;
+    std::wstring listenFitState;
+    std::wstring disableFittingState;
+    std::wstring assetToggleState;
+    std::wstring comRegistrationStatusFailed;
+    std::wstring gdiPlusStartupFailedTitle;
+    std::wstring gdiPlusStartupFailedMessage;
+    std::wstring gdiPlusOperationFailed;
+    std::wstring win32FailureFmt;
+    std::wstring logPathChanged;
+    std::wstring logPathRenamed;
+    std::wstring logPathReset;
+    std::wstring logWriteFailed;
+    std::wstring iniWriteFailed;
+    std::wstring listenFitAutoDisabled;
+    std::wstring singleInstanceScopeSummary;
+    std::wstring singleInstanceMutexFailure;
+
+    std::wstring fitFill;
+    std::wstring fitFit;
+    std::wstring fitStretch;
+    std::wstring fitCenter;
+    std::wstring fitTile;
+    std::wstring fitSpan;
+
+    std::wstring notifyOnStartState;
+    std::wstring notifyOnSuccessState;
+    std::wstring notifyOnFailureState;
+    std::wstring notifyOnBusyState;
+    std::wstring notifyOnAlreadyRunningState;
+    std::wstring notifyOnSingleInstanceFailureState;
+    std::wstring unspecifiedReason;
+
+    std::wstring changeDetected;
+    std::wstring advancedTitle;
+    std::wstring pollIntervalLabel;
+    std::wstring confirmMsLabel;
+    std::wstring debounceMinMsLabel;
+    std::wstring pollInitialDebounceBypassMsLabel;
+    std::wstring iniCacheRefreshMsLabel;
+    std::wstring wallpaperDetectionLogRepeatMsLabel;
+    std::wstring notificationTimeoutMsLabel;
+    std::wstring shutdownInitialNoticeMsLabel;
+    std::wstring shutdownRepeatNoticeMsLabel;
+    std::wstring singleInstanceSignalRetriesLabel;
+    std::wstring singleInstanceSignalDelayMsLabel;
+    std::wstring comRegistrationTimeoutMsLabel;
+    std::wstring comRegistrationCancelWaitMsLabel;
+    std::wstring trayIconHiddenDelayMsLabel;
+    std::wstring logBufferLinesLabel;
+    std::wstring logAppendLockWaitMsLabel;
+    std::wstring powerShellExeLabel;
+    std::wstring powerShellPollMsLabel;
+    std::wstring powerShellTimeoutMsLabel;
+    std::wstring powerShellTerminateWaitMsLabel;
+    std::wstring powerShellOutputMessageBoxCharsLabel;
+    std::wstring registrationUnresolvedBlockMsLabel;
+    std::wstring savePngReplaceRetriesLabel;
+    std::wstring savePngReplaceRetryDelayMsLabel;
+    std::wstring timeoutInfiniteText;
+    std::wstring manifestTitle;
+    std::wstring manifestIdentityNameLabel;
+    std::wstring manifestPublisherLabel;
+    std::wstring manifestPackageVersionLabel;
+    std::wstring manifestDisplayNameLabel;
+    std::wstring manifestPublisherDisplayNameLabel;
+    std::wstring manifestDescriptionLabel;
+    std::wstring manifestExecutableLabel;
+    std::wstring manifestApplicationIdLabel;
+    std::wstring manifestTargetDeviceFamilyNameLabel;
+    std::wstring manifestMinVersionLabel;
+    std::wstring manifestMaxVersionTestedLabel;
+    std::wstring manifestResourceLanguageLabel;
+    std::wstring manifestPropertiesLogoLabel;
+    std::wstring manifestSquare150x150LogoLabel;
+    std::wstring manifestSquare44x44LogoLabel;
+    std::wstring manifestSquare71x71LogoLabel;
+    std::wstring manifestWide310x150LogoLabel;
+    std::wstring manifestSquare310x310LogoLabel;
+    std::wstring manifestBackgroundColorLabel;
+    std::wstring manifestShowNameOnTilesLabel;
+    std::wstring manifestEntryPointLabel;
+    std::wstring manifestRestrictedCapabilityLabel;
+    std::wstring manifestSourceLabel;
+    std::wstring manifestSourceExisting;
+    std::wstring manifestSourceGenerated;
+    std::wstring manifestOverwriteExistingLabel;
+    std::wstring manifestOverwriteExistingToggle;
+    std::wstring wallpaperDetectionMethodLabel;
+    std::wstring singleInstanceFailureActionLabel;
+    std::wstring singleInstanceActionIgnore;
+    std::wstring singleInstanceActionWarn;
+    std::wstring singleInstanceActionExit;
+    std::wstring singleInstanceActionCrash;
+    std::wstring unknownError;
+
+    std::wstring logFileFilter;
+};
+
+static UiStrings g_ui;
+static const wchar_t* StateEnabled(bool v) { return v ? g_ui.enabledText.c_str() : g_ui.disabledText.c_str(); }
+static const wchar_t* StateOn(bool v) { return v ? g_ui.onText.c_str() : g_ui.offText.c_str(); }
+
+static std::wstring ExceptionTextToWide(const std::exception& ex)
+{
+    const char* text = ex.what();
+    if (text && *text)
+    {
+        size_t len = 0;
+        while (text[len])
+            ++len;
+
+        const BYTE* begin = reinterpret_cast<const BYTE*>(text);
+        std::vector<BYTE> bytes(begin, begin + len);
+        std::wstring decoded = DecodeProcessOutput(bytes);
+        if (!decoded.empty())
+            return decoded;
+    }
+
+    return g_ui.unknownException.empty() ? L"unknown exception" : g_ui.unknownException;
+}
+
+static std::wstring UnknownExceptionText()
+{
+    return g_ui.unknownException.empty() ? L"unknown exception" : g_ui.unknownException;
+}
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+static void WriteConsoleLine(const std::wstring& line)
+{
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode))
+    {
+        std::wstring s = line;
+        s += L"\r\n";
+        DWORD written = 0;
+        if (WriteConsoleW(h, s.c_str(), (DWORD)s.size(), &written, nullptr))
+            return;
+    }
+
+    fwprintf(stdout, L"%ls\n", line.c_str());
+    fflush(stdout);
+}
+
+static std::wstring GetLogPathCopy()
+{
+    std::lock_guard<std::mutex> lk(g_pathMutex);
+    return g_logPath;
+}
+
+static void SetLogPathCopy(const std::wstring& path)
+{
+    std::lock_guard<std::mutex> lk(g_pathMutex);
+    g_logPath = path;
+}
+
+std::wstring Win32ErrorString(DWORD err);
+static std::wstring FormatWideV(const wchar_t* fmt, va_list ap);
+std::wstring FormatWide(const wchar_t* fmt, ...);
+
+void Log(const wchar_t* fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    std::wstring msg = FormatWideV(fmt, ap);
+    va_end(ap);
+
+    SYSTEMTIME st; GetLocalTime(&st);
+    wchar_t ts[64];
+    swprintf(ts, 64, L"[%04d-%02d-%02d %02d:%02d:%02d] ",
+        static_cast<int>(st.wYear),
+        static_cast<int>(st.wMonth),
+        static_cast<int>(st.wDay),
+        static_cast<int>(st.wHour),
+        static_cast<int>(st.wMinute),
+        static_cast<int>(st.wSecond));
+
+    std::wstring line = ts + msg;
+
+    std::lock_guard<std::mutex> lk(g_logMutex);
+    int configuredMaxLogLines = g_logBufferLines.load();
+    if (configuredMaxLogLines < 1) configuredMaxLogLines = 1;
+    if (configuredMaxLogLines > 100000) configuredMaxLogLines = 100000;
+    size_t maxLogLines = static_cast<size_t>(configuredMaxLogLines);
+    auto bufferLine = [&](const std::wstring& bufferedLine)
+    {
+        while (g_logBuf.size() >= maxLogLines)
+            g_logBuf.erase(g_logBuf.begin());
+        g_logBuf.push_back(bufferedLine);
+        if (g_console)
+            WriteConsoleLine(bufferedLine);
+    };
+
+    bufferLine(line);
+
+    if (g_logging)
+    {
+        std::wstring logPath = GetLogPathCopy();
+        if (!logPath.empty())
+        {
+            if (AppendUtf8TextFile(logPath, line + L"\r\n"))
+            {
+                g_logWriteFailureReported = false;
+            }
+            else
+            {
+                DWORD err = GetLastError();
+                if (err == ERROR_SUCCESS)
+                    err = ERROR_WRITE_FAULT;
+                if (!g_logWriteFailureReported.exchange(true))
+                {
+                    const wchar_t* failureFmt = g_ui.logWriteFailed.empty()
+                        ? L"[!] Log file write failed (error %lu: %s): %s"
+                        : g_ui.logWriteFailed.c_str();
+                    std::wstring failureLine = ts + FormatWide(failureFmt, err, Win32ErrorString(err).c_str(), logPath.c_str());
+                    bufferLine(failureLine);
+                }
+            }
+        }
+    }
+}
+
+void LogText(const std::wstring& text)
+{
+    Log(L"%ls", text.c_str());
+}
+
+static void BindConsoleStreams()
+{
+    FILE* f = nullptr;
+    freopen_s(&f, "CONOUT$", "w", stdout);
+    freopen_s(&f, "CONOUT$", "w", stderr);
+    freopen_s(&f, "CONIN$", "r", stdin);
+    ConfigureConsoleCP();
+}
+
+static void ReplayLogBufferToConsole()
+{
+    std::lock_guard<std::mutex> lk(g_logMutex);
+    for (const auto& line : g_logBuf)
+        WriteConsoleLine(line);
+}
+
+static void LogWin32FailureText(const wchar_t* what, DWORD err)
+{
+    Log(g_ui.win32FailureFmt.c_str(), what, err, Win32ErrorString(err).c_str());
+}
+
+static void ApplyConsoleSetting(bool enable, bool writeIni, bool logState)
+{
+    std::lock_guard<std::mutex> applyLock(g_consoleApplyMutex);
+    bool attached = GetConsoleWindow() != nullptr;
+
+    if (enable)
+    {
+        if (g_consoleAttached && attached)
+        {
+            g_console = true;
+        }
+        else
+        {
+            if (!attached)
+            {
+                if (!AllocConsole())
+                {
+                    DWORD err = GetLastError();
+                    g_console = false;
+                    g_consoleAttached = false;
+                    LogWin32FailureText(L"AllocConsole", err);
+                    if (writeIni)
+                        IniWrite(L"Settings", L"ShowConsole", L"0");
+                    return;
+                }
+                attached = true;
+            }
+
+            if (!SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE))
+                LogWin32FailureText(L"SetConsoleCtrlHandler", GetLastError());
+            BindConsoleStreams();
+            g_consoleAttached = true;
+            g_console = true;
+            ReplayLogBufferToConsole();
+            LogText(g_ui.consoleAllocated);
+        }
+    }
+    else
+    {
+        if (attached || g_consoleAttached)
+            FreeConsole();
+        g_consoleAttached = false;
+        g_console = false;
+    }
+
+    if (writeIni)
+        IniWrite(L"Settings", L"ShowConsole", g_console ? L"1" : L"0");
+    if (logState)
+        Log(g_ui.consoleSummary.c_str(), StateOn(g_console));
+}
+
+static void FlushStartupWarnings()
+{
+    std::vector<std::wstring> warnings;
+    {
+        std::lock_guard<std::mutex> lk(g_startupWarningMutex);
+        warnings.swap(g_startupWarnings);
+    }
+
+    for (const auto& warning : warnings)
+        LogText(warning);
+}
+
+int IniReadI(const wchar_t* s, const wchar_t* k, int d)
+{
+    std::wstring value;
+    if (!ReadIniValueCached(s, k, value))
+        return d;
+
+    std::wstring trimmed = TrimCopy(value);
+    if (trimmed.empty())
+        return d;
+
+    errno = 0;
+    wchar_t* end = nullptr;
+    long parsed = wcstol(trimmed.c_str(), &end, 10);
+    if (end == trimmed.c_str() || errno == ERANGE || parsed < INT_MIN || parsed > INT_MAX)
+        return d;
+
+    while (end && *end && iswspace(*end) != 0)
+        ++end;
+    if (end && *end)
+        return d;
+
+    return static_cast<int>(parsed);
+}
+
+static int ClampInt(int value, int minValue, int maxValue)
+{
+    return std::max(minValue, std::min(value, maxValue));
+}
+
+static int ElapsedMs(steady_clock::time_point start, steady_clock::time_point end)
+{
+    auto ms = duration_cast<milliseconds>(end - start).count();
+    if (ms < 0) return 0;
+    if (ms > INT_MAX) return INT_MAX;
+    return static_cast<int>(ms);
+}
+
+static int IniReadClampedI(const wchar_t* s, const wchar_t* k, int d, int minValue, int maxValue)
+{
+    return ClampInt(IniReadI(s, k, d), minValue, maxValue);
+}
+
+static std::wstring EffectiveConfiguredLogPath();
+
+static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
+{
+    g_logging = IniReadI(L"Settings", L"Logging", 1) != 0;
+    if (includeTrayIcon)
+        g_tray = IniReadI(L"Settings", L"TrayIcon", 1) != 0;
+    SetLogPathCopy(EffectiveConfiguredLogPath());
+
+    ApplyConsoleSetting(IniReadI(L"Settings", L"ShowConsole", 0) != 0, false, false);
+    g_generateOnStartup = IniReadI(L"Settings", L"GenerateOnStartup", 1) != 0;
+    g_generateOnStartupOnlyWhenChanged = IniReadI(L"Settings", L"GenerateOnStartupOnlyWhenChanged", 1) != 0;
+    g_hideDisabled = IniReadI(L"Settings", L"HideDisabledEntries", 0) != 0;
+    g_generateDesktopIconForDisabledEntries = IniReadI(L"Settings", L"GenerateDesktopIconForDisabledEntries", 1) != 0;
+    g_deleteDisabledAssets = IniReadI(L"Settings", L"DeleteDisabledAssets", 0) != 0;
+    g_generateScaleAuto = IniReadI(L"Settings", L"GenerateScaleAuto", 1) != 0;
+    g_generateScale100 = IniReadI(L"Settings", L"GenerateScale100", 1) != 0;
+    g_generateScale125 = IniReadI(L"Settings", L"GenerateScale125", 1) != 0;
+    g_generateScale150 = IniReadI(L"Settings", L"GenerateScale150", 1) != 0;
+    g_generateScale200 = IniReadI(L"Settings", L"GenerateScale200", 0) != 0;
+    g_generateScale400 = IniReadI(L"Settings", L"GenerateScale400", 0) != 0;
+    g_showMenuAsDropdown = IniReadI(L"Settings", L"ShowMenuAsDropdown", 1) != 0;
+    g_notificationsEnabled = IniReadI(L"Settings", L"NotificationsEnabled", 1) != 0;
+    g_notifyOnStart = IniReadI(L"Settings", L"NotifyOnStart", 0) != 0;
+    g_notifyOnSuccess = IniReadI(L"Settings", L"NotifyOnSuccess", 0) != 0;
+    g_notifyOnFailure = IniReadI(L"Settings", L"NotifyOnFailure", 1) != 0;
+    g_notifyOnBusy = IniReadI(L"Settings", L"NotifyOnBusy", 0) != 0;
+    g_notifyOnAlreadyRunning = IniReadI(L"Settings", L"NotifyOnAlreadyRunning", 1) != 0;
+    g_notifyOnSingleInstanceFailure = IniReadI(L"Settings", L"NotifyOnSingleInstanceFailure", 1) != 0;
+    g_listenWallpaper = IniReadI(L"Settings", L"ListenWallpaper", 1) != 0;
+    g_listenFit = IniReadI(L"Settings", L"ListenFit", 1) != 0;
+    g_disableFitting = IniReadI(L"Settings", L"DisableFitting", 0) != 0;
+    g_wallpaperDetectionFallbackOnInvalid = IniReadI(L"Settings", L"WallpaperDetectionFallbackOnInvalid", 1) != 0;
+    g_notificationTimeoutMs = IniReadClampedI(L"Settings", L"NotificationTimeoutMs", 4000, 1000, 60000);
+    g_shutdownInitialNoticeMs = IniReadClampedI(L"Settings", L"ShutdownInitialNoticeMs", 1000, 250, 60000);
+    g_shutdownRepeatNoticeMs = IniReadClampedI(L"Settings", L"ShutdownRepeatNoticeMs", 5000, 250, 60000);
+    g_trayIconHiddenDelayMs = IniReadClampedI(L"Settings", L"TrayIconHiddenDelayMs", 750, 0, 10000);
+    g_logBufferLines = IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000);
+    g_logAppendLockWaitMs = IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000);
+    g_pollInitialDebounceBypassMs = IniReadClampedI(L"Settings", L"PollInitialDebounceBypassMs", 5000, 0, 60000);
+    g_wallpaperDetectionLogRepeatMs = IniReadClampedI(L"Settings", L"WallpaperDetectionLogRepeatMs", 60000, 0, 3600000);
+    g_powerShellOutputMessageBoxChars = IniReadClampedI(L"Settings", L"PowerShellOutputMessageBoxChars", 6000, 0, 60000);
+    g_iniCacheRefreshMs = IniReadClampedI(L"Settings", L"IniCacheRefreshMs", 250, 0, 60000);
+}
+
+static void ReloadRuntimeSettingsFromIni()
+{
+    // TrayIcon is session-scoped after startup; do not resurrect or hide it
+    // because the INI changed while this instance is already running.
+    LoadRuntimeSettingsFromIni(false);
+}
+
+static std::wstring IntToWString(int value)
+{
+    wchar_t buf[32];
+    swprintf(buf, _countof(buf), L"%d", value);
+    return buf;
+}
+
+static std::wstring TimeoutDisplayText(int timeoutMs)
+{
+    if (timeoutMs <= 0)
+        return g_ui.timeoutInfiniteText.empty() ? L"infinite" : g_ui.timeoutInfiniteText;
+    return IntToWString(timeoutMs) + L" ms";
+}
+
+std::wstring IniReadS(const wchar_t* s, const wchar_t* k, const wchar_t* d)
+{
+    std::wstring out;
+    if (ReadIniValueCached(s, k, out))
+        return out;
+    return d ? d : L"";
+}
+
+void IniWrite(const wchar_t* s, const wchar_t* k, const wchar_t* v)
+{
+    if (WriteIniValue(s, k, v))
+        return;
+
+    DWORD err = GetLastError();
+    if (err == ERROR_SUCCESS)
+        err = ERROR_WRITE_FAULT;
+
+    const wchar_t* fmt = g_ui.iniWriteFailed.empty()
+        ? L"[!] Failed to write INI value [%s] %s (error %lu: %s)."
+        : g_ui.iniWriteFailed.c_str();
+    Log(fmt, s ? s : L"", k ? k : L"", err, Win32ErrorString(err).c_str());
+}
+
+std::wstring GetExeDir()
+{
+    size_t pos = g_exePath.find_last_of(L"\\/");
+    if (pos == std::wstring::npos) return L".";
+    return g_exePath.substr(0, pos);
+}
+
+std::wstring MakeFileUri(const std::wstring& path)
+{
+    DWORD need = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
+    if (!need) return L"";
+
+    std::vector<wchar_t> full(need);
+    DWORD n = GetFullPathNameW(path.c_str(), (DWORD)full.size(), full.data(), nullptr);
+    if (!n || n >= full.size()) return L"";
+
+    std::wstring p(full.data(), n);
+    if (p.rfind(L"\\\\?\\UNC\\", 0) == 0)
+        p = L"\\\\" + p.substr(8);
+    else if (p.rfind(L"\\\\?\\", 0) == 0)
+        p.erase(0, 4);
+
+    size_t uriCapSize = std::max<size_t>(260, p.size() * 3 + 32);
+    if (uriCapSize <= MAXDWORD)
+    {
+        std::vector<wchar_t> uri(uriCapSize);
+        DWORD uriLen = static_cast<DWORD>(uri.size());
+        if (SUCCEEDED(UrlCreateFromPathW(p.c_str(), uri.data(), &uriLen, 0)) && uri[0])
+            return std::wstring(uri.data());
+    }
+
+    std::replace(p.begin(), p.end(), L'\\', L'/');
+
+    std::wstring esc;
+    esc.reserve(p.size() * 3);
+    for (wchar_t ch : p)
+    {
+        switch (ch)
+        {
+        case L' ':  esc += L"%20"; break;
+        case L'#':  esc += L"%23"; break;
+        case L'%':  esc += L"%25"; break;
+        case L'?':  esc += L"%3F"; break;
+        case L'"':  esc += L"%22"; break;
+        case L'<':  esc += L"%3C"; break;
+        case L'>':  esc += L"%3E"; break;
+        case L'|':  esc += L"%7C"; break;
+        default:    esc.push_back(ch); break;
+        }
+    }
+
+    if (esc.size() >= 2 && esc[1] == L':')
+        esc.insert(esc.begin(), L'/');
+
+    if (esc.rfind(L"//", 0) == 0)
+        return L"file:" + esc;
+
+    return L"file://" + esc;
+}
+
+static bool IsAsciiAlpha(wchar_t ch)
+{
+    return (ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z');
+}
+
+static bool IsAsciiDigit(wchar_t ch)
+{
+    return ch >= L'0' && ch <= L'9';
+}
+
+static bool IsAsciiAlnum(wchar_t ch)
+{
+    return IsAsciiAlpha(ch) || IsAsciiDigit(ch);
+}
+
+static std::wstring ExeBaseName()
+{
+    std::wstring name = g_exePath;
+    size_t slash = name.find_last_of(L"\\/");
+    if (slash != std::wstring::npos)
+        name.erase(0, slash + 1);
+
+    size_t dot = name.find_last_of(L'.');
+    if (dot != std::wstring::npos)
+        name.erase(dot);
+
+    return name.empty() ? L"GenerateAssets" : name;
+}
+
+static std::wstring DefaultLogPath()
+{
+    return GetExeDir() + L"\\" + ExeBaseName() + L".log";
+}
+
+static std::wstring EffectiveConfiguredLogPath()
+{
+    std::wstring configured = TrimCopy(IniReadS(L"Settings", L"LogPath", L""));
+    return configured.empty() ? DefaultLogPath() : configured;
+}
+
+static std::wstring ManifestSetting(const wchar_t* key, const wchar_t* fallback, const wchar_t* legacySettingsKey = nullptr)
+{
+    std::wstring value = TrimCopy(IniReadS(L"Manifest", key, L""));
+    if (!value.empty())
+        return value;
+
+    if (legacySettingsKey)
+        value = TrimCopy(IniReadS(L"Settings", legacySettingsKey, L""));
+    if (!value.empty())
+        return value;
+    return fallback ? fallback : L"";
+}
+
+static bool TryParseIntStrict(const std::wstring& value, int& parsed)
+{
+    std::wstring trimmed = TrimCopy(value);
+    if (trimmed.empty())
+        return false;
+
+    errno = 0;
+    wchar_t* end = nullptr;
+    long result = wcstol(trimmed.c_str(), &end, 10);
+    if (end == trimmed.c_str() || errno == ERANGE || result < INT_MIN || result > INT_MAX)
+        return false;
+
+    while (end && *end && iswspace(*end) != 0)
+        ++end;
+    if (end && *end)
+        return false;
+
+    parsed = static_cast<int>(result);
+    return true;
+}
+
+static bool TryParseBoolStrict(const std::wstring& value, bool& parsed)
+{
+    std::wstring lowered = ToLowerCopy(TrimCopy(value));
+    if (lowered == L"1" || lowered == L"true" || lowered == L"yes" || lowered == L"on")
+    {
+        parsed = true;
+        return true;
+    }
+    if (lowered == L"0" || lowered == L"false" || lowered == L"no" || lowered == L"off")
+    {
+        parsed = false;
+        return true;
+    }
+    return false;
+}
+
+static int ManifestSettingI(const wchar_t* key, int fallback, const wchar_t* legacySettingsKey = nullptr)
+{
+    std::wstring value = TrimCopy(IniReadS(L"Manifest", key, L""));
+    if (value.empty() && legacySettingsKey)
+        value = TrimCopy(IniReadS(L"Settings", legacySettingsKey, L""));
+    if (value.empty())
+        return fallback;
+
+    int parsed = 0;
+    if (TryParseIntStrict(value, parsed))
+        return parsed;
+
+    bool boolValue = false;
+    if (TryParseBoolStrict(value, boolValue))
+        return boolValue ? 1 : 0;
+
+    return fallback;
+}
+
+static std::wstring TrimNonAlnumEnds(std::wstring value)
+{
+    while (!value.empty() && !IsAsciiAlnum(value.front()))
+        value.erase(value.begin());
+    while (!value.empty() && !IsAsciiAlnum(value.back()))
+        value.pop_back();
+    return value;
+}
+
+static std::wstring SanitizeManifestIdentityName(const std::wstring& raw)
+{
+    std::wstring lower = ToLowerCopy(raw);
+    std::wstring out;
+    bool lastSeparator = false;
+    for (wchar_t ch : lower)
+    {
+        if (IsAsciiAlnum(ch))
+        {
+            out.push_back(ch);
+            lastSeparator = false;
+        }
+        else if (ch == L'.' || ch == L'-')
+        {
+            if (!out.empty() && !lastSeparator)
+            {
+                out.push_back(ch);
+                lastSeparator = true;
+            }
+        }
+        else if (!out.empty() && !lastSeparator)
+        {
+            out.push_back(L'.');
+            lastSeparator = true;
+        }
+    }
+
+    out = TrimNonAlnumEnds(out);
+    if (out.empty())
+        out = L"generateassets";
+
+    if (out.find(L'.') == std::wstring::npos)
+        out = L"dev.local." + out;
+
+    if (out.size() > 50)
+    {
+        out.resize(50);
+        out = TrimNonAlnumEnds(out);
+    }
+
+    return out.empty() ? L"dev.local.generateassets" : out;
+}
+
+static std::wstring SanitizeManifestToken(const std::wstring& raw, const wchar_t* fallback)
+{
+    std::wstring out;
+    for (wchar_t ch : raw)
+    {
+        if (IsAsciiAlnum(ch) || ch == L'.' || ch == L'_' || ch == L'-')
+            out.push_back(ch);
+    }
+
+    out = TrimNonAlnumEnds(out);
+    if (out.empty())
+        out = fallback ? fallback : L"App";
+    if (!IsAsciiAlpha(out.front()))
+        out = std::wstring(L"App") + out;
+    return out;
+}
+
+static bool IsManifestVersion(const std::wstring& version)
+{
+    size_t pos = 0;
+    int parts = 0;
+    while (pos <= version.size())
+    {
+        size_t dot = version.find(L'.', pos);
+        size_t end = dot == std::wstring::npos ? version.size() : dot;
+        if (end == pos)
+            return false;
+
+        errno = 0;
+        wchar_t* parseEnd = nullptr;
+        std::wstring part = version.substr(pos, end - pos);
+        unsigned long value = wcstoul(part.c_str(), &parseEnd, 10);
+        if (parseEnd == part.c_str() || *parseEnd != L'\0' || errno == ERANGE || value > 65535)
+            return false;
+
+        ++parts;
+        if (dot == std::wstring::npos)
+            break;
+        pos = dot + 1;
+    }
+
+    return parts == 4;
+}
+
+static std::wstring EffectiveManifestIdentityName()
+{
+    std::wstring configured = ManifestSetting(L"IdentityName", L"", L"ManifestIdentityName");
+    if (configured.empty())
+        configured = L"dev.local." + ExeBaseName();
+    return SanitizeManifestIdentityName(configured);
+}
+
+static std::wstring EffectiveManifestPublisher()
+{
+    std::wstring publisher = ManifestSetting(L"Publisher", L"CN=DesktopTileGenerator", L"ManifestPublisher");
+    if (ToLowerCopy(publisher).rfind(L"cn=", 0) != 0)
+        publisher = L"CN=" + publisher;
+    return publisher;
+}
+
+static std::wstring EffectiveManifestPackageVersion()
+{
+    std::wstring version = ManifestSetting(L"PackageVersion", L"1.0.0.0", L"ManifestPackageVersion");
+    return IsManifestVersion(version) ? version : L"1.0.0.0";
+}
+
+static std::wstring EffectiveManifestDisplayName()
+{
+    return ManifestSetting(L"DisplayName", L"Desktop", L"ManifestDisplayName");
+}
+
+static std::wstring EffectiveManifestPublisherDisplayName()
+{
+    return ManifestSetting(L"PublisherDisplayName", L"Desktop Tile Generator", L"ManifestPublisherDisplayName");
+}
+
+static std::wstring EffectiveManifestDescription()
+{
+    return ManifestSetting(L"Description", L"Desktop", L"ManifestDescription");
+}
+
+static std::wstring EffectiveManifestExecutable()
+{
+    return ManifestSetting(L"Executable", L"rundll32.exe", L"ManifestExecutable");
+}
+
+static std::wstring EffectiveManifestApplicationId()
+{
+    return SanitizeManifestToken(ManifestSetting(L"ApplicationId", L"App", L"ManifestApplicationId"), L"App");
+}
+
+static std::wstring EffectiveManifestMinVersion()
+{
+    std::wstring version = ManifestSetting(L"MinVersion", L"10.0.15063.0", L"ManifestMinVersion");
+    return IsManifestVersion(version) ? version : L"10.0.15063.0";
+}
+
+static std::wstring EffectiveManifestMaxVersionTested()
+{
+    std::wstring version = ManifestSetting(L"MaxVersionTested", L"10.0.15063.0", L"ManifestMaxVersionTested");
+    return IsManifestVersion(version) ? version : L"10.0.15063.0";
+}
+
+static std::wstring EffectiveManifestTargetDeviceFamilyName()
+{
+    return ManifestSetting(L"TargetDeviceFamilyName", L"Windows.Desktop", L"ManifestTargetDeviceFamilyName");
+}
+
+static std::wstring EffectiveManifestResourceLanguage()
+{
+    return ManifestSetting(L"ResourceLanguage", L"en-us", L"ManifestResourceLanguage");
+}
+
+static std::wstring EffectiveManifestPropertiesLogo()
+{
+    return ManifestSetting(L"PropertiesLogo", L"Assets\\StoreLogo.png", L"ManifestPropertiesLogo");
+}
+
+static std::wstring EffectiveManifestSquare150x150Logo()
+{
+    return ManifestSetting(L"Square150x150Logo", L"Assets\\MediumTile.png", L"ManifestSquare150x150Logo");
+}
+
+static std::wstring EffectiveManifestSquare44x44Logo()
+{
+    return ManifestSetting(L"Square44x44Logo", L"Assets\\Square44x44Logo.png", L"ManifestSquare44x44Logo");
+}
+
+static std::wstring EffectiveManifestSquare71x71Logo()
+{
+    return ManifestSetting(L"Square71x71Logo", L"Assets\\SmallTile.png", L"ManifestSquare71x71Logo");
+}
+
+static std::wstring EffectiveManifestWide310x150Logo()
+{
+    return ManifestSetting(L"Wide310x150Logo", L"Assets\\WideTile.png", L"ManifestWide310x150Logo");
+}
+
+static std::wstring EffectiveManifestSquare310x310Logo()
+{
+    return ManifestSetting(L"Square310x310Logo", L"Assets\\LargeTile.png", L"ManifestSquare310x310Logo");
+}
+
+static std::wstring EffectiveManifestBackgroundColor()
+{
+    return ManifestSetting(L"BackgroundColor", L"transparent", L"ManifestBackgroundColor");
+}
+
+static std::wstring EffectiveManifestEntryPoint()
+{
+    return ManifestSetting(L"EntryPoint", L"Windows.FullTrustApplication", L"ManifestEntryPoint");
+}
+
+static std::wstring EffectiveManifestRestrictedCapability()
+{
+    std::wstring value = ManifestSetting(L"RestrictedCapability", L"runFullTrust", L"ManifestRestrictedCapability");
+    std::wstring lowered = ToLowerCopy(TrimCopy(value));
+    if (lowered == L"0" || lowered == L"false" || lowered == L"off" || lowered == L"none")
+        return L"";
+    return value;
+}
+
+static std::wstring XmlEscape(const std::wstring& value)
+{
+    std::wstring out;
+    out.reserve(value.size());
+    for (wchar_t ch : value)
+    {
+        switch (ch)
+        {
+        case L'&': out += L"&amp;"; break;
+        case L'<': out += L"&lt;"; break;
+        case L'>': out += L"&gt;"; break;
+        case L'"': out += L"&quot;"; break;
+        case L'\'': out += L"&apos;"; break;
+        default: out.push_back(ch); break;
+        }
+    }
+    return out;
+}
+
+static std::wstring XmlUnescape(std::wstring value)
+{
+    struct Replacement { const wchar_t* from; const wchar_t* to; };
+    static const Replacement replacements[] = {
+        { L"&quot;", L"\"" },
+        { L"&apos;", L"'" },
+        { L"&lt;", L"<" },
+        { L"&gt;", L">" },
+        { L"&amp;", L"&" },
+    };
+
+    for (const auto& r : replacements)
+    {
+        size_t pos = 0;
+        while ((pos = value.find(r.from, pos)) != std::wstring::npos)
+        {
+            value.replace(pos, wcslen(r.from), r.to);
+            pos += wcslen(r.to);
+        }
+    }
+    return value;
+}
+
+static bool IsXmlNameChar(wchar_t ch)
+{
+    return IsAsciiAlnum(ch) || ch == L'_' || ch == L'-' || ch == L'.' || ch == L':';
+}
+
+static std::wstring XmlLocalName(std::wstring name)
+{
+    size_t colon = name.find_last_of(L':');
+    if (colon != std::wstring::npos)
+        name.erase(0, colon + 1);
+    return name;
+}
+
+static std::wstring XmlLocalNameFromTagStart(const wchar_t* tagStart)
+{
+    std::wstring s = TrimCopy(tagStart ? tagStart : L"");
+    if (!s.empty() && s.front() == L'<')
+        s.erase(s.begin());
+    s = TrimCopy(s);
+
+    size_t end = 0;
+    while (end < s.size() && IsXmlNameChar(s[end]))
+        ++end;
+    return XmlLocalName(s.substr(0, end));
+}
+
+static bool FindXmlTagEnd(const std::wstring& xml, size_t tagStart, size_t& tagEnd)
+{
+    wchar_t quote = 0;
+    for (size_t i = tagStart + 1; i < xml.size(); ++i)
+    {
+        wchar_t ch = xml[i];
+        if (quote)
+        {
+            if (ch == quote)
+                quote = 0;
+            continue;
+        }
+        if (ch == L'\'' || ch == L'"')
+        {
+            quote = ch;
+            continue;
+        }
+        if (ch == L'>')
+        {
+            tagEnd = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool FindXmlStartTagByLocalName(const std::wstring& xml, const std::wstring& localName, size_t from, size_t& tagStart, size_t& nameEnd, size_t& tagEnd)
+{
+    if (localName.empty())
+        return false;
+
+    size_t pos = from;
+    while ((pos = xml.find(L'<', pos)) != std::wstring::npos)
+    {
+        size_t nameStart = pos + 1;
+        if (nameStart >= xml.size())
+            return false;
+        if (xml[nameStart] == L'/' || xml[nameStart] == L'!' || xml[nameStart] == L'?')
+        {
+            ++pos;
+            continue;
+        }
+
+        size_t end = nameStart;
+        while (end < xml.size() && IsXmlNameChar(xml[end]))
+            ++end;
+        if (end == nameStart)
+        {
+            ++pos;
+            continue;
+        }
+
+        std::wstring found = XmlLocalName(xml.substr(nameStart, end - nameStart));
+        if (IEquals(found, localName) && FindXmlTagEnd(xml, pos, tagEnd))
+        {
+            tagStart = pos;
+            nameEnd = end;
+            return true;
+        }
+        ++pos;
+    }
+    return false;
+}
+
+static bool FindXmlEndTagByLocalName(const std::wstring& xml, const std::wstring& localName, size_t from, size_t& tagStart)
+{
+    size_t pos = from;
+    while ((pos = xml.find(L"</", pos)) != std::wstring::npos)
+    {
+        size_t nameStart = pos + 2;
+        size_t end = nameStart;
+        while (end < xml.size() && IsXmlNameChar(xml[end]))
+            ++end;
+        if (end == nameStart)
+        {
+            pos += 2;
+            continue;
+        }
+
+        std::wstring found = XmlLocalName(xml.substr(nameStart, end - nameStart));
+        if (IEquals(found, localName))
+        {
+            tagStart = pos;
+            return true;
+        }
+        pos += 2;
+    }
+    return false;
+}
+
+static bool ExtractXmlAttributeFromTag(const std::wstring& xml, const wchar_t* tagStartNeedle, const wchar_t* attributeName, std::wstring& out)
+{
+    size_t tag = 0;
+    size_t nameEnd = 0;
+    size_t tagEnd = 0;
+    std::wstring tagLocalName = XmlLocalNameFromTagStart(tagStartNeedle);
+    if (!FindXmlStartTagByLocalName(xml, tagLocalName, 0, tag, nameEnd, tagEnd))
+        return false;
+
+    std::wstring wantedAttribute = XmlLocalName(attributeName ? attributeName : L"");
+    size_t pos = nameEnd;
+    while (pos < tagEnd)
+    {
+        while (pos < tagEnd && iswspace(xml[pos]) != 0)
+            ++pos;
+        if (pos >= tagEnd || xml[pos] == L'/')
+            break;
+
+        size_t attrStart = pos;
+        while (pos < tagEnd && IsXmlNameChar(xml[pos]))
+            ++pos;
+        if (pos == attrStart)
+        {
+            ++pos;
+            continue;
+        }
+
+        std::wstring attrLocalName = XmlLocalName(xml.substr(attrStart, pos - attrStart));
+        while (pos < tagEnd && iswspace(xml[pos]) != 0)
+            ++pos;
+        if (pos >= tagEnd || xml[pos] != L'=')
+            continue;
+        ++pos;
+        while (pos < tagEnd && iswspace(xml[pos]) != 0)
+            ++pos;
+        if (pos >= tagEnd)
+            break;
+
+        wchar_t quote = xml[pos];
+        size_t valueStart = pos;
+        size_t valueEnd = pos;
+        if (quote == L'\'' || quote == L'"')
+        {
+            valueStart = pos + 1;
+            valueEnd = xml.find(quote, valueStart);
+            if (valueEnd == std::wstring::npos || valueEnd > tagEnd)
+                return false;
+            pos = valueEnd + 1;
+        }
+        else
+        {
+            while (valueEnd < tagEnd && iswspace(xml[valueEnd]) == 0)
+                ++valueEnd;
+            pos = valueEnd;
+        }
+
+        if (IEquals(attrLocalName, wantedAttribute))
+        {
+            out = XmlUnescape(xml.substr(valueStart, valueEnd - valueStart));
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool ExtractXmlElementText(const std::wstring& xml, const wchar_t* elementName, std::wstring& out)
+{
+    std::wstring localName = XmlLocalName(elementName ? elementName : L"");
+    size_t tag = 0;
+    size_t nameEnd = 0;
+    size_t tagEnd = 0;
+    if (!FindXmlStartTagByLocalName(xml, localName, 0, tag, nameEnd, tagEnd))
+        return false;
+
+    if (tagEnd > tag && xml[tagEnd - 1] == L'/')
+        return false;
+
+    size_t closeStart = 0;
+    if (!FindXmlEndTagByLocalName(xml, localName, tagEnd + 1, closeStart))
+        return false;
+
+    out = XmlUnescape(xml.substr(tagEnd + 1, closeStart - tagEnd - 1));
+    return true;
+}
+
+static bool ManifestOverwriteExisting()
+{
+    return ManifestSettingI(L"OverwriteExisting", 0, L"ManifestOverwriteExisting") != 0;
+}
+
+static std::vector<std::wstring> EffectiveManifestShowNameOnTiles()
+{
+    std::wstring configured = ManifestSetting(
+        L"ShowNameOnTiles",
+        L"square150x150Logo,wide310x150Logo,square310x310Logo",
+        L"ManifestShowNameOnTiles");
+    std::wstring lowered = ToLowerCopy(TrimCopy(configured));
+    if (lowered == L"0" || lowered == L"false" || lowered == L"off" || lowered == L"none")
+        return {};
+
+    std::vector<std::wstring> tiles;
+    size_t pos = 0;
+    while (pos <= configured.size())
+    {
+        size_t comma = configured.find_first_of(L",;", pos);
+        size_t end = comma == std::wstring::npos ? configured.size() : comma;
+        std::wstring tile = TrimCopy(configured.substr(pos, end - pos));
+        if (!tile.empty())
+            tiles.push_back(tile);
+        if (comma == std::wstring::npos)
+            break;
+        pos = comma + 1;
+    }
+    return tiles;
+}
+
+#pragma warning(push)
+#pragma warning(disable: 4820) // Padding in this display-only struct is harmless.
+struct ManifestDisplayInfo
+{
+    bool existing = false;
+    std::wstring identityName;
+    std::wstring publisher;
+    std::wstring packageVersion;
+    std::wstring displayName;
+    std::wstring publisherDisplayName;
+    std::wstring description;
+    std::wstring executable;
+    std::wstring applicationId;
+    std::wstring targetDeviceFamilyName;
+    std::wstring minVersion;
+    std::wstring maxVersionTested;
+    std::wstring resourceLanguage;
+    std::wstring propertiesLogo;
+    std::wstring square150x150Logo;
+    std::wstring square44x44Logo;
+    std::wstring square71x71Logo;
+    std::wstring wide310x150Logo;
+    std::wstring square310x310Logo;
+    std::wstring backgroundColor;
+    std::wstring showNameOnTiles;
+    std::wstring entryPoint;
+    std::wstring restrictedCapability;
+};
+#pragma warning(pop)
+
+static ManifestDisplayInfo CurrentManifestDisplayInfo()
+{
+    ManifestDisplayInfo info;
+    info.identityName = EffectiveManifestIdentityName();
+    info.publisher = EffectiveManifestPublisher();
+    info.packageVersion = EffectiveManifestPackageVersion();
+    info.displayName = EffectiveManifestDisplayName();
+    info.publisherDisplayName = EffectiveManifestPublisherDisplayName();
+    info.description = EffectiveManifestDescription();
+    info.executable = EffectiveManifestExecutable();
+    info.applicationId = EffectiveManifestApplicationId();
+    info.targetDeviceFamilyName = EffectiveManifestTargetDeviceFamilyName();
+    info.minVersion = EffectiveManifestMinVersion();
+    info.maxVersionTested = EffectiveManifestMaxVersionTested();
+    info.resourceLanguage = EffectiveManifestResourceLanguage();
+    info.propertiesLogo = EffectiveManifestPropertiesLogo();
+    info.square150x150Logo = EffectiveManifestSquare150x150Logo();
+    info.square44x44Logo = EffectiveManifestSquare44x44Logo();
+    info.square71x71Logo = EffectiveManifestSquare71x71Logo();
+    info.wide310x150Logo = EffectiveManifestWide310x150Logo();
+    info.square310x310Logo = EffectiveManifestSquare310x310Logo();
+    info.backgroundColor = EffectiveManifestBackgroundColor();
+    info.showNameOnTiles = ManifestSetting(L"ShowNameOnTiles", L"square150x150Logo,wide310x150Logo,square310x310Logo", L"ManifestShowNameOnTiles");
+    info.entryPoint = EffectiveManifestEntryPoint();
+    info.restrictedCapability = EffectiveManifestRestrictedCapability();
+
+    std::wstring manifestPath = GetExeDir() + L"\\AppxManifest.xml";
+    DWORD attrs = GetFileAttributesW(manifestPath.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY))
+        return info;
+
+    std::wstring xml;
+    if (!ReadTextFile(manifestPath, xml))
+        return info;
+
+    info.existing = true;
+    ExtractXmlAttributeFromTag(xml, L"<Identity", L"Name", info.identityName);
+    ExtractXmlAttributeFromTag(xml, L"<Identity", L"Publisher", info.publisher);
+    ExtractXmlAttributeFromTag(xml, L"<Identity", L"Version", info.packageVersion);
+    ExtractXmlElementText(xml, L"DisplayName", info.displayName);
+    ExtractXmlElementText(xml, L"PublisherDisplayName", info.publisherDisplayName);
+    ExtractXmlAttributeFromTag(xml, L"<Application ", L"Executable", info.executable);
+    ExtractXmlAttributeFromTag(xml, L"<Application ", L"Id", info.applicationId);
+    ExtractXmlAttributeFromTag(xml, L"<Application ", L"EntryPoint", info.entryPoint);
+    ExtractXmlAttributeFromTag(xml, L"<TargetDeviceFamily", L"Name", info.targetDeviceFamilyName);
+    ExtractXmlAttributeFromTag(xml, L"<TargetDeviceFamily", L"MinVersion", info.minVersion);
+    ExtractXmlAttributeFromTag(xml, L"<TargetDeviceFamily", L"MaxVersionTested", info.maxVersionTested);
+    ExtractXmlAttributeFromTag(xml, L"<Resource", L"Language", info.resourceLanguage);
+    ExtractXmlElementText(xml, L"Logo", info.propertiesLogo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Description", info.description);
+    ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Square150x150Logo", info.square150x150Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Square44x44Logo", info.square44x44Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"BackgroundColor", info.backgroundColor);
+    ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Square71x71Logo", info.square71x71Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Wide310x150Logo", info.wide310x150Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Square310x310Logo", info.square310x310Logo);
+    ExtractXmlAttributeFromTag(xml, L"<rescap:Capability", L"Name", info.restrictedCapability);
+    return info;
+}
+
+static std::wstring BuildDefaultAppxManifest()
+{
+    std::wstring identity = XmlEscape(EffectiveManifestIdentityName());
+    std::wstring publisher = XmlEscape(EffectiveManifestPublisher());
+    std::wstring version = XmlEscape(EffectiveManifestPackageVersion());
+    std::wstring displayName = XmlEscape(EffectiveManifestDisplayName());
+    std::wstring publisherDisplayName = XmlEscape(EffectiveManifestPublisherDisplayName());
+    std::wstring description = XmlEscape(EffectiveManifestDescription());
+    std::wstring executable = XmlEscape(EffectiveManifestExecutable());
+    std::wstring appId = XmlEscape(EffectiveManifestApplicationId());
+    std::wstring targetDeviceFamilyName = XmlEscape(EffectiveManifestTargetDeviceFamilyName());
+    std::wstring minVersion = XmlEscape(EffectiveManifestMinVersion());
+    std::wstring maxVersionTested = XmlEscape(EffectiveManifestMaxVersionTested());
+    std::wstring resourceLanguage = XmlEscape(EffectiveManifestResourceLanguage());
+    std::wstring propertiesLogo = XmlEscape(EffectiveManifestPropertiesLogo());
+    std::wstring square150x150Logo = XmlEscape(EffectiveManifestSquare150x150Logo());
+    std::wstring square44x44Logo = XmlEscape(EffectiveManifestSquare44x44Logo());
+    std::wstring square71x71Logo = XmlEscape(EffectiveManifestSquare71x71Logo());
+    std::wstring wide310x150Logo = XmlEscape(EffectiveManifestWide310x150Logo());
+    std::wstring square310x310Logo = XmlEscape(EffectiveManifestSquare310x310Logo());
+    std::wstring backgroundColor = XmlEscape(EffectiveManifestBackgroundColor());
+    std::wstring entryPoint = XmlEscape(EffectiveManifestEntryPoint());
+    std::wstring restrictedCapability = XmlEscape(EffectiveManifestRestrictedCapability());
+    std::vector<std::wstring> showNameOnTiles = EffectiveManifestShowNameOnTiles();
+
+    std::wstring manifest;
+    manifest += L"<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n";
+    manifest += L"<Package\r\n";
+    manifest += L"  xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\"\r\n";
+    manifest += L"  xmlns:uap=\"http://schemas.microsoft.com/appx/manifest/uap/windows10\"\r\n";
+    manifest += L"  xmlns:rescap=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities\"\r\n";
+    manifest += L"  IgnorableNamespaces=\"uap rescap\">\r\n\r\n";
+    manifest += L"  <Identity\r\n";
+    manifest += L"    Name=\"" + identity + L"\"\r\n";
+    manifest += L"    Publisher=\"" + publisher + L"\"\r\n";
+    manifest += L"    Version=\"" + version + L"\" />\r\n\r\n";
+    manifest += L"  <Properties>\r\n";
+    manifest += L"    <DisplayName>" + displayName + L"</DisplayName>\r\n";
+    manifest += L"    <PublisherDisplayName>" + publisherDisplayName + L"</PublisherDisplayName>\r\n";
+    manifest += L"    <Logo>" + propertiesLogo + L"</Logo>\r\n";
+    manifest += L"  </Properties>\r\n\r\n";
+    manifest += L"  <Dependencies>\r\n";
+    manifest += L"    <TargetDeviceFamily Name=\"" + targetDeviceFamilyName + L"\"\r\n";
+    manifest += L"                        MinVersion=\"" + minVersion + L"\"\r\n";
+    manifest += L"                        MaxVersionTested=\"" + maxVersionTested + L"\" />\r\n";
+    manifest += L"  </Dependencies>\r\n\r\n";
+    manifest += L"  <Resources>\r\n";
+    manifest += L"    <Resource Language=\"" + resourceLanguage + L"\" />\r\n";
+    manifest += L"  </Resources>\r\n\r\n";
+    manifest += L"  <Applications>\r\n";
+    manifest += L"    <Application Id=\"" + appId + L"\"\r\n";
+    manifest += L"                 Executable=\"" + executable + L"\"\r\n";
+    manifest += L"                 EntryPoint=\"" + entryPoint + L"\">\r\n\r\n";
+    manifest += L"      <uap:VisualElements\r\n";
+    manifest += L"        DisplayName=\"" + displayName + L"\"\r\n";
+    manifest += L"        Description=\"" + description + L"\"\r\n";
+    manifest += L"        Square150x150Logo=\"" + square150x150Logo + L"\"\r\n";
+    manifest += L"        Square44x44Logo=\"" + square44x44Logo + L"\"\r\n";
+    manifest += L"        BackgroundColor=\"" + backgroundColor + L"\">\r\n\r\n";
+    manifest += L"        <uap:DefaultTile\r\n";
+    manifest += L"          Square71x71Logo=\"" + square71x71Logo + L"\"\r\n";
+    manifest += L"          Wide310x150Logo=\"" + wide310x150Logo + L"\"\r\n";
+    manifest += L"          Square310x310Logo=\"" + square310x310Logo + L"\">\r\n\r\n";
+    if (!showNameOnTiles.empty())
+    {
+        manifest += L"          <uap:ShowNameOnTiles>\r\n";
+        for (const std::wstring& tile : showNameOnTiles)
+            manifest += L"            <uap:ShowOn Tile=\"" + XmlEscape(tile) + L"\" />\r\n";
+        manifest += L"          </uap:ShowNameOnTiles>\r\n\r\n";
+    }
+    manifest += L"        </uap:DefaultTile>\r\n\r\n";
+    manifest += L"      </uap:VisualElements>\r\n";
+    manifest += L"    </Application>\r\n";
+    manifest += L"  </Applications>\r\n\r\n";
+    if (!restrictedCapability.empty())
+    {
+        manifest += L"  <Capabilities>\r\n";
+        manifest += L"    <rescap:Capability Name=\"" + restrictedCapability + L"\" />\r\n";
+        manifest += L"  </Capabilities>\r\n\r\n";
+    }
+    manifest += L"</Package>\r\n";
+    return manifest;
+}
+
+static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD& error)
+{
+    manifestPath = GetExeDir() + L"\\AppxManifest.xml";
+    created = false;
+    error = ERROR_SUCCESS;
+
+    DWORD attrs = GetFileAttributesW(manifestPath.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES)
+    {
+        if ((attrs & FILE_ATTRIBUTE_DIRECTORY) == 0)
+        {
+            if (ManifestOverwriteExisting())
+            {
+                if (WriteUtf8BomTextFile(manifestPath, BuildDefaultAppxManifest()))
+                {
+                    Log(g_ui.appxManifestOverwritten.c_str(), manifestPath.c_str());
+                    return true;
+                }
+
+                error = GetLastError();
+                if (error == ERROR_SUCCESS)
+                    error = ERROR_WRITE_FAULT;
+                return false;
+            }
+            Log(g_ui.appxManifestExisting.c_str(), manifestPath.c_str());
+            return true;
+        }
+        error = ERROR_ALREADY_EXISTS;
+        SetLastError(error);
+        return false;
+    }
+
+    if (WriteUtf8BomTextFile(manifestPath, BuildDefaultAppxManifest()))
+    {
+        created = true;
+        return true;
+    }
+
+    error = GetLastError();
+    if (error == ERROR_SUCCESS)
+        error = ERROR_WRITE_FAULT;
+    return false;
+}
+
+std::wstring Win32ErrorString(DWORD err)
+{
+    wchar_t* buf = nullptr;
+    DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+    DWORD len = FormatMessageW(flags, nullptr, err, 0, (LPWSTR)&buf, 0, nullptr);
+
+    std::wstring msg;
+    if (len && buf)
+    {
+        msg.assign(buf, buf + len);
+        while (!msg.empty() && (msg.back() == L'\r' || msg.back() == L'\n' || msg.back() == L'.' || msg.back() == L' '))
+            msg.pop_back();
+    }
+    else
+    {
+        msg = g_ui.unknownError.empty() ? L"Unknown error" : g_ui.unknownError;
+    }
+
+    if (buf) LocalFree(buf);
+    return msg;
+}
+
+void LogWin32Failure(const wchar_t* what, DWORD err = GetLastError())
+{
+    Log(g_ui.win32FailureFmt.c_str(), what, err, Win32ErrorString(err).c_str());
+}
+
+static std::wstring FormatWideV(const wchar_t* fmt, va_list ap)
+{
+    if (!fmt)
+        return L"";
+
+    va_list measure;
+    va_copy(measure, ap);
+    int needed = _vscwprintf(fmt, measure);
+    va_end(measure);
+
+    if (needed < 0)
+        return L"";
+
+    std::vector<wchar_t> buf(static_cast<size_t>(needed) + 1, L'\0');
+    _vsnwprintf_s(buf.data(), buf.size(), _TRUNCATE, fmt, ap);
+    std::wstring result(buf.data());
+    return result;
+}
+
+std::wstring FormatWide(const wchar_t* fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    std::wstring result = FormatWideV(fmt, ap);
+    va_end(ap);
+    return result;
+}
+
+template <size_t N>
+static void CopyTruncated(wchar_t (&dest)[N], const std::wstring& text)
+{
+    wcsncpy_s(dest, N, text.c_str(), _TRUNCATE);
+}
+
+void NotifyTrayBalloon(const std::wstring& title, const std::wstring& msg, DWORD icon = NIIF_INFO, bool force = false)
+{
+    NOTIFYICONDATAW nid{};
+    {
+        std::lock_guard<std::mutex> lk(g_trayMutex);
+        if ((!force && !g_tray) || (!force && !g_notificationsEnabled) || !g_nid.hWnd)
+            return;
+        nid = g_nid;
+    }
+    nid.uFlags = NIF_INFO;
+    CopyTruncated(nid.szInfoTitle, title);
+    CopyTruncated(nid.szInfo, msg);
+    nid.dwInfoFlags = icon;
+    nid.uTimeout = static_cast<UINT>(ClampInt(g_notificationTimeoutMs.load(), 1000, 60000));
+    if (!Shell_NotifyIconW(NIM_MODIFY, &nid))
+        LogWin32Failure(L"Shell_NotifyIconW(NIM_MODIFY)");
+}
+
+static TextNormalizeResult NormalizeIniToUtf8BomIfNeeded()
+{
+    return NormalizeTextFileToUtf8Bom(g_iniPath);
+}
+
+void EnsureIniDefaults()
+{
+    std::lock_guard<std::mutex> writeLock(g_iniWriteMutex);
+
+    std::wstring iniText;
+    if (!ReadIniFileForMutation(iniText))
+    {
+        QueueStartupWarning(L"[!] Failed to read INI while applying setting defaults (error " + std::to_wstring(GetLastError()) + L").");
+        return;
+    }
+
+    bool haveText = true;
+    auto doc = ParseIniDocument(iniText);
+    bool changed = false;
+
+    for (const auto& d : g_defaults)
+    {
+        std::wstring value;
+        if (!haveText || !ReadIniValueFromDoc(doc, d.section, d.key, value))
+        {
+            if (!WriteIniValueToText(iniText, d.section, d.key, d.value))
+            {
+                QueueStartupWarning(L"[!] Failed to update INI setting default: [" + std::wstring(d.section ? d.section : L"") + L"] " + std::wstring(d.key ? d.key : L""));
+                return;
+            }
+            changed = true;
+            doc = ParseIniDocument(iniText);
+            haveText = true;
+        }
+    }
+
+    std::vector<IniEntry> powerShellErrorEntries;
+    if (!ReadIniSectionFromDoc(doc, POWERSHELL_ERROR_MESSAGES_SECTION, powerShellErrorEntries))
+    {
+        for (const auto& d : g_powerShellErrorMessageDefaults)
+        {
+            if (!WriteIniValueToText(iniText, d.section, d.key, d.value))
+            {
+                QueueStartupWarning(L"[!] Failed to update INI PowerShell error default: [" + std::wstring(d.section ? d.section : L"") + L"] " + std::wstring(d.key ? d.key : L""));
+                return;
+            }
+            changed = true;
+            doc = ParseIniDocument(iniText);
+        }
+    }
+
+    if (changed && !WriteUtf8BomTextFile(g_iniPath, iniText))
+    {
+        QueueStartupWarning(L"[!] Failed to write INI setting defaults (error " + std::to_wstring(GetLastError()) + L").");
+    }
+    else if (changed)
+    {
+        std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+        SetIniCacheUnlocked(iniText);
+    }
+}
+
+
+void LoadUiStrings()
+{
+    g_ui.generalTitle = IniReadS(L"Strings", L"GeneralTitle", L"General:");
+    g_ui.loggingTitle = IniReadS(L"Strings", L"LoggingTitle", L"Logging:");
+    g_ui.wallpaperFittingTitle = IniReadS(L"Strings", L"WallpaperFittingTitle", L"Wallpaper Fitting:");
+    g_ui.methodsTitle = IniReadS(L"Strings", L"MethodsTitle", L"Methods:");
+    g_ui.assetsTitle = IniReadS(L"Strings", L"AssetsTitle", L"Assets:");
+    g_ui.dpiScalesTitle = IniReadS(L"Strings", L"DpiScalesTitle", L"DPI Scales:");
+
+    g_ui.listenWallpaper = IniReadS(L"Strings", L"ListenWallpaper", L"Listen Wallpaper");
+    g_ui.trayIcon = IniReadS(L"Strings", L"TrayIcon", L"Tray Icon (this session)");
+    g_ui.usePowerShell = IniReadS(L"Strings", L"UsePowerShell", L"PowerShell only");
+    g_ui.generateOnStartup = IniReadS(L"Strings", L"GenerateOnStartup", L"Generate on Startup");
+    g_ui.generateOnStartupOnlyWhenChanged = IniReadS(L"Strings", L"GenerateOnStartupOnlyWhenChanged", L"Generate on Startup only when changed");
+    g_ui.hideDisabledEntries = IniReadS(L"Strings", L"HideDisabledEntries", L"Hide disabled entries");
+    g_ui.generateDesktopIconForDisabledEntries = IniReadS(L"Strings", L"GenerateDesktopIconForDisabledEntries", L"Generate Desktop Icon for disabled entries");
+    g_ui.deleteDisabledAssets = IniReadS(L"Strings", L"DeleteDisabledAssets", L"Auto-delete disabled asset files");
+    g_ui.wallpaperDetectionFallback = IniReadS(L"Strings", L"WallpaperDetectionFallback", L"Fallback when selected path is invalid");
+    g_ui.generateScaleAuto = IniReadS(L"Strings", L"GenerateScaleAuto", L"Auto: current DPI scale");
+    g_ui.generateScale100 = IniReadS(L"Strings", L"GenerateScale100", L"100%");
+    g_ui.generateScale125 = IniReadS(L"Strings", L"GenerateScale125", L"125%");
+    g_ui.generateScale150 = IniReadS(L"Strings", L"GenerateScale150", L"150%");
+    g_ui.generateScale200 = IniReadS(L"Strings", L"GenerateScale200", L"200%");
+    g_ui.generateScale400 = IniReadS(L"Strings", L"GenerateScale400", L"400%");
+    g_ui.currentDpiScaleLabel = IniReadS(L"Strings", L"CurrentDpiScaleLabel", L"Current DPI: %d%% (asset scale: %d%%)");
+    g_ui.showMenuAsDropdown = IniReadS(L"Strings", L"ShowMenuAsDropdown", L"Show menu as dropdown");
+    g_ui.notificationsTitle = IniReadS(L"Strings", L"NotificationsTitle", L"Notifications:");
+    g_ui.notificationsEnabled = IniReadS(L"Strings", L"NotificationsEnabled", L"Enable all tray notifications");
+    g_ui.notifyOnStart = IniReadS(L"Strings", L"NotifyOnStart", L"Notify when generation starts");
+    g_ui.notifyOnSuccess = IniReadS(L"Strings", L"NotifyOnSuccess", L"Notify when generation succeeds");
+    g_ui.notifyOnFailure = IniReadS(L"Strings", L"NotifyOnFailure", L"Notify when generation, wallpaper, or registration fails");
+    g_ui.notifyOnBusy = IniReadS(L"Strings", L"NotifyOnBusy", L"Notify when generation is already running");
+    g_ui.notifyOnAlreadyRunning = IniReadS(L"Strings", L"NotifyOnAlreadyRunning", L"Notify when the app is already running");
+    g_ui.notifyOnSingleInstanceFailure = IniReadS(L"Strings", L"NotifyOnSingleInstanceFailure", L"Notify when single-instance protection fails");
+    g_ui.showConsole = IniReadS(L"Strings", L"ShowConsole", L"Show Console");
+    g_ui.generateNow = IniReadS(L"Strings", L"GenerateNow", L"Generate now");
+
+    g_ui.loggingEnable = IniReadS(L"Strings", L"LoggingEnable", L"Enable");
+    g_ui.changePath = IniReadS(L"Strings", L"ChangePath", L"Change path...");
+    g_ui.renamePath = IniReadS(L"Strings", L"RenamePath", L"Rename path...");
+    g_ui.openInExplorer = IniReadS(L"Strings", L"OpenInExplorer", L"Open in Explorer");
+    g_ui.resetDefault = IniReadS(L"Strings", L"ResetDefault", L"Reset to default");
+    g_ui.showPowerShellLog = IniReadS(L"Strings", L"ShowPowerShellLog", L"Show PowerShell Log");
+
+    g_ui.logPathPrefix = IniReadS(L"Strings", L"LogPathPrefix", L"Path: ");
+    g_ui.logPathTitle = IniReadS(L"Strings", L"LogPathTitle", L"Log Path");
+    g_ui.psStatusPrefix = IniReadS(L"Strings", L"PSStatusPrefix", L"PS Status: ");
+    g_ui.psStatusTitle = IniReadS(L"Strings", L"PSStatusTitle", L"PS Status");
+
+    g_ui.disableFitting = IniReadS(L"Strings", L"DisableFitting", L"Disable Fitting");
+    g_ui.listenFit = IniReadS(L"Strings", L"ListenFit", L"Listen Fit Mode");
+    g_ui.fitModePrefix = IniReadS(L"Strings", L"FitModePrefix", L"Fit Mode: ");
+    g_ui.fitModeForced = IniReadS(L"Strings", L"FitModeForced", L"Fit Mode: Fill (forced)");
+
+    g_ui.exitText = IniReadS(L"Strings", L"Exit", L"Exit");
+    g_ui.shutdownPendingTitle = IniReadS(L"Strings", L"ShutdownPendingTitle", L"Shutdown pending:");
+    g_ui.shutdownPendingReason = IniReadS(L"Strings", L"ShutdownPendingReason", L"Waiting for generation/registration: %s");
+    g_ui.cancelShutdown = IniReadS(L"Strings", L"CancelShutdown", L"Cancel shutdown");
+    g_ui.forceShutdown = IniReadS(L"Strings", L"ForceShutdown", L"Force shutdown");
+    g_ui.shutdownDelayedNotification = IniReadS(L"Strings", L"ShutdownDelayedNotification", L"Exit is waiting for generation/registration to finish: %s");
+    g_ui.shutdownRequested = IniReadS(L"Strings", L"ShutdownRequested", L"[i] Shutdown requested.");
+    g_ui.shutdownCancelled = IniReadS(L"Strings", L"ShutdownCancelled", L"[i] Shutdown cancelled.");
+    g_ui.forceShutdownRequested = IniReadS(L"Strings", L"ForceShutdownRequested", L"[!] Force shutdown requested.");
+
+    g_ui.renameDialogTitle = IniReadS(L"Strings", L"RenameDialogTitle", L"Rename Log Path");
+    g_ui.okText = IniReadS(L"Strings", L"OKText", L"OK");
+    g_ui.cancelText = IniReadS(L"Strings", L"CancelText", L"Cancel");
+    g_ui.errorTitle = IniReadS(L"Strings", L"ErrorTitle", L"Error");
+    g_ui.pathCannotBeEmpty = IniReadS(L"Strings", L"PathCannotBeEmpty", L"Path cannot be empty.");
+
+    g_ui.noPowerShellOutputTitle = IniReadS(L"Strings", L"NoPowerShellOutputTitle", L"PowerShell Output");
+    g_ui.noPowerShellOutput = IniReadS(L"Strings", L"NoPowerShellOutput", L"No PowerShell output.");
+    g_ui.powerShellOutputTruncated = IniReadS(L"Strings", L"PowerShellOutputTruncated", L"\r\n\r\n[i] Output truncated for display; see the log for the full output (%d characters hidden).");
+
+    g_ui.generateNowTitle = IniReadS(L"Strings", L"GenerateNowTitle", L"Generate Now");
+    g_ui.wallpaperNotFound = IniReadS(L"Strings", L"WallpaperNotFound", L"Could not detect current wallpaper.");
+    g_ui.currentWallpaperNotFound = IniReadS(L"Strings", L"CurrentWallpaperNotFound", L"Could not detect current wallpaper.");
+
+    g_ui.programStarting = IniReadS(L"Strings", L"ProgramStarting", L"Program starting...");
+    g_ui.notificationTitle = IniReadS(L"Strings", L"NotificationTitle", L"Desktop Tile Generator");
+    g_ui.notificationGenerationStarted = IniReadS(L"Strings", L"NotificationGenerationStarted", L"Wallpaper generation started.");
+    g_ui.notificationGenerationSuccess = IniReadS(L"Strings", L"NotificationGenerationSuccess", L"Wallpaper generation completed successfully.");
+    g_ui.notificationGenerationFailed = IniReadS(L"Strings", L"NotificationGenerationFailed", L"Wallpaper generation failed.");
+    g_ui.notificationGenerationBusy = IniReadS(L"Strings", L"NotificationGenerationBusy", L"Wallpaper generation is already running.");
+    g_ui.notificationAlreadyRunning = IniReadS(L"Strings", L"NotificationAlreadyRunning", L"Desktop Tile Generator is already running.");
+    g_ui.notificationAlreadyRunningTrayPersistent = IniReadS(L"Strings", L"NotificationAlreadyRunningTrayPersistent", L"Desktop Tile Generator is already running. Tray icon is enabled in the config, so it will stay visible after restart.");
+    g_ui.notificationAlreadyRunningTraySession = IniReadS(L"Strings", L"NotificationAlreadyRunningTraySession", L"Desktop Tile Generator is already running. Tray icon is visible for this session only; it will be hidden again after restart because TrayIcon=0 in the config.");
+    g_ui.notificationSingleInstanceFailure = IniReadS(L"Strings", L"NotificationSingleInstanceFailure", L"Single-instance protection failed; another copy may run.");
+    g_ui.notificationTrayIconHidden = IniReadS(L"Strings", L"NotificationTrayIconHidden", L"Tray icon hidden for this session. Run GenerateAssets.exe again to restore it.");
+    g_ui.manualGenerateTriggered = IniReadS(L"Strings", L"ManualGenerateTriggered", L"Manual generate triggered.");
+    g_ui.startingWallpaperGeneration = IniReadS(L"Strings", L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s.");
+    g_ui.wallpaperSource = IniReadS(L"Strings", L"WallpaperSource", L"Wallpaper source: %s");
+    g_ui.wallpaperImageLoaded = IniReadS(L"Strings", L"WallpaperImageLoaded", L"[i] Wallpaper image loaded (%d x %d).");
+    g_ui.renderModeSummary = IniReadS(L"Strings", L"RenderModeSummary", L"[i] Render fit mode: %s");
+    g_ui.assetsDirectoryReady = IniReadS(L"Strings", L"AssetsDirectoryReady", L"[i] Assets directory ready: %s");
+    g_ui.failedLoadWallpaper = IniReadS(L"Strings", L"FailedLoadWallpaper", L"Failed to load wallpaper image.");
+    g_ui.iniEncodingNormalized = IniReadS(L"Strings", L"IniEncodingNormalized", L"[i] INI file normalized to UTF-8 with BOM.");
+    g_ui.skippingAssetDisabled = IniReadS(L"Strings", L"SkippingAssetDisabled", L"Skipping %s (disabled in settings).");
+    g_ui.generatedDesktopIconAsset = IniReadS(L"Strings", L"GeneratedDesktopIconAsset", L"Generated desktop icon for disabled %s");
+    g_ui.activeScales = IniReadS(L"Strings", L"ActiveScales", L"[i] Active scales: %s");
+    g_ui.savedAsset = IniReadS(L"Strings", L"SavedAsset", L"Saved %s");
+    g_ui.savedScaledAsset = IniReadS(L"Strings", L"SavedScaledAsset", L"Saved %s (scale %d%%)");
+    g_ui.failedSaveAsset = IniReadS(L"Strings", L"FailedSaveAsset", L"Failed to save %s");
+    g_ui.failedSaveScaledAsset = IniReadS(L"Strings", L"FailedSaveScaledAsset", L"Failed to save %s (scale %d%%)");
+    g_ui.savePngInvalidInput = IniReadS(L"Strings", L"SavePngInvalidInput", L"[!] SavePNG skipped for %s: invalid bitmap, path, or PNG encoder.");
+    g_ui.savePngGdiFailure = IniReadS(L"Strings", L"SavePngGdiFailure", L"[!] SavePNG GDI+ save failed for %s (status=%d).");
+    g_ui.savePngReplaceFailed = IniReadS(L"Strings", L"SavePngReplaceFailed", L"[!] SavePNG replace failed for %s (temp=%s).");
+    g_ui.savePngReplaceRetrying = IniReadS(L"Strings", L"SavePngReplaceRetrying", L"[!] SavePNG replace attempt %d/%d failed for %s (error %lu: %s); retrying in %d ms.");
+    g_ui.deletedDisabledAsset = IniReadS(L"Strings", L"DeletedDisabledAsset", L"[i] Deleted disabled asset file: %s");
+    g_ui.failedDeleteDisabledAsset = IniReadS(L"Strings", L"FailedDeleteDisabledAsset", L"[!] Failed to delete disabled asset file: %s");
+
+    g_ui.reRegisteringManifest = IniReadS(L"Strings", L"ReRegisteringManifest", L"Re-registering AppxManifest due to regenerated assets.");
+    g_ui.appxManifestCreated = IniReadS(L"Strings", L"AppxManifestCreated", L"[i] Created AppxManifest.xml: %s");
+    g_ui.appxManifestExisting = IniReadS(L"Strings", L"AppxManifestExisting", L"[i] Using existing AppxManifest.xml: %s");
+    g_ui.appxManifestOverwritten = IniReadS(L"Strings", L"AppxManifestOverwritten", L"[i] Updated AppxManifest.xml from configured defaults: %s");
+    g_ui.appxManifestCreateFailed = IniReadS(L"Strings", L"AppxManifestCreateFailed", L"[!] Failed to create AppxManifest.xml: %s");
+    g_ui.manifestPath = IniReadS(L"Strings", L"ManifestPath", L"Manifest path: %s");
+    g_ui.usingComRegistration = IniReadS(L"Strings", L"UsingComRegistration", L"Using COM Appx registration...");
+    g_ui.comRegistrationUri = IniReadS(L"Strings", L"ComRegistrationUri", L"[i] COM registration URI: %s");
+    g_ui.comRegistrationTimeoutDetails = IniReadS(L"Strings", L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%s, cancel wait=%d ms");
+    g_ui.invalidManifestPath = IniReadS(L"Strings", L"InvalidManifestPath", L"Invalid manifest path.");
+    g_ui.comRegistrationSuccess = IniReadS(L"Strings", L"ComRegistrationSuccess", L"COM registration success.");
+    g_ui.comRegistrationTimedOut = IniReadS(L"Strings", L"ComRegistrationTimedOut", L"COM registration timed out.");
+    g_ui.comRegistrationFailed = IniReadS(L"Strings", L"ComRegistrationFailed", L"COM registration failed; falling back to PowerShell registration.");
+    g_ui.comRegistrationCancelStillRunning = IniReadS(L"Strings", L"ComRegistrationCancelStillRunning", L"COM registration is still running after cancel; PowerShell fallback skipped to avoid concurrent registration.");
+    g_ui.comRegistrationFallbackSkippedAfterTimeout = IniReadS(L"Strings", L"ComRegistrationFallbackSkippedAfterTimeout", L"COM registration timeout is unresolved; PowerShell fallback skipped to avoid concurrent registration.");
+    g_ui.comRegistrationException = IniReadS(L"Strings", L"ComRegistrationException", L"COM registration threw exception: 0x%08X");
+    g_ui.comExceptionMessage = IniReadS(L"Strings", L"ComExceptionMessage", L"COM message: %s");
+    g_ui.launchingPowerShellRegistration = IniReadS(L"Strings", L"LaunchingPowerShellRegistration", L"Launching PowerShell registration...");
+    g_ui.powerShellCommand = IniReadS(L"Strings", L"PowerShellCommand", L"Command: %s");
+    g_ui.powerShellLaunchDetails = IniReadS(L"Strings", L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%s, poll=%d ms, terminate wait=%d ms)");
+    g_ui.powerShellProcessStarted = IniReadS(L"Strings", L"PowerShellProcessStarted", L"[i] PowerShell process started (pid=%lu).");
+    g_ui.powerShellTerminateRequested = IniReadS(L"Strings", L"PowerShellTerminateRequested", L"[!] Terminating timed-out PowerShell process (pid=%lu).");
+    g_ui.powerShellTerminateFailed = IniReadS(L"Strings", L"PowerShellTerminateFailed", L"[!] Failed to terminate timed-out PowerShell process (pid=%lu).");
+    g_ui.powerShellStillRunningAfterTimeout = IniReadS(L"Strings", L"PowerShellStillRunningAfterTimeout", L"[!] PowerShell process is still running after terminate wait (pid=%lu).");
+    g_ui.powerShellTerminatedAfterTimeout = IniReadS(L"Strings", L"PowerShellTerminatedAfterTimeout", L"[i] PowerShell process terminated after timeout (pid=%lu).");
+    g_ui.powerShellCompleted = IniReadS(L"Strings", L"PowerShellCompleted", L"PowerShell registration completed successfully.");
+    g_ui.powerShellTimedOut = IniReadS(L"Strings", L"PowerShellTimedOut", L"PowerShell registration timed out.");
+    g_ui.powerShellErrorSideloadDisabled = IniReadS(L"Strings", L"PowerShellErrorSideloadDisabled", L"PowerShell error: Enable sideloading first!");
+    g_ui.powerShellErrorCode = IniReadS(L"Strings", L"PowerShellErrorCode", L"PowerShell registration failed with exit code 0x%08X.");
+    g_ui.powerShellOutputFollows = IniReadS(L"Strings", L"PowerShellOutputFollows", L"PowerShell output follows:");
+    g_ui.powerShellRegistrationFailed = IniReadS(L"Strings", L"PowerShellRegistrationFailed", L"PowerShell registration did not complete successfully.");
+    g_ui.assetGenerationFinished = IniReadS(L"Strings", L"AssetGenerationFinished", L"Asset generation and registration finished successfully.");
+    g_ui.assetGenerationFailed = IniReadS(L"Strings", L"AssetGenerationFailed", L"Asset generation did not complete successfully.");
+    g_ui.appRegistrationFailed = IniReadS(L"Strings", L"AppRegistrationFailed", L"App registration did not complete successfully.");
+    g_ui.generationUnhandledException = IniReadS(L"Strings", L"GenerationUnhandledException", L"[!] Generation worker caught an unhandled exception: %s");
+    g_ui.generationThreadStartFailed = IniReadS(L"Strings", L"GenerationThreadStartFailed", L"[!] Failed to start generation worker thread: %s");
+    g_ui.pollThreadUnhandledException = IniReadS(L"Strings", L"PollThreadUnhandledException", L"[!] Wallpaper poll thread stopped after an unhandled exception: %s");
+    g_ui.pollThreadStartFailed = IniReadS(L"Strings", L"PollThreadStartFailed", L"[!] Failed to start wallpaper poll thread: %s");
+    g_ui.unknownException = IniReadS(L"Strings", L"UnknownException", L"unknown exception");
+    g_ui.skippingRegistrationDueToAssetFailure = IniReadS(L"Strings", L"SkippingRegistrationDueToAssetFailure", L"[!] Skipping Appx registration because asset generation failed.");
+    g_ui.createAssetsDirectoryOperation = IniReadS(L"Strings", L"CreateAssetsDirectoryOperation", L"Create Assets directory");
+    g_ui.missingManifestAssets = IniReadS(L"Strings", L"MissingManifestAssets", L"[!] Registration failed and manifest assets are missing or invalid: %s");
+    g_ui.notificationMissingManifestAssets = IniReadS(L"Strings", L"NotificationMissingManifestAssets", L"Registration failed; one or more manifest assets are missing or invalid.");
+    g_ui.registrationBlockedUnresolved = IniReadS(L"Strings", L"RegistrationBlockedUnresolved", L"[!] Registration skipped because a previous registration is unresolved: %s");
+    g_ui.registrationUnresolvedMarked = IniReadS(L"Strings", L"RegistrationUnresolvedMarked", L"[!] Registration marked unresolved: %s");
+    g_ui.registrationUnresolvedCleared = IniReadS(L"Strings", L"RegistrationUnresolvedCleared", L"[i] Previous unresolved registration finished: %s");
+    g_ui.registrationUnresolvedExpired = IniReadS(L"Strings", L"RegistrationUnresolvedExpired", L"[!] Previous unresolved registration block expired; allowing registration again: %s");
+
+    g_ui.changeConfirmed = IniReadS(L"Strings", L"ChangeConfirmed", L"Change confirmed; regeneration allowed after debounce.");
+    g_ui.wallpaperAndFitChangeDetected = IniReadS(L"Strings", L"WallpaperAndFitChangeDetected", L"Wallpaper and fit mode change detected.");
+    g_ui.wallpaperChangeDetected = IniReadS(L"Strings", L"WallpaperChangeDetected", L"Wallpaper change detected.");
+    g_ui.wallpaperDetectionEmptyDuringPoll = IniReadS(L"Strings", L"WallpaperDetectionEmptyDuringPoll", L"[!] Wallpaper change ignored: wallpaper detection returned empty.");
+    g_ui.wallpaperDetectionEmptyUsingLast = IniReadS(L"Strings", L"WallpaperDetectionEmptyUsingLast", L"[!] Wallpaper detection returned empty during a fit/DPI-only change; using the last valid wallpaper path: %s");
+    g_ui.wallpaperDetectionMethodFailed = IniReadS(L"Strings", L"WallpaperDetectionMethodFailed", L"[!] Wallpaper detection method %s did not return a wallpaper path.");
+    g_ui.wallpaperDetectionMethodReturnedInvalid = IniReadS(L"Strings", L"WallpaperDetectionMethodReturnedInvalid", L"[!] Wallpaper detection method %s returned an unusable path: %s");
+    g_ui.wallpaperDetectionFallbackSelected = IniReadS(L"Strings", L"WallpaperDetectionFallbackSelected", L"[i] Wallpaper detection fallback selected %s: %s");
+    g_ui.wallpaperDetectionFallbackDisabled = IniReadS(L"Strings", L"WallpaperDetectionFallbackDisabled", L"[!] Wallpaper detection fallback disabled; using %s result as-is.");
+    g_ui.fitModeChangeDetected = IniReadS(L"Strings", L"FitModeChangeDetected", L"Fit mode change detected.");
+    g_ui.dpiScaleChangeDetected = IniReadS(L"Strings", L"DpiScaleChangeDetected", L"DPI scale change detected.");
+    g_ui.enabledText = IniReadS(L"Strings", L"EnabledText", L"enabled");
+    g_ui.disabledText = IniReadS(L"Strings", L"DisabledText", L"disabled");
+    g_ui.onText = IniReadS(L"Strings", L"OnText", L"on");
+    g_ui.offText = IniReadS(L"Strings", L"OffText", L"off");
+
+    g_ui.trayTip = IniReadS(L"Strings", L"TrayTip", L"Desktop Tile Generator");
+    g_ui.exeLabel = IniReadS(L"Strings", L"ExeLabel", L"[i] EXE: %s");
+    g_ui.iniLabel = IniReadS(L"Strings", L"IniLabel", L"[i] INI: %s");
+    g_ui.logFileLabel = IniReadS(L"Strings", L"LogFileLabel", L"[i] Log file: %s");
+    g_ui.timingLog = IniReadS(L"Strings", L"TimingLog", L"[i] Timing: %s = %d ms");
+    g_ui.timingPreLogInitialization = IniReadS(L"Strings", L"TimingPreLogInitialization", L"pre-log initialization");
+    g_ui.timingIniDefaultStringLoading = IniReadS(L"Strings", L"TimingIniDefaultStringLoading", L"INI/default/string loading");
+    g_ui.timingGdiStartup = IniReadS(L"Strings", L"TimingGdiStartup", L"GDI+ startup");
+    g_ui.timingAssetGeneration = IniReadS(L"Strings", L"TimingAssetGeneration", L"asset generation");
+    g_ui.timingAppRegistration = IniReadS(L"Strings", L"TimingAppRegistration", L"app registration");
+    g_ui.timingGenerationTotal = IniReadS(L"Strings", L"TimingGenerationTotal", L"generation total");
+    g_ui.powerShellRegistrationSummary = IniReadS(L"Strings", L"PowerShellRegistrationSummary", L"[i] PowerShell registration: %s");
+    g_ui.usePowerShellSummary = IniReadS(L"Strings", L"UsePowerShellSummary", L"[i] UsePowerShell = %d (%s)");
+    g_ui.wallpaperDetectionFallbackSummary = IniReadS(L"Strings", L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s");
+    g_ui.trayIconSummary = IniReadS(L"Strings", L"TrayIconSummary", L"[i] Tray icon: %s");
+    g_ui.consoleSummary = IniReadS(L"Strings", L"ConsoleSummary", L"[i] Console %s.");
+    g_ui.loggingSummary = IniReadS(L"Strings", L"LoggingSummary", L"[i] Logging %s.");
+    g_ui.generateOnStartupSummary = IniReadS(L"Strings", L"GenerateOnStartupSummary", L"[i] Generate on Startup: %s");
+    g_ui.generateOnStartupOnlyWhenChangedSummary = IniReadS(L"Strings", L"GenerateOnStartupOnlyWhenChangedSummary", L"[i] Startup generation only when changed: %s");
+    g_ui.hideDisabledEntriesSummary = IniReadS(L"Strings", L"HideDisabledEntriesSummary", L"[i] Hide disabled entries: %s");
+    g_ui.generateDesktopIconForDisabledEntriesSummary = IniReadS(L"Strings", L"GenerateDesktopIconForDisabledEntriesSummary", L"[i] Generate Desktop Icon for disabled entries: %s");
+    g_ui.deleteDisabledAssetsSummary = IniReadS(L"Strings", L"DeleteDisabledAssetsSummary", L"[i] Auto-delete disabled asset files: %s");
+    g_ui.generateScaleAutoSummary = IniReadS(L"Strings", L"GenerateScaleAutoSummary", L"[i] Generate current DPI scale automatically: %s");
+    g_ui.generateScaleSummary = IniReadS(L"Strings", L"GenerateScaleSummary", L"[i] Generate %d%% scale assets: %s");
+    g_ui.showMenuAsDropdownSummary = IniReadS(L"Strings", L"ShowMenuAsDropdownSummary", L"[i] Show menu as dropdown: %s");
+    g_ui.notificationsSummary = IniReadS(L"Strings", L"NotificationsSummary", L"[i] Tray notifications: %s (generation start=%s, generation success=%s, generation failure=%s, busy warning=%s, already running=%s, protection failure=%s)");
+    g_ui.powerShellEnabledMode = IniReadS(L"Strings", L"PowerShellEnabledMode", L"PowerShell enabled");
+    g_ui.comPreferredMode = IniReadS(L"Strings", L"ComPreferredMode", L"COM preferred with PowerShell fallback");
+    g_ui.consoleAllocated = IniReadS(L"Strings", L"ConsoleAllocated", L"[i] Console allocated.");
+    g_ui.startupGenerationEnabled = IniReadS(L"Strings", L"StartupGenerationEnabled", L"[i] Startup generation enabled.");
+    g_ui.startupGenerationSkippedUnchanged = IniReadS(L"Strings", L"StartupGenerationSkippedUnchanged", L"[i] Startup generation skipped: wallpaper/config unchanged.");
+    g_ui.startupGenerationSkippedNoWallpaper = IniReadS(L"Strings", L"StartupGenerationSkippedNoWallpaper", L"[!] Startup generation skipped: no wallpaper detected.");
+    g_ui.manualGenerationRequested = IniReadS(L"Strings", L"ManualGenerationRequested", L"[i] Manual generation requested from the tray menu.");
+    g_ui.generationRequestBusy = IniReadS(L"Strings", L"GenerationRequestBusy", L"[!] Generation request ignored: another operation is already running.");
+    g_ui.emptyWallpaper = IniReadS(L"Strings", L"EmptyWallpaper", L"[!] Empty wallpaper.");
+    g_ui.futureLogEntriesNewPath = IniReadS(L"Strings", L"FutureLogEntriesNewPath", L"[i] Future log entries will be written to the new path.");
+    g_ui.futureLogEntriesRenamedPath = IniReadS(L"Strings", L"FutureLogEntriesRenamedPath", L"[i] Future log entries will be written to the renamed path.");
+    g_ui.futureLogEntriesDefaultPath = IniReadS(L"Strings", L"FutureLogEntriesDefaultPath", L"[i] Future log entries will be written to the default path.");
+    g_ui.listenWallpaperState = IniReadS(L"Strings", L"ListenWallpaperState", L"[i] ListenWallpaper = %d");
+    g_ui.listenFitState = IniReadS(L"Strings", L"ListenFitState", L"[i] ListenFit = %d");
+    g_ui.disableFittingState = IniReadS(L"Strings", L"DisableFittingState", L"[i] DisableFitting = %d");
+    g_ui.assetToggleState = IniReadS(L"Strings", L"AssetToggleState", L"[i] Asset %s %s.");
+    g_ui.comRegistrationStatusFailed = IniReadS(L"Strings", L"ComRegistrationStatusFailed", L"[!] COM registration failed (status=%d)");
+    g_ui.gdiPlusStartupFailedTitle = IniReadS(L"Strings", L"GdiPlusStartupFailedTitle", L"GDI+");
+    g_ui.gdiPlusStartupFailedMessage = IniReadS(L"Strings", L"GdiPlusStartupFailedMessage", L"GDI+ startup failed");
+    g_ui.gdiPlusOperationFailed = IniReadS(L"Strings", L"GdiPlusOperationFailed", L"[!] GDI+ %s failed (status=%d).");
+    g_ui.win32FailureFmt = IniReadS(L"Strings", L"Win32FailureFmt", L"[!] %s failed (error %lu: %s)");
+    g_ui.logPathChanged = IniReadS(L"Strings", L"LogPathChanged", L"[i] Log path changed to: %s");
+    g_ui.logPathRenamed = IniReadS(L"Strings", L"LogPathRenamed", L"[i] Log path renamed to: %s");
+    g_ui.logPathReset = IniReadS(L"Strings", L"LogPathReset", L"[i] Log path reset to default: %s");
+    g_ui.logWriteFailed = IniReadS(L"Strings", L"LogWriteFailed", L"[!] Log file write failed (error %lu: %s): %s");
+    g_ui.iniWriteFailed = IniReadS(L"Strings", L"IniWriteFailed", L"[!] Failed to write INI value [%s] %s (error %lu: %s).");
+    g_ui.listenFitAutoDisabled = IniReadS(L"Strings", L"ListenFitAutoDisabled", L"[i] ListenFit auto-disabled due to DisableFitting.");
+    g_ui.singleInstanceScopeSummary = IniReadS(L"Strings", L"SingleInstanceScopeSummary", L"[i] Single-instance scope: %s");
+    g_ui.singleInstanceMutexFailure = IniReadS(L"Strings", L"SingleInstanceMutexFailure", L"[!] Single-instance mutex creation failed (error %lu: %s); action=%s.");
+
+    g_ui.fitFill = IniReadS(L"Strings", L"FitFill", L"Fill");
+    g_ui.fitFit = IniReadS(L"Strings", L"FitFit", L"Fit");
+    g_ui.fitStretch = IniReadS(L"Strings", L"FitStretch", L"Stretch");
+    g_ui.fitCenter = IniReadS(L"Strings", L"FitCenter", L"Center");
+    g_ui.fitTile = IniReadS(L"Strings", L"FitTile", L"Tile");
+    g_ui.fitSpan = IniReadS(L"Strings", L"FitSpan", L"Span");
+
+    g_ui.notifyOnStartState = IniReadS(L"Strings", L"NotifyOnStartState", L"[i] NotifyOnStart = %d");
+    g_ui.notifyOnSuccessState = IniReadS(L"Strings", L"NotifyOnSuccessState", L"[i] NotifyOnSuccess = %d");
+    g_ui.notifyOnFailureState = IniReadS(L"Strings", L"NotifyOnFailureState", L"[i] NotifyOnFailure = %d");
+    g_ui.notifyOnBusyState = IniReadS(L"Strings", L"NotifyOnBusyState", L"[i] NotifyOnBusy = %d");
+    g_ui.notifyOnAlreadyRunningState = IniReadS(L"Strings", L"NotifyOnAlreadyRunningState", L"[i] NotifyOnAlreadyRunning = %d");
+    g_ui.notifyOnSingleInstanceFailureState = IniReadS(L"Strings", L"NotifyOnSingleInstanceFailureState", L"[i] NotifyOnSingleInstanceFailure = %d");
+    g_ui.unspecifiedReason = IniReadS(L"Strings", L"UnspecifiedReason", L"an unspecified reason");
+    g_ui.changeDetected = IniReadS(L"Strings", L"ChangeDetected", L"change detected");
+    g_ui.advancedTitle = IniReadS(L"Strings", L"AdvancedTitle", L"Advanced:");
+    g_ui.pollIntervalLabel = IniReadS(L"Strings", L"PollIntervalLabel", L"Poll interval: %d ms");
+    g_ui.confirmMsLabel = IniReadS(L"Strings", L"ConfirmMsLabel", L"Confirm: %d ms");
+    g_ui.debounceMinMsLabel = IniReadS(L"Strings", L"DebounceMinMsLabel", L"Debounce min: %d ms");
+    g_ui.pollInitialDebounceBypassMsLabel = IniReadS(L"Strings", L"PollInitialDebounceBypassMsLabel", L"Initial debounce bypass: %d ms");
+    g_ui.iniCacheRefreshMsLabel = IniReadS(L"Strings", L"IniCacheRefreshMsLabel", L"INI cache refresh: %d ms");
+    g_ui.wallpaperDetectionLogRepeatMsLabel = IniReadS(L"Strings", L"WallpaperDetectionLogRepeatMsLabel", L"Wallpaper detection log repeat: %d ms");
+    g_ui.notificationTimeoutMsLabel = IniReadS(L"Strings", L"NotificationTimeoutMsLabel", L"Notification timeout: %d ms");
+    g_ui.shutdownInitialNoticeMsLabel = IniReadS(L"Strings", L"ShutdownInitialNoticeMsLabel", L"Shutdown first notice: %d ms");
+    g_ui.shutdownRepeatNoticeMsLabel = IniReadS(L"Strings", L"ShutdownRepeatNoticeMsLabel", L"Shutdown repeat notice: %d ms");
+    g_ui.singleInstanceSignalRetriesLabel = IniReadS(L"Strings", L"SingleInstanceSignalRetriesLabel", L"Single-instance signal retries: %d");
+    g_ui.singleInstanceSignalDelayMsLabel = IniReadS(L"Strings", L"SingleInstanceSignalDelayMsLabel", L"Single-instance signal delay: %d ms");
+    g_ui.comRegistrationTimeoutMsLabel = IniReadS(L"Strings", L"ComRegistrationTimeoutMsLabel", L"COM registration timeout: %s");
+    g_ui.comRegistrationCancelWaitMsLabel = IniReadS(L"Strings", L"ComRegistrationCancelWaitMsLabel", L"COM cancel wait: %d ms");
+    g_ui.trayIconHiddenDelayMsLabel = IniReadS(L"Strings", L"TrayIconHiddenDelayMsLabel", L"Tray hide warning delay: %d ms");
+    g_ui.logBufferLinesLabel = IniReadS(L"Strings", L"LogBufferLinesLabel", L"Log buffer lines: %d");
+    g_ui.logAppendLockWaitMsLabel = IniReadS(L"Strings", L"LogAppendLockWaitMsLabel", L"Log append lock wait: %d ms");
+    g_ui.powerShellExeLabel = IniReadS(L"Strings", L"PowerShellExeLabel", L"PowerShell executable: %s");
+    g_ui.powerShellPollMsLabel = IniReadS(L"Strings", L"PowerShellPollMsLabel", L"PowerShell poll: %d ms");
+    g_ui.powerShellTimeoutMsLabel = IniReadS(L"Strings", L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %s");
+    g_ui.powerShellTerminateWaitMsLabel = IniReadS(L"Strings", L"PowerShellTerminateWaitMsLabel", L"PowerShell terminate wait: %d ms");
+    g_ui.powerShellOutputMessageBoxCharsLabel = IniReadS(L"Strings", L"PowerShellOutputMessageBoxCharsLabel", L"PowerShell output dialog limit: %d chars");
+    g_ui.registrationUnresolvedBlockMsLabel = IniReadS(L"Strings", L"RegistrationUnresolvedBlockMsLabel", L"Unresolved registration block: %d ms");
+    g_ui.savePngReplaceRetriesLabel = IniReadS(L"Strings", L"SavePngReplaceRetriesLabel", L"PNG replace retries: %d");
+    g_ui.savePngReplaceRetryDelayMsLabel = IniReadS(L"Strings", L"SavePngReplaceRetryDelayMsLabel", L"PNG replace retry delay: %d ms");
+    g_ui.timeoutInfiniteText = IniReadS(L"Strings", L"TimeoutInfiniteText", L"infinite");
+    g_ui.manifestTitle = IniReadS(L"Strings", L"ManifestTitle", L"Manifest:");
+    g_ui.manifestIdentityNameLabel = IniReadS(L"Strings", L"ManifestIdentityNameLabel", L"Manifest identity: %s");
+    g_ui.manifestPublisherLabel = IniReadS(L"Strings", L"ManifestPublisherLabel", L"Manifest publisher: %s");
+    g_ui.manifestPackageVersionLabel = IniReadS(L"Strings", L"ManifestPackageVersionLabel", L"Manifest version: %s");
+    g_ui.manifestDisplayNameLabel = IniReadS(L"Strings", L"ManifestDisplayNameLabel", L"Manifest display name: %s");
+    g_ui.manifestPublisherDisplayNameLabel = IniReadS(L"Strings", L"ManifestPublisherDisplayNameLabel", L"Manifest publisher display: %s");
+    g_ui.manifestDescriptionLabel = IniReadS(L"Strings", L"ManifestDescriptionLabel", L"Manifest description: %s");
+    g_ui.manifestExecutableLabel = IniReadS(L"Strings", L"ManifestExecutableLabel", L"Manifest executable: %s");
+    g_ui.manifestApplicationIdLabel = IniReadS(L"Strings", L"ManifestApplicationIdLabel", L"Manifest app id: %s");
+    g_ui.manifestTargetDeviceFamilyNameLabel = IniReadS(L"Strings", L"ManifestTargetDeviceFamilyNameLabel", L"Manifest target family: %s");
+    g_ui.manifestMinVersionLabel = IniReadS(L"Strings", L"ManifestMinVersionLabel", L"Manifest min version: %s");
+    g_ui.manifestMaxVersionTestedLabel = IniReadS(L"Strings", L"ManifestMaxVersionTestedLabel", L"Manifest max tested: %s");
+    g_ui.manifestResourceLanguageLabel = IniReadS(L"Strings", L"ManifestResourceLanguageLabel", L"Manifest resource language: %s");
+    g_ui.manifestPropertiesLogoLabel = IniReadS(L"Strings", L"ManifestPropertiesLogoLabel", L"Manifest properties logo: %s");
+    g_ui.manifestSquare150x150LogoLabel = IniReadS(L"Strings", L"ManifestSquare150x150LogoLabel", L"Manifest square 150 logo: %s");
+    g_ui.manifestSquare44x44LogoLabel = IniReadS(L"Strings", L"ManifestSquare44x44LogoLabel", L"Manifest square 44 logo: %s");
+    g_ui.manifestSquare71x71LogoLabel = IniReadS(L"Strings", L"ManifestSquare71x71LogoLabel", L"Manifest square 71 logo: %s");
+    g_ui.manifestWide310x150LogoLabel = IniReadS(L"Strings", L"ManifestWide310x150LogoLabel", L"Manifest wide 310 logo: %s");
+    g_ui.manifestSquare310x310LogoLabel = IniReadS(L"Strings", L"ManifestSquare310x310LogoLabel", L"Manifest square 310 logo: %s");
+    g_ui.manifestBackgroundColorLabel = IniReadS(L"Strings", L"ManifestBackgroundColorLabel", L"Manifest background color: %s");
+    g_ui.manifestShowNameOnTilesLabel = IniReadS(L"Strings", L"ManifestShowNameOnTilesLabel", L"Manifest show names on: %s");
+    g_ui.manifestEntryPointLabel = IniReadS(L"Strings", L"ManifestEntryPointLabel", L"Manifest entry point: %s");
+    g_ui.manifestRestrictedCapabilityLabel = IniReadS(L"Strings", L"ManifestRestrictedCapabilityLabel", L"Manifest restricted capability: %s");
+    g_ui.manifestSourceLabel = IniReadS(L"Strings", L"ManifestSourceLabel", L"Manifest source: %s");
+    g_ui.manifestSourceExisting = IniReadS(L"Strings", L"ManifestSourceExisting", L"existing AppxManifest.xml");
+    g_ui.manifestSourceGenerated = IniReadS(L"Strings", L"ManifestSourceGenerated", L"generated from INI if missing");
+    g_ui.manifestOverwriteExistingLabel = IniReadS(L"Strings", L"ManifestOverwriteExistingLabel", L"Manifest overwrite existing: %s");
+    g_ui.manifestOverwriteExistingToggle = IniReadS(L"Strings", L"ManifestOverwriteExistingToggle", L"Overwrite existing AppxManifest.xml");
+    g_ui.wallpaperDetectionMethodLabel = IniReadS(L"Strings", L"WallpaperDetectionMethodLabel", L"Wallpaper detection method: %s");
+    g_ui.singleInstanceFailureActionLabel = IniReadS(L"Strings", L"SingleInstanceFailureActionLabel", L"Single-instance failure action: %s");
+    g_ui.singleInstanceActionIgnore = IniReadS(L"Strings", L"SingleInstanceActionIgnore", L"Ignore");
+    g_ui.singleInstanceActionWarn = IniReadS(L"Strings", L"SingleInstanceActionWarn", L"Warn");
+    g_ui.singleInstanceActionExit = IniReadS(L"Strings", L"SingleInstanceActionExit", L"Exit");
+    g_ui.singleInstanceActionCrash = IniReadS(L"Strings", L"SingleInstanceActionCrash", L"Crash");
+    g_ui.unknownError = IniReadS(L"Strings", L"UnknownError", L"Unknown error");
+
+    g_ui.logFileFilter = IniReadS(L"Strings", L"LogFileFilter", L"Log files (*.log)|*.log|All files (*.*)|*.*||");
+}
+
+static const wchar_t* FindStringDefault(const wchar_t* key, const wchar_t* fallback)
+{
+    for (const auto& d : g_stringDefaults)
+    {
+        if (IEquals(d.key, key))
+            return d.value;
+    }
+    return fallback;
+}
+
+static std::vector<std::wstring> ExtractFormatTokens(const std::wstring& fmt)
+{
+    std::vector<std::wstring> tokens;
+    for (size_t i = 0; i < fmt.size(); ++i)
+    {
+        if (fmt[i] != L'%')
+            continue;
+
+        if (i + 1 < fmt.size() && fmt[i + 1] == L'%')
+        {
+            ++i;
+            continue;
+        }
+
+        if (fmt.compare(i, 4, L"%08X") == 0)
+        {
+            tokens.push_back(L"%08X");
+            i += 3;
+        }
+        else if (fmt.compare(i, 3, L"%lu") == 0)
+        {
+            tokens.push_back(L"%lu");
+            i += 2;
+        }
+        else if (fmt.compare(i, 2, L"%s") == 0)
+        {
+            tokens.push_back(L"%s");
+            i += 1;
+        }
+        else if (fmt.compare(i, 2, L"%d") == 0)
+        {
+            tokens.push_back(L"%d");
+            i += 1;
+        }
+        else
+        {
+            tokens.push_back(L"<invalid>");
+        }
+    }
+    return tokens;
+}
+
+static bool FormatTokensMatch(const std::wstring& fmt, std::initializer_list<const wchar_t*> expected)
+{
+    std::vector<std::wstring> actual = ExtractFormatTokens(fmt);
+    if (actual.size() != expected.size())
+        return false;
+
+    size_t i = 0;
+    for (const wchar_t* token : expected)
+    {
+        if (actual[i++] != token)
+            return false;
+    }
+    return true;
+}
+
+static void RequireFormat(std::wstring& text, const wchar_t* key, std::initializer_list<const wchar_t*> expected)
+{
+    if (!FormatTokensMatch(text, expected))
+    {
+        QueueStartupWarning(L"[!] Invalid format tokens in [Strings] " + std::wstring(key ? key : L"") + L"; using built-in default for this session.");
+        text = FindStringDefault(key, L"");
+    }
+}
+
+static void ValidateFormatStrings()
+{
+    RequireFormat(g_ui.exeLabel, L"ExeLabel", { L"%s" });
+    RequireFormat(g_ui.iniLabel, L"IniLabel", { L"%s" });
+    RequireFormat(g_ui.logFileLabel, L"LogFileLabel", { L"%s" });
+    RequireFormat(g_ui.timingLog, L"TimingLog", { L"%s", L"%d" });
+    RequireFormat(g_ui.powerShellRegistrationSummary, L"PowerShellRegistrationSummary", { L"%s" });
+    RequireFormat(g_ui.usePowerShellSummary, L"UsePowerShellSummary", { L"%d", L"%s" });
+    RequireFormat(g_ui.wallpaperDetectionFallbackSummary, L"WallpaperDetectionFallbackSummary", { L"%s" });
+    RequireFormat(g_ui.trayIconSummary, L"TrayIconSummary", { L"%s" });
+    RequireFormat(g_ui.consoleSummary, L"ConsoleSummary", { L"%s" });
+    RequireFormat(g_ui.loggingSummary, L"LoggingSummary", { L"%s" });
+    RequireFormat(g_ui.generateOnStartupSummary, L"GenerateOnStartupSummary", { L"%s" });
+    RequireFormat(g_ui.generateOnStartupOnlyWhenChangedSummary, L"GenerateOnStartupOnlyWhenChangedSummary", { L"%s" });
+    RequireFormat(g_ui.hideDisabledEntriesSummary, L"HideDisabledEntriesSummary", { L"%s" });
+    RequireFormat(g_ui.generateDesktopIconForDisabledEntriesSummary, L"GenerateDesktopIconForDisabledEntriesSummary", { L"%s" });
+    RequireFormat(g_ui.deleteDisabledAssetsSummary, L"DeleteDisabledAssetsSummary", { L"%s" });
+    RequireFormat(g_ui.generateScaleAutoSummary, L"GenerateScaleAutoSummary", { L"%s" });
+    RequireFormat(g_ui.generateScaleSummary, L"GenerateScaleSummary", { L"%d", L"%s" });
+    RequireFormat(g_ui.currentDpiScaleLabel, L"CurrentDpiScaleLabel", { L"%d", L"%d" });
+    RequireFormat(g_ui.showMenuAsDropdownSummary, L"ShowMenuAsDropdownSummary", { L"%s" });
+    RequireFormat(g_ui.notificationsSummary, L"NotificationsSummary", { L"%s", L"%s", L"%s", L"%s", L"%s", L"%s", L"%s" });
+    RequireFormat(g_ui.listenWallpaperState, L"ListenWallpaperState", { L"%d" });
+    RequireFormat(g_ui.listenFitState, L"ListenFitState", { L"%d" });
+    RequireFormat(g_ui.disableFittingState, L"DisableFittingState", { L"%d" });
+    RequireFormat(g_ui.assetToggleState, L"AssetToggleState", { L"%s", L"%s" });
+    RequireFormat(g_ui.comRegistrationStatusFailed, L"ComRegistrationStatusFailed", { L"%d" });
+    RequireFormat(g_ui.gdiPlusOperationFailed, L"GdiPlusOperationFailed", { L"%s", L"%d" });
+    RequireFormat(g_ui.win32FailureFmt, L"Win32FailureFmt", { L"%s", L"%lu", L"%s" });
+    RequireFormat(g_ui.logPathChanged, L"LogPathChanged", { L"%s" });
+    RequireFormat(g_ui.logPathRenamed, L"LogPathRenamed", { L"%s" });
+    RequireFormat(g_ui.logPathReset, L"LogPathReset", { L"%s" });
+    RequireFormat(g_ui.logWriteFailed, L"LogWriteFailed", { L"%lu", L"%s", L"%s" });
+    RequireFormat(g_ui.iniWriteFailed, L"IniWriteFailed", { L"%s", L"%s", L"%lu", L"%s" });
+    RequireFormat(g_ui.singleInstanceScopeSummary, L"SingleInstanceScopeSummary", { L"%s" });
+    RequireFormat(g_ui.singleInstanceMutexFailure, L"SingleInstanceMutexFailure", { L"%lu", L"%s", L"%s" });
+    RequireFormat(g_ui.notifyOnStartState, L"NotifyOnStartState", { L"%d" });
+    RequireFormat(g_ui.notifyOnSuccessState, L"NotifyOnSuccessState", { L"%d" });
+    RequireFormat(g_ui.notifyOnFailureState, L"NotifyOnFailureState", { L"%d" });
+    RequireFormat(g_ui.notifyOnBusyState, L"NotifyOnBusyState", { L"%d" });
+    RequireFormat(g_ui.notifyOnAlreadyRunningState, L"NotifyOnAlreadyRunningState", { L"%d" });
+    RequireFormat(g_ui.notifyOnSingleInstanceFailureState, L"NotifyOnSingleInstanceFailureState", { L"%d" });
+    RequireFormat(g_ui.pollIntervalLabel, L"PollIntervalLabel", { L"%d" });
+    RequireFormat(g_ui.confirmMsLabel, L"ConfirmMsLabel", { L"%d" });
+    RequireFormat(g_ui.debounceMinMsLabel, L"DebounceMinMsLabel", { L"%d" });
+    RequireFormat(g_ui.pollInitialDebounceBypassMsLabel, L"PollInitialDebounceBypassMsLabel", { L"%d" });
+    RequireFormat(g_ui.iniCacheRefreshMsLabel, L"IniCacheRefreshMsLabel", { L"%d" });
+    RequireFormat(g_ui.wallpaperDetectionLogRepeatMsLabel, L"WallpaperDetectionLogRepeatMsLabel", { L"%d" });
+    RequireFormat(g_ui.notificationTimeoutMsLabel, L"NotificationTimeoutMsLabel", { L"%d" });
+    RequireFormat(g_ui.shutdownInitialNoticeMsLabel, L"ShutdownInitialNoticeMsLabel", { L"%d" });
+    RequireFormat(g_ui.shutdownRepeatNoticeMsLabel, L"ShutdownRepeatNoticeMsLabel", { L"%d" });
+    RequireFormat(g_ui.singleInstanceSignalRetriesLabel, L"SingleInstanceSignalRetriesLabel", { L"%d" });
+    RequireFormat(g_ui.singleInstanceSignalDelayMsLabel, L"SingleInstanceSignalDelayMsLabel", { L"%d" });
+    RequireFormat(g_ui.comRegistrationTimeoutMsLabel, L"ComRegistrationTimeoutMsLabel", { L"%s" });
+    RequireFormat(g_ui.comRegistrationCancelWaitMsLabel, L"ComRegistrationCancelWaitMsLabel", { L"%d" });
+    RequireFormat(g_ui.trayIconHiddenDelayMsLabel, L"TrayIconHiddenDelayMsLabel", { L"%d" });
+    RequireFormat(g_ui.logBufferLinesLabel, L"LogBufferLinesLabel", { L"%d" });
+    RequireFormat(g_ui.logAppendLockWaitMsLabel, L"LogAppendLockWaitMsLabel", { L"%d" });
+    RequireFormat(g_ui.powerShellExeLabel, L"PowerShellExeLabel", { L"%s" });
+    RequireFormat(g_ui.powerShellPollMsLabel, L"PowerShellPollMsLabel", { L"%d" });
+    RequireFormat(g_ui.powerShellTimeoutMsLabel, L"PowerShellTimeoutMsLabel", { L"%s" });
+    RequireFormat(g_ui.powerShellTerminateWaitMsLabel, L"PowerShellTerminateWaitMsLabel", { L"%d" });
+    RequireFormat(g_ui.powerShellOutputMessageBoxCharsLabel, L"PowerShellOutputMessageBoxCharsLabel", { L"%d" });
+    RequireFormat(g_ui.registrationUnresolvedBlockMsLabel, L"RegistrationUnresolvedBlockMsLabel", { L"%d" });
+    RequireFormat(g_ui.savePngReplaceRetriesLabel, L"SavePngReplaceRetriesLabel", { L"%d" });
+    RequireFormat(g_ui.savePngReplaceRetryDelayMsLabel, L"SavePngReplaceRetryDelayMsLabel", { L"%d" });
+    RequireFormat(g_ui.manifestIdentityNameLabel, L"ManifestIdentityNameLabel", { L"%s" });
+    RequireFormat(g_ui.manifestPublisherLabel, L"ManifestPublisherLabel", { L"%s" });
+    RequireFormat(g_ui.manifestPackageVersionLabel, L"ManifestPackageVersionLabel", { L"%s" });
+    RequireFormat(g_ui.manifestDisplayNameLabel, L"ManifestDisplayNameLabel", { L"%s" });
+    RequireFormat(g_ui.manifestPublisherDisplayNameLabel, L"ManifestPublisherDisplayNameLabel", { L"%s" });
+    RequireFormat(g_ui.manifestDescriptionLabel, L"ManifestDescriptionLabel", { L"%s" });
+    RequireFormat(g_ui.manifestExecutableLabel, L"ManifestExecutableLabel", { L"%s" });
+    RequireFormat(g_ui.manifestApplicationIdLabel, L"ManifestApplicationIdLabel", { L"%s" });
+    RequireFormat(g_ui.manifestTargetDeviceFamilyNameLabel, L"ManifestTargetDeviceFamilyNameLabel", { L"%s" });
+    RequireFormat(g_ui.manifestMinVersionLabel, L"ManifestMinVersionLabel", { L"%s" });
+    RequireFormat(g_ui.manifestMaxVersionTestedLabel, L"ManifestMaxVersionTestedLabel", { L"%s" });
+    RequireFormat(g_ui.manifestResourceLanguageLabel, L"ManifestResourceLanguageLabel", { L"%s" });
+    RequireFormat(g_ui.manifestPropertiesLogoLabel, L"ManifestPropertiesLogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSquare150x150LogoLabel, L"ManifestSquare150x150LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSquare44x44LogoLabel, L"ManifestSquare44x44LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSquare71x71LogoLabel, L"ManifestSquare71x71LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestWide310x150LogoLabel, L"ManifestWide310x150LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSquare310x310LogoLabel, L"ManifestSquare310x310LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestBackgroundColorLabel, L"ManifestBackgroundColorLabel", { L"%s" });
+    RequireFormat(g_ui.manifestShowNameOnTilesLabel, L"ManifestShowNameOnTilesLabel", { L"%s" });
+    RequireFormat(g_ui.manifestEntryPointLabel, L"ManifestEntryPointLabel", { L"%s" });
+    RequireFormat(g_ui.manifestRestrictedCapabilityLabel, L"ManifestRestrictedCapabilityLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSourceLabel, L"ManifestSourceLabel", { L"%s" });
+    RequireFormat(g_ui.manifestOverwriteExistingLabel, L"ManifestOverwriteExistingLabel", { L"%s" });
+    RequireFormat(g_ui.wallpaperDetectionMethodLabel, L"WallpaperDetectionMethodLabel", { L"%s" });
+    RequireFormat(g_ui.singleInstanceFailureActionLabel, L"SingleInstanceFailureActionLabel", { L"%s" });
+    RequireFormat(g_ui.shutdownPendingReason, L"ShutdownPendingReason", { L"%s" });
+    RequireFormat(g_ui.shutdownDelayedNotification, L"ShutdownDelayedNotification", { L"%s" });
+
+    RequireFormat(g_ui.startingWallpaperGeneration, L"StartingWallpaperGeneration", { L"%s" });
+    RequireFormat(g_ui.wallpaperSource, L"WallpaperSource", { L"%s" });
+    RequireFormat(g_ui.wallpaperImageLoaded, L"WallpaperImageLoaded", { L"%d", L"%d" });
+    RequireFormat(g_ui.renderModeSummary, L"RenderModeSummary", { L"%s" });
+    RequireFormat(g_ui.assetsDirectoryReady, L"AssetsDirectoryReady", { L"%s" });
+    RequireFormat(g_ui.skippingAssetDisabled, L"SkippingAssetDisabled", { L"%s" });
+    RequireFormat(g_ui.generatedDesktopIconAsset, L"GeneratedDesktopIconAsset", { L"%s" });
+    RequireFormat(g_ui.activeScales, L"ActiveScales", { L"%s" });
+    RequireFormat(g_ui.savedAsset, L"SavedAsset", { L"%s" });
+    RequireFormat(g_ui.savedScaledAsset, L"SavedScaledAsset", { L"%s", L"%d" });
+    RequireFormat(g_ui.failedSaveAsset, L"FailedSaveAsset", { L"%s" });
+    RequireFormat(g_ui.failedSaveScaledAsset, L"FailedSaveScaledAsset", { L"%s", L"%d" });
+    RequireFormat(g_ui.savePngInvalidInput, L"SavePngInvalidInput", { L"%s" });
+    RequireFormat(g_ui.savePngGdiFailure, L"SavePngGdiFailure", { L"%s", L"%d" });
+    RequireFormat(g_ui.savePngReplaceFailed, L"SavePngReplaceFailed", { L"%s", L"%s" });
+    RequireFormat(g_ui.savePngReplaceRetrying, L"SavePngReplaceRetrying", { L"%d", L"%d", L"%s", L"%lu", L"%s", L"%d" });
+    RequireFormat(g_ui.deletedDisabledAsset, L"DeletedDisabledAsset", { L"%s" });
+    RequireFormat(g_ui.failedDeleteDisabledAsset, L"FailedDeleteDisabledAsset", { L"%s" });
+    RequireFormat(g_ui.appxManifestCreated, L"AppxManifestCreated", { L"%s" });
+    RequireFormat(g_ui.appxManifestExisting, L"AppxManifestExisting", { L"%s" });
+    RequireFormat(g_ui.appxManifestOverwritten, L"AppxManifestOverwritten", { L"%s" });
+    RequireFormat(g_ui.appxManifestCreateFailed, L"AppxManifestCreateFailed", { L"%s" });
+    RequireFormat(g_ui.manifestPath, L"ManifestPath", { L"%s" });
+    RequireFormat(g_ui.comRegistrationUri, L"ComRegistrationUri", { L"%s" });
+    RequireFormat(g_ui.comRegistrationTimeoutDetails, L"ComRegistrationTimeoutDetails", { L"%s", L"%d" });
+    RequireFormat(g_ui.comRegistrationException, L"ComRegistrationException", { L"%08X" });
+    RequireFormat(g_ui.comExceptionMessage, L"ComExceptionMessage", { L"%s" });
+    RequireFormat(g_ui.powerShellCommand, L"PowerShellCommand", { L"%s" });
+    RequireFormat(g_ui.powerShellLaunchDetails, L"PowerShellLaunchDetails", { L"%s", L"%s", L"%d", L"%d" });
+    RequireFormat(g_ui.powerShellProcessStarted, L"PowerShellProcessStarted", { L"%lu" });
+    RequireFormat(g_ui.powerShellTerminateRequested, L"PowerShellTerminateRequested", { L"%lu" });
+    RequireFormat(g_ui.powerShellTerminateFailed, L"PowerShellTerminateFailed", { L"%lu" });
+    RequireFormat(g_ui.powerShellStillRunningAfterTimeout, L"PowerShellStillRunningAfterTimeout", { L"%lu" });
+    RequireFormat(g_ui.powerShellTerminatedAfterTimeout, L"PowerShellTerminatedAfterTimeout", { L"%lu" });
+    RequireFormat(g_ui.powerShellErrorCode, L"PowerShellErrorCode", { L"%08X" });
+    RequireFormat(g_ui.powerShellOutputTruncated, L"PowerShellOutputTruncated", { L"%d" });
+    RequireFormat(g_ui.generationUnhandledException, L"GenerationUnhandledException", { L"%s" });
+    RequireFormat(g_ui.generationThreadStartFailed, L"GenerationThreadStartFailed", { L"%s" });
+    RequireFormat(g_ui.pollThreadUnhandledException, L"PollThreadUnhandledException", { L"%s" });
+    RequireFormat(g_ui.pollThreadStartFailed, L"PollThreadStartFailed", { L"%s" });
+    RequireFormat(g_ui.missingManifestAssets, L"MissingManifestAssets", { L"%s" });
+    RequireFormat(g_ui.registrationBlockedUnresolved, L"RegistrationBlockedUnresolved", { L"%s" });
+    RequireFormat(g_ui.registrationUnresolvedMarked, L"RegistrationUnresolvedMarked", { L"%s" });
+    RequireFormat(g_ui.registrationUnresolvedCleared, L"RegistrationUnresolvedCleared", { L"%s" });
+    RequireFormat(g_ui.registrationUnresolvedExpired, L"RegistrationUnresolvedExpired", { L"%s" });
+    RequireFormat(g_ui.wallpaperDetectionMethodFailed, L"WallpaperDetectionMethodFailed", { L"%s" });
+    RequireFormat(g_ui.wallpaperDetectionEmptyUsingLast, L"WallpaperDetectionEmptyUsingLast", { L"%s" });
+    RequireFormat(g_ui.wallpaperDetectionMethodReturnedInvalid, L"WallpaperDetectionMethodReturnedInvalid", { L"%s", L"%s" });
+    RequireFormat(g_ui.wallpaperDetectionFallbackSelected, L"WallpaperDetectionFallbackSelected", { L"%s", L"%s" });
+    RequireFormat(g_ui.wallpaperDetectionFallbackDisabled, L"WallpaperDetectionFallbackDisabled", { L"%s" });
+}
+
+static std::wstring EnsureTrailingSpace(std::wstring s)
+{
+    if (!s.empty() && s.back() != L' ')
+        s.push_back(L' ');
+    return s;
+}
+
+static void NormalizeSeparatorStrings()
+{
+    g_ui.logPathPrefix = EnsureTrailingSpace(g_ui.logPathPrefix);
+    g_ui.psStatusPrefix = EnsureTrailingSpace(g_ui.psStatusPrefix);
+    g_ui.fitModePrefix = EnsureTrailingSpace(g_ui.fitModePrefix);
+}
+
+bool UsePowerShell()
+{
+    return IniReadI(L"Settings", L"UsePowerShell", 0) != 0;
+}
+
+static ErrorAction ParseErrorAction(const std::wstring& value)
+{
+    std::wstring v = ToLowerCopy(TrimCopy(value));
+    if (v == L"ignore" || v == L"none" || v == L"do nothing" || v == L"do_nothing")
+        return ErrorAction::Ignore;
+    if (v == L"exit" || v == L"exit program" || v == L"exit_program")
+        return ErrorAction::Exit;
+    if (v == L"crash" || v == L"crash program" || v == L"crash_program" || v == L"failfast" || v == L"fail fast")
+        return ErrorAction::Crash;
+    return ErrorAction::Warn;
+}
+
+static const wchar_t* ErrorActionName(ErrorAction action)
+{
+    switch (action)
+    {
+    case ErrorAction::Ignore: return g_ui.singleInstanceActionIgnore.c_str();
+    case ErrorAction::Exit: return g_ui.singleInstanceActionExit.c_str();
+    case ErrorAction::Crash: return g_ui.singleInstanceActionCrash.c_str();
+    case ErrorAction::Warn:
+    default:
+        return g_ui.singleInstanceActionWarn.c_str();
+    }
+}
+
+static ErrorAction CurrentSingleInstanceFailureAction()
+{
+    return ParseErrorAction(IniReadS(L"Settings", L"SingleInstanceFailureAction", L"Warn"));
+}
+
+static constexpr int SUPPORTED_ASSET_SCALES[] = { 100, 125, 150, 200, 400 };
+
+static int SnapToSupportedScale(int percent)
+{
+    for (int scale : SUPPORTED_ASSET_SCALES)
+    {
+        if (percent <= scale)
+            return scale;
+    }
+    return 400;
+}
+
+static HMONITOR GetPrimaryMonitorHandle()
+{
+    struct MonitorSearch
+    {
+        HMONITOR primary = nullptr;
+    } search;
+
+    EnumDisplayMonitors(nullptr, nullptr,
+        [](HMONITOR monitor, HDC, LPRECT, LPARAM param) noexcept -> BOOL
+        {
+            auto* search = reinterpret_cast<MonitorSearch*>(param);
+            MONITORINFO mi{};
+            mi.cbSize = sizeof(mi);
+            if (GetMonitorInfoW(monitor, &mi) && (mi.dwFlags & MONITORINFOF_PRIMARY))
+            {
+                search->primary = monitor;
+                return FALSE;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&search));
+
+    if (search.primary)
+        return search.primary;
+    return MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
+}
+
+static bool GetPrimaryMonitorRect(RECT& rect)
+{
+    HMONITOR monitor = GetPrimaryMonitorHandle();
+    if (!monitor)
+        return false;
+
+    MONITORINFO mi{};
+    mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(monitor, &mi))
+        return false;
+
+    rect = mi.rcMonitor;
+    return true;
+}
+
+static int CurrentDpiPercent()
+{
+    UINT dpiX = 96;
+    UINT dpiY = 96;
+
+    HMODULE shcore = LoadLibraryW(L"shcore.dll");
+    if (shcore)
+    {
+        using GetDpiForMonitorFn = HRESULT(WINAPI*)(HMONITOR, int, UINT*, UINT*);
+#pragma warning(suppress: 4191)
+        auto getDpiForMonitor = (GetDpiForMonitorFn)GetProcAddress(shcore, "GetDpiForMonitor");
+        if (getDpiForMonitor)
+        {
+            HMONITOR monitor = GetPrimaryMonitorHandle();
+            if (SUCCEEDED(getDpiForMonitor(monitor, 0, &dpiX, &dpiY)) && dpiX > 0)
+            {
+                FreeLibrary(shcore);
+                return MulDiv((int)dpiX, 100, 96);
+            }
+        }
+        FreeLibrary(shcore);
+    }
+
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (user32)
+    {
+        using GetDpiForSystemFn = UINT(WINAPI*)();
+#pragma warning(suppress: 4191)
+        auto getDpiForSystem = (GetDpiForSystemFn)GetProcAddress(user32, "GetDpiForSystem");
+        if (getDpiForSystem)
+        {
+            dpiX = getDpiForSystem();
+            if (dpiX > 0)
+                return MulDiv((int)dpiX, 100, 96);
+        }
+    }
+
+    HDC dc = GetDC(nullptr);
+    if (dc)
+    {
+        int dpi = GetDeviceCaps(dc, LOGPIXELSX);
+        ReleaseDC(nullptr, dc);
+        if (dpi > 0)
+            return MulDiv(dpi, 100, 96);
+    }
+
+    return 100;
+}
+
+static int CurrentAssetScale()
+{
+    return SnapToSupportedScale(CurrentDpiPercent());
+}
+
+static bool AddScale(std::vector<int>& scales, int scale)
+{
+    if (std::find(scales.begin(), scales.end(), scale) != scales.end())
+        return false;
+    scales.push_back(scale);
+    return true;
+}
+
+static std::vector<int> GetConfiguredScales()
+{
+    std::vector<int> scales;
+    if (g_generateScaleAuto)
+    {
+        // Auto mode: use only the detected DPI scale; manual flags are ignored
+        AddScale(scales, CurrentAssetScale());
+    }
+    else
+    {
+        if (g_generateScale100) AddScale(scales, 100);
+        if (g_generateScale125) AddScale(scales, 125);
+        if (g_generateScale150) AddScale(scales, 150);
+        if (g_generateScale200) AddScale(scales, 200);
+        if (g_generateScale400) AddScale(scales, 400);
+    }
+    if (scales.empty()) AddScale(scales, 100);
+    std::sort(scales.begin(), scales.end());
+    return scales;
+}
+
+static int ScalePixels(int value, int scale)
+{
+    return MulDiv(value, scale, 100);
+}
+
+static std::wstring ScaleAssetPath(const std::wstring& path, int scale)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    size_t dot = path.find_last_of(L'.');
+    if (dot == std::wstring::npos || (slash != std::wstring::npos && dot < slash))
+        dot = path.size();
+
+    return path.substr(0, dot) + L".scale-" + IntToWString(scale) + path.substr(dot);
+}
+
+static bool DeleteFileIfExistsForDisabledAsset(const std::wstring& path)
+{
+    if (!PathFileExistsW(path.c_str()))
+        return true;
+
+    if (DeleteFileW(path.c_str()))
+    {
+        Log(g_ui.deletedDisabledAsset.c_str(), path.c_str());
+        return true;
+    }
+
+    Log(g_ui.failedDeleteDisabledAsset.c_str(), path.c_str());
+    LogWin32Failure(L"DeleteFileW");
+    return false;
+}
+
+static bool DeleteDisabledAssetFiles(const std::wstring& basePath)
+{
+    bool ok = DeleteFileIfExistsForDisabledAsset(basePath);
+    for (int scale : SUPPORTED_ASSET_SCALES)
+        ok = DeleteFileIfExistsForDisabledAsset(ScaleAssetPath(basePath, scale)) && ok;
+    return ok;
+}
+
+const wchar_t* FitModeToString(FitMode m)
+{
+    switch (m)
+    {
+    case FitMode::Fill:    return g_ui.fitFill.c_str();
+    case FitMode::Fit:     return g_ui.fitFit.c_str();
+    case FitMode::Stretch: return g_ui.fitStretch.c_str();
+    case FitMode::Center:  return g_ui.fitCenter.c_str();
+    case FitMode::Tile:    return g_ui.fitTile.c_str();
+    case FitMode::Span:    return g_ui.fitSpan.c_str();
+    default:               return L"?";
+    }
+}
+
+static void AppendDialogTemplateString(WORD*& dst, const std::wstring& text)
+{
+    memcpy(dst, text.c_str(), (text.size() + 1) * sizeof(wchar_t));
+    dst += text.size() + 1;
+}
+
+static DLGITEMTEMPLATE* AlignDialogItem(WORD*& p)
+{
+    DLGITEMTEMPLATE* item = (DLGITEMTEMPLATE*)(((DWORD_PTR)p + 3) & ~3);
+    p = (WORD*)item;
+    return item;
+}
+
+INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
+{
+    size_t stringBytes =
+        (g_ui.renameDialogTitle.size() + g_ui.okText.size() + g_ui.cancelText.size() + 64) * sizeof(wchar_t);
+    std::vector<BYTE> tmpl(4096 + stringBytes);
+    DLGTEMPLATE* dlg = (DLGTEMPLATE*)tmpl.data();
+
+    dlg->style = WS_POPUP | WS_BORDER | WS_SYSMENU | DS_MODALFRAME | WS_CAPTION | DS_SETFONT;
+    dlg->cdit = 3;
+    dlg->x = 10; dlg->y = 10; dlg->cx = 200; dlg->cy = 60;
+
+    WORD* p = (WORD*)(dlg + 1);
+
+    *p++ = 0; // no menu
+    *p++ = 0; // default class
+
+    AppendDialogTemplateString(p, g_ui.renameDialogTitle);
+    *p++ = 9; // font size
+    AppendDialogTemplateString(p, L"Segoe UI");
+    // ---- Edit box ----
+    DLGITEMTEMPLATE* item = AlignDialogItem(p);
+    item->x = 5; item->y = 5; item->cx = 190; item->cy = 12;
+    item->id = 1001;
+    item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL;
+
+    p = (WORD*)(item + 1);
+    *p++ = 0xFFFF; *p++ = 0x0081; // EDIT class
+    *p++ = 0; // no text
+    *p++ = 0; // no extra data
+
+    // ---- OK button ----
+    item = AlignDialogItem(p);
+    item->x = 40; item->y = 25; item->cx = 50; item->cy = 14;
+    item->id = IDOK;
+    item->style = WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON;
+
+    p = (WORD*)(item + 1);
+    *p++ = 0xFFFF; *p++ = 0x0080; // BUTTON
+    AppendDialogTemplateString(p, g_ui.okText);
+    *p++ = 0;
+
+    // ---- Cancel button ----
+    item = AlignDialogItem(p);
+    item->x = 110; item->y = 25; item->cx = 50; item->cy = 14;
+    item->id = IDCANCEL;
+    item->style = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON;
+
+    p = (WORD*)(item + 1);
+    *p++ = 0xFFFF; *p++ = 0x0080;
+    AppendDialogTemplateString(p, g_ui.cancelText);
+    *p++ = 0;
+
+    return DialogBoxIndirectParamW(
+        GetModuleHandleW(nullptr),
+        (DLGTEMPLATE*)tmpl.data(),
+        parent,
+        RenameDlgProc,
+        (LPARAM)&path
+    );
+}
+
