@@ -49,3 +49,7 @@ Common prerequisites:
 - PowerShell 5.1 or newer for script projects.
 
 Some tools modify system settings, services, scheduled tasks, DNS records, or secure-desktop processes. Read the project README before running them, and use an elevated shell where documented.
+
+## License
+
+This repository is released under the [0BSD license](LICENSE). You can use, copy, modify, and distribute it for any purpose, with or without fee.
