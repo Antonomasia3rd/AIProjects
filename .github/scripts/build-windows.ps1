@@ -6,8 +6,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
-$ArtifactsDir = Join-Path $RepoRoot 'artifacts'
-$StageRoot = Join-Path $RepoRoot 'build\github-artifacts'
+$script:ReleaseArtifacts = New-Object System.Collections.Generic.List[string]
 
 function Write-Section([string]$Message) {
     Write-Host ""
@@ -168,6 +167,17 @@ function Copy-IfExists([string]$Source, [string]$Destination) {
     }
 }
 
+function Register-ReleaseArtifact([string]$Path) {
+    if (-not (Test-Path $Path)) {
+        throw "Release artifact missing: $Path"
+    }
+
+    $resolved = (Resolve-Path -LiteralPath $Path).Path
+    if (-not $script:ReleaseArtifacts.Contains($resolved)) {
+        [void]$script:ReleaseArtifacts.Add($resolved)
+    }
+}
+
 function New-BuildInfo([string]$Destination) {
     $sha = if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { (& git -C $RepoRoot rev-parse HEAD) }
     $ref = if ($env:GITHUB_REF) { $env:GITHUB_REF } else { (& git -C $RepoRoot branch --show-current) }
@@ -190,11 +200,22 @@ function New-Package {
     )
 
     Write-Section "Package $Name"
-    $packageRoot = Join-Path $StageRoot $Name
-    Remove-Item -LiteralPath $packageRoot -Recurse -Force -ErrorAction SilentlyContinue
+    $projectDir = Join-Path $RepoRoot $Project
+    $projectBuildDir = Ensure-BuildDir $Project
+
+    if ($Paths.Count -eq 1 -and $ExtraPaths.Count -eq 0) {
+        $source = Join-Path $projectDir $Paths[0]
+        if (-not (Test-Path $source)) {
+            throw "Package input missing: $source"
+        }
+        Register-ReleaseArtifact $source
+        Write-Host "Created $source"
+        return
+    }
+
+    $packageRoot = Join-Path ([IO.Path]::GetTempPath()) "AIProjects-$Name-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 
-    $projectDir = Join-Path $RepoRoot $Project
     foreach ($relative in $Paths) {
         $source = Join-Path $projectDir $relative
         if (-not (Test-Path $source)) {
@@ -210,15 +231,25 @@ function New-Package {
 
     New-BuildInfo $packageRoot
 
-    $zip = Join-Path $ArtifactsDir "$Name-windows-x64.zip"
+    $zip = Join-Path $projectBuildDir "$Name-windows-x64.zip"
     Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
     Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zip -Force
+    Remove-Item -LiteralPath $packageRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Register-ReleaseArtifact $zip
     Write-Host "Created $zip"
 }
 
-Remove-Item -LiteralPath $ArtifactsDir -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $StageRoot -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $ArtifactsDir, $StageRoot | Out-Null
+function New-ArtifactChecksums {
+    Write-Section 'Checksums'
+
+    foreach ($artifact in $script:ReleaseArtifacts) {
+        $hash = Get-FileHash -LiteralPath $artifact -Algorithm SHA256
+        $checksumPath = "$artifact.sha256"
+        "$($hash.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($artifact))" |
+            Set-Content -LiteralPath $checksumPath -Encoding ascii
+        Write-Host "Created $checksumPath"
+    }
+}
 
 if (-not (Test-SkipProject 'AllowContentAboveLock')) {
     Build-CSharpProject -Project 'AllowContentAboveLock' -Source 'AllowContentAboveLock.cs' -OutputName 'AllowContentAboveLock.exe' -References @('System.ServiceProcess.dll')
@@ -268,5 +299,10 @@ if (-not (Test-SkipProject 'RealTimeNotesDeskband')) {
     New-Package -Name 'RealTimeNotesDeskband' -Project 'RealTimeNotesDeskband' -Paths @('build\RealTimeNotesDeskband.dll') -ExtraPaths @('RegisterDeskband.cmd', 'UnregisterDeskband.cmd', 'ConfigureDeskband.cmd')
 }
 
+New-ArtifactChecksums
+
 Write-Section 'Artifacts'
-Get-ChildItem -LiteralPath $ArtifactsDir -Filter '*.zip' | Sort-Object Name | ForEach-Object { Write-Host $_.FullName }
+foreach ($artifact in ($script:ReleaseArtifacts | Sort-Object)) {
+    Write-Host $artifact
+    Write-Host "$artifact.sha256"
+}
