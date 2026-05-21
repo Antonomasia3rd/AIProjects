@@ -48,5 +48,5 @@ sc.exe delete YourPhoneHideBannerService
 ## Notes
 
 - Logs are written to the Windows Application Event Log using source `YourPhoneHideBannerService`.
-- The service watches loaded user hives under `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings`.
+- The service watches loaded user hives under `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings`, including matching child key creation and value changes.
 - The release build is available at [YourPhoneHideBanner v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/YourPhoneHideBanner-v1).

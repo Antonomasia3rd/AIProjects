@@ -168,7 +168,7 @@ cd /d C:\Tools\SecureDesktopLauncher
 build\SecureDesktopPasswordLauncher.exe set-password
 ```
 
-The password is not stored as plaintext. The config stores `Kdf=PBKDF2-SHA256`, an iteration count, a random salt, and the derived hash in `SecureDesktopPasswordLauncher.ini`. It also keeps the older salted SHA-256 `PasswordHashHex` value so rollback to an older binary can still unlock the gate. Older salted SHA-256-only configs are still accepted so existing installs can be unlocked and reset.
+The password is not stored as plaintext. The config stores `Kdf=PBKDF2-SHA256`, an iteration count, a random salt, and the derived hash in `SecureDesktopPasswordLauncher.ini`. Older salted SHA-256-only configs are still accepted so existing installs can be unlocked and reset. New password saves remove the older `PasswordHashHex` rollback hash by default; set `[Security] KeepLegacySha256Hash=1` before running `set-password` only if you need rollback to an older binary.
 
 After setting the password, restart the service to launch the gate immediately:
 
@@ -186,6 +186,16 @@ StartMinimized=1
 TopMost=0
 AutoLockMinutes=5
 ```
+
+Password retry policy:
+
+```ini
+[Security]
+MaxAttempts=3
+LockoutSeconds=30
+```
+
+`MaxAttempts` limits one password prompt batch. When the already-running gate is locked and a batch fails, `LockoutSeconds` delays the next prompt instead of immediately reopening it.
 
 With this default, the password window is created as a normal Alt+Tab window and shown minimized without activation. It should not steal focus from sign-in, UAC, or the Ctrl+Alt+Delete screen. Use Alt+Tab on the secure desktop to bring it forward.
 `AutoLockMinutes=0` disables automatic locking. Positive values lock the launched programs after that many minutes of Windows input inactivity.

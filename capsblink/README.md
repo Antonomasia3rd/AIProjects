@@ -2,7 +2,7 @@
 
 Small console experiment that blinks the physical Caps Lock LED while Caps Lock is off.
 
-It creates a temporary DOS device mapping to `\Device\KeyboardClass0`, opens the keyboard class device, and toggles the Caps Lock indicator every 500 ms. Ctrl+C removes the DOS device mapping before exit.
+It creates a per-process temporary DOS device mapping to `\Device\KeyboardClass0`, opens the keyboard class device, and toggles the Caps Lock indicator every 500 ms. Ctrl+C exits through a cleanup path that closes the device handle and removes the DOS device mapping.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:exe /opt
 build\capsblink.exe
 ```
 
-Stop with Ctrl+C so the cleanup handler can close the device handle and remove the `myKBD` DOS device mapping.
+Stop with Ctrl+C so the cleanup handler can close the device handle and remove the temporary DOS device mapping.
 
 ## Notes
 
