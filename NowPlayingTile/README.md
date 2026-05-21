@@ -88,6 +88,12 @@ Settings are stored at:
 %LOCALAPPDATA%\NowPlayingTile\settings.ini
 ```
 
+Diagnostics are written to:
+
+```text
+%LOCALAPPDATA%\NowPlayingTile\NowPlayingTile.log
+```
+
 Available settings:
 
 ```ini

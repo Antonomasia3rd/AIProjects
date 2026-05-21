@@ -80,8 +80,9 @@ internal static class Program
             snapshot = MediaReader.Read();
             LiveTileUpdater.TryUpdate(snapshot, settings);
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Write(ex, "UpdateOnce failed");
         }
         finally
         {
@@ -153,6 +154,36 @@ internal enum TileLayout
     Combined
 }
 
+internal static class AppLog
+{
+    public static readonly string LogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "NowPlayingTile",
+        "NowPlayingTile.log");
+
+    public static void Write(Exception ex, string context)
+    {
+        Write(context + ": " + (ex == null ? "unknown error" : ex.Message));
+    }
+
+    public static void Write(string message)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(LogPath);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            File.AppendAllText(LogPath,
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + message + Environment.NewLine);
+        }
+        catch
+        {
+        }
+    }
+}
+
 internal sealed class AppSettings
 {
     public static readonly string DataDirectory = Path.Combine(
@@ -199,8 +230,9 @@ internal sealed class AppSettings
                     values[line.Substring(0, separator).Trim()] = line.Substring(separator + 1).Trim();
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                AppLog.Write(ex, "Could not read settings");
             }
         }
 
@@ -229,8 +261,9 @@ internal sealed class AppSettings
                 "TileRefreshSeconds=60\r\n" +
                 "ShowTrayIcon=false\r\n");
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Write(ex, "Could not create default settings");
         }
     }
 
@@ -692,8 +725,9 @@ internal static class LiveTileUpdater
 
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Write(ex, "Live tile update failed");
             return false;
         }
     }
@@ -919,8 +953,9 @@ internal static class MediaReader
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Write(ex, "Artwork load failed");
             return null;
         }
     }

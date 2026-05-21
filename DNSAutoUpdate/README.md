@@ -46,5 +46,5 @@ powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.l
 
 - The script runs forever until the PowerShell process is stopped.
 - Loopback, APIPA, `0.0.0.0`, unpreferred addresses, and excluded virtual adapters are ignored by default. If no eligible IPv4 address remains, the cycle skips DNS changes instead of deleting records.
-- The repository root also contains a duplicate `DNSAutoUpdate.ps1` convenience copy with the same content.
+- The repository root also contains a `DNSAutoUpdate.ps1` convenience wrapper that forwards to this script.
 - Generated logs/build folders are ignored by git.

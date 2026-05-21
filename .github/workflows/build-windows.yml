@@ -13,14 +13,14 @@ on:
       - published
 
 permissions:
-  attestations: write
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
   build-windows:
     name: Build Windows binaries
     runs-on: windows-2022
+    permissions:
+      contents: read
 
     steps:
       - name: Check out repository
@@ -34,7 +34,7 @@ jobs:
             exit 0
           }
 
-          choco install mingw -y --no-progress
+          choco install mingw --version=13.2.0 -y --no-progress
           $mingwBin = 'C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin'
           if (-not (Test-Path $mingwBin)) {
             $mingwBin = Get-ChildItem 'C:\ProgramData\chocolatey\lib\mingw\tools\install' -Directory -Recurse -Filter bin |
@@ -48,31 +48,6 @@ jobs:
       - name: Build and package
         shell: pwsh
         run: .\.github\scripts\build-windows.ps1
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: |
-            AllowContentAboveLock/build/AllowContentAboveLock.exe
-            AllowContentAboveLock/build/AllowContentAboveLock.exe.sha256
-            asusblink/build/asusblink.exe
-            asusblink/build/asusblink.exe.sha256
-            capsblink/build/capsblink.exe
-            capsblink/build/capsblink.exe.sha256
-            YourPhoneHideBanner/build/YourPhoneHideBanner.exe
-            YourPhoneHideBanner/build/YourPhoneHideBanner.exe.sha256
-            DiscordRPC/build/DiscordRPC.exe
-            DiscordRPC/build/DiscordRPC.exe.sha256
-            NowPlayingTile/build/NowPlayingTile-windows-x64.zip
-            NowPlayingTile/build/NowPlayingTile-windows-x64.zip.sha256
-            DesktopStub/build/GenerateAssets.exe
-            DesktopStub/build/GenerateAssets.exe.sha256
-            CharmTray/build/CharmTray.exe
-            CharmTray/build/CharmTray.exe.sha256
-            SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip
-            SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip.sha256
-            RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip
-            RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip.sha256
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
@@ -101,8 +76,44 @@ jobs:
             RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip.sha256
           if-no-files-found: error
 
+  attest-build-provenance:
+    name: Attest build provenance
+    if: github.event_name != 'pull_request'
+    needs: build-windows
+    runs-on: windows-2022
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: AIProjects-Windows-${{ github.sha }}
+          path: artifacts
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: artifacts/**
+
+  release-assets:
+    name: Upload release assets
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+    needs: build-windows
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: AIProjects-Windows-${{ github.sha }}
+          path: artifacts
+
       - name: Upload release assets
-        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -118,31 +129,36 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
-          $assets = @(
-            'AllowContentAboveLock/build/AllowContentAboveLock.exe',
-            'AllowContentAboveLock/build/AllowContentAboveLock.exe.sha256',
-            'asusblink/build/asusblink.exe',
-            'asusblink/build/asusblink.exe.sha256',
-            'capsblink/build/capsblink.exe',
-            'capsblink/build/capsblink.exe.sha256',
-            'YourPhoneHideBanner/build/YourPhoneHideBanner.exe',
-            'YourPhoneHideBanner/build/YourPhoneHideBanner.exe.sha256',
-            'DiscordRPC/build/DiscordRPC.exe',
-            'DiscordRPC/build/DiscordRPC.exe.sha256',
-            'NowPlayingTile/build/NowPlayingTile-windows-x64.zip',
-            'NowPlayingTile/build/NowPlayingTile-windows-x64.zip.sha256',
-            'DesktopStub/build/GenerateAssets.exe',
-            'DesktopStub/build/GenerateAssets.exe.sha256',
-            'CharmTray/build/CharmTray.exe',
-            'CharmTray/build/CharmTray.exe.sha256',
-            'SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip',
-            'SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip.sha256',
-            'RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip',
-            'RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip.sha256'
-          ) | Where-Object { Test-Path $_ }
+          $expected = @(
+            'AllowContentAboveLock.exe',
+            'AllowContentAboveLock.exe.sha256',
+            'asusblink.exe',
+            'asusblink.exe.sha256',
+            'capsblink.exe',
+            'capsblink.exe.sha256',
+            'YourPhoneHideBanner.exe',
+            'YourPhoneHideBanner.exe.sha256',
+            'DiscordRPC.exe',
+            'DiscordRPC.exe.sha256',
+            'NowPlayingTile-windows-x64.zip',
+            'NowPlayingTile-windows-x64.zip.sha256',
+            'GenerateAssets.exe',
+            'GenerateAssets.exe.sha256',
+            'CharmTray.exe',
+            'CharmTray.exe.sha256',
+            'SecureDesktopLauncher-windows-x64.zip',
+            'SecureDesktopLauncher-windows-x64.zip.sha256',
+            'RealTimeNotesDeskband-windows-x64.zip',
+            'RealTimeNotesDeskband-windows-x64.zip.sha256'
+          )
 
-          if (-not $assets) {
-            throw 'No release assets were found.'
+          $files = Get-ChildItem -LiteralPath artifacts -Recurse -File
+          $assets = foreach ($name in $expected) {
+            $match = $files | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+            if (-not $match) {
+              throw "Release asset missing from downloaded artifact: $name"
+            }
+            $match.FullName
           }
 
           gh release upload $env:RELEASE_TAG @assets --clobber
