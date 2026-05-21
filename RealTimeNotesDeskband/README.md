@@ -1,31 +1,17 @@
 # RealTimeNotesDeskband
 
-Classic Windows taskbar Deskband for HoYoLAB Real-Time Notes. It shows a compact ExplorerPatcher-weather-style widget on the taskbar:
+Classic Windows taskbar Deskband for HoYoLAB Real-Time Notes. It shows a compact ExplorerPatcher-weather-style widget on the taskbar with:
 
-- icon/fallback marker
-- `current/max` amount
-- time until full
+- icon or built-in fallback marker;
+- current/max resource amount;
+- time until full;
+- context-menu details for API fields exposed by HoYoLAB.
 
 Supported resources:
 
 - Genshin Impact Resin
 - Honkai: Star Rail Trailblaze Power
 - Zenless Zone Zero Battery Charge
-
-## Layout
-
-```text
-RealTimeNotesDeskband\
-  build\                         generated DLLs, ignored
-  references\                    local upstream/reference source, ignored
-  BuildDeskband.cmd
-  ConfigureDeskband.cmd
-  RegisterDeskband.cmd
-  UnregisterDeskband.cmd
-  RealTimeNotesDeskband.cpp
-```
-
-The `references\` folder may contain local copies of ExplorerPatcher and the original Real-Time Notes tray app, but those copies are not part of this publishable project.
 
 ## Requirements
 
@@ -78,11 +64,11 @@ If it does not appear immediately, restart File Explorer from ExplorerPatcher Pr
 
 No PowerShell is required. Configure credentials from the deskband context menu:
 
-- right-click the deskband and choose `Configure selected account...`
-- choose the game resource
-- enter `UID`, `ltoken_v2`, and `ltuid_v2`
-- optionally set a per-account refresh interval in seconds
-- choose `Import cookie JSON for selected...` if you already have a compatible cookie JSON file
+- right-click the deskband and choose `Configure selected account...`;
+- choose the game resource;
+- enter `UID`, `ltoken_v2`, and `ltuid_v2`;
+- optionally set a per-account refresh interval in seconds;
+- choose `Import cookie JSON for selected...` if you already have a compatible cookie JSON file.
 
 You can also open the same native configuration dialog without Explorer loaded:
 
@@ -96,27 +82,23 @@ The imported JSON fields are `uid`, `ltoken_v2`, `ltuid_v2`, and optional `refre
 
 The deskband menu includes:
 
-- current game detail rows matching the original tray menu where the API exposes them
-- `Refresh now`
-- selected account configuration/import/clear actions
-- `Open HoYoLAB login page`
-- `Resource` selection, including automatic selection
-- per-resource account configuration and import commands
-- config/asset directory open and change commands under `Advanced`
+- current game detail rows;
+- `Refresh now`;
+- selected-account configure/import/clear actions;
+- `Open HoYoLAB login page`;
+- `Resource` selection, including automatic selection;
+- per-resource account configuration and import commands;
+- config/asset directory open and change commands under `Advanced`;
+- `About`.
 
-The deskband asks Explorer to resize when status text changes, so the toolbar width follows the current content instead of staying at a fixed size.
+The deskband asks Explorer to resize when status text changes, so the toolbar width follows current content instead of staying fixed.
 
-## Uninstall
+## Runtime Behavior
 
-```cmd
-UnregisterDeskband.cmd
-```
-
-If the registered DLL was a side-by-side build, the unregister script detects the registered path automatically. You can also pass it explicitly:
-
-```cmd
-UnregisterDeskband.cmd build\RealTimeNotesDeskband.12345.dll
-```
+- Refreshes use WinHTTP with connect/send/receive timeouts.
+- HTTP responses are capped at 1 MiB before parsing so Explorer does not retain an unexpectedly large API body.
+- Settings are copied under a lock before refresh workers use them, so changing config/asset directories from the menu cannot race with a background refresh.
+- If no icon resource is found, the deskband draws a built-in fallback marker.
 
 ## Settings
 
@@ -132,12 +114,38 @@ Values:
 - `Accounts\<resource>\UID`: game account UID.
 - `Accounts\<resource>\LTokenV2Protected`: DPAPI-protected HoYoLAB `ltoken_v2`.
 - `Accounts\<resource>\LTuidV2Protected`: DPAPI-protected HoYoLAB `ltuid_v2`.
-- Legacy plaintext `LTokenV2` / `LTuidV2` values are still read when protected values are not present. New saves are DPAPI-only and remove legacy plaintext values unless `KeepLegacyPlaintextSecrets` is enabled.
-- `KeepLegacyPlaintextSecrets`: optional DWORD. Set to `1` before saving credentials only if you need older releases to keep reading plaintext token values after rollback; leave unset or set to `0` to remove legacy plaintext on the next save.
-- `Accounts\<resource>\RefreshIntervalSeconds`: optional DWORD refresh override for one resource.
+- `Accounts\<resource>\RefreshIntervalSeconds`: optional per-resource refresh override.
 - `ConfigDir`: legacy fallback directory containing cookie JSON files.
 - `AssetDir`: optional directory containing icon resources.
-- `RefreshIntervalSeconds`: optional DWORD override. Values below 30 seconds are clamped.
 - `InstallDir`: directory containing the registered DLL.
+- `RefreshIntervalSeconds`: optional global refresh override. Values below 30 seconds are clamped.
+- `KeepLegacyPlaintextSecrets`: optional DWORD. Set to `1` before saving credentials only if older releases must keep reading plaintext token values after rollback.
 
-Credential registry values are user-local and are not written to the repository. If no icon resource is found, the Deskband draws a small built-in fallback marker. Local references can supply icons from `references\genshin-real-time-notes-0.0.8\embedded\assets`.
+Legacy plaintext `LTokenV2` and `LTuidV2` values are still read when protected values are absent. New saves are DPAPI-only and remove legacy plaintext values unless `KeepLegacyPlaintextSecrets` is enabled.
+
+## Source Layout
+
+```text
+RealTimeNotesDeskband\
+  build\                         generated DLLs, ignored
+  references\                    local upstream/reference source, ignored
+  BuildDeskband.cmd
+  ConfigureDeskband.cmd
+  RegisterDeskband.cmd
+  UnregisterDeskband.cmd
+  RealTimeNotesDeskband.cpp
+```
+
+The `references\` folder may contain local copies of ExplorerPatcher and the original Real-Time Notes tray app. Those copies are reference material, not part of the publishable project.
+
+## Uninstall
+
+```cmd
+UnregisterDeskband.cmd
+```
+
+If the registered DLL was a side-by-side build, the unregister script detects the registered path automatically. You can also pass it explicitly:
+
+```cmd
+UnregisterDeskband.cmd build\RealTimeNotesDeskband.12345.dll
+```

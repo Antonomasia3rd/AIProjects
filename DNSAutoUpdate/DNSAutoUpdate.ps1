@@ -2,6 +2,8 @@
 param(
     [string]$ZoneName = "server.local",
     [string[]]$SubFolder,                         # no default here
+    [string[]]$ManagedRecordName = @(),
+    [switch]$NoRootRecord,
     [string]$LogFile = ".\DNSAutoUpdate.log",
     [ValidateRange(1, 86400)]
     [int]$SleepSeconds = 20,
@@ -44,6 +46,16 @@ function Test-WildcardAny {
     return $false
 }
 
+function Normalize-RecordName {
+    param([string]$Name)
+
+    $normalized = ([string]$Name).Trim()
+    if (-not $normalized) {
+        return "@"
+    }
+    return $normalized
+}
+
 function Get-EligibleServerIPv4 {
     if ($IncludeIPAddress.Count -gt 0) {
         return @(
@@ -80,14 +92,37 @@ function Get-EligibleServerIPv4 {
     return @($eligible | Sort-Object -Unique)
 }
 
+$managedRecordNames = @()
+if ($ManagedRecordName.Count -gt 0) {
+    $managedRecordNames = @(
+        $ManagedRecordName |
+            ForEach-Object { Normalize-RecordName $_ } |
+            Where-Object { $_ } |
+            Sort-Object -Unique
+    )
+} else {
+    if (-not $NoRootRecord) {
+        $managedRecordNames += "@"
+    }
+
+    $managedRecordNames += @(
+        $SubFolder |
+            ForEach-Object { Normalize-RecordName $_ } |
+            Where-Object { $_ -and $_ -ne "@" } |
+            Sort-Object -Unique
+    )
+    $managedRecordNames = @($managedRecordNames | Sort-Object -Unique)
+}
+
+if ($managedRecordNames.Count -eq 0) {
+    throw "No managed DNS owner names were selected. Remove -NoRootRecord, pass -SubFolder, or pass -ManagedRecordName."
+}
+
 Write-Log "============================================="
 Write-Log " DNS Auto-Update Background Service Starting "
 Write-Log " Zone: $ZoneName"
-if ($SubFolder.Count -gt 0) {
-    Write-Log " Subfolders enabled: $($SubFolder -join ', ')"
-} else {
-    Write-Log " Subfolders: <none>"
-}
+Write-Log " Managed exact A record owner names: $($managedRecordNames -join ', ')"
+Write-Log " Records outside this allowlist are ignored."
 Write-Log "============================================="
 
 while ($true) {
@@ -176,18 +211,8 @@ while ($true) {
         }
     }
 
-    # ===========================================================
-    # ALWAYS process root "@"
-    # ===========================================================
-    Sync-ARecords -RecName "@"
-
-    # ===========================================================
-    # Process each subfolder (if any)
-    # ===========================================================
-    foreach ($folder in $SubFolder) {
-        if ($folder -and $folder.Trim() -ne "") {
-            Sync-ARecords -RecName $folder
-        }
+    foreach ($recordName in $managedRecordNames) {
+        Sync-ARecords -RecName $recordName
     }
 
     Write-Log "Cycle complete. Sleeping for $SleepSeconds seconds."

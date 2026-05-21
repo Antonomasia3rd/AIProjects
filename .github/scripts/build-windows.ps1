@@ -390,8 +390,8 @@ if (-not (Test-SkipProject 'CharmTray')) {
 }
 if (-not (Test-SkipProject 'SecureDesktopLauncher')) {
     Build-MsvcProject -Project 'SecureDesktopLauncher' -Source 'SecureDesktopLauncherService.cpp' -OutputName 'SecureDesktopLauncherService.exe' -CompileArgs @('/EHsc', '/W4') -LinkArgs @('advapi32.lib', 'wtsapi32.lib', 'userenv.lib')
-    Build-MsvcProject -Project 'SecureDesktopLauncher' -Source 'SecureDesktopPasswordLauncher.cpp' -OutputName 'SecureDesktopPasswordLauncher.exe' -CompileArgs @('/EHsc', '/W4') -LinkArgs @('bcrypt.lib', 'shell32.lib', 'user32.lib', 'gdi32.lib', 'comctl32.lib', 'version.lib', '/SUBSYSTEM:WINDOWS')
-    New-Package -Name 'SecureDesktopLauncher' -Project 'SecureDesktopLauncher' -Paths @('build\SecureDesktopLauncherService.exe', 'build\SecureDesktopPasswordLauncher.exe') -ExtraPaths @('SecureDesktopLauncher.README.md')
+    Build-MsvcProject -Project 'SecureDesktopLauncher' -Source 'SecureDesktopPasswordLauncher.cpp' -OutputName 'SecureDesktopPasswordLauncher.exe' -CompileArgs @('/EHsc', '/W4') -LinkArgs @('bcrypt.lib', 'advapi32.lib', 'shell32.lib', 'user32.lib', 'gdi32.lib', 'comctl32.lib', 'version.lib', '/SUBSYSTEM:WINDOWS')
+    New-Package -Name 'SecureDesktopLauncher' -Project 'SecureDesktopLauncher' -Paths @('build\SecureDesktopLauncherService.exe', 'build\SecureDesktopPasswordLauncher.exe')
 }
 if (-not (Test-SkipProject 'RealTimeNotesDeskband')) {
     if (-not (Get-Command g++.exe -ErrorAction SilentlyContinue)) {

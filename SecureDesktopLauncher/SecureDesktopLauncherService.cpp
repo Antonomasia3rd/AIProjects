@@ -6,6 +6,7 @@
 #include <userenv.h>
 #include <tlhelp32.h>
 #include <aclapi.h>
+#include <sddl.h>
 
 #include <algorithm>
 #include <cwchar>
@@ -202,10 +203,29 @@ static bool EqualKnownSid(PSID sid, WELL_KNOWN_SID_TYPE type)
     return CreateWellKnownSid(type, nullptr, buffer, &size) && EqualSid(sid, buffer);
 }
 
-static bool IsTrustedWritePrincipal(PSID sid)
+static bool EqualSidString(PSID sid, const wchar_t* sidString)
+{
+    PSID parsedSid = nullptr;
+    if (!ConvertStringSidToSidW(sidString, &parsedSid))
+    {
+        return false;
+    }
+
+    bool equal = EqualSid(sid, parsedSid) != FALSE;
+    LocalFree(parsedSid);
+    return equal;
+}
+
+static bool IsTrustedSecurityPrincipal(PSID sid)
 {
     return EqualKnownSid(sid, WinLocalSystemSid) ||
-        EqualKnownSid(sid, WinBuiltinAdministratorsSid);
+        EqualKnownSid(sid, WinBuiltinAdministratorsSid) ||
+        EqualSidString(sid, L"S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464");
+}
+
+static bool IsTrustedWritePrincipal(PSID sid)
+{
+    return IsTrustedSecurityPrincipal(sid);
 }
 
 static bool IsWriteLikeAccess(DWORD mask)
@@ -216,6 +236,7 @@ static bool IsWriteLikeAccess(DWORD mask)
         FILE_WRITE_EA |
         FILE_WRITE_ATTRIBUTES |
         DELETE |
+        FILE_DELETE_CHILD |
         WRITE_DAC |
         WRITE_OWNER |
         GENERIC_WRITE |
@@ -223,7 +244,18 @@ static bool IsWriteLikeAccess(DWORD mask)
     return (mask & writeMask) != 0;
 }
 
-static bool PathHasUntrustedWriteAce(const std::wstring& path)
+static bool IsReplaceLikeAccess(DWORD mask)
+{
+    const DWORD replaceMask =
+        DELETE |
+        FILE_DELETE_CHILD |
+        WRITE_DAC |
+        WRITE_OWNER |
+        GENERIC_ALL;
+    return (mask & replaceMask) != 0;
+}
+
+static bool PathHasUntrustedAccessAce(const std::wstring& path, bool replaceOnly)
 {
     PSECURITY_DESCRIPTOR sd = nullptr;
     PACL dacl = nullptr;
@@ -269,7 +301,8 @@ static bool PathHasUntrustedWriteAce(const std::wstring& path)
 
         auto* ace = reinterpret_cast<ACCESS_ALLOWED_ACE*>(aceData);
         PSID sid = reinterpret_cast<PSID>(&ace->SidStart);
-        if (IsWriteLikeAccess(ace->Mask) && !IsTrustedWritePrincipal(sid))
+        bool unsafeAccess = replaceOnly ? IsReplaceLikeAccess(ace->Mask) : IsWriteLikeAccess(ace->Mask);
+        if (unsafeAccess && !IsTrustedWritePrincipal(sid))
         {
             unsafe = true;
         }
@@ -283,24 +316,200 @@ static bool PathHasUntrustedWriteAce(const std::wstring& path)
     return unsafe;
 }
 
+static bool PathHasUntrustedWriteAce(const std::wstring& path)
+{
+    return PathHasUntrustedAccessAce(path, false);
+}
+
+static bool PathHasUntrustedReplaceAce(const std::wstring& path)
+{
+    return PathHasUntrustedAccessAce(path, true);
+}
+
+static bool PathOwnerIsTrusted(const std::wstring& path)
+{
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    PSID owner = nullptr;
+    DWORD error = GetNamedSecurityInfoW(
+        const_cast<LPWSTR>(path.c_str()),
+        SE_FILE_OBJECT,
+        OWNER_SECURITY_INFORMATION,
+        &owner,
+        nullptr,
+        nullptr,
+        nullptr,
+        &sd);
+    if (error != ERROR_SUCCESS || !owner)
+    {
+        if (sd) LocalFree(sd);
+        LogServiceWarning(L"Could not read owner for " + path + L"; refusing to trust it.");
+        return false;
+    }
+
+    bool trusted = IsTrustedSecurityPrincipal(owner);
+    if (sd) LocalFree(sd);
+    if (!trusted)
+    {
+        LogServiceWarning(L"Refusing to trust path with untrusted owner: " + path);
+    }
+    return trusted;
+}
+
+static bool PathSecurityIsTrusted(const std::wstring& path, bool replaceOnly = false)
+{
+    return PathOwnerIsTrusted(path) &&
+        !(replaceOnly ? PathHasUntrustedReplaceAce(path) : PathHasUntrustedWriteAce(path));
+}
+
+static bool IsAbsoluteFileSystemPath(const std::wstring& path)
+{
+    return (path.size() >= 3 &&
+            iswalpha(path[0]) &&
+            path[1] == L':' &&
+            (path[2] == L'\\' || path[2] == L'/')) ||
+        (path.size() >= 2 && path[0] == L'\\' && path[1] == L'\\');
+}
+
+static bool NormalizeFullPath(const std::wstring& path, std::wstring& fullPath)
+{
+    DWORD needed = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
+    if (needed == 0)
+    {
+        return false;
+    }
+
+    std::vector<wchar_t> buffer(needed + 1);
+    DWORD written = GetFullPathNameW(path.c_str(), static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
+    if (written == 0 || written >= buffer.size())
+    {
+        return false;
+    }
+
+    fullPath.assign(buffer.data(), written);
+    return true;
+}
+
+static bool IsDriveRoot(const std::wstring& path)
+{
+    return path.size() == 3 &&
+        iswalpha(path[0]) &&
+        path[1] == L':' &&
+        (path[2] == L'\\' || path[2] == L'/');
+}
+
+static std::wstring TrimTrailingDirectorySeparators(std::wstring path)
+{
+    while (path.size() > 3 &&
+        (path[path.size() - 1] == L'\\' || path[path.size() - 1] == L'/'))
+    {
+        path.resize(path.size() - 1);
+    }
+    return path;
+}
+
+static bool IsUncShareRoot(const std::wstring& path)
+{
+    if (path.size() < 5 || path[0] != L'\\' || path[1] != L'\\')
+    {
+        return false;
+    }
+
+    size_t serverEnd = path.find_first_of(L"\\/", 2);
+    if (serverEnd == std::wstring::npos || serverEnd + 1 >= path.size())
+    {
+        return false;
+    }
+
+    size_t shareEnd = path.find_first_of(L"\\/", serverEnd + 1);
+    return shareEnd == std::wstring::npos;
+}
+
+static std::wstring ParentDirectoryForTrust(std::wstring path)
+{
+    path = TrimTrailingDirectorySeparators(path);
+    if (path.empty() || IsDriveRoot(path) || IsUncShareRoot(path))
+    {
+        return L"";
+    }
+
+    size_t pos = path.find_last_of(L"\\/");
+    if (pos == std::wstring::npos)
+    {
+        return L"";
+    }
+    if (pos == 2 && path[1] == L':')
+    {
+        return path.substr(0, 3);
+    }
+    return path.substr(0, pos);
+}
+
+static bool TrustedExistingAncestorDirectories(std::wstring path)
+{
+    path = TrimTrailingDirectorySeparators(path);
+    bool strictCurrentDirectory = true;
+    while (!path.empty())
+    {
+        if (!DirectoryExists(path) || !PathSecurityIsTrusted(path, !strictCurrentDirectory))
+        {
+            return false;
+        }
+
+        std::wstring parent = ParentDirectoryForTrust(path);
+        if (parent.empty() || parent == path)
+        {
+            break;
+        }
+        path = parent;
+        strictCurrentDirectory = false;
+    }
+
+    return true;
+}
+
 static bool TrustedExistingFilePath(const std::wstring& path)
 {
-    if (!FileExists(path))
+    if (!IsAbsoluteFileSystemPath(path))
+    {
+        LogServiceWarning(L"Configured file path is not absolute: " + path);
+        return false;
+    }
+
+    std::wstring fullPath;
+    if (!NormalizeFullPath(path, fullPath))
+    {
+        LogServiceWarning(L"Could not normalize configured file path: " + path);
+        return false;
+    }
+
+    if (!FileExists(fullPath))
     {
         LogServiceWarning(L"Configured file does not exist: " + path);
         return false;
     }
 
-    std::wstring dir = DirectoryOf(path);
-    return !PathHasUntrustedWriteAce(path) &&
+    std::wstring dir = DirectoryOf(fullPath);
+    return PathSecurityIsTrusted(fullPath) &&
         !dir.empty() &&
-        DirectoryExists(dir) &&
-        !PathHasUntrustedWriteAce(dir);
+        TrustedExistingAncestorDirectories(dir);
 }
 
 static bool TrustedExistingDirectoryPath(const std::wstring& path)
 {
-    return DirectoryExists(path) && !PathHasUntrustedWriteAce(path);
+    if (!IsAbsoluteFileSystemPath(path))
+    {
+        LogServiceWarning(L"Configured directory path is not absolute: " + path);
+        return false;
+    }
+
+    std::wstring fullPath;
+    if (!NormalizeFullPath(path, fullPath))
+    {
+        LogServiceWarning(L"Could not normalize configured directory path: " + path);
+        return false;
+    }
+
+    return TrustedExistingAncestorDirectories(fullPath);
 }
 
 static std::wstring FindConfigPath()

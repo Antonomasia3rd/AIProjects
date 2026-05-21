@@ -1,54 +1,88 @@
 # AIProjects
 
-A collection of small Windows utility projects and experiments. Most projects are standalone: each folder contains its source, optional build script, and a project-level `README.md`.
-
-## Prebuilt Releases
-
-Prebuilt executables are published as GitHub releases when a project has a compiled binary:
-
-| Project | Release | Purpose |
-| --- | --- | --- |
-| AllowContentAboveLock | [AllowContentAboveLock v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/AllowContentAboveLock-v1) | Service that keeps notification `AllowContentAboveLock` registry values enabled for loaded users. |
-| asusblink | [asusblink v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/asusblink-v1) | ASUS ACPI LED/task controller for mic, keyboard, and activity blink patterns. |
-| CharmTray | [CharmTray v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/CharmTray-v1) | Windows 8/8.1 tray launcher for charm flyouts. |
-| GenerateAssets | [GenerateAssets v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/GenerateAssets-v1) | Desktop tile asset generator and Appx manifest registrar. |
-| DiscordRPC | [DiscordRPC v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/DiscordRPC-v1) | Discord Rich Presence tray app with IPC and Gateway modes. |
-| NowPlayingTile | [NowPlayingTile v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/NowPlayingTile-v1) | SMTC-based Windows Start live tile updater. |
-| SecureDesktopLauncher | [SecureDesktopLauncher v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/SecureDesktopLauncher-v1) | Secure desktop service and password-gated launcher. |
-| YourPhoneHideBanner | [YourPhoneHideBanner v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/YourPhoneHideBanner-v1) | Service that suppresses Phone Link notification banners/sounds. |
+Small Windows utility projects and experiments. Most folders are standalone and contain the source, build scripts, and a project-level `README.md`.
 
 ## Projects
 
-| Folder | Type | Notes |
+| Folder | Runtime | Purpose |
 | --- | --- | --- |
-| `AllowContentAboveLock` | C# Windows service | Requires administrator rights to install and write Event Log sources. |
-| `asusblink` | C# tray/console app | Hardware-specific ASUS ACPI tool. |
-| `capsblink` | C# console app | Raw keyboard LED experiment; no release is currently published. |
-| `CharmTray` | C++ Win32 tray app | Intended only for Windows 8/8.1. |
-| `DesktopStub` | C++ Win32 tray app | Builds `GenerateAssets.exe`. |
-| `DiscordRPC` | C# tray/console app | Builds to `DiscordRPC\build`. |
-| `DNSAutoUpdate` | PowerShell script | Requires Windows DNS Server PowerShell cmdlets. |
-| `NowPlayingTile` | C# app plus loose Appx registration scripts | Builds generated files under `NowPlayingTile\build`. |
-| `PhotoCollage` | PowerShell script | Creates a simple image grid/collage. |
-| `RealTimeNotesDeskband` | C++ Win32 Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes; local upstream/reference dumps are ignored. |
-| `SecureDesktopLauncher` | C++ Windows service/tools | Detailed docs are in the project folder. |
-| `TaskSchedulerMigration` | PowerShell script | Re-registers scheduled tasks from an old SID to a new user. |
-| `YourPhoneHideBanner` | C# Windows service | Requires administrator rights to install and write Event Log sources. |
+| `AllowContentAboveLock` | C# Windows service | Keeps notification `AllowContentAboveLock` registry values enabled for loaded users. |
+| `asusblink` | C# tray/console app | ASUS ACPI LED controller for mic LED, keyboard backlight states, and HDD-activity keyboard patterns. |
+| `capsblink` | C# console app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
+| `CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
+| `DesktopStub` | C++ Win32 tray app | Builds `GenerateAssets.exe`, a desktop wallpaper tile-asset generator and loose Appx registrar. |
+| `DiscordRPC` | C# tray/console app | Discord Rich Presence app with IPC, optional Gateway mode, dynamic placeholders, and a tray config UI. |
+| `DNSAutoUpdate` | PowerShell loop | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
+| `NowPlayingTile` | C# app plus Appx scripts | SMTC-based Windows Start live tile updater with optional widget mode. |
+| `PhotoCollage` | PowerShell script | Creates a simple JPEG grid/collage from images in a folder. |
+| `RealTimeNotesDeskband` | C++ Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes resources. |
+| `SecureDesktopLauncher` | C++ service/tools | Launches trusted configured programs on secure desktops, with an optional password-gated launcher. |
+| `TaskSchedulerMigration` | PowerShell script | Re-registers scheduled tasks from an old SID to a new user/account. |
+| `YourPhoneHideBanner` | C# Windows service | Suppresses Phone Link notification banners and sounds for loaded users. |
 
-## Build Policy
+## Prebuilt Releases
 
-Generated outputs belong in project `build` folders and are ignored by git. Source files, scripts, manifests/templates, and READMEs are tracked. Prebuilt binaries should be distributed through GitHub Releases rather than committed to the repository.
+Prebuilt executables are published through GitHub Releases for projects that produce binaries:
 
-GitHub Actions builds Windows binaries on GitHub-hosted runners. Each run uploads zipped workflow artifacts, and tag/release builds attach those same ZIP files to the matching GitHub Release. This keeps published binaries tied to a public workflow run and commit instead of a local machine build.
+| Project | Release |
+| --- | --- |
+| AllowContentAboveLock | [AllowContentAboveLock v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/AllowContentAboveLock-v1) |
+| asusblink | [asusblink v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/asusblink-v1) |
+| CharmTray | [CharmTray v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/CharmTray-v1) |
+| GenerateAssets | [GenerateAssets v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/GenerateAssets-v1) |
+| DiscordRPC | [DiscordRPC v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/DiscordRPC-v1) |
+| NowPlayingTile | [NowPlayingTile v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/NowPlayingTile-v1) |
+| SecureDesktopLauncher | [SecureDesktopLauncher v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/SecureDesktopLauncher-v1) |
+| YourPhoneHideBanner | [YourPhoneHideBanner v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/YourPhoneHideBanner-v1) |
+
+Projects without a release entry are source/script utilities or experiments.
+
+## Build
 
 Common prerequisites:
 
-- Windows 10/11 for most projects, except `CharmTray`, which targets Windows 8/8.1 shell internals.
+- Windows 10/11 for most projects.
+- Windows 8 or 8.1 for `CharmTray`.
 - .NET Framework compiler at `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` for C# projects.
-- Visual Studio Build Tools with the C++ workload for C++ projects.
-- PowerShell 5.1 or newer for script projects.
+- Visual Studio Build Tools with the C++ workload for MSVC projects.
+- MinGW-w64 `g++` for `RealTimeNotesDeskband`.
+- PowerShell 5.1 or newer for script projects and build wrappers.
 
-Some tools modify system settings, services, scheduled tasks, DNS records, or secure-desktop processes. Read the project README before running them, and use an elevated shell where documented.
+Build all packaged Windows artifacts:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\build-windows.ps1
+```
+
+Useful build options:
+
+```powershell
+# Skip one or more projects.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\build-windows.ps1 -SkipProjects asusblink,RealTimeNotesDeskband
+
+# Stop running output EXEs if they block overwrite.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\build-windows.ps1 -StopRunningArtifacts
+```
+
+Each project README also lists direct build commands for that project. Generated outputs belong in project `build` folders and are ignored by git.
+
+## Safety
+
+Several tools intentionally modify system state:
+
+- services write user-hive notification settings and Windows Event Log entries;
+- `DNSAutoUpdate` adds and removes exact DNS A records in its managed allowlist;
+- `SecureDesktopLauncher` can launch processes as `LocalSystem` on secure desktops;
+- `TaskSchedulerMigration` re-registers matching scheduled tasks;
+- Appx scripts register or unregister loose development packages.
+
+Read the project README before running a tool, use an elevated shell where documented, and use `-WhatIf` for PowerShell scripts that support it.
+
+## Repository Policy
+
+Tracked files are source, build scripts, templates/manifests, and documentation. Local configs, logs, generated assets, binaries, object files, and release ZIPs are ignored.
+
+GitHub Actions builds Windows binaries on hosted runners. Workflow artifacts and release attachments are generated from the workflow run so published binaries are tied to a commit.
 
 ## License
 

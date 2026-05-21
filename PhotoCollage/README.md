@@ -29,7 +29,14 @@ powershell -ExecutionPolicy Bypass -File .\PhotoCollage.ps1 -InputFolder "C:\Pho
 - `-MaxImages`: maximum number of images to include. Default: `25`.
 - `-JpegQuality`: JPEG quality from 1 to 100. Default: `80`.
 
-## Notes
+## Behavior And Limitations
 
-- Images are not cropped individually; each image is drawn into cells matching the first image's dimensions.
-- If source images have mixed aspect ratios/sizes, output may look uneven or scaled.
+- Image order follows the recursive file enumeration order returned by PowerShell.
+- The first image defines the cell size for the whole collage.
+- Source images are scaled into cells but not cropped individually.
+- Mixed aspect ratios/sizes can produce uneven-looking output.
+- Existing output files are overwritten by `System.Drawing` save behavior if the path can be written.
+
+## Generated Files
+
+The script creates only the requested `-OutputFile`.

@@ -1,6 +1,6 @@
-// testing.cs
-// Compile (tray): C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc /out:testing.exe /target:winexe /r:System.Windows.Forms.dll /r:System.Drawing.dll testing.cs
-// Compile (console): C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc /out:testing.exe /target:exe testing.cs
+// asusblink.cs
+// Compile (tray): C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc /out:asusblink.exe /target:winexe /r:System.Windows.Forms.dll /r:System.Drawing.dll asusblink.cs
+// Compile (console): C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc /out:asusblink.exe /target:exe asusblink.cs
 
 using System;
 using System.Collections.Generic;
@@ -302,6 +302,7 @@ class Program
     static int errorRetryTimes = 3;
     static string errorLogPath = null;
     static List<string> errorActions = new List<string>();
+    static string startupArguments = "";
 
     class DeviceEvent
     {
@@ -468,6 +469,47 @@ class Program
         return dict;
     }
 
+    static string QuoteShortcutArgument(string argument)
+    {
+        if (argument == null) return "\"\"";
+        if (argument.Length > 0 && argument.IndexOfAny(new char[] { ' ', '\t', '\n', '\v', '"' }) < 0)
+        {
+            return argument;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        builder.Append('"');
+        int backslashes = 0;
+        foreach (char ch in argument)
+        {
+            if (ch == '\\')
+            {
+                backslashes++;
+            }
+            else if (ch == '"')
+            {
+                builder.Append('\\', backslashes * 2 + 1);
+                builder.Append('"');
+                backslashes = 0;
+            }
+            else
+            {
+                builder.Append('\\', backslashes);
+                backslashes = 0;
+                builder.Append(ch);
+            }
+        }
+        builder.Append('\\', backslashes * 2);
+        builder.Append('"');
+        return builder.ToString();
+    }
+
+    static string BuildShortcutArguments(string[] args)
+    {
+        if (args == null || args.Length == 0) return "";
+        return string.Join(" ", args.Select(QuoteShortcutArgument).ToArray());
+    }
+
     static DeviceEvent BuildEventFromOptions(string name, Dictionary<string, string> options)
     {
         DeviceEvent ev = new DeviceEvent();
@@ -574,7 +616,7 @@ class Program
                 Type scType = shortcut.GetType();
                 scType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { exe });
                 scType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { Path.GetDirectoryName(exe) });
-                scType.InvokeMember("Arguments", BindingFlags.SetProperty, null, shortcut, new object[] { "" });
+                scType.InvokeMember("Arguments", BindingFlags.SetProperty, null, shortcut, new object[] { startupArguments });
                 scType.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, new object[] { });
                 Log("Installed startup shortcut: " + linkPath);
             }
@@ -816,6 +858,7 @@ class Program
     [STAThread]
     static void Main(string[] args)
     {
+        startupArguments = BuildShortcutArguments(args);
         if (args.Length == 0)
         {
             PrintHelp();
@@ -909,7 +952,9 @@ class Program
                 built.Name = evn;
                 int eidx;
                 if (int.TryParse(evn.Substring(5), out eidx)) built.Priority = eidx;
-                toRun.Add(new KeyValuePair<string, DeviceEvent>("hdd", built));
+                built.Condition = "HDD activity";
+                built.Extras["handler"] = "hdd";
+                toRun.Add(new KeyValuePair<string, DeviceEvent>("keyboard", built));
             }
         }
 
@@ -944,19 +989,17 @@ class Program
                 string device = g.Key;
                 var chosenEvents = g.Select(x => x.Value).OrderBy(e => e.Priority).ToList();
 
-                foreach (var ev in chosenEvents)
-                {
-                    var cts = new CancellationTokenSource();
-                    runningCts.Add(cts);
-                    Task t = Task.Factory.StartNew(
-                        (obj) => RunEventLoop(device, (DeviceEvent)obj, cts.Token),
-                        ev,
-                        cts.Token,
-                        TaskCreationOptions.LongRunning,
-                        TaskScheduler.Default
-                    );
-                    runningTasks.Add(t);
-                }
+                string deviceForTask = device;
+                List<DeviceEvent> eventsForTask = chosenEvents;
+                var cts = new CancellationTokenSource();
+                runningCts.Add(cts);
+                Task t = Task.Factory.StartNew(
+                    () => RunDeviceEventGroup(deviceForTask, eventsForTask, cts.Token),
+                    cts.Token,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default
+                );
+                runningTasks.Add(t);
             }
         }
 
@@ -994,6 +1037,27 @@ class Program
         }
     }
 
+    static void RunDeviceEventGroup(string device, List<DeviceEvent> events, CancellationToken token)
+    {
+        if (events == null || events.Count == 0) return;
+        if (events.Count > 1)
+        {
+            Log("Serializing {0} events for device {1} by priority.", events.Count, device);
+        }
+
+        foreach (var ev in events.OrderBy(e => e.Priority))
+        {
+            if (token.IsCancellationRequested) break;
+            RunEventLoop(device, ev, token);
+        }
+    }
+
+    static bool IsHddActivityEvent(DeviceEvent ev)
+    {
+        string handler;
+        return ev != null && ev.Extras.TryGetValue("handler", out handler) && string.Equals(handler, "hdd", StringComparison.OrdinalIgnoreCase);
+    }
+
     static void RunEventLoop(string device, DeviceEvent ev, CancellationToken token)
     {
         Log("Starting event {0} for device {1} (priority {2})", ev.Name, device, ev.Priority);
@@ -1001,9 +1065,9 @@ class Program
         int sCount = ev.States.Count;
         if (sCount == 0) { Log("Event {0} has no states, exiting", ev.Name); return; }
 
-        if (device == "hdd")
+        if (IsHddActivityEvent(ev))
         {
-            RunHddActivityLoop(ev, token);
+            RunHddActivityLoop(device, ev, token);
             return;
         }
 
@@ -1071,14 +1135,14 @@ class Program
         return ev.States[stateIndex];
     }
 
-    static void RunHddActivityLoop(DeviceEvent ev, CancellationToken token)
+    static void RunHddActivityLoop(string device, DeviceEvent ev, CancellationToken token)
     {
         long pollInterval = ev.IntervalsMs.Count > 0 ? ev.IntervalsMs[0] : 500;
         if (pollInterval <= 0) pollInterval = 500;
 
         if (ev.DurationMs == -1)
         {
-            ApplyDeviceState("keyboard", StateForHddActivity(ev));
+            ApplyDeviceState(device, StateForHddActivity(ev));
             Log("Event {0} finished one HDD activity sample", ev.Name);
             return;
         }
@@ -1088,7 +1152,7 @@ class Program
         while (!token.IsCancellationRequested)
         {
             while (paused && !token.IsCancellationRequested) Thread.Sleep(200);
-            ApplyDeviceState("keyboard", StateForHddActivity(ev));
+            ApplyDeviceState(device, StateForHddActivity(ev));
 
             if (!infinite && ev.DurationMs > 0)
             {
@@ -1106,9 +1170,9 @@ class Program
     {
         Console.WriteLine("Asus LED Controller - help");
         Console.WriteLine("Examples:");
-        Console.WriteLine("  testing.exe --mic-state 0,1 --mic-interval 200,5000 --mic-duration 60s");
-        Console.WriteLine("  testing.exe --keyboard-state 128,129,130,131 --keyboard-interval 200,100,50,2000 --keyboard-duration 5s");
-        Console.WriteLine("  testing.exe --mic-state 1 --keyboard-state 130");
+        Console.WriteLine("  asusblink.exe --mic-state 0,1 --mic-interval 200,5000 --mic-duration 60s");
+        Console.WriteLine("  asusblink.exe --keyboard-state 128,129,130,131 --keyboard-interval 200,100,50,2000 --keyboard-duration 5s");
+        Console.WriteLine("  asusblink.exe --mic-state 1 --keyboard-state 130");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --mic-state <csv of ints>         : mic states (0/1)");
@@ -1120,6 +1184,7 @@ class Program
         Console.WriteLine("  --keyboard-duration <time>        : duration");
         Console.WriteLine("  --event1-hdd-state <csv>          : map HDD activity levels 0..4 to keyboard states");
         Console.WriteLine("  --event1-mic-state ...            : custom events (event1,event2...)");
+        Console.WriteLine("                                      same-device events run serially by priority");
         Console.WriteLine("  --error-log <path|off>            : error log");
         Console.WriteLine("  --error-retry <times>             : how many times to retry operations");
         Console.WriteLine("  --error-action <commalist>        : actions on error: exit,continue,pause,crash,log");
