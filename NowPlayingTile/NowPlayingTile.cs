@@ -853,6 +853,7 @@ internal static class LiveTileUpdater
 
 internal static class MediaReader
 {
+    private const int AsyncTimeoutMs = 10000;
     private static GlobalSystemMediaTransportControlsSessionManager manager;
 
     public static MediaSnapshot Read()
@@ -893,26 +894,28 @@ internal static class MediaReader
 
         try
         {
-            var stream = WaitFor(thumbnail.OpenReadAsync());
-            if (stream == null || stream.Size == 0 || stream.Size > 10 * 1024 * 1024)
+            using (var stream = WaitFor(thumbnail.OpenReadAsync()))
             {
-                return null;
-            }
-
-            using (var reader = new DataReader(stream))
-            {
-                var loaded = WaitFor(reader.LoadAsync((uint)stream.Size));
-                if (loaded == 0)
+                if (stream == null || stream.Size == 0 || stream.Size > 10 * 1024 * 1024)
                 {
                     return null;
                 }
 
-                var bytes = new byte[loaded];
-                reader.ReadBytes(bytes);
-                using (var memory = new MemoryStream(bytes))
-                using (var image = Image.FromStream(memory))
+                using (var reader = new DataReader(stream))
                 {
-                    return new Bitmap(image);
+                    var loaded = WaitFor(reader.LoadAsync((uint)stream.Size));
+                    if (loaded == 0)
+                    {
+                        return null;
+                    }
+
+                    var bytes = new byte[loaded];
+                    reader.ReadBytes(bytes);
+                    using (var memory = new MemoryStream(bytes))
+                    using (var image = Image.FromStream(memory))
+                    {
+                        return new Bitmap(image);
+                    }
                 }
             }
         }
@@ -964,8 +967,15 @@ internal static class MediaReader
 
     private static T WaitFor<T>(IAsyncOperation<T> operation)
     {
+        int started = Environment.TickCount;
         while (operation.Status == AsyncStatus.Started)
         {
+            if (TimedOut(started, AsyncTimeoutMs))
+            {
+                operation.Cancel();
+                throw new TimeoutException("WinRT operation timed out.");
+            }
+
             Thread.Sleep(25);
         }
 
@@ -984,8 +994,15 @@ internal static class MediaReader
 
     private static T WaitFor<T, TProgress>(IAsyncOperationWithProgress<T, TProgress> operation)
     {
+        int started = Environment.TickCount;
         while (operation.Status == AsyncStatus.Started)
         {
+            if (TimedOut(started, AsyncTimeoutMs))
+            {
+                operation.Cancel();
+                throw new TimeoutException("WinRT operation timed out.");
+            }
+
             Thread.Sleep(25);
         }
 
@@ -1000,6 +1017,11 @@ internal static class MediaReader
         }
 
         return operation.GetResults();
+    }
+
+    private static bool TimedOut(int startedTick, int timeoutMs)
+    {
+        return unchecked(Environment.TickCount - startedTick) >= timeoutMs;
     }
 }
 

@@ -43,18 +43,20 @@ while ($true) {
     Write-Log "Server IPs detected: $($serverIPs -join ', ')"
 
     # ===========================================================
-    # FUNCTION — apply sync logic to any name (root or subfolder)
+    # FUNCTION - apply sync logic to one exact DNS owner name
     # ===========================================================
     function Sync-ARecords {
-        param([string]$RecName, [string]$Node)
+        param([string]$RecName)
 
-        if ($Node -eq "") {
-            $records = Get-DnsServerResourceRecord -ZoneName $ZoneName -RRType A |
-                       Where-Object { $_.HostName -notmatch '\.' }
-        } else {
-            $records = Get-DnsServerResourceRecord -ZoneName $ZoneName -RRType A -Node $Node
+        function Get-ExactARecords {
+            try {
+                @(Get-DnsServerResourceRecord -ZoneName $ZoneName -Name $RecName -RRType A -ErrorAction Stop)
+            } catch [Microsoft.Management.Infrastructure.CimException] {
+                @()
+            }
         }
 
+        $records = Get-ExactARecords
         Write-Log "Found $($records.Count) A records for '$RecName'"
 
         foreach ($rec in $records) {
@@ -79,14 +81,8 @@ while ($true) {
             }
         }
 
-        # Re-evaluate remaining IPs
-        if ($Node -eq "") {
-            $records = Get-DnsServerResourceRecord -ZoneName $ZoneName -RRType A |
-                       Where-Object { $_.HostName -notmatch '\.' }
-        } else {
-            $records = Get-DnsServerResourceRecord -ZoneName $ZoneName -RRType A -Node $Node
-        }
-
+        # Re-evaluate remaining IPs for this exact owner name.
+        $records = Get-ExactARecords
         $existingIPs = $records | ForEach-Object {
             Normalize-IP $_.RecordData.IPv4Address.ToString()
         }
@@ -112,14 +108,14 @@ while ($true) {
     # ===========================================================
     # ALWAYS process root "@"
     # ===========================================================
-    Sync-ARecords -RecName "@" -Node ""
+    Sync-ARecords -RecName "@"
 
     # ===========================================================
     # Process each subfolder (if any)
     # ===========================================================
     foreach ($folder in $SubFolder) {
         if ($folder -and $folder.Trim() -ne "") {
-            Sync-ARecords -RecName $folder -Node $folder
+            Sync-ARecords -RecName $folder
         }
     }
 

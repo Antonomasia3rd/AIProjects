@@ -2,6 +2,7 @@ using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using System.Threading;
@@ -9,7 +10,10 @@ using System.Threading;
 public class AllowContentService : ServiceBase
 {
     private const string BasePath = @"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings";
-    private List<Thread> watcherThreads = new List<Thread>();
+    private readonly object watcherLock = new object();
+    private readonly List<Thread> watcherThreads = new List<Thread>();
+    private readonly HashSet<string> watchedSids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly ManualResetEvent stopEvent = new ManualResetEvent(false);
     private volatile bool running = true;
 
     [DllImport("advapi32.dll", SetLastError = true)]
@@ -37,23 +41,40 @@ public class AllowContentService : ServiceBase
 
     protected override void OnStart(string[] args)
     {
+        running = true;
+        stopEvent.Reset();
         Log("Service started");
 
-        // Watch HKU for new users
         Thread hkuWatcher = new Thread(WatchHKU);
+        hkuWatcher.IsBackground = true;
         hkuWatcher.Start();
-        watcherThreads.Add(hkuWatcher);
+        lock (watcherLock)
+        {
+            watcherThreads.Add(hkuWatcher);
+        }
 
-        // Attach to already loaded users
         AttachToExistingUsers();
     }
 
     protected override void OnStop()
     {
         running = false;
+        stopEvent.Set();
         Log("Service stopping...");
-        // Trigger exit by forcing threads to continue
-        Environment.Exit(0);
+
+        Thread[] threads;
+        lock (watcherLock)
+        {
+            threads = watcherThreads.ToArray();
+        }
+
+        foreach (Thread thread in threads)
+        {
+            if (thread != Thread.CurrentThread && thread.IsAlive)
+            {
+                thread.Join(2000);
+            }
+        }
     }
 
     private void WatchHKU()
@@ -62,18 +83,31 @@ public class AllowContentService : ServiceBase
         {
             while (running)
             {
-                IntPtr handle = hku.Handle.DangerousGetHandle();
+                using (ManualResetEvent changed = new ManualResetEvent(false))
+                {
+                    int status = RegNotifyChangeKeyValue(
+                        hku.Handle.DangerousGetHandle(),
+                        false,
+                        RegChangeNotifyFilter.Name,
+                        changed.SafeWaitHandle.DangerousGetHandle(),
+                        true
+                    );
 
-                RegNotifyChangeKeyValue(
-                    handle,
-                    false,
-                    RegChangeNotifyFilter.Name,
-                    IntPtr.Zero,
-                    false
-                );
+                    if (status != 0)
+                    {
+                        Log("RegNotifyChangeKeyValue(HKU) failed: " + status);
+                        stopEvent.WaitOne(5000);
+                        continue;
+                    }
+
+                    int signaled = WaitHandle.WaitAny(new WaitHandle[] { stopEvent, changed });
+                    if (signaled == 0 || !running)
+                    {
+                        break;
+                    }
+                }
 
                 Log("HKU changed (user login/logout?)");
-
                 AttachToExistingUsers();
             }
         }
@@ -87,40 +121,95 @@ public class AllowContentService : ServiceBase
 
             string fullPath = sid + "\\" + BasePath;
 
+            RegistryKey key = null;
+            bool registered = false;
             try
             {
-                RegistryKey key = Registry.Users.OpenSubKey(fullPath, true);
+                key = Registry.Users.OpenSubKey(fullPath, true);
                 if (key == null) continue;
 
-                Thread t = new Thread(() => WatchUserKey(key, sid));
-                t.Start();
-                watcherThreads.Add(t);
+                lock (watcherLock)
+                {
+                    if (watchedSids.Contains(sid))
+                    {
+                        key.Dispose();
+                        continue;
+                    }
+
+                    watchedSids.Add(sid);
+                    registered = true;
+                }
 
                 ProcessAllKeys(key, sid);
 
+                Thread t = new Thread(() => WatchUserKey(key, sid));
+                t.IsBackground = true;
+                t.Start();
+                lock (watcherLock)
+                {
+                    watcherThreads.Add(t);
+                }
+
                 Log("Attached to " + sid);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                if (key != null)
+                {
+                    key.Dispose();
+                }
+                if (registered)
+                {
+                    lock (watcherLock)
+                    {
+                        watchedSids.Remove(sid);
+                    }
+                }
+                Log("Attach error for " + sid + ": " + ex.Message);
+            }
         }
     }
 
     private void WatchUserKey(RegistryKey baseKey, string sid)
     {
-        while (running)
+        try
         {
-            IntPtr handle = baseKey.Handle.DangerousGetHandle();
+            while (running)
+            {
+                using (ManualResetEvent changed = new ManualResetEvent(false))
+                {
+                    int status = RegNotifyChangeKeyValue(
+                        baseKey.Handle.DangerousGetHandle(),
+                        false,
+                        RegChangeNotifyFilter.Name,
+                        changed.SafeWaitHandle.DangerousGetHandle(),
+                        true
+                    );
 
-            RegNotifyChangeKeyValue(
-                handle,
-                false,
-                RegChangeNotifyFilter.Name,
-                IntPtr.Zero,
-                false
-            );
+                    if (status != 0)
+                    {
+                        Log("RegNotifyChangeKeyValue failed for " + sid + ": " + status);
+                        break;
+                    }
 
-            Log("Change detected for " + sid);
+                    int signaled = WaitHandle.WaitAny(new WaitHandle[] { stopEvent, changed });
+                    if (signaled == 0 || !running)
+                    {
+                        break;
+                    }
+                }
 
-            ProcessAllKeys(baseKey, sid);
+                Log("Change detected for " + sid);
+                ProcessAllKeys(baseKey, sid);
+            }
+        }
+        finally
+        {
+            baseKey.Dispose();
+            lock (watcherLock)
+            {
+                watchedSids.Remove(sid);
+            }
         }
     }
 
@@ -128,43 +217,45 @@ public class AllowContentService : ServiceBase
     {
         foreach (string name in baseKey.GetSubKeyNames())
         {
-            // ✅ FILTER: only target YourPhone notification keys
             if (!name.StartsWith("Microsoft.YourPhone_8wekyb3d8bbwe!YourPhoneNotifications_"))
-                continue;
-
-            try
             {
-                using (RegistryKey subKey = baseKey.OpenSubKey(name, true))
+                continue;
+            }
+
+            ProcessOneKey(baseKey, sid, name);
+        }
+    }
+
+    private void ProcessOneKey(RegistryKey baseKey, string sid, string name)
+    {
+        try
+        {
+            using (RegistryKey subKey = baseKey.OpenSubKey(name, true))
+            {
+                if (subKey == null) return;
+
+                object bannerObj = subKey.GetValue("ShowBanner");
+                int bannerVal = bannerObj != null ? Convert.ToInt32(bannerObj) : -1;
+
+                if (bannerVal != 0)
                 {
-                    if (subKey == null) return;
+                    subKey.SetValue("ShowBanner", 0, RegistryValueKind.DWord);
+                    Log("Updated ShowBanner: " + sid + "\\" + name);
+                }
 
-                    // --- ShowBanner ---
-                    object bannerObj = subKey.GetValue("ShowBanner");
-                    int bannerVal = bannerObj != null ? Convert.ToInt32(bannerObj) : -1;
+                object soundObj = subKey.GetValue("SoundFile");
+                string soundVal = soundObj as string;
 
-                    if (bannerVal != 0)
-                    {
-                        subKey.SetValue("ShowBanner", 0, RegistryValueKind.DWord);
-                        Log("Updated ShowBanner: " + sid + "\\" + name);
-                    }
-
-                    // --- SoundFile ---
-                    object soundObj = subKey.GetValue("SoundFile");
-
-                    string soundVal = soundObj as string;
-
-                    // Only write if NOT already empty string
-                    if (soundVal == null || soundVal.Length != 0)
-                    {
-                        subKey.SetValue("SoundFile", "", RegistryValueKind.String);
-                        Log("Updated SoundFile: " + sid + "\\" + name);
-                    }
+                if (soundVal == null || soundVal.Length != 0)
+                {
+                    subKey.SetValue("SoundFile", "", RegistryValueKind.String);
+                    Log("Updated SoundFile: " + sid + "\\" + name);
                 }
             }
-            catch (Exception ex)
-            {
-                Log("Error: " + ex.Message);
-            }
+        }
+        catch (Exception ex)
+        {
+            Log("Error: " + ex.Message);
         }
     }
 
@@ -172,12 +263,18 @@ public class AllowContentService : ServiceBase
     {
         string source = "YourPhoneHideBannerService";
 
-        if (!EventLog.SourceExists(source))
+        try
         {
-            EventLog.CreateEventSource(source, "Application");
-        }
+            if (!EventLog.SourceExists(source))
+            {
+                EventLog.CreateEventSource(source, "Application");
+            }
 
-        EventLog.WriteEntry(source, message);
+            EventLog.WriteEntry(source, message);
+        }
+        catch
+        {
+        }
     }
 
     public static void Main()

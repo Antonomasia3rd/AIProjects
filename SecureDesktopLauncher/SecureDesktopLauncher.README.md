@@ -168,7 +168,7 @@ cd /d C:\Tools\SecureDesktopLauncher
 build\SecureDesktopPasswordLauncher.exe set-password
 ```
 
-The password is not stored as plaintext. The config stores a random salt and a salted SHA-256 hash in `SecureDesktopPasswordLauncher.ini`.
+The password is not stored as plaintext. The config stores `Kdf=PBKDF2-SHA256`, an iteration count, a random salt, and the derived hash in `SecureDesktopPasswordLauncher.ini`. It also keeps the older salted SHA-256 `PasswordHashHex` value so rollback to an older binary can still unlock the gate. Older salted SHA-256-only configs are still accepted so existing installs can be unlocked and reset.
 
 After setting the password, restart the service to launch the gate immediately:
 
