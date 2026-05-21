@@ -132,8 +132,8 @@ Values:
 - `Accounts\<resource>\UID`: game account UID.
 - `Accounts\<resource>\LTokenV2Protected`: DPAPI-protected HoYoLAB `ltoken_v2`.
 - `Accounts\<resource>\LTuidV2Protected`: DPAPI-protected HoYoLAB `ltuid_v2`.
-- Legacy plaintext `LTokenV2` / `LTuidV2` values are still read when protected values are not present. New saves are DPAPI-only unless legacy plaintext already exists for that resource or `KeepLegacyPlaintextSecrets` is enabled.
-- `KeepLegacyPlaintextSecrets`: optional DWORD. Set to `1` before saving credentials if you need older releases to keep reading plaintext token values after rollback; set to `0` to remove legacy plaintext on the next save.
+- Legacy plaintext `LTokenV2` / `LTuidV2` values are still read when protected values are not present. New saves are DPAPI-only and remove legacy plaintext values unless `KeepLegacyPlaintextSecrets` is enabled.
+- `KeepLegacyPlaintextSecrets`: optional DWORD. Set to `1` before saving credentials only if you need older releases to keep reading plaintext token values after rollback; leave unset or set to `0` to remove legacy plaintext on the next save.
 - `Accounts\<resource>\RefreshIntervalSeconds`: optional DWORD refresh override for one resource.
 - `ConfigDir`: legacy fallback directory containing cookie JSON files.
 - `AssetDir`: optional directory containing icon resources.

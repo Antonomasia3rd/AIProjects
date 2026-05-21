@@ -937,16 +937,6 @@ static std::wstring ImageDisplayName(const std::wstring& imagePath)
     return baseName.empty() ? friendlyName : friendlyName + L" (" + baseName + L")";
 }
 
-static std::wstring ProcessDisplayName(const LaunchedProcess& process, const GateConfig& config)
-{
-    std::wstring imagePath = QueryProcessImagePath(process.process);
-    if (imagePath.empty()) {
-        imagePath = config.launchPath;
-    }
-
-    return ImageDisplayName(imagePath);
-}
-
 static std::wstring Ellipsize(const std::wstring& value, size_t maxChars)
 {
     if (value.size() <= maxChars || maxChars < 4) {

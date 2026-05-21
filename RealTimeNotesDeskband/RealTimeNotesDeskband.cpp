@@ -542,24 +542,16 @@ static std::wstring ReadProtectedAccountString(ResourceKind resource, const wcha
     return ReadAccountString(resource, valueName, fallbackValueName);
 }
 
-static bool HasLegacyPlaintextSecrets(ResourceKind resource)
-{
-    std::wstring key = AccountKeyFor(resource);
-    return !ReadRegString(HKEY_CURRENT_USER, key.c_str(), L"LTokenV2", L"").empty() ||
-        !ReadRegString(HKEY_CURRENT_USER, key.c_str(), L"LTuidV2", L"").empty() ||
-        !ReadRegString(HKEY_CURRENT_USER, key.c_str(), L"ltoken_v2", L"").empty() ||
-        !ReadRegString(HKEY_CURRENT_USER, key.c_str(), L"ltuid_v2", L"").empty();
-}
-
 static bool KeepLegacyPlaintextSecrets(ResourceKind resource)
 {
+    (void)resource;
     DWORD configured = 0;
     if (TryReadRegDword(HKEY_CURRENT_USER, kSettingsKey, L"KeepLegacyPlaintextSecrets", configured))
     {
         return configured != 0;
     }
 
-    return HasLegacyPlaintextSecrets(resource);
+    return false;
 }
 
 static bool WriteProtectedAccountString(ResourceKind resource, const wchar_t* valueName, const std::wstring& value, bool keepLegacyPlaintext)

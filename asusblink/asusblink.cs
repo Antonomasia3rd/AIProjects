@@ -194,7 +194,7 @@ public class AsusACPI
     public void Control(uint dwIoControlCode, byte[] lpInBuffer, byte[] lpOutBuffer)
     {
         uint lpBytesReturned = 0;
-        DeviceIoControl(
+        bool ok = DeviceIoControl(
             handle,
             dwIoControlCode,
             lpInBuffer,
@@ -204,6 +204,11 @@ public class AsusACPI
             ref lpBytesReturned,
             IntPtr.Zero
         );
+        if (!ok)
+        {
+            int error = Marshal.GetLastWin32Error();
+            throw new Win32Exception(error, "ACPI DeviceIoControl failed");
+        }
     }
 
     protected byte[] CallMethod(uint MethodID, byte[] args)

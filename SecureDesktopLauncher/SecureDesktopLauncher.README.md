@@ -133,6 +133,8 @@ build\SecureDesktopLauncherService.exe uninstall
 
 Processes are launched as `LocalSystem`, not as the interactive user. Make sure paths and config files are readable by SYSTEM.
 
+For safety, the service refuses to use its executable, config file, configured program paths, or working directories when they are writable by non-admin principals. Install the service and any launched programs under an admin-writable location such as `Program Files`, and keep `SecureDesktopLauncher.ini` protected by the same ACL policy.
+
 On service stop, the service terminates configured SYSTEM-owned processes whose executable paths match enabled program sections with `StopOnServiceStop=1`. Normal user-owned processes are not targeted.
 ## Password-Gated Command Prompt
 

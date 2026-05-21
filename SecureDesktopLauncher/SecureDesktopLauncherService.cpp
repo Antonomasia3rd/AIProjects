@@ -5,6 +5,7 @@
 #include <wtsapi32.h>
 #include <userenv.h>
 #include <tlhelp32.h>
+#include <aclapi.h>
 
 #include <algorithm>
 #include <cwchar>
@@ -140,6 +141,12 @@ static bool FileExists(const std::wstring& path)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
+static bool DirectoryExists(const std::wstring& path)
+{
+    DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
 static std::wstring CurrentExePath()
 {
     std::vector<wchar_t> buffer(MAX_PATH);
@@ -181,6 +188,119 @@ static std::wstring ParentDirectory(std::wstring path)
 
     size_t pos = path.find_last_of(L"\\/");
     return pos == std::wstring::npos ? L"" : path.substr(0, pos);
+}
+
+static void LogServiceWarning(const std::wstring& message)
+{
+    OutputDebugStringW((std::wstring(kServiceName) + L": " + message + L"\n").c_str());
+}
+
+static bool EqualKnownSid(PSID sid, WELL_KNOWN_SID_TYPE type)
+{
+    BYTE buffer[SECURITY_MAX_SID_SIZE] = {};
+    DWORD size = sizeof(buffer);
+    return CreateWellKnownSid(type, nullptr, buffer, &size) && EqualSid(sid, buffer);
+}
+
+static bool IsTrustedWritePrincipal(PSID sid)
+{
+    return EqualKnownSid(sid, WinLocalSystemSid) ||
+        EqualKnownSid(sid, WinBuiltinAdministratorsSid);
+}
+
+static bool IsWriteLikeAccess(DWORD mask)
+{
+    const DWORD writeMask =
+        FILE_WRITE_DATA |
+        FILE_APPEND_DATA |
+        FILE_WRITE_EA |
+        FILE_WRITE_ATTRIBUTES |
+        DELETE |
+        WRITE_DAC |
+        WRITE_OWNER |
+        GENERIC_WRITE |
+        GENERIC_ALL;
+    return (mask & writeMask) != 0;
+}
+
+static bool PathHasUntrustedWriteAce(const std::wstring& path)
+{
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    PACL dacl = nullptr;
+    DWORD error = GetNamedSecurityInfoW(
+        const_cast<LPWSTR>(path.c_str()),
+        SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION,
+        nullptr,
+        nullptr,
+        &dacl,
+        nullptr,
+        &sd);
+    if (error != ERROR_SUCCESS)
+    {
+        LogServiceWarning(L"Could not read ACL for " + path + L"; refusing to trust it.");
+        return true;
+    }
+
+    if (!dacl)
+    {
+        if (sd) LocalFree(sd);
+        LogServiceWarning(L"Null DACL grants broad write access for " + path + L"; refusing to trust it.");
+        return true;
+    }
+
+    bool unsafe = false;
+    for (DWORD i = 0; i < dacl->AceCount && !unsafe; ++i)
+    {
+        void* aceData = nullptr;
+        if (!GetAce(dacl, i, &aceData) || !aceData)
+        {
+            unsafe = true;
+            break;
+        }
+
+        ACE_HEADER* header = reinterpret_cast<ACE_HEADER*>(aceData);
+        if ((header->AceFlags & INHERIT_ONLY_ACE) != 0 ||
+            (header->AceType != ACCESS_ALLOWED_ACE_TYPE &&
+             header->AceType != ACCESS_ALLOWED_CALLBACK_ACE_TYPE))
+        {
+            continue;
+        }
+
+        auto* ace = reinterpret_cast<ACCESS_ALLOWED_ACE*>(aceData);
+        PSID sid = reinterpret_cast<PSID>(&ace->SidStart);
+        if (IsWriteLikeAccess(ace->Mask) && !IsTrustedWritePrincipal(sid))
+        {
+            unsafe = true;
+        }
+    }
+
+    if (sd) LocalFree(sd);
+    if (unsafe)
+    {
+        LogServiceWarning(L"Refusing to trust user-writable path: " + path);
+    }
+    return unsafe;
+}
+
+static bool TrustedExistingFilePath(const std::wstring& path)
+{
+    if (!FileExists(path))
+    {
+        LogServiceWarning(L"Configured file does not exist: " + path);
+        return false;
+    }
+
+    std::wstring dir = DirectoryOf(path);
+    return !PathHasUntrustedWriteAce(path) &&
+        !dir.empty() &&
+        DirectoryExists(dir) &&
+        !PathHasUntrustedWriteAce(dir);
+}
+
+static bool TrustedExistingDirectoryPath(const std::wstring& path)
+{
+    return DirectoryExists(path) && !PathHasUntrustedWriteAce(path);
 }
 
 static std::wstring FindConfigPath()
@@ -582,8 +702,18 @@ static std::vector<std::wstring> ReadIniSectionNames(const std::wstring& path)
 static AppConfig LoadConfig()
 {
     AppConfig config;
+    std::wstring exePath = CurrentExePath();
+    if (!TrustedExistingFilePath(exePath))
+    {
+        return config;
+    }
+
     config.configPath = FindConfigPath();
     if (!FileExists(config.configPath)) {
+        return config;
+    }
+    if (!TrustedExistingFilePath(config.configPath))
+    {
         return config;
     }
 
@@ -624,8 +754,13 @@ static AppConfig LoadConfig()
         program.launchSpacingMs = ReadIniDword(config.configPath, section, L"LaunchSpacingMs", config.launchSpacingMs);
         program.showWindow = ReadIniInt(config.configPath, section, L"ShowWindow", SW_SHOWNOACTIVATE);
 
-        if (!program.name.empty() && !program.path.empty()) {
+        if (!program.name.empty() &&
+            !program.path.empty() &&
+            TrustedExistingFilePath(program.path) &&
+            (program.workingDirectory.empty() || TrustedExistingDirectoryPath(program.workingDirectory))) {
             config.programs.push_back(program);
+        } else if (!program.name.empty()) {
+            LogServiceWarning(L"Skipped untrusted or invalid program section: " + section);
         }
     }
 
@@ -959,9 +1094,10 @@ static void WINAPI ServiceMain(DWORD, LPWSTR*)
 static int InstallService()
 {
     std::wstring exePath = CurrentExePath();
-    if (exePath.empty()) {
+    if (exePath.empty() || !TrustedExistingFilePath(exePath)) {
         return 1;
     }
+    std::wstring serviceBinaryPath = Quote(exePath);
 
     SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CREATE_SERVICE);
     if (!scm) {
@@ -976,7 +1112,7 @@ static int InstallService()
         SERVICE_WIN32_OWN_PROCESS,
         SERVICE_AUTO_START,
         SERVICE_ERROR_NORMAL,
-        exePath.c_str(),
+        serviceBinaryPath.c_str(),
         nullptr,
         nullptr,
         nullptr,
@@ -991,7 +1127,7 @@ static int InstallService()
                 SERVICE_WIN32_OWN_PROCESS,
                 SERVICE_AUTO_START,
                 SERVICE_ERROR_NORMAL,
-                exePath.c_str(),
+                serviceBinaryPath.c_str(),
                 nullptr,
                 nullptr,
                 nullptr,
