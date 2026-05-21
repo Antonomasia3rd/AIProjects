@@ -40,6 +40,7 @@ powershell -ExecutionPolicy Bypass -File .\TaskSchedulerMigration.ps1 -OldSID "S
 - `-NewUser`: replacement user/account value. Required.
 - `-BackupDirectory`: folder for exported task XML backups. Default: `.\TaskSchedulerMigrationBackup`.
 - `-TaskPath`: optional scheduled-task folder filter.
+- `-IncludeCredentialSensitiveTasks`: also attempt tasks with `Password`, `S4U`, or `InteractiveOrPassword` logon types. These are skipped by default because XML-only re-registration can require credentials or change logon behavior.
 - `-WhatIf`: preview re-registration without changing tasks.
 - `-Confirm`: prompt before each matching task is re-registered.
 
@@ -47,6 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\TaskSchedulerMigration.ps1 -OldSID "S
 
 - Matching tasks are exported to the backup directory before they are changed.
 - The script uses `Register-ScheduledTask -Force`, so matching tasks are overwritten with updated XML.
+- Tasks with credential-sensitive logon types are reported and skipped unless `-IncludeCredentialSensitiveTasks` is supplied.
 - Only exact old-SID text matches in task XML are replaced.
 - Review console output after running; failures are printed per task.
 - Consider exporting important tasks manually before bulk migration.

@@ -167,12 +167,6 @@ public class AsusACPI
 
     private IntPtr handle;
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr CreateEvent(IntPtr lpEventAttributes, bool bManualReset, bool bInitialState, string lpName);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool WaitForSingleObject(IntPtr hHandle, int dwMilliseconds);
-
     public AsusACPI()
     {
         handle = CreateFile(
@@ -271,7 +265,11 @@ public class AsusACPI
 
     public void Close()
     {
-        CloseHandle(handle);
+        if (handle != IntPtr.Zero && handle != new IntPtr(-1))
+        {
+            CloseHandle(handle);
+            handle = IntPtr.Zero;
+        }
     }
 
     public int SetMicLed(int state)
@@ -293,6 +291,7 @@ class Program
     static readonly long HDD_HIGH = 10 * 1024 * 1024;
 
     static AsusACPI acpi;
+    static readonly object acpiLock = new object();
     static TextWriter logWriter = Console.Out;
     static object logLock = new object();
 
@@ -716,7 +715,7 @@ class Program
                 var miExit = new MenuItem("Exit");
                 miExit.Click += (s, e) =>
                 {
-                    exiting = true;
+                    RequestExit();
                     try { tray.Visible = false; } catch { }
                     Application.Exit();
                     Environment.Exit(0);
@@ -858,6 +857,13 @@ class Program
     [STAThread]
     static void Main(string[] args)
     {
+        Console.CancelKeyPress += (sender, e) =>
+        {
+            e.Cancel = true;
+            RequestExit();
+        };
+        AppDomain.CurrentDomain.ProcessExit += (sender, e) => CloseAcpi();
+
         startupArguments = BuildShortcutArguments(args);
         if (args.Length == 0)
         {
@@ -1034,6 +1040,39 @@ class Program
                     Thread.Sleep(500);
                 }
             }
+        }
+
+        CloseAcpi();
+    }
+
+    static void RequestExit()
+    {
+        exiting = true;
+        lock (runningLock)
+        {
+            foreach (var cts in runningCts)
+            {
+                try { cts.Cancel(); }
+                catch { }
+            }
+        }
+    }
+
+    static void CloseAcpi()
+    {
+        lock (acpiLock)
+        {
+            if (acpi == null)
+            {
+                return;
+            }
+
+            try
+            {
+                acpi.Close();
+            }
+            catch { }
+            acpi = null;
         }
     }
 

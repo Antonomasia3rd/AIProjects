@@ -13,6 +13,7 @@ public class AllowContentService : ServiceBase
     private readonly object watcherLock = new object();
     private readonly List<Thread> watcherThreads = new List<Thread>();
     private readonly HashSet<string> watchedSids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> watchedRootSids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private readonly ManualResetEvent stopEvent = new ManualResetEvent(false);
     private volatile bool running = true;
 
@@ -119,53 +120,166 @@ public class AllowContentService : ServiceBase
         {
             if (!sid.StartsWith("S-1-5-21-")) continue;
 
-            string fullPath = sid + "\\" + BasePath;
+            TryAttachUser(sid);
+        }
+    }
 
-            RegistryKey key = null;
-            bool registered = false;
-            try
+    private bool TryAttachUser(string sid)
+    {
+        string fullPath = sid + "\\" + BasePath;
+
+        RegistryKey key = null;
+        bool registered = false;
+        try
+        {
+            key = Registry.Users.OpenSubKey(fullPath, true);
+            if (key == null)
             {
-                key = Registry.Users.OpenSubKey(fullPath, true);
-                if (key == null) continue;
+                EnsureRootWatcher(sid);
+                return false;
+            }
 
+            lock (watcherLock)
+            {
+                if (watchedSids.Contains(sid))
+                {
+                    key.Dispose();
+                    return true;
+                }
+
+                watchedSids.Add(sid);
+                watchedRootSids.Remove(sid);
+                registered = true;
+            }
+
+            ProcessAllKeys(key, sid);
+
+            Thread t = new Thread(() => WatchUserKey(key, sid));
+            t.IsBackground = true;
+            t.Start();
+            lock (watcherLock)
+            {
+                watcherThreads.Add(t);
+            }
+
+            Log("Attached to " + sid);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (key != null)
+            {
+                key.Dispose();
+            }
+            if (registered)
+            {
                 lock (watcherLock)
                 {
-                    if (watchedSids.Contains(sid))
+                    watchedSids.Remove(sid);
+                }
+            }
+            Log("Attach error for " + sid + ": " + ex.Message);
+            return false;
+        }
+    }
+
+    private void EnsureRootWatcher(string sid)
+    {
+        lock (watcherLock)
+        {
+            if (watchedSids.Contains(sid) || watchedRootSids.Contains(sid))
+            {
+                return;
+            }
+
+            watchedRootSids.Add(sid);
+        }
+
+        RegistryKey rootKey = null;
+        try
+        {
+            rootKey = Registry.Users.OpenSubKey(sid, false);
+            if (rootKey == null)
+            {
+                lock (watcherLock)
+                {
+                    watchedRootSids.Remove(sid);
+                }
+                return;
+            }
+
+            Thread t = new Thread(() => WatchUserRoot(rootKey, sid));
+            t.IsBackground = true;
+            t.Start();
+            lock (watcherLock)
+            {
+                watcherThreads.Add(t);
+            }
+
+            Log("Watching user root for notification settings: " + sid);
+        }
+        catch (Exception ex)
+        {
+            if (rootKey != null)
+            {
+                rootKey.Dispose();
+            }
+            lock (watcherLock)
+            {
+                watchedRootSids.Remove(sid);
+            }
+            Log("Root watch error for " + sid + ": " + ex.Message);
+        }
+    }
+
+    private void WatchUserRoot(RegistryKey rootKey, string sid)
+    {
+        try
+        {
+            while (running)
+            {
+                using (RegistryKey existing = Registry.Users.OpenSubKey(sid + "\\" + BasePath, true))
+                {
+                    if (existing != null)
                     {
-                        key.Dispose();
+                        if (TryAttachUser(sid))
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                using (ManualResetEvent changed = new ManualResetEvent(false))
+                {
+                    int status = RegNotifyChangeKeyValue(
+                        rootKey.Handle.DangerousGetHandle(),
+                        true,
+                        RegChangeNotifyFilter.Name,
+                        changed.SafeWaitHandle.DangerousGetHandle(),
+                        true
+                    );
+
+                    if (status != 0)
+                    {
+                        Log("RegNotifyChangeKeyValue(root) failed for " + sid + ": " + status);
+                        stopEvent.WaitOne(5000);
                         continue;
                     }
 
-                    watchedSids.Add(sid);
-                    registered = true;
-                }
-
-                ProcessAllKeys(key, sid);
-
-                Thread t = new Thread(() => WatchUserKey(key, sid));
-                t.IsBackground = true;
-                t.Start();
-                lock (watcherLock)
-                {
-                    watcherThreads.Add(t);
-                }
-
-                Log("Attached to " + sid);
-            }
-            catch (Exception ex)
-            {
-                if (key != null)
-                {
-                    key.Dispose();
-                }
-                if (registered)
-                {
-                    lock (watcherLock)
+                    int signaled = WaitHandle.WaitAny(new WaitHandle[] { stopEvent, changed });
+                    if (signaled == 0 || !running)
                     {
-                        watchedSids.Remove(sid);
+                        break;
                     }
                 }
-                Log("Attach error for " + sid + ": " + ex.Message);
+            }
+        }
+        finally
+        {
+            rootKey.Dispose();
+            lock (watcherLock)
+            {
+                watchedRootSids.Remove(sid);
             }
         }
     }

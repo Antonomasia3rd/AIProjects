@@ -8,7 +8,9 @@ param(
 
     [string]$BackupDirectory = ".\TaskSchedulerMigrationBackup",
 
-    [string]$TaskPath
+    [string]$TaskPath,
+
+    [switch]$IncludeCredentialSensitiveTasks
 )
 
 Write-Host "=== Task Migration START (SID -> User) ===" -ForegroundColor Cyan
@@ -52,14 +54,33 @@ function Update-TaskXmlUserId {
     return $doc.OuterXml
 }
 
+function Get-TaskLogonType {
+    param([Parameter(Mandatory = $true)]$Task)
+
+    if ($Task.Principal -and $null -ne $Task.Principal.LogonType) {
+        return [string]$Task.Principal.LogonType
+    }
+
+    return ""
+}
+
+function Test-CredentialSensitiveLogonType {
+    param([string]$LogonType)
+
+    return @("Password", "S4U", "InteractiveOrPassword") -contains $LogonType
+}
+
 $Tasks = if ($TaskPath) {
     Get-ScheduledTask -TaskPath $TaskPath
 } else {
     Get-ScheduledTask
 }
 $updatedCount = 0
+$skippedCredentialCount = 0
+$failedCount = 0
 
 foreach ($task in $Tasks) {
+    $fullName = $null
     try {
         $taskName = $task.TaskName
         $taskPath = $task.TaskPath
@@ -86,6 +107,19 @@ foreach ($task in $Tasks) {
 
         if (-not $needsUpdate) {
             continue
+        }
+
+        $logonType = Get-TaskLogonType -Task $task
+        if (Test-CredentialSensitiveLogonType -LogonType $logonType) {
+            $message = "[SKIP] Credential-sensitive task: $fullName (LogonType=$logonType). Re-run with -IncludeCredentialSensitiveTasks only after confirming credentials/logon behavior."
+            if (-not $IncludeCredentialSensitiveTasks) {
+                Write-Host $message -ForegroundColor Magenta
+                Write-Host ""
+                $skippedCredentialCount++
+                continue
+            }
+
+            Write-Host "[WARN] Updating credential-sensitive task: $fullName (LogonType=$logonType)" -ForegroundColor Magenta
         }
 
         $xml = Export-ScheduledTask -TaskName $taskName -TaskPath $taskPath
@@ -120,7 +154,9 @@ foreach ($task in $Tasks) {
         $updatedCount++
     }
     catch {
-        Write-Host "[ERROR] Failed: $($task.TaskName)" -ForegroundColor Red
+        $failedCount++
+        $displayName = if ($fullName) { $fullName } else { $task.TaskName }
+        Write-Host "[ERROR] Failed: $displayName" -ForegroundColor Red
         Write-Host $_.Exception.Message
         Write-Host ""
     }
@@ -128,4 +164,6 @@ foreach ($task in $Tasks) {
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Total updated tasks: $updatedCount" -ForegroundColor Green
+Write-Host "Credential-sensitive tasks skipped: $skippedCredentialCount" -ForegroundColor Yellow
+Write-Host "Failed tasks: $failedCount" -ForegroundColor $(if ($failedCount -eq 0) { "Green" } else { "Red" })
 Write-Host "=== Task Migration COMPLETE ==="

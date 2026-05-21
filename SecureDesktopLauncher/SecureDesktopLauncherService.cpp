@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cwchar>
 #include <cwctype>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,16 @@ struct AppConfig
     std::vector<std::wstring> excludeUsers;
     std::vector<ProgramConfig> programs;
 };
+
+struct LaunchedProcessRecord
+{
+    DWORD pid = 0;
+    std::wstring path;
+    FILETIME creationTime = {};
+};
+
+static std::mutex gLaunchedProcessesMutex;
+static std::vector<LaunchedProcessRecord> gLaunchedProcesses;
 
 static void SetServiceState(DWORD state, DWORD win32ExitCode = NO_ERROR, DWORD waitHint = 0)
 {
@@ -193,7 +204,25 @@ static std::wstring ParentDirectory(std::wstring path)
 
 static void LogServiceWarning(const std::wstring& message)
 {
-    OutputDebugStringW((std::wstring(kServiceName) + L": " + message + L"\n").c_str());
+    std::wstring debugLine = std::wstring(kServiceName) + L": " + message + L"\n";
+    OutputDebugStringW(debugLine.c_str());
+
+    HANDLE eventSource = RegisterEventSourceW(nullptr, kServiceName);
+    if (eventSource)
+    {
+        LPCWSTR strings[] = { message.c_str() };
+        ReportEventW(
+            eventSource,
+            EVENTLOG_WARNING_TYPE,
+            0,
+            1,
+            nullptr,
+            1,
+            0,
+            strings,
+            nullptr);
+        DeregisterEventSource(eventSource);
+    }
 }
 
 static bool EqualKnownSid(PSID sid, WELL_KNOWN_SID_TYPE type)
@@ -363,11 +392,16 @@ static bool PathSecurityIsTrusted(const std::wstring& path, bool replaceOnly = f
 
 static bool IsAbsoluteFileSystemPath(const std::wstring& path)
 {
-    return (path.size() >= 3 &&
-            iswalpha(path[0]) &&
-            path[1] == L':' &&
-            (path[2] == L'\\' || path[2] == L'/')) ||
-        (path.size() >= 2 && path[0] == L'\\' && path[1] == L'\\');
+    std::wstring value = path;
+    if (value.rfind(L"\\\\?\\", 0) == 0)
+    {
+        value.erase(0, 4);
+    }
+
+    return value.size() >= 3 &&
+        iswalpha(value[0]) &&
+        value[1] == L':' &&
+        (value[2] == L'\\' || value[2] == L'/');
 }
 
 static bool NormalizeFullPath(const std::wstring& path, std::wstring& fullPath)
@@ -471,7 +505,7 @@ static bool TrustedExistingFilePath(const std::wstring& path)
 {
     if (!IsAbsoluteFileSystemPath(path))
     {
-        LogServiceWarning(L"Configured file path is not absolute: " + path);
+        LogServiceWarning(L"Configured file path is not a local absolute path: " + path);
         return false;
     }
 
@@ -498,7 +532,7 @@ static bool TrustedExistingDirectoryPath(const std::wstring& path)
 {
     if (!IsAbsoluteFileSystemPath(path))
     {
-        LogServiceWarning(L"Configured directory path is not absolute: " + path);
+        LogServiceWarning(L"Configured directory path is not a local absolute path: " + path);
         return false;
     }
 
@@ -797,6 +831,54 @@ static bool ProcessPathEquals(DWORD pid, const std::wstring& expectedPath)
     return result;
 }
 
+static bool TryGetProcessCreationTime(HANDLE process, FILETIME& creationTime)
+{
+    FILETIME exitTime = {};
+    FILETIME kernelTime = {};
+    FILETIME userTime = {};
+    return GetProcessTimes(process, &creationTime, &exitTime, &kernelTime, &userTime) != FALSE;
+}
+
+static bool FileTimeEquals(const FILETIME& left, const FILETIME& right)
+{
+    return left.dwLowDateTime == right.dwLowDateTime &&
+        left.dwHighDateTime == right.dwHighDateTime;
+}
+
+static void RecordLaunchedProcess(const ProgramConfig& program, const PROCESS_INFORMATION& pi)
+{
+    if (!pi.hProcess || pi.dwProcessId == 0)
+    {
+        return;
+    }
+
+    LaunchedProcessRecord record;
+    record.pid = pi.dwProcessId;
+    record.path = program.path;
+    if (!TryGetProcessCreationTime(pi.hProcess, record.creationTime))
+    {
+        LogServiceWarning(L"Could not read process creation time for launched process: " + program.name);
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(gLaunchedProcessesMutex);
+    gLaunchedProcesses.push_back(record);
+}
+
+static bool StopOnServiceStopEnabledForPath(const AppConfig& config, const std::wstring& path)
+{
+    for (const ProgramConfig& program : config.programs)
+    {
+        if (program.stopOnServiceStop &&
+            _wcsicmp(NormalizePath(program.path).c_str(), NormalizePath(path).c_str()) == 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static bool ConfiguredProgramAlreadyRunningInSession(const ProgramConfig& program, DWORD sessionId)
 {
     if (!program.preventDuplicate) {
@@ -914,15 +996,18 @@ static AppConfig LoadConfig()
     std::wstring exePath = CurrentExePath();
     if (!TrustedExistingFilePath(exePath))
     {
+        LogServiceWarning(L"Refusing to load configuration because the service executable is not trusted: " + exePath);
         return config;
     }
 
     config.configPath = FindConfigPath();
     if (!FileExists(config.configPath)) {
+        LogServiceWarning(L"Configuration file does not exist: " + config.configPath);
         return config;
     }
     if (!TrustedExistingFilePath(config.configPath))
     {
+        LogServiceWarning(L"Refusing to load untrusted configuration file: " + config.configPath);
         return config;
     }
 
@@ -1078,6 +1163,11 @@ static bool LaunchProgramOnDesktop(const AppConfig& config, const ProgramConfig&
         &si,
         &pi);
 
+    if (ok)
+    {
+        RecordLaunchedProcess(program, pi);
+    }
+
     if (pi.hThread) {
         CloseHandle(pi.hThread);
     }
@@ -1129,40 +1219,28 @@ static void StopConfiguredProcesses()
         return;
     }
 
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) {
-        return;
+    std::vector<LaunchedProcessRecord> targets;
+    {
+        std::lock_guard<std::mutex> lock(gLaunchedProcessesMutex);
+        targets = gLaunchedProcesses;
     }
 
-    PROCESSENTRY32W pe = {};
-    pe.dwSize = sizeof(pe);
-    std::vector<DWORD> targets;
+    for (const LaunchedProcessRecord& target : targets) {
+        if (!StopOnServiceStopEnabledForPath(config, target.path) ||
+            !IsLocalSystemProcess(target.pid) ||
+            !ProcessPathEquals(target.pid, target.path)) {
+            continue;
+        }
 
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            if (!IsLocalSystemProcess(pe.th32ProcessID)) {
-                continue;
-            }
-
-            for (const ProgramConfig& program : config.programs) {
-                if (!program.stopOnServiceStop || program.path.empty()) {
-                    continue;
-                }
-
-                if (_wcsicmp(pe.szExeFile, BaseName(program.path).c_str()) == 0 &&
-                    ProcessPathEquals(pe.th32ProcessID, program.path) &&
-                    std::find(targets.begin(), targets.end(), pe.th32ProcessID) == targets.end()) {
-                    targets.push_back(pe.th32ProcessID);
-                }
-            }
-        } while (Process32NextW(snap, &pe));
-    }
-
-    CloseHandle(snap);
-
-    for (DWORD pid : targets) {
-        HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
+        HANDLE process = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, target.pid);
         if (!process) {
+            continue;
+        }
+
+        FILETIME creationTime = {};
+        if (!TryGetProcessCreationTime(process, creationTime) ||
+            !FileTimeEquals(creationTime, target.creationTime)) {
+            CloseHandle(process);
             continue;
         }
 

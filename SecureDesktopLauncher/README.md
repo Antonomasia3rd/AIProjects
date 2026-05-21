@@ -106,7 +106,7 @@ General keys:
 - `Desktop`: default desktop for program launches.
 - `LaunchSpacingMs`: delay between matching program launches.
 - `MaxProgramsPerSession`: `0` launches every enabled matching program; positive values cap per-session launches.
-- `StopOnServiceStop`: default process cleanup behavior.
+- `StopOnServiceStop`: default cleanup behavior for processes launched by the current service instance.
 - `StartOnServiceStart`, `StartOnConsoleConnect`, `StartOnRemoteConnect`, `StartOnLogon`, `StartOnLock`, `StartOnUnlock`: session events that trigger launches.
 - `LaunchDisconnectedSessions`: whether disconnected sessions can be considered during service-start scans.
 - `IncludeUsers`, `ExcludeUsers`: global user filters.
@@ -114,13 +114,13 @@ General keys:
 Program keys:
 
 - `Enabled`: set `0` to keep the section but skip it.
-- `Path`: absolute executable path. Required.
+- `Path`: local absolute executable path. Required; UNC paths are rejected by the trust checks.
 - `Arguments`: arguments appended after the quoted `Path`.
 - `CommandLine`: optional full command line. If present, this replaces the generated `Path + Arguments` command line while `Path` remains the trusted application path passed to `CreateProcessAsUserW`.
-- `WorkingDirectory`: absolute working directory. Defaults to the directory of `Path`.
+- `WorkingDirectory`: local absolute working directory. Defaults to the directory of `Path`.
 - `Desktop`: per-program desktop override.
 - `PreventDuplicate`: skips launch when the same configured image is already running in the target session.
-- `StopOnServiceStop`: whether service stop should terminate matching SYSTEM-owned processes.
+- `StopOnServiceStop`: whether service stop should terminate matching SYSTEM-owned processes launched by the current service instance.
 - `LaunchSpacingMs`: per-program launch delay override.
 - `ShowWindow`: `STARTUPINFO.wShowWindow` value.
 - `IncludeUsers`, `ExcludeUsers`: per-program filters.
@@ -209,7 +209,7 @@ build\SecureDesktopPasswordLauncher.exe set-password
 
 `set-password` writes `SecureDesktopPasswordLauncher.ini` and preserves the current launch/UI policy values. New saves use PBKDF2-SHA256 with a random salt and remove the older salted SHA-256 hash by default. Set `KeepLegacySha256Hash=1` only if rollback to an older binary is required.
 
-At normal launch, the password launcher enforces the same trust policy for its own executable, config file, launch target, and working directory. It also rechecks the target and working directory immediately before each `CreateProcessW` call.
+At normal launch, the password launcher enforces the same local-path trust policy for its own executable, config file, launch target, and working directory. It also rechecks the target and working directory immediately before each `CreateProcessW` call.
 
 ## Service Launching The Gate
 
