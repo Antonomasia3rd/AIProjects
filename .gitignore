@@ -32,7 +32,6 @@
 # DesktopStub runtime outputs
 DesktopStub/build/AppxManifest.xml
 DesktopStub/build/Assets/
-DesktopStub/build/GenerateAssets.md
 DesktopStub/build/microsoft.system.package.metadata
 DesktopStub/build/obj/
 

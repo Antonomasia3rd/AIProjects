@@ -37,13 +37,13 @@ if /i "%1"=="check" (
 )
 if /i "%1"=="new" (
   if not exist build mkdir build
-  cl /nologo /EHsc /W4 /Fo.\build\SecureDesktopPasswordLauncher.new.obj /Fe.\build\SecureDesktopPasswordLauncher.new.exe SecureDesktopPasswordLauncher.cpp bcrypt.lib shell32.lib user32.lib gdi32.lib comctl32.lib version.lib /link /SUBSYSTEM:WINDOWS
+  cl /nologo /EHsc /W4 /Fo.\build\SecureDesktopPasswordLauncher.new.obj /Fe.\build\SecureDesktopPasswordLauncher.new.exe SecureDesktopPasswordLauncher.cpp bcrypt.lib advapi32.lib shell32.lib user32.lib gdi32.lib comctl32.lib version.lib /link /SUBSYSTEM:WINDOWS
   set "STATUS=%ERRORLEVEL%"
   popd
   exit /b %STATUS%
 )
 if not exist build mkdir build
-cl /nologo /EHsc /W4 /Fo.\build\SecureDesktopPasswordLauncher.obj /Fe.\build\SecureDesktopPasswordLauncher.exe SecureDesktopPasswordLauncher.cpp bcrypt.lib shell32.lib user32.lib gdi32.lib comctl32.lib version.lib /link /SUBSYSTEM:WINDOWS
+cl /nologo /EHsc /W4 /Fo.\build\SecureDesktopPasswordLauncher.obj /Fe.\build\SecureDesktopPasswordLauncher.exe SecureDesktopPasswordLauncher.cpp bcrypt.lib advapi32.lib shell32.lib user32.lib gdi32.lib comctl32.lib version.lib /link /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 exit /b %STATUS%

@@ -1,17 +1,17 @@
 # YourPhoneHideBanner
 
-Windows service that watches Phone Link notification registry entries and suppresses banners/sounds for matching notification keys.
+Windows service that watches Phone Link notification registry entries for loaded users and suppresses matching notification banners/sounds.
 
-It targets notification settings whose key starts with:
+It targets notification setting keys whose names start with:
 
 ```text
 Microsoft.YourPhone_8wekyb3d8bbwe!YourPhoneNotifications_
 ```
 
-For those keys it sets:
+For matching keys it sets:
 
-- `ShowBanner` to `0`
-- `SoundFile` to an empty string
+- `ShowBanner` to `0`;
+- `SoundFile` to an empty string.
 
 ## Requirements
 
@@ -26,6 +26,8 @@ From this folder:
 mkdir build 2>nul
 C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:exe /optimize+ /out:build\YourPhoneHideBanner.exe /r:System.ServiceProcess.dll YourPhoneHideBanner.cs
 ```
+
+The service class is `YourPhoneHideBannerService`; the installed Windows service name is also `YourPhoneHideBannerService`.
 
 ## Install
 
@@ -45,8 +47,20 @@ sc.exe stop YourPhoneHideBannerService
 sc.exe delete YourPhoneHideBannerService
 ```
 
-## Notes
+## Runtime Behavior
 
-- Logs are written to the Windows Application Event Log using source `YourPhoneHideBannerService`.
-- The service watches loaded user hives under `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings`, including matching child key creation and value changes.
-- The release build is available at [YourPhoneHideBanner v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/YourPhoneHideBanner-v1).
+- Watches `HKEY_USERS` for newly loaded user hives.
+- Attaches to loaded `S-1-5-21-*` user hives.
+- Watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for child-key and value changes.
+- Reapplies the banner/sound values when matching keys are created or changed.
+- Logs to the Windows Application Event Log using source `YourPhoneHideBannerService`.
+
+## Generated Files
+
+- `build\YourPhoneHideBanner.exe`
+
+Generated build output is ignored by git.
+
+## Release
+
+Prebuilt binary: [YourPhoneHideBanner v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/YourPhoneHideBanner-v1).

@@ -58,6 +58,7 @@ static const UINT kStatusReadyMessage = WM_APP + 0x343;
 static const UINT kMinRefreshSeconds = 30;
 static const UINT kDefaultRefreshSeconds = 300;
 static const UINT kMaxRefreshSeconds = 24 * 60 * 60;
+static const size_t kMaxHttpResponseBytes = 1024 * 1024;
 
 HMODULE g_module = nullptr;
 long g_objectCount = 0;
@@ -1083,11 +1084,21 @@ static bool HttpGet(const ResourceMetadata& metadata, const std::wstring& server
             {
                 break;
             }
+            if (response.size() + static_cast<size_t>(available) > kMaxHttpResponseBytes)
+            {
+                ok = FALSE;
+                response.clear();
+                break;
+            }
             std::vector<char> buffer(available);
             DWORD read = 0;
             if (!WinHttpReadData(request, buffer.data(), available, &read))
             {
                 ok = FALSE;
+                break;
+            }
+            if (read == 0)
+            {
                 break;
             }
             response.append(buffer.data(), buffer.data() + read);
@@ -1830,15 +1841,15 @@ public:
     {
         InterlockedIncrement(&g_objectCount);
         InitializeCriticalSection(&m_stateLock);
-        m_installDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", ParentDirectoryOf(ModulePath()));
-        m_configDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", DefaultConfigDir(m_installDir));
-        m_assetDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"AssetDir", DefaultAssetDir(m_installDir));
+        InitializeCriticalSection(&m_settingsLock);
+        ReloadSettings();
     }
 
     ~RealTimeNotesBand()
     {
         CloseDW(0);
         SetSite(nullptr);
+        DeleteCriticalSection(&m_settingsLock);
         DeleteCriticalSection(&m_stateLock);
         InterlockedDecrement(&g_objectCount);
     }
@@ -2229,6 +2240,21 @@ private:
         return DefWindowProcW(hwnd, message, wParam, lParam);
     }
 
+    struct BandSettings
+    {
+        std::wstring installDir;
+        std::wstring configDir;
+        std::wstring assetDir;
+    };
+
+    BandSettings CurrentSettings()
+    {
+        EnterCriticalSection(&m_settingsLock);
+        BandSettings settings{ m_installDir, m_configDir, m_assetDir };
+        LeaveCriticalSection(&m_settingsLock);
+        return settings;
+    }
+
     void BeginRefresh()
     {
         if (InterlockedCompareExchange(&m_refreshing, 1, 0) != 0)
@@ -2250,7 +2276,8 @@ private:
     static DWORD WINAPI RefreshThread(void* context)
     {
         auto band = static_cast<RealTimeNotesBand*>(context);
-        NoteState state = FetchState(band->m_configDir);
+        BandSettings settings = band->CurrentSettings();
+        NoteState state = FetchState(settings.configDir);
 
         EnterCriticalSection(&band->m_stateLock);
         band->m_state = state;
@@ -2322,6 +2349,7 @@ private:
 
     std::wstring IconPathFor(const NoteState& state)
     {
+        BandSettings settings = CurrentSettings();
         const auto& metadata = MetadataFor(state.resource);
         std::wstring relative = metadata.notFullIcon;
         if (state.state == StateKind::Full)
@@ -2333,19 +2361,19 @@ private:
             relative = metadata.errorIcon;
         }
 
-        std::wstring iconPath = JoinPath(m_assetDir, relative);
+        std::wstring iconPath = JoinPath(settings.assetDir, relative);
         if (FileExists(iconPath))
         {
             return iconPath;
         }
 
-        std::wstring legacyPath = JoinPath(m_configDir, JoinPath(L"embedded\\assets", relative));
+        std::wstring legacyPath = JoinPath(settings.configDir, JoinPath(L"embedded\\assets", relative));
         if (FileExists(legacyPath))
         {
             return legacyPath;
         }
 
-        legacyPath = JoinPath(m_installDir, JoinPath(L"embedded\\assets", relative));
+        legacyPath = JoinPath(settings.installDir, JoinPath(L"embedded\\assets", relative));
         if (FileExists(legacyPath))
         {
             return legacyPath;
@@ -2485,9 +2513,15 @@ private:
 
     void ReloadSettings()
     {
-        m_installDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", ParentDirectoryOf(ModulePath()));
-        m_configDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", DefaultConfigDir(m_installDir));
-        m_assetDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"AssetDir", DefaultAssetDir(m_installDir));
+        std::wstring installDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", ParentDirectoryOf(ModulePath()));
+        std::wstring configDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", DefaultConfigDir(installDir));
+        std::wstring assetDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"AssetDir", DefaultAssetDir(installDir));
+
+        EnterCriticalSection(&m_settingsLock);
+        m_installDir = installDir;
+        m_configDir = configDir;
+        m_assetDir = assetDir;
+        LeaveCriticalSection(&m_settingsLock);
     }
 
     void SetLoadingState(ResourceKind resource, const wchar_t* detail)
@@ -2513,7 +2547,8 @@ private:
     void BeginRefreshWithCurrentSettings()
     {
         ReloadSettings();
-        ResourceKind resource = ReadResourceSetting(m_configDir);
+        BandSettings settings = CurrentSettings();
+        ResourceKind resource = ReadResourceSetting(settings.configDir);
         SetLoadingState(resource, MetadataFor(resource).displayName);
         BeginRefresh();
     }
@@ -2740,12 +2775,12 @@ private:
         else if (command == kCommandOpenConfigDir)
         {
             ReloadSettings();
-            OpenDirectory(m_configDir);
+            OpenDirectory(CurrentSettings().configDir);
         }
         else if (command == kCommandOpenAssetDir)
         {
             ReloadSettings();
-            OpenDirectory(m_assetDir);
+            OpenDirectory(CurrentSettings().assetDir);
         }
         else if (command == kCommandChangeConfigDir)
         {
@@ -2772,6 +2807,7 @@ private:
     bool m_compositionEnabled = false;
     long m_refreshing = 0;
     CRITICAL_SECTION m_stateLock{};
+    CRITICAL_SECTION m_settingsLock{};
     NoteState m_state{};
     std::wstring m_installDir;
     std::wstring m_configDir;

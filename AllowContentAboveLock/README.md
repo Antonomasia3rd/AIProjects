@@ -1,8 +1,8 @@
 # AllowContentAboveLock
 
-Windows service that watches notification settings under each loaded user hive and forces `AllowContentAboveLock=1` for every notification app entry it can access.
+Windows service that watches notification settings under each loaded user hive and forces `AllowContentAboveLock=1` for notification app entries it can access.
 
-This is useful when Windows or app updates reset notification visibility on the lock screen and you want those entries restored automatically.
+This is useful when Windows or app updates reset lock-screen notification visibility and you want those entries restored automatically.
 
 ## Requirements
 
@@ -36,8 +36,20 @@ sc.exe stop AllowContentAboveLockService
 sc.exe delete AllowContentAboveLockService
 ```
 
-## Notes
+## Runtime Behavior
 
-- Logs are written to the Windows Application Event Log using source `AllowContentAboveLockService`.
-- The service watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for loaded user hives, including child notification key creation and value changes.
-- The release build is available at [AllowContentAboveLock v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/AllowContentAboveLock-v1).
+- Watches `HKEY_USERS` for newly loaded user hives.
+- Attaches to loaded `S-1-5-21-*` user hives.
+- Watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for child-key and value changes.
+- Sets `AllowContentAboveLock` to DWORD `1` on notification setting subkeys.
+- Logs to the Windows Application Event Log using source `AllowContentAboveLockService`.
+
+## Generated Files
+
+- `build\AllowContentAboveLock.exe`
+
+Generated build output is ignored by git.
+
+## Release
+
+Prebuilt binary: [AllowContentAboveLock v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/AllowContentAboveLock-v1).

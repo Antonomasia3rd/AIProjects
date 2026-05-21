@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using System.Threading;
 
-public class AllowContentService : ServiceBase
+public class YourPhoneHideBannerService : ServiceBase
 {
     private const string BasePath = @"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings";
     private readonly object watcherLock = new object();
@@ -34,7 +34,7 @@ public class AllowContentService : ServiceBase
         Security = 8,
     }
 
-    public AllowContentService()
+    public YourPhoneHideBannerService()
     {
         ServiceName = "YourPhoneHideBannerService";
     }
@@ -279,6 +279,6 @@ public class AllowContentService : ServiceBase
 
     public static void Main()
     {
-        ServiceBase.Run(new AllowContentService());
+        ServiceBase.Run(new YourPhoneHideBannerService());
     }
 }

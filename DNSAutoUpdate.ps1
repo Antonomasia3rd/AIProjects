@@ -2,6 +2,8 @@
 param(
     [string]$ZoneName = "server.local",
     [string[]]$SubFolder,
+    [string[]]$ManagedRecordName = @(),
+    [switch]$NoRootRecord,
     [string]$LogFile = ".\DNSAutoUpdate.log",
     [ValidateRange(1, 86400)]
     [int]$SleepSeconds = 20,
