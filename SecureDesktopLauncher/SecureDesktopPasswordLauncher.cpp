@@ -34,7 +34,9 @@ struct GateConfig
     std::wstring saltHex;
     std::wstring hashHex;
     std::wstring pbkdf2HashHex;
+    bool keepLegacySha256Hash = false;
     DWORD maxAttempts = 3;
+    DWORD lockoutSeconds = 30;
     std::wstring launchPath = L"C:\\Windows\\System32\\cmd.exe";
     std::wstring arguments;
     std::wstring workingDirectory = L"C:\\Windows\\System32";
@@ -261,7 +263,9 @@ static GateConfig LoadConfig()
     config.saltHex = ReadIniString(config.configPath, L"Security", L"SaltHex", L"");
     config.hashHex = ReadIniString(config.configPath, L"Security", L"PasswordHashHex", L"");
     config.pbkdf2HashHex = ReadIniString(config.configPath, L"Security", L"PasswordPbkdf2HashHex", L"");
+    config.keepLegacySha256Hash = ReadIniBool(config.configPath, L"Security", L"KeepLegacySha256Hash", false);
     config.maxAttempts = ReadIniDword(config.configPath, L"Security", L"MaxAttempts", 3);
+    config.lockoutSeconds = ReadIniDword(config.configPath, L"Security", L"LockoutSeconds", 30);
     config.launchPath = ReadIniString(config.configPath, L"Launch", L"Path", config.launchPath);
     config.arguments = ReadIniString(config.configPath, L"Launch", L"Arguments", L"");
     config.workingDirectory = ReadIniString(config.configPath, L"Launch", L"WorkingDirectory", config.workingDirectory);
@@ -557,8 +561,8 @@ static int SetPassword()
     std::vector<BYTE> legacyHash;
     std::vector<BYTE> pbkdf2Hash;
     if (!GenerateRandomBytes(salt) ||
-        !HashPasswordLegacySha256(salt, password, legacyHash) ||
-        !DerivePasswordHash(salt, password, kPasswordKdfIterations, pbkdf2Hash)) {
+        !DerivePasswordHash(salt, password, kPasswordKdfIterations, pbkdf2Hash) ||
+        (config.keepLegacySha256Hash && !HashPasswordLegacySha256(salt, password, legacyHash))) {
         MessageBoxW(nullptr, L"Failed to generate password hash.", L"Password", MB_OK | MB_ICONERROR);
         return 1;
     }
@@ -566,9 +570,15 @@ static int SetPassword()
     WritePrivateProfileStringW(L"Security", L"Kdf", kPasswordKdfName, config.configPath.c_str());
     WritePrivateProfileStringW(L"Security", L"Iterations", std::to_wstring(kPasswordKdfIterations).c_str(), config.configPath.c_str());
     WritePrivateProfileStringW(L"Security", L"SaltHex", BytesToHex(salt).c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"PasswordHashHex", BytesToHex(legacyHash).c_str(), config.configPath.c_str());
+    WritePrivateProfileStringW(L"Security", L"KeepLegacySha256Hash", config.keepLegacySha256Hash ? L"1" : L"0", config.configPath.c_str());
+    if (config.keepLegacySha256Hash) {
+        WritePrivateProfileStringW(L"Security", L"PasswordHashHex", BytesToHex(legacyHash).c_str(), config.configPath.c_str());
+    } else {
+        WritePrivateProfileStringW(L"Security", L"PasswordHashHex", nullptr, config.configPath.c_str());
+    }
     WritePrivateProfileStringW(L"Security", L"PasswordPbkdf2HashHex", BytesToHex(pbkdf2Hash).c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"MaxAttempts", L"3", config.configPath.c_str());
+    WritePrivateProfileStringW(L"Security", L"MaxAttempts", std::to_wstring(config.maxAttempts).c_str(), config.configPath.c_str());
+    WritePrivateProfileStringW(L"Security", L"LockoutSeconds", std::to_wstring(config.lockoutSeconds).c_str(), config.configPath.c_str());
     WritePrivateProfileStringW(L"Launch", L"Path", config.launchPath.c_str(), config.configPath.c_str());
     WritePrivateProfileStringW(L"Launch", L"Arguments", config.arguments.c_str(), config.configPath.c_str());
     WritePrivateProfileStringW(L"Launch", L"WorkingDirectory", config.workingDirectory.c_str(), config.configPath.c_str());
@@ -617,6 +627,18 @@ static bool VerifyPassword(const GateConfig& config, bool startMinimized)
     }
 
     return false;
+}
+
+static void SleepAfterFailedUnlock(const GateConfig& config)
+{
+    DWORD seconds = config.lockoutSeconds;
+    if (seconds == 0) {
+        seconds = 1;
+    }
+    if (seconds > 3600) {
+        seconds = 3600;
+    }
+    Sleep(seconds * 1000UL);
 }
 
 static bool ContainsWindow(const std::vector<HWND>& windows, HWND hwnd)
@@ -1385,7 +1407,7 @@ static void QuickLock(ControlWindowState* state)
     }
 
     while (!VerifyPassword(state->config, false)) {
-        Sleep(750);
+        SleepAfterFailedUnlock(state->config);
     }
 
     RestoreTrackedWindows(state);
@@ -1417,7 +1439,7 @@ static void ResetToPasswordPrompt(ControlWindowState* state)
     }
 
     while (!VerifyPassword(state->config, false)) {
-        Sleep(750);
+        SleepAfterFailedUnlock(state->config);
     }
 
     if (state->hwnd) {

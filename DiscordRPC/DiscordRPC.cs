@@ -431,13 +431,17 @@ internal static class Program
 
                 try
                 {
-                    Dictionary<string, object> activity = BuildActivity(config);
+                    TemplateContext activityContext;
+                    Dictionary<string, object> activity = BuildActivity(config, out activityContext);
                     string status = NormalizeStatus(config.Get("general", "status", "online"));
                     lastStatus = status;
 
                     if (verbose)
                     {
-                        Logger.Debug("Presence JSON: " + Json.Serialize(activity) + " status=" + status);
+                        Dictionary<string, object> logActivity = config.GetBool("app", "verbose_redact_sensitive", true)
+                            ? RedactActivityForDryRun(activity, activityContext)
+                            : activity;
+                        Logger.Debug("Presence JSON: " + Json.Serialize(logActivity) + " status=" + status);
                     }
 
                     bool updated = false;
@@ -1377,6 +1381,7 @@ internal static class UiStrings
         { "notify_on_reload", "Notify on reload" },
         { "enable_logging", "Enable logging" },
         { "verbose_ipc_logging", "Verbose logging" },
+        { "redact_verbose_log", "Redact sensitive verbose logs" },
         { "show_console", "Show console" },
         { "show_recent_log", "Show recent log" },
         { "file_logging", "File logging" },
@@ -1643,6 +1648,7 @@ internal static class ConfigDefaults
         Add(defaults, "app", "log_path", "");
         Add(defaults, "app", "backup_config_on_save", "false");
         Add(defaults, "app", "verbose_logging", "false");
+        Add(defaults, "app", "verbose_redact_sensitive", "true");
         Add(defaults, "app", "hide_disabled_entries", "false");
         Add(defaults, "app", "dry_run_redact_sensitive", "true");
 
@@ -1765,6 +1771,7 @@ internal static class ConfigDefaults
         Add(target, "gui", "log_path", "text");
         Add(target, "gui", "backup_config_on_save", "bool");
         Add(target, "gui", "verbose_logging", "bool");
+        Add(target, "gui", "verbose_redact_sensitive", "bool");
         Add(target, "gui", "hide_disabled_entries", "bool");
         Add(target, "gui", "dry_run_redact_sensitive", "bool");
         Add(target, "gui", "connect_timeout_ms", "number");
@@ -1976,6 +1983,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         AddToggle(logging, UiStrings.Get("enable_logging"), config, "app", "logging_enabled", true, false);
         AddToggle(logging, UiStrings.Get("file_logging"), config, "app", "file_logging_enabled", true, false);
         AddToggle(logging, UiStrings.Get("verbose_ipc_logging"), config, "app", "verbose_logging", false, true, config.GetBool("app", "logging_enabled", true));
+        AddToggle(logging, UiStrings.Get("redact_verbose_log"), config, "app", "verbose_redact_sensitive", true, false, config.GetBool("app", "verbose_logging", false));
         AddConsoleToggle(logging);
         AddStatus(logging, UiStrings.Format("console_state_format", ConsoleWindow.IsVisible() ? UiStrings.Get("enabled_text") : UiStrings.Get("disabled_text")));
         AddEdit(logging, UiStrings.Get("log_path"), config, "app", "log_path", UiStrings.Get("log_path"), false, false);

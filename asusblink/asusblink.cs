@@ -884,12 +884,7 @@ class Program
             }
             if (subOpts.ContainsKey("mic-state"))
             {
-                var tdict = new Dictionary<string, string>();
-                foreach (var sk in subOpts.Keys) tdict[sk] = subOpts[sk];
-                var miccfg = new Dictionary<string, string>();
-                foreach (var kk in tdict.Keys)
-                    miccfg["mic-" + kk] = tdict[kk];
-                var built = BuildEventFromOptions("mic", miccfg);
+                var built = BuildEventFromOptions("mic", subOpts);
                 built.Name = evn;
                 int eidx;
                 if (int.TryParse(evn.Substring(5), out eidx)) built.Priority = eidx;
@@ -1001,6 +996,12 @@ class Program
         int sCount = ev.States.Count;
         if (sCount == 0) { Log("Event {0} has no states, exiting", ev.Name); return; }
 
+        if (device == "hdd")
+        {
+            RunHddActivityLoop(ev, token);
+            return;
+        }
+
         bool infinite = ev.DurationMs == 0;
         long durationMs = ev.DurationMs;
 
@@ -1058,6 +1059,44 @@ class Program
         Log("Event {0} ended", ev.Name);
     }
 
+    static int StateForHddActivity(DeviceEvent ev)
+    {
+        int activityLevel = GetHddActivityLevel();
+        int stateIndex = Math.Min(activityLevel, ev.States.Count - 1);
+        return ev.States[stateIndex];
+    }
+
+    static void RunHddActivityLoop(DeviceEvent ev, CancellationToken token)
+    {
+        long pollInterval = ev.IntervalsMs.Count > 0 ? ev.IntervalsMs[0] : 500;
+        if (pollInterval <= 0) pollInterval = 500;
+
+        if (ev.DurationMs == -1)
+        {
+            ApplyDeviceState("keyboard", StateForHddActivity(ev));
+            Log("Event {0} finished one HDD activity sample", ev.Name);
+            return;
+        }
+
+        bool infinite = ev.DurationMs == 0;
+        long loopStart = Environment.TickCount;
+        while (!token.IsCancellationRequested)
+        {
+            while (paused && !token.IsCancellationRequested) Thread.Sleep(200);
+            ApplyDeviceState("keyboard", StateForHddActivity(ev));
+
+            if (!infinite && ev.DurationMs > 0)
+            {
+                long elapsed = Environment.TickCount - loopStart;
+                if (elapsed >= ev.DurationMs) break;
+            }
+
+            SleepWithCancel(pollInterval, token);
+        }
+
+        Log("Event {0} ended", ev.Name);
+    }
+
     static void PrintHelp()
     {
         Console.WriteLine("Asus LED Controller - help");
@@ -1074,6 +1113,7 @@ class Program
         Console.WriteLine("  --keyboard-state <csv of ints>    : keyboard levels (128..131)");
         Console.WriteLine("  --keyboard-interval <csv>         : intervals (wraps)");
         Console.WriteLine("  --keyboard-duration <time>        : duration");
+        Console.WriteLine("  --event1-hdd-state <csv>          : map HDD activity levels 0..4 to keyboard states");
         Console.WriteLine("  --event1-mic-state ...            : custom events (event1,event2...)");
         Console.WriteLine("  --error-log <path|off>            : error log");
         Console.WriteLine("  --error-retry <times>             : how many times to retry operations");

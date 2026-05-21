@@ -180,8 +180,8 @@ public class AllowContentService : ServiceBase
                 {
                     int status = RegNotifyChangeKeyValue(
                         baseKey.Handle.DangerousGetHandle(),
-                        false,
-                        RegChangeNotifyFilter.Name,
+                        true,
+                        RegChangeNotifyFilter.Name | RegChangeNotifyFilter.LastSet,
                         changed.SafeWaitHandle.DangerousGetHandle(),
                         true
                     );

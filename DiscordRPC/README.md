@@ -87,6 +87,7 @@ Run without the tray icon:
 - `[app] show_menu_as_dropdown` switches between dropdown category menus and a flat sectioned menu similar to GenerateAssets.
 - `[app] single_instance` prevents two persistent instances from fighting over the same Discord presence.
 - `[app] file_logging_enabled` and `[app] log_path` control the runtime log file. The default log path is next to `config.ini`.
+- `[app] verbose_redact_sensitive` is on by default so verbose presence JSON logs redact foreground-window, username, computer, process ID, and executable-path token values. Set it to `false` only for private debugging.
 - `[app] backup_config_on_save` is off by default to avoid duplicating plaintext Gateway tokens into `.bak` files.
 - `[general] token_env` can point to an environment variable containing the Discord token, avoiding plaintext token storage in `config.ini`.
 - `[ipc] connect_timeout_ms` and `response_timeout_ms` tune Discord IPC waits.

@@ -39,5 +39,5 @@ sc.exe delete AllowContentAboveLockService
 ## Notes
 
 - Logs are written to the Windows Application Event Log using source `AllowContentAboveLockService`.
-- The service watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for loaded user hives.
+- The service watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for loaded user hives, including child notification key creation and value changes.
 - The release build is available at [AllowContentAboveLock v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/AllowContentAboveLock-v1).

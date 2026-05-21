@@ -24,15 +24,27 @@ With subfolders/nodes:
 powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.local" -SubFolder "app","files" -SleepSeconds 60
 ```
 
+Preview DNS changes without applying them:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.local" -WhatIf
+```
+
 ## Parameters
 
 - `-ZoneName`: DNS zone to maintain. Default: `server.local`.
 - `-SubFolder`: optional DNS nodes to maintain in addition to `@`.
 - `-LogFile`: log file path. Default: `.\DNSAutoUpdate.log` from the process working directory.
 - `-SleepSeconds`: delay between scan cycles. Default: `20`.
+- `-IncludeInterfaceAlias`: optional wildcard allowlist for network interface aliases.
+- `-ExcludeInterfaceAlias`: wildcard denylist for network interface aliases. Defaults exclude loopback and common virtual adapters.
+- `-IncludeIPAddress`: explicit IP allowlist. When supplied, interface discovery is bypassed.
+- `-IncludeUnpreferred`: include IPv4 addresses whose `AddressState` is not `Preferred`.
+- `-WhatIf`: log and preview DNS add/remove operations without changing records.
 
 ## Notes
 
 - The script runs forever until the PowerShell process is stopped.
+- Loopback, APIPA, `0.0.0.0`, unpreferred addresses, and excluded virtual adapters are ignored by default. If no eligible IPv4 address remains, the cycle skips DNS changes instead of deleting records.
 - The repository root also contains a duplicate `DNSAutoUpdate.ps1` convenience copy with the same content.
 - Generated logs/build folders are ignored by git.

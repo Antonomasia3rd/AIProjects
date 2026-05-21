@@ -5,6 +5,9 @@ using System.Threading;
 
 class CapsLockLight
 {
+    const string KeyboardTargetPath = "\\Device\\KeyboardClass0";
+    static volatile bool exiting = false;
+
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern Boolean DefineDosDevice(UInt32 flags, String deviceName, String targetPath);
 
@@ -51,63 +54,67 @@ class CapsLockLight
     static void Main(string[] args)
     {
         UInt32 bytesReturned = 0;
-        IntPtr device;
+        IntPtr device = Flags.INVALID_HANDLE_VALUE;
+        bool mappingDefined = false;
+        string deviceName = "capsblinkKBD_" + System.Diagnostics.Process.GetCurrentProcess().Id.ToString();
         KEYBOARD_INDICATOR_PARAMETERS KIPbuf = new KEYBOARD_INDICATOR_PARAMETERS { unitID = 0, LEDflags = 0 };
 
-        if (!DefineDosDevice(Flags.DDD_RAW_TARGET_PATH, "myKBD", "\\Device\\KeyboardClass0"))
+        try
         {
-            Int32 err = Marshal.GetLastWin32Error();
-            throw new Win32Exception(err);
-        }
+            if (!DefineDosDevice(Flags.DDD_RAW_TARGET_PATH, deviceName, KeyboardTargetPath))
+            {
+                Int32 err = Marshal.GetLastWin32Error();
+                throw new Win32Exception(err);
+            }
+            mappingDefined = true;
 
-        device = CreateFile("\\\\.\\myKBD", Flags.GENERIC_WRITE, 0, IntPtr.Zero, Flags.OPEN_EXISTING, 0, IntPtr.Zero);
-        if (device == Flags.INVALID_HANDLE_VALUE)
-        {
-            Int32 err = Marshal.GetLastWin32Error();
-            throw new Win32Exception(err);
-        }
-
-        Console.CancelKeyPress += (sender, e) =>
-        {
-            e.Cancel = true; // Cancel the termination to perform cleanup
-
-            if (!CloseHandle(device))
+            device = CreateFile("\\\\.\\" + deviceName, Flags.GENERIC_WRITE, 0, IntPtr.Zero, Flags.OPEN_EXISTING, 0, IntPtr.Zero);
+            if (device == Flags.INVALID_HANDLE_VALUE)
             {
                 Int32 err = Marshal.GetLastWin32Error();
                 throw new Win32Exception(err);
             }
 
-            if (!DefineDosDevice(Flags.DDD_REMOVE_DEFINITION, "myKBD", null))
+            Console.CancelKeyPress += (sender, e) =>
             {
-                Int32 err = Marshal.GetLastWin32Error();
-                throw new Win32Exception(err);
+                e.Cancel = true;
+                exiting = true;
+            };
+
+            while (!exiting)
+            {
+                bool capsLockOn = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+
+                if (!capsLockOn)
+                {
+                    if (!DeviceIoControl(device, Flags.IOCTL_KEYBOARD_QUERY_INDICATORS, IntPtr.Zero, 0, ref KIPbuf, (UInt32)Marshal.SizeOf(KIPbuf), ref bytesReturned, IntPtr.Zero))
+                    {
+                        Int32 err = Marshal.GetLastWin32Error();
+                        throw new Win32Exception(err);
+                    }
+
+                    KIPbuf.LEDflags = (UInt16)(KIPbuf.LEDflags ^ Flags.KEYBOARD_CAPS_LOCK_ON);
+
+                    if (!DeviceIoControl(device, Flags.IOCTL_KEYBOARD_SET_INDICATORS, ref KIPbuf, (UInt32)Marshal.SizeOf(KIPbuf), IntPtr.Zero, 0, ref bytesReturned, IntPtr.Zero))
+                    {
+                        Int32 err = Marshal.GetLastWin32Error();
+                        throw new Win32Exception(err);
+                    }
+                }
+
+                Thread.Sleep(500); // Adjust the blink interval as needed
             }
-
-            Environment.Exit(0); // Exit the program
-        };
-
-        while (true)
+        }
+        finally
         {
-            bool capsLockOn = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
-
-            if (!capsLockOn)
+            if (device != Flags.INVALID_HANDLE_VALUE)
             {
-                if (!DeviceIoControl(device, Flags.IOCTL_KEYBOARD_QUERY_INDICATORS, IntPtr.Zero, 0, ref KIPbuf, (UInt32)Marshal.SizeOf(KIPbuf), ref bytesReturned, IntPtr.Zero))
-                {
-                    Int32 err = Marshal.GetLastWin32Error();
-                    throw new Win32Exception(err);
-                }
-
-                KIPbuf.LEDflags = (UInt16)(KIPbuf.LEDflags ^ Flags.KEYBOARD_CAPS_LOCK_ON);
-
-                if (!DeviceIoControl(device, Flags.IOCTL_KEYBOARD_SET_INDICATORS, ref KIPbuf, (UInt32)Marshal.SizeOf(KIPbuf), IntPtr.Zero, 0, ref bytesReturned, IntPtr.Zero))
-                {
-                    Int32 err = Marshal.GetLastWin32Error();
-                    throw new Win32Exception(err);
-                }
+                CloseHandle(device);
             }
-
-            Thread.Sleep(500); // Adjust the blink interval as needed
+            if (mappingDefined)
+            {
+                DefineDosDevice(Flags.DDD_REMOVE_DEFINITION | Flags.DDD_EXACT_MATCH_ON_REMOVE, deviceName, KeyboardTargetPath);
+            }
         }
     }
 }

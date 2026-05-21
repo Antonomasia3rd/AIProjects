@@ -370,6 +370,12 @@ static DWORD ReadRegDword(HKEY root, const wchar_t* subkey, const wchar_t* value
     return fallback;
 }
 
+static bool TryReadRegDword(HKEY root, const wchar_t* subkey, const wchar_t* valueName, DWORD& value)
+{
+    DWORD bytes = sizeof(value);
+    return RegGetValueW(root, subkey, valueName, RRF_RT_REG_DWORD, nullptr, &value, &bytes) == ERROR_SUCCESS;
+}
+
 static void WriteRegString(HKEY root, const wchar_t* subkey, const wchar_t* valueName, const std::wstring& value)
 {
     HKEY key = nullptr;
@@ -536,9 +542,24 @@ static std::wstring ReadProtectedAccountString(ResourceKind resource, const wcha
     return ReadAccountString(resource, valueName, fallbackValueName);
 }
 
-static bool KeepLegacyPlaintextSecrets()
+static bool HasLegacyPlaintextSecrets(ResourceKind resource)
 {
-    return ReadRegDword(HKEY_CURRENT_USER, kSettingsKey, L"KeepLegacyPlaintextSecrets", 1) != 0;
+    std::wstring key = AccountKeyFor(resource);
+    return !ReadRegString(HKEY_CURRENT_USER, key.c_str(), L"LTokenV2", L"").empty() ||
+        !ReadRegString(HKEY_CURRENT_USER, key.c_str(), L"LTuidV2", L"").empty() ||
+        !ReadRegString(HKEY_CURRENT_USER, key.c_str(), L"ltoken_v2", L"").empty() ||
+        !ReadRegString(HKEY_CURRENT_USER, key.c_str(), L"ltuid_v2", L"").empty();
+}
+
+static bool KeepLegacyPlaintextSecrets(ResourceKind resource)
+{
+    DWORD configured = 0;
+    if (TryReadRegDword(HKEY_CURRENT_USER, kSettingsKey, L"KeepLegacyPlaintextSecrets", configured))
+    {
+        return configured != 0;
+    }
+
+    return HasLegacyPlaintextSecrets(resource);
 }
 
 static bool WriteProtectedAccountString(ResourceKind resource, const wchar_t* valueName, const std::wstring& value, bool keepLegacyPlaintext)
@@ -569,7 +590,7 @@ static bool HasRegistryConfig(ResourceKind resource)
 static void SaveRegistryConfig(ResourceKind resource, const AppConfig& cfg)
 {
     std::wstring key = AccountKeyFor(resource);
-    bool keepLegacyPlaintext = KeepLegacyPlaintextSecrets();
+    bool keepLegacyPlaintext = KeepLegacyPlaintextSecrets(resource);
     WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"UID", Utf8ToWide(cfg.uid));
     if (keepLegacyPlaintext)
     {

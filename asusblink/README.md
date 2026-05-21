@@ -39,6 +39,7 @@ Useful options include:
 
 - `--mic-state`, `--mic-interval`, `--mic-duration`, `--mic-check`
 - `--keyboard-state`, `--keyboard-interval`, `--keyboard-duration`
+- `--eventN-hdd-state` to map HDD activity levels 0 through 4 to keyboard LED states, with `--eventN-hdd-interval` controlling the polling interval
 - `--event1-*`, `--event2-*`, etc. for custom events
 - `--error-log <path|off>`
 - `--error-retry <times>`
