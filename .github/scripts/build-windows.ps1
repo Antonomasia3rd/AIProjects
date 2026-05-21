@@ -58,25 +58,83 @@ function Get-ProcessesUsingPath([string]$Path) {
     })
 }
 
+function Get-ProcessesMatchingArtifactName([string]$Path) {
+    $name = [IO.Path]::GetFileNameWithoutExtension($Path)
+    if (-not $name) {
+        return @()
+    }
+
+    @(Get-Process -Name $name -ErrorAction SilentlyContinue)
+}
+
+function Get-ArtifactWriteFailure([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $null
+    }
+
+    $stream = $null
+    try {
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        return $null
+    }
+    catch {
+        return $_.Exception.Message
+    }
+    finally {
+        if ($stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
+function Stop-ArtifactProcess([Diagnostics.Process]$Process, [string]$Project) {
+    Write-Host "Stopping running $Project artifact: $($Process.ProcessName)[$($Process.Id)]"
+
+    try {
+        if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
+            Write-Host "Requesting graceful close for $($Process.ProcessName)[$($Process.Id)]"
+            if ($Process.CloseMainWindow() -and $Process.WaitForExit(5000)) {
+                return
+            }
+        }
+
+        Write-Host "Force stopping $($Process.ProcessName)[$($Process.Id)]"
+        Stop-Process -Id $Process.Id -Force -ErrorAction Stop
+        [void]$Process.WaitForExit(5000)
+    }
+    catch {
+        throw "Could not stop $($Process.ProcessName)[$($Process.Id)] for $Project. Close it manually or skip this project. $($_.Exception.Message)"
+    }
+}
+
 function Assert-ArtifactWritable([string]$Path, [string]$Project) {
+    $writeFailure = Get-ArtifactWriteFailure $Path
+    if (-not $writeFailure) {
+        return
+    }
+
     $processes = @(Get-ProcessesUsingPath $Path)
     if ($processes.Count -eq 0) {
-        return
+        $processes = @(Get-ProcessesMatchingArtifactName $Path)
     }
 
     $summary = ($processes | ForEach-Object { "$($_.ProcessName)[$($_.Id)]" }) -join ', '
     if (-not $StopRunningArtifacts) {
-        throw "$Project output is currently running and cannot be overwritten: $Path ($summary). Close it, pass -StopRunningArtifacts, or skip this project."
+        $processText = if ($summary) { " ($summary)" } else { "" }
+        throw "$Project output is currently locked and cannot be overwritten: $Path$processText. Close it, pass -StopRunningArtifacts, or skip this project. Lock detail: $writeFailure"
+    }
+
+    if ($processes.Count -eq 0) {
+        throw "$Project output is locked, but no matching running process could be identified: $Path. Close the owner manually or skip this project. Lock detail: $writeFailure"
     }
 
     foreach ($process in $processes) {
-        Write-Host "Stopping running $Project artifact: $($process.ProcessName)[$($process.Id)]"
-        try {
-            Stop-Process -Id $process.Id -Force -ErrorAction Stop
-        }
-        catch {
-            throw "Could not stop $($process.ProcessName)[$($process.Id)] for $Project. Close it manually or skip this project. $($_.Exception.Message)"
-        }
+        Stop-ArtifactProcess $process $Project
+    }
+
+    $writeFailure = Get-ArtifactWriteFailure $Path
+    if ($writeFailure) {
+        throw "$Project output is still locked after stopping matching processes: $Path. Lock detail: $writeFailure"
     }
 }
 
