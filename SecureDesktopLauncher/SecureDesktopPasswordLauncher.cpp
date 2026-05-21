@@ -28,6 +28,7 @@
 static const wchar_t* kConfigFileName = L"SecureDesktopPasswordLauncher.ini";
 static const wchar_t* kPasswordKdfName = L"PBKDF2-SHA256";
 static const DWORD kPasswordKdfIterations = 210000;
+static const DWORD kPasswordKdfMaxIterations = 5000000;
 
 struct GateConfig
 {
@@ -314,11 +315,16 @@ static bool PathSecurityIsTrusted(const std::wstring& path, bool replaceOnly = f
 
 static bool IsAbsoluteFileSystemPath(const std::wstring& path)
 {
-    return (path.size() >= 3 &&
-            iswalpha(path[0]) &&
-            path[1] == L':' &&
-            (path[2] == L'\\' || path[2] == L'/')) ||
-        (path.size() >= 2 && path[0] == L'\\' && path[1] == L'\\');
+    std::wstring value = path;
+    if (value.rfind(L"\\\\?\\", 0) == 0)
+    {
+        value.erase(0, 4);
+    }
+
+    return value.size() >= 3 &&
+        iswalpha(value[0]) &&
+        value[1] == L':' &&
+        (value[2] == L'\\' || value[2] == L'/');
 }
 
 static bool NormalizeFullPath(const std::wstring& path, std::wstring& fullPath)
@@ -422,7 +428,7 @@ static bool TrustedExistingFilePath(const std::wstring& path, std::wstring& erro
 {
     if (!IsAbsoluteFileSystemPath(path))
     {
-        error = std::wstring(label) + L" path is not absolute: " + path;
+        error = std::wstring(label) + L" path is not a local absolute path: " + path;
         return false;
     }
 
@@ -459,7 +465,7 @@ static bool TrustedExistingDirectoryPath(const std::wstring& path, std::wstring&
 {
     if (!IsAbsoluteFileSystemPath(path))
     {
-        error = std::wstring(label) + L" path is not absolute: " + path;
+        error = std::wstring(label) + L" path is not a local absolute path: " + path;
         return false;
     }
 
@@ -594,6 +600,10 @@ static GateConfig LoadConfig(bool enforceTrust = true)
     config.kdfIterations = ReadIniDword(config.configPath, L"Security", L"Iterations", kPasswordKdfIterations);
     if (config.kdfIterations == 0) {
         config.kdfIterations = kPasswordKdfIterations;
+    }
+    if (config.kdfIterations > kPasswordKdfMaxIterations) {
+        MarkUntrusted(config, L"Password KDF iteration count is too large: " + std::to_wstring(config.kdfIterations));
+        return config;
     }
     config.saltHex = ReadIniString(config.configPath, L"Security", L"SaltHex", L"");
     config.hashHex = ReadIniString(config.configPath, L"Security", L"PasswordHashHex", L"");

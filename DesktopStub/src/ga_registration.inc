@@ -67,6 +67,44 @@ static std::wstring QuoteCommandLineArg(const std::wstring& arg)
     return out;
 }
 
+static std::wstring DefaultPowerShellExe()
+{
+    wchar_t systemDirectory[MAX_PATH] = {};
+    UINT len = GetSystemDirectoryW(systemDirectory, ARRAYSIZE(systemDirectory));
+    if (len > 0 && len < ARRAYSIZE(systemDirectory))
+        return std::wstring(systemDirectory) + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
+
+    return L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+}
+
+static bool IsLocalAbsoluteFilePath(const std::wstring& path)
+{
+    std::wstring trimmed = TrimCopy(path);
+    if (trimmed.rfind(L"\\\\?\\", 0) == 0)
+        trimmed.erase(0, 4);
+
+    return trimmed.size() >= 3 &&
+        iswalpha(trimmed[0]) &&
+        trimmed[1] == L':' &&
+        (trimmed[2] == L'\\' || trimmed[2] == L'/');
+}
+
+static std::wstring ReadPowerShellExe()
+{
+    std::wstring fallback = DefaultPowerShellExe();
+    std::wstring configured = TrimCopy(IniReadS(L"Settings", L"PowerShellExe", fallback.c_str()));
+    if (configured.empty())
+        return fallback;
+
+    if (!IsLocalAbsoluteFilePath(configured))
+    {
+        Log(L"PowerShellExe must be a local absolute path; using default: %s", fallback.c_str());
+        return fallback;
+    }
+
+    return configured;
+}
+
 static bool IsAsciiHexDigit(wchar_t ch)
 {
     return (ch >= L'0' && ch <= L'9') ||
@@ -217,9 +255,7 @@ bool PS_Run(const std::wstring& cmd)
     si.wShowWindow=SW_HIDE; si.hStdInput=nulIn; si.hStdOutput=w; si.hStdError=w;
 
     PROCESS_INFORMATION pi{};
-    std::wstring powerShellExe = IniReadS(L"Settings", L"PowerShellExe", L"powershell.exe");
-    if (TrimCopy(powerShellExe).empty())
-        powerShellExe = L"powershell.exe";
+    std::wstring powerShellExe = ReadPowerShellExe();
     const int timeoutMs = IniReadClampedI(L"Settings", L"PowerShellTimeoutMs", 120000, 0, 600000);
     const int pollMs = IniReadClampedI(L"Settings", L"PowerShellPollMs", 50, 10, 1000);
     const int terminateWaitMs = IniReadClampedI(L"Settings", L"PowerShellTerminateWaitMs", 5000, 0, 60000);

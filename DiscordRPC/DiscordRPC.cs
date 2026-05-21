@@ -16,6 +16,7 @@ using System.Windows.Forms;
 
 internal static class Program
 {
+    private static readonly TimeSpan CensorRegexTimeout = TimeSpan.FromMilliseconds(100);
     private static volatile bool stopping;
     private static CpuSampler cpuSampler = new CpuSampler();
     private static Mutex singleInstanceMutex;
@@ -1118,7 +1119,7 @@ internal static class Program
                 List<KeyValuePair<string, string>> replacements = ParseKeyValueList(config.Get("censor_map", "word_replace", ""));
                 for (int r = 0; r < replacements.Count; r++)
                 {
-                    result = result.Replace(replacements[r].Key, replacements[r].Value);
+                    result = ReplaceOrdinalIgnoreCase(result, replacements[r].Key, replacements[r].Value);
                 }
             }
             else if (rule == "pattern_replace")
@@ -1145,7 +1146,11 @@ internal static class Program
             string replacement = replacements[i].Value;
             try
             {
-                result = Regex.Replace(result, replacements[i].Key, replacement);
+                result = Regex.Replace(result, replacements[i].Key, replacement, RegexOptions.None, CensorRegexTimeout);
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                Logger.Error("Timed out regex in [censor_map] pattern_replace: " + replacements[i].Key);
             }
             catch (ArgumentException ex)
             {
@@ -1154,6 +1159,42 @@ internal static class Program
         }
 
         return result;
+    }
+
+    private static string ReplaceOrdinalIgnoreCase(string input, string oldValue, string newValue)
+    {
+        if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(oldValue))
+        {
+            return input;
+        }
+
+        StringBuilder builder = null;
+        int start = 0;
+        for (;;)
+        {
+            int index = input.IndexOf(oldValue, start, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                break;
+            }
+
+            if (builder == null)
+            {
+                builder = new StringBuilder(input.Length);
+            }
+
+            builder.Append(input, start, index - start);
+            builder.Append(newValue ?? "");
+            start = index + oldValue.Length;
+        }
+
+        if (builder == null)
+        {
+            return input;
+        }
+
+        builder.Append(input, start, input.Length - start);
+        return builder.ToString();
     }
 
     private static List<KeyValuePair<string, string>> ParseKeyValueList(string value)

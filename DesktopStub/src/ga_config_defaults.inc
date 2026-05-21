@@ -120,7 +120,7 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"ComRegistrationTimeoutMs", L"120000"},
     {L"Settings", L"ComRegistrationCancelWaitMs", L"5000"},
     {L"Settings", L"ComRegistrationUseHelper", L"1"},
-    {L"Settings", L"PowerShellExe", L"powershell.exe"},
+    {L"Settings", L"PowerShellExe", L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"},
     {L"Settings", L"PowerShellPollMs", L"50"},
     {L"Settings", L"PowerShellTimeoutMs", L"120000"},
     {L"Settings", L"PowerShellTerminateWaitMs", L"5000"},

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -419,7 +420,7 @@ internal sealed class BackgroundTileContext : ApplicationContext
 
     private void UpdateLiveTileIfNeeded(MediaSnapshot next)
     {
-        var key = next.Source + "\n" + next.Title + "\n" + next.Artist + "\n" + next.Status + "\n" + settings.TileLayout;
+        var key = next.Source + "\n" + next.Title + "\n" + next.Artist + "\n" + next.Status + "\n" + next.ArtworkHash + "\n" + settings.TileLayout;
         if (key == lastTileKey && (DateTime.UtcNow - lastTileUpdateUtc).TotalSeconds < settings.TileRefreshSeconds)
         {
             return;
@@ -659,7 +660,7 @@ internal sealed class TileForm : Form
 
     private void UpdateLiveTileIfNeeded(MediaSnapshot next)
     {
-        var key = next.Source + "\n" + next.Title + "\n" + next.Artist + "\n" + next.Status + "\n" + settings.TileLayout;
+        var key = next.Source + "\n" + next.Title + "\n" + next.Artist + "\n" + next.Status + "\n" + next.ArtworkHash + "\n" + settings.TileLayout;
         if (key == lastTileKey && (DateTime.UtcNow - lastTileUpdateUtc).TotalSeconds < settings.TileRefreshSeconds)
         {
             return;
@@ -708,7 +709,7 @@ internal static class LiveTileUpdater
         try
         {
             Directory.CreateDirectory(AppSettings.DataDirectory);
-            var imageSource = SaveArtwork(snapshot.Artwork);
+            var imageSource = SaveArtwork(snapshot.Artwork, snapshot.ArtworkHash);
             var payloads = BuildTileXmlPayloads(snapshot, imageSource, settings.TileLayout);
             var updater = TileUpdateManager.CreateTileUpdaterForApplication();
             updater.Clear();
@@ -732,20 +733,61 @@ internal static class LiveTileUpdater
         }
     }
 
-    private static string SaveArtwork(Image artwork)
+    private static string SaveArtwork(Image artwork, string artworkHash)
     {
         if (artwork == null)
         {
             return string.Empty;
         }
 
-        var path = Path.Combine(AppSettings.DataDirectory, "tile-artwork.jpg");
+        byte[] jpegBytes;
         using (var bitmap = new Bitmap(artwork, 310, 310))
+        using (var memory = new MemoryStream())
         {
-            bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Jpeg);
+            bitmap.Save(memory, System.Drawing.Imaging.ImageFormat.Jpeg);
+            jpegBytes = memory.ToArray();
         }
 
+        var suffix = string.IsNullOrWhiteSpace(artworkHash) ? HashBytes(jpegBytes) : artworkHash;
+        var path = Path.Combine(AppSettings.DataDirectory, "tile-artwork-" + suffix + ".jpg");
+        File.WriteAllBytes(path, jpegBytes);
+        CleanupOldArtwork(path);
         return new Uri(path).AbsoluteUri;
+    }
+
+    private static string HashBytes(byte[] bytes)
+    {
+        using (var md5 = MD5.Create())
+        {
+            var hash = md5.ComputeHash(bytes);
+            var builder = new System.Text.StringBuilder(hash.Length * 2);
+            for (int i = 0; i < hash.Length; i++)
+            {
+                builder.Append(hash[i].ToString("x2"));
+            }
+
+            return builder.ToString();
+        }
+    }
+
+    private static void CleanupOldArtwork(string keepPath)
+    {
+        try
+        {
+            foreach (var file in Directory.GetFiles(AppSettings.DataDirectory, "tile-artwork-*.jpg"))
+            {
+                if (!file.Equals(keepPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(file);
+                }
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     private static List<string> BuildTileXmlPayloads(MediaSnapshot snapshot, string imageSource, TileLayout layout)
@@ -908,7 +950,8 @@ internal static class MediaReader
         var title = string.IsNullOrWhiteSpace(props.Title) ? "(untitled media)" : props.Title;
         var artist = FirstNonEmpty(props.Artist, props.AlbumArtist, props.Subtitle, session.SourceAppUserModelId);
         var source = ShortSourceName(session.SourceAppUserModelId);
-        var artwork = TryLoadArtwork(props.Thumbnail);
+        string artworkHash;
+        var artwork = TryLoadArtwork(props.Thumbnail, out artworkHash);
 
         return new MediaSnapshot(
             source,
@@ -916,11 +959,13 @@ internal static class MediaReader
             artist,
             playback.PlaybackStatus.ToString(),
             DateTime.Now.ToString("HH:mm:ss"),
-            artwork);
+            artwork,
+            artworkHash);
     }
 
-    private static Image TryLoadArtwork(IRandomAccessStreamReference thumbnail)
+    private static Image TryLoadArtwork(IRandomAccessStreamReference thumbnail, out string artworkHash)
     {
+        artworkHash = string.Empty;
         if (thumbnail == null)
         {
             return null;
@@ -945,6 +990,7 @@ internal static class MediaReader
 
                     var bytes = new byte[loaded];
                     reader.ReadBytes(bytes);
+                    artworkHash = HashBytes(bytes);
                     using (var memory = new MemoryStream(bytes))
                     using (var image = Image.FromStream(memory))
                     {
@@ -957,6 +1003,21 @@ internal static class MediaReader
         {
             AppLog.Write(ex, "Artwork load failed");
             return null;
+        }
+    }
+
+    private static string HashBytes(byte[] bytes)
+    {
+        using (var md5 = MD5.Create())
+        {
+            var hash = md5.ComputeHash(bytes);
+            var builder = new System.Text.StringBuilder(hash.Length * 2);
+            for (int i = 0; i < hash.Length; i++)
+            {
+                builder.Append(hash[i].ToString("x2"));
+            }
+
+            return builder.ToString();
         }
     }
 
@@ -1068,8 +1129,9 @@ internal sealed class MediaSnapshot
     public readonly string Status;
     public readonly string LastUpdated;
     public readonly Image Artwork;
+    public readonly string ArtworkHash;
 
-    public MediaSnapshot(string source, string title, string artist, string status, string lastUpdated, Image artwork)
+    public MediaSnapshot(string source, string title, string artist, string status, string lastUpdated, Image artwork, string artworkHash)
     {
         Source = source;
         Title = title;
@@ -1077,10 +1139,11 @@ internal sealed class MediaSnapshot
         Status = status;
         LastUpdated = lastUpdated;
         Artwork = artwork;
+        ArtworkHash = artworkHash ?? string.Empty;
     }
 
     public static MediaSnapshot Empty(string status)
     {
-        return new MediaSnapshot("SMTC", "Nothing playing", "Start media in Spotify, browser, VLC, etc.", status, DateTime.Now.ToString("HH:mm:ss"), null);
+        return new MediaSnapshot("SMTC", "Nothing playing", "Start media in Spotify, browser, VLC, etc.", status, DateTime.Now.ToString("HH:mm:ss"), null, string.Empty);
     }
 }
