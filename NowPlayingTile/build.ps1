@@ -14,6 +14,21 @@ $uiWinmd = Join-Path $winMetadata 'Windows.UI.winmd'
 
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
+if (Test-Path -LiteralPath $out -PathType Leaf) {
+    $resolvedOut = (Resolve-Path -LiteralPath $out).Path
+    $lockers = @(Get-Process | Where-Object {
+        try {
+            $_.Path -and [string]::Equals((Resolve-Path -LiteralPath $_.Path).Path, $resolvedOut, [StringComparison]::OrdinalIgnoreCase)
+        } catch {
+            $false
+        }
+    })
+    if ($lockers.Count -gt 0) {
+        $summary = ($lockers | ForEach-Object { "$($_.ProcessName)[$($_.Id)]" }) -join ', '
+        throw "Cannot overwrite $out because it is running: $summary"
+    }
+}
+
 & $csc /nologo /target:winexe /platform:x64 /out:$out `
     /r:System.dll `
     /r:System.Core.dll `

@@ -23,12 +23,17 @@
 #pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 static const wchar_t* kConfigFileName = L"SecureDesktopPasswordLauncher.ini";
+static const wchar_t* kPasswordKdfName = L"PBKDF2-SHA256";
+static const DWORD kPasswordKdfIterations = 210000;
 
 struct GateConfig
 {
     std::wstring configPath;
+    std::wstring kdf;
+    DWORD kdfIterations = kPasswordKdfIterations;
     std::wstring saltHex;
     std::wstring hashHex;
+    std::wstring pbkdf2HashHex;
     DWORD maxAttempts = 3;
     std::wstring launchPath = L"C:\\Windows\\System32\\cmd.exe";
     std::wstring arguments;
@@ -248,8 +253,14 @@ static GateConfig LoadConfig()
 {
     GateConfig config;
     config.configPath = FindConfigPath();
+    config.kdf = ReadIniString(config.configPath, L"Security", L"Kdf", L"");
+    config.kdfIterations = ReadIniDword(config.configPath, L"Security", L"Iterations", kPasswordKdfIterations);
+    if (config.kdfIterations == 0) {
+        config.kdfIterations = kPasswordKdfIterations;
+    }
     config.saltHex = ReadIniString(config.configPath, L"Security", L"SaltHex", L"");
     config.hashHex = ReadIniString(config.configPath, L"Security", L"PasswordHashHex", L"");
+    config.pbkdf2HashHex = ReadIniString(config.configPath, L"Security", L"PasswordPbkdf2HashHex", L"");
     config.maxAttempts = ReadIniDword(config.configPath, L"Security", L"MaxAttempts", 3);
     config.launchPath = ReadIniString(config.configPath, L"Launch", L"Path", config.launchPath);
     config.arguments = ReadIniString(config.configPath, L"Launch", L"Arguments", L"");
@@ -305,7 +316,7 @@ static bool GenerateRandomBytes(std::vector<BYTE>& bytes)
     return BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(bytes.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
 }
 
-static bool HashPassword(const std::vector<BYTE>& salt, const std::wstring& password, std::vector<BYTE>& hash)
+static bool HashPasswordLegacySha256(const std::vector<BYTE>& salt, const std::wstring& password, std::vector<BYTE>& hash)
 {
     BCRYPT_ALG_HANDLE alg = nullptr;
     BCRYPT_HASH_HANDLE hashHandle = nullptr;
@@ -340,6 +351,36 @@ static bool HashPassword(const std::vector<BYTE>& salt, const std::wstring& pass
     }
     BCryptCloseAlgorithmProvider(alg, 0);
     return ok;
+}
+
+static bool DerivePasswordHash(
+    const std::vector<BYTE>& salt,
+    const std::wstring& password,
+    DWORD iterations,
+    std::vector<BYTE>& hash)
+{
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    hash.assign(32, 0);
+
+    if (iterations == 0 || BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG) != 0) {
+        return false;
+    }
+
+    const BYTE* passwordBytes = reinterpret_cast<const BYTE*>(password.data());
+    ULONG passwordByteCount = static_cast<ULONG>(password.size() * sizeof(wchar_t));
+    NTSTATUS status = BCryptDeriveKeyPBKDF2(
+        alg,
+        const_cast<PUCHAR>(passwordBytes),
+        passwordByteCount,
+        const_cast<PUCHAR>(salt.data()),
+        static_cast<ULONG>(salt.size()),
+        iterations,
+        hash.data(),
+        static_cast<ULONG>(hash.size()),
+        0);
+
+    BCryptCloseAlgorithmProvider(alg, 0);
+    return status == 0;
 }
 
 static bool ConstantTimeEquals(const std::vector<BYTE>& left, const std::vector<BYTE>& right)
@@ -513,14 +554,20 @@ static int SetPassword()
     }
 
     std::vector<BYTE> salt(16);
-    std::vector<BYTE> hash;
-    if (!GenerateRandomBytes(salt) || !HashPassword(salt, password, hash)) {
+    std::vector<BYTE> legacyHash;
+    std::vector<BYTE> pbkdf2Hash;
+    if (!GenerateRandomBytes(salt) ||
+        !HashPasswordLegacySha256(salt, password, legacyHash) ||
+        !DerivePasswordHash(salt, password, kPasswordKdfIterations, pbkdf2Hash)) {
         MessageBoxW(nullptr, L"Failed to generate password hash.", L"Password", MB_OK | MB_ICONERROR);
         return 1;
     }
 
+    WritePrivateProfileStringW(L"Security", L"Kdf", kPasswordKdfName, config.configPath.c_str());
+    WritePrivateProfileStringW(L"Security", L"Iterations", std::to_wstring(kPasswordKdfIterations).c_str(), config.configPath.c_str());
     WritePrivateProfileStringW(L"Security", L"SaltHex", BytesToHex(salt).c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"PasswordHashHex", BytesToHex(hash).c_str(), config.configPath.c_str());
+    WritePrivateProfileStringW(L"Security", L"PasswordHashHex", BytesToHex(legacyHash).c_str(), config.configPath.c_str());
+    WritePrivateProfileStringW(L"Security", L"PasswordPbkdf2HashHex", BytesToHex(pbkdf2Hash).c_str(), config.configPath.c_str());
     WritePrivateProfileStringW(L"Security", L"MaxAttempts", L"3", config.configPath.c_str());
     WritePrivateProfileStringW(L"Launch", L"Path", config.launchPath.c_str(), config.configPath.c_str());
     WritePrivateProfileStringW(L"Launch", L"Arguments", config.arguments.c_str(), config.configPath.c_str());
@@ -539,7 +586,12 @@ static bool VerifyPassword(const GateConfig& config, bool startMinimized)
 {
     std::vector<BYTE> salt;
     std::vector<BYTE> expectedHash;
-    if (!HexToBytes(config.saltHex, salt) || !HexToBytes(config.hashHex, expectedHash) || salt.empty() || expectedHash.empty()) {
+    bool hasPbkdf2Hash = _wcsicmp(config.kdf.c_str(), kPasswordKdfName) == 0 &&
+        HexToBytes(config.pbkdf2HashHex, expectedHash) &&
+        !expectedHash.empty();
+    if (!HexToBytes(config.saltHex, salt) ||
+        (!hasPbkdf2Hash && (!HexToBytes(config.hashHex, expectedHash) || expectedHash.empty())) ||
+        salt.empty()) {
         MessageBoxW(nullptr, L"Password is not configured. Run this program with the set-password argument first.",
             L"Secure Desktop Password Launcher", MB_OK | MB_ICONERROR);
         return false;
@@ -554,7 +606,10 @@ static bool VerifyPassword(const GateConfig& config, bool startMinimized)
         }
 
         std::vector<BYTE> actualHash;
-        if (HashPassword(salt, password, actualHash) && ConstantTimeEquals(actualHash, expectedHash)) {
+        bool hashed = hasPbkdf2Hash
+            ? DerivePasswordHash(salt, password, config.kdfIterations, actualHash)
+            : HashPasswordLegacySha256(salt, password, actualHash);
+        if (hashed && ConstantTimeEquals(actualHash, expectedHash)) {
             return true;
         }
 

@@ -23,6 +23,8 @@
 **/build/*.map
 **/build/**/*.map
 **/build/*.nativecodeanalysis.xml
+**/build/*.manifest
+**/build/**/*.manifest
 **/build/*.log
 **/build/*.ini
 **/build/*.bak

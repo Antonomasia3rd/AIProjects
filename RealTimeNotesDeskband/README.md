@@ -130,8 +130,10 @@ Values:
 
 - `Resource`: `auto`, `resin`, `stamina`, or `charge`.
 - `Accounts\<resource>\UID`: game account UID.
-- `Accounts\<resource>\LTokenV2`: HoYoLAB `ltoken_v2`.
-- `Accounts\<resource>\LTuidV2`: HoYoLAB `ltuid_v2`.
+- `Accounts\<resource>\LTokenV2Protected`: DPAPI-protected HoYoLAB `ltoken_v2`.
+- `Accounts\<resource>\LTuidV2Protected`: DPAPI-protected HoYoLAB `ltuid_v2`.
+- Legacy plaintext `LTokenV2` / `LTuidV2` values are still read when protected values are not present, and are kept by default so older releases can still read credentials after rollback.
+- `KeepLegacyPlaintextSecrets`: optional DWORD. Set to `0` before saving credentials if you want new saves to remove legacy plaintext token values.
 - `Accounts\<resource>\RefreshIntervalSeconds`: optional DWORD refresh override for one resource.
 - `ConfigDir`: legacy fallback directory containing cookie JSON files.
 - `AssetDir`: optional directory containing icon resources.

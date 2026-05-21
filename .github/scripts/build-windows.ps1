@@ -1,5 +1,6 @@
 param(
-    [string[]]$SkipProjects = @()
+    [string[]]$SkipProjects = @(),
+    [switch]$StopRunningArtifacts
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +39,44 @@ function Invoke-External([string]$FilePath, [string[]]$Arguments, [string]$Worki
     }
     finally {
         Pop-Location
+    }
+}
+
+function Get-ProcessesUsingPath([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return @()
+    }
+
+    $resolved = (Resolve-Path -LiteralPath $Path).Path
+    @(Get-Process | Where-Object {
+        try {
+            $_.Path -and [string]::Equals((Resolve-Path -LiteralPath $_.Path).Path, $resolved, [StringComparison]::OrdinalIgnoreCase)
+        }
+        catch {
+            $false
+        }
+    })
+}
+
+function Assert-ArtifactWritable([string]$Path, [string]$Project) {
+    $processes = @(Get-ProcessesUsingPath $Path)
+    if ($processes.Count -eq 0) {
+        return
+    }
+
+    $summary = ($processes | ForEach-Object { "$($_.ProcessName)[$($_.Id)]" }) -join ', '
+    if (-not $StopRunningArtifacts) {
+        throw "$Project output is currently running and cannot be overwritten: $Path ($summary). Close it, pass -StopRunningArtifacts, or skip this project."
+    }
+
+    foreach ($process in $processes) {
+        Write-Host "Stopping running $Project artifact: $($process.ProcessName)[$($process.Id)]"
+        try {
+            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+        }
+        catch {
+            throw "Could not stop $($process.ProcessName)[$($process.Id)] for $Project. Close it manually or skip this project. $($_.Exception.Message)"
+        }
     }
 }
 
@@ -117,6 +156,7 @@ function Build-CSharpProject {
     $projectDir = Join-Path $RepoRoot $Project
     $outDir = Ensure-BuildDir $Project
     $out = Join-Path $outDir $OutputName
+    Assert-ArtifactWritable $out $Project
     $args = @('/nologo', '/optimize+', "/target:$Target", "/out:$out")
     foreach ($ref in $References) {
         $args += "/r:$ref"
@@ -142,6 +182,7 @@ function Build-MsvcProject {
     New-Item -ItemType Directory -Force -Path $objDir | Out-Null
     $obj = Join-Path $objDir ([IO.Path]::GetFileNameWithoutExtension($Source) + '.obj')
     $out = Join-Path $outDir $OutputName
+    Assert-ArtifactWritable $out $Project
     $args = @('/nologo') + $CompileArgs + @("/Fo$obj", "/Fe$out", (Join-Path $projectDir $Source))
     if ($LinkArgs.Count -gt 0) {
         $args += '/link'
@@ -269,16 +310,19 @@ if (-not (Test-SkipProject 'YourPhoneHideBanner')) {
 }
 if (-not (Test-SkipProject 'DiscordRPC')) {
     Write-Section 'Build DiscordRPC'
+    Assert-ArtifactWritable (Join-Path $RepoRoot 'DiscordRPC\build\DiscordRPC.exe') 'DiscordRPC'
     Invoke-External 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'build.ps1') (Join-Path $RepoRoot 'DiscordRPC')
     New-Package -Name 'DiscordRPC' -Project 'DiscordRPC' -Paths @('build\DiscordRPC.exe')
 }
 if (-not (Test-SkipProject 'NowPlayingTile')) {
     Write-Section 'Build NowPlayingTile'
+    Assert-ArtifactWritable (Join-Path $RepoRoot 'NowPlayingTile\build\NowPlayingTile.exe') 'NowPlayingTile'
     Invoke-External 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'build.ps1') (Join-Path $RepoRoot 'NowPlayingTile')
     New-Package -Name 'NowPlayingTile' -Project 'NowPlayingTile' -Paths @('build\NowPlayingTile.exe') -ExtraPaths @('register-dev-package.ps1', 'unregister-dev-package.ps1', 'launch-packaged.ps1', 'launch-widget.ps1', 'install-startup.ps1', 'uninstall-startup.ps1', 'open-settings.ps1', 'package')
 }
 if (-not (Test-SkipProject 'GenerateAssets')) {
     Invoke-External 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'TestGenerateAssetsSource.ps1') (Join-Path $RepoRoot 'DesktopStub')
+    Assert-ArtifactWritable (Join-Path $RepoRoot 'DesktopStub\build\GenerateAssets.exe') 'GenerateAssets'
     Build-CmdProject -Project 'DesktopStub' -Command 'BuildGenerateAssets.cmd'
     New-Package -Name 'GenerateAssets' -Project 'DesktopStub' -Paths @('build\GenerateAssets.exe')
 }

@@ -32,6 +32,7 @@
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "crypt32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -399,6 +400,112 @@ static void DeleteRegValue(HKEY root, const wchar_t* subkey, const wchar_t* valu
     }
 }
 
+static std::wstring BytesToHexWide(const BYTE* bytes, DWORD byteCount)
+{
+    static const wchar_t* digits = L"0123456789abcdef";
+    std::wstring result;
+    result.reserve(static_cast<size_t>(byteCount) * 2);
+    for (DWORD i = 0; i < byteCount; ++i)
+    {
+        BYTE value = bytes[i];
+        result.push_back(digits[(value >> 4) & 0x0f]);
+        result.push_back(digits[value & 0x0f]);
+    }
+    return result;
+}
+
+static bool HexWideToBytes(const std::wstring& hex, std::vector<BYTE>& bytes)
+{
+    auto hexValue = [](wchar_t ch) -> int {
+        if (ch >= L'0' && ch <= L'9') return ch - L'0';
+        if (ch >= L'a' && ch <= L'f') return ch - L'a' + 10;
+        if (ch >= L'A' && ch <= L'F') return ch - L'A' + 10;
+        return -1;
+    };
+
+    if ((hex.size() % 2) != 0)
+    {
+        return false;
+    }
+
+    bytes.clear();
+    bytes.reserve(hex.size() / 2);
+    for (size_t i = 0; i < hex.size(); i += 2)
+    {
+        int hi = hexValue(hex[i]);
+        int lo = hexValue(hex[i + 1]);
+        if (hi < 0 || lo < 0)
+        {
+            return false;
+        }
+        bytes.push_back(static_cast<BYTE>((hi << 4) | lo));
+    }
+    return true;
+}
+
+static std::wstring ProtectedValueName(const wchar_t* valueName)
+{
+    return std::wstring(valueName) + L"Protected";
+}
+
+static std::wstring ProtectSecretString(const std::wstring& value)
+{
+    if (value.empty())
+    {
+        return L"";
+    }
+
+    DATA_BLOB input{};
+    input.pbData = reinterpret_cast<BYTE*>(const_cast<wchar_t*>(value.data()));
+    input.cbData = static_cast<DWORD>(value.size() * sizeof(wchar_t));
+
+    DATA_BLOB output{};
+    if (!CryptProtectData(&input, L"RealTimeNotesDeskband", nullptr, nullptr, nullptr, 0, &output))
+    {
+        return L"";
+    }
+
+    std::wstring protectedValue = L"dpapi:" + BytesToHexWide(output.pbData, output.cbData);
+    LocalFree(output.pbData);
+    return protectedValue;
+}
+
+static bool UnprotectSecretString(const std::wstring& value, std::wstring& plain)
+{
+    static const std::wstring prefix = L"dpapi:";
+    if (value.size() <= prefix.size() ||
+        _wcsnicmp(value.c_str(), prefix.c_str(), prefix.size()) != 0)
+    {
+        return false;
+    }
+
+    std::vector<BYTE> protectedBytes;
+    if (!HexWideToBytes(value.substr(prefix.size()), protectedBytes) || protectedBytes.empty())
+    {
+        return false;
+    }
+
+    DATA_BLOB input{};
+    input.pbData = protectedBytes.data();
+    input.cbData = static_cast<DWORD>(protectedBytes.size());
+
+    DATA_BLOB output{};
+    if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, 0, &output))
+    {
+        return false;
+    }
+
+    if ((output.cbData % sizeof(wchar_t)) != 0)
+    {
+        LocalFree(output.pbData);
+        return false;
+    }
+
+    plain.assign(reinterpret_cast<wchar_t*>(output.pbData), output.cbData / sizeof(wchar_t));
+    LocalFree(output.pbData);
+    return true;
+}
+
 static std::wstring AccountKeyFor(ResourceKind resource)
 {
     return std::wstring(kAccountsKey) + L"\\" + MetadataFor(resource).registryValue;
@@ -415,19 +522,74 @@ static std::wstring ReadAccountString(ResourceKind resource, const wchar_t* valu
     return value;
 }
 
+static std::wstring ReadProtectedAccountString(ResourceKind resource, const wchar_t* valueName, const wchar_t* fallbackValueName = nullptr)
+{
+    std::wstring key = AccountKeyFor(resource);
+    std::wstring protectedName = ProtectedValueName(valueName);
+    std::wstring protectedValue = ReadRegString(HKEY_CURRENT_USER, key.c_str(), protectedName.c_str(), L"");
+    std::wstring plain;
+    if (UnprotectSecretString(protectedValue, plain))
+    {
+        return plain;
+    }
+
+    return ReadAccountString(resource, valueName, fallbackValueName);
+}
+
+static bool KeepLegacyPlaintextSecrets()
+{
+    return ReadRegDword(HKEY_CURRENT_USER, kSettingsKey, L"KeepLegacyPlaintextSecrets", 1) != 0;
+}
+
+static bool WriteProtectedAccountString(ResourceKind resource, const wchar_t* valueName, const std::wstring& value, bool keepLegacyPlaintext)
+{
+    std::wstring key = AccountKeyFor(resource);
+    std::wstring protectedName = ProtectedValueName(valueName);
+    std::wstring protectedValue = ProtectSecretString(value);
+    if (protectedValue.empty())
+    {
+        return false;
+    }
+
+    WriteRegString(HKEY_CURRENT_USER, key.c_str(), protectedName.c_str(), protectedValue);
+    if (!keepLegacyPlaintext)
+    {
+        DeleteRegValue(HKEY_CURRENT_USER, key.c_str(), valueName);
+    }
+    return true;
+}
+
 static bool HasRegistryConfig(ResourceKind resource)
 {
     return !ReadAccountString(resource, L"UID", L"uid").empty() &&
-        !ReadAccountString(resource, L"LTokenV2", L"ltoken_v2").empty() &&
-        !ReadAccountString(resource, L"LTuidV2", L"ltuid_v2").empty();
+        !ReadProtectedAccountString(resource, L"LTokenV2", L"ltoken_v2").empty() &&
+        !ReadProtectedAccountString(resource, L"LTuidV2", L"ltuid_v2").empty();
 }
 
 static void SaveRegistryConfig(ResourceKind resource, const AppConfig& cfg)
 {
     std::wstring key = AccountKeyFor(resource);
+    bool keepLegacyPlaintext = KeepLegacyPlaintextSecrets();
     WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"UID", Utf8ToWide(cfg.uid));
-    WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"LTokenV2", Utf8ToWide(cfg.ltoken));
-    WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"LTuidV2", Utf8ToWide(cfg.ltuid));
+    if (keepLegacyPlaintext)
+    {
+        WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"LTokenV2", Utf8ToWide(cfg.ltoken));
+        WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"LTuidV2", Utf8ToWide(cfg.ltuid));
+    }
+    if (WriteProtectedAccountString(resource, L"LTokenV2", Utf8ToWide(cfg.ltoken), keepLegacyPlaintext))
+    {
+        if (!keepLegacyPlaintext)
+        {
+            DeleteRegValue(HKEY_CURRENT_USER, key.c_str(), L"ltoken_v2");
+        }
+    }
+    if (WriteProtectedAccountString(resource, L"LTuidV2", Utf8ToWide(cfg.ltuid), keepLegacyPlaintext))
+    {
+        if (!keepLegacyPlaintext)
+        {
+            DeleteRegValue(HKEY_CURRENT_USER, key.c_str(), L"ltuid_v2");
+        }
+    }
     if (cfg.refreshSeconds > 0)
     {
         WriteRegDword(HKEY_CURRENT_USER, key.c_str(), L"RefreshIntervalSeconds", cfg.refreshSeconds);
@@ -761,8 +923,8 @@ static bool LoadRegistryConfig(ResourceKind resource, AppConfig& cfg)
 {
     cfg = AppConfig{};
     std::wstring uid = ReadAccountString(resource, L"UID", L"uid");
-    std::wstring ltoken = ReadAccountString(resource, L"LTokenV2", L"ltoken_v2");
-    std::wstring ltuid = ReadAccountString(resource, L"LTuidV2", L"ltuid_v2");
+    std::wstring ltoken = ReadProtectedAccountString(resource, L"LTokenV2", L"ltoken_v2");
+    std::wstring ltuid = ReadProtectedAccountString(resource, L"LTuidV2", L"ltuid_v2");
 
     cfg.uid = WideToUtf8(uid);
     cfg.ltoken = WideToUtf8(ltoken);
