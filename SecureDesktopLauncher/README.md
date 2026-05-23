@@ -26,6 +26,12 @@ build_launcher.cmd check
 build_password_launcher.cmd check
 ```
 
+Source guardrails for launch/trust invariants:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\TestSecureDesktopLauncherSource.ps1
+```
+
 Side-by-side builds when installed files are locked:
 
 ```cmd
@@ -166,6 +172,12 @@ A trusted path must:
 
 Install the service, gate, configs, and launched targets under an admin-controlled directory such as `C:\Program Files\...`. Do not run this from a user-writable folder when the service is active.
 
+## Threat Model Notes
+
+This tool intentionally creates `LocalSystem` processes on interactive desktops. Treat the service executable, password launcher, INI files, launched programs, and their parent directories as privileged code. A user who can replace any of those files, or replace an ancestor directory entry, can turn a launch into code execution as `LocalSystem`.
+
+`CommandLine` only changes the command-line string passed to `CreateProcessAsUserW`; the trusted `Path` is still passed as `lpApplicationName`. Keep `CommandLine` empty unless a target truly needs custom `argv[0]` or unusual quoting.
+
 ## Password Gate Config
 
 The password launcher reads:
@@ -207,7 +219,7 @@ cd /d C:\Program Files\SecureDesktopLauncher
 build\SecureDesktopPasswordLauncher.exe set-password
 ```
 
-`set-password` writes `SecureDesktopPasswordLauncher.ini` and preserves the current launch/UI policy values. New saves use PBKDF2-SHA256 with a random salt and remove the older salted SHA-256 hash by default. Set `KeepLegacySha256Hash=1` only if rollback to an older binary is required.
+`set-password` writes `SecureDesktopPasswordLauncher.ini` and preserves the current launch/UI policy values. New saves use PBKDF2-SHA256 with a random salt and remove the older salted SHA-256 hash by default. If an older config still has only `PasswordHashHex`, the launcher upgrades it after the next successful password verification. Set `KeepLegacySha256Hash=1` only if rollback to an older binary is required.
 
 At normal launch, the password launcher enforces the same local-path trust policy for its own executable, config file, launch target, and working directory. It also rechecks the target and working directory immediately before each `CreateProcessW` call.
 

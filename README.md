@@ -62,6 +62,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\build-wind
 
 # Stop running output EXEs if they block overwrite.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\build-windows.ps1 -StopRunningArtifacts
+
+# Also allow name-based process stopping when exact executable paths cannot be resolved.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\build-windows.ps1 -StopRunningArtifacts -StopMatchingArtifactNames
 ```
 
 Each project README also lists direct build commands for that project. Generated outputs belong in project `build` folders and are ignored by git.

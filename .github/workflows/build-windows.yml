@@ -24,7 +24,8 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        # actions/checkout v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Ensure MinGW-w64 for deskband build
         shell: pwsh
@@ -50,7 +51,8 @@ jobs:
         run: .\.github\scripts\build-windows.ps1
 
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v7
+        # actions/upload-artifact v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: AIProjects-Windows-${{ github.sha }}
           path: |
@@ -88,13 +90,15 @@ jobs:
 
     steps:
       - name: Download workflow artifacts
-        uses: actions/download-artifact@v7
+        # actions/download-artifact v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: AIProjects-Windows-${{ github.sha }}
           path: artifacts
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
+        # actions/attest-build-provenance v4
+        uses: actions/attest-build-provenance@b3e506e8c389afc651c5bacf2b8f2a1ea0557215
         with:
           subject-path: artifacts/**
 
@@ -108,7 +112,8 @@ jobs:
 
     steps:
       - name: Download workflow artifacts
-        uses: actions/download-artifact@v7
+        # actions/download-artifact v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: AIProjects-Windows-${{ github.sha }}
           path: artifacts

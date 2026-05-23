@@ -753,6 +753,29 @@ static bool ConstantTimeEquals(const std::vector<BYTE>& left, const std::vector<
     return diff == 0;
 }
 
+static void TryUpgradeLegacyPasswordHash(
+    const GateConfig& config,
+    const std::vector<BYTE>& salt,
+    const std::wstring& password)
+{
+    if (config.configPath.empty()) {
+        return;
+    }
+
+    std::vector<BYTE> pbkdf2Hash;
+    if (!DerivePasswordHash(salt, password, kPasswordKdfIterations, pbkdf2Hash)) {
+        return;
+    }
+
+    WritePrivateProfileStringW(L"Security", L"Kdf", kPasswordKdfName, config.configPath.c_str());
+    WritePrivateProfileStringW(L"Security", L"Iterations", std::to_wstring(kPasswordKdfIterations).c_str(), config.configPath.c_str());
+    WritePrivateProfileStringW(L"Security", L"PasswordPbkdf2HashHex", BytesToHex(pbkdf2Hash).c_str(), config.configPath.c_str());
+    WritePrivateProfileStringW(L"Security", L"KeepLegacySha256Hash", config.keepLegacySha256Hash ? L"1" : L"0", config.configPath.c_str());
+    if (!config.keepLegacySha256Hash) {
+        WritePrivateProfileStringW(L"Security", L"PasswordHashHex", nullptr, config.configPath.c_str());
+    }
+}
+
 static LRESULT CALLBACK PasswordWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     auto* state = reinterpret_cast<PasswordDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -973,6 +996,9 @@ static bool VerifyPassword(const GateConfig& config, bool startMinimized)
             ? DerivePasswordHash(salt, password, config.kdfIterations, actualHash)
             : HashPasswordLegacySha256(salt, password, actualHash);
         if (hashed && ConstantTimeEquals(actualHash, expectedHash)) {
+            if (!hasPbkdf2Hash) {
+                TryUpgradeLegacyPasswordHash(config, salt, password);
+            }
             return true;
         }
 

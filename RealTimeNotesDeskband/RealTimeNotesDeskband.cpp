@@ -689,25 +689,183 @@ static std::string ReadFileUtf8(const std::wstring& path)
     return data;
 }
 
-static size_t FindJsonValue(const std::string& json, const std::string& key, size_t start = 0)
+static int JsonHexValue(char ch)
 {
-    std::string pattern = "\"" + key + "\"";
-    size_t pos = json.find(pattern, start);
-    if (pos == std::string::npos)
+    if (ch >= '0' && ch <= '9')
     {
-        return std::string::npos;
+        return ch - '0';
     }
-    pos = json.find(':', pos + pattern.size());
-    if (pos == std::string::npos)
+    if (ch >= 'a' && ch <= 'f')
     {
-        return std::string::npos;
+        return ch - 'a' + 10;
     }
-    ++pos;
+    if (ch >= 'A' && ch <= 'F')
+    {
+        return ch - 'A' + 10;
+    }
+    return -1;
+}
+
+static bool JsonReadHexQuad(const std::string& json, size_t pos, uint32_t& value)
+{
+    if (pos + 4 > json.size())
+    {
+        return false;
+    }
+
+    value = 0;
+    for (size_t i = 0; i < 4; ++i)
+    {
+        int digit = JsonHexValue(json[pos + i]);
+        if (digit < 0)
+        {
+            return false;
+        }
+        value = (value << 4) | static_cast<uint32_t>(digit);
+    }
+    return true;
+}
+
+static void JsonAppendUtf8(uint32_t codePoint, std::string& out)
+{
+    if (codePoint <= 0x7F)
+    {
+        out.push_back(static_cast<char>(codePoint));
+    }
+    else if (codePoint <= 0x7FF)
+    {
+        out.push_back(static_cast<char>(0xC0 | ((codePoint >> 6) & 0x1F)));
+        out.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
+    }
+    else if (codePoint <= 0xFFFF)
+    {
+        out.push_back(static_cast<char>(0xE0 | ((codePoint >> 12) & 0x0F)));
+        out.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
+    }
+    else if (codePoint <= 0x10FFFF)
+    {
+        out.push_back(static_cast<char>(0xF0 | ((codePoint >> 18) & 0x07)));
+        out.push_back(static_cast<char>(0x80 | ((codePoint >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
+    }
+}
+
+static bool JsonDecodeStringAt(const std::string& json, size_t start, std::string& out, size_t& after)
+{
+    if (start >= json.size() || json[start] != '"')
+    {
+        return false;
+    }
+
+    std::string value;
+    for (size_t pos = start + 1; pos < json.size(); ++pos)
+    {
+        unsigned char ch = static_cast<unsigned char>(json[pos]);
+        if (ch == '"')
+        {
+            out = value;
+            after = pos + 1;
+            return true;
+        }
+        if (ch != '\\')
+        {
+            value.push_back(static_cast<char>(ch));
+            continue;
+        }
+
+        if (++pos >= json.size())
+        {
+            return false;
+        }
+
+        char escaped = json[pos];
+        switch (escaped)
+        {
+        case '"': value.push_back('"'); break;
+        case '\\': value.push_back('\\'); break;
+        case '/': value.push_back('/'); break;
+        case 'b': value.push_back('\b'); break;
+        case 'f': value.push_back('\f'); break;
+        case 'n': value.push_back('\n'); break;
+        case 'r': value.push_back('\r'); break;
+        case 't': value.push_back('\t'); break;
+        case 'u':
+        {
+            uint32_t first = 0;
+            if (!JsonReadHexQuad(json, pos + 1, first))
+            {
+                return false;
+            }
+            pos += 4;
+
+            if (first >= 0xD800 && first <= 0xDBFF)
+            {
+                if (pos + 6 >= json.size() || json[pos + 1] != '\\' || json[pos + 2] != 'u')
+                {
+                    return false;
+                }
+                uint32_t second = 0;
+                if (!JsonReadHexQuad(json, pos + 3, second) || second < 0xDC00 || second > 0xDFFF)
+                {
+                    return false;
+                }
+                pos += 6;
+                JsonAppendUtf8(0x10000 + (((first - 0xD800) << 10) | (second - 0xDC00)), value);
+            }
+            else if (first >= 0xDC00 && first <= 0xDFFF)
+            {
+                return false;
+            }
+            else
+            {
+                JsonAppendUtf8(first, value);
+            }
+            break;
+        }
+        default:
+            return false;
+        }
+    }
+    return false;
+}
+
+static size_t JsonSkipWhitespace(const std::string& json, size_t pos)
+{
     while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos])))
     {
         ++pos;
     }
     return pos;
+}
+
+static size_t FindJsonValue(const std::string& json, const std::string& key, size_t start = 0)
+{
+    for (size_t pos = start; pos < json.size();)
+    {
+        if (json[pos] != '"')
+        {
+            ++pos;
+            continue;
+        }
+
+        std::string decodedKey;
+        size_t afterString = 0;
+        if (!JsonDecodeStringAt(json, pos, decodedKey, afterString))
+        {
+            return std::string::npos;
+        }
+
+        size_t colon = JsonSkipWhitespace(json, afterString);
+        if (colon < json.size() && json[colon] == ':' && decodedKey == key)
+        {
+            return JsonSkipWhitespace(json, colon + 1);
+        }
+
+        pos = afterString;
+    }
+    return std::string::npos;
 }
 
 static bool JsonString(const std::string& json, const std::string& key, std::string& out)
@@ -717,43 +875,9 @@ static bool JsonString(const std::string& json, const std::string& key, std::str
     {
         return false;
     }
-    ++pos;
 
-    std::string value;
-    bool escaping = false;
-    for (; pos < json.size(); ++pos)
-    {
-        char ch = json[pos];
-        if (escaping)
-        {
-            switch (ch)
-            {
-            case '"': value.push_back('"'); break;
-            case '\\': value.push_back('\\'); break;
-            case '/': value.push_back('/'); break;
-            case 'b': value.push_back('\b'); break;
-            case 'f': value.push_back('\f'); break;
-            case 'n': value.push_back('\n'); break;
-            case 'r': value.push_back('\r'); break;
-            case 't': value.push_back('\t'); break;
-            default: value.push_back(ch); break;
-            }
-            escaping = false;
-            continue;
-        }
-        if (ch == '\\')
-        {
-            escaping = true;
-            continue;
-        }
-        if (ch == '"')
-        {
-            out = value;
-            return true;
-        }
-        value.push_back(ch);
-    }
-    return false;
+    size_t after = 0;
+    return JsonDecodeStringAt(json, pos, out, after);
 }
 
 static bool JsonInt(const std::string& json, const std::string& key, int& out)

@@ -5,6 +5,10 @@ param(
     [string[]]$ManagedRecordName = @(),
     [switch]$NoRootRecord,
     [string]$LogFile = ".\DNSAutoUpdate.log",
+    [ValidateRange(0, 1048576)]
+    [int]$MaxLogMegabytes = 10,
+    [ValidateRange(0, 100)]
+    [int]$LogRetentionCount = 5,
     [ValidateRange(1, 86400)]
     [int]$SleepSeconds = 20,
     [string[]]$IncludeInterfaceAlias = @(),

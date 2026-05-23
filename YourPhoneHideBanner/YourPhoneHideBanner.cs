@@ -2,6 +2,7 @@ using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
@@ -385,6 +386,21 @@ public class YourPhoneHideBannerService : ServiceBase
             }
 
             EventLog.WriteEntry(source, message);
+        }
+        catch (Exception ex)
+        {
+            FallbackLog(source, message + " (EventLog write failed: " + ex.Message + ")");
+        }
+    }
+
+    private void FallbackLog(string source, string message)
+    {
+        try
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "AIProjects");
+            Directory.CreateDirectory(dir);
+            string path = Path.Combine(dir, source + ".log");
+            File.AppendAllText(path, DateTime.UtcNow.ToString("o") + "  " + message + Environment.NewLine);
         }
         catch
         {
