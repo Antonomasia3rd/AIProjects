@@ -17,14 +17,19 @@ The implementation uses undocumented COM interfaces and GUID/vtable offsets deri
 
 ## Build
 
-From a Visual Studio x64 developer command prompt:
+From the repository root:
 
 ```cmd
-mkdir build 2>nul
-cl /nologo /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 CharmTray.cpp /Fe:build\CharmTray.exe /link user32.lib ole32.lib shell32.lib /SUBSYSTEM:WINDOWS
+CharmTray\BuildCharmTray.cmd
 ```
 
-The repository build script uses MSVC and writes `build\CharmTray.exe`.
+From this folder, run `BuildCharmTray.cmd`.
+
+The build script locates MSVC, writes `build\CharmTray.exe`, and supports a syntax-only check:
+
+```cmd
+CharmTray\BuildCharmTray.cmd check
+```
 
 ## Run
 

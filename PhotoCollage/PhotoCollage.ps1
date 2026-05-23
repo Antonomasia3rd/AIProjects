@@ -20,6 +20,11 @@ param(
 
 Add-Type -AssemblyName System.Drawing
 
+$outputExtension = [System.IO.Path]::GetExtension($OutputFile).ToLowerInvariant()
+if ($outputExtension -notin @(".jpg", ".jpeg", ".png", ".bmp")) {
+    throw "Unsupported output extension '$outputExtension'. Use .jpg, .jpeg, .png, or .bmp."
+}
+
 # --- LOAD FILES ---
 $files = @(Get-ChildItem -LiteralPath $InputFolder -File -Include *.jpg,*.jpeg,*.png,*.bmp -Recurse | Select-Object -First $MaxImages)
 if ($files.Count -eq 0) {
@@ -76,10 +81,20 @@ try {
     }
 
     # --- SAVE ---
-    $encoder = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq "image/jpeg" }
-    $encParams = New-Object System.Drawing.Imaging.EncoderParameters -ArgumentList 1
-    $encParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter -ArgumentList ([System.Drawing.Imaging.Encoder]::Quality), $JpegQuality
-    $canvas.Save($OutputFile, $encoder, $encParams)
+    if ($outputExtension -in @(".jpg", ".jpeg")) {
+        $encoder = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq "image/jpeg" }
+        if ($null -eq $encoder) {
+            throw "JPEG encoder was not found."
+        }
+
+        $encParams = New-Object System.Drawing.Imaging.EncoderParameters -ArgumentList 1
+        $encParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter -ArgumentList ([System.Drawing.Imaging.Encoder]::Quality), $JpegQuality
+        $canvas.Save($OutputFile, $encoder, $encParams)
+    } elseif ($outputExtension -eq ".png") {
+        $canvas.Save($OutputFile, [System.Drawing.Imaging.ImageFormat]::Png)
+    } else {
+        $canvas.Save($OutputFile, [System.Drawing.Imaging.ImageFormat]::Bmp)
+    }
 }
 finally {
     if ($encParams -ne $null) {

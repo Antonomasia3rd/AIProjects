@@ -102,6 +102,20 @@ function Normalize-RecordName {
     return $normalized
 }
 
+function Test-DnsRecordNotFoundException {
+    param([Microsoft.Management.Infrastructure.CimException]$Exception)
+
+    # Common DNS "no such owner/record" codes. Other CIM failures usually mean
+    # the DNS lookup itself failed and should not be treated as an empty set.
+    $notFoundCodes = @(9003, 9701, 9714)
+    if ($null -ne $Exception.NativeErrorCode -and $notFoundCodes -contains [int]$Exception.NativeErrorCode) {
+        return $true
+    }
+
+    $message = [string]$Exception.Message
+    return $message -match '(?i)DNS_ERROR_(RECORD|NAME)_DOES_NOT_EXIST|resource record.*(not found|does not exist)|record.*does not exist'
+}
+
 function Get-EligibleServerIPv4 {
     if ($IncludeIPAddress.Count -gt 0) {
         return @(
@@ -196,11 +210,20 @@ while ($true) {
             try {
                 @(Get-DnsServerResourceRecord -ZoneName $ZoneName -Name $RecName -RRType A -ErrorAction Stop)
             } catch [Microsoft.Management.Infrastructure.CimException] {
-                @()
+                if (Test-DnsRecordNotFoundException -Exception $_.Exception) {
+                    @()
+                    return
+                }
+                throw
             }
         }
 
-        $records = Get-ExactARecords
+        try {
+            $records = @(Get-ExactARecords)
+        } catch {
+            Write-Log "ERROR reading A records for '$RecName'; skipping this owner name this cycle: $($_.Exception.Message)"
+            return
+        }
         Write-Log "Found $($records.Count) A records for '$RecName'"
 
         foreach ($rec in $records) {
@@ -230,7 +253,12 @@ while ($true) {
         }
 
         # Re-evaluate remaining IPs for this exact owner name.
-        $records = Get-ExactARecords
+        try {
+            $records = @(Get-ExactARecords)
+        } catch {
+            Write-Log "ERROR re-reading A records for '$RecName' after removals; skipping additions this cycle: $($_.Exception.Message)"
+            return
+        }
         $existingIPs = $records | ForEach-Object {
             Normalize-IP $_.RecordData.IPv4Address.ToString()
         }

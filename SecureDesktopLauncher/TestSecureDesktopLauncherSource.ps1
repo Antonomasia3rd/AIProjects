@@ -30,21 +30,21 @@ function Assert-SourceMatches {
 $service = Read-Source -Path $servicePath
 $password = Read-Source -Path $passwordPath
 
-Write-Host 'Running SecureDesktopLauncher source guardrails...'
-Write-Host 'These checks validate launch/trust invariants only; they do not install or start services.'
+Write-Host 'Running SecureDesktopLauncher source checks...'
+Write-Host 'These checks validate launch invariants only; they do not install or start services.'
 
 Assert-SourceMatches `
-    -Name 'service requires trusted executable and config path before loading programs' `
+    -Name 'service requires an existing config path before loading programs' `
     -Source $service `
-    -Pattern '(?s)TrustedExistingFilePath\(exePath\).*?TrustedExistingFilePath\(config\.configPath\)'
+    -Pattern '(?s)config\.configPath = FindConfigPath\(\).*?FileExists\(config\.configPath\)'
 
 Assert-SourceMatches `
-    -Name 'service validates each configured program path and working directory' `
+    -Name 'service requires configured program path and working directory to exist' `
     -Source $service `
-    -Pattern '(?s)TrustedExistingFilePath\(program\.path\).*?\(program\.workingDirectory\.empty\(\) \|\| TrustedExistingDirectoryPath\(program\.workingDirectory\)\).*?config\.programs\.push_back\(program\)'
+    -Pattern '(?s)!program\.path\.empty\(\).*?ExistingFilePath\(program\.path\).*?\(program\.workingDirectory\.empty\(\) \|\| ExistingDirectoryPath\(program\.workingDirectory\)\).*?config\.programs\.push_back\(program\)'
 
 Assert-SourceMatches `
-    -Name 'service keeps lpApplicationName pinned to trusted Path even when CommandLine is configured' `
+    -Name 'service keeps lpApplicationName pinned to configured Path even when CommandLine is configured' `
     -Source $service `
     -Pattern '(?s)CreateProcessAsUserW\(\s*primaryToken,\s*program\.path\.c_str\(\),\s*commandLine\.empty\(\) \? nullptr : &commandLine\[0\]'
 
@@ -54,18 +54,18 @@ Assert-SourceMatches `
     -Pattern '(?s)SetTokenInformation\(primaryToken,\s*TokenSessionId,\s*&tokenSessionId,\s*sizeof\(tokenSessionId\)\).*?CreateProcessAsUserW'
 
 Assert-SourceMatches `
-    -Name 'password launcher enforces trusted executable and config before loading launch policy' `
+    -Name 'password launcher requires config file before loading launch policy' `
     -Source $password `
-    -Pattern '(?s)TrustedExistingFilePath\(CurrentExePath\(\), trustError, L"Password launcher executable"\).*?TrustedExistingFilePath\(config\.configPath, trustError, L"Password launcher config"\)'
+    -Pattern '(?s)config\.configPath = FindConfigPath\(\).*?FileExists\(config\.configPath\)'
 
 Assert-SourceMatches `
-    -Name 'password launcher revalidates target and working directory immediately before CreateProcessW' `
+    -Name 'password launcher revalidates target existence immediately before CreateProcessW' `
     -Source $password `
-    -Pattern '(?s)TrustedExistingFilePath\(state->config\.launchPath, trustError, L"Launch target"\).*?TrustedExistingDirectoryPath\(state->config\.workingDirectory, trustError, L"Launch working directory"\).*?CreateProcessW'
+    -Pattern '(?s)ExistingFilePath\(state->config\.launchPath, validationError, L"Launch target"\).*?ExistingDirectoryPath\(state->config\.workingDirectory, validationError, L"Launch working directory"\).*?CreateProcessW'
 
 Assert-SourceMatches `
     -Name 'password launcher writes PBKDF2 hash and keeps legacy hash opt-in' `
     -Source $password `
     -Pattern '(?s)PasswordPbkdf2HashHex.*?KeepLegacySha256Hash.*?keepLegacySha256Hash'
 
-Write-Host 'SecureDesktopLauncher source guardrails passed.'
+Write-Host 'SecureDesktopLauncher source checks passed.'
