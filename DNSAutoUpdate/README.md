@@ -51,6 +51,8 @@ powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.l
 - `-ManagedRecordName`: explicit exact owner-name allowlist. When supplied, `-SubFolder` and `-NoRootRecord` are ignored for owner-name selection.
 - `-NoRootRecord`: do not manage `@` when using legacy `-SubFolder` selection.
 - `-LogFile`: log file path. Default: `.\DNSAutoUpdate.log` from the process working directory.
+- `-MaxLogMegabytes`: rotate the log when it reaches this size. Default: `10`; `0` disables rotation.
+- `-LogRetentionCount`: number of rotated logs to keep. Default: `5`; `0` deletes the current log when the size cap is reached.
 - `-SleepSeconds`: delay between scan cycles. Default: `20`.
 - `-IncludeInterfaceAlias`: optional wildcard allowlist for network interface aliases.
 - `-ExcludeInterfaceAlias`: wildcard denylist for network interface aliases. Defaults exclude loopback and common virtual adapters.
@@ -67,4 +69,4 @@ powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.l
 - Loopback, APIPA, `0.0.0.0`, unpreferred addresses, and excluded virtual adapters are ignored by default.
 - The repository root also contains a `DNSAutoUpdate.ps1` convenience wrapper that forwards to this script with the same parameters.
 - The script runs forever until the PowerShell process is stopped.
-- Generated logs are ignored by git.
+- Generated logs are ignored by git. Long-running jobs should keep log rotation enabled or send `-LogFile` to a managed logging location.

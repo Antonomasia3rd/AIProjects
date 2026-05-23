@@ -5,6 +5,10 @@ param(
     [string[]]$ManagedRecordName = @(),
     [switch]$NoRootRecord,
     [string]$LogFile = ".\DNSAutoUpdate.log",
+    [ValidateRange(0, 1048576)]
+    [int]$MaxLogMegabytes = 10,
+    [ValidateRange(0, 100)]
+    [int]$LogRetentionCount = 5,
     [ValidateRange(1, 86400)]
     [int]$SleepSeconds = 20,
     [string[]]$IncludeInterfaceAlias = @(),
@@ -22,8 +26,50 @@ function Write-Log {
     param([string]$msg)
     $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     $line = "$timestamp  $msg"
-    Add-Content -Path $LogFile -Value $line
+    try {
+        Rotate-LogIfNeeded
+        $logDir = Split-Path -Parent $LogFile
+        if ($logDir) {
+            New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+        }
+        Add-Content -Path $LogFile -Value $line
+    } catch {
+        Write-Warning "Could not write DNSAutoUpdate log '$LogFile': $($_.Exception.Message)"
+    }
     Write-Output $line
+}
+
+function Rotate-LogIfNeeded {
+    if ($MaxLogMegabytes -le 0 -or [string]::IsNullOrWhiteSpace($LogFile)) {
+        return
+    }
+
+    $logItem = Get-Item -LiteralPath $LogFile -ErrorAction SilentlyContinue
+    if ($null -eq $logItem) {
+        return
+    }
+
+    $maxBytes = [int64]$MaxLogMegabytes * 1MB
+    if ($logItem.Length -lt $maxBytes) {
+        return
+    }
+
+    if ($LogRetentionCount -le 0) {
+        Remove-Item -LiteralPath $LogFile -Force -ErrorAction SilentlyContinue
+        return
+    }
+
+    for ($i = $LogRetentionCount; $i -ge 1; $i--) {
+        $source = if ($i -eq 1) { $LogFile } else { "$LogFile.$($i - 1)" }
+        $destination = "$LogFile.$i"
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            continue
+        }
+        if ($i -eq $LogRetentionCount) {
+            Remove-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+        }
+        Move-Item -LiteralPath $source -Destination $destination -Force
+    }
 }
 
 function Normalize-IP {

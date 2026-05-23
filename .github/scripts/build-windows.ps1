@@ -1,6 +1,7 @@
 param(
     [string[]]$SkipProjects = @(),
-    [switch]$StopRunningArtifacts
+    [switch]$StopRunningArtifacts,
+    [switch]$StopMatchingArtifactNames
 )
 
 $ErrorActionPreference = 'Stop'
@@ -114,7 +115,7 @@ function Assert-ArtifactWritable([string]$Path, [string]$Project) {
     }
 
     $processes = @(Get-ProcessesUsingPath $Path)
-    if ($processes.Count -eq 0) {
+    if ($processes.Count -eq 0 -and $StopMatchingArtifactNames) {
         $processes = @(Get-ProcessesMatchingArtifactName $Path)
     }
 
@@ -125,7 +126,12 @@ function Assert-ArtifactWritable([string]$Path, [string]$Project) {
     }
 
     if ($processes.Count -eq 0) {
-        throw "$Project output is locked, but no matching running process could be identified: $Path. Close the owner manually or skip this project. Lock detail: $writeFailure"
+        $nameHint = if ($StopMatchingArtifactNames) {
+            ""
+        } else {
+            " If the owner cannot be resolved by exact executable path and you want the older name-based fallback, also pass -StopMatchingArtifactNames."
+        }
+        throw "$Project output is locked, but no matching running process could be identified by exact path: $Path. Close the owner manually or skip this project.$nameHint Lock detail: $writeFailure"
     }
 
     foreach ($process in $processes) {
@@ -389,6 +395,7 @@ if (-not (Test-SkipProject 'CharmTray')) {
     New-Package -Name 'CharmTray' -Project 'CharmTray' -Paths @('build\CharmTray.exe')
 }
 if (-not (Test-SkipProject 'SecureDesktopLauncher')) {
+    Invoke-External 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'TestSecureDesktopLauncherSource.ps1') (Join-Path $RepoRoot 'SecureDesktopLauncher')
     Build-MsvcProject -Project 'SecureDesktopLauncher' -Source 'SecureDesktopLauncherService.cpp' -OutputName 'SecureDesktopLauncherService.exe' -CompileArgs @('/EHsc', '/W4') -LinkArgs @('advapi32.lib', 'wtsapi32.lib', 'userenv.lib')
     Build-MsvcProject -Project 'SecureDesktopLauncher' -Source 'SecureDesktopPasswordLauncher.cpp' -OutputName 'SecureDesktopPasswordLauncher.exe' -CompileArgs @('/EHsc', '/W4') -LinkArgs @('bcrypt.lib', 'advapi32.lib', 'shell32.lib', 'user32.lib', 'gdi32.lib', 'comctl32.lib', 'version.lib', '/SUBSYSTEM:WINDOWS')
     New-Package -Name 'SecureDesktopLauncher' -Project 'SecureDesktopLauncher' -Paths @('build\SecureDesktopLauncherService.exe', 'build\SecureDesktopPasswordLauncher.exe')
