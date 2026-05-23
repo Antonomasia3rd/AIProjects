@@ -100,12 +100,11 @@ Include full IPC/Gateway JSON for diagnostics:
 - On first launch, setup asks for Discord Application ID, preferred transport, and dynamic/static presence mode.
 - `[general] transport_mode` accepts `ipc`, `gateway`, or `auto`.
 - `[general] client_id` must be a valid Discord application ID.
-- `[general] token_env` can point to an environment variable containing the Discord token. `[general] token = env:VARIABLE_NAME` is also accepted.
-- Plaintext token values in `config.ini` are ignored and cleared by the setup dialog.
+- `[general] token` can contain the Discord token directly. `[general] token_env` or `[general] token = env:VARIABLE_NAME` can point to an environment variable instead.
 - `[app] show_menu_as_dropdown` switches between dropdown category menus and a flat sectioned menu.
 - `[app] single_instance` prevents two persistent instances from fighting over the same Discord presence.
 - `[app] file_logging_enabled` and `[app] log_path` control runtime logs.
-- `[app] backup_config_on_save` is off by default to avoid duplicating plaintext Gateway tokens into `.bak` files.
+- `[app] backup_config_on_save` controls whether config edits create a `.bak` copy before saving.
 - `[ipc] connect_timeout_ms` and `response_timeout_ms` tune Discord IPC waits.
 
 Most tray/menu/dialog labels are configurable in the `[strings]` section, including `ok`, `cancel`, `current_value_format`, `change_menu_format`, and category names.

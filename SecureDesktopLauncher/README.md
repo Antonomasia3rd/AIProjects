@@ -10,7 +10,7 @@ Windows secure-desktop tooling made of two executables:
 - Windows.
 - Visual Studio Build Tools with the C++ workload.
 - Administrator rights to install/start the service.
-- A trusted install directory. The service and password launcher reject executable, config, target, and working-directory paths that are not absolute, are not owned by SYSTEM/Administrators/TrustedInstaller, or can be replaced/written by non-admin principals.
+- Absolute local paths for the service, config files, launch targets, and working directories.
 
 ## Build
 
@@ -26,7 +26,7 @@ build_launcher.cmd check
 build_password_launcher.cmd check
 ```
 
-Source guardrails for launch/trust invariants:
+Source checks for launch invariants:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\TestSecureDesktopLauncherSource.ps1
@@ -120,9 +120,9 @@ General keys:
 Program keys:
 
 - `Enabled`: set `0` to keep the section but skip it.
-- `Path`: local absolute executable path. Required; UNC paths are rejected by the trust checks.
+- `Path`: local absolute executable path. Required; UNC paths are rejected by path validation.
 - `Arguments`: arguments appended after the quoted `Path`.
-- `CommandLine`: optional full command line. If present, this replaces the generated `Path + Arguments` command line while `Path` remains the trusted application path passed to `CreateProcessAsUserW`.
+- `CommandLine`: optional full command line. If present, this replaces the generated `Path + Arguments` command line while `Path` remains the application path passed to `CreateProcessAsUserW`.
 - `WorkingDirectory`: local absolute working directory. Defaults to the directory of `Path`.
 - `Desktop`: per-program desktop override.
 - `PreventDuplicate`: skips launch when the same configured image is already running in the target session.
@@ -158,25 +158,22 @@ IncludeUsers=DOMAIN\UserName
 ExcludeUsers=DOMAIN\test*
 ```
 
-## Trust Policy
+## Path Validation
 
-The service refuses to use its executable, config file, configured program path, or configured working directory unless the path is trusted.
+The service requires configured program paths and working directories to be local absolute paths that already exist.
 
-A trusted path must:
+A valid path must:
 
 - be absolute;
 - already exist;
-- be owned by SYSTEM, Administrators, or TrustedInstaller;
-- not grant write-like access to non-admin principals on the file or immediate directory;
-- not grant delete/replace-style access to non-admin principals on ancestor directories.
 
-Install the service, gate, configs, and launched targets under an admin-controlled directory such as `C:\Program Files\...`. Do not run this from a user-writable folder when the service is active.
+Install the service, gate, configs, and launched targets wherever the service account can read and execute them.
 
 ## Threat Model Notes
 
-This tool intentionally creates `LocalSystem` processes on interactive desktops. Treat the service executable, password launcher, INI files, launched programs, and their parent directories as privileged code. A user who can replace any of those files, or replace an ancestor directory entry, can turn a launch into code execution as `LocalSystem`.
+This tool intentionally creates `LocalSystem` processes on interactive desktops. Treat the service executable, password launcher, INI files, launched programs, and their parent directories as privileged code.
 
-`CommandLine` only changes the command-line string passed to `CreateProcessAsUserW`; the trusted `Path` is still passed as `lpApplicationName`. Keep `CommandLine` empty unless a target truly needs custom `argv[0]` or unusual quoting.
+`CommandLine` only changes the command-line string passed to `CreateProcessAsUserW`; `Path` is still passed as `lpApplicationName`. Keep `CommandLine` empty unless a target truly needs custom `argv[0]` or unusual quoting.
 
 ## Password Gate Config
 
@@ -212,7 +209,7 @@ MaxAttempts=3
 LockoutSeconds=30
 ```
 
-Set or reset the password from a trusted normal desktop:
+Set or reset the password from a normal desktop:
 
 ```cmd
 cd /d C:\Program Files\SecureDesktopLauncher
@@ -221,7 +218,7 @@ build\SecureDesktopPasswordLauncher.exe set-password
 
 `set-password` writes `SecureDesktopPasswordLauncher.ini` and preserves the current launch/UI policy values. New saves use PBKDF2-SHA256 with a random salt and remove the older salted SHA-256 hash by default. If an older config still has only `PasswordHashHex`, the launcher upgrades it after the next successful password verification. Set `KeepLegacySha256Hash=1` only if rollback to an older binary is required.
 
-At normal launch, the password launcher enforces the same local-path trust policy for its own executable, config file, launch target, and working directory. It also rechecks the target and working directory immediately before each `CreateProcessW` call.
+At normal launch, the password launcher checks that the target and working directory exist before each `CreateProcessW` call.
 
 ## Service Launching The Gate
 

@@ -7,8 +7,6 @@
 #include <shellapi.h>
 #include <tlhelp32.h>
 #include <winver.h>
-#include <aclapi.h>
-#include <sddl.h>
 
 #include <algorithm>
 #include <cwchar>
@@ -49,8 +47,8 @@ struct GateConfig
     bool startMinimized = true;
     bool topMost = false;
     DWORD autoLockMinutes = 0;
-    bool trusted = true;
-    std::wstring trustError;
+    bool valid = true;
+    std::wstring validationError;
 };
 
 struct PasswordDialogState
@@ -180,139 +178,6 @@ static bool DirectoryExists(const std::wstring& path)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-static bool EqualKnownSid(PSID sid, WELL_KNOWN_SID_TYPE type)
-{
-    BYTE buffer[SECURITY_MAX_SID_SIZE] = {};
-    DWORD size = sizeof(buffer);
-    return CreateWellKnownSid(type, nullptr, buffer, &size) && EqualSid(sid, buffer);
-}
-
-static bool EqualSidString(PSID sid, const wchar_t* sidString)
-{
-    PSID parsedSid = nullptr;
-    if (!ConvertStringSidToSidW(sidString, &parsedSid))
-    {
-        return false;
-    }
-
-    bool equal = EqualSid(sid, parsedSid) != FALSE;
-    LocalFree(parsedSid);
-    return equal;
-}
-
-static bool IsTrustedSecurityPrincipal(PSID sid)
-{
-    return EqualKnownSid(sid, WinLocalSystemSid) ||
-        EqualKnownSid(sid, WinBuiltinAdministratorsSid) ||
-        EqualSidString(sid, L"S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464");
-}
-
-static bool IsWriteLikeAccess(DWORD mask)
-{
-    const DWORD writeMask =
-        FILE_WRITE_DATA |
-        FILE_APPEND_DATA |
-        FILE_WRITE_EA |
-        FILE_WRITE_ATTRIBUTES |
-        DELETE |
-        FILE_DELETE_CHILD |
-        WRITE_DAC |
-        WRITE_OWNER |
-        GENERIC_WRITE |
-        GENERIC_ALL;
-    return (mask & writeMask) != 0;
-}
-
-static bool IsReplaceLikeAccess(DWORD mask)
-{
-    const DWORD replaceMask =
-        DELETE |
-        FILE_DELETE_CHILD |
-        WRITE_DAC |
-        WRITE_OWNER |
-        GENERIC_ALL;
-    return (mask & replaceMask) != 0;
-}
-
-static bool PathHasUntrustedAccessAce(const std::wstring& path, bool replaceOnly)
-{
-    PSECURITY_DESCRIPTOR sd = nullptr;
-    PACL dacl = nullptr;
-    DWORD error = GetNamedSecurityInfoW(
-        const_cast<LPWSTR>(path.c_str()),
-        SE_FILE_OBJECT,
-        DACL_SECURITY_INFORMATION,
-        nullptr,
-        nullptr,
-        &dacl,
-        nullptr,
-        &sd);
-    if (error != ERROR_SUCCESS || !dacl)
-    {
-        if (sd) LocalFree(sd);
-        return true;
-    }
-
-    bool unsafe = false;
-    for (DWORD i = 0; i < dacl->AceCount && !unsafe; ++i)
-    {
-        void* aceData = nullptr;
-        if (!GetAce(dacl, i, &aceData) || !aceData)
-        {
-            unsafe = true;
-            break;
-        }
-
-        ACE_HEADER* header = reinterpret_cast<ACE_HEADER*>(aceData);
-        if ((header->AceFlags & INHERIT_ONLY_ACE) != 0 ||
-            (header->AceType != ACCESS_ALLOWED_ACE_TYPE &&
-             header->AceType != ACCESS_ALLOWED_CALLBACK_ACE_TYPE))
-        {
-            continue;
-        }
-
-        auto* ace = reinterpret_cast<ACCESS_ALLOWED_ACE*>(aceData);
-        PSID sid = reinterpret_cast<PSID>(&ace->SidStart);
-        bool unsafeAccess = replaceOnly ? IsReplaceLikeAccess(ace->Mask) : IsWriteLikeAccess(ace->Mask);
-        if (unsafeAccess && !IsTrustedSecurityPrincipal(sid))
-        {
-            unsafe = true;
-        }
-    }
-
-    if (sd) LocalFree(sd);
-    return unsafe;
-}
-
-static bool PathOwnerIsTrusted(const std::wstring& path)
-{
-    PSECURITY_DESCRIPTOR sd = nullptr;
-    PSID owner = nullptr;
-    DWORD error = GetNamedSecurityInfoW(
-        const_cast<LPWSTR>(path.c_str()),
-        SE_FILE_OBJECT,
-        OWNER_SECURITY_INFORMATION,
-        &owner,
-        nullptr,
-        nullptr,
-        nullptr,
-        &sd);
-    if (error != ERROR_SUCCESS || !owner)
-    {
-        if (sd) LocalFree(sd);
-        return false;
-    }
-
-    bool trusted = IsTrustedSecurityPrincipal(owner);
-    if (sd) LocalFree(sd);
-    return trusted;
-}
-
-static bool PathSecurityIsTrusted(const std::wstring& path, bool replaceOnly = false)
-{
-    return PathOwnerIsTrusted(path) && !PathHasUntrustedAccessAce(path, replaceOnly);
-}
-
 static bool IsAbsoluteFileSystemPath(const std::wstring& path)
 {
     std::wstring value = path;
@@ -346,14 +211,6 @@ static bool NormalizeFullPath(const std::wstring& path, std::wstring& fullPath)
     return true;
 }
 
-static bool IsDriveRoot(const std::wstring& path)
-{
-    return path.size() == 3 &&
-        iswalpha(path[0]) &&
-        path[1] == L':' &&
-        (path[2] == L'\\' || path[2] == L'/');
-}
-
 static std::wstring TrimTrailingDirectorySeparators(std::wstring path)
 {
     while (path.size() > 3 &&
@@ -364,67 +221,13 @@ static std::wstring TrimTrailingDirectorySeparators(std::wstring path)
     return path;
 }
 
-static bool IsUncShareRoot(const std::wstring& path)
-{
-    if (path.size() < 5 || path[0] != L'\\' || path[1] != L'\\')
-    {
-        return false;
-    }
-
-    size_t serverEnd = path.find_first_of(L"\\/", 2);
-    if (serverEnd == std::wstring::npos || serverEnd + 1 >= path.size())
-    {
-        return false;
-    }
-
-    size_t shareEnd = path.find_first_of(L"\\/", serverEnd + 1);
-    return shareEnd == std::wstring::npos;
-}
-
-static std::wstring ParentDirectoryForTrust(std::wstring path)
+static bool ExistingAncestorDirectories(std::wstring path)
 {
     path = TrimTrailingDirectorySeparators(path);
-    if (path.empty() || IsDriveRoot(path) || IsUncShareRoot(path))
-    {
-        return L"";
-    }
-
-    size_t pos = path.find_last_of(L"\\/");
-    if (pos == std::wstring::npos)
-    {
-        return L"";
-    }
-    if (pos == 2 && path[1] == L':')
-    {
-        return path.substr(0, 3);
-    }
-    return path.substr(0, pos);
+    return path.empty() || DirectoryExists(path);
 }
 
-static bool TrustedExistingAncestorDirectories(std::wstring path)
-{
-    path = TrimTrailingDirectorySeparators(path);
-    bool strictCurrentDirectory = true;
-    while (!path.empty())
-    {
-        if (!DirectoryExists(path) || !PathSecurityIsTrusted(path, !strictCurrentDirectory))
-        {
-            return false;
-        }
-
-        std::wstring parent = ParentDirectoryForTrust(path);
-        if (parent.empty() || parent == path)
-        {
-            break;
-        }
-        path = parent;
-        strictCurrentDirectory = false;
-    }
-
-    return true;
-}
-
-static bool TrustedExistingFilePath(const std::wstring& path, std::wstring& error, const wchar_t* label)
+static bool ExistingFilePath(const std::wstring& path, std::wstring& error, const wchar_t* label)
 {
     if (!IsAbsoluteFileSystemPath(path))
     {
@@ -445,23 +248,17 @@ static bool TrustedExistingFilePath(const std::wstring& path, std::wstring& erro
         return false;
     }
 
-    if (!PathSecurityIsTrusted(fullPath))
-    {
-        error = std::wstring(label) + L" is not trusted. It must be owned by SYSTEM, Administrators, or TrustedInstaller and not writable by non-admin principals: " + fullPath;
-        return false;
-    }
-
     std::wstring dir = DirectoryOf(fullPath);
-    if (dir.empty() || !TrustedExistingAncestorDirectories(dir))
+    if (dir.empty() || !ExistingAncestorDirectories(dir))
     {
-        error = std::wstring(label) + L" directory chain is not trusted: " + dir;
+        error = std::wstring(label) + L" directory does not exist: " + dir;
         return false;
     }
 
     return true;
 }
 
-static bool TrustedExistingDirectoryPath(const std::wstring& path, std::wstring& error, const wchar_t* label)
+static bool ExistingDirectoryPath(const std::wstring& path, std::wstring& error, const wchar_t* label)
 {
     if (!IsAbsoluteFileSystemPath(path))
     {
@@ -476,9 +273,9 @@ static bool TrustedExistingDirectoryPath(const std::wstring& path, std::wstring&
         return false;
     }
 
-    if (!TrustedExistingAncestorDirectories(fullPath))
+    if (!ExistingAncestorDirectories(fullPath))
     {
-        error = std::wstring(label) + L" directory chain is not trusted: " + fullPath;
+        error = std::wstring(label) + L" directory does not exist: " + fullPath;
         return false;
     }
 
@@ -568,31 +365,31 @@ static int ReadIniInt(
     return end && *end == L'\0' ? static_cast<int>(value) : defaultValue;
 }
 
-static void MarkUntrusted(GateConfig& config, const std::wstring& error)
+static void MarkInvalid(GateConfig& config, const std::wstring& error)
 {
-    config.trusted = false;
-    config.trustError = error;
+    config.valid = false;
+    config.validationError = error;
 }
 
-static GateConfig LoadConfig(bool enforceTrust = true)
+static GateConfig LoadConfig(bool enforceValidation = true)
 {
     GateConfig config;
-    std::wstring trustError;
-    if (enforceTrust && !TrustedExistingFilePath(CurrentExePath(), trustError, L"Password launcher executable"))
+    std::wstring validationError;
+    if (enforceValidation && !ExistingFilePath(CurrentExePath(), validationError, L"Password launcher executable"))
     {
-        MarkUntrusted(config, trustError);
+        MarkInvalid(config, validationError);
         return config;
     }
 
     config.configPath = FindConfigPath();
-    if (enforceTrust && !FileExists(config.configPath))
+    if (enforceValidation && !FileExists(config.configPath))
     {
-        MarkUntrusted(config, L"Password launcher config file does not exist: " + config.configPath + L"\n\nRun SecureDesktopPasswordLauncher.exe set-password from a trusted install directory first.");
+        MarkInvalid(config, L"Password launcher config file does not exist: " + config.configPath + L"\n\nRun SecureDesktopPasswordLauncher.exe set-password first.");
         return config;
     }
-    if (enforceTrust && !TrustedExistingFilePath(config.configPath, trustError, L"Password launcher config"))
+    if (enforceValidation && !ExistingFilePath(config.configPath, validationError, L"Password launcher config"))
     {
-        MarkUntrusted(config, trustError);
+        MarkInvalid(config, validationError);
         return config;
     }
 
@@ -602,7 +399,7 @@ static GateConfig LoadConfig(bool enforceTrust = true)
         config.kdfIterations = kPasswordKdfIterations;
     }
     if (config.kdfIterations > kPasswordKdfMaxIterations) {
-        MarkUntrusted(config, L"Password KDF iteration count is too large: " + std::to_wstring(config.kdfIterations));
+        MarkInvalid(config, L"Password KDF iteration count is too large: " + std::to_wstring(config.kdfIterations));
         return config;
     }
     config.saltHex = ReadIniString(config.configPath, L"Security", L"SaltHex", L"");
@@ -619,11 +416,11 @@ static GateConfig LoadConfig(bool enforceTrust = true)
     config.startMinimized = ReadIniBool(config.configPath, L"UI", L"StartMinimized", true);
     config.topMost = ReadIniBool(config.configPath, L"UI", L"TopMost", false);
     config.autoLockMinutes = ReadIniDword(config.configPath, L"UI", L"AutoLockMinutes", 0);
-    if (enforceTrust &&
-        (!TrustedExistingFilePath(config.launchPath, trustError, L"Launch target") ||
-         (!config.workingDirectory.empty() && !TrustedExistingDirectoryPath(config.workingDirectory, trustError, L"Launch working directory"))))
+    if (enforceValidation &&
+        (!ExistingFilePath(config.launchPath, validationError, L"Launch target") ||
+         (!config.workingDirectory.empty() && !ExistingDirectoryPath(config.workingDirectory, validationError, L"Launch working directory"))))
     {
-        MarkUntrusted(config, trustError);
+        MarkInvalid(config, validationError);
         return config;
     }
 
@@ -1702,11 +1499,11 @@ static bool LaunchConfiguredTarget(ControlWindowState* state)
         return false;
     }
 
-    std::wstring trustError;
-    if (!TrustedExistingFilePath(state->config.launchPath, trustError, L"Launch target") ||
-        (!state->config.workingDirectory.empty() && !TrustedExistingDirectoryPath(state->config.workingDirectory, trustError, L"Launch working directory")))
+    std::wstring validationError;
+    if (!ExistingFilePath(state->config.launchPath, validationError, L"Launch target") ||
+        (!state->config.workingDirectory.empty() && !ExistingDirectoryPath(state->config.workingDirectory, validationError, L"Launch working directory")))
     {
-        MessageBoxW(state->hwnd, trustError.c_str(), L"Secure Desktop Password Launcher", MB_OK | MB_ICONERROR);
+        MessageBoxW(state->hwnd, validationError.c_str(), L"Secure Desktop Password Launcher", MB_OK | MB_ICONERROR);
         return false;
     }
 
@@ -2049,8 +1846,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     }
 
     GateConfig config = LoadConfig();
-    if (!config.trusted) {
-        MessageBoxW(nullptr, config.trustError.c_str(), L"Secure Desktop Password Launcher", MB_OK | MB_ICONERROR);
+    if (!config.valid) {
+        MessageBoxW(nullptr, config.validationError.c_str(), L"Secure Desktop Password Launcher", MB_OK | MB_ICONERROR);
         return 1;
     }
     if (!VerifyPassword(config, config.startMinimized)) {

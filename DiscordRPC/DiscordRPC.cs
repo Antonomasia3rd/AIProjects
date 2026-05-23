@@ -171,10 +171,6 @@ internal static class Program
 
             string existingClientId = config.Get("general", "client_id", "").Trim();
             string setupExistingToken = config.Get("general", "token", "").Trim();
-            if (!IsTokenEnvironmentReference(setupExistingToken))
-            {
-                setupExistingToken = "";
-            }
             if (setupExistingToken.Length == 0 && token.Length > 0)
             {
                 string setupTokenEnv = config.Get("general", "token_env", "").Trim();
@@ -763,11 +759,7 @@ internal static class Program
             return "";
         }
 
-        if (token.Length > 0)
-        {
-            Logger.Error("Ignoring plaintext [general] token. Set [general] token_env or [general] token = env:VARIABLE_NAME.");
-        }
-        return "";
+        return token;
     }
 
     internal static bool IsTokenEnvironmentReference(string token)
@@ -2324,14 +2316,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             if (ShouldWriteConfigBackup())
             {
-                if (Program.HasPlaintextDiscordToken(IniConfig.Load(configPath)))
-                {
-                    Logger.Info("Skipped config backup because [general] token contains a plaintext secret.");
-                }
-                else
-                {
-                    File.Copy(configPath, configPath + ".bak", true);
-                }
+                File.Copy(configPath, configPath + ".bak", true);
             }
             IniConfigFile.WriteValue(configPath, section, key, value);
             Logger.Info("Config updated: [" + section + "] " + key);
@@ -2703,7 +2688,7 @@ internal sealed class SetupDialog : Form
         y += 24;
 
         Label tokenHint = new Label();
-        tokenHint.Text = "Gateway tokens must be stored in an environment variable. Enter env:VARIABLE_NAME here.";
+        tokenHint.Text = "Gateway can use a token directly or env:VARIABLE_NAME.";
         tokenHint.Left = x + 126; tokenHint.Top = y;
         tokenHint.Width = w - 126; tokenHint.Height = 18;
         tokenHint.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
@@ -2770,17 +2755,7 @@ internal sealed class SetupDialog : Form
         if (DialogResult == DialogResult.OK && IsGatewaySelected() && tokenText.Length == 0)
         {
             MessageBox.Show(this,
-                "Please enter env:VARIABLE_NAME for your Discord token before continuing in Gateway mode.",
-                "DiscordRPC — Setup",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-            e.Cancel = true;
-            return;
-        }
-        if (DialogResult == DialogResult.OK && tokenText.Length > 0 && !Program.IsTokenEnvironmentReference(tokenText))
-        {
-            MessageBox.Show(this,
-                "Plaintext Discord tokens are not saved. Enter env:VARIABLE_NAME or leave the token field blank.",
+                "Please enter a Discord token or env:VARIABLE_NAME before continuing in Gateway mode.",
                 "DiscordRPC — Setup",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
@@ -2794,18 +2769,18 @@ internal sealed class SetupDialog : Form
     {
         if (gatewayMode.Checked)
         {
-            modeHelp.Text = "Gateway still requires an Application ID. Store the Discord token in an environment variable and enter env:VARIABLE_NAME.";
-            tokenLabel.Text = "Token Env:";
+            modeHelp.Text = "Gateway still requires an Application ID and a Discord token.";
+            tokenLabel.Text = "Token:";
         }
         else if (autoMode.Checked)
         {
-            modeHelp.Text = "Auto still requires an Application ID. It uses IPC first, then falls back to Gateway if env:VARIABLE_NAME is configured.";
-            tokenLabel.Text = "Token Env\r\n(optional):";
+            modeHelp.Text = "Auto still requires an Application ID. It uses IPC first, then falls back to Gateway if a token is configured.";
+            tokenLabel.Text = "Token\r\n(optional):";
         }
         else
         {
             modeHelp.Text = "IPC is recommended and still requires an Application ID. It does not need your Discord account token.";
-            tokenLabel.Text = "Token Env\r\n(optional):";
+            tokenLabel.Text = "Token\r\n(optional):";
         }
     }
 
@@ -2870,8 +2845,7 @@ internal sealed class SetupDialog : Form
             Dictionary<string, string> updates = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             updates[IniConfigFile.MakeKey("general", "client_id")] = clientId;
             updates[IniConfigFile.MakeKey("general", "transport_mode")] = transportMode;
-            updates[IniConfigFile.MakeKey("general", "token")] =
-                Program.IsTokenEnvironmentReference(token) ? token : "";
+            updates[IniConfigFile.MakeKey("general", "token")] = token;
 
             Dictionary<string, string> presenceUpdates = ConfigDefaults.CreateSetupPresenceUpdates(
                 dlg.UseWindowDetection(),

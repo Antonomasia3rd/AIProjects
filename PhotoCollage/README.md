@@ -2,7 +2,7 @@
 
 PowerShell script that creates a simple image grid/collage from images in a folder.
 
-The script reads supported images recursively, uses the first image's dimensions as the cell size, draws each image into a fixed grid, and saves the result as a JPEG.
+The script reads supported images recursively, uses the first image's dimensions as the cell size, draws each image into a fixed grid, and saves the result using the requested output extension.
 
 ## Requirements
 
@@ -24,10 +24,10 @@ powershell -ExecutionPolicy Bypass -File .\PhotoCollage.ps1 -InputFolder "C:\Pho
 ## Parameters
 
 - `-InputFolder`: folder to scan recursively. Required.
-- `-OutputFile`: JPEG output path. Required.
+- `-OutputFile`: output path ending in `.jpg`, `.jpeg`, `.png`, or `.bmp`. Required.
 - `-Cols`: number of columns. Default: `5`.
 - `-MaxImages`: maximum number of images to include. Default: `25`.
-- `-JpegQuality`: JPEG quality from 1 to 100. Default: `80`.
+- `-JpegQuality`: JPEG quality from 1 to 100 when writing `.jpg` or `.jpeg`. Default: `80`.
 
 ## Behavior And Limitations
 

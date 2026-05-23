@@ -49,29 +49,29 @@ if errorlevel 1 (
 )
 
 if /I "%~1"=="check" (
-    cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /Zs GenerateAssets.cpp
+    cl /nologo /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 /Zs CharmTray.cpp
     set "STATUS=%ERRORLEVEL%"
     popd
     exit /b %STATUS%
 )
 
-set "OUT_EXE=build\GenerateAssets.exe"
-set "OBJ_FILE=build\obj\GenerateAssets.obj"
+set "OUT_EXE=build\CharmTray.exe"
+set "OBJ_FILE=build\obj\CharmTray.obj"
 
-call :PrepareOutput "%CD%\%OUT_EXE%" "GenerateAssets"
+call :PrepareOutput "%CD%\%OUT_EXE%" "CharmTray"
 set "PREPARE_STATUS=%ERRORLEVEL%"
 if not "%PREPARE_STATUS%"=="0" if not "%PREPARE_STATUS%"=="2" (
     popd
     exit /b %PREPARE_STATUS%
 )
 if "%PREPARE_STATUS%"=="2" (
-    echo WARNING: Could not overwrite build\GenerateAssets.exe after trying to close the running app.
-    echo WARNING: Building side-by-side output build\GenerateAssets.side-by-side.exe instead.
-    set "OUT_EXE=build\GenerateAssets.side-by-side.exe"
-    set "OBJ_FILE=build\obj\GenerateAssets.side-by-side.obj"
+    echo WARNING: Could not overwrite build\CharmTray.exe after trying to close the running app.
+    echo WARNING: Building side-by-side output build\CharmTray.side-by-side.exe instead.
+    set "OUT_EXE=build\CharmTray.side-by-side.exe"
+    set "OBJ_FILE=build\obj\CharmTray.side-by-side.obj"
 )
 
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE GenerateAssets.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib /SUBSYSTEM:WINDOWS
+cl /nologo /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 CharmTray.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link user32.lib ole32.lib shell32.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 

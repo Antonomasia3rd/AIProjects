@@ -18,6 +18,14 @@ From the repository root:
 DesktopStub\BuildGenerateAssets.cmd
 ```
 
+The build script tries to close a running `build\GenerateAssets.exe` before rebuilding it. If the executable still cannot be overwritten, it falls back to `build\GenerateAssets.side-by-side.exe`.
+
+Syntax-only check:
+
+```cmd
+DesktopStub\BuildGenerateAssets.cmd check
+```
+
 Output:
 
 ```text
