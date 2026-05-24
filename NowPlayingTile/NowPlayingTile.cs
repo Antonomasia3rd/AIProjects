@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -157,10 +158,7 @@ internal enum TileLayout
 
 internal static class AppLog
 {
-    public static readonly string LogPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "NowPlayingTile",
-        "NowPlayingTile.log");
+    public static readonly string LogPath = AppPaths.LogPath;
 
     public static void Write(Exception ex, string context)
     {
@@ -185,13 +183,32 @@ internal static class AppLog
     }
 }
 
+internal static class AppPaths
+{
+    public static readonly string ExecutablePath = Assembly.GetEntryAssembly().Location;
+    public static readonly string ExecutableDirectory = GetExecutableDirectory();
+    public static readonly string ExecutableBaseName = GetExecutableBaseName();
+    public static readonly string SettingsPath = Path.Combine(ExecutableDirectory, ExecutableBaseName + ".ini");
+    public static readonly string LogPath = Path.Combine(ExecutableDirectory, ExecutableBaseName + ".log");
+
+    private static string GetExecutableDirectory()
+    {
+        string dir = Path.GetDirectoryName(ExecutablePath);
+        return string.IsNullOrEmpty(dir) ? AppDomain.CurrentDomain.BaseDirectory : dir;
+    }
+
+    private static string GetExecutableBaseName()
+    {
+        string name = Path.GetFileNameWithoutExtension(ExecutablePath);
+        return string.IsNullOrEmpty(name) ? "NowPlayingTile" : name;
+    }
+}
+
 internal sealed class AppSettings
 {
-    public static readonly string DataDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "NowPlayingTile");
+    public static readonly string DataDirectory = AppPaths.ExecutableDirectory;
 
-    public static readonly string SettingsPath = Path.Combine(DataDirectory, "settings.ini");
+    public static readonly string SettingsPath = AppPaths.SettingsPath;
 
     public readonly int UpdateIntervalSeconds;
     public readonly int TileRefreshSeconds;

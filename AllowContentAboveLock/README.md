@@ -7,7 +7,7 @@ This is useful when Windows or app updates reset lock-screen notification visibi
 ## Requirements
 
 - Windows with .NET Framework 4.x.
-- Administrator rights to install/start the service and create the Event Log source.
+- Administrator rights to install/start the service.
 
 ## Build
 
@@ -42,11 +42,14 @@ sc.exe delete AllowContentAboveLockService
 - Attaches to loaded `S-1-5-21-*` user hives.
 - Watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for child-key and value changes.
 - Sets `AllowContentAboveLock` to DWORD `1` on notification setting subkeys.
-- Logs to the Windows Application Event Log using source `AllowContentAboveLockService`.
+- Creates `AllowContentAboveLock.ini` beside the executable if missing.
+- Logs to `AllowContentAboveLock.log` beside the executable by default. Set `[Settings] LoggingEnabled=0` in the local INI to disable file logging.
 
 ## Generated Files
 
 - `build\AllowContentAboveLock.exe`
+- `build\AllowContentAboveLock.ini`
+- `build\AllowContentAboveLock.log`
 
 Generated build output is ignored by git.
 

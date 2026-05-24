@@ -2,7 +2,7 @@
 
 Windows secure-desktop tooling made of two executables:
 
-- `SecureDesktopLauncherService.exe`: Windows service that launches configured programs as `LocalSystem` on matching sessions/desktops, usually `WinSta0\Winlogon`.
+- `SecureDesktopLauncher.exe`: Windows service that launches configured programs as `LocalSystem` on matching sessions/desktops, usually `WinSta0\Winlogon`.
 - `SecureDesktopPasswordLauncher.exe`: password-gated launcher that starts one configured target only after password verification and keeps spawned processes in a kill-on-close Job object.
 
 ## Requirements
@@ -46,7 +46,7 @@ Outputs are written to `build\`.
 From an elevated prompt:
 
 ```cmd
-build\SecureDesktopLauncherService.exe install
+build\SecureDesktopLauncher.exe install
 sc start SecureDesktopLauncher
 ```
 
@@ -56,19 +56,19 @@ Remove it with:
 
 ```cmd
 sc stop SecureDesktopLauncher
-build\SecureDesktopLauncherService.exe uninstall
+build\SecureDesktopLauncher.exe uninstall
 ```
 
-## Service Config Search
+## Service Local Files
 
-The service reads the first existing file from:
+The service reads its configuration from the executable directory using the executable base name:
 
 ```text
-<exe folder>\SecureDesktopLauncher.ini
-<exe parent folder>\SecureDesktopLauncher.ini
+<exe folder>\<exe name>.ini
+<exe folder>\<exe name>.log
 ```
 
-This lets `build\SecureDesktopLauncherService.exe` use `SecureDesktopLauncher.ini` from the project root while testing.
+For the default build output, those files are `build\SecureDesktopLauncher.ini` and `build\SecureDesktopLauncher.log`. If the executable is renamed, the default INI/log names follow the renamed executable.
 
 ## Service Configuration
 
@@ -177,11 +177,11 @@ This tool intentionally creates `LocalSystem` processes on interactive desktops.
 
 ## Password Gate Config
 
-The password launcher reads:
+The password launcher reads and writes local files beside itself using the executable base name:
 
 ```text
-<exe folder>\SecureDesktopPasswordLauncher.ini
-<exe parent folder>\SecureDesktopPasswordLauncher.ini
+<exe folder>\<exe name>.ini
+<exe folder>\<exe name>.log
 ```
 
 Example:
@@ -216,7 +216,7 @@ cd /d C:\Program Files\SecureDesktopLauncher
 build\SecureDesktopPasswordLauncher.exe set-password
 ```
 
-`set-password` writes `SecureDesktopPasswordLauncher.ini` and preserves the current launch/UI policy values. New saves use PBKDF2-SHA256 with a random salt and remove the older salted SHA-256 hash by default. If an older config still has only `PasswordHashHex`, the launcher upgrades it after the next successful password verification. Set `KeepLegacySha256Hash=1` only if rollback to an older binary is required.
+`set-password` writes the launcher-local INI and preserves the current launch/UI policy values. New saves use PBKDF2-SHA256 with a random salt and remove the older salted SHA-256 hash by default. If an older config still has only `PasswordHashHex`, the launcher upgrades it after the next successful password verification. Set `KeepLegacySha256Hash=1` only if rollback to an older binary is required.
 
 At normal launch, the password launcher checks that the target and working directory exist before each `CreateProcessW` call.
 
@@ -259,7 +259,9 @@ sc start SecureDesktopLauncher
 The following local files are ignored by git and should not be packaged from a working tree by accident:
 
 - `SecureDesktopLauncher.ini`
+- `SecureDesktopLauncher.log`
 - `SecureDesktopPasswordLauncher.ini`
+- `SecureDesktopPasswordLauncher.log`
 - `build\*`
 
 ## Release

@@ -102,26 +102,30 @@ The deskband asks Explorer to resize when status text changes, so the toolbar wi
 
 ## Settings
 
-Settings are stored under:
+Settings are stored beside the registered DLL using the module base name:
 
 ```text
-HKCU\Software\RealTimeNotesDeskband
+<dll folder>\<dll name>.ini
+<dll folder>\<dll name>.log
 ```
 
-Values:
+For the default DLL name, those files are `RealTimeNotesDeskband.ini` and `RealTimeNotesDeskband.log`. COM/deskband registration still uses `HKCU\Software\Classes` because Explorer requires that registration state.
+
+INI values:
 
 - `Resource`: `auto`, `resin`, `stamina`, or `charge`.
-- `Accounts\<resource>\UID`: game account UID.
-- `Accounts\<resource>\LTokenV2Protected`: DPAPI-protected HoYoLAB `ltoken_v2`.
-- `Accounts\<resource>\LTuidV2Protected`: DPAPI-protected HoYoLAB `ltuid_v2`.
-- `Accounts\<resource>\RefreshIntervalSeconds`: optional per-resource refresh override.
+- `[Account.<resource>] UID`: game account UID.
+- `[Account.<resource>] LTokenV2Protected`: DPAPI-protected HoYoLAB `ltoken_v2`.
+- `[Account.<resource>] LTuidV2Protected`: DPAPI-protected HoYoLAB `ltuid_v2`.
+- `[Account.<resource>] RefreshIntervalSeconds`: optional per-resource refresh override.
 - `ConfigDir`: legacy fallback directory containing cookie JSON files.
 - `AssetDir`: optional directory containing icon resources.
 - `InstallDir`: directory containing the registered DLL.
 - `RefreshIntervalSeconds`: optional global refresh override. Values below 30 seconds are clamped.
-- `KeepLegacyPlaintextSecrets`: optional DWORD. Set to `1` before saving credentials only if older releases must keep reading plaintext token values after rollback.
+- `LoggingEnabled`: optional `0`/`1` log toggle.
+- `KeepLegacyPlaintextSecrets`: optional `0`/`1`. Set to `1` before saving credentials only if older releases must keep reading plaintext token values after rollback.
 
-Legacy plaintext `LTokenV2` and `LTuidV2` values are still read when protected values are absent. New saves are DPAPI-only and remove legacy plaintext values unless `KeepLegacyPlaintextSecrets` is enabled.
+Legacy registry settings under `HKCU\Software\RealTimeNotesDeskband` are migrated to the module-local INI when the deskband loads. Legacy plaintext `LTokenV2` and `LTuidV2` values are still read during migration when protected values are absent. New saves are DPAPI-only and remove legacy plaintext values unless `KeepLegacyPlaintextSecrets` is enabled.
 
 ## Source Layout
 

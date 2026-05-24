@@ -4,7 +4,7 @@ param(
     [string[]]$SubFolder,
     [string[]]$ManagedRecordName = @(),
     [switch]$NoRootRecord,
-    [string]$LogFile = ".\DNSAutoUpdate.log",
+    [string]$LogFile,
     [ValidateRange(0, 1048576)]
     [int]$MaxLogMegabytes = 10,
     [ValidateRange(0, 100)]

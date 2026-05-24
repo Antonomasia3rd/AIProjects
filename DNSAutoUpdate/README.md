@@ -50,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.l
 - `-SubFolder`: optional DNS owner names to maintain in addition to `@` when `-ManagedRecordName` is not supplied.
 - `-ManagedRecordName`: explicit exact owner-name allowlist. When supplied, `-SubFolder` and `-NoRootRecord` are ignored for owner-name selection.
 - `-NoRootRecord`: do not manage `@` when using legacy `-SubFolder` selection.
-- `-LogFile`: log file path. Default: `.\DNSAutoUpdate.log` from the process working directory.
+- `-LogFile`: log file path. Default: `DNSAutoUpdate.log` beside `DNSAutoUpdate.ps1`. Relative paths resolve from the script directory.
 - `-MaxLogMegabytes`: rotate the log when it reaches this size. Default: `10`; `0` disables rotation.
 - `-LogRetentionCount`: number of rotated logs to keep. Default: `5`; `0` deletes the current log when the size cap is reached.
 - `-SleepSeconds`: delay between scan cycles. Default: `20`.

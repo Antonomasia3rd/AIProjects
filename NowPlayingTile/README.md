@@ -92,14 +92,16 @@ pwsh .\open-settings.ps1
 Settings are stored at:
 
 ```text
-%LOCALAPPDATA%\NowPlayingTile\settings.ini
+<exe folder>\<exe name>.ini
 ```
 
 Diagnostics are written to:
 
 ```text
-%LOCALAPPDATA%\NowPlayingTile\NowPlayingTile.log
+<exe folder>\<exe name>.log
 ```
+
+For the default build output, those files are `build\NowPlayingTile.ini` and `build\NowPlayingTile.log`. If the executable is renamed, the default INI/log names follow the renamed executable.
 
 Available settings:
 
@@ -136,6 +138,8 @@ Running `NowPlayingTile.exe` directly does not provide package identity, so Star
 The `build` folder contains generated files:
 
 - `NowPlayingTile.exe`
+- `NowPlayingTile.ini`
+- `NowPlayingTile.log`
 - copied/generated Appx manifest output
 - generated tile assets
 

@@ -34,6 +34,8 @@ Show built-in help:
 build\asusblink.exe
 ```
 
+On first launch, the app creates `asusblink.ini` beside the executable. Option names in `[Options]` match the command-line names without the leading `--`, and command-line arguments override INI values. The default log path is `asusblink.log` beside the executable; if the executable is renamed, the default INI/log names follow the renamed executable.
+
 Examples:
 
 ```cmd
@@ -58,7 +60,7 @@ build\asusblink.exe --event1-hdd-state 128,129,130,131,131 --event1-hdd-interval
 - `--keyboard-interval <csv>`: per-state intervals.
 - `--keyboard-duration <time>`: total duration. `0` means infinite; omitted means one cycle.
 - `--eventN-mic-*`, `--eventN-keyboard-*`, `--eventN-hdd-*`: named custom events. The numeric `N` is used as priority.
-- `--error-log <path|off>`: write operation errors to a file or disable file logging.
+- `--error-log <path|off>`: write operation logs to a file or disable file logging. Relative paths resolve beside the executable.
 - `--error-retry <times>`: retry failed device writes.
 - `--error-action <exit,continue,pause,crash,log>`: behavior after repeated errors.
 - `--no-tray`: run without creating the tray icon.
@@ -78,7 +80,8 @@ The startup shortcut preserves the command-line arguments of the running tray in
 ## Generated Files
 
 - `build\asusblink.exe`
-- optional error log path passed through `--error-log`
+- `build\asusblink.ini`
+- `build\asusblink.log`
 
 Generated files are ignored by git.
 

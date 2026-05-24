@@ -37,13 +37,13 @@ if /i "%1"=="check" (
 )
 if /i "%1"=="new" (
   if not exist build mkdir build
-  cl /nologo /EHsc /W4 /Fo.\build\SecureDesktopLauncherService.new.obj /Fe.\build\SecureDesktopLauncherService.new.exe SecureDesktopLauncherService.cpp advapi32.lib wtsapi32.lib userenv.lib
+  cl /nologo /EHsc /W4 /Fo.\build\SecureDesktopLauncher.new.obj /Fe.\build\SecureDesktopLauncher.new.exe SecureDesktopLauncherService.cpp advapi32.lib wtsapi32.lib userenv.lib
   set "STATUS=%ERRORLEVEL%"
   popd
   exit /b %STATUS%
 )
 if not exist build mkdir build
-cl /nologo /EHsc /W4 /Fo.\build\SecureDesktopLauncherService.obj /Fe.\build\SecureDesktopLauncherService.exe SecureDesktopLauncherService.cpp advapi32.lib wtsapi32.lib userenv.lib
+cl /nologo /EHsc /W4 /Fo.\build\SecureDesktopLauncher.obj /Fe.\build\SecureDesktopLauncher.exe SecureDesktopLauncherService.cpp advapi32.lib wtsapi32.lib userenv.lib
 set "STATUS=%ERRORLEVEL%"
 popd
 exit /b %STATUS%

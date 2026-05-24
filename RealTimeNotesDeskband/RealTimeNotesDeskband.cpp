@@ -63,6 +63,7 @@ static const size_t kMaxHttpResponseBytes = 1024 * 1024;
 HMODULE g_module = nullptr;
 long g_objectCount = 0;
 long g_lockCount = 0;
+LONG g_legacyMigrationAttempted = 0;
 
 enum class ResourceKind
 {
@@ -183,6 +184,19 @@ static std::wstring ParentDirectoryOf(const std::wstring& path)
     return path.substr(0, slash);
 }
 
+static std::wstring BaseNameWithoutExtension(const std::wstring& path)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    size_t start = slash == std::wstring::npos ? 0 : slash + 1;
+    size_t dot = path.find_last_of(L'.');
+    if (dot == std::wstring::npos || dot < start)
+    {
+        dot = path.size();
+    }
+    std::wstring name = path.substr(start, dot - start);
+    return name.empty() ? L"RealTimeNotesDeskband" : name;
+}
+
 static bool FileExists(const std::wstring& path)
 {
     DWORD attr = GetFileAttributesW(path.c_str());
@@ -202,12 +216,118 @@ static std::wstring JoinPath(const std::wstring& left, const std::wstring& right
     return left + L"\\" + right;
 }
 
+static std::wstring ModuleLocalPath(const wchar_t* extension)
+{
+    std::wstring module = ModulePath();
+    return JoinPath(ParentDirectoryOf(module), BaseNameWithoutExtension(module) + extension);
+}
+
 static std::wstring TrimWide(std::wstring value)
 {
     auto isNotSpace = [](wchar_t ch) { return iswspace(ch) == 0; };
     value.erase(value.begin(), std::find_if(value.begin(), value.end(), isNotSpace));
     value.erase(std::find_if(value.rbegin(), value.rend(), isNotSpace).base(), value.end());
     return value;
+}
+
+static std::wstring AppIniPath()
+{
+    return ModuleLocalPath(L".ini");
+}
+
+static bool TryReadIniString(const wchar_t* section, const wchar_t* key, std::wstring& value)
+{
+    static const wchar_t sentinel[] = L"\x1e__missing__";
+    DWORD size = 512;
+    for (;;)
+    {
+        std::vector<wchar_t> buffer(size);
+        DWORD read = GetPrivateProfileStringW(section, key, sentinel, buffer.data(), size, AppIniPath().c_str());
+        if (read < size - 2 || size >= 32768)
+        {
+            value.assign(buffer.data(), read);
+            if (value == sentinel)
+            {
+                value.clear();
+                return false;
+            }
+            value = TrimWide(value);
+            return true;
+        }
+        size *= 2;
+    }
+}
+
+static bool TryReadIniDword(const wchar_t* section, const wchar_t* key, DWORD& value)
+{
+    std::wstring raw;
+    if (!TryReadIniString(section, key, raw) || raw.empty())
+    {
+        return false;
+    }
+
+    wchar_t* end = nullptr;
+    unsigned long parsed = wcstoul(raw.c_str(), &end, 10);
+    if (!end || *end != L'\0')
+    {
+        return false;
+    }
+
+    value = static_cast<DWORD>(parsed);
+    return true;
+}
+
+static DWORD ReadIniDwordValue(const wchar_t* section, const wchar_t* key, DWORD fallback)
+{
+    DWORD value = fallback;
+    return TryReadIniDword(section, key, value) ? value : fallback;
+}
+
+static void WriteIniStringValue(const wchar_t* section, const wchar_t* key, const std::wstring& value)
+{
+    WritePrivateProfileStringW(section, key, value.c_str(), AppIniPath().c_str());
+}
+
+static void WriteIniDwordValue(const wchar_t* section, const wchar_t* key, DWORD value)
+{
+    WriteIniStringValue(section, key, std::to_wstring(value));
+}
+
+static void DeleteIniValue(const wchar_t* section, const wchar_t* key)
+{
+    WritePrivateProfileStringW(section, key, nullptr, AppIniPath().c_str());
+}
+
+static void DeleteIniSection(const wchar_t* section)
+{
+    WritePrivateProfileStringW(section, nullptr, nullptr, AppIniPath().c_str());
+}
+
+static void LogLine(const std::wstring& message)
+{
+    if (ReadIniDwordValue(L"Settings", L"LoggingEnabled", 1) == 0)
+    {
+        return;
+    }
+
+    HANDLE file = CreateFileW(ModuleLocalPath(L".log").c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return;
+    }
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t timestamp[64];
+    wsprintfW(timestamp, L"%04u-%02u-%02u %02u:%02u:%02u  ",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    DWORD bytes = 0;
+    WriteFile(file, timestamp, static_cast<DWORD>(wcslen(timestamp) * sizeof(wchar_t)), &bytes, nullptr);
+    WriteFile(file, message.c_str(), static_cast<DWORD>(message.size() * sizeof(wchar_t)), &bytes, nullptr);
+    const wchar_t newline[] = L"\r\n";
+    WriteFile(file, newline, static_cast<DWORD>((ARRAYSIZE(newline) - 1) * sizeof(wchar_t)), &bytes, nullptr);
+    CloseHandle(file);
 }
 
 static UINT ClampRefreshSeconds(UINT seconds)
@@ -377,36 +497,6 @@ static bool TryReadRegDword(HKEY root, const wchar_t* subkey, const wchar_t* val
     return RegGetValueW(root, subkey, valueName, RRF_RT_REG_DWORD, nullptr, &value, &bytes) == ERROR_SUCCESS;
 }
 
-static void WriteRegString(HKEY root, const wchar_t* subkey, const wchar_t* valueName, const std::wstring& value)
-{
-    HKEY key = nullptr;
-    if (RegCreateKeyExW(root, subkey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS)
-    {
-        RegSetValueExW(key, valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
-        RegCloseKey(key);
-    }
-}
-
-static void WriteRegDword(HKEY root, const wchar_t* subkey, const wchar_t* valueName, DWORD value)
-{
-    HKEY key = nullptr;
-    if (RegCreateKeyExW(root, subkey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS)
-    {
-        RegSetValueExW(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
-        RegCloseKey(key);
-    }
-}
-
-static void DeleteRegValue(HKEY root, const wchar_t* subkey, const wchar_t* valueName)
-{
-    HKEY key = nullptr;
-    if (RegOpenKeyExW(root, subkey, 0, KEY_SET_VALUE, &key) == ERROR_SUCCESS)
-    {
-        RegDeleteValueW(key, valueName);
-        RegCloseKey(key);
-    }
-}
-
 static std::wstring BytesToHexWide(const BYTE* bytes, DWORD byteCount)
 {
     static const wchar_t* digits = L"0123456789abcdef";
@@ -518,24 +608,70 @@ static std::wstring AccountKeyFor(ResourceKind resource)
     return std::wstring(kAccountsKey) + L"\\" + MetadataFor(resource).registryValue;
 }
 
+static std::wstring AccountSectionFor(ResourceKind resource)
+{
+    return L"Account." + std::wstring(MetadataFor(resource).registryValue);
+}
+
+static std::wstring ReadSettingString(const wchar_t* valueName, const std::wstring& fallback)
+{
+    std::wstring value;
+    if (TryReadIniString(L"Settings", valueName, value))
+    {
+        return value.empty() ? fallback : value;
+    }
+    return fallback;
+}
+
+static DWORD ReadSettingDword(const wchar_t* valueName, DWORD fallback)
+{
+    DWORD value = fallback;
+    if (TryReadIniDword(L"Settings", valueName, value))
+    {
+        return value;
+    }
+    return fallback;
+}
+
+static bool TryReadSettingDword(const wchar_t* valueName, DWORD& value)
+{
+    return TryReadIniDword(L"Settings", valueName, value);
+}
+
+static void WriteSettingString(const wchar_t* valueName, const std::wstring& value)
+{
+    WriteIniStringValue(L"Settings", valueName, value);
+}
+
+static void WriteSettingDword(const wchar_t* valueName, DWORD value)
+{
+    WriteIniDwordValue(L"Settings", valueName, value);
+}
+
 static std::wstring ReadAccountString(ResourceKind resource, const wchar_t* valueName, const wchar_t* fallbackValueName = nullptr)
 {
-    std::wstring key = AccountKeyFor(resource);
-    std::wstring value = ReadRegString(HKEY_CURRENT_USER, key.c_str(), valueName, L"");
-    if (value.empty() && fallbackValueName)
+    std::wstring section = AccountSectionFor(resource);
+    std::wstring value;
+    if (TryReadIniString(section.c_str(), valueName, value) && !value.empty())
     {
-        value = ReadRegString(HKEY_CURRENT_USER, key.c_str(), fallbackValueName, L"");
+        return value;
     }
-    return value;
+    if (fallbackValueName && TryReadIniString(section.c_str(), fallbackValueName, value) && !value.empty())
+    {
+        return value;
+    }
+
+    return L"";
 }
 
 static std::wstring ReadProtectedAccountString(ResourceKind resource, const wchar_t* valueName, const wchar_t* fallbackValueName = nullptr)
 {
-    std::wstring key = AccountKeyFor(resource);
     std::wstring protectedName = ProtectedValueName(valueName);
-    std::wstring protectedValue = ReadRegString(HKEY_CURRENT_USER, key.c_str(), protectedName.c_str(), L"");
+    std::wstring section = AccountSectionFor(resource);
+    std::wstring protectedValue;
     std::wstring plain;
-    if (UnprotectSecretString(protectedValue, plain))
+    if (TryReadIniString(section.c_str(), protectedName.c_str(), protectedValue) &&
+        UnprotectSecretString(protectedValue, plain))
     {
         return plain;
     }
@@ -547,7 +683,7 @@ static bool KeepLegacyPlaintextSecrets(ResourceKind resource)
 {
     (void)resource;
     DWORD configured = 0;
-    if (TryReadRegDword(HKEY_CURRENT_USER, kSettingsKey, L"KeepLegacyPlaintextSecrets", configured))
+    if (TryReadSettingDword(L"KeepLegacyPlaintextSecrets", configured))
     {
         return configured != 0;
     }
@@ -557,7 +693,7 @@ static bool KeepLegacyPlaintextSecrets(ResourceKind resource)
 
 static bool WriteProtectedAccountString(ResourceKind resource, const wchar_t* valueName, const std::wstring& value, bool keepLegacyPlaintext)
 {
-    std::wstring key = AccountKeyFor(resource);
+    std::wstring section = AccountSectionFor(resource);
     std::wstring protectedName = ProtectedValueName(valueName);
     std::wstring protectedValue = ProtectSecretString(value);
     if (protectedValue.empty())
@@ -565,59 +701,199 @@ static bool WriteProtectedAccountString(ResourceKind resource, const wchar_t* va
         return false;
     }
 
-    WriteRegString(HKEY_CURRENT_USER, key.c_str(), protectedName.c_str(), protectedValue);
+    WriteIniStringValue(section.c_str(), protectedName.c_str(), protectedValue);
     if (!keepLegacyPlaintext)
     {
-        DeleteRegValue(HKEY_CURRENT_USER, key.c_str(), valueName);
+        DeleteIniValue(section.c_str(), valueName);
     }
     return true;
 }
 
-static bool HasRegistryConfig(ResourceKind resource)
+static bool HasAccountConfig(ResourceKind resource)
 {
     return !ReadAccountString(resource, L"UID", L"uid").empty() &&
         !ReadProtectedAccountString(resource, L"LTokenV2", L"ltoken_v2").empty() &&
         !ReadProtectedAccountString(resource, L"LTuidV2", L"ltuid_v2").empty();
 }
 
-static void SaveRegistryConfig(ResourceKind resource, const AppConfig& cfg)
+static void SaveAccountConfig(ResourceKind resource, const AppConfig& cfg)
 {
-    std::wstring key = AccountKeyFor(resource);
+    std::wstring section = AccountSectionFor(resource);
     bool keepLegacyPlaintext = KeepLegacyPlaintextSecrets(resource);
-    WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"UID", Utf8ToWide(cfg.uid));
+    WriteIniStringValue(section.c_str(), L"UID", Utf8ToWide(cfg.uid));
     if (keepLegacyPlaintext)
     {
-        WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"LTokenV2", Utf8ToWide(cfg.ltoken));
-        WriteRegString(HKEY_CURRENT_USER, key.c_str(), L"LTuidV2", Utf8ToWide(cfg.ltuid));
+        WriteIniStringValue(section.c_str(), L"LTokenV2", Utf8ToWide(cfg.ltoken));
+        WriteIniStringValue(section.c_str(), L"LTuidV2", Utf8ToWide(cfg.ltuid));
     }
     if (WriteProtectedAccountString(resource, L"LTokenV2", Utf8ToWide(cfg.ltoken), keepLegacyPlaintext))
     {
         if (!keepLegacyPlaintext)
         {
-            DeleteRegValue(HKEY_CURRENT_USER, key.c_str(), L"ltoken_v2");
+            DeleteIniValue(section.c_str(), L"ltoken_v2");
         }
     }
     if (WriteProtectedAccountString(resource, L"LTuidV2", Utf8ToWide(cfg.ltuid), keepLegacyPlaintext))
     {
         if (!keepLegacyPlaintext)
         {
-            DeleteRegValue(HKEY_CURRENT_USER, key.c_str(), L"ltuid_v2");
+            DeleteIniValue(section.c_str(), L"ltuid_v2");
         }
     }
     if (cfg.refreshSeconds > 0)
     {
-        WriteRegDword(HKEY_CURRENT_USER, key.c_str(), L"RefreshIntervalSeconds", cfg.refreshSeconds);
+        WriteIniDwordValue(section.c_str(), L"RefreshIntervalSeconds", cfg.refreshSeconds);
     }
     else
     {
-        DeleteRegValue(HKEY_CURRENT_USER, key.c_str(), L"RefreshIntervalSeconds");
+        DeleteIniValue(section.c_str(), L"RefreshIntervalSeconds");
     }
 }
 
-static void DeleteRegistryConfig(ResourceKind resource)
+static void DeleteAccountConfig(ResourceKind resource)
+{
+    std::wstring section = AccountSectionFor(resource);
+    DeleteIniSection(section.c_str());
+    RegDeleteTreeW(HKEY_CURRENT_USER, AccountKeyFor(resource).c_str());
+}
+
+static std::wstring ReadIniAccountStringOnly(ResourceKind resource, const wchar_t* valueName, const wchar_t* fallbackValueName = nullptr)
+{
+    std::wstring section = AccountSectionFor(resource);
+    std::wstring value;
+    if (TryReadIniString(section.c_str(), valueName, value) && !value.empty())
+    {
+        return value;
+    }
+    if (fallbackValueName && TryReadIniString(section.c_str(), fallbackValueName, value) && !value.empty())
+    {
+        return value;
+    }
+    return L"";
+}
+
+static std::wstring ReadIniProtectedAccountStringOnly(ResourceKind resource, const wchar_t* valueName, const wchar_t* fallbackValueName = nullptr)
+{
+    std::wstring section = AccountSectionFor(resource);
+    std::wstring protectedName = ProtectedValueName(valueName);
+    std::wstring protectedValue;
+    std::wstring plain;
+    if (TryReadIniString(section.c_str(), protectedName.c_str(), protectedValue) &&
+        UnprotectSecretString(protectedValue, plain))
+    {
+        return plain;
+    }
+    return ReadIniAccountStringOnly(resource, valueName, fallbackValueName);
+}
+
+static bool HasIniAccountConfig(ResourceKind resource)
+{
+    return !ReadIniAccountStringOnly(resource, L"UID", L"uid").empty() &&
+        !ReadIniProtectedAccountStringOnly(resource, L"LTokenV2", L"ltoken_v2").empty() &&
+        !ReadIniProtectedAccountStringOnly(resource, L"LTuidV2", L"ltuid_v2").empty();
+}
+
+static std::wstring ReadLegacyAccountString(ResourceKind resource, const wchar_t* valueName, const wchar_t* fallbackValueName = nullptr)
 {
     std::wstring key = AccountKeyFor(resource);
-    RegDeleteTreeW(HKEY_CURRENT_USER, key.c_str());
+    std::wstring value = ReadRegString(HKEY_CURRENT_USER, key.c_str(), valueName, L"");
+    if (value.empty() && fallbackValueName)
+    {
+        value = ReadRegString(HKEY_CURRENT_USER, key.c_str(), fallbackValueName, L"");
+    }
+    return value;
+}
+
+static std::wstring ReadLegacyProtectedAccountString(ResourceKind resource, const wchar_t* valueName, const wchar_t* fallbackValueName = nullptr)
+{
+    std::wstring key = AccountKeyFor(resource);
+    std::wstring protectedName = ProtectedValueName(valueName);
+    std::wstring protectedValue = ReadRegString(HKEY_CURRENT_USER, key.c_str(), protectedName.c_str(), L"");
+    std::wstring plain;
+    if (UnprotectSecretString(protectedValue, plain))
+    {
+        return plain;
+    }
+    return ReadLegacyAccountString(resource, valueName, fallbackValueName);
+}
+
+static bool LoadLegacyAccountConfig(ResourceKind resource, AppConfig& cfg)
+{
+    cfg = AppConfig{};
+    cfg.uid = WideToUtf8(ReadLegacyAccountString(resource, L"UID", L"uid"));
+    cfg.ltoken = WideToUtf8(ReadLegacyProtectedAccountString(resource, L"LTokenV2", L"ltoken_v2"));
+    cfg.ltuid = WideToUtf8(ReadLegacyProtectedAccountString(resource, L"LTuidV2", L"ltuid_v2"));
+
+    std::wstring key = AccountKeyFor(resource);
+    DWORD refresh = ReadRegDword(HKEY_CURRENT_USER, key.c_str(), L"RefreshIntervalSeconds", 0);
+    if (refresh == 0)
+    {
+        refresh = ReadRegDword(HKEY_CURRENT_USER, key.c_str(), L"refresh_interval", 0);
+    }
+    if (refresh > 0)
+    {
+        cfg.refreshSeconds = refresh;
+    }
+
+    return !cfg.uid.empty() && !cfg.ltoken.empty() && !cfg.ltuid.empty();
+}
+
+static void MigrateLegacySettingString(const wchar_t* valueName)
+{
+    std::wstring existing;
+    if (TryReadIniString(L"Settings", valueName, existing))
+    {
+        return;
+    }
+    std::wstring legacy = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, valueName, L"");
+    if (!legacy.empty())
+    {
+        WriteSettingString(valueName, legacy);
+    }
+}
+
+static void MigrateLegacySettingDword(const wchar_t* valueName)
+{
+    DWORD existing = 0;
+    if (TryReadIniDword(L"Settings", valueName, existing))
+    {
+        return;
+    }
+    DWORD legacy = 0;
+    if (TryReadRegDword(HKEY_CURRENT_USER, kSettingsKey, valueName, legacy))
+    {
+        WriteSettingDword(valueName, legacy);
+    }
+}
+
+static void MigrateLegacyRegistryToIniOnce()
+{
+    if (InterlockedExchange(&g_legacyMigrationAttempted, 1) != 0)
+    {
+        return;
+    }
+
+    MigrateLegacySettingString(L"Resource");
+    MigrateLegacySettingString(L"ConfigDir");
+    MigrateLegacySettingString(L"AssetDir");
+    MigrateLegacySettingString(L"InstallDir");
+    MigrateLegacySettingDword(L"RefreshIntervalSeconds");
+    MigrateLegacySettingDword(L"KeepLegacyPlaintextSecrets");
+
+    for (const auto& item : kResources)
+    {
+        if (HasIniAccountConfig(item.resource))
+        {
+            continue;
+        }
+
+        AppConfig cfg;
+        if (LoadLegacyAccountConfig(item.resource, cfg))
+        {
+            SaveAccountConfig(item.resource, cfg);
+            LogLine(std::wstring(L"Migrated legacy registry account settings for ") + item.displayName);
+        }
+    }
 }
 
 static ResourceKind ResourceFromString(const std::wstring& value)
@@ -636,7 +912,8 @@ static ResourceKind ResourceFromString(const std::wstring& value)
 
 static ResourceKind ReadResourceSetting(const std::wstring& configDir)
 {
-    std::wstring value = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", L"auto");
+    MigrateLegacyRegistryToIniOnce();
+    std::wstring value = ReadSettingString(L"Resource", L"auto");
     std::wstring lower = value;
     std::transform(lower.begin(), lower.end(), lower.begin(), [](wchar_t ch) { return static_cast<wchar_t>(towlower(ch)); });
     if (lower != L"auto")
@@ -646,7 +923,7 @@ static ResourceKind ReadResourceSetting(const std::wstring& configDir)
 
     for (const auto& item : kResources)
     {
-        if (HasRegistryConfig(item.resource))
+        if (HasAccountConfig(item.resource))
         {
             return item.resource;
         }
@@ -1057,7 +1334,7 @@ static bool LoadConfig(const std::wstring& path, AppConfig& cfg)
     return !cfg.uid.empty() && !cfg.ltoken.empty() && !cfg.ltuid.empty();
 }
 
-static bool LoadRegistryConfig(ResourceKind resource, AppConfig& cfg)
+static bool LoadAccountConfig(ResourceKind resource, AppConfig& cfg)
 {
     cfg = AppConfig{};
     std::wstring uid = ReadAccountString(resource, L"UID", L"uid");
@@ -1068,11 +1345,11 @@ static bool LoadRegistryConfig(ResourceKind resource, AppConfig& cfg)
     cfg.ltoken = WideToUtf8(ltoken);
     cfg.ltuid = WideToUtf8(ltuid);
 
-    std::wstring key = AccountKeyFor(resource);
-    DWORD refresh = ReadRegDword(HKEY_CURRENT_USER, key.c_str(), L"RefreshIntervalSeconds", 0);
+    std::wstring section = AccountSectionFor(resource);
+    DWORD refresh = ReadIniDwordValue(section.c_str(), L"RefreshIntervalSeconds", 0);
     if (refresh == 0)
     {
-        refresh = ReadRegDword(HKEY_CURRENT_USER, key.c_str(), L"refresh_interval", 0);
+        refresh = ReadIniDwordValue(section.c_str(), L"refresh_interval", 0);
     }
     if (refresh > 0)
     {
@@ -1381,13 +1658,14 @@ static std::wstring ZzzCardStateText(const std::string& cardSign)
 
 static UINT EffectiveRefreshSeconds(UINT configRefresh)
 {
-    DWORD registryRefresh = ReadRegDword(HKEY_CURRENT_USER, kSettingsKey, L"RefreshIntervalSeconds", 0);
-    UINT refresh = registryRefresh > 0 ? registryRefresh : configRefresh;
+    DWORD configuredRefresh = ReadSettingDword(L"RefreshIntervalSeconds", 0);
+    UINT refresh = configuredRefresh > 0 ? configuredRefresh : configRefresh;
     return ClampRefreshSeconds(refresh);
 }
 
 static NoteState ErrorState(ResourceKind resource, const std::wstring& line1, const std::wstring& line2, UINT refreshSeconds = kDefaultRefreshSeconds)
 {
+    LogLine(line1 + L": " + line2);
     NoteState state;
     state.resource = resource;
     state.state = StateKind::Error;
@@ -1404,7 +1682,7 @@ static NoteState FetchState(const std::wstring& configDir)
     const auto& metadata = MetadataFor(resource);
 
     AppConfig cfg;
-    if (!LoadRegistryConfig(resource, cfg) && !LoadConfig(JoinPath(configDir, metadata.configFile), cfg))
+    if (!LoadAccountConfig(resource, cfg) && !LoadConfig(JoinPath(configDir, metadata.configFile), cfg))
     {
         return ErrorState(resource, L"Login needed", L"Configure account");
     }
@@ -1654,7 +1932,7 @@ static bool OpenCookieJson(HWND owner, ResourceKind resource, AppConfig& cfg)
     }
 
     cfg = imported;
-    SaveRegistryConfig(resource, cfg);
+    SaveAccountConfig(resource, cfg);
     return true;
 }
 
@@ -1685,9 +1963,9 @@ static int DpiScale(HWND hwnd, int value)
 static void SetAccountDialogFields(AccountDialogState* state, ResourceKind resource)
 {
     AppConfig cfg;
-    std::wstring installDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", ParentDirectoryOf(ModulePath()));
-    std::wstring configDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", DefaultConfigDir(installDir));
-    if (!LoadRegistryConfig(resource, cfg))
+    std::wstring installDir = ReadSettingString(L"InstallDir", ParentDirectoryOf(ModulePath()));
+    std::wstring configDir = ReadSettingString(L"ConfigDir", DefaultConfigDir(installDir));
+    if (!LoadAccountConfig(resource, cfg))
     {
         LoadConfig(JoinPath(configDir, MetadataFor(resource).configFile), cfg);
     }
@@ -1759,10 +2037,10 @@ static bool SaveAccountDialog(AccountDialogState* state)
     cfg.ltoken = WideToUtf8(ltoken);
     cfg.ltuid = WideToUtf8(ltuid);
     cfg.refreshSeconds = refresh;
-    SaveRegistryConfig(resource, cfg);
+    SaveAccountConfig(resource, cfg);
     if (state->selectAfterSave)
     {
-        WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", MetadataFor(resource).registryValue);
+        WriteSettingString(L"Resource", MetadataFor(resource).registryValue);
     }
 
     state->saved = true;
@@ -2637,9 +2915,10 @@ private:
 
     void ReloadSettings()
     {
-        std::wstring installDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", ParentDirectoryOf(ModulePath()));
-        std::wstring configDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", DefaultConfigDir(installDir));
-        std::wstring assetDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"AssetDir", DefaultAssetDir(installDir));
+        MigrateLegacyRegistryToIniOnce();
+        std::wstring installDir = ReadSettingString(L"InstallDir", ParentDirectoryOf(ModulePath()));
+        std::wstring configDir = ReadSettingString(L"ConfigDir", DefaultConfigDir(installDir));
+        std::wstring assetDir = ReadSettingString(L"AssetDir", DefaultAssetDir(installDir));
 
         EnterCriticalSection(&m_settingsLock);
         m_installDir = installDir;
@@ -2690,7 +2969,7 @@ private:
         AppConfig cfg;
         if (OpenCookieJson(m_hwnd, resource, cfg))
         {
-            WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", MetadataFor(resource).registryValue);
+            WriteSettingString(L"Resource", MetadataFor(resource).registryValue);
             BeginRefreshWithCurrentSettings();
         }
     }
@@ -2702,7 +2981,7 @@ private:
         message += L"?";
         if (MessageBoxW(m_hwnd, message.c_str(), L"Clear Account", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES)
         {
-            DeleteRegistryConfig(resource);
+            DeleteAccountConfig(resource);
             BeginRefreshWithCurrentSettings();
         }
     }
@@ -2721,7 +3000,7 @@ private:
         std::wstring directory;
         if (BrowseForFolder(m_hwnd, title, directory))
         {
-            WriteRegString(HKEY_CURRENT_USER, kSettingsKey, valueName, directory);
+            WriteSettingString(valueName, directory);
             BeginRefreshWithCurrentSettings();
         }
     }
@@ -2759,7 +3038,7 @@ private:
         constexpr UINT kCommandChangeAssetDir = 303;
         constexpr UINT kCommandAbout = 304;
 
-        std::wstring configuredResource = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", L"auto");
+        std::wstring configuredResource = ReadSettingString(L"Resource", L"auto");
         std::transform(configuredResource.begin(), configuredResource.end(), configuredResource.begin(), [](wchar_t ch) { return static_cast<wchar_t>(towlower(ch)); });
         bool resourceAuto = configuredResource.empty() || configuredResource == L"auto";
         ResourceKind selectedResource = state.resource;
@@ -2874,13 +3153,13 @@ private:
         }
         else if (command == kCommandResourceAuto)
         {
-            WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", L"auto");
+            WriteSettingString(L"Resource", L"auto");
             BeginRefreshWithCurrentSettings();
         }
         else if (command >= kCommandResourceBase && command < kCommandResourceBase + ARRAYSIZE(kResources))
         {
             ResourceKind resource = static_cast<ResourceKind>(command - kCommandResourceBase);
-            WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", MetadataFor(resource).registryValue);
+            WriteSettingString(L"Resource", MetadataFor(resource).registryValue);
             SetLoadingState(resource, MetadataFor(resource).displayName);
             BeginRefreshWithCurrentSettings();
         }
@@ -3070,13 +3349,15 @@ extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllGetClassObject(REFCLS
 
 extern "C" __declspec(dllexport) void CALLBACK ConfigureDeskband(HWND hwnd, HINSTANCE, LPSTR, int)
 {
-    std::wstring installDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", ParentDirectoryOf(ModulePath()));
-    std::wstring configDir = ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", DefaultConfigDir(installDir));
+    MigrateLegacyRegistryToIniOnce();
+    std::wstring installDir = ReadSettingString(L"InstallDir", ParentDirectoryOf(ModulePath()));
+    std::wstring configDir = ReadSettingString(L"ConfigDir", DefaultConfigDir(installDir));
     ShowAccountDialog(hwnd, ReadResourceSetting(configDir), true);
 }
 
 extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllRegisterServer()
 {
+    MigrateLegacyRegistryToIniOnce();
     std::wstring clsid = GuidToString(CLSID_RealTimeNotesDeskband);
     std::wstring clsidKey = std::wstring(kClassesClsidKey) + L"\\" + clsid;
     std::wstring modulePath = ModulePath();
@@ -3095,18 +3376,23 @@ extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllRegisterServer()
     hr = SetRegValueString(HKEY_CURRENT_USER, L"Software\\Classes\\Component Categories\\" + std::wstring(kDeskBandCatid), nullptr, L"Desk Band");
     if (FAILED(hr)) return hr;
 
-    WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"InstallDir", installDir);
-    if (ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", L"").empty())
+    WriteSettingString(L"InstallDir", installDir);
+    if (ReadSettingString(L"ConfigDir", L"").empty())
     {
-        WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"ConfigDir", configDir);
+        WriteSettingString(L"ConfigDir", configDir);
     }
-    if (ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"AssetDir", L"").empty())
+    if (ReadSettingString(L"AssetDir", L"").empty())
     {
-        WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"AssetDir", assetDir);
+        WriteSettingString(L"AssetDir", assetDir);
     }
-    if (ReadRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", L"").empty())
+    if (ReadSettingString(L"Resource", L"").empty())
     {
-        WriteRegString(HKEY_CURRENT_USER, kSettingsKey, L"Resource", L"auto");
+        WriteSettingString(L"Resource", L"auto");
+    }
+    DWORD loggingEnabled = 0;
+    if (!TryReadIniDword(L"Settings", L"LoggingEnabled", loggingEnabled))
+    {
+        WriteSettingDword(L"LoggingEnabled", 1);
     }
 
     DeleteCategoryCache();
