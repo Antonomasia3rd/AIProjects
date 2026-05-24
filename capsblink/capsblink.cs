@@ -1,12 +1,19 @@
 using System.Runtime.InteropServices;
 using System.ComponentModel;
 using System;
+using System.IO;
+using System.Reflection;
 using System.Threading;
 
 class CapsLockLight
 {
-    const string KeyboardTargetPath = "\\Device\\KeyboardClass0";
+    const string DefaultKeyboardTargetPath = "\\Device\\KeyboardClass0";
     static volatile bool exiting = false;
+    static readonly string executablePath = Assembly.GetEntryAssembly().Location;
+    static readonly string executableDirectory = GetExecutableDirectory();
+    static readonly string executableBaseName = GetExecutableBaseName();
+    static readonly string iniPath = Path.Combine(executableDirectory, executableBaseName + ".ini");
+    static readonly string logPath = Path.Combine(executableDirectory, executableBaseName + ".log");
 
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern Boolean DefineDosDevice(UInt32 flags, String deviceName, String targetPath);
@@ -57,11 +64,22 @@ class CapsLockLight
         IntPtr device = Flags.INVALID_HANDLE_VALUE;
         bool mappingDefined = false;
         string deviceName = "capsblinkKBD_" + System.Diagnostics.Process.GetCurrentProcess().Id.ToString();
+        string keyboardTargetPath = DefaultKeyboardTargetPath;
+        int blinkIntervalMs = 500;
         KEYBOARD_INDICATOR_PARAMETERS KIPbuf = new KEYBOARD_INDICATOR_PARAMETERS { unitID = 0, LEDflags = 0 };
 
         try
         {
-            if (!DefineDosDevice(Flags.DDD_RAW_TARGET_PATH, deviceName, KeyboardTargetPath))
+            EnsureIniFile();
+            keyboardTargetPath = ReadIniString("Settings", "KeyboardTargetPath", DefaultKeyboardTargetPath);
+            blinkIntervalMs = ReadIniInt("Settings", "BlinkIntervalMs", 500);
+            if (blinkIntervalMs < 50)
+            {
+                blinkIntervalMs = 50;
+            }
+
+            Log("Starting with keyboard target " + keyboardTargetPath);
+            if (!DefineDosDevice(Flags.DDD_RAW_TARGET_PATH, deviceName, keyboardTargetPath))
             {
                 Int32 err = Marshal.GetLastWin32Error();
                 throw new Win32Exception(err);
@@ -102,8 +120,13 @@ class CapsLockLight
                     }
                 }
 
-                Thread.Sleep(500); // Adjust the blink interval as needed
+                Thread.Sleep(blinkIntervalMs);
             }
+        }
+        catch (Exception ex)
+        {
+            Log("Error: " + ex);
+            throw;
         }
         finally
         {
@@ -113,8 +136,92 @@ class CapsLockLight
             }
             if (mappingDefined)
             {
-                DefineDosDevice(Flags.DDD_REMOVE_DEFINITION | Flags.DDD_EXACT_MATCH_ON_REMOVE, deviceName, KeyboardTargetPath);
+                DefineDosDevice(Flags.DDD_REMOVE_DEFINITION | Flags.DDD_EXACT_MATCH_ON_REMOVE, deviceName, keyboardTargetPath);
             }
+            Log("Stopped");
+        }
+    }
+
+    static string GetExecutableDirectory()
+    {
+        string dir = Path.GetDirectoryName(executablePath);
+        return string.IsNullOrEmpty(dir) ? AppDomain.CurrentDomain.BaseDirectory : dir;
+    }
+
+    static string GetExecutableBaseName()
+    {
+        string name = Path.GetFileNameWithoutExtension(executablePath);
+        return string.IsNullOrEmpty(name) ? "capsblink" : name;
+    }
+
+    static void EnsureIniFile()
+    {
+        if (File.Exists(iniPath))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(executableDirectory);
+        File.WriteAllText(iniPath,
+            "[Settings]" + Environment.NewLine +
+            "KeyboardTargetPath=" + DefaultKeyboardTargetPath + Environment.NewLine +
+            "BlinkIntervalMs=500" + Environment.NewLine);
+    }
+
+    static string ReadIniString(string section, string key, string fallback)
+    {
+        try
+        {
+            string currentSection = "";
+            foreach (string rawLine in File.ReadAllLines(iniPath))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith(";") || line.StartsWith("#"))
+                {
+                    continue;
+                }
+                if (line.StartsWith("[") && line.EndsWith("]"))
+                {
+                    currentSection = line.Substring(1, line.Length - 2).Trim();
+                    continue;
+                }
+                if (!currentSection.Equals(section, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                int equals = line.IndexOf('=');
+                if (equals <= 0)
+                {
+                    continue;
+                }
+                if (line.Substring(0, equals).Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
+                {
+                    string value = line.Substring(equals + 1).Trim();
+                    return value.Length == 0 ? fallback : value;
+                }
+            }
+        }
+        catch
+        {
+        }
+        return fallback;
+    }
+
+    static int ReadIniInt(string section, string key, int fallback)
+    {
+        int value;
+        return int.TryParse(ReadIniString(section, key, ""), out value) ? value : fallback;
+    }
+
+    static void Log(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(executableDirectory);
+            File.AppendAllText(logPath, DateTime.UtcNow.ToString("o") + "  " + message + Environment.NewLine);
+        }
+        catch
+        {
         }
     }
 }

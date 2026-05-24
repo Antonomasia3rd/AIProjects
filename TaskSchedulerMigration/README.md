@@ -38,7 +38,7 @@ powershell -ExecutionPolicy Bypass -File .\TaskSchedulerMigration.ps1 -OldSID "S
 
 - `-OldSID`: SID text to replace. Required.
 - `-NewUser`: replacement user/account value. Required.
-- `-BackupDirectory`: folder for exported task XML backups. Default: `.\TaskSchedulerMigrationBackup`.
+- `-BackupDirectory`: folder for exported task XML backups. Default: `TaskSchedulerMigrationBackup` beside `TaskSchedulerMigration.ps1`. Relative paths resolve from the script directory.
 - `-TaskPath`: optional scheduled-task folder filter.
 - `-IncludeCredentialSensitiveTasks`: also attempt tasks with `Password`, `S4U`, or `InteractiveOrPassword` logon types. These are skipped by default because XML-only re-registration can require credentials or change logon behavior.
 - `-WhatIf`: preview re-registration without changing tasks.
@@ -55,4 +55,4 @@ powershell -ExecutionPolicy Bypass -File .\TaskSchedulerMigration.ps1 -OldSID "S
 
 ## Generated Files
 
-- XML backups under `.\TaskSchedulerMigrationBackup` unless `-BackupDirectory` is changed.
+- XML backups under `TaskSchedulerMigrationBackup` beside the script unless `-BackupDirectory` is changed.

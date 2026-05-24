@@ -23,7 +23,6 @@
 #pragma comment(lib, "version.lib")
 #pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
-static const wchar_t* kConfigFileName = L"SecureDesktopPasswordLauncher.ini";
 static const wchar_t* kPasswordKdfName = L"PBKDF2-SHA256";
 static const DWORD kPasswordKdfIterations = 210000;
 static const DWORD kPasswordKdfMaxIterations = 5000000;
@@ -144,6 +143,16 @@ static std::wstring BaseName(const std::wstring& path)
     return pos == std::wstring::npos ? path : path.substr(pos + 1);
 }
 
+static std::wstring BaseNameWithoutExtension(const std::wstring& path)
+{
+    std::wstring name = BaseName(path);
+    size_t dot = name.find_last_of(L'.');
+    if (dot != std::wstring::npos) {
+        name.resize(dot);
+    }
+    return name.empty() ? L"SecureDesktopPasswordLauncher" : name;
+}
+
 static std::wstring CombinePath(const std::wstring& left, const std::wstring& right)
 {
     if (left.empty()) {
@@ -154,16 +163,6 @@ static std::wstring CombinePath(const std::wstring& left, const std::wstring& ri
         return left + right;
     }
     return left + L"\\" + right;
-}
-
-static std::wstring ParentDirectory(std::wstring path)
-{
-    while (!path.empty() && (path[path.size() - 1] == L'\\' || path[path.size() - 1] == L'/')) {
-        path.resize(path.size() - 1);
-    }
-
-    size_t pos = path.find_last_of(L"\\/");
-    return pos == std::wstring::npos ? L"" : path.substr(0, pos);
 }
 
 static bool FileExists(const std::wstring& path)
@@ -285,17 +284,34 @@ static bool ExistingDirectoryPath(const std::wstring& path, std::wstring& error,
 static std::wstring FindConfigPath()
 {
     std::wstring exeDir = DirectoryOf(CurrentExePath());
-    std::wstring parent = ParentDirectory(exeDir);
-    std::wstring inExeDir = CombinePath(exeDir, kConfigFileName);
-    std::wstring inParent = parent.empty() ? L"" : CombinePath(parent, kConfigFileName);
+    return CombinePath(exeDir, BaseNameWithoutExtension(CurrentExePath()) + L".ini");
+}
 
-    if (FileExists(inExeDir)) {
-        return inExeDir;
+static std::wstring DefaultLogPath()
+{
+    std::wstring exePath = CurrentExePath();
+    return CombinePath(DirectoryOf(exePath), BaseNameWithoutExtension(exePath) + L".log");
+}
+
+static void LogLine(const std::wstring& message)
+{
+    HANDLE file = CreateFileW(DefaultLogPath().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return;
     }
-    if (!inParent.empty() && FileExists(inParent)) {
-        return inParent;
-    }
-    return inExeDir;
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t timestamp[64];
+    wsprintfW(timestamp, L"%04u-%02u-%02u %02u:%02u:%02u  ",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    DWORD bytes = 0;
+    WriteFile(file, timestamp, static_cast<DWORD>(wcslen(timestamp) * sizeof(wchar_t)), &bytes, nullptr);
+    WriteFile(file, message.c_str(), static_cast<DWORD>(message.size() * sizeof(wchar_t)), &bytes, nullptr);
+    const wchar_t newline[] = L"\r\n";
+    WriteFile(file, newline, static_cast<DWORD>((ARRAYSIZE(newline) - 1) * sizeof(wchar_t)), &bytes, nullptr);
+    CloseHandle(file);
 }
 
 static std::wstring ReadIniString(
@@ -759,6 +775,7 @@ static int SetPassword()
     WritePrivateProfileStringW(L"Launch", L"ShowWindow", L"1", config.configPath.c_str());
     WritePrivateProfileStringW(L"UI", L"AutoLockMinutes", std::to_wstring(config.autoLockMinutes).c_str(), config.configPath.c_str());
 
+    LogLine(L"Password configuration saved");
     MessageBoxW(nullptr, config.configPath.c_str(), L"Password saved", MB_OK | MB_ICONINFORMATION);
     return 0;
 }
@@ -1830,6 +1847,8 @@ static int RunControlWindow(const GateConfig& config)
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
+    LogLine(L"Starting");
+
     INITCOMMONCONTROLSEX controls = {};
     controls.dwSize = sizeof(controls);
     controls.dwICC = ICC_STANDARD_CLASSES;
@@ -1847,13 +1866,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     GateConfig config = LoadConfig();
     if (!config.valid) {
+        LogLine(L"Configuration invalid: " + config.validationError);
         MessageBoxW(nullptr, config.validationError.c_str(), L"Secure Desktop Password Launcher", MB_OK | MB_ICONERROR);
         return 1;
     }
     if (!VerifyPassword(config, config.startMinimized)) {
+        LogLine(L"Password verification did not complete");
         return 1;
     }
 
+    LogLine(L"Password verified");
     return RunControlWindow(config);
 }
 

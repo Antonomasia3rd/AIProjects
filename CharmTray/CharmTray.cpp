@@ -15,6 +15,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <objbase.h>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // Tray / menu constants
@@ -32,6 +33,68 @@
 #define CHARM_START     2
 #define CHARM_DEVICES   3
 #define CHARM_SETTINGS  4
+
+static std::wstring ModulePath()
+{
+    wchar_t buffer[MAX_PATH];
+    DWORD len = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) return L"CharmTray.exe";
+    return std::wstring(buffer, len);
+}
+
+static std::wstring DirectoryOf(const std::wstring& path)
+{
+    size_t pos = path.find_last_of(L"\\/");
+    return pos == std::wstring::npos ? L"." : path.substr(0, pos);
+}
+
+static std::wstring BaseNameWithoutExtension(const std::wstring& path)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    size_t start = slash == std::wstring::npos ? 0 : slash + 1;
+    size_t dot = path.find_last_of(L'.');
+    if (dot == std::wstring::npos || dot < start) dot = path.size();
+    std::wstring name = path.substr(start, dot - start);
+    return name.empty() ? L"CharmTray" : name;
+}
+
+static std::wstring ModuleLocalPath(const wchar_t* extension)
+{
+    std::wstring module = ModulePath();
+    return DirectoryOf(module) + L"\\" + BaseNameWithoutExtension(module) + extension;
+}
+
+static void EnsureIniFile()
+{
+    std::wstring ini = ModuleLocalPath(L".ini");
+    DWORD attrs = GetFileAttributesW(ini.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY)) return;
+    WritePrivateProfileStringW(L"Settings", L"LoggingEnabled", L"1", ini.c_str());
+}
+
+static bool IsLoggingEnabled()
+{
+    EnsureIniFile();
+    return GetPrivateProfileIntW(L"Settings", L"LoggingEnabled", 1, ModuleLocalPath(L".ini").c_str()) != 0;
+}
+
+static void LogLine(const wchar_t* message)
+{
+    if (!IsLoggingEnabled()) return;
+    std::wstring path = ModuleLocalPath(L".log");
+    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t line[512];
+    int len = wsprintfW(line, L"%04u-%02u-%02u %02u:%02u:%02u  %s\r\n",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, message);
+    DWORD bytes = 0;
+    WriteFile(file, line, static_cast<DWORD>(len * sizeof(wchar_t)), &bytes, nullptr);
+    CloseHandle(file);
+}
 
 // ---------------------------------------------------------------------------
 // GUIDs — all verified from CharmBar.exe disassembly.
@@ -370,9 +433,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 {
+    EnsureIniFile();
+    LogLine(L"Starting");
+
     HANDLE hMutex = CreateMutex(nullptr, TRUE, L"CharmTray_SingleInstance");
     if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
+        LogLine(L"Another instance is already running");
         if (hMutex) CloseHandle(hMutex);
         return 0;
     }
@@ -389,7 +456,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
     HWND hwnd = CreateWindowEx(0, L"CharmTrayWnd", L"CharmTray",
                                 0, 0, 0, 0, 0,
                                 HWND_MESSAGE, nullptr, hInstance, nullptr);
-    if (!hwnd) { CoUninitialize(); CloseHandle(hMutex); return 1; }
+    if (!hwnd) { LogLine(L"Failed to create message window"); CoUninitialize(); CloseHandle(hMutex); return 1; }
 
     AddTrayIcon(hwnd);
 
@@ -402,5 +469,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 
     CoUninitialize();
     CloseHandle(hMutex);
+    LogLine(L"Stopped");
     return static_cast<int>(msg.wParam);
 }

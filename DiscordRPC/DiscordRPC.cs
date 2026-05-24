@@ -8,6 +8,7 @@ using System.IO;
 using System.IO.Pipes;
 using System.Net;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -38,7 +39,7 @@ internal static class Program
         bool forceShowConsole = false;
         bool forceHideConsole = false;
         bool dryRunFull = false;
-        string configPath = "config.ini";
+        string configPath = AppPaths.DefaultIniPath;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i].Equals("--dry-run", StringComparison.OrdinalIgnoreCase))
@@ -1269,7 +1270,7 @@ internal static class AppState
     public static volatile bool NotifyOnFailure = true;
     public static volatile bool NotifyOnReload = true;
     public static bool CommandLineVerbose;
-    public static string ConfigPath = "config.ini";
+    public static string ConfigPath = AppPaths.DefaultIniPath;
     public static event Action<string, string, ToolTipIcon> NotificationRequested;
 
     public static bool IsVerboseLogging
@@ -5746,6 +5747,27 @@ internal sealed class AssetInfo
     }
 }
 
+internal static class AppPaths
+{
+    public static readonly string ExecutablePath = Assembly.GetEntryAssembly().Location;
+    public static readonly string ExecutableDirectory = GetExecutableDirectory();
+    public static readonly string ExecutableBaseName = GetExecutableBaseName();
+    public static readonly string DefaultIniPath = Path.Combine(ExecutableDirectory, ExecutableBaseName + ".ini");
+    public static readonly string DefaultLogPath = Path.Combine(ExecutableDirectory, ExecutableBaseName + ".log");
+
+    private static string GetExecutableDirectory()
+    {
+        string dir = Path.GetDirectoryName(ExecutablePath);
+        return string.IsNullOrEmpty(dir) ? AppDomain.CurrentDomain.BaseDirectory : dir;
+    }
+
+    private static string GetExecutableBaseName()
+    {
+        string name = Path.GetFileNameWithoutExtension(ExecutablePath);
+        return string.IsNullOrEmpty(name) ? "DiscordRPC" : name;
+    }
+}
+
 internal static class Logger
 {
     private static readonly object SyncRoot = new object();
@@ -5780,15 +5802,11 @@ internal static class Logger
         string path = configured;
         if (path.Length == 0)
         {
-            string fullConfigPath = Path.GetFullPath(configPath ?? "config.ini");
-            string dir = Path.GetDirectoryName(fullConfigPath);
-            string name = Path.GetFileNameWithoutExtension(fullConfigPath);
-            path = Path.Combine(dir ?? ".", (name.Length == 0 ? "DiscordRPC" : name) + ".log");
+            path = AppPaths.DefaultLogPath;
         }
         else if (!Path.IsPathRooted(path))
         {
-            string fullConfigPath = Path.GetFullPath(configPath ?? "config.ini");
-            path = Path.Combine(Path.GetDirectoryName(fullConfigPath) ?? ".", path);
+            path = Path.Combine(AppPaths.ExecutableDirectory, path);
         }
 
         lock (SyncRoot)

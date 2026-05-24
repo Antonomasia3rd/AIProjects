@@ -39,6 +39,8 @@ build\CharmTray.exe
 
 The app creates a tray icon. Right-click the icon and choose a charm flyout. The app is single-instance guarded by a mutex.
 
+On first launch, the app creates `CharmTray.ini` and writes `CharmTray.log` beside the executable. If the executable is renamed, the default INI/log names follow the renamed executable. Set `[Settings] LoggingEnabled=0` in the local INI to disable file logging.
+
 ## Limitations
 
 - Windows 10/11 are out of scope.
@@ -47,6 +49,8 @@ The app creates a tray icon. Right-click the icon and choose a charm flyout. The
 ## Generated Files
 
 - `build\CharmTray.exe`
+- `build\CharmTray.ini`
+- `build\CharmTray.log`
 - compiler object files under `build\obj\` when built by the repository build script
 
 Generated build output is ignored by git.

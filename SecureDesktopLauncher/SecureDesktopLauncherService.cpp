@@ -19,7 +19,6 @@
 
 static const wchar_t* kServiceName = L"SecureDesktopLauncher";
 static const wchar_t* kServiceDisplayName = L"Secure Desktop Launcher";
-static const wchar_t* kConfigFileName = L"SecureDesktopLauncher.ini";
 
 static SERVICE_STATUS_HANDLE gStatusHandle = nullptr;
 static SERVICE_STATUS gStatus = {};
@@ -145,6 +144,16 @@ static std::wstring BaseName(const std::wstring& path)
     return pos == std::wstring::npos ? path : path.substr(pos + 1);
 }
 
+static std::wstring BaseNameWithoutExtension(const std::wstring& path)
+{
+    std::wstring name = BaseName(path);
+    size_t dot = name.find_last_of(L'.');
+    if (dot != std::wstring::npos) {
+        name.resize(dot);
+    }
+    return name.empty() ? L"SecureDesktopLauncher" : name;
+}
+
 static bool FileExists(const std::wstring& path)
 {
     DWORD attributes = GetFileAttributesW(path.c_str());
@@ -190,14 +199,10 @@ static std::wstring CombinePath(const std::wstring& left, const std::wstring& ri
     return left + L"\\" + right;
 }
 
-static std::wstring ParentDirectory(std::wstring path)
+static std::wstring DefaultLogPath()
 {
-    while (!path.empty() && (path[path.size() - 1] == L'\\' || path[path.size() - 1] == L'/')) {
-        path.resize(path.size() - 1);
-    }
-
-    size_t pos = path.find_last_of(L"\\/");
-    return pos == std::wstring::npos ? L"" : path.substr(0, pos);
+    std::wstring exePath = CurrentExePath();
+    return CombinePath(DirectoryOf(exePath), BaseNameWithoutExtension(exePath) + L".log");
 }
 
 static void LogServiceWarning(const std::wstring& message)
@@ -205,22 +210,21 @@ static void LogServiceWarning(const std::wstring& message)
     std::wstring debugLine = std::wstring(kServiceName) + L": " + message + L"\n";
     OutputDebugStringW(debugLine.c_str());
 
-    HANDLE eventSource = RegisterEventSourceW(nullptr, kServiceName);
-    if (eventSource)
-    {
-        LPCWSTR strings[] = { message.c_str() };
-        ReportEventW(
-            eventSource,
-            EVENTLOG_WARNING_TYPE,
-            0,
-            1,
-            nullptr,
-            1,
-            0,
-            strings,
-            nullptr);
-        DeregisterEventSource(eventSource);
-    }
+    HANDLE file = CreateFileW(DefaultLogPath().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t timestamp[64];
+    swprintf_s(timestamp, ARRAYSIZE(timestamp), L"%04u-%02u-%02u %02u:%02u:%02u  ",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    DWORD bytes = 0;
+    WriteFile(file, timestamp, static_cast<DWORD>(wcslen(timestamp) * sizeof(wchar_t)), &bytes, nullptr);
+    WriteFile(file, message.c_str(), static_cast<DWORD>(message.size() * sizeof(wchar_t)), &bytes, nullptr);
+    const wchar_t newline[] = L"\r\n";
+    WriteFile(file, newline, static_cast<DWORD>((ARRAYSIZE(newline) - 1) * sizeof(wchar_t)), &bytes, nullptr);
+    CloseHandle(file);
 }
 
 static bool IsAbsoluteFileSystemPath(const std::wstring& path)
@@ -318,21 +322,7 @@ static bool ExistingDirectoryPath(const std::wstring& path)
 static std::wstring FindConfigPath()
 {
     std::wstring exeDir = DirectoryOf(CurrentExePath());
-    std::wstring parent = ParentDirectory(exeDir);
-    std::vector<std::wstring> candidates;
-
-    candidates.push_back(CombinePath(exeDir, kConfigFileName));
-    if (!parent.empty()) {
-        candidates.push_back(CombinePath(parent, kConfigFileName));
-    }
-
-    for (const std::wstring& candidate : candidates) {
-        if (FileExists(candidate)) {
-            return candidate;
-        }
-    }
-
-    return CombinePath(exeDir, kConfigFileName);
+    return CombinePath(exeDir, BaseNameWithoutExtension(CurrentExePath()) + L".ini");
 }
 
 static std::wstring ReadIniString(

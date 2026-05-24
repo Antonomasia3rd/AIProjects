@@ -1,7 +1,15 @@
 $ErrorActionPreference = 'Stop'
 
-$settingsDir = Join-Path $env:LOCALAPPDATA 'NowPlayingTile'
-$settingsPath = Join-Path $settingsDir 'settings.ini'
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$buildDir = Join-Path $root 'build'
+$exe = Get-ChildItem -LiteralPath $buildDir -Filter '*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($exe) {
+    $settingsDir = $exe.DirectoryName
+    $settingsPath = Join-Path $settingsDir "$($exe.BaseName).ini"
+} else {
+    $settingsDir = $buildDir
+    $settingsPath = Join-Path $settingsDir 'NowPlayingTile.ini'
+}
 
 if (-not (Test-Path -LiteralPath $settingsPath)) {
     New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null

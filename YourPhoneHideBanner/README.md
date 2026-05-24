@@ -16,7 +16,7 @@ For matching keys it sets:
 ## Requirements
 
 - Windows with .NET Framework 4.x.
-- Administrator rights to install/start the service and create the Event Log source.
+- Administrator rights to install/start the service.
 
 ## Build
 
@@ -53,11 +53,14 @@ sc.exe delete YourPhoneHideBannerService
 - Attaches to loaded `S-1-5-21-*` user hives.
 - Watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for child-key and value changes.
 - Reapplies the banner/sound values when matching keys are created or changed.
-- Logs to the Windows Application Event Log using source `YourPhoneHideBannerService`.
+- Creates `YourPhoneHideBanner.ini` beside the executable if missing.
+- Logs to `YourPhoneHideBanner.log` beside the executable by default. Set `[Settings] LoggingEnabled=0` in the local INI to disable file logging.
 
 ## Generated Files
 
 - `build\YourPhoneHideBanner.exe`
+- `build\YourPhoneHideBanner.ini`
+- `build\YourPhoneHideBanner.log`
 
 Generated build output is ignored by git.
 

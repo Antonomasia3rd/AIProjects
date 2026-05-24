@@ -39,6 +39,8 @@ Pass a config path:
 .\build\DiscordRPC.exe .\config.ini
 ```
 
+Without an explicit config path, the app uses `DiscordRPC.ini` beside `DiscordRPC.exe`. If the executable is renamed, the default INI/log names follow the renamed executable.
+
 Run without the tray icon:
 
 ```powershell
@@ -71,8 +73,8 @@ Include full IPC/Gateway JSON for diagnostics:
 
 ## Preserved Python Features
 
-- Reads the existing `config.ini` format.
-- Creates missing `config.ini` entries on startup while preserving existing user values.
+- Reads the existing INI format.
+- Creates missing INI entries on startup while preserving existing user values.
 - Connects through local Discord IPC by default.
 - Supports optional Gateway fallback and Auto mode.
 - Shows the foreground window title in `details` when enabled.
@@ -109,13 +111,14 @@ Include full IPC/Gateway JSON for diagnostics:
 
 Most tray/menu/dialog labels are configurable in the `[strings]` section, including `ok`, `cancel`, `current_value_format`, `change_menu_format`, and category names.
 
-If Discord reports `Invalid Client ID`, update `[general] client_id` in `config.ini` with an existing application ID.
+If Discord reports `Invalid Client ID`, update `[general] client_id` in the local INI with an existing application ID.
 
 ## Generated Files
 
 - `build\DiscordRPC.exe`
-- `config.ini` next to the selected config path/current directory
-- optional log file controlled by `[app] log_path`
+- `<exe folder>\<exe name>.ini`
+- `<exe folder>\<exe name>.log`
+- optional log file controlled by `[app] log_path`; relative log paths resolve beside the executable
 
 Generated binaries, runtime configs, and logs should not be committed.
 

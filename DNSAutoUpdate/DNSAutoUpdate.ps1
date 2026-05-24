@@ -4,7 +4,7 @@ param(
     [string[]]$SubFolder,                         # no default here
     [string[]]$ManagedRecordName = @(),
     [switch]$NoRootRecord,
-    [string]$LogFile = ".\DNSAutoUpdate.log",
+    [string]$LogFile,
     [ValidateRange(0, 1048576)]
     [int]$MaxLogMegabytes = 10,
     [ValidateRange(0, 100)]
@@ -20,6 +20,13 @@ param(
 # Apply default **only if the user did not provide -SubFolder**
 if (-not $PSBoundParameters.ContainsKey('SubFolder')) {
     $SubFolder = @("")
+}
+
+$defaultLogFile = Join-Path $PSScriptRoot "$([IO.Path]::GetFileNameWithoutExtension($PSCommandPath)).log"
+if (-not $PSBoundParameters.ContainsKey('LogFile') -or [string]::IsNullOrWhiteSpace($LogFile)) {
+    $LogFile = $defaultLogFile
+} elseif (-not [IO.Path]::IsPathRooted($LogFile)) {
+    $LogFile = Join-Path $PSScriptRoot $LogFile
 }
 
 function Write-Log {

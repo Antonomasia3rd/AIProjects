@@ -15,8 +15,31 @@ param(
     [long]$JpegQuality = 80,
 
     [ValidateRange(1, 1024)]
-    [long]$MaxCanvasMegapixels = 100
+    [long]$MaxCanvasMegapixels = 100,
+
+    [string]$LogFile
 )
+
+$defaultLogFile = Join-Path $PSScriptRoot "$([IO.Path]::GetFileNameWithoutExtension($PSCommandPath)).log"
+if (-not $PSBoundParameters.ContainsKey('LogFile') -or [string]::IsNullOrWhiteSpace($LogFile)) {
+    $LogFile = $defaultLogFile
+} elseif (-not [IO.Path]::IsPathRooted($LogFile)) {
+    $LogFile = Join-Path $PSScriptRoot $LogFile
+}
+
+function Write-Status {
+    param([Parameter(Mandatory = $true)][string]$Message)
+
+    Write-Host $Message
+    try {
+        $logDir = Split-Path -Parent $LogFile
+        if ($logDir) {
+            New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+        }
+        Add-Content -LiteralPath $LogFile -Value "$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))  $Message"
+    } catch {
+    }
+}
 
 Add-Type -AssemblyName System.Drawing
 
@@ -44,7 +67,7 @@ finally {
         $probe.Dispose()
     }
 }
-Write-Host "Detected photo size: ${photoW}x${photoH}, grid: ${Cols}x${rows}"
+Write-Status "Detected photo size: ${photoW}x${photoH}, grid: ${Cols}x${rows}"
 
 # --- BUILD CANVAS ---
 $canvasWidth = [int64]$Cols * [int64]$photoW
@@ -71,7 +94,7 @@ try {
             $x = ($i % $Cols) * $photoW
             $y = [math]::Floor($i / $Cols) * $photoH
             $g.DrawImage($img, $x, $y, $photoW, $photoH)
-            Write-Host "[$($i+1)/$($files.Count)] $($files[$i].Name)"
+            Write-Status "[$($i+1)/$($files.Count)] $($files[$i].Name)"
         }
         finally {
             if ($img -ne $null) {
@@ -108,4 +131,4 @@ finally {
     }
 }
 
-Write-Host "Done! Saved to $OutputFile"
+Write-Status "Done! Saved to $OutputFile"

@@ -2,7 +2,7 @@
 
 Small console experiment that blinks the physical Caps Lock LED while Caps Lock is off.
 
-It creates a per-process temporary DOS device mapping to `\Device\KeyboardClass0`, opens the keyboard class device, and toggles the Caps Lock indicator every 500 ms. Ctrl+C exits through a cleanup path that closes the device handle and removes the DOS device mapping.
+It creates a per-process temporary DOS device mapping to `\Device\KeyboardClass0`, opens the keyboard class device, and toggles the Caps Lock indicator every 500 ms by default. Ctrl+C exits through a cleanup path that closes the device handle and removes the DOS device mapping.
 
 ## Requirements
 
@@ -28,13 +28,17 @@ build\capsblink.exe
 
 Stop with Ctrl+C so the cleanup handler can close the device handle and remove the temporary DOS device mapping.
 
+On first launch, the app creates `capsblink.ini` and `capsblink.log` beside the executable. If the executable is renamed, the default INI/log names follow the renamed executable.
+
 ## Limitations
 
-- The target keyboard class device is hardcoded to `KeyboardClass0`; systems with different keyboard device ordering may need code changes.
+- The default keyboard class device is `KeyboardClass0`; systems with different keyboard device ordering can set `[Settings] KeyboardTargetPath` in the local INI.
 - Direct keyboard class access may fail under normal user permissions or different keyboard drivers.
 
 ## Generated Files
 
 - `build\capsblink.exe`
+- `build\capsblink.ini`
+- `build\capsblink.log`
 
 Generated build output is ignored by git.

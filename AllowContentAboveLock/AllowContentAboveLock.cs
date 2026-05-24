@@ -45,6 +45,7 @@ public class AllowContentService : ServiceBase
     {
         running = true;
         stopEvent.Reset();
+        EnsureIniFile();
         Log("Service started");
 
         Thread hkuWatcher = new Thread(WatchHKU);
@@ -363,34 +364,119 @@ public class AllowContentService : ServiceBase
     private void Log(string message)
     {
         string source = "AllowContentAboveLockService";
-
         try
         {
-            if (!EventLog.SourceExists(source))
+            EnsureIniFile();
+            if (!ReadIniBool("Settings", "LoggingEnabled", true))
             {
-                EventLog.CreateEventSource(source, "Application");
+                return;
             }
 
-            EventLog.WriteEntry(source, message);
-        }
-        catch (Exception ex)
-        {
-            FallbackLog(source, message + " (EventLog write failed: " + ex.Message + ")");
-        }
-    }
-
-    private void FallbackLog(string source, string message)
-    {
-        try
-        {
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "AIProjects");
-            Directory.CreateDirectory(dir);
-            string path = Path.Combine(dir, source + ".log");
+            string path = ModuleLocalPath(".log", source);
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
             File.AppendAllText(path, DateTime.UtcNow.ToString("o") + "  " + message + Environment.NewLine);
         }
         catch
         {
         }
+    }
+
+    private void EnsureIniFile()
+    {
+        try
+        {
+            string path = ModuleLocalPath(".ini", "AllowContentAboveLockService");
+            if (File.Exists(path))
+            {
+                return;
+            }
+
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            File.WriteAllText(path, "[Settings]" + Environment.NewLine + "LoggingEnabled=1" + Environment.NewLine);
+        }
+        catch
+        {
+        }
+    }
+
+    private bool ReadIniBool(string section, string key, bool fallback)
+    {
+        try
+        {
+            string path = ModuleLocalPath(".ini", "AllowContentAboveLockService");
+            if (!File.Exists(path))
+            {
+                return fallback;
+            }
+
+            string currentSection = "";
+            foreach (string rawLine in File.ReadAllLines(path))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith(";") || line.StartsWith("#"))
+                {
+                    continue;
+                }
+                if (line.StartsWith("[") && line.EndsWith("]"))
+                {
+                    currentSection = line.Substring(1, line.Length - 2).Trim();
+                    continue;
+                }
+                if (!currentSection.Equals(section, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                int equals = line.IndexOf('=');
+                if (equals <= 0)
+                {
+                    continue;
+                }
+
+                string name = line.Substring(0, equals).Trim();
+                if (!name.Equals(key, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string value = line.Substring(equals + 1).Trim();
+                return value == "1" ||
+                    value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("on", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        catch
+        {
+        }
+
+        return fallback;
+    }
+
+    private string ModuleLocalPath(string extension, string fallbackBaseName)
+    {
+        string module = System.Reflection.Assembly.GetExecutingAssembly().Location;
+        string dir = Path.GetDirectoryName(module);
+        if (string.IsNullOrEmpty(dir))
+        {
+            dir = AppDomain.CurrentDomain.BaseDirectory;
+        }
+
+        string name = Path.GetFileNameWithoutExtension(module);
+        if (string.IsNullOrEmpty(name))
+        {
+            name = fallbackBaseName;
+        }
+
+        return Path.Combine(dir, name + extension);
     }
 
     public static void Main()

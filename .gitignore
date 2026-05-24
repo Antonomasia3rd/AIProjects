@@ -1,5 +1,7 @@
 # User-local and generated files
 *.log
+*.ini
+!*.example.ini
 *.tmp
 *.bak
 *.user

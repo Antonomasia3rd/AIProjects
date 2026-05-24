@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$NewUser,
 
-    [string]$BackupDirectory = ".\TaskSchedulerMigrationBackup",
+    [string]$BackupDirectory,
 
     [string]$TaskPath,
 
@@ -17,6 +17,12 @@ Write-Host "=== Task Migration START (SID -> User) ===" -ForegroundColor Cyan
 Write-Host "Old SID : $OldSID"
 Write-Host "New User: $NewUser"
 Write-Host ""
+
+if (-not $PSBoundParameters.ContainsKey('BackupDirectory') -or [string]::IsNullOrWhiteSpace($BackupDirectory)) {
+    $BackupDirectory = Join-Path $PSScriptRoot 'TaskSchedulerMigrationBackup'
+} elseif (-not [IO.Path]::IsPathRooted($BackupDirectory)) {
+    $BackupDirectory = Join-Path $PSScriptRoot $BackupDirectory
+}
 
 function ConvertTo-SafeFileName {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -129,11 +135,7 @@ foreach ($task in $Tasks) {
             continue
         }
 
-        $backupRoot = if ([IO.Path]::IsPathRooted($BackupDirectory)) {
-            $BackupDirectory
-        } else {
-            Join-Path (Resolve-Path -LiteralPath ".") $BackupDirectory
-        }
+        $backupRoot = $BackupDirectory
         New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
         $safeName = ConvertTo-SafeFileName -Name ($fullName.TrimStart('\') -replace '\\', '_')
         $backupPath = Join-Path $backupRoot "$safeName.xml"

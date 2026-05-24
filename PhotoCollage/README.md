@@ -28,6 +28,7 @@ powershell -ExecutionPolicy Bypass -File .\PhotoCollage.ps1 -InputFolder "C:\Pho
 - `-Cols`: number of columns. Default: `5`.
 - `-MaxImages`: maximum number of images to include. Default: `25`.
 - `-JpegQuality`: JPEG quality from 1 to 100 when writing `.jpg` or `.jpeg`. Default: `80`.
+- `-LogFile`: optional log path. Default: `PhotoCollage.log` beside `PhotoCollage.ps1`. Relative paths resolve from the script directory.
 
 ## Behavior And Limitations
 
@@ -39,4 +40,4 @@ powershell -ExecutionPolicy Bypass -File .\PhotoCollage.ps1 -InputFolder "C:\Pho
 
 ## Generated Files
 
-The script creates only the requested `-OutputFile`.
+The script creates the requested `-OutputFile` and writes `PhotoCollage.log` beside the script by default.

@@ -302,6 +302,11 @@ class Program
     static string errorLogPath = null;
     static List<string> errorActions = new List<string>();
     static string startupArguments = "";
+    static readonly string executablePath = Assembly.GetEntryAssembly().Location;
+    static readonly string executableDirectory = GetExecutableDirectory();
+    static readonly string executableBaseName = GetExecutableBaseName();
+    static readonly string iniPath = Path.Combine(executableDirectory, executableBaseName + ".ini");
+    static readonly string defaultLogPath = Path.Combine(executableDirectory, executableBaseName + ".log");
 
     class DeviceEvent
     {
@@ -447,6 +452,99 @@ class Program
             Thread.Sleep(toSleep);
             waited += toSleep;
         }
+    }
+
+    static string GetExecutableDirectory()
+    {
+        string dir = Path.GetDirectoryName(executablePath);
+        return string.IsNullOrEmpty(dir) ? AppDomain.CurrentDomain.BaseDirectory : dir;
+    }
+
+    static string GetExecutableBaseName()
+    {
+        string name = Path.GetFileNameWithoutExtension(executablePath);
+        return string.IsNullOrEmpty(name) ? "asusblink" : name;
+    }
+
+    static void EnsureIniFile()
+    {
+        if (File.Exists(iniPath))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(executableDirectory);
+        File.WriteAllText(iniPath,
+            "[Options]" + Environment.NewLine +
+            "; Command-line option names can be used here without the leading --." + Environment.NewLine +
+            "; Example: error-log=off" + Environment.NewLine +
+            "; Example: mic-state=0,1" + Environment.NewLine +
+            "error-log=" + Path.GetFileName(defaultLogPath) + Environment.NewLine,
+            Encoding.UTF8);
+    }
+
+    static Dictionary<string, string> LoadIniOptions()
+    {
+        EnsureIniFile();
+        var dict = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
+        string section = "";
+        foreach (string rawLine in File.ReadAllLines(iniPath))
+        {
+            string line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith(";") || line.StartsWith("#"))
+            {
+                continue;
+            }
+            if (line.StartsWith("[") && line.EndsWith("]"))
+            {
+                section = line.Substring(1, line.Length - 2).Trim();
+                continue;
+            }
+            if (!section.Equals("Options", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            int equals = line.IndexOf('=');
+            if (equals <= 0)
+            {
+                continue;
+            }
+
+            string key = line.Substring(0, equals).Trim();
+            string value = line.Substring(equals + 1).Trim();
+            if (key.Length > 0 && value.Length > 0)
+            {
+                dict[key] = value;
+            }
+        }
+        return dict;
+    }
+
+    static string ResolveModuleLocalPath(string path)
+    {
+        if (string.IsNullOrEmpty(path) || path == "off")
+        {
+            return path;
+        }
+        return Path.IsPathRooted(path) ? path : Path.Combine(executableDirectory, path);
+    }
+
+    static bool OptionEnabled(Dictionary<string, string> opts, string key)
+    {
+        string value;
+        if (!opts.TryGetValue(key, out value))
+        {
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+        return value == "1" ||
+            value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("on", StringComparison.OrdinalIgnoreCase);
     }
 
     static Dictionary<string, string> ParseArgs(string[] args)
@@ -681,7 +779,8 @@ class Program
                     SaveFileDialog sd = new SaveFileDialog();
                     sd.Title = "Select log file path (or Cancel to disable logging)";
                     sd.Filter = "Log files (*.log)|*.log|All files (*.*)|*.*";
-                    sd.FileName = "asus_led_controller.log";
+                    sd.InitialDirectory = executableDirectory;
+                    sd.FileName = Path.GetFileName(defaultLogPath);
                     DialogResult dr = sd.ShowDialog();
                     if (dr == DialogResult.OK)
                     {
@@ -865,13 +964,13 @@ class Program
         AppDomain.CurrentDomain.ProcessExit += (sender, e) => CloseAcpi();
 
         startupArguments = BuildShortcutArguments(args);
-        if (args.Length == 0)
-        {
-            PrintHelp();
-            return;
-        }
 
-        var opts = ParseArgs(args);
+        errorLogPath = defaultLogPath;
+        var opts = LoadIniOptions();
+        foreach (var kv in ParseArgs(args))
+        {
+            opts[kv.Key] = kv.Value;
+        }
 
         string er;
         if (opts.TryGetValue("error-retry", out er))
@@ -884,7 +983,7 @@ class Program
         {
             if (!string.IsNullOrEmpty(el))
             {
-                errorLogPath = el == "off" ? "off" : el;
+                errorLogPath = el == "off" ? "off" : ResolveModuleLocalPath(el);
             }
         }
         string ea;
@@ -903,7 +1002,7 @@ class Program
             return;
         }
 
-        bool noTray = opts.ContainsKey("no-tray");
+        bool noTray = OptionEnabled(opts, "no-tray");
 
         // Build events (same as before)
         var micEvent = BuildEventFromOptions("mic", opts);
