@@ -15,8 +15,8 @@ This is a C# replacement for the experimental Python `DiscordRPC.py`.
 
 From this folder:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+```cmd
+build.cmd
 ```
 
 Output:
@@ -102,7 +102,8 @@ Include full IPC/Gateway JSON for diagnostics:
 - On first launch, setup asks for Discord Application ID, preferred transport, and dynamic/static presence mode.
 - `[general] transport_mode` accepts `ipc`, `gateway`, or `auto`.
 - `[general] client_id` must be a valid Discord application ID.
-- `[general] token` can contain the Discord token directly. `[general] token_env` or `[general] token = env:VARIABLE_NAME` can point to an environment variable instead.
+- Direct Discord tokens entered in setup are saved as `[general] token_protected` with current-user DPAPI. Existing plaintext `[general] token` values are migrated and cleared on normal startup.
+- `[general] token_env` or `[general] token = env:VARIABLE_NAME` can point to an environment variable instead. DPAPI-protected tokens can only be decrypted by the same Windows user profile on the same machine.
 - `[app] show_menu_as_dropdown` switches between dropdown category menus and a flat sectioned menu.
 - `[app] single_instance` prevents two persistent instances from fighting over the same Discord presence.
 - `[app] file_logging_enabled` and `[app] log_path` control runtime logs.

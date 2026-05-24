@@ -5,7 +5,10 @@ $buildDir = Join-Path $root 'build'
 $manifestTemplate = Join-Path $root 'package\AppxManifest.xml'
 $manifest = Join-Path $buildDir 'AppxManifest.xml'
 
-& (Join-Path $root 'build.ps1')
+& $env:ComSpec /d /c "`"$root\build.cmd`""
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
 & (Join-Path $root 'make-assets.ps1')
 Copy-Item -LiteralPath $manifestTemplate -Destination $manifest -Force
 

@@ -43,6 +43,9 @@ NowPlayingTile/build/
 # Runtime-only build folder in this project
 DNSAutoUpdate/build/
 
+# TaskSchedulerMigration safety backups
+TaskSchedulerMigration/TaskSchedulerMigrationBackup/
+
 # Local inventories and private runtime configuration
 LOCAL_TOOL_INVENTORY.md
 SecureDesktopLauncher/SecureDesktopLauncher.ini

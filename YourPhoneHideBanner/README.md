@@ -50,7 +50,7 @@ sc.exe delete YourPhoneHideBannerService
 ## Runtime Behavior
 
 - Watches `HKEY_USERS` for newly loaded user hives.
-- Attaches to loaded `S-1-5-21-*` user hives.
+- Attaches to loaded domain/local `S-1-5-21-*` and Azure AD `S-1-12-1-*` user hives.
 - Watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for child-key and value changes.
 - Reapplies the banner/sound values when matching keys are created or changed.
 - Creates `YourPhoneHideBanner.ini` beside the executable if missing.

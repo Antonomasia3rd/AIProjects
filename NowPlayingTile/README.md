@@ -8,13 +8,13 @@ It is intended for Windows 10 Start, including ExplorerPatcher's Windows 10 Star
 
 - Windows 10, or Windows 11 with a Start implementation that still displays live tiles.
 - .NET Framework compiler at `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`.
-- PowerShell for build/register helper scripts.
+- PowerShell for Appx register/run helper scripts.
 - Developer Mode or sideloading support for loose Appx registration.
 
 ## Build
 
-```powershell
-pwsh .\build.ps1
+```cmd
+build.cmd
 ```
 
 Output:

@@ -99,6 +99,7 @@ The deskband asks Explorer to resize when status text changes, so the toolbar wi
 - HTTP responses are capped at 1 MiB before parsing so Explorer does not retain an unexpectedly large API body.
 - Settings are copied under a lock before refresh workers use them, so changing config/asset directories from the menu cannot race with a background refresh.
 - If no icon resource is found, the deskband draws a built-in fallback marker.
+- HoYoLAB request signing, headers, and response fields intentionally mirror the original Real-Time Notes reference copy under `references\genshin-real-time-notes-0.0.8`. Treat changes there as compatibility updates, not generic API refactors.
 
 ## Settings
 
