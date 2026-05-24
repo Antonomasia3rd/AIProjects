@@ -499,7 +499,10 @@ struct WinrtApartmentGuard
     ~WinrtApartmentGuard()
     {
         if (initialized)
+        {
+            winrt::clear_factory_cache();
             winrt::uninit_apartment();
+        }
     }
 
     WinrtApartmentGuard(const WinrtApartmentGuard&) = delete;
