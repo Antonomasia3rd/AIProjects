@@ -9,6 +9,7 @@ enum {
     ID_TRAYICON,
     ID_CONSOLE,
     ID_LOG,
+    ID_EXPERIMENTAL_LIVE_TILE_UPDATE,
     ID_LOGFILE,
     ID_LOG_RENAME,
     ID_LOG_OPEN,
@@ -311,6 +312,7 @@ void Menu(HWND h)
     addTo(generalMenu, ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
     addTo(generalMenu, ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);
     addTo(generalMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
+    addTo(generalMenu, ID_EXPERIMENTAL_LIVE_TILE_UPDATE, g_ui.experimentalLiveTileUpdate.c_str(), UseExperimentalLiveTileUpdate());
     addTo(generalMenu, ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
     addTo(generalMenu, ID_GENERATE_STARTUP_CHANGED_ONLY, g_ui.generateOnStartupOnlyWhenChanged.c_str(), g_generateOnStartupOnlyWhenChanged, g_generateOnStartup);
     addTo(generalMenu, ID_HIDE_DISABLED, g_ui.hideDisabledEntries.c_str(), g_hideDisabled);
@@ -544,6 +546,16 @@ void Menu(HWND h)
         bool v = !UsePowerShell();
         IniWrite(L"Settings", L"UsePowerShell", v ? L"1" : L"0");
         Log(g_ui.usePowerShellSummary.c_str(), v, v ? g_ui.powerShellEnabledMode.c_str() : g_ui.comPreferredMode.c_str());
+    }
+    break;
+
+    case ID_EXPERIMENTAL_LIVE_TILE_UPDATE:
+    {
+        bool v = !g_experimentalLiveTileUpdate.load();
+        g_experimentalLiveTileUpdate = v;
+        IniWrite(L"Settings", L"ExperimentalLiveTileUpdate", v ? L"1" : L"0");
+        Log(g_ui.liveTileUpdateSummary.c_str(), StateEnabled(v));
+        QueueLiveTileModeReregistration();
     }
     break;
 

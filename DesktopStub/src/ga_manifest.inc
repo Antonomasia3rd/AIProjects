@@ -446,7 +446,7 @@ static std::wstring EffectiveManifestDescription()
 
 static std::wstring EffectiveManifestExecutable()
 {
-    return ManifestSettingValidated(L"Executable", L"rundll32.exe", L"ManifestExecutable", IsManifestExecutableValue);
+    return ManifestSettingValidated(L"Executable", L"GenerateAssets.exe", L"ManifestExecutable", IsManifestExecutableValue);
 }
 
 static std::wstring EffectiveManifestApplicationId()

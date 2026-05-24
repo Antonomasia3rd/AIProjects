@@ -56,6 +56,7 @@ On first launch the app creates `GenerateAssets.ini` next to the executable. The
 - asset generation targets and DPI scales;
 - manifest settings;
 - registration mode and fallback behavior;
+- experimental Live Tile update mode;
 - advanced timing/error options;
 - startup/cleanup actions.
 
@@ -65,6 +66,7 @@ On first launch the app creates `GenerateAssets.ini` next to the executable. The
 - Supports selected DPI scales plus automatic current-DPI scale generation.
 - Detects wallpaper through configurable methods, including slideshow-compatible methods.
 - Uses COM Appx registration by default with optional PowerShell-only mode and fallback behavior.
+- Can optionally try an experimental Live Tile notification update instead of re-registering after each asset regeneration.
 - Can dynamically create `AppxManifest.xml` from configurable manifest defaults.
 - Supports quoted INI values and inline comments.
 - Keeps detailed logs and exposes registration output from the tray.
@@ -86,6 +88,7 @@ On first launch the app creates `GenerateAssets.ini` next to the executable. The
 - `ga_image.inc`: GDI+ image generation and PNG saving.
 - `ga_registration.inc`: Appx registration and PowerShell fallback handling.
 - `ga_generation.inc`: asset generation, polling, and shutdown coordination.
+- `ga_live_tile.inc`: experimental Live Tile notification update handling.
 - `ga_tray.inc`: tray menu and tray notifications.
 - `ga_app.inc`: window procedure and application startup/shutdown.
 
@@ -99,6 +102,16 @@ Generated/runtime files live under `DesktopStub\build` and are ignored by git:
 - `AppxManifest.xml`
 - `Assets\*`
 - compiler object files under `obj\`
+
+## Experimental Live Tile Update
+
+By default, each successful asset regeneration refreshes the Start entry by re-registering `AppxManifest.xml`.
+
+Set `ExperimentalLiveTileUpdate=1` in `GenerateAssets.ini`, or enable **Experimental Live Tile update** from the tray menu, to try updating the tile through `Windows.UI.Notifications.TileUpdateManager` instead. New default manifests point at `GenerateAssets.exe`, so launching the registered `shell:AppsFolder\<PackageFamilyName>!App` entry starts the updater with package identity. Existing manifests and explicit `Manifest.Executable` settings are not rewritten; keep `rundll32.exe` if you want the tile launch to do nothing. Direct `GenerateAssets.exe` launches usually do not have package identity, so the app logs a clear failure instead of falling back silently. The registration path remains the default.
+
+In this mode, static manifest logo assets are treated as disabled so stale registered assets are not refreshed with wallpaper images. If **Generate Desktop Icon for disabled entries** is enabled, those static assets become desktop-icon placeholders; otherwise they are deleted. The Live Tile notification itself uses separate generated files under `Assets\Live*.png`.
+
+Changing the **Experimental Live Tile update** tray checkbox queues one asset regeneration and one Appx re-registration before normal Live Tile updates resume. This refreshes Windows' cached static assets after switching modes.
 
 ## Release
 

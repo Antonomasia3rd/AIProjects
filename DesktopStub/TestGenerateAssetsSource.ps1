@@ -102,6 +102,9 @@ function Assert-UiStringWired {
 $generation = Read-Source 'src\ga_generation.inc'
 $app = Read-Source 'src\ga_app.inc'
 $registration = Read-Source 'src\ga_registration.inc'
+$liveTile = Read-Source 'src\ga_live_tile.inc'
+$manifest = Read-Source 'src\ga_manifest.inc'
+$tray = Read-Source 'src\ga_tray.inc'
 $defaults = Read-Source 'src\ga_config_defaults.inc'
 $uiSources = Join-Source @(
     'src\ga_ui_logging.inc',
@@ -146,13 +149,87 @@ $sourceChecks = @(
         -SourceName 'src\ga_app.inc' `
         -SourceText $app `
         -Pattern '(?s)ConsumePreviousForceShutdownCleanupWarning\(previousForceShutdownCleanupWarning\).*QueueStartupWarning\(previousForceShutdownCleanupWarning\).*MessageBoxW\(' `
-        -Failure 'startup must warn the user when a previous force shutdown skipped cleanup')
+        -Failure 'startup must warn the user when a previous force shutdown skipped cleanup'),
+
+    (New-SourceCheck `
+        -Name 'Experimental Live Tile mode defaults off' `
+        -SourceName 'src\ga_config_defaults.inc' `
+        -SourceText $defaults `
+        -Pattern '\{L"Settings",\s*L"ExperimentalLiveTileUpdate",\s*L"0"\}' `
+        -Failure 'experimental Live Tile update must remain opt-in by default'),
+
+    (New-SourceCheck `
+        -Name 'Generated manifest launches GenerateAssets by default' `
+        -SourceName 'src\ga_config_defaults.inc' `
+        -SourceText $defaults `
+        -Pattern '\{L"Manifest",\s*L"Executable",\s*L"GenerateAssets\.exe"\}' `
+        -Failure 'manifest executable default must point at GenerateAssets.exe so packaged launches have identity'),
+
+    (New-SourceCheck `
+        -Name 'Manifest executable fallback launches GenerateAssets' `
+        -SourceName 'src\ga_manifest.inc' `
+        -SourceText $manifest `
+        -Pattern 'ManifestSettingValidated\(L"Executable",\s*L"GenerateAssets\.exe",\s*L"ManifestExecutable",\s*IsManifestExecutableValue\)' `
+        -Failure 'manifest executable fallback must point at GenerateAssets.exe'),
+
+    (New-SourceCheck `
+        -Name 'Experimental Live Tile mode skips AppX registration path' `
+        -SourceName 'src\ga_generation.inc' `
+        -SourceText $generation `
+        -Pattern '(?s)useLiveTileUpdateForThisRun.*Appx_Update_LiveTile\(exeDir,\s*manifestInfo,\s*appUpdateFailureMessage\).*else\s*\{.*RegisterAppxManifest\(manifestPath,\s*appUpdateFailureMessage\)' `
+        -Failure 'experimental Live Tile mode must call the tile updater instead of re-registering the AppX manifest'),
+
+    (New-SourceCheck `
+        -Name 'Live Tile checkbox queues one-time re-registration' `
+        -SourceName 'src\ga_tray.inc' `
+        -SourceText $tray `
+        -Pattern '(?s)ID_EXPERIMENTAL_LIVE_TILE_UPDATE.*IniWrite\(L"Settings",\s*L"ExperimentalLiveTileUpdate".*QueueLiveTileModeReregistration\(\)' `
+        -Failure 'changing the Live Tile checkbox must queue a one-time AppX re-registration'),
+
+    (New-SourceCheck `
+        -Name 'Live Tile mode change forces registration before Live Tile updates' `
+        -SourceName 'src\ga_generation.inc' `
+        -SourceText $generation `
+        -Pattern '(?s)LiveTileModeReregistrationPending\(\).*StartupGenerationCanSkip.*LiveTileModeReregistrationPending\(\).*return false.*liveTileModeReregistrationPending.*useLiveTileUpdateForThisRun\s*=\s*liveTileUpdateMode\s*&&\s*!liveTileModeReregistrationPending.*RegisterAppxManifest\(manifestPath,\s*appUpdateFailureMessage\).*SetLiveTileModeReregistrationPending\(false\)' `
+        -Failure 'Live Tile setting changes must bypass startup skip, force one registration, and clear the pending flag after registration succeeds'),
+
+    (New-SourceCheck `
+        -Name 'Live Tile update requires package identity' `
+        -SourceName 'src\ga_live_tile.inc' `
+        -SourceText $liveTile `
+        -Pattern '(?s)GetCurrentPackageFullName.*liveTileUpdateRequiresIdentity' `
+        -Failure 'Live Tile updater must detect missing package identity and report a clear failure'),
+
+    (New-SourceCheck `
+        -Name 'Live Tile mode disables static wallpaper manifest assets' `
+        -SourceName 'src\ga_generation.inc' `
+        -SourceText $generation `
+        -Pattern '(?s)staticWallpaperAssetEnabled\s*=\s*!liveTileUpdateMode\s*&&\s*IniReadI\(L"Assets",\s*t\.name,\s*0\)\s*!=\s*0.*g_deleteDisabledAssets\s*\|\|\s*liveTileUpdateMode' `
+        -Failure 'Live Tile mode must treat static manifest assets as disabled and remove stale files when desktop-icon fallback is off'),
+
+    (New-SourceCheck `
+        -Name 'Live Tile mode writes dedicated notification assets' `
+        -SourceName 'src\ga_generation.inc' `
+        -SourceText $generation `
+        -Pattern '(?s)g_liveTileAssets.*Assets\\\\LiveMediumTile\.png.*Assets\\\\LiveWideTile\.png.*Assets\\\\LiveLargeTile\.png.*if \(liveTileUpdateMode\).*for \(const auto& t : g_liveTileAssets\)' `
+        -Failure 'Live Tile mode must write dedicated Live*.png assets instead of relying on manifest logo assets'),
+
+    (New-SourceCheck `
+        -Name 'Live Tile XML uses dedicated notification assets' `
+        -SourceName 'src\ga_live_tile.inc' `
+        -SourceText $liveTile `
+        -Pattern '(?s)BuildLiveTileXml.*for \(const auto& asset : g_liveTileAssets\).*LiveTileAssetUriIfValid\(exeDir,\s*asset\.file\).*AppendLiveTileImageBinding\(xml,\s*asset\.binding' `
+        -Failure 'Live Tile XML must reference the dedicated Live*.png assets')
 )
 
 $uiStringKeys = @(
     'ComRegistrationAsyncError',
     'ComRegistrationDeploymentError',
-    'ComRegistrationDeploymentMessage'
+    'ComRegistrationDeploymentMessage',
+    'LiveTileUpdateSummary',
+    'LiveTileUpdateException',
+    'LiveTileUpdateMessage',
+    'LiveTilePackageIdentity'
 )
 
 if ($ListChecks) {

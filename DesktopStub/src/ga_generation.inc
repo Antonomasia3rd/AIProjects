@@ -11,6 +11,13 @@ static const Tile g_tiles[] = {
     {L"LargeTile",       L"Assets\\LargeTile.png",310,310},
 };
 
+struct LiveTileAsset { const wchar_t* name; const wchar_t* file; int w,h; const wchar_t* binding; };
+static const LiveTileAsset g_liveTileAssets[] = {
+    {L"LiveMediumTile", L"Assets\\LiveMediumTile.png",150,150,L"TileMedium"},
+    {L"LiveWideTile",   L"Assets\\LiveWideTile.png",310,150,L"TileWide"},
+    {L"LiveLargeTile",  L"Assets\\LiveLargeTile.png",310,310,L"TileLarge"},
+};
+
 struct GenerationCompletionRecord
 {
     unsigned long long id = 0;
@@ -23,6 +30,10 @@ static std::vector<GenerationCompletionRecord> g_generationCompletions;
 static unsigned long long g_generationQueuedId = 0;
 
 static void WakePollThread();
+static bool Appx_Update_LiveTile(
+    const std::wstring& exeDir,
+    const ManifestDisplayInfo& manifestInfo,
+    std::wstring& failureMessage);
 
 static std::wstring ManifestAssetPathForTile(const ManifestDisplayInfo& info, const Tile& tile)
 {
@@ -256,6 +267,47 @@ static bool StartupGeneratedAssetsPresent(const std::wstring& exeDir)
 {
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
     std::vector<int> scales = GetConfiguredScales();
+
+    if (UseExperimentalLiveTileUpdate())
+    {
+        for (const auto& t : g_tiles)
+        {
+            std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
+            std::wstring basePath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
+
+            if (!g_generateDesktopIconForDisabledEntries)
+            {
+                if (PathFileExistsW(basePath.c_str()))
+                    return false;
+                for (int scale : SUPPORTED_ASSET_SCALES)
+                {
+                    if (PathFileExistsW(ScaleAssetPath(basePath, scale).c_str()))
+                        return false;
+                }
+                continue;
+            }
+
+            if (!IsValidGeneratedPng(basePath))
+                return false;
+
+            for (int scale : scales)
+            {
+                std::wstring scaledPath = ScaleAssetPath(basePath, scale);
+                if (!IsValidGeneratedPng(scaledPath))
+                    return false;
+            }
+        }
+
+        for (const auto& asset : g_liveTileAssets)
+        {
+            std::wstring path = ResolveManifestAssetPath(exeDir, asset.file);
+            if (!IsValidGeneratedPng(path))
+                return false;
+        }
+
+        return true;
+    }
+
     for (const auto& t : g_tiles)
     {
         std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
@@ -334,6 +386,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     state += L"method=" + std::wstring(WallpaperDetectionMethodName(CurrentWallpaperDetectionMethod())) + L";";
     state += L"methodFallback=" + IntToWString(g_wallpaperDetectionFallbackOnInvalid ? 1 : 0) + L";";
     state += L"usePowerShell=" + IntToWString(UsePowerShell() ? 1 : 0) + L";";
+    state += L"experimentalLiveTileUpdate=" + IntToWString(UseExperimentalLiveTileUpdate() ? 1 : 0) + L";";
     state += L"disableFitting=" + IntToWString(g_disableFitting ? 1 : 0) + L";";
     state += L"fit=" + IntToWString(static_cast<int>(g_disableFitting ? FitMode::Fill : GetWallpaperFit())) + L";";
     state += L"desktopIconForDisabled=" + IntToWString(g_generateDesktopIconForDisabledEntries ? 1 : 0) + L";";
@@ -361,9 +414,21 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     return Hex64(hash);
 }
 
+static bool LiveTileModeReregistrationPending()
+{
+    return IniReadI(L"State", L"LiveTileModeReregistrationPending", 0) != 0;
+}
+
+static void SetLiveTileModeReregistrationPending(bool pending)
+{
+    IniWrite(L"State", L"LiveTileModeReregistrationPending", pending ? L"1" : L"0");
+}
+
 static bool StartupGenerationCanSkip(const std::wstring& wallpaperPath)
 {
     if (!g_generateOnStartupOnlyWhenChanged)
+        return false;
+    if (LiveTileModeReregistrationPending())
         return false;
 
     std::wstring last = IniReadS(L"State", L"LastSuccessfulGenerationKey", L"");
@@ -378,6 +443,54 @@ static void StoreSuccessfulGenerationState(const std::wstring& wallpaperPath)
     std::wstring key = BuildGenerationStateKey(wallpaperPath);
     if (!key.empty())
         IniWrite(L"State", L"LastSuccessfulGenerationKey", key.c_str());
+}
+
+static bool RegisterAppxManifest(const std::wstring& manifestPath, std::wstring& failureMessage)
+{
+    failureMessage.clear();
+
+    auto setPowerShellFailureMessage = [&]()
+    {
+        std::lock_guard<std::mutex> lk(g_psMutex);
+        failureMessage = g_psMsg.empty() ? g_ui.powerShellRegistrationFailed : g_psMsg;
+    };
+
+    std::wstring unresolvedReason;
+    if (RegistrationBlockedByUnresolved(unresolvedReason))
+    {
+        Log(g_ui.registrationBlockedUnresolved.c_str(), unresolvedReason.c_str());
+        failureMessage = unresolvedReason;
+        return false;
+    }
+
+    if (!UsePowerShell())
+    {
+        AppxRegistrationResult comResult = Appx_Register_COM(manifestPath);
+        if (comResult == AppxRegistrationResult::Success)
+            return true;
+
+        if (comResult == AppxRegistrationResult::TimeoutUncertain)
+        {
+            LogText(g_ui.comRegistrationFallbackSkippedAfterTimeout);
+            if (!RegistrationUnresolvedRecorded())
+                MarkRegistrationUnresolved(g_ui.comRegistrationFallbackSkippedAfterTimeout, nullptr, 0);
+            failureMessage = g_ui.comRegistrationFallbackSkippedAfterTimeout;
+            return false;
+        }
+
+        LogText(g_ui.comRegistrationFailed);
+        std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
+        bool ok = PS_Run(ps);
+        if (!ok)
+            setPowerShellFailureMessage();
+        return ok;
+    }
+
+    std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
+    bool ok = PS_Run(ps);
+    if (!ok)
+        setPowerShellFailureMessage();
+    return ok;
 }
 
 bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
@@ -442,6 +555,9 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 
     std::wstring exeDir = GetExeDir();
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
+    bool liveTileUpdateMode = UseExperimentalLiveTileUpdate();
+    bool liveTileModeReregistrationPending = LiveTileModeReregistrationPending();
+    bool useLiveTileUpdateForThisRun = liveTileUpdateMode && !liveTileModeReregistrationPending;
     bool assetsOk = true;
     std::vector<int> scales = GetConfiguredScales();
     {
@@ -454,19 +570,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         Log(g_ui.activeScales.c_str(), scaleList.c_str());
     }
     std::vector<std::wstring> loggedAssetDirs;
-    for (auto& t : g_tiles)
+    auto logAssetDirIfNeeded = [&](const std::wstring& assetDir)
     {
-        std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
-        std::wstring outPath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
-        DWORD assetDirError = ERROR_SUCCESS;
-        if (!EnsureParentDirectoryForFile(outPath, &assetDirError))
-        {
-            assetsOk = false;
-            LogWin32Failure(g_ui.createAssetsDirectoryOperation.c_str(), assetDirError);
-            Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
-            continue;
-        }
-        std::wstring assetDir = ParentDirectoryOfPath(outPath);
         bool directoryAlreadyLogged = false;
         for (const auto& loggedDir : loggedAssetDirs)
         {
@@ -481,13 +586,29 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
             loggedAssetDirs.push_back(assetDir);
             Log(g_ui.assetsDirectoryReady.c_str(), assetDir.c_str());
         }
+    };
 
-        if (!IniReadI(L"Assets", t.name, 0))
+    for (auto& t : g_tiles)
+    {
+        std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
+        std::wstring outPath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
+        DWORD assetDirError = ERROR_SUCCESS;
+        if (!EnsureParentDirectoryForFile(outPath, &assetDirError))
+        {
+            assetsOk = false;
+            LogWin32Failure(g_ui.createAssetsDirectoryOperation.c_str(), assetDirError);
+            Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+            continue;
+        }
+        logAssetDirIfNeeded(ParentDirectoryOfPath(outPath));
+
+        bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
+        if (!staticWallpaperAssetEnabled)
         {
             if (!g_generateDesktopIconForDisabledEntries)
             {
-                Log(g_ui.skippingAssetDisabled.c_str(), t.name);
-                if (g_deleteDisabledAssets && !DeleteDisabledAssetFiles(outPath))
+                Log((liveTileUpdateMode ? g_ui.skippingStaticAssetLiveTileMode : g_ui.skippingAssetDisabled).c_str(), t.name);
+                if ((g_deleteDisabledAssets || liveTileUpdateMode) && !DeleteDisabledAssetFiles(outPath))
                     assetsOk = false;
                 continue;
             }
@@ -562,14 +683,53 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
             assetsOk = false;
     }
 
+    if (liveTileUpdateMode)
+    {
+        for (const auto& t : g_liveTileAssets)
+        {
+            std::wstring outPath = ResolveManifestAssetPath(exeDir, t.file);
+            DWORD assetDirError = ERROR_SUCCESS;
+            if (!EnsureParentDirectoryForFile(outPath, &assetDirError))
+            {
+                assetsOk = false;
+                LogWin32Failure(g_ui.createAssetsDirectoryOperation.c_str(), assetDirError);
+                Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+                continue;
+            }
+            logAssetDirIfNeeded(ParentDirectoryOfPath(outPath));
+
+            std::unique_ptr<Bitmap> o(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0)));
+            bool saved = false;
+            if (o)
+            {
+                saved = SavePNG(o.get(), outPath.c_str());
+                if (saved)
+                    Log(g_ui.savedAsset.c_str(), outPath.c_str());
+                else
+                    Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+            }
+            else
+            {
+                Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+            }
+
+            if (!saved)
+                assetsOk = false;
+        }
+    }
+
     auto assetsDone = steady_clock::now();
     Log(g_ui.timingLog.c_str(), g_ui.timingAssetGeneration.c_str(), ElapsedMs(generationStart, assetsDone));
 
     if (!assetsOk)
     {
         auto generationDone = steady_clock::now();
-        LogText(g_ui.skippingRegistrationDueToAssetFailure);
-        Log(g_ui.timingLog.c_str(), g_ui.timingAppRegistration.c_str(), 0);
+        LogText(useLiveTileUpdateForThisRun
+            ? g_ui.skippingLiveTileUpdateDueToAssetFailure
+            : g_ui.skippingRegistrationDueToAssetFailure);
+        Log(g_ui.timingLog.c_str(),
+            useLiveTileUpdateForThisRun ? g_ui.timingLiveTileUpdate.c_str() : g_ui.timingAppRegistration.c_str(),
+            0);
         Log(g_ui.timingLog.c_str(), g_ui.timingGenerationTotal.c_str(), ElapsedMs(generationStart, generationDone));
         LogText(g_ui.assetGenerationFailed);
         if (g_notifyOnFailure)
@@ -577,7 +737,9 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         return false;
     }
 
-    LogText(g_ui.reRegisteringManifest);
+    LogText(liveTileModeReregistrationPending
+        ? g_ui.reRegisteringManifestForLiveTileModeChange
+        : (useLiveTileUpdateForThisRun ? g_ui.updatingLiveTile : g_ui.reRegisteringManifest));
 
     std::wstring manifestPath;
     bool manifestCreated = false;
@@ -595,64 +757,55 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         Log(g_ui.manifestPath.c_str(), manifestPath.c_str());
     }
 
-    bool registrationOk = false;
-    std::wstring registrationFailureMessage;
-    auto setPowerShellFailureMessage = [&]()
-    {
-        std::lock_guard<std::mutex> lk(g_psMutex);
-        registrationFailureMessage = g_psMsg.empty() ? g_ui.powerShellRegistrationFailed : g_psMsg;
-    };
+    bool appUpdateOk = false;
+    std::wstring appUpdateFailureMessage;
+    bool appUpdateFailureIsLiveTile = false;
 
     if (!manifestReady)
     {
-        registrationOk = false;
-        registrationFailureMessage = FormatWide(g_ui.appxManifestCreateFailed.c_str(), manifestPath.c_str());
+        appUpdateOk = false;
+        appUpdateFailureMessage = FormatWide(g_ui.appxManifestCreateFailed.c_str(), manifestPath.c_str());
+    }
+    else if (liveTileModeReregistrationPending)
+    {
+        appUpdateOk = RegisterAppxManifest(manifestPath, appUpdateFailureMessage);
+        if (appUpdateOk)
+        {
+            SetLiveTileModeReregistrationPending(false);
+            LogText(g_ui.liveTileModeReregistrationComplete);
+
+            if (liveTileUpdateMode)
+            {
+                appUpdateOk = Appx_Update_LiveTile(exeDir, manifestInfo, appUpdateFailureMessage);
+                if (!appUpdateOk)
+                {
+                    appUpdateFailureIsLiveTile = true;
+                    if (appUpdateFailureMessage.empty())
+                        appUpdateFailureMessage = g_ui.liveTileUpdateFailed;
+                }
+            }
+        }
+    }
+    else if (useLiveTileUpdateForThisRun)
+    {
+        appUpdateOk = Appx_Update_LiveTile(exeDir, manifestInfo, appUpdateFailureMessage);
+        appUpdateFailureIsLiveTile = !appUpdateOk;
+        if (!appUpdateOk && appUpdateFailureMessage.empty())
+            appUpdateFailureMessage = g_ui.liveTileUpdateFailed;
     }
     else
     {
-        std::wstring unresolvedReason;
-        if (RegistrationBlockedByUnresolved(unresolvedReason))
-        {
-            Log(g_ui.registrationBlockedUnresolved.c_str(), unresolvedReason.c_str());
-            registrationOk = false;
-            registrationFailureMessage = unresolvedReason;
-        }
-        else if (!UsePowerShell())
-        {
-            AppxRegistrationResult comResult = Appx_Register_COM(manifestPath);
-            registrationOk = comResult == AppxRegistrationResult::Success;
-
-            if (comResult == AppxRegistrationResult::Failed)
-            {
-                LogText(g_ui.comRegistrationFailed);
-                std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
-                registrationOk = PS_Run(ps);
-                if (!registrationOk)
-                    setPowerShellFailureMessage();
-            }
-            else if (comResult == AppxRegistrationResult::TimeoutUncertain)
-            {
-                LogText(g_ui.comRegistrationFallbackSkippedAfterTimeout);
-                if (!RegistrationUnresolvedRecorded())
-                    MarkRegistrationUnresolved(g_ui.comRegistrationFallbackSkippedAfterTimeout, nullptr, 0);
-                registrationFailureMessage = g_ui.comRegistrationFallbackSkippedAfterTimeout;
-            }
-        }
-        else
-        {
-            std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
-            registrationOk = PS_Run(ps);
-            if (!registrationOk)
-                setPowerShellFailureMessage();
-        }
+        appUpdateOk = RegisterAppxManifest(manifestPath, appUpdateFailureMessage);
     }
 
-    bool ok = assetsOk && registrationOk;
+    bool ok = assetsOk && appUpdateOk;
     auto registrationDone = steady_clock::now();
-    Log(g_ui.timingLog.c_str(), g_ui.timingAppRegistration.c_str(), ElapsedMs(assetsDone, registrationDone));
+    Log(g_ui.timingLog.c_str(),
+        useLiveTileUpdateForThisRun ? g_ui.timingLiveTileUpdate.c_str() : g_ui.timingAppRegistration.c_str(),
+        ElapsedMs(assetsDone, registrationDone));
     Log(g_ui.timingLog.c_str(), g_ui.timingGenerationTotal.c_str(), ElapsedMs(generationStart, registrationDone));
     std::wstring missingManifestAssets;
-    if (!registrationOk)
+    if (!appUpdateOk && !appUpdateFailureIsLiveTile)
     {
         missingManifestAssets = FindMissingManifestAssets(exeDir);
         if (!missingManifestAssets.empty())
@@ -662,7 +815,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
     if (ok)
     {
         StoreSuccessfulGenerationState(wp);
-        LogText(g_ui.assetGenerationFinished);
+        LogText(liveTileUpdateMode ? g_ui.assetGenerationLiveTileFinished : g_ui.assetGenerationFinished);
         if (g_notifyOnSuccess)
             NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationSuccess, NIIF_INFO);
     }
@@ -670,18 +823,19 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
     {
         if (!assetsOk)
             LogText(g_ui.assetGenerationFailed);
-        if (!registrationOk)
-            LogText(g_ui.appRegistrationFailed);
+        if (!appUpdateOk)
+            LogText(appUpdateFailureIsLiveTile ? g_ui.liveTileUpdateFailed : g_ui.appRegistrationFailed);
         if (g_notifyOnFailure)
         {
-            std::wstring failMsg = registrationFailureMessage.empty()
+            std::wstring failMsg = appUpdateFailureMessage.empty()
                 ? g_ui.notificationGenerationFailed
-                : registrationFailureMessage;
+                : appUpdateFailureMessage;
             if (!missingManifestAssets.empty() &&
-                (registrationFailureMessage.empty() ||
+                (appUpdateFailureMessage.empty() ||
                     failMsg == g_ui.notificationGenerationFailed ||
                     failMsg == g_ui.appRegistrationFailed ||
-                    failMsg == g_ui.powerShellRegistrationFailed))
+                    failMsg == g_ui.powerShellRegistrationFailed ||
+                    failMsg == g_ui.liveTileUpdateFailed))
             {
                 failMsg = g_ui.notificationMissingManifestAssets;
             }
@@ -992,6 +1146,21 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
         RecordGenerationCompletion(droppedRequestId, false);
     g_generationQueueCv.notify_one();
     return requestId;
+}
+
+static void QueueLiveTileModeReregistration()
+{
+    SetLiveTileModeReregistrationPending(true);
+
+    std::wstring wp = GetWallpaper();
+    if (wp.empty())
+    {
+        LogText(g_ui.liveTileModeReregistrationQueuedNoWallpaper);
+        return;
+    }
+
+    LogText(g_ui.liveTileModeReregistrationQueued);
+    QueueGenerate(wp, g_ui.liveTileModeChanged);
 }
 
 static void JoinQueuedGenerations()

@@ -25,10 +25,13 @@
 #include <cstdint>
 #include <memory>
 #include <commdlg.h>
+#include <appmodel.h>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Data.Xml.Dom.h>
 #include <winrt/Windows.Management.Deployment.h>
+#include <winrt/Windows.UI.Notifications.h>
 
 INT_PTR CALLBACK RenameDlgProc(HWND, UINT, WPARAM, LPARAM) noexcept;
 static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) noexcept;
@@ -84,5 +87,6 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "src/ga_image.inc"
 #include "src/ga_registration.inc"
 #include "src/ga_generation.inc"
+#include "src/ga_live_tile.inc"
 #include "src/ga_tray.inc"
 #include "src/ga_app.inc"
