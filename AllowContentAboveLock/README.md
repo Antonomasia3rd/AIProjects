@@ -39,7 +39,7 @@ sc.exe delete AllowContentAboveLockService
 ## Runtime Behavior
 
 - Watches `HKEY_USERS` for newly loaded user hives.
-- Attaches to loaded `S-1-5-21-*` user hives.
+- Attaches to loaded domain/local `S-1-5-21-*` and Azure AD `S-1-12-1-*` user hives.
 - Watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for child-key and value changes.
 - Sets `AllowContentAboveLock` to DWORD `1` on notification setting subkeys.
 - Creates `AllowContentAboveLock.ini` beside the executable if missing.

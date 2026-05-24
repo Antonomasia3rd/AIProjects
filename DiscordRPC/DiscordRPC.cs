@@ -10,6 +10,7 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -145,6 +146,21 @@ internal static class Program
             return 0;
         }
 
+        if (configExists)
+        {
+            try
+            {
+                config = ProtectDiscordTokenInConfig(configPath, config);
+                startupTransportMode = NormalizeTransportMode(config.Get("general", "transport_mode", "ipc"));
+                token = ResolveDiscordToken(config);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Failed to protect Discord token in config: " + ex.Message);
+                return 1;
+            }
+        }
+
         bool tokenRequired = startupTransportMode == "gateway";
         bool setupRequired = startupClientId.Length == 0 || (tokenRequired && token.Length == 0);
         if (setupRequired)
@@ -164,7 +180,7 @@ internal static class Program
                     }
                     if (tokenRequired && token.Length == 0)
                     {
-                        Logger.Error("Missing [general] token or token_env in " + Path.GetFullPath(configPath));
+                        Logger.Error("Missing [general] token_protected, token, or token_env in " + Path.GetFullPath(configPath));
                     }
                 }
                 return 1;
@@ -178,6 +194,10 @@ internal static class Program
                 if (setupTokenEnv.Length > 0)
                 {
                     setupExistingToken = "env:" + setupTokenEnv;
+                }
+                else if (config.Get("general", "token_protected", "").Trim().Length > 0)
+                {
+                    setupExistingToken = token;
                 }
             }
             if (!SetupDialog.TrySetup(configPath, setupExistingToken, existingClientId, startupTransportMode, out token))
@@ -367,6 +387,7 @@ internal static class Program
                     try
                     {
                         IniConfig reloadedConfig = ConfigDefaults.EnsureAndReload(configPath, IniConfig.Load(configPath));
+                        reloadedConfig = ProtectDiscordTokenInConfig(configPath, reloadedConfig);
                         string reloadedToken = ResolveDiscordToken(reloadedConfig);
                         string reloadedClientId = reloadedConfig.Get("general", "client_id", "").Trim();
                         string reloadedTransportMode = NormalizeTransportMode(reloadedConfig.Get("general", "transport_mode", "ipc"));
@@ -453,8 +474,8 @@ internal static class Program
                         {
                             if (!reportedGatewayConnectFailure)
                             {
-                                Logger.Error("Gateway skipped: missing [general] token.");
-                                AppState.Notify("DiscordRPC Gateway skipped", "Missing Discord token or token_env.", ToolTipIcon.Warning, NotificationEventKind.Failure);
+                                Logger.Error("Gateway skipped: missing [general] token_protected, token, or token_env.");
+                                AppState.Notify("DiscordRPC Gateway skipped", "Missing Discord token.", ToolTipIcon.Warning, NotificationEventKind.Failure);
                                 reportedGatewayConnectFailure = true;
                             }
                         }
@@ -493,7 +514,7 @@ internal static class Program
                                     if (ex.Message.IndexOf("4004", StringComparison.Ordinal) >= 0 ||
                                         ex.Message.IndexOf("Authentication failed", StringComparison.OrdinalIgnoreCase) >= 0)
                                     {
-                                        Logger.Error("Invalid token. Check [general] token in your config.");
+                                        Logger.Error("Invalid token. Check [general] token_protected, token, or token_env in your config.");
                                         Logger.Error("If you use token_env, verify that the environment variable is set for this process.");
                                         AppState.Notify("DiscordRPC auth error", "Invalid Discord token.", ToolTipIcon.Error, NotificationEventKind.Failure);
                                         return 1;
@@ -572,8 +593,8 @@ internal static class Program
                         {
                             if (!reportedGatewayConnectFailure)
                             {
-                                Logger.Error("Gateway fallback skipped: missing [general] token.");
-                                AppState.Notify("DiscordRPC Gateway skipped", "Missing Discord token or token_env.", ToolTipIcon.Warning, NotificationEventKind.Failure);
+                                Logger.Error("Gateway fallback skipped: missing [general] token_protected, token, or token_env.");
+                                AppState.Notify("DiscordRPC Gateway skipped", "Missing Discord token.", ToolTipIcon.Warning, NotificationEventKind.Failure);
                                 reportedGatewayConnectFailure = true;
                             }
                         }
@@ -612,7 +633,7 @@ internal static class Program
                                     if (ex.Message.IndexOf("4004", StringComparison.Ordinal) >= 0 ||
                                         ex.Message.IndexOf("Authentication failed", StringComparison.OrdinalIgnoreCase) >= 0)
                                     {
-                                        Logger.Error("Invalid token. Check [general] token in your config.");
+                                        Logger.Error("Invalid token. Check [general] token_protected, token, or token_env in your config.");
                                         Logger.Error("If you use token_env, verify that the environment variable is set for this process.");
                                         AppState.Notify("DiscordRPC auth error", "Invalid Discord token.", ToolTipIcon.Error, NotificationEventKind.Failure);
                                     }
@@ -746,6 +767,19 @@ internal static class Program
             Logger.Error("Configured Discord token environment variable is empty or missing: " + tokenEnv);
         }
 
+        string protectedToken = config.Get("general", "token_protected", "").Trim();
+        if (protectedToken.Length > 0)
+        {
+            try
+            {
+                return ProtectedSecrets.Unprotect(protectedToken).Trim();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Could not decrypt [general] token_protected with DPAPI for this user: " + ex.Message);
+            }
+        }
+
         string token = config.Get("general", "token", "").Trim();
         if (IsTokenEnvironmentReference(token))
         {
@@ -761,6 +795,37 @@ internal static class Program
         }
 
         return token;
+    }
+
+    internal static IniConfig ProtectDiscordTokenInConfig(string configPath, IniConfig config)
+    {
+        if (config == null)
+        {
+            return config;
+        }
+
+        string token = config.Get("general", "token", "").Trim();
+        if (token.Length == 0 || IsTokenEnvironmentReference(token))
+        {
+            return config;
+        }
+
+        string protectedToken = config.Get("general", "token_protected", "").Trim();
+        Dictionary<string, string> updates = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        updates[IniConfigFile.MakeKey("general", "token")] = "";
+
+        if (protectedToken.Length == 0)
+        {
+            updates[IniConfigFile.MakeKey("general", "token_protected")] = ProtectedSecrets.Protect(token);
+            Logger.Info("Migrating [general] token to DPAPI-protected [general] token_protected.");
+        }
+        else
+        {
+            Logger.Info("Clearing legacy plaintext [general] token because token_protected is already configured.");
+        }
+
+        IniConfigFile.WriteValues(configPath, updates);
+        return IniConfig.Load(configPath);
     }
 
     internal static bool IsTokenEnvironmentReference(string token)
@@ -779,6 +844,11 @@ internal static class Program
     {
         string token = config.Get("general", "token", "").Trim();
         return token.Length > 0 && !IsTokenEnvironmentReference(token);
+    }
+
+    internal static bool HasProtectedDiscordToken(IniConfig config)
+    {
+        return config.Get("general", "token_protected", "").Trim().Length > 0;
     }
 
     private static bool TransportAllowsIpc(string mode)
@@ -1261,6 +1331,70 @@ internal static class Program
     }
 }
 
+internal static class ProtectedSecrets
+{
+    private const string Prefix = "dpapi:";
+
+    public static string Protect(string secret)
+    {
+        byte[] plain = Encoding.UTF8.GetBytes(secret ?? "");
+        byte[] cipher = ProtectedData.Protect(plain, null, DataProtectionScope.CurrentUser);
+        return Prefix + ToHex(cipher);
+    }
+
+    public static string Unprotect(string value)
+    {
+        string text = (value ?? "").Trim();
+        if (!text.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new FormatException("Protected value must start with " + Prefix);
+        }
+
+        byte[] cipher = FromHex(text.Substring(Prefix.Length));
+        byte[] plain = ProtectedData.Unprotect(cipher, null, DataProtectionScope.CurrentUser);
+        return Encoding.UTF8.GetString(plain);
+    }
+
+    private static string ToHex(byte[] bytes)
+    {
+        StringBuilder builder = new StringBuilder(bytes.Length * 2);
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            builder.Append(bytes[i].ToString("x2", CultureInfo.InvariantCulture));
+        }
+        return builder.ToString();
+    }
+
+    private static byte[] FromHex(string hex)
+    {
+        if (hex == null || (hex.Length % 2) != 0)
+        {
+            throw new FormatException("Protected value has invalid hex length.");
+        }
+
+        byte[] bytes = new byte[hex.Length / 2];
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            int hi = HexValue(hex[i * 2]);
+            int lo = HexValue(hex[i * 2 + 1]);
+            if (hi < 0 || lo < 0)
+            {
+                throw new FormatException("Protected value contains non-hex characters.");
+            }
+            bytes[i] = (byte)((hi << 4) | lo);
+        }
+        return bytes;
+    }
+
+    private static int HexValue(char ch)
+    {
+        if (ch >= '0' && ch <= '9') return ch - '0';
+        if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+        if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+        return -1;
+    }
+}
+
 internal static class AppState
 {
     public static volatile bool ReloadRequested;
@@ -1402,6 +1536,7 @@ internal static class UiStrings
         { "transport_mode_ipc", "Discord IPC (default)" },
         { "transport_mode_auto", "Auto (IPC, then Gateway fallback)" },
         { "token_env", "Discord token environment variable" },
+        { "token_protected", "DPAPI-protected Discord token" },
         { "update_interval", "Update interval" },
         { "idle_message", "Idle message" },
         { "fallback_details", "Fallback details" },
@@ -1659,6 +1794,7 @@ internal static class ConfigDefaults
         Add(defaults, "general", "details_template", DefaultDetailsTemplate);
         Add(defaults, "general", "state_template", DefaultStateTemplate);
         Add(defaults, "general", "token_env", "");
+        Add(defaults, "general", "token_protected", "");
 
         Add(defaults, "censor_map", "rule_order", "full_replace, word_replace, pattern_replace");
         Add(defaults, "censor_map", "full_replace", "");
@@ -2689,12 +2825,12 @@ internal sealed class SetupDialog : Form
         y += 24;
 
         Label tokenHint = new Label();
-        tokenHint.Text = "Gateway can use a token directly or env:VARIABLE_NAME.";
+        tokenHint.Text = "Direct tokens are saved with DPAPI.\r\nUse env:VARIABLE_NAME to keep one in the environment.";
         tokenHint.Left = x + 126; tokenHint.Top = y;
-        tokenHint.Width = w - 126; tokenHint.Height = 18;
+        tokenHint.Width = w - 126; tokenHint.Height = 36;
         tokenHint.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
         Controls.Add(tokenHint);
-        y += 28;
+        y += 44;
 
         // ---- Buttons ----
         Button save = new Button();
@@ -2846,7 +2982,22 @@ internal sealed class SetupDialog : Form
             Dictionary<string, string> updates = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             updates[IniConfigFile.MakeKey("general", "client_id")] = clientId;
             updates[IniConfigFile.MakeKey("general", "transport_mode")] = transportMode;
-            updates[IniConfigFile.MakeKey("general", "token")] = token;
+            updates[IniConfigFile.MakeKey("general", "token_env")] = "";
+            if (Program.IsTokenEnvironmentReference(token))
+            {
+                updates[IniConfigFile.MakeKey("general", "token")] = token;
+                updates[IniConfigFile.MakeKey("general", "token_protected")] = "";
+            }
+            else if (token.Length > 0)
+            {
+                updates[IniConfigFile.MakeKey("general", "token")] = "";
+                updates[IniConfigFile.MakeKey("general", "token_protected")] = ProtectedSecrets.Protect(token);
+            }
+            else
+            {
+                updates[IniConfigFile.MakeKey("general", "token")] = "";
+                updates[IniConfigFile.MakeKey("general", "token_protected")] = "";
+            }
 
             Dictionary<string, string> presenceUpdates = ConfigDefaults.CreateSetupPresenceUpdates(
                 dlg.UseWindowDetection(),

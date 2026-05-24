@@ -58,27 +58,8 @@ if /I "%~1"=="check" (
 set "OUT_EXE=build\CharmTray.exe"
 set "OBJ_FILE=build\obj\CharmTray.obj"
 
-call :PrepareOutput "%CD%\%OUT_EXE%" "CharmTray"
-set "PREPARE_STATUS=%ERRORLEVEL%"
-if not "%PREPARE_STATUS%"=="0" if not "%PREPARE_STATUS%"=="2" (
-    popd
-    exit /b %PREPARE_STATUS%
-)
-if "%PREPARE_STATUS%"=="2" (
-    echo WARNING: Could not overwrite build\CharmTray.exe after trying to close the running app.
-    echo WARNING: Building side-by-side output build\CharmTray.side-by-side.exe instead.
-    set "OUT_EXE=build\CharmTray.side-by-side.exe"
-    set "OBJ_FILE=build\obj\CharmTray.side-by-side.obj"
-)
-
 cl /nologo /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 CharmTray.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link user32.lib ole32.lib shell32.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 
 exit /b %STATUS%
-
-:PrepareOutput
-set "TARGET=%~1"
-set "PROCNAME=%~2"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& { param([string]$OutputPath, [string]$ProcessName); if (-not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) { exit 0 }; $resolved = (Resolve-Path -LiteralPath $OutputPath).Path; $processes = @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Where-Object { try { $_.Path -and [string]::Equals((Resolve-Path -LiteralPath $_.Path).Path, $resolved, [StringComparison]::OrdinalIgnoreCase) } catch { $false } }); foreach ($process in $processes) { try { if ($process.MainWindowHandle -ne [IntPtr]::Zero) { Write-Host ('Requesting graceful close for {0}[{1}]' -f $process.ProcessName, $process.Id); if ($process.CloseMainWindow() -and $process.WaitForExit(5000)) { continue } }; Write-Host ('Force stopping {0}[{1}]' -f $process.ProcessName, $process.Id); Stop-Process -Id $process.Id -Force -ErrorAction Stop; [void]$process.WaitForExit(5000) } catch { Write-Warning ('Could not stop {0}[{1}]: {2}' -f $process.ProcessName, $process.Id, $_.Exception.Message) } }; try { $stream = [IO.File]::Open($resolved, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None); $stream.Dispose(); exit 0 } catch { Write-Warning ('Output is still not writable: {0}. {1}' -f $resolved, $_.Exception.Message); exit 2 } }" "%TARGET%" "%PROCNAME%"
-exit /b %ERRORLEVEL%

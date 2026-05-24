@@ -169,6 +169,8 @@ A valid path must:
 
 Install the service, gate, configs, and launched targets wherever the service account can read and execute them.
 
+This project does not change ACLs on service files, config files, target programs, or their parent directories. If future changes add checks for user-writable or otherwise risky locations, those checks must warn only; they must not modify ACLs, ownership, inheritance, integrity labels, or other access-control state.
+
 ## Threat Model Notes
 
 This tool intentionally creates `LocalSystem` processes on interactive desktops. Treat the service executable, password launcher, INI files, launched programs, and their parent directories as privileged code.

@@ -46,28 +46,22 @@ Common prerequisites:
 - .NET Framework compiler at `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` for C# projects.
 - Visual Studio Build Tools with the C++ workload for MSVC projects.
 - MinGW-w64 `g++` for `RealTimeNotesDeskband`.
-- PowerShell 5.1 or newer for script projects and build wrappers.
+- PowerShell 5.1 or newer for script-only utilities and Appx helper scripts.
 
 Build all packaged Windows artifacts:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\build-windows.ps1
+```cmd
+.github\scripts\build-windows.cmd
 ```
 
 Useful build options:
 
-```powershell
+```cmd
 # Skip one or more projects.
-powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\build-windows.ps1 -SkipProjects asusblink,RealTimeNotesDeskband
-
-# Stop running output EXEs if they block overwrite.
-powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\build-windows.ps1 -StopRunningArtifacts
-
-# Also allow name-based process stopping when exact executable paths cannot be resolved.
-powershell -NoProfile -ExecutionPolicy Bypass -File .\.github\scripts\build-windows.ps1 -StopRunningArtifacts -StopMatchingArtifactNames
+.github\scripts\build-windows.cmd /skip:asusblink,RealTimeNotesDeskband
 ```
 
-Each project README also lists direct build commands for that project. Generated outputs belong in project `build` folders and are ignored by git.
+Each project README also lists direct build commands for that project. Generated outputs belong in project `build` folders and are ignored by git. If a compiler cannot overwrite a running EXE, close that program and rerun the build.
 
 ## Safety
 
@@ -85,7 +79,7 @@ Read the project README before running a tool, use an elevated shell where docum
 
 Tracked files are source, build scripts, templates/manifests, and documentation. Local configs, logs, generated assets, binaries, object files, and release ZIPs are ignored.
 
-Runtime configuration and logs must stay local to each program. By default, every binary must use files beside itself with the same base name as the binary:
+Runtime configuration and logs must stay local to each program. By default, every binary must use `.ini` and `.log` files beside itself with the same base name as the binary:
 
 ```text
 <binary directory>\<binary name>.ini
@@ -94,7 +88,11 @@ Runtime configuration and logs must stay local to each program. By default, ever
 
 If a non-INI configuration format is unavoidable, it must still default to the same directory and base name as the binary. Script-only tools should use the script directory and script base name by default. Do not use the registry, `%APPDATA%`, `%LOCALAPPDATA%`, `%PROGRAMDATA%`, the process working directory, or other global/user profile locations for app-owned configuration or logs. Registry writes are acceptable only for OS integration that is the explicit purpose of the tool, such as service registration, COM/deskband registration, scheduled-task migration, or Windows settings the tool is designed to manage.
 
-Use `DesktopStub\GenerateAssets` as the reference pattern for new fixes: create and normalize the INI next to the executable, preserve user-edited values, write the log next to the executable by default, expose path changes through the INI/UI when needed, and report write failures clearly. When changing an existing program that already has registry/profile-based state, preserve or migrate existing user values where practical and stop for maintainer input before choosing a compatibility-breaking migration.
+Do not change file or directory ACLs from these tools, installers, build scripts, or migration helpers. Past ACL-hardening attempts caused Windows integration failures in specific placements, including Start Menu related cases. Security checks may detect and warn about risky writable locations, but they must not modify ACLs, ownership, inheritance, integrity labels, or other access-control state.
+
+Use `DesktopStub\GenerateAssets` as the reference pattern for new fixes: create and normalize the INI next to the executable, preserve user-edited values, write the log next to the executable by default, expose path changes through the INI/UI when needed, and report write failures clearly. When changing another program, follow that implementation style for local config/log handling unless the maintainer explicitly approves a different pattern.
+
+Stop for maintainer input before making a decision that changes storage location, config/log format, migration behavior, compatibility guarantees, ACL/security enforcement, or OS integration behavior. When changing an existing program that already has registry/profile-based state, preserve or migrate existing user values where practical and do not choose a compatibility-breaking migration without maintainer approval.
 
 GitHub Actions builds Windows binaries on hosted runners. Workflow artifacts and release attachments are generated from the workflow run so published binaries are tied to a commit.
 
