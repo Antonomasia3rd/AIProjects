@@ -152,6 +152,7 @@ void LoadUiStrings()
     g_ui.listenWallpaper = IniReadS(L"Strings", L"ListenWallpaper", L"Listen Wallpaper");
     g_ui.trayIcon = IniReadS(L"Strings", L"TrayIcon", L"Tray Icon (this session)");
     g_ui.usePowerShell = IniReadS(L"Strings", L"UsePowerShell", L"PowerShell only");
+    g_ui.experimentalLiveTileUpdate = IniReadS(L"Strings", L"ExperimentalLiveTileUpdate", L"Experimental Live Tile update");
     g_ui.generateOnStartup = IniReadS(L"Strings", L"GenerateOnStartup", L"Generate on Startup");
     g_ui.generateOnStartupOnlyWhenChanged = IniReadS(L"Strings", L"GenerateOnStartupOnlyWhenChanged", L"Generate on Startup only when changed");
     g_ui.hideDisabledEntries = IniReadS(L"Strings", L"HideDisabledEntries", L"Hide disabled entries");
@@ -232,6 +233,9 @@ void LoadUiStrings()
     g_ui.notificationSingleInstanceFailure = IniReadS(L"Strings", L"NotificationSingleInstanceFailure", L"Single-instance protection failed; another copy may run.");
     g_ui.notificationTrayIconHidden = IniReadS(L"Strings", L"NotificationTrayIconHidden", L"Tray icon hidden for this session. Run GenerateAssets.exe again to restore it.");
     g_ui.manualGenerateTriggered = IniReadS(L"Strings", L"ManualGenerateTriggered", L"Manual generate triggered.");
+    g_ui.liveTileModeChanged = IniReadS(L"Strings", L"LiveTileModeChanged", L"Live Tile mode changed.");
+    g_ui.liveTileModeReregistrationQueued = IniReadS(L"Strings", L"LiveTileModeReregistrationQueued", L"[i] Queued one-time Appx re-registration because Live Tile mode changed.");
+    g_ui.liveTileModeReregistrationQueuedNoWallpaper = IniReadS(L"Strings", L"LiveTileModeReregistrationQueuedNoWallpaper", L"[!] Live Tile mode changed; one-time Appx re-registration is pending but current wallpaper could not be detected.");
     g_ui.startingWallpaperGeneration = IniReadS(L"Strings", L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s.");
     g_ui.wallpaperSource = IniReadS(L"Strings", L"WallpaperSource", L"Wallpaper source: %s");
     g_ui.wallpaperImageLoaded = IniReadS(L"Strings", L"WallpaperImageLoaded", L"[i] Wallpaper image loaded (%d x %d).");
@@ -240,6 +244,7 @@ void LoadUiStrings()
     g_ui.failedLoadWallpaper = IniReadS(L"Strings", L"FailedLoadWallpaper", L"Failed to load wallpaper image.");
     g_ui.iniEncodingNormalized = IniReadS(L"Strings", L"IniEncodingNormalized", L"[i] INI file normalized to UTF-8 with BOM.");
     g_ui.skippingAssetDisabled = IniReadS(L"Strings", L"SkippingAssetDisabled", L"Skipping %s (disabled in settings).");
+    g_ui.skippingStaticAssetLiveTileMode = IniReadS(L"Strings", L"SkippingStaticAssetLiveTileMode", L"Skipping %s (static manifest assets are disabled in Live Tile mode).");
     g_ui.generatedDesktopIconAsset = IniReadS(L"Strings", L"GeneratedDesktopIconAsset", L"Generated desktop icon for disabled %s");
     g_ui.activeScales = IniReadS(L"Strings", L"ActiveScales", L"[i] Active scales: %s");
     g_ui.savedAsset = IniReadS(L"Strings", L"SavedAsset", L"Saved %s");
@@ -254,6 +259,9 @@ void LoadUiStrings()
     g_ui.failedDeleteDisabledAsset = IniReadS(L"Strings", L"FailedDeleteDisabledAsset", L"[!] Failed to delete disabled asset file: %s");
 
     g_ui.reRegisteringManifest = IniReadS(L"Strings", L"ReRegisteringManifest", L"Re-registering AppxManifest due to regenerated assets.");
+    g_ui.updatingLiveTile = IniReadS(L"Strings", L"UpdatingLiveTile", L"Updating Live Tile from regenerated assets.");
+    g_ui.reRegisteringManifestForLiveTileModeChange = IniReadS(L"Strings", L"ReRegisteringManifestForLiveTileModeChange", L"Re-registering AppxManifest once because Live Tile mode changed.");
+    g_ui.liveTileModeReregistrationComplete = IniReadS(L"Strings", L"LiveTileModeReregistrationComplete", L"[i] Live Tile mode change re-registration completed.");
     g_ui.appxManifestCreated = IniReadS(L"Strings", L"AppxManifestCreated", L"[i] Created AppxManifest.xml: %s");
     g_ui.appxManifestExisting = IniReadS(L"Strings", L"AppxManifestExisting", L"[i] Using existing AppxManifest.xml: %s");
     g_ui.appxManifestOverwritten = IniReadS(L"Strings", L"AppxManifestOverwritten", L"[i] Updated AppxManifest.xml from configured defaults: %s");
@@ -293,14 +301,23 @@ void LoadUiStrings()
     g_ui.powerShellOutputFollows = IniReadS(L"Strings", L"PowerShellOutputFollows", L"PowerShell output follows:");
     g_ui.powerShellRegistrationFailed = IniReadS(L"Strings", L"PowerShellRegistrationFailed", L"PowerShell registration did not complete successfully.");
     g_ui.assetGenerationFinished = IniReadS(L"Strings", L"AssetGenerationFinished", L"Asset generation and registration finished successfully.");
+    g_ui.assetGenerationLiveTileFinished = IniReadS(L"Strings", L"AssetGenerationLiveTileFinished", L"Asset generation and Live Tile update finished successfully.");
     g_ui.assetGenerationFailed = IniReadS(L"Strings", L"AssetGenerationFailed", L"Asset generation did not complete successfully.");
     g_ui.appRegistrationFailed = IniReadS(L"Strings", L"AppRegistrationFailed", L"App registration did not complete successfully.");
+    g_ui.liveTileUpdateSuccess = IniReadS(L"Strings", L"LiveTileUpdateSuccess", L"Live Tile update completed successfully.");
+    g_ui.liveTileUpdateFailed = IniReadS(L"Strings", L"LiveTileUpdateFailed", L"Live Tile update did not complete successfully.");
+    g_ui.liveTileUpdateRequiresIdentity = IniReadS(L"Strings", L"LiveTileUpdateRequiresIdentity", L"Live Tile update requires package identity; launch through the registered package entry.");
+    g_ui.liveTileUpdateNoUsableAssets = IniReadS(L"Strings", L"LiveTileUpdateNoUsableAssets", L"Live Tile update failed: no valid tile assets were available.");
+    g_ui.liveTileUpdateException = IniReadS(L"Strings", L"LiveTileUpdateException", L"Live Tile update threw exception: 0x%08X");
+    g_ui.liveTileUpdateMessage = IniReadS(L"Strings", L"LiveTileUpdateMessage", L"Live Tile message: %s");
+    g_ui.liveTilePackageIdentity = IniReadS(L"Strings", L"LiveTilePackageIdentity", L"[i] Live Tile package identity: %s");
     g_ui.generationUnhandledException = IniReadS(L"Strings", L"GenerationUnhandledException", L"[!] Generation worker caught an unhandled exception: %s");
     g_ui.generationThreadStartFailed = IniReadS(L"Strings", L"GenerationThreadStartFailed", L"[!] Failed to start generation worker thread: %s");
     g_ui.pollThreadUnhandledException = IniReadS(L"Strings", L"PollThreadUnhandledException", L"[!] Wallpaper poll thread stopped after an unhandled exception: %s");
     g_ui.pollThreadStartFailed = IniReadS(L"Strings", L"PollThreadStartFailed", L"[!] Failed to start wallpaper poll thread: %s");
     g_ui.unknownException = IniReadS(L"Strings", L"UnknownException", L"unknown exception");
     g_ui.skippingRegistrationDueToAssetFailure = IniReadS(L"Strings", L"SkippingRegistrationDueToAssetFailure", L"[!] Skipping Appx registration because asset generation failed.");
+    g_ui.skippingLiveTileUpdateDueToAssetFailure = IniReadS(L"Strings", L"SkippingLiveTileUpdateDueToAssetFailure", L"[!] Skipping Live Tile update because asset generation failed.");
     g_ui.createAssetsDirectoryOperation = IniReadS(L"Strings", L"CreateAssetsDirectoryOperation", L"Create Assets directory");
     g_ui.missingManifestAssets = IniReadS(L"Strings", L"MissingManifestAssets", L"[!] Registration failed and manifest assets are missing or invalid: %s");
     g_ui.notificationMissingManifestAssets = IniReadS(L"Strings", L"NotificationMissingManifestAssets", L"Registration failed; one or more manifest assets are missing or invalid.");
@@ -335,9 +352,11 @@ void LoadUiStrings()
     g_ui.timingGdiStartup = IniReadS(L"Strings", L"TimingGdiStartup", L"GDI+ startup");
     g_ui.timingAssetGeneration = IniReadS(L"Strings", L"TimingAssetGeneration", L"asset generation");
     g_ui.timingAppRegistration = IniReadS(L"Strings", L"TimingAppRegistration", L"app registration");
+    g_ui.timingLiveTileUpdate = IniReadS(L"Strings", L"TimingLiveTileUpdate", L"Live Tile update");
     g_ui.timingGenerationTotal = IniReadS(L"Strings", L"TimingGenerationTotal", L"generation total");
     g_ui.powerShellRegistrationSummary = IniReadS(L"Strings", L"PowerShellRegistrationSummary", L"[i] PowerShell registration: %s");
     g_ui.usePowerShellSummary = IniReadS(L"Strings", L"UsePowerShellSummary", L"[i] UsePowerShell = %d (%s)");
+    g_ui.liveTileUpdateSummary = IniReadS(L"Strings", L"LiveTileUpdateSummary", L"[i] Experimental Live Tile update: %s");
     g_ui.wallpaperDetectionFallbackSummary = IniReadS(L"Strings", L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s");
     g_ui.trayIconSummary = IniReadS(L"Strings", L"TrayIconSummary", L"[i] Tray icon: %s");
     g_ui.consoleSummary = IniReadS(L"Strings", L"ConsoleSummary", L"[i] Console %s.");
@@ -549,6 +568,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.timingLog, L"TimingLog", { L"%s", L"%d" });
     RequireFormat(g_ui.powerShellRegistrationSummary, L"PowerShellRegistrationSummary", { L"%s" });
     RequireFormat(g_ui.usePowerShellSummary, L"UsePowerShellSummary", { L"%d", L"%s" });
+    RequireFormat(g_ui.liveTileUpdateSummary, L"LiveTileUpdateSummary", { L"%s" });
     RequireFormat(g_ui.wallpaperDetectionFallbackSummary, L"WallpaperDetectionFallbackSummary", { L"%s" });
     RequireFormat(g_ui.trayIconSummary, L"TrayIconSummary", { L"%s" });
     RequireFormat(g_ui.consoleSummary, L"ConsoleSummary", { L"%s" });
@@ -571,6 +591,9 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.comRegistrationAsyncError, L"ComRegistrationAsyncError", { L"%08X" });
     RequireFormat(g_ui.comRegistrationDeploymentError, L"ComRegistrationDeploymentError", { L"%08X" });
     RequireFormat(g_ui.comRegistrationDeploymentMessage, L"ComRegistrationDeploymentMessage", { L"%s" });
+    RequireFormat(g_ui.liveTileUpdateException, L"LiveTileUpdateException", { L"%08X" });
+    RequireFormat(g_ui.liveTileUpdateMessage, L"LiveTileUpdateMessage", { L"%s" });
+    RequireFormat(g_ui.liveTilePackageIdentity, L"LiveTilePackageIdentity", { L"%s" });
     RequireFormat(g_ui.gdiPlusOperationFailed, L"GdiPlusOperationFailed", { L"%s", L"%d" });
     RequireFormat(g_ui.win32FailureFmt, L"Win32FailureFmt", { L"%s", L"%lu", L"%s" });
     RequireFormat(g_ui.logPathChanged, L"LogPathChanged", { L"%s" });
@@ -647,6 +670,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.renderModeSummary, L"RenderModeSummary", { L"%s" });
     RequireFormat(g_ui.assetsDirectoryReady, L"AssetsDirectoryReady", { L"%s" });
     RequireFormat(g_ui.skippingAssetDisabled, L"SkippingAssetDisabled", { L"%s" });
+    RequireFormat(g_ui.skippingStaticAssetLiveTileMode, L"SkippingStaticAssetLiveTileMode", { L"%s" });
     RequireFormat(g_ui.generatedDesktopIconAsset, L"GeneratedDesktopIconAsset", { L"%s" });
     RequireFormat(g_ui.activeScales, L"ActiveScales", { L"%s" });
     RequireFormat(g_ui.savedAsset, L"SavedAsset", { L"%s" });

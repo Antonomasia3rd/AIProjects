@@ -263,6 +263,7 @@ static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
     ApplyConsoleSetting(IniReadI(L"Settings", L"ShowConsole", 0) != 0, false, false);
     g_generateOnStartup = IniReadI(L"Settings", L"GenerateOnStartup", 1) != 0;
     g_generateOnStartupOnlyWhenChanged = IniReadI(L"Settings", L"GenerateOnStartupOnlyWhenChanged", 1) != 0;
+    g_experimentalLiveTileUpdate = IniReadI(L"Settings", L"ExperimentalLiveTileUpdate", 0) != 0;
     g_hideDisabled = IniReadI(L"Settings", L"HideDisabledEntries", 0) != 0;
     g_generateDesktopIconForDisabledEntries = IniReadI(L"Settings", L"GenerateDesktopIconForDisabledEntries", 1) != 0;
     g_deleteDisabledAssets = IniReadI(L"Settings", L"DeleteDisabledAssets", 0) != 0;

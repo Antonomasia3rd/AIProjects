@@ -3,6 +3,11 @@ bool UsePowerShell()
     return IniReadI(L"Settings", L"UsePowerShell", 0) != 0;
 }
 
+static bool UseExperimentalLiveTileUpdate()
+{
+    return g_experimentalLiveTileUpdate.load();
+}
+
 static ErrorAction ParseErrorAction(const std::wstring& value)
 {
     std::wstring v = ToLowerCopy(TrimCopy(value));
