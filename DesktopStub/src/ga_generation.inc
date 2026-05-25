@@ -938,14 +938,15 @@ static void AppendRectFingerprint(std::wstring& out, const wchar_t* name, const 
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
 {
     std::wstring state;
-    state += L"v=2;";
+    state += L"v=3;";
     state += L"wallpaper=" + FileFingerprint(wallpaperPath) + L";";
     state += L"exe=" + FileFingerprint(g_exePath) + L";";
     state += L"manifest=" + FileFingerprint(GetExeDir() + L"\\AppxManifest.xml") + L";";
     state += L"method=" + std::wstring(WallpaperDetectionMethodName(CurrentWallpaperDetectionMethod())) + L";";
     state += L"methodFallback=" + IntToWString(g_wallpaperDetectionFallbackOnInvalid ? 1 : 0) + L";";
     state += L"usePowerShell=" + IntToWString(UsePowerShell() ? 1 : 0) + L";";
-    state += L"experimentalLiveTileUpdate=" + IntToWString(UseExperimentalLiveTileUpdate() ? 1 : 0) + L";";
+    state += L"liveTileUpdateMode=" + LiveTileUpdateModeIniValue(ConfiguredLiveTileUpdateMode()) + L";";
+    state += L"effectiveLiveTileUpdate=" + IntToWString(UseExperimentalLiveTileUpdate() ? 1 : 0) + L";";
     state += L"disableFitting=" + IntToWString(g_disableFitting ? 1 : 0) + L";";
     state += L"fit=" + IntToWString(static_cast<int>(g_disableFitting ? FitMode::Fill : GetWallpaperFit())) + L";";
     state += L"desktopIconForDisabled=" + IntToWString(g_generateDesktopIconForDisabledEntries ? 1 : 0) + L";";

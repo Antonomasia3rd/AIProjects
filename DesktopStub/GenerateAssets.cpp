@@ -63,6 +63,13 @@ enum class ErrorAction
     Crash
 };
 
+enum class LiveTileUpdateMode
+{
+    Registration,
+    LiveTile,
+    Auto
+};
+
 static const wchar_t* StateEnabled(bool v);
 static const wchar_t* StateOn(bool v);
 static int ClampInt(int value, int minValue, int maxValue);
@@ -71,6 +78,7 @@ static std::wstring g_iniPath, g_logPath, g_exePath;
 static std::mutex g_pathMutex;
 static std::atomic<int> g_logAppendLockWaitMs(1000);
 static constexpr const wchar_t* WINDOW_CLASS_NAME = L"DesktopTileGeneratorTrayWnd";
+static constexpr const wchar_t* COM_REGISTRATION_HELPER_ARG = L"--ga-com-register";
 static constexpr const wchar_t* SINGLE_INSTANCE_MUTEX_BASE = L"Local\\DesktopTileGenerator.GenerateAssets";
 static constexpr const wchar_t* SINGLE_INSTANCE_MESSAGE_BASE = L"DesktopTileGenerator.RestoreRunningInstance";
 static std::wstring g_singleInstanceMutexName;
@@ -82,6 +90,7 @@ static HANDLE g_singleInstanceMutex = nullptr;
 
 #include "src/ga_core.inc"
 #include "src/ga_config_defaults.inc"
+#include "src/ga_command_line.inc"
 #include "src/ga_ui_logging.inc"
 #include "src/ga_wallpaper.inc"
 #include "src/ga_image.inc"

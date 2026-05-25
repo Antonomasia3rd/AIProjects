@@ -131,6 +131,8 @@ $registration = Read-Source 'src\ga_registration.inc'
 $liveTile = Read-Source 'src\ga_live_tile.inc'
 $manifest = Read-Source 'src\ga_manifest.inc'
 $tray = Read-Source 'src\ga_tray.inc'
+$runtime = Read-Source 'src\ga_runtime_helpers.inc'
+$commandLine = Read-Source 'src\ga_command_line.inc'
 $defaults = Read-Source 'src\ga_config_defaults.inc'
 $uiSources = Join-Source @(
     'src\ga_ui_logging.inc',
@@ -178,11 +180,18 @@ $sourceChecks = @(
         -Failure 'startup must warn the user when a previous force shutdown skipped cleanup'),
 
     (New-SourceCheck `
-        -Name 'Experimental Live Tile mode defaults off' `
+        -Name 'Live Tile update mode defaults auto' `
         -SourceName 'src\ga_config_defaults.inc' `
         -SourceText $defaults `
-        -Pattern '\{L"Settings",\s*L"ExperimentalLiveTileUpdate",\s*L"0"\}' `
-        -Failure 'experimental Live Tile update must remain opt-in by default'),
+        -Pattern '\{L"Settings",\s*L"ExperimentalLiveTileUpdate",\s*L"Auto"\}' `
+        -Failure 'Live Tile update mode must default to Auto so Start tile launches can use package identity while direct launches use registration'),
+
+    (New-SourceCheck `
+        -Name 'Live Tile Auto mode chooses by package identity' `
+        -SourceName 'src\ga_runtime_helpers.inc' `
+        -SourceText $runtime `
+        -Pattern '(?s)ConfiguredLiveTileUpdateMode.*EffectiveLiveTileUpdateMode.*CurrentProcessHasPackageIdentity\(\).*LiveTileUpdateMode::LiveTile.*LiveTileUpdateMode::Registration' `
+        -Failure 'Auto Live Tile mode must choose Live Tile updates only when the process has package identity'),
 
     (New-SourceCheck `
         -Name 'Generated manifest launches GenerateAssets by default' `
@@ -199,18 +208,32 @@ $sourceChecks = @(
         -Failure 'manifest executable fallback must point at GenerateAssets.exe'),
 
     (New-SourceCheck `
-        -Name 'Experimental Live Tile mode skips AppX registration path' `
+        -Name 'Live Tile update mode skips AppX registration path' `
         -SourceName 'src\ga_generation.inc' `
         -SourceText $generation `
         -Pattern '(?s)useLiveTileUpdateForThisRun.*Appx_Update_LiveTile\(exeDir,\s*manifestInfo,\s*liveTileUpdateAssets,\s*appUpdateFailureMessage\).*else\s*\{.*RegisterAppxManifest\(manifestPath,\s*appUpdateFailureMessage\)' `
-        -Failure 'experimental Live Tile mode must call the tile updater instead of re-registering the AppX manifest'),
+        -Failure 'Live Tile update mode must call the tile updater instead of re-registering the AppX manifest'),
 
     (New-SourceCheck `
-        -Name 'Live Tile checkbox queues one-time re-registration' `
+        -Name 'Live Tile mode menu queues one-time re-registration' `
         -SourceName 'src\ga_tray.inc' `
         -SourceText $tray `
-        -Pattern '(?s)ID_EXPERIMENTAL_LIVE_TILE_UPDATE.*IniWrite\(L"Settings",\s*L"ExperimentalLiveTileUpdate".*QueueLiveTileModeReregistration\(\)' `
-        -Failure 'changing the Live Tile checkbox must queue a one-time AppX re-registration'),
+        -Pattern '(?s)ID_LIVE_TILE_MODE_AUTO.*ID_LIVE_TILE_MODE_REGISTRATION.*ID_LIVE_TILE_MODE_LIVE_TILE.*IniWrite\(L"Settings",\s*L"ExperimentalLiveTileUpdate".*QueueLiveTileModeReregistration\(\)' `
+        -Failure 'changing the Live Tile mode menu must queue a one-time AppX re-registration'),
+
+    (New-SourceCheck `
+        -Name 'Command line exposes Live Tile mode overrides' `
+        -SourceName 'src\ga_command_line.inc' `
+        -SourceText $commandLine `
+        -Pattern '(?s)--live-tile.*--no-live-tile.*--live-tile-auto.*--live-tile-mode.*ExperimentalLiveTileUpdate' `
+        -Failure 'command-line options must expose Auto, Registration, and Live Tile update mode overrides'),
+
+    (New-SourceCheck `
+        -Name 'Custom INI uses separate single-instance scope' `
+        -SourceName 'src\ga_app.inc' `
+        -SourceText $app `
+        -Pattern '(?s)ConfigureSingleInstanceIdentity\(const std::wstring& exeDir,\s*const std::wstring& iniPath,\s*bool customIniPath\).*customIniPath\s*\?\s*iniPath\s*:\s*exeDir.*ConfigureSingleInstanceIdentity\(dir,\s*g_iniPath,\s*g_commandLine\.customIniPath\)' `
+        -Failure 'alternate --ini runs must not signal the default running instance'),
 
     (New-SourceCheck `
         -Name 'Live Tile mode change forces registration before Live Tile updates' `
@@ -302,6 +325,9 @@ $uiStringKeys = @(
     'ComRegistrationDeploymentError',
     'ComRegistrationDeploymentMessage',
     'LiveTileUpdateSummary',
+    'LiveTileModeAuto',
+    'LiveTileModeRegistration',
+    'LiveTileModeLiveTile',
     'LiveTileUpdateException',
     'LiveTileUpdateMessage',
     'LiveTilePackageIdentity',

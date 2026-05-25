@@ -3,9 +3,54 @@ bool UsePowerShell()
     return IniReadI(L"Settings", L"UsePowerShell", 0) != 0;
 }
 
+static LiveTileUpdateMode ConfiguredLiveTileUpdateMode()
+{
+    LiveTileUpdateMode mode = static_cast<LiveTileUpdateMode>(g_liveTileUpdateMode.load());
+    switch (mode)
+    {
+    case LiveTileUpdateMode::Registration:
+    case LiveTileUpdateMode::LiveTile:
+    case LiveTileUpdateMode::Auto:
+        return mode;
+    default:
+        return LiveTileUpdateMode::Auto;
+    }
+}
+
+static bool CurrentProcessHasPackageIdentity()
+{
+    UINT32 length = 0;
+    LONG rc = GetCurrentPackageFullName(&length, nullptr);
+    return rc == ERROR_INSUFFICIENT_BUFFER && length > 0;
+}
+
+static LiveTileUpdateMode EffectiveLiveTileUpdateMode()
+{
+    LiveTileUpdateMode mode = ConfiguredLiveTileUpdateMode();
+    if (mode != LiveTileUpdateMode::Auto)
+        return mode;
+
+    return CurrentProcessHasPackageIdentity()
+        ? LiveTileUpdateMode::LiveTile
+        : LiveTileUpdateMode::Registration;
+}
+
 static bool UseExperimentalLiveTileUpdate()
 {
-    return g_experimentalLiveTileUpdate.load();
+    return EffectiveLiveTileUpdateMode() == LiveTileUpdateMode::LiveTile;
+}
+
+static std::wstring LiveTileUpdateModeSummaryText()
+{
+    LiveTileUpdateMode configured = ConfiguredLiveTileUpdateMode();
+    if (configured != LiveTileUpdateMode::Auto)
+        return LiveTileUpdateModeName(configured);
+
+    std::wstring text = LiveTileUpdateModeName(LiveTileUpdateMode::Auto);
+    text += L" (";
+    text += LiveTileUpdateModeName(EffectiveLiveTileUpdateMode());
+    text += L")";
+    return text;
 }
 
 static ErrorAction ParseErrorAction(const std::wstring& value)

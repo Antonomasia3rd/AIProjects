@@ -38,35 +38,6 @@ static std::wstring PowerShellUtf8Preamble()
         L"$OutputEncoding = [System.Text.Encoding]::UTF8; ";
 }
 
-static std::wstring QuoteCommandLineArg(const std::wstring& arg)
-{
-    std::wstring out = L"\"";
-    size_t slashCount = 0;
-    for (wchar_t ch : arg)
-    {
-        if (ch == L'\\')
-        {
-            ++slashCount;
-            continue;
-        }
-
-        if (ch == L'"')
-        {
-            out.append(slashCount * 2 + 1, L'\\');
-            out.push_back(ch);
-        }
-        else
-        {
-            out.append(slashCount, L'\\');
-            out.push_back(ch);
-        }
-        slashCount = 0;
-    }
-    out.append(slashCount * 2, L'\\');
-    out.push_back(L'"');
-    return out;
-}
-
 static std::wstring DefaultPowerShellExe()
 {
     wchar_t systemDirectory[MAX_PATH] = {};
@@ -444,8 +415,6 @@ enum class AppxRegistrationResult
     TimeoutUncertain
 };
 
-static constexpr const wchar_t* COM_REGISTRATION_HELPER_ARG = L"--ga-com-register";
-
 using DeploymentResult = winrt::Windows::Management::Deployment::DeploymentResult;
 using DeploymentProgress = winrt::Windows::Management::Deployment::DeploymentProgress;
 using DeploymentOperation = winrt::Windows::Foundation::IAsyncOperationWithProgress<DeploymentResult, DeploymentProgress>;
@@ -617,23 +586,6 @@ static void InitializeComRegistrationHelperRuntime()
     FlushStartupWarnings();
 }
 
-static bool TryGetComRegistrationHelperArgument(std::wstring& manifestPath)
-{
-    manifestPath.clear();
-
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (!argv)
-        return false;
-
-    bool helperMode = argc == 3 && IEquals(argv[1], COM_REGISTRATION_HELPER_ARG);
-    if (helperMode)
-        manifestPath = argv[2];
-
-    LocalFree(argv);
-    return helperMode;
-}
-
 static int RunComRegistrationHelper(const std::wstring& manifestPath)
 {
     InitializeComRegistrationHelperRuntime();
@@ -680,6 +632,7 @@ static AppxRegistrationResult Appx_Register_COM_OutOfProcess(const std::wstring&
     PROCESS_INFORMATION pi{};
     std::wstring cmdline = QuoteCommandLineArg(g_exePath) + L" " +
         COM_REGISTRATION_HELPER_ARG + L" " + QuoteCommandLineArg(manifestPath);
+    AppendCommandLineForwardedOptions(cmdline);
     std::wstring workingDir = GetExeDir();
 
     BOOL ok = CreateProcessW(g_exePath.c_str(), &cmdline[0], nullptr, nullptr, FALSE,

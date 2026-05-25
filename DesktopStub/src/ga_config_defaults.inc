@@ -8,7 +8,7 @@ static std::atomic<bool> g_disableFitting(false);
 static std::atomic<bool> g_wallpaperDetectionFallbackOnInvalid(true);
 static std::atomic<bool> g_generateOnStartup(true);
 static std::atomic<bool> g_generateOnStartupOnlyWhenChanged(true);
-static std::atomic<bool> g_experimentalLiveTileUpdate(false);
+static std::atomic<int> g_liveTileUpdateMode(static_cast<int>(LiveTileUpdateMode::Auto));
 static std::atomic<bool> g_hideDisabled(false);
 static std::atomic<bool> g_showMenuAsDropdown(true);
 static std::atomic<bool> g_notificationsEnabled(true);
@@ -99,7 +99,7 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"ListenFit", L"1"},
     {L"Settings", L"DisableFitting", L"0"},
     {L"Settings", L"UsePowerShell", L"0"},
-    {L"Settings", L"ExperimentalLiveTileUpdate", L"0"},
+    {L"Settings", L"ExperimentalLiveTileUpdate", L"Auto"},
     {L"Settings", L"HideDisabledEntries", L"0"},
     {L"Settings", L"GenerateDesktopIconForDisabledEntries", L"1"},
     {L"Settings", L"DeleteDisabledAssets", L"0"},
@@ -201,7 +201,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"TimingGenerationTotal", L"generation total"},
     {L"PowerShellRegistrationSummary", L"[i] PowerShell registration: %s"},
     {L"UsePowerShellSummary", L"[i] UsePowerShell = %d (%s)"},
-    {L"LiveTileUpdateSummary", L"[i] Experimental Live Tile update: %s"},
+    {L"LiveTileUpdateSummary", L"[i] Live Tile update mode: %s"},
     {L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s"},
     {L"TrayIconSummary", L"[i] Tray icon: %s"},
     {L"ConsoleSummary", L"[i] Console %s."},
@@ -342,7 +342,10 @@ static const StringDefault g_stringDefaults[] = {
     {L"ListenWallpaper", L"Listen Wallpaper"},
     {L"TrayIcon", L"Tray Icon (this session)"},
     {L"UsePowerShell", L"PowerShell only"},
-    {L"ExperimentalLiveTileUpdate", L"Experimental Live Tile update"},
+    {L"ExperimentalLiveTileUpdate", L"Live Tile update mode"},
+    {L"LiveTileModeAuto", L"Auto"},
+    {L"LiveTileModeRegistration", L"Registration"},
+    {L"LiveTileModeLiveTile", L"Live Tile"},
     {L"GenerateOnStartup", L"Generate on Startup"},
     {L"GenerateOnStartupOnlyWhenChanged", L"Generate on Startup only when changed"},
     {L"HideDisabledEntries", L"Hide disabled entries"},
@@ -743,6 +746,8 @@ static void UpgradeRenamedStringDefaults()
     RepairBrokenPowerShellOutputTruncatedDefault();
     UpgradeStringDefaultIfUnmodified(L"UsePowerShell", L"Use PowerShell", L"PowerShell only");
     UpgradeStringDefaultIfUnmodified(L"TrayIcon", L"Tray Icon", L"Tray Icon (this session)");
+    UpgradeStringDefaultIfUnmodified(L"ExperimentalLiveTileUpdate", L"Experimental Live Tile update", L"Live Tile update mode");
+    UpgradeStringDefaultIfUnmodified(L"LiveTileUpdateSummary", L"[i] Experimental Live Tile update: %s", L"[i] Live Tile update mode: %s");
     UpgradeStringDefaultIfUnmodified(L"MissingManifestAssets", L"[!] Registration failed and manifest assets are missing: %s", L"[!] Registration failed and manifest assets are missing or invalid: %s");
     UpgradeStringDefaultIfUnmodified(L"NotificationMissingManifestAssets", L"Registration failed because one or more manifest assets are missing.", L"Registration failed; one or more manifest assets are missing or invalid.");
     UpgradeStringDefaultIfUnmodified(L"NotificationMissingManifestAssets", L"Registration failed because one or more manifest assets are missing or invalid.", L"Registration failed; one or more manifest assets are missing or invalid.");
