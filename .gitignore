@@ -33,9 +33,11 @@
 
 # DesktopStub runtime outputs
 DesktopStub/build/AppxManifest.xml
+DesktopStub/build/AssetCache/
 DesktopStub/build/Assets/
 DesktopStub/build/microsoft.system.package.metadata
 DesktopStub/build/obj/
+DesktopStub/references/
 
 # NowPlayingTile generated package/build output
 NowPlayingTile/build/

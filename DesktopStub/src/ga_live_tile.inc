@@ -113,7 +113,10 @@ static void AppendLiveTileImageBinding(
     xml += L"    </binding>\r\n";
 }
 
-static std::wstring BuildLiveTileXml(const std::wstring& exeDir, const ManifestDisplayInfo& manifestInfo)
+static std::wstring BuildLiveTileXml(
+    const std::wstring& exeDir,
+    const ManifestDisplayInfo& manifestInfo,
+    const std::vector<LiveTileUpdateAsset>& liveTileAssets)
 {
     (void)manifestInfo;
 
@@ -122,7 +125,7 @@ static std::wstring BuildLiveTileXml(const std::wstring& exeDir, const ManifestD
     xml += L"<tile>\r\n";
     xml += L"  <visual branding=\"nameAndLogo\">\r\n";
 
-    for (const auto& asset : g_liveTileAssets)
+    for (const auto& asset : liveTileAssets)
     {
         std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file);
         if (!uri.empty())
@@ -141,6 +144,7 @@ static std::wstring BuildLiveTileXml(const std::wstring& exeDir, const ManifestD
 static bool Appx_Update_LiveTile(
     const std::wstring& exeDir,
     const ManifestDisplayInfo& manifestInfo,
+    const std::vector<LiveTileUpdateAsset>& liveTileAssets,
     std::wstring& failureMessage)
 {
     failureMessage.clear();
@@ -154,7 +158,7 @@ static bool Appx_Update_LiveTile(
     }
     Log(g_ui.liveTilePackageIdentity.c_str(), packageFullName.c_str());
 
-    std::wstring tileXml = BuildLiveTileXml(exeDir, manifestInfo);
+    std::wstring tileXml = BuildLiveTileXml(exeDir, manifestInfo, liveTileAssets);
     if (tileXml.empty())
     {
         failureMessage = g_ui.liveTileUpdateNoUsableAssets;
@@ -175,7 +179,6 @@ static bool Appx_Update_LiveTile(
         TileNotification notification(xml);
         TileUpdater updater = TileUpdateManager::CreateTileUpdaterForApplication();
         updater.EnableNotificationQueue(false);
-        updater.Clear();
         updater.Update(notification);
 
         LogText(g_ui.liveTileUpdateSuccess);

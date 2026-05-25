@@ -23,6 +23,7 @@ struct UiStrings
     std::wstring methodsTitle;
     std::wstring assetsTitle;
     std::wstring dpiScalesTitle;
+    std::wstring cachingTitle;
 
     std::wstring listenWallpaper;
     std::wstring trayIcon;
@@ -41,6 +42,10 @@ struct UiStrings
     std::wstring generateScale200;
     std::wstring generateScale400;
     std::wstring currentDpiScaleLabel;
+    std::wstring generatedAssetCache;
+    std::wstring generatedAssetPrecache;
+    std::wstring generatedAssetCacheMaxEntriesLabel;
+    std::wstring generatedAssetPrecacheMaxFilesLabel;
     std::wstring showMenuAsDropdown;
     std::wstring notificationsTitle;
     std::wstring notificationsEnabled;
@@ -124,6 +129,11 @@ struct UiStrings
     std::wstring activeScales;
     std::wstring savedAsset;
     std::wstring savedScaledAsset;
+    std::wstring generatedAssetCacheHit;
+    std::wstring generatedAssetCacheSaved;
+    std::wstring generatedAssetCacheSummary;
+    std::wstring generatedAssetPrecacheSaved;
+    std::wstring generatedAssetPrecacheSummary;
     std::wstring failedSaveAsset;
     std::wstring failedSaveScaledAsset;
     std::wstring savePngInvalidInput;

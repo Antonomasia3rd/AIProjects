@@ -289,6 +289,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.trayIconSummary.c_str(), StateEnabled(g_tray));
     Log(g_ui.powerShellRegistrationSummary.c_str(), UsePowerShell() ? g_ui.powerShellEnabledMode.c_str() : g_ui.comPreferredMode.c_str());
     Log(g_ui.liveTileUpdateSummary.c_str(), StateEnabled(UseExperimentalLiveTileUpdate()));
+    Log(g_ui.generatedAssetCacheSummary.c_str(),
+        StateEnabled(GeneratedAssetCacheEnabled()),
+        GeneratedAssetCacheMaxEntries());
+    Log(g_ui.generatedAssetPrecacheSummary.c_str(),
+        StateEnabled(GeneratedAssetPrecacheEnabled()),
+        GeneratedAssetPrecacheMaxFiles());
     Log(g_ui.comRegistrationHelperSummary.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 1) != 0));
     Log(g_ui.wallpaperDetectionFallbackSummary.c_str(), StateEnabled(g_wallpaperDetectionFallbackOnInvalid));
     if (singleInstanceMessageError != ERROR_SUCCESS)
@@ -393,6 +399,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     WakePollThread();
     if (th.joinable()) th.join();
     JoinQueuedGenerations();
+    JoinGeneratedAssetPrecache();
 
     TrayRemove();
     GdiplusShutdown(tk);
