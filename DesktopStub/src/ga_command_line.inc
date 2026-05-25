@@ -26,6 +26,7 @@ struct CommandLineOptions
     std::wstring comRegistrationHelperManifestPath;
     std::vector<CommandLineIniSetting> settings;
     bool liveTileModeChanged = false;
+    bool trayIconChanged = false;
 };
 
 static CommandLineOptions g_commandLine;
@@ -36,6 +37,8 @@ static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW = 0;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_RELOAD_SETTINGS = 1;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_EXIT = 2;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_GENERATE = 3;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MASK = 0x00FF;
+static constexpr WPARAM SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON = 0x0100;
 
 static void AddCommandLineIniSetting(const std::wstring& section, const std::wstring& key, const std::wstring& value);
 
@@ -805,6 +808,11 @@ static bool CommandLineLiveTileModeChanged()
     return g_commandLine.liveTileModeChanged;
 }
 
+static bool CommandLineTrayIconChanged()
+{
+    return g_commandLine.trayIconChanged;
+}
+
 static bool CommandLineShouldGenerateOnce()
 {
     return g_commandLine.generateOnce;
@@ -873,14 +881,21 @@ static bool CommandLineSettingChangesLiveTileMode(const CommandLineIniSetting& e
     return before != after;
 }
 
+static bool CommandLineSettingChangesTrayIcon(const CommandLineIniSetting& entry)
+{
+    return IEquals(entry.section, L"Settings") && IEquals(entry.key, L"TrayIcon");
+}
+
 static bool ApplyCommandLinePersistentSettings()
 {
     g_commandLine.applyError.clear();
     g_commandLine.liveTileModeChanged = false;
+    g_commandLine.trayIconChanged = false;
 
     for (const auto& entry : g_commandLine.settings)
     {
         bool changesLiveTileMode = CommandLineSettingChangesLiveTileMode(entry);
+        bool changesTrayIcon = CommandLineSettingChangesTrayIcon(entry);
         if (!WriteIniValue(entry.section.c_str(), entry.key.c_str(), entry.value.c_str()))
         {
             DWORD err = GetLastError();
@@ -894,6 +909,8 @@ static bool ApplyCommandLinePersistentSettings()
 
         if (changesLiveTileMode)
             g_commandLine.liveTileModeChanged = true;
+        if (changesTrayIcon)
+            g_commandLine.trayIconChanged = true;
     }
 
     return true;

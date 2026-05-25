@@ -239,8 +239,15 @@ $sourceChecks = @(
         -Name 'Command-line requests fail when existing instance cannot be signaled' `
         -SourceName 'src\ga_app.inc' `
         -SourceText $app `
-        -Pattern '(?s)if \(!SignalExistingInstance\(singleInstanceRequest\)\).*singleInstanceRequest != SINGLE_INSTANCE_REQUEST_SHOW.*ShowCommandLineMessage\(L"Failed to signal the running GenerateAssets instance\.",\s*true\).*return 2' `
+        -Pattern '(?s)if \(!SignalExistingInstance\(singleInstanceRequest\)\).*\(singleInstanceRequest\s*&\s*SINGLE_INSTANCE_REQUEST_MASK\)\s*!=\s*SINGLE_INSTANCE_REQUEST_SHOW.*ShowCommandLineMessage\(L"Failed to signal the running GenerateAssets instance\.",\s*true\).*return 2' `
         -Failure 'command-line exit/generate/reload requests must not report success when the running instance cannot be signaled'),
+
+    (New-SourceCheck `
+        -Name 'Command-line reload only applies tray visibility when TrayIcon changed' `
+        -SourceName 'command-line/app sources' `
+        -SourceText ($commandLine + "`n" + $app) `
+        -Pattern '(?s)CommandLineSettingChangesTrayIcon.*IEquals\(entry\.section,\s*L"Settings"\).*IEquals\(entry\.key,\s*L"TrayIcon"\).*ApplySettingsChangedByCommandLine\(bool applyTrayIcon\).*if \(applyTrayIcon\)\s*ApplyTrayIconSettingFromIni\(\).*CommandLineTrayIconChanged\(\).*SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON' `
+        -Failure 'command-line settings reloads must not resurrect or hide the session tray icon unless TrayIcon changed'),
 
     (New-SourceCheck `
         -Name 'Live Tile mode change forces registration before Live Tile updates' `
