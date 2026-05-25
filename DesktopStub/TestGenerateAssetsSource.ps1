@@ -236,6 +236,13 @@ $sourceChecks = @(
         -Failure 'alternate --ini runs must not signal the default running instance'),
 
     (New-SourceCheck `
+        -Name 'Command-line requests fail when existing instance cannot be signaled' `
+        -SourceName 'src\ga_app.inc' `
+        -SourceText $app `
+        -Pattern '(?s)if \(!SignalExistingInstance\(singleInstanceRequest\)\).*singleInstanceRequest != SINGLE_INSTANCE_REQUEST_SHOW.*ShowCommandLineMessage\(L"Failed to signal the running GenerateAssets instance\.",\s*true\).*return 2' `
+        -Failure 'command-line exit/generate/reload requests must not report success when the running instance cannot be signaled'),
+
+    (New-SourceCheck `
         -Name 'Live Tile mode change forces registration before Live Tile updates' `
         -SourceName 'src\ga_generation.inc' `
         -SourceText $generation `
