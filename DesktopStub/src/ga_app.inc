@@ -405,8 +405,15 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
         if (!SignalExistingInstance(singleInstanceRequest))
         {
-            if (singleInstanceRequest == SINGLE_INSTANCE_REQUEST_SHOW &&
-                IniReadI(L"Settings", L"NotificationsEnabled", 1) != 0 &&
+            if (singleInstanceRequest != SINGLE_INSTANCE_REQUEST_SHOW)
+            {
+                ShowCommandLineMessage(L"Failed to signal the running GenerateAssets instance.", true);
+                CloseHandle(g_singleInstanceMutex);
+                g_singleInstanceMutex = nullptr;
+                return 2;
+            }
+
+            if (IniReadI(L"Settings", L"NotificationsEnabled", 1) != 0 &&
                 IniReadI(L"Settings", L"NotifyOnAlreadyRunning", 1) != 0)
             {
                 std::wstring title = StartupString(L"NotificationTitle", L"Desktop Tile Generator");
