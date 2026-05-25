@@ -29,6 +29,9 @@ struct UiStrings
     std::wstring trayIcon;
     std::wstring usePowerShell;
     std::wstring experimentalLiveTileUpdate;
+    std::wstring liveTileModeAuto;
+    std::wstring liveTileModeRegistration;
+    std::wstring liveTileModeLiveTile;
     std::wstring generateOnStartup;
     std::wstring generateOnStartupOnlyWhenChanged;
     std::wstring hideDisabledEntries;

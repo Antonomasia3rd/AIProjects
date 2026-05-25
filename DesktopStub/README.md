@@ -56,9 +56,38 @@ On first launch the app creates `GenerateAssets.ini` next to the executable. The
 - asset generation targets and DPI scales;
 - manifest settings;
 - registration mode and fallback behavior;
-- experimental Live Tile update mode;
+- Live Tile update mode;
 - advanced timing/error options;
 - startup/cleanup actions.
+
+Command-line settings are saved to `GenerateAssets.ini`, the same configuration file used by the tray menu. Action-only commands such as `--once`, `--generate`, `--no-monitor`, and `--exit` affect only that invocation.
+
+```cmd
+GenerateAssets.exe --once
+GenerateAssets.exe --no-tray --console
+GenerateAssets.exe --ini D:\Temp\GenerateAssets.ini --set Settings.PollIntervalMs=5000
+GenerateAssets.exe --wallpaper D:\Pictures\wallpaper.jpg --scales 100,200
+GenerateAssets.exe --exit
+```
+
+Supported options:
+
+- `--help`, `-h`, `/?`: show command-line help.
+- `--ini <path>`: use an alternate INI file; alternate INI instances have separate single-instance scope.
+- `--set Section.Key=Value`: set and save any INI value.
+- `--exit` / `--quit`: ask the running instance to exit gracefully.
+- `--once`: generate once and exit.
+- `--generate` / `--generate-now`: force startup generation and keep running.
+- `--wallpaper <path>` or a bare wallpaper path: generate from that image.
+- `--no-monitor`: skip wallpaper/fit/DPI monitoring.
+- `--tray` / `--no-tray`, `--console` / `--no-console`, `--logging` / `--no-logging`, `--notifications` / `--no-notifications`.
+- `--powershell` / `--com-registration`: set and save registration command mode.
+- `--live-tile` / `--no-live-tile`: set and save Live Tile update mode.
+- `--live-tile-auto`: set and save automatic Live Tile update mode.
+- `--live-tile-mode Auto|Registration|LiveTile`: set and save Live Tile update mode.
+- `--detect <method>`: set and save `WallpaperDetectionMethod`.
+- `--scales auto|all|100,125,150,200,400`: set and save generated DPI scales.
+- `--asset Name=0|1`: set and save one asset toggle, such as `MediumTile=1`.
 
 ## Important Features
 
@@ -66,7 +95,7 @@ On first launch the app creates `GenerateAssets.ini` next to the executable. The
 - Supports selected DPI scales plus automatic current-DPI scale generation.
 - Detects wallpaper through configurable methods, including slideshow-compatible methods.
 - Uses COM Appx registration by default with optional PowerShell-only mode and fallback behavior.
-- Can optionally try an experimental Live Tile notification update instead of re-registering after each asset regeneration.
+- Can automatically use Live Tile notification updates when launched with package identity, with manual registration/Live Tile overrides.
 - Can dynamically create `AppxManifest.xml` from configurable manifest defaults.
 - Supports quoted INI values and inline comments.
 - Keeps detailed logs and exposes registration output from the tray.
@@ -78,6 +107,7 @@ On first launch the app creates `GenerateAssets.ini` next to the executable. The
 
 - `ga_core.inc`: low-level file, text, INI, and process-output helpers.
 - `ga_config_defaults.inc`: runtime globals and generated INI/string defaults.
+- `ga_command_line.inc`: command-line parsing and saved INI setting changes.
 - `ga_ui_logging.inc`: ordered UI/logging aggregator for smaller fragments.
 - `ga_ui_state.inc`: UI string state, logging/tray globals, and shared state labels.
 - `ga_logging_core.inc`: logging, console, INI access wrappers, and runtime logging settings.
@@ -88,7 +118,7 @@ On first launch the app creates `GenerateAssets.ini` next to the executable. The
 - `ga_image.inc`: GDI+ image generation and PNG saving.
 - `ga_registration.inc`: Appx registration and PowerShell fallback handling.
 - `ga_generation.inc`: asset generation, polling, and shutdown coordination.
-- `ga_live_tile.inc`: experimental Live Tile notification update handling.
+- `ga_live_tile.inc`: Live Tile notification update handling.
 - `ga_tray.inc`: tray menu and tray notifications.
 - `ga_app.inc`: window procedure and application startup/shutdown.
 
@@ -103,15 +133,23 @@ Generated/runtime files live under `DesktopStub\build` and are ignored by git:
 - `Assets\*`
 - compiler object files under `obj\`
 
-## Experimental Live Tile Update
+## Live Tile Update
 
-By default, each successful asset regeneration refreshes the Start entry by re-registering `AppxManifest.xml`.
+`ExperimentalLiveTileUpdate=Auto` is the default Live Tile update mode in `GenerateAssets.ini`.
 
-Set `ExperimentalLiveTileUpdate=1` in `GenerateAssets.ini`, or enable **Experimental Live Tile update** from the tray menu, to try updating the tile through `Windows.UI.Notifications.TileUpdateManager` instead. New default manifests point at `GenerateAssets.exe`, so launching the registered `shell:AppsFolder\<PackageFamilyName>!App` entry starts the updater with package identity. Existing manifests and explicit `Manifest.Executable` settings are not rewritten; keep `rundll32.exe` if you want the tile launch to do nothing. Direct `GenerateAssets.exe` launches usually do not have package identity, so the app logs a clear failure instead of falling back silently. The registration path remains the default.
+In `Auto`, a Start tile launch through the registered `shell:AppsFolder\<PackageFamilyName>!App` entry normally starts `GenerateAssets.exe` with package identity, so successful asset regeneration updates the tile through `Windows.UI.Notifications.TileUpdateManager`. A direct `GenerateAssets.exe` launch normally has no package identity, so successful asset regeneration uses the registration path and refreshes the Start entry by re-registering `AppxManifest.xml`.
 
-In this mode, static manifest logo assets are treated as disabled so stale registered assets are not refreshed with wallpaper images. If **Generate Desktop Icon for disabled entries** is enabled, those static assets become desktop-icon placeholders; otherwise they are deleted. The Live Tile notification itself uses separate generated files under `Assets\Live*.png`.
+The mode is user-configurable from the tray menu, command line, or INI:
 
-Changing the **Experimental Live Tile update** tray checkbox queues one asset regeneration and one Appx re-registration before normal Live Tile updates resume. This refreshes Windows' cached static assets after switching modes.
+- `Auto`: choose Live Tile update only when the current process has package identity.
+- `LiveTile` or `1`: always try `TileUpdateManager`; without package identity the app logs a clear failure.
+- `Registration` or `0`: always refresh by re-registering `AppxManifest.xml`.
+
+New default manifests point at `GenerateAssets.exe`, so registered Start launches can carry package identity. Existing manifests and explicit `Manifest.Executable` settings are not rewritten; keep `rundll32.exe` if you want the tile launch to do nothing.
+
+When Live Tile update is active, static manifest logo assets are treated as disabled so stale registered assets are not refreshed with wallpaper images. If **Generate Desktop Icon for disabled entries** is enabled, those static assets become desktop-icon placeholders; otherwise they are deleted. The Live Tile notification itself uses separate generated files under `Assets\Live*.png`.
+
+Changing the Live Tile update mode queues one asset regeneration and one Appx re-registration before normal Live Tile updates resume. This refreshes Windows' cached static assets after switching modes.
 
 ## Release
 

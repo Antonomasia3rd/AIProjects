@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------------
-// Experimental Live Tile update
+// Live Tile update
 // -----------------------------------------------------------------------------
 static bool CurrentProcessPackageFullName(std::wstring& packageFullName)
 {

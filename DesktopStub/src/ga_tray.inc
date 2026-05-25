@@ -9,7 +9,9 @@ enum {
     ID_TRAYICON,
     ID_CONSOLE,
     ID_LOG,
-    ID_EXPERIMENTAL_LIVE_TILE_UPDATE,
+    ID_LIVE_TILE_MODE_AUTO,
+    ID_LIVE_TILE_MODE_REGISTRATION,
+    ID_LIVE_TILE_MODE_LIVE_TILE,
     ID_LOGFILE,
     ID_LOG_RENAME,
     ID_LOG_OPEN,
@@ -314,7 +316,12 @@ void Menu(HWND h)
     addTo(generalMenu, ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
     addTo(generalMenu, ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);
     addTo(generalMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
-    addTo(generalMenu, ID_EXPERIMENTAL_LIVE_TILE_UPDATE, g_ui.experimentalLiveTileUpdate.c_str(), UseExperimentalLiveTileUpdate());
+    {
+        LiveTileUpdateMode liveTileMode = ConfiguredLiveTileUpdateMode();
+        addTo(generalMenu, ID_LIVE_TILE_MODE_AUTO, g_ui.experimentalLiveTileUpdate + L": " + g_ui.liveTileModeAuto, liveTileMode == LiveTileUpdateMode::Auto);
+        addTo(generalMenu, ID_LIVE_TILE_MODE_REGISTRATION, g_ui.experimentalLiveTileUpdate + L": " + g_ui.liveTileModeRegistration, liveTileMode == LiveTileUpdateMode::Registration);
+        addTo(generalMenu, ID_LIVE_TILE_MODE_LIVE_TILE, g_ui.experimentalLiveTileUpdate + L": " + g_ui.liveTileModeLiveTile, liveTileMode == LiveTileUpdateMode::LiveTile);
+    }
     addTo(generalMenu, ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
     addTo(generalMenu, ID_GENERATE_STARTUP_CHANGED_ONLY, g_ui.generateOnStartupOnlyWhenChanged.c_str(), g_generateOnStartupOnlyWhenChanged, g_generateOnStartup);
     addTo(generalMenu, ID_HIDE_DISABLED, g_ui.hideDisabledEntries.c_str(), g_hideDisabled);
@@ -563,13 +570,23 @@ void Menu(HWND h)
     }
     break;
 
-    case ID_EXPERIMENTAL_LIVE_TILE_UPDATE:
+    case ID_LIVE_TILE_MODE_AUTO:
+    case ID_LIVE_TILE_MODE_REGISTRATION:
+    case ID_LIVE_TILE_MODE_LIVE_TILE:
     {
-        bool v = !g_experimentalLiveTileUpdate.load();
-        g_experimentalLiveTileUpdate = v;
-        IniWrite(L"Settings", L"ExperimentalLiveTileUpdate", v ? L"1" : L"0");
-        Log(g_ui.liveTileUpdateSummary.c_str(), StateEnabled(v));
-        QueueLiveTileModeReregistration();
+        LiveTileUpdateMode newLiveTileMode = LiveTileUpdateMode::Auto;
+        if (cmd == ID_LIVE_TILE_MODE_REGISTRATION)
+            newLiveTileMode = LiveTileUpdateMode::Registration;
+        else if (cmd == ID_LIVE_TILE_MODE_LIVE_TILE)
+            newLiveTileMode = LiveTileUpdateMode::LiveTile;
+
+        if (ConfiguredLiveTileUpdateMode() != newLiveTileMode)
+        {
+            g_liveTileUpdateMode = static_cast<int>(newLiveTileMode);
+            IniWrite(L"Settings", L"ExperimentalLiveTileUpdate", LiveTileUpdateModeIniValue(newLiveTileMode).c_str());
+            Log(g_ui.liveTileUpdateSummary.c_str(), LiveTileUpdateModeSummaryText().c_str());
+            QueueLiveTileModeReregistration();
+        }
     }
     break;
 
