@@ -30,11 +30,12 @@ static void ApplyTrayIconSettingFromIni()
     Log(g_ui.trayIconSummary.c_str(), StateEnabled(g_tray));
 }
 
-static void ApplySettingsChangedByCommandLine()
+static void ApplySettingsChangedByCommandLine(bool applyTrayIcon)
 {
     LiveTileUpdateMode liveTileBefore = ConfiguredLiveTileUpdateMode();
     ReloadRuntimeSettingsFromIni();
-    ApplyTrayIconSettingFromIni();
+    if (applyTrayIcon)
+        ApplyTrayIconSettingFromIni();
 
     if (liveTileBefore != ConfiguredLiveTileUpdateMode())
         QueueLiveTileModeReregistration();
@@ -67,18 +68,20 @@ static void QueueCommandLineGenerationRequest()
 
 static void HandleSingleInstanceRequest(WPARAM request)
 {
-    switch (request)
+    bool applyTrayIcon = (request & SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON) != 0;
+
+    switch (request & SINGLE_INSTANCE_REQUEST_MASK)
     {
     case SINGLE_INSTANCE_REQUEST_EXIT:
         RequestGracefulShutdown(g_hwnd);
         return;
 
     case SINGLE_INSTANCE_REQUEST_RELOAD_SETTINGS:
-        ApplySettingsChangedByCommandLine();
+        ApplySettingsChangedByCommandLine(applyTrayIcon);
         return;
 
     case SINGLE_INSTANCE_REQUEST_GENERATE:
-        ApplySettingsChangedByCommandLine();
+        ApplySettingsChangedByCommandLine(applyTrayIcon);
         QueueCommandLineGenerationRequest();
         return;
 
@@ -403,9 +406,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             singleInstanceRequest = SINGLE_INSTANCE_REQUEST_RELOAD_SETTINGS;
         }
 
+        if (CommandLineTrayIconChanged())
+            singleInstanceRequest |= SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON;
+
         if (!SignalExistingInstance(singleInstanceRequest))
         {
-            if (singleInstanceRequest != SINGLE_INSTANCE_REQUEST_SHOW)
+            if ((singleInstanceRequest & SINGLE_INSTANCE_REQUEST_MASK) != SINGLE_INSTANCE_REQUEST_SHOW)
             {
                 ShowCommandLineMessage(L"Failed to signal the running GenerateAssets instance.", true);
                 CloseHandle(g_singleInstanceMutex);
