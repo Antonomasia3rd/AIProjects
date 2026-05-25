@@ -68,6 +68,23 @@ function Assert-SourceCheck {
     Write-Host "ok - $($Check.Name)"
 }
 
+function Assert-SourceAbsent {
+    param(
+        [Parameter(Mandatory=$true)][string]$Name,
+        [Parameter(Mandatory=$true)][string]$SourceName,
+        [Parameter(Mandatory=$true)][string]$SourceText,
+        [Parameter(Mandatory=$true)][string]$Pattern,
+        [Parameter(Mandatory=$true)][string]$Failure
+    )
+
+    $script:CheckCount++
+    if ($SourceText -match $Pattern) {
+        throw "GenerateAssets source regression: $Failure [$Name in $SourceName]"
+    }
+
+    Write-Host "ok - $Name"
+}
+
 function Assert-UiStringWired {
     param(
         [Parameter(Mandatory=$true)][string]$Key,
@@ -91,16 +108,25 @@ function Assert-UiStringWired {
         -Pattern ([regex]::Escape("g_ui.$property")) `
         -Failure "UI field load missing for $Key")
 
-    Assert-SourceCheck (New-SourceCheck `
-        -Name "UI format is validated: $Key" `
-        -SourceName 'UI/string sources' `
-        -SourceText $UiSources `
-        -Pattern "RequireFormat\(g_ui\.$property" `
-        -Failure "format validation missing for $Key")
+    $defaultMatch = [regex]::Match(
+        $Defaults,
+        '\{L"' + [regex]::Escape($Key) + '",\s*L"(?<value>(?:[^"\\]|\\.)*)"'
+    )
+    $requiresFormatValidation = $defaultMatch.Success -and $defaultMatch.Groups['value'].Value -match '%[0-9A-Za-z]'
+    if ($requiresFormatValidation) {
+        Assert-SourceCheck (New-SourceCheck `
+            -Name "UI format is validated: $Key" `
+            -SourceName 'UI/string sources' `
+            -SourceText $UiSources `
+            -Pattern "RequireFormat\(g_ui\.$property" `
+            -Failure "format validation missing for $Key")
+    }
 }
 
 $generation = Read-Source 'src\ga_generation.inc'
 $app = Read-Source 'src\ga_app.inc'
+$image = Read-Source 'src\ga_image.inc'
+$desktopIcon = Read-Source 'src\ga_desktop_icon_png.inc'
 $registration = Read-Source 'src\ga_registration.inc'
 $liveTile = Read-Source 'src\ga_live_tile.inc'
 $manifest = Read-Source 'src\ga_manifest.inc'
@@ -176,7 +202,7 @@ $sourceChecks = @(
         -Name 'Experimental Live Tile mode skips AppX registration path' `
         -SourceName 'src\ga_generation.inc' `
         -SourceText $generation `
-        -Pattern '(?s)useLiveTileUpdateForThisRun.*Appx_Update_LiveTile\(exeDir,\s*manifestInfo,\s*appUpdateFailureMessage\).*else\s*\{.*RegisterAppxManifest\(manifestPath,\s*appUpdateFailureMessage\)' `
+        -Pattern '(?s)useLiveTileUpdateForThisRun.*Appx_Update_LiveTile\(exeDir,\s*manifestInfo,\s*liveTileUpdateAssets,\s*appUpdateFailureMessage\).*else\s*\{.*RegisterAppxManifest\(manifestPath,\s*appUpdateFailureMessage\)' `
         -Failure 'experimental Live Tile mode must call the tile updater instead of re-registering the AppX manifest'),
 
     (New-SourceCheck `
@@ -208,18 +234,67 @@ $sourceChecks = @(
         -Failure 'Live Tile mode must treat static manifest assets as disabled and remove stale files when desktop-icon fallback is off'),
 
     (New-SourceCheck `
+        -Name 'Desktop icon placeholder assets use full tile canvases' `
+        -SourceName 'src\ga_generation.inc' `
+        -SourceText $generation `
+        -Pattern '(?s)LoadEmbeddedDesktopIcon\(\).*RenderDesktopIconAsset\(icon\.get\(\),\s*t\.w,\s*t\.h,\s*t\.w,\s*t\.h\).*ScalePixels\(t\.w,\s*scale\).*ScalePixels\(t\.h,\s*scale\).*RenderDesktopIconAsset\(icon\.get\(\),\s*scaledW,\s*scaledH,\s*t\.w,\s*t\.h\)' `
+        -Failure 'disabled/static Desktop icon placeholders must be rendered to target tile dimensions instead of saving the raw icon directly'),
+
+    (New-SourceCheck `
+        -Name 'Desktop icon placeholder renderer uses Windows 8 tile placement' `
+        -SourceName 'src\ga_image.inc' `
+        -SourceText $image `
+        -Pattern '(?s)DesktopIconVisibleWidthForAsset.*MulDiv\(logicalShortSide,\s*74,\s*150\).*MulDiv\(logicalVisibleW,\s*assetShortSide,\s*logicalShortSide\).*DesktopIconCenterYForAsset.*MulDiv\(logicalShortSide,\s*119,\s*300\).*MulDiv\(logicalCenterY,\s*assetHeight,\s*logicalHeight\).*static Bitmap\* RenderDesktopIconAsset.*DrawImage\(icon,\s*Rect\(dx,\s*dy,\s*targetVisibleW,\s*targetVisibleH\)' `
+        -Failure 'Desktop icon placeholder renderer must use Windows 8-style logical tile sizing and placement without stretching the icon or shrinking high-DPI variants'),
+
+    (New-SourceCheck `
+        -Name 'Desktop icon placeholder uses embedded high-resolution source' `
+        -SourceName 'src\ga_desktop_icon_png.inc' `
+        -SourceText $desktopIcon `
+        -Pattern '(?s)Embedded 864x640 RGBA PNG generated from the Windows 8\.1 Desktop tile logo proportions.*0x00,\s*0x00,\s*0x03,\s*0x60,\s*0x00,\s*0x00,\s*0x02,\s*0x80' `
+        -Failure 'Desktop icon placeholder must use an embedded high-resolution PNG source so the app stays portable and avoids low-resolution upscaling'),
+
+    (New-SourceCheck `
+        -Name 'Generated asset cache restores before loading wallpaper' `
+        -SourceName 'src\ga_generation.inc' `
+        -SourceText $generation `
+        -Pattern '(?s)BuildGenerationStateKey\(wp\).*TryRestoreGeneratedAssetCache\(.*if \(!restoredFromGeneratedAssetCache\).*std::make_unique<Bitmap>\(wp\)' `
+        -Failure 'generated asset cache hits must bypass wallpaper loading and PNG rendering'),
+
+    (New-SourceCheck `
+        -Name 'Generated asset cache is populated after successful generation' `
+        -SourceName 'src\ga_generation.inc' `
+        -SourceText $generation `
+        -Pattern '(?s)GeneratedAssetCache.*AddGeneratedAssetCacheFile.*if \(ok\).*SaveGeneratedAssetCache\(exeDir,\s*BuildGenerationStateKey\(wp\),\s*generatedAssetCacheFiles\)' `
+        -Failure 'successful generation must save generated PNGs into the bounded asset cache for repeat slideshow wallpapers'),
+
+    (New-SourceCheck `
+        -Name 'Generated asset pre-cache warms likely slideshow siblings in the background' `
+        -SourceName 'src\ga_generation.inc' `
+        -SourceText $generation `
+        -Pattern '(?s)RenderWallpaperToGeneratedAssetCache.*EnumerateSiblingWallpaperCandidates.*RunGeneratedAssetPrecache.*GeneratedAssetPrecacheThread.*QueueGeneratedAssetPrecache.*MarkGenerationActive\(false\).*QueueGeneratedAssetPrecache' `
+        -Failure 'successful generation must opportunistically pre-cache likely slideshow siblings without blocking the foreground tile update'),
+
+    (New-SourceCheck `
+        -Name 'Generated asset cache settings are exposed in a Caching menu' `
+        -SourceName 'src\ga_tray.inc' `
+        -SourceText $tray `
+        -Pattern '(?s)ID_GENERATED_ASSET_CACHE.*ID_GENERATED_ASSET_PRECACHE.*beginSection\(g_ui\.cachingTitle\).*g_ui\.generatedAssetCache.*g_ui\.generatedAssetPrecache.*GeneratedAssetCacheMaxEntriesLabel.*GeneratedAssetPrecacheMaxFilesLabel.*IniWrite\(L"Settings",\s*L"GeneratedAssetCache".*IniWrite\(L"Settings",\s*L"GeneratedAssetPrecache"' `
+        -Failure 'cache and slideshow pre-cache settings must be configurable from a dedicated Caching menu section'),
+
+    (New-SourceCheck `
         -Name 'Live Tile mode writes dedicated notification assets' `
         -SourceName 'src\ga_generation.inc' `
         -SourceText $generation `
-        -Pattern '(?s)g_liveTileAssets.*Assets\\\\LiveMediumTile\.png.*Assets\\\\LiveWideTile\.png.*Assets\\\\LiveLargeTile\.png.*if \(liveTileUpdateMode\).*for \(const auto& t : g_liveTileAssets\)' `
-        -Failure 'Live Tile mode must write dedicated Live*.png assets instead of relying on manifest logo assets'),
+        -Pattern '(?s)g_liveTileAssets.*Assets\\\\LiveMediumTile\.png.*Assets\\\\LiveWideTile\.png.*Assets\\\\LiveLargeTile\.png.*NewLiveTileAssetToken.*VersionedLiveTileAssetPath.*if \(liveTileUpdateMode\).*VersionedLiveTileAssetPath\(t,\s*liveTileToken\).*liveTileUpdateAssets\.push_back' `
+        -Failure 'Live Tile mode must write dedicated versioned Live*.png notification assets instead of relying on manifest logo assets or overwriting the displayed tile image in place'),
 
     (New-SourceCheck `
         -Name 'Live Tile XML uses dedicated notification assets' `
         -SourceName 'src\ga_live_tile.inc' `
         -SourceText $liveTile `
-        -Pattern '(?s)BuildLiveTileXml.*for \(const auto& asset : g_liveTileAssets\).*LiveTileAssetUriIfValid\(exeDir,\s*asset\.file\).*AppendLiveTileImageBinding\(xml,\s*asset\.binding' `
-        -Failure 'Live Tile XML must reference the dedicated Live*.png assets')
+        -Pattern '(?s)BuildLiveTileXml.*const std::vector<LiveTileUpdateAsset>& liveTileAssets.*for \(const auto& asset : liveTileAssets\).*LiveTileAssetUriIfValid\(exeDir,\s*asset\.file\).*AppendLiveTileImageBinding\(xml,\s*asset\.binding' `
+        -Failure 'Live Tile XML must reference the generated Live*.png update assets')
 )
 
 $uiStringKeys = @(
@@ -229,7 +304,17 @@ $uiStringKeys = @(
     'LiveTileUpdateSummary',
     'LiveTileUpdateException',
     'LiveTileUpdateMessage',
-    'LiveTilePackageIdentity'
+    'LiveTilePackageIdentity',
+    'CachingTitle',
+    'GeneratedAssetCache',
+    'GeneratedAssetPrecache',
+    'GeneratedAssetCacheMaxEntriesLabel',
+    'GeneratedAssetPrecacheMaxFilesLabel',
+    'GeneratedAssetCacheHit',
+    'GeneratedAssetCacheSaved',
+    'GeneratedAssetCacheSummary',
+    'GeneratedAssetPrecacheSaved',
+    'GeneratedAssetPrecacheSummary'
 )
 
 if ($ListChecks) {
@@ -249,6 +334,13 @@ Write-Host 'This checks source guardrails only; it does not build or launch the 
 foreach ($check in $sourceChecks) {
     Assert-SourceCheck $check
 }
+
+Assert-SourceAbsent `
+    -Name 'Live Tile update does not clear the existing tile first' `
+    -SourceName 'src\ga_live_tile.inc' `
+    -SourceText $liveTile `
+    -Pattern 'updater\.Clear\s*\(' `
+    -Failure 'Live Tile updater must not call Clear before Update because that causes a visible blank tile during refresh'
 
 foreach ($key in $uiStringKeys) {
     Assert-UiStringWired -Key $key -Defaults $defaults -UiSources $uiSources

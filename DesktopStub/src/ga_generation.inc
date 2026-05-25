@@ -18,6 +18,20 @@ static const LiveTileAsset g_liveTileAssets[] = {
     {L"LiveLargeTile",  L"Assets\\LiveLargeTile.png",310,310,L"TileLarge"},
 };
 
+struct LiveTileUpdateAsset
+{
+    const wchar_t* name;
+    const wchar_t* stableFile;
+    const wchar_t* binding;
+    std::wstring file;
+};
+
+struct GeneratedAssetCacheFile
+{
+    std::wstring cacheRelativePath;
+    std::wstring activePath;
+};
+
 struct GenerationCompletionRecord
 {
     unsigned long long id = 0;
@@ -28,12 +42,557 @@ static std::atomic<unsigned long long> g_generationNextRequestId(1);
 static std::mutex g_generationCompletionMutex;
 static std::vector<GenerationCompletionRecord> g_generationCompletions;
 static unsigned long long g_generationQueuedId = 0;
+static std::mutex g_generatedAssetPrecacheMutex;
+static std::condition_variable g_generatedAssetPrecacheCv;
+static std::thread g_generatedAssetPrecacheThread;
+static bool g_generatedAssetPrecacheWorkerStarted = false;
+static bool g_generatedAssetPrecacheStop = false;
+static bool g_generatedAssetPrecacheQueued = false;
+static std::wstring g_generatedAssetPrecacheWallpaper;
 
 static void WakePollThread();
+static bool GenerationWorkPending();
 static bool Appx_Update_LiveTile(
     const std::wstring& exeDir,
     const ManifestDisplayInfo& manifestInfo,
+    const std::vector<LiveTileUpdateAsset>& liveTileAssets,
     std::wstring& failureMessage);
+static std::wstring ResolveManifestAssetPath(const std::wstring& exeDir, const std::wstring& assetPath);
+static std::wstring ManifestAssetPathForTile(const ManifestDisplayInfo& info, const Tile& tile);
+static bool IsValidGeneratedPng(const std::wstring& path);
+
+static std::wstring FileNameFromPath(const std::wstring& path)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? path : path.substr(slash + 1);
+}
+
+static std::wstring InsertFileNameSuffix(const std::wstring& path, const std::wstring& suffix)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    size_t dot = path.find_last_of(L'.');
+    if (dot == std::wstring::npos || (slash != std::wstring::npos && dot < slash))
+        dot = path.size();
+
+    return path.substr(0, dot) + suffix + path.substr(dot);
+}
+
+static bool StartsWithI(const std::wstring& text, const std::wstring& prefix)
+{
+    return text.size() >= prefix.size() && IEquals(text.substr(0, prefix.size()), prefix);
+}
+
+static bool EndsWithI(const std::wstring& text, const std::wstring& suffix)
+{
+    return text.size() >= suffix.size() && IEquals(text.substr(text.size() - suffix.size()), suffix);
+}
+
+static bool IsHexToken(const std::wstring& value)
+{
+    if (value.empty())
+        return false;
+
+    for (wchar_t ch : value)
+    {
+        if (!((ch >= L'0' && ch <= L'9') ||
+            (ch >= L'a' && ch <= L'f') ||
+            (ch >= L'A' && ch <= L'F')))
+            return false;
+    }
+    return true;
+}
+
+static std::wstring NewLiveTileAssetToken()
+{
+    FILETIME ft{};
+    GetSystemTimeAsFileTime(&ft);
+    wchar_t token[32];
+    swprintf(token, _countof(token), L"%08lX%08lX", ft.dwHighDateTime, ft.dwLowDateTime);
+    return token;
+}
+
+static std::wstring VersionedLiveTileAssetPath(const LiveTileAsset& asset, const std::wstring& token)
+{
+    return InsertFileNameSuffix(asset.file, L"." + token);
+}
+
+static bool IsVersionedLiveTileAssetFileName(const std::wstring& fileName, const wchar_t* stableAssetFile)
+{
+    std::wstring stableName = FileNameFromPath(stableAssetFile ? stableAssetFile : L"");
+    size_t dot = stableName.find_last_of(L'.');
+    if (dot == std::wstring::npos || dot == 0)
+        return false;
+
+    std::wstring stem = stableName.substr(0, dot);
+    std::wstring ext = stableName.substr(dot);
+    std::wstring prefix = stem + L".";
+    if (!StartsWithI(fileName, prefix) || !EndsWithI(fileName, ext))
+        return false;
+
+    std::wstring token = fileName.substr(prefix.size(), fileName.size() - prefix.size() - ext.size());
+    return token.size() == 16 && IsHexToken(token);
+}
+
+static bool IsKeptLiveTileAssetPath(
+    const std::wstring& fullPath,
+    const std::wstring& exeDir,
+    const std::vector<LiveTileUpdateAsset>& keepAssets)
+{
+    for (const auto& asset : keepAssets)
+    {
+        if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file)))
+            return true;
+    }
+    return false;
+}
+
+static unsigned long long FileTimeToUInt64(const FILETIME& ft)
+{
+    ULARGE_INTEGER value{};
+    value.LowPart = ft.dwLowDateTime;
+    value.HighPart = ft.dwHighDateTime;
+    return value.QuadPart;
+}
+
+static void DeleteOldVersionedLiveTileAssets(
+    const std::wstring& exeDir,
+    const std::vector<LiveTileUpdateAsset>& keepAssets)
+{
+    struct VersionedLiveTileCandidate
+    {
+        std::wstring path;
+        unsigned long long writeTime;
+    };
+
+    constexpr size_t retainedVersionedAssetsPerTile = 2;
+
+    for (const auto& asset : g_liveTileAssets)
+    {
+        std::wstring stablePath = ResolveManifestAssetPath(exeDir, asset.file);
+        std::wstring assetDir = ParentDirectoryOfPath(stablePath);
+        if (assetDir.empty())
+            continue;
+
+        std::wstring stableName = FileNameFromPath(asset.file);
+        size_t dot = stableName.find_last_of(L'.');
+        if (dot == std::wstring::npos || dot == 0)
+            continue;
+
+        std::wstring pattern = assetDir + L"\\" + stableName.substr(0, dot) + L".*" + stableName.substr(dot);
+        WIN32_FIND_DATAW data{};
+        HANDLE find = FindFirstFileW(pattern.c_str(), &data);
+        if (find == INVALID_HANDLE_VALUE)
+            continue;
+
+        std::vector<VersionedLiveTileCandidate> candidates;
+        do
+        {
+            if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+                continue;
+
+            std::wstring fileName = data.cFileName;
+            if (!IsVersionedLiveTileAssetFileName(fileName, asset.file))
+                continue;
+
+            std::wstring fullPath = assetDir + L"\\" + fileName;
+            candidates.push_back({ fullPath, FileTimeToUInt64(data.ftLastWriteTime) });
+        } while (FindNextFileW(find, &data));
+
+        FindClose(find);
+
+        std::sort(candidates.begin(), candidates.end(),
+            [](const VersionedLiveTileCandidate& a, const VersionedLiveTileCandidate& b)
+            {
+                return a.writeTime > b.writeTime;
+            });
+
+        for (size_t i = 0; i < candidates.size(); ++i)
+        {
+            if (i < retainedVersionedAssetsPerTile ||
+                IsKeptLiveTileAssetPath(candidates[i].path, exeDir, keepAssets))
+                continue;
+
+            DeleteFileW(candidates[i].path.c_str());
+        }
+    }
+}
+
+static void CopyLiveTileAssetsToStablePaths(
+    const std::wstring& exeDir,
+    const std::vector<LiveTileUpdateAsset>& liveTileAssets)
+{
+    for (const auto& asset : liveTileAssets)
+    {
+        if (!asset.stableFile || !*asset.stableFile)
+            continue;
+
+        std::wstring sourcePath = ResolveManifestAssetPath(exeDir, asset.file);
+        std::wstring stablePath = ResolveManifestAssetPath(exeDir, asset.stableFile);
+        if (IEquals(sourcePath, stablePath))
+            continue;
+
+        if (!CopyFileW(sourcePath.c_str(), stablePath.c_str(), FALSE))
+        {
+            Log(g_ui.failedSaveAsset.c_str(), stablePath.c_str());
+            LogWin32Failure(L"CopyFileW");
+        }
+    }
+}
+
+static bool GeneratedAssetCacheEnabled()
+{
+    return IniReadI(L"Settings", L"GeneratedAssetCache", 1) != 0;
+}
+
+static int GeneratedAssetCacheMaxEntries()
+{
+    return IniReadClampedI(L"Settings", L"GeneratedAssetCacheMaxEntries", 64, 0, 4096);
+}
+
+static bool GeneratedAssetPrecacheEnabled()
+{
+    return GeneratedAssetCacheEnabled() &&
+        IniReadI(L"Settings", L"GeneratedAssetPrecache", 1) != 0 &&
+        GeneratedAssetCacheMaxEntries() > 0;
+}
+
+static int GeneratedAssetPrecacheMaxFiles()
+{
+    return IniReadClampedI(L"Settings", L"GeneratedAssetPrecacheMaxFiles", 16, 0, 256);
+}
+
+static std::wstring GeneratedAssetCacheRoot(const std::wstring& exeDir)
+{
+    return exeDir + L"\\AssetCache";
+}
+
+static std::wstring GeneratedAssetCacheDir(const std::wstring& exeDir, const std::wstring& stateKey)
+{
+    return GeneratedAssetCacheRoot(exeDir) + L"\\" + stateKey;
+}
+
+static std::wstring GeneratedAssetCacheFilePath(const std::wstring& cacheDir, const std::wstring& relativePath)
+{
+    return cacheDir + L"\\" + relativePath;
+}
+
+static std::wstring ManifestGeneratedAssetCacheName(const wchar_t* tileName)
+{
+    return L"Manifest\\" + std::wstring(tileName ? tileName : L"Asset") + L".png";
+}
+
+static std::wstring LiveGeneratedAssetCacheName(const wchar_t* tileName)
+{
+    return L"Live\\" + std::wstring(tileName ? tileName : L"Asset") + L".png";
+}
+
+static void AddGeneratedAssetCacheFile(
+    std::vector<GeneratedAssetCacheFile>& files,
+    const std::wstring& cacheRelativePath,
+    const std::wstring& activePath)
+{
+    if (cacheRelativePath.empty() || activePath.empty())
+        return;
+
+    for (const auto& file : files)
+    {
+        if (IEquals(file.cacheRelativePath, cacheRelativePath) ||
+            IEquals(file.activePath, activePath))
+            return;
+    }
+    files.push_back({ cacheRelativePath, activePath });
+}
+
+static bool CopyPngFileAtomically(const std::wstring& sourcePath, const std::wstring& targetPath)
+{
+    std::vector<BYTE> bytes;
+    if (!ReadWholeFileBytes(sourcePath, bytes))
+        return false;
+
+    DWORD dirError = ERROR_SUCCESS;
+    if (!EnsureParentDirectoryForFile(targetPath, &dirError))
+    {
+        SetLastError(dirError);
+        return false;
+    }
+
+    return WriteWholeFileBytes(targetPath, bytes);
+}
+
+static bool DeleteDirectoryTree(const std::wstring& dir)
+{
+    std::wstring pattern = dir + L"\\*";
+    WIN32_FIND_DATAW data{};
+    HANDLE find = FindFirstFileW(pattern.c_str(), &data);
+    if (find != INVALID_HANDLE_VALUE)
+    {
+        do
+        {
+            std::wstring name = data.cFileName;
+            if (name == L"." || name == L"..")
+                continue;
+
+            std::wstring child = dir + L"\\" + name;
+            if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+                DeleteDirectoryTree(child);
+            else
+                DeleteFileW(child.c_str());
+        } while (FindNextFileW(find, &data));
+
+        FindClose(find);
+    }
+
+    return RemoveDirectoryW(dir.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND;
+}
+
+static void PruneGeneratedAssetCache(const std::wstring& exeDir)
+{
+    int maxEntries = GeneratedAssetCacheMaxEntries();
+    if (maxEntries <= 0)
+        return;
+
+    struct CacheDirCandidate
+    {
+        std::wstring path;
+        unsigned long long writeTime;
+    };
+
+    std::wstring root = GeneratedAssetCacheRoot(exeDir);
+    std::wstring pattern = root + L"\\*";
+    WIN32_FIND_DATAW data{};
+    HANDLE find = FindFirstFileW(pattern.c_str(), &data);
+    if (find == INVALID_HANDLE_VALUE)
+        return;
+
+    std::vector<CacheDirCandidate> candidates;
+    do
+    {
+        std::wstring name = data.cFileName;
+        if (name == L"." || name == L".." ||
+            (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+            name.size() != 16 ||
+            !IsHexToken(name))
+            continue;
+
+        candidates.push_back({ root + L"\\" + name, FileTimeToUInt64(data.ftLastWriteTime) });
+    } while (FindNextFileW(find, &data));
+
+    FindClose(find);
+
+    if (candidates.size() <= static_cast<size_t>(maxEntries))
+        return;
+
+    std::sort(candidates.begin(), candidates.end(),
+        [](const CacheDirCandidate& a, const CacheDirCandidate& b)
+        {
+            return a.writeTime > b.writeTime;
+        });
+
+    for (size_t i = static_cast<size_t>(maxEntries); i < candidates.size(); ++i)
+        DeleteDirectoryTree(candidates[i].path);
+}
+
+static std::vector<GeneratedAssetCacheFile> BuildGeneratedAssetCacheFileList(
+    const std::wstring& exeDir,
+    const ManifestDisplayInfo& manifestInfo,
+    const std::vector<int>& scales,
+    bool liveTileUpdateMode,
+    const std::wstring& liveTileToken,
+    std::vector<LiveTileUpdateAsset>& liveTileUpdateAssets)
+{
+    std::vector<GeneratedAssetCacheFile> files;
+    liveTileUpdateAssets.clear();
+
+    for (const auto& t : g_tiles)
+    {
+        std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
+        std::wstring outPath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
+
+        bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
+        if (!staticWallpaperAssetEnabled && !g_generateDesktopIconForDisabledEntries)
+            continue;
+
+        std::wstring cacheName = ManifestGeneratedAssetCacheName(t.name);
+        AddGeneratedAssetCacheFile(files, cacheName, outPath);
+
+        for (int scale : scales)
+            AddGeneratedAssetCacheFile(files, ScaleAssetPath(cacheName, scale), ScaleAssetPath(outPath, scale));
+    }
+
+    if (liveTileUpdateMode)
+    {
+        for (const auto& t : g_liveTileAssets)
+        {
+            std::wstring updateAssetPath = VersionedLiveTileAssetPath(t, liveTileToken);
+            std::wstring outPath = ResolveManifestAssetPath(exeDir, updateAssetPath);
+            liveTileUpdateAssets.push_back({ t.name, t.file, t.binding, updateAssetPath });
+            AddGeneratedAssetCacheFile(files, LiveGeneratedAssetCacheName(t.name), outPath);
+        }
+    }
+
+    return files;
+}
+
+static bool GeneratedAssetCacheFilesPresent(
+    const std::wstring& cacheDir,
+    const std::vector<GeneratedAssetCacheFile>& files)
+{
+    if (files.empty())
+        return false;
+
+    for (const auto& file : files)
+    {
+        if (!IsValidGeneratedPng(GeneratedAssetCacheFilePath(cacheDir, file.cacheRelativePath)))
+            return false;
+    }
+
+    return true;
+}
+
+static bool GeneratedAssetCacheComplete(
+    const std::wstring& exeDir,
+    const ManifestDisplayInfo& manifestInfo,
+    const std::vector<int>& scales,
+    bool liveTileUpdateMode,
+    const std::wstring& stateKey)
+{
+    if (!GeneratedAssetCacheEnabled() || stateKey.empty())
+        return false;
+
+    std::vector<LiveTileUpdateAsset> unusedLiveTileAssets;
+    std::vector<GeneratedAssetCacheFile> files = BuildGeneratedAssetCacheFileList(
+        exeDir,
+        manifestInfo,
+        scales,
+        liveTileUpdateMode,
+        L"0000000000000000",
+        unusedLiveTileAssets);
+
+    return GeneratedAssetCacheFilesPresent(GeneratedAssetCacheDir(exeDir, stateKey), files);
+}
+
+static void DeleteDisabledAssetsForCurrentConfig(
+    const std::wstring& exeDir,
+    const ManifestDisplayInfo& manifestInfo,
+    bool liveTileUpdateMode)
+{
+    for (const auto& t : g_tiles)
+    {
+        bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
+        if (staticWallpaperAssetEnabled || g_generateDesktopIconForDisabledEntries)
+            continue;
+
+        if (!g_deleteDisabledAssets && !liveTileUpdateMode)
+            continue;
+
+        std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
+        std::wstring outPath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
+        DeleteDisabledAssetFiles(outPath);
+    }
+}
+
+static bool TryRestoreGeneratedAssetCache(
+    const std::wstring& exeDir,
+    const ManifestDisplayInfo& manifestInfo,
+    const std::vector<int>& scales,
+    bool liveTileUpdateMode,
+    const std::wstring& stateKey,
+    std::vector<LiveTileUpdateAsset>& liveTileUpdateAssets)
+{
+    liveTileUpdateAssets.clear();
+    if (!GeneratedAssetCacheEnabled() || stateKey.empty())
+        return false;
+
+    std::wstring liveTileToken = NewLiveTileAssetToken();
+    std::vector<GeneratedAssetCacheFile> files = BuildGeneratedAssetCacheFileList(
+        exeDir,
+        manifestInfo,
+        scales,
+        liveTileUpdateMode,
+        liveTileToken,
+        liveTileUpdateAssets);
+    if (files.empty())
+    {
+        liveTileUpdateAssets.clear();
+        return false;
+    }
+
+    std::wstring cacheDir = GeneratedAssetCacheDir(exeDir, stateKey);
+    if (!GeneratedAssetCacheFilesPresent(cacheDir, files))
+    {
+        liveTileUpdateAssets.clear();
+        return false;
+    }
+
+    DeleteDisabledAssetsForCurrentConfig(exeDir, manifestInfo, liveTileUpdateMode);
+
+    for (const auto& file : files)
+    {
+        std::wstring sourcePath = GeneratedAssetCacheFilePath(cacheDir, file.cacheRelativePath);
+        if (!CopyPngFileAtomically(sourcePath, file.activePath) || !IsValidGeneratedPng(file.activePath))
+        {
+            liveTileUpdateAssets.clear();
+            return false;
+        }
+    }
+
+    Log(g_ui.generatedAssetCacheHit.c_str(), stateKey.c_str());
+    return true;
+}
+
+static void SaveGeneratedAssetCache(
+    const std::wstring& exeDir,
+    const std::wstring& stateKey,
+    const std::vector<GeneratedAssetCacheFile>& files)
+{
+    if (!GeneratedAssetCacheEnabled() || stateKey.empty() || files.empty())
+        return;
+
+    if (GeneratedAssetCacheMaxEntries() <= 0)
+        return;
+
+    std::wstring cacheDir = GeneratedAssetCacheDir(exeDir, stateKey);
+    std::wstring stagingCacheDir = cacheDir + L".save." + NewLiveTileAssetToken();
+    DeleteDirectoryTree(stagingCacheDir);
+
+    bool savedAny = false;
+    bool ok = true;
+    for (const auto& file : files)
+    {
+        if (!IsValidGeneratedPng(file.activePath))
+        {
+            ok = false;
+            continue;
+        }
+
+        std::wstring cachePath = GeneratedAssetCacheFilePath(stagingCacheDir, file.cacheRelativePath);
+        if (CopyPngFileAtomically(file.activePath, cachePath))
+        {
+            savedAny = true;
+        }
+        else
+        {
+            ok = false;
+        }
+    }
+
+    if (savedAny && ok && GeneratedAssetCacheFilesPresent(stagingCacheDir, files))
+    {
+        DeleteDirectoryTree(cacheDir);
+        if (!MoveFileExW(stagingCacheDir.c_str(), cacheDir.c_str(), MOVEFILE_WRITE_THROUGH))
+        {
+            LogWin32Failure(L"MoveFileExW(cache publish)");
+            DeleteDirectoryTree(stagingCacheDir);
+            return;
+        }
+
+        Log(g_ui.generatedAssetCacheSaved.c_str(), stateKey.c_str());
+        PruneGeneratedAssetCache(exeDir);
+        return;
+    }
+
+    DeleteDirectoryTree(stagingCacheDir);
+}
 
 static std::wstring ManifestAssetPathForTile(const ManifestDisplayInfo& info, const Tile& tile)
 {
@@ -445,6 +1004,408 @@ static void StoreSuccessfulGenerationState(const std::wstring& wallpaperPath)
         IniWrite(L"State", L"LastSuccessfulGenerationKey", key.c_str());
 }
 
+static bool PrepareWallpaperRenderSource(
+    Bitmap* src,
+    FitMode& renderMode,
+    std::unique_ptr<Bitmap>& preparedWallpaper,
+    Bitmap*& renderSource)
+{
+    if (!src)
+        return false;
+
+    FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
+    renderSource = src;
+    renderMode = mode;
+    preparedWallpaper.reset();
+
+    if (mode == FitMode::Tile || mode == FitMode::Span)
+    {
+        preparedWallpaper.reset((mode == FitMode::Tile)
+            ? BuildTiledPrimaryBitmap(src)
+            : BuildSpannedPrimaryBitmap(src));
+        if (preparedWallpaper)
+        {
+            renderSource = preparedWallpaper.get();
+            renderMode = FitMode::Fill;
+        }
+        else
+        {
+            renderMode = FitMode::Fill;
+        }
+    }
+
+    return true;
+}
+
+static bool SaveGeneratedAssetCacheBitmap(Bitmap* bitmap, const std::wstring& path)
+{
+    DWORD dirError = ERROR_SUCCESS;
+    if (!EnsureParentDirectoryForFile(path, &dirError))
+    {
+        LogWin32Failure(g_ui.createAssetsDirectoryOperation.c_str(), dirError);
+        Log(g_ui.failedSaveAsset.c_str(), path.c_str());
+        return false;
+    }
+
+    if (SavePNG(bitmap, path.c_str()))
+        return true;
+
+    Log(g_ui.failedSaveAsset.c_str(), path.c_str());
+    return false;
+}
+
+static bool RenderWallpaperToGeneratedAssetCache(
+    const std::wstring& exeDir,
+    const ManifestDisplayInfo& manifestInfo,
+    const std::vector<int>& scales,
+    bool liveTileUpdateMode,
+    const std::wstring& wallpaperPath)
+{
+    if (!GeneratedAssetPrecacheEnabled() || !IsUsableWallpaperPath(wallpaperPath))
+        return false;
+
+    std::wstring stateKey = BuildGenerationStateKey(wallpaperPath);
+    if (stateKey.empty() ||
+        GeneratedAssetCacheComplete(exeDir, manifestInfo, scales, liveTileUpdateMode, stateKey))
+        return false;
+
+    std::wstring cacheDir = GeneratedAssetCacheDir(exeDir, stateKey);
+    std::wstring stagingCacheDir = cacheDir + L".precache." + NewLiveTileAssetToken();
+    DeleteDirectoryTree(stagingCacheDir);
+
+    std::unique_ptr<Bitmap> src(new Bitmap(wallpaperPath.c_str()));
+    if (!src || src->GetLastStatus() != Ok)
+        return false;
+
+    FitMode renderMode = FitMode::Fill;
+    std::unique_ptr<Bitmap> preparedWallpaper;
+    Bitmap* renderSource = nullptr;
+    if (!PrepareWallpaperRenderSource(src.get(), renderMode, preparedWallpaper, renderSource))
+        return false;
+
+    bool ok = true;
+    bool savedAny = false;
+    std::unique_ptr<Bitmap> icon;
+
+    for (const auto& t : g_tiles)
+    {
+        bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
+        if (!staticWallpaperAssetEnabled)
+        {
+            if (!g_generateDesktopIconForDisabledEntries)
+                continue;
+
+            if (!icon)
+                icon.reset(LoadEmbeddedDesktopIcon());
+            if (!icon)
+            {
+                ok = false;
+                continue;
+            }
+
+            std::wstring outPath = GeneratedAssetCacheFilePath(stagingCacheDir, ManifestGeneratedAssetCacheName(t.name));
+            std::unique_ptr<Bitmap> desktopAsset(RenderDesktopIconAsset(icon.get(), t.w, t.h, t.w, t.h));
+            bool saved = desktopAsset && SaveGeneratedAssetCacheBitmap(desktopAsset.get(), outPath);
+            ok = saved && ok;
+            savedAny = saved || savedAny;
+
+            for (int scale : scales)
+            {
+                int scaledW = ScalePixels(t.w, scale);
+                int scaledH = ScalePixels(t.h, scale);
+                std::wstring scaledPath = GeneratedAssetCacheFilePath(
+                    stagingCacheDir,
+                    ScaleAssetPath(ManifestGeneratedAssetCacheName(t.name), scale));
+                std::unique_ptr<Bitmap> scaledDesktopAsset(RenderDesktopIconAsset(icon.get(), scaledW, scaledH, t.w, t.h));
+                bool scaledSaved = scaledDesktopAsset && SaveGeneratedAssetCacheBitmap(scaledDesktopAsset.get(), scaledPath);
+                ok = scaledSaved && ok;
+                savedAny = scaledSaved || savedAny;
+            }
+            continue;
+        }
+
+        std::wstring outPath = GeneratedAssetCacheFilePath(stagingCacheDir, ManifestGeneratedAssetCacheName(t.name));
+        std::unique_ptr<Bitmap> asset(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0)));
+        bool saved = asset && SaveGeneratedAssetCacheBitmap(asset.get(), outPath);
+        ok = saved && ok;
+        savedAny = saved || savedAny;
+
+        for (int scale : scales)
+        {
+            int scaledW = ScalePixels(t.w, scale);
+            int scaledH = ScalePixels(t.h, scale);
+            std::wstring scaledPath = GeneratedAssetCacheFilePath(
+                stagingCacheDir,
+                ScaleAssetPath(ManifestGeneratedAssetCacheName(t.name), scale));
+            std::unique_ptr<Bitmap> scaled(ResizeBitmapToMode(renderSource, scaledW, scaledH, renderMode, Color(255, 0, 0, 0)));
+            bool scaledSaved = scaled && SaveGeneratedAssetCacheBitmap(scaled.get(), scaledPath);
+            ok = scaledSaved && ok;
+            savedAny = scaledSaved || savedAny;
+        }
+    }
+
+    if (liveTileUpdateMode)
+    {
+        for (const auto& t : g_liveTileAssets)
+        {
+            std::wstring outPath = GeneratedAssetCacheFilePath(stagingCacheDir, LiveGeneratedAssetCacheName(t.name));
+            std::unique_ptr<Bitmap> asset(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0)));
+            bool saved = asset && SaveGeneratedAssetCacheBitmap(asset.get(), outPath);
+            ok = saved && ok;
+            savedAny = saved || savedAny;
+        }
+    }
+
+    if (!ok)
+    {
+        DeleteDirectoryTree(stagingCacheDir);
+        return false;
+    }
+
+    if (savedAny)
+    {
+        std::vector<LiveTileUpdateAsset> unusedLiveTileAssets;
+        std::vector<GeneratedAssetCacheFile> expectedFiles = BuildGeneratedAssetCacheFileList(
+            exeDir,
+            manifestInfo,
+            scales,
+            liveTileUpdateMode,
+            L"0000000000000000",
+            unusedLiveTileAssets);
+        if (!GeneratedAssetCacheFilesPresent(stagingCacheDir, expectedFiles))
+        {
+            DeleteDirectoryTree(stagingCacheDir);
+            return false;
+        }
+
+        if (GeneratedAssetCacheComplete(exeDir, manifestInfo, scales, liveTileUpdateMode, stateKey))
+        {
+            DeleteDirectoryTree(stagingCacheDir);
+            return false;
+        }
+
+        DeleteDirectoryTree(cacheDir);
+        if (!MoveFileExW(stagingCacheDir.c_str(), cacheDir.c_str(), MOVEFILE_WRITE_THROUGH))
+        {
+            LogWin32Failure(L"MoveFileExW(pre-cache publish)");
+            DeleteDirectoryTree(stagingCacheDir);
+            return false;
+        }
+
+        Log(g_ui.generatedAssetPrecacheSaved.c_str(), stateKey.c_str());
+        PruneGeneratedAssetCache(exeDir);
+    }
+
+    return savedAny;
+}
+
+static bool IsSupportedWallpaperImageName(const std::wstring& fileName)
+{
+    size_t dot = fileName.find_last_of(L'.');
+    if (dot == std::wstring::npos)
+        return false;
+
+    std::wstring ext = ToLowerCopy(fileName.substr(dot));
+    return ext == L".jpg" ||
+        ext == L".jpeg" ||
+        ext == L".jpe" ||
+        ext == L".jfif" ||
+        ext == L".png" ||
+        ext == L".bmp" ||
+        ext == L".dib" ||
+        ext == L".gif" ||
+        ext == L".tif" ||
+        ext == L".tiff";
+}
+
+static std::vector<std::wstring> EnumerateSiblingWallpaperCandidates(
+    const std::wstring& currentWallpaper,
+    int maxFiles)
+{
+    std::vector<std::wstring> result;
+    if (maxFiles <= 0 || !IsUsableWallpaperPath(currentWallpaper))
+        return result;
+
+    std::wstring dir = ParentDirectoryOfPath(currentWallpaper);
+    if (dir.empty())
+        return result;
+
+    struct WallpaperCandidate
+    {
+        std::wstring name;
+        std::wstring path;
+    };
+
+    std::vector<WallpaperCandidate> candidates;
+    std::wstring pattern = dir + L"\\*";
+    WIN32_FIND_DATAW data{};
+    HANDLE find = FindFirstFileW(pattern.c_str(), &data);
+    if (find == INVALID_HANDLE_VALUE)
+        return result;
+
+    do
+    {
+        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+            continue;
+
+        std::wstring name = data.cFileName;
+        if (!IsSupportedWallpaperImageName(name))
+            continue;
+
+        std::wstring path = dir + L"\\" + name;
+        if (!IsUsableWallpaperPath(path))
+            continue;
+
+        candidates.push_back({ name, path });
+    } while (FindNextFileW(find, &data));
+
+    FindClose(find);
+
+    if (candidates.size() <= 1)
+        return result;
+
+    std::sort(candidates.begin(), candidates.end(),
+        [](const WallpaperCandidate& a, const WallpaperCandidate& b)
+        {
+            return StrCmpLogicalW(a.name.c_str(), b.name.c_str()) < 0;
+        });
+
+    size_t start = 0;
+    bool foundCurrent = false;
+    for (size_t i = 0; i < candidates.size(); ++i)
+    {
+        if (IEquals(candidates[i].path, currentWallpaper))
+        {
+            start = i;
+            foundCurrent = true;
+            break;
+        }
+    }
+
+    size_t offsetStart = foundCurrent ? 1 : 0;
+    for (size_t offset = offsetStart;
+        offset < candidates.size() && result.size() < static_cast<size_t>(maxFiles);
+        ++offset)
+    {
+        size_t index = foundCurrent
+            ? ((start + offset) % candidates.size())
+            : offset;
+        if (!IEquals(candidates[index].path, currentWallpaper))
+            result.push_back(candidates[index].path);
+    }
+
+    return result;
+}
+
+static void RunGeneratedAssetPrecache(const std::wstring& currentWallpaper)
+{
+    ReloadRuntimeSettingsFromIni();
+    if (!GeneratedAssetPrecacheEnabled() || g_shutdownRequested)
+        return;
+
+    int maxFiles = GeneratedAssetPrecacheMaxFiles();
+    if (maxFiles <= 0)
+        return;
+
+    std::vector<std::wstring> candidates = EnumerateSiblingWallpaperCandidates(currentWallpaper, maxFiles);
+    if (candidates.empty())
+        return;
+
+    std::wstring exeDir = GetExeDir();
+    ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
+    bool liveTileUpdateMode = UseExperimentalLiveTileUpdate();
+    std::vector<int> scales = GetConfiguredScales();
+
+    for (const auto& candidate : candidates)
+    {
+        if (g_shutdownRequested || GenerationWorkPending())
+            return;
+
+        RenderWallpaperToGeneratedAssetCache(exeDir, manifestInfo, scales, liveTileUpdateMode, candidate);
+    }
+}
+
+static void GeneratedAssetPrecacheThread()
+{
+    for (;;)
+    {
+        std::wstring wallpaper;
+        {
+            std::unique_lock<std::mutex> lk(g_generatedAssetPrecacheMutex);
+            g_generatedAssetPrecacheCv.wait(lk, []
+            {
+                return g_generatedAssetPrecacheStop || g_generatedAssetPrecacheQueued;
+            });
+
+            if (!g_generatedAssetPrecacheQueued && g_generatedAssetPrecacheStop)
+                break;
+
+            wallpaper = std::move(g_generatedAssetPrecacheWallpaper);
+            g_generatedAssetPrecacheQueued = false;
+        }
+
+        try
+        {
+            RunGeneratedAssetPrecache(wallpaper);
+        }
+        catch (...)
+        {
+            // Pre-caching is opportunistic; foreground generation remains authoritative.
+        }
+    }
+}
+
+static void QueueGeneratedAssetPrecache(const std::wstring& wallpaper)
+{
+    if (!GeneratedAssetPrecacheEnabled() || wallpaper.empty() || g_shutdownRequested)
+        return;
+
+    bool startWorker = false;
+    {
+        std::lock_guard<std::mutex> lk(g_generatedAssetPrecacheMutex);
+        if (g_generatedAssetPrecacheStop)
+            return;
+
+        g_generatedAssetPrecacheWallpaper = wallpaper;
+        g_generatedAssetPrecacheQueued = true;
+        if (!g_generatedAssetPrecacheWorkerStarted)
+        {
+            g_generatedAssetPrecacheWorkerStarted = true;
+            startWorker = true;
+        }
+    }
+
+    if (startWorker)
+    {
+        try
+        {
+            g_generatedAssetPrecacheThread = std::thread(GeneratedAssetPrecacheThread);
+        }
+        catch (...)
+        {
+            std::lock_guard<std::mutex> lk(g_generatedAssetPrecacheMutex);
+            g_generatedAssetPrecacheWorkerStarted = false;
+            g_generatedAssetPrecacheQueued = false;
+            g_generatedAssetPrecacheWallpaper.clear();
+            return;
+        }
+    }
+
+    g_generatedAssetPrecacheCv.notify_one();
+}
+
+static void JoinGeneratedAssetPrecache()
+{
+    {
+        std::lock_guard<std::mutex> lk(g_generatedAssetPrecacheMutex);
+        g_generatedAssetPrecacheStop = true;
+    }
+    g_generatedAssetPrecacheCv.notify_one();
+
+    if (g_generatedAssetPrecacheThread.joinable())
+        g_generatedAssetPrecacheThread.join();
+}
+
 static bool RegisterAppxManifest(const std::wstring& manifestPath, std::wstring& failureMessage)
 {
     failureMessage.clear();
@@ -522,43 +1483,15 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
     if (g_notifyOnStart)
         NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationStarted, NIIF_INFO);
 
-    auto src = std::make_unique<Bitmap>(wp);
-    if (src->GetLastStatus() != Ok)
-    {
-        LogText(g_ui.failedLoadWallpaper);
-        if (g_notifyOnFailure)
-            NotifyTrayBalloon(g_ui.notificationTitle, g_ui.failedLoadWallpaper, NIIF_ERROR);
-        return false;
-    }
-    Log(g_ui.wallpaperImageLoaded.c_str(), static_cast<int>(src->GetWidth()), static_cast<int>(src->GetHeight()));
-
-    FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
-    std::unique_ptr<Bitmap> preparedWallpaper;
-    Bitmap* renderSource = src.get();
-    FitMode renderMode = mode;
-    if (mode == FitMode::Tile || mode == FitMode::Span)
-    {
-        preparedWallpaper.reset((mode == FitMode::Tile)
-            ? BuildTiledPrimaryBitmap(src.get())
-            : BuildSpannedPrimaryBitmap(src.get()));
-        if (preparedWallpaper)
-        {
-            renderSource = preparedWallpaper.get();
-            renderMode = FitMode::Fill;
-        }
-        else
-        {
-            renderMode = FitMode::Fill;
-        }
-    }
-    Log(g_ui.renderModeSummary.c_str(), FitModeToString(renderMode));
-
     std::wstring exeDir = GetExeDir();
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
     bool liveTileUpdateMode = UseExperimentalLiveTileUpdate();
     bool liveTileModeReregistrationPending = LiveTileModeReregistrationPending();
     bool useLiveTileUpdateForThisRun = liveTileUpdateMode && !liveTileModeReregistrationPending;
     bool assetsOk = true;
+    bool restoredFromGeneratedAssetCache = false;
+    std::vector<LiveTileUpdateAsset> liveTileUpdateAssets;
+    std::vector<GeneratedAssetCacheFile> generatedAssetCacheFiles;
     std::vector<int> scales = GetConfiguredScales();
     {
         std::wstring scaleList;
@@ -588,8 +1521,35 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         }
     };
 
-    for (auto& t : g_tiles)
+    std::wstring generationStateKey = BuildGenerationStateKey(wp);
+    restoredFromGeneratedAssetCache = TryRestoreGeneratedAssetCache(
+        exeDir,
+        manifestInfo,
+        scales,
+        liveTileUpdateMode,
+        generationStateKey,
+        liveTileUpdateAssets);
+
+    if (!restoredFromGeneratedAssetCache)
     {
+        auto src = std::make_unique<Bitmap>(wp);
+        if (src->GetLastStatus() != Ok)
+        {
+            LogText(g_ui.failedLoadWallpaper);
+            if (g_notifyOnFailure)
+                NotifyTrayBalloon(g_ui.notificationTitle, g_ui.failedLoadWallpaper, NIIF_ERROR);
+            return false;
+        }
+        Log(g_ui.wallpaperImageLoaded.c_str(), static_cast<int>(src->GetWidth()), static_cast<int>(src->GetHeight()));
+
+        FitMode renderMode = FitMode::Fill;
+        std::unique_ptr<Bitmap> preparedWallpaper;
+        Bitmap* renderSource = nullptr;
+        PrepareWallpaperRenderSource(src.get(), renderMode, preparedWallpaper, renderSource);
+        Log(g_ui.renderModeSummary.c_str(), FitModeToString(renderMode));
+
+        for (auto& t : g_tiles)
+        {
         std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
         std::wstring outPath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
         DWORD assetDirError = ERROR_SUCCESS;
@@ -613,8 +1573,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
                 continue;
             }
 
-            // Decode the embedded 30x30 icon and write it as-is to the base path,
-            // then write the same 30x30 image to each scaled variant path.
+            // Render the Desktop icon into full-size transparent asset
+            // canvases using Windows 8-style tile logo sizing and placement.
             {
                 std::unique_ptr<Bitmap> icon(LoadEmbeddedDesktopIcon());
                 if (!icon)
@@ -624,20 +1584,34 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
                     continue;
                 }
 
-                bool ok = SavePNG(icon.get(), outPath.c_str());
+                std::unique_ptr<Bitmap> desktopAsset(RenderDesktopIconAsset(icon.get(), t.w, t.h, t.w, t.h));
+                bool ok = desktopAsset && SavePNG(desktopAsset.get(), outPath.c_str());
                 if (ok)
+                {
                     Log(g_ui.generatedDesktopIconAsset.c_str(), outPath.c_str());
+                    AddGeneratedAssetCacheFile(generatedAssetCacheFiles, ManifestGeneratedAssetCacheName(t.name), outPath);
+                }
                 else
+                {
                     Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+                }
 
                 for (int scale : scales)
                 {
+                    int scaledW = ScalePixels(t.w, scale);
+                    int scaledH = ScalePixels(t.h, scale);
                     std::wstring scaledPath = ScaleAssetPath(outPath, scale);
-                    bool scaledOk = SavePNG(icon.get(), scaledPath.c_str());
+                    std::unique_ptr<Bitmap> scaledDesktopAsset(RenderDesktopIconAsset(icon.get(), scaledW, scaledH, t.w, t.h));
+                    bool scaledOk = scaledDesktopAsset && SavePNG(scaledDesktopAsset.get(), scaledPath.c_str());
                     if (scaledOk)
+                    {
                         Log(g_ui.savedScaledAsset.c_str(), scaledPath.c_str(), scale);
+                        AddGeneratedAssetCacheFile(generatedAssetCacheFiles, ScaleAssetPath(ManifestGeneratedAssetCacheName(t.name), scale), scaledPath);
+                    }
                     else
+                    {
                         Log(g_ui.failedSaveScaledAsset.c_str(), scaledPath.c_str(), scale);
+                    }
                     ok = ok && scaledOk;
                 }
 
@@ -652,9 +1626,14 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         {
             saved = SavePNG(o.get(), outPath.c_str());
             if (saved)
+            {
                 Log(g_ui.savedAsset.c_str(), outPath.c_str());
+                AddGeneratedAssetCacheFile(generatedAssetCacheFiles, ManifestGeneratedAssetCacheName(t.name), outPath);
+            }
             else
+            {
                 Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+            }
         }
 
         for (int scale : scales)
@@ -667,9 +1646,14 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
             {
                 bool scaledSaved = SavePNG(scaled.get(), scaledPath.c_str());
                 if (scaledSaved)
+                {
                     Log(g_ui.savedScaledAsset.c_str(), scaledPath.c_str(), scale);
+                    AddGeneratedAssetCacheFile(generatedAssetCacheFiles, ScaleAssetPath(ManifestGeneratedAssetCacheName(t.name), scale), scaledPath);
+                }
                 else
+                {
                     Log(g_ui.failedSaveScaledAsset.c_str(), scaledPath.c_str(), scale);
+                }
                 saved = scaledSaved && saved;
             }
             else
@@ -683,38 +1667,46 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
             assetsOk = false;
     }
 
-    if (liveTileUpdateMode)
-    {
-        for (const auto& t : g_liveTileAssets)
+        if (liveTileUpdateMode)
         {
-            std::wstring outPath = ResolveManifestAssetPath(exeDir, t.file);
-            DWORD assetDirError = ERROR_SUCCESS;
-            if (!EnsureParentDirectoryForFile(outPath, &assetDirError))
+            std::wstring liveTileToken = NewLiveTileAssetToken();
+            for (const auto& t : g_liveTileAssets)
             {
-                assetsOk = false;
-                LogWin32Failure(g_ui.createAssetsDirectoryOperation.c_str(), assetDirError);
-                Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
-                continue;
-            }
-            logAssetDirIfNeeded(ParentDirectoryOfPath(outPath));
-
-            std::unique_ptr<Bitmap> o(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0)));
-            bool saved = false;
-            if (o)
-            {
-                saved = SavePNG(o.get(), outPath.c_str());
-                if (saved)
-                    Log(g_ui.savedAsset.c_str(), outPath.c_str());
-                else
+                std::wstring updateAssetPath = VersionedLiveTileAssetPath(t, liveTileToken);
+                std::wstring outPath = ResolveManifestAssetPath(exeDir, updateAssetPath);
+                DWORD assetDirError = ERROR_SUCCESS;
+                if (!EnsureParentDirectoryForFile(outPath, &assetDirError))
+                {
+                    assetsOk = false;
+                    LogWin32Failure(g_ui.createAssetsDirectoryOperation.c_str(), assetDirError);
                     Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
-            }
-            else
-            {
-                Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
-            }
+                    continue;
+                }
+                logAssetDirIfNeeded(ParentDirectoryOfPath(outPath));
 
-            if (!saved)
-                assetsOk = false;
+                std::unique_ptr<Bitmap> o(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0)));
+                bool saved = false;
+                if (o)
+                {
+                    saved = SavePNG(o.get(), outPath.c_str());
+                    if (saved)
+                        Log(g_ui.savedAsset.c_str(), outPath.c_str());
+                    else
+                        Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+                }
+                else
+                {
+                    Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
+                }
+
+                if (!saved)
+                    assetsOk = false;
+                else
+                {
+                    liveTileUpdateAssets.push_back({ t.name, t.file, t.binding, updateAssetPath });
+                    AddGeneratedAssetCacheFile(generatedAssetCacheFiles, LiveGeneratedAssetCacheName(t.name), outPath);
+                }
+            }
         }
     }
 
@@ -776,7 +1768,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 
             if (liveTileUpdateMode)
             {
-                appUpdateOk = Appx_Update_LiveTile(exeDir, manifestInfo, appUpdateFailureMessage);
+                appUpdateOk = Appx_Update_LiveTile(exeDir, manifestInfo, liveTileUpdateAssets, appUpdateFailureMessage);
                 if (!appUpdateOk)
                 {
                     appUpdateFailureIsLiveTile = true;
@@ -788,7 +1780,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
     }
     else if (useLiveTileUpdateForThisRun)
     {
-        appUpdateOk = Appx_Update_LiveTile(exeDir, manifestInfo, appUpdateFailureMessage);
+        appUpdateOk = Appx_Update_LiveTile(exeDir, manifestInfo, liveTileUpdateAssets, appUpdateFailureMessage);
         appUpdateFailureIsLiveTile = !appUpdateOk;
         if (!appUpdateOk && appUpdateFailureMessage.empty())
             appUpdateFailureMessage = g_ui.liveTileUpdateFailed;
@@ -814,6 +1806,13 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 
     if (ok)
     {
+        if (liveTileUpdateMode)
+        {
+            CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
+            DeleteOldVersionedLiveTileAssets(exeDir, liveTileUpdateAssets);
+        }
+        if (!restoredFromGeneratedAssetCache)
+            SaveGeneratedAssetCache(exeDir, BuildGenerationStateKey(wp), generatedAssetCacheFiles);
         StoreSuccessfulGenerationState(wp);
         LogText(liveTileUpdateMode ? g_ui.assetGenerationLiveTileFinished : g_ui.assetGenerationFinished);
         if (g_notifyOnSuccess)
@@ -892,7 +1891,7 @@ static bool GenerationWorkPending()
 
 static std::wstring ForceShutdownSkippedCleanupSummary()
 {
-    return L"generation/registration worker completion, poll-thread stop/join, normal GDI+ shutdown, and normal single-instance mutex release";
+    return L"generation/registration worker completion, asset pre-cache worker completion, poll-thread stop/join, normal GDI+ shutdown, and normal single-instance mutex release";
 }
 
 static std::wstring ForceShutdownCleanupDownsideSummary()
@@ -1065,6 +2064,8 @@ static void GenerationWorkerThread()
         }
         RecordGenerationCompletion(requestId, ok);
         MarkGenerationActive(false);
+        if (ok && !GenerationWorkPending())
+            QueueGeneratedAssetPrecache(wallpaper);
         MaybeCompleteRequestedShutdown();
     }
 }

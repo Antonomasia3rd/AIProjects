@@ -148,6 +148,7 @@ void LoadUiStrings()
     g_ui.methodsTitle = IniReadS(L"Strings", L"MethodsTitle", L"Methods:");
     g_ui.assetsTitle = IniReadS(L"Strings", L"AssetsTitle", L"Assets:");
     g_ui.dpiScalesTitle = IniReadS(L"Strings", L"DpiScalesTitle", L"DPI Scales:");
+    g_ui.cachingTitle = IniReadS(L"Strings", L"CachingTitle", L"Caching:");
 
     g_ui.listenWallpaper = IniReadS(L"Strings", L"ListenWallpaper", L"Listen Wallpaper");
     g_ui.trayIcon = IniReadS(L"Strings", L"TrayIcon", L"Tray Icon (this session)");
@@ -166,6 +167,10 @@ void LoadUiStrings()
     g_ui.generateScale200 = IniReadS(L"Strings", L"GenerateScale200", L"200%");
     g_ui.generateScale400 = IniReadS(L"Strings", L"GenerateScale400", L"400%");
     g_ui.currentDpiScaleLabel = IniReadS(L"Strings", L"CurrentDpiScaleLabel", L"Current DPI: %d%% (asset scale: %d%%)");
+    g_ui.generatedAssetCache = IniReadS(L"Strings", L"GeneratedAssetCache", L"Generated asset cache");
+    g_ui.generatedAssetPrecache = IniReadS(L"Strings", L"GeneratedAssetPrecache", L"Pre-cache slideshow wallpapers");
+    g_ui.generatedAssetCacheMaxEntriesLabel = IniReadS(L"Strings", L"GeneratedAssetCacheMaxEntriesLabel", L"Cache max entries: %d");
+    g_ui.generatedAssetPrecacheMaxFilesLabel = IniReadS(L"Strings", L"GeneratedAssetPrecacheMaxFilesLabel", L"Pre-cache max files: %d");
     g_ui.showMenuAsDropdown = IniReadS(L"Strings", L"ShowMenuAsDropdown", L"Show menu as dropdown");
     g_ui.notificationsTitle = IniReadS(L"Strings", L"NotificationsTitle", L"Notifications:");
     g_ui.notificationsEnabled = IniReadS(L"Strings", L"NotificationsEnabled", L"Enable all tray notifications");
@@ -249,6 +254,11 @@ void LoadUiStrings()
     g_ui.activeScales = IniReadS(L"Strings", L"ActiveScales", L"[i] Active scales: %s");
     g_ui.savedAsset = IniReadS(L"Strings", L"SavedAsset", L"Saved %s");
     g_ui.savedScaledAsset = IniReadS(L"Strings", L"SavedScaledAsset", L"Saved %s (scale %d%%)");
+    g_ui.generatedAssetCacheHit = IniReadS(L"Strings", L"GeneratedAssetCacheHit", L"[i] Reused cached generated assets: %s");
+    g_ui.generatedAssetCacheSaved = IniReadS(L"Strings", L"GeneratedAssetCacheSaved", L"[i] Saved generated asset cache: %s");
+    g_ui.generatedAssetCacheSummary = IniReadS(L"Strings", L"GeneratedAssetCacheSummary", L"[i] Generated asset cache: %s (max entries=%d)");
+    g_ui.generatedAssetPrecacheSaved = IniReadS(L"Strings", L"GeneratedAssetPrecacheSaved", L"[i] Precached generated assets: %s");
+    g_ui.generatedAssetPrecacheSummary = IniReadS(L"Strings", L"GeneratedAssetPrecacheSummary", L"[i] Generated asset pre-cache: %s (max files=%d)");
     g_ui.failedSaveAsset = IniReadS(L"Strings", L"FailedSaveAsset", L"Failed to save %s");
     g_ui.failedSaveScaledAsset = IniReadS(L"Strings", L"FailedSaveScaledAsset", L"Failed to save %s (scale %d%%)");
     g_ui.savePngInvalidInput = IniReadS(L"Strings", L"SavePngInvalidInput", L"[!] SavePNG skipped for %s: invalid bitmap, path, or PNG encoder.");
@@ -660,6 +670,8 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.manifestOverwriteExistingLabel, L"ManifestOverwriteExistingLabel", { L"%s" });
     RequireFormat(g_ui.wallpaperDetectionMethodLabel, L"WallpaperDetectionMethodLabel", { L"%s" });
     RequireFormat(g_ui.singleInstanceFailureActionLabel, L"SingleInstanceFailureActionLabel", { L"%s" });
+    RequireFormat(g_ui.generatedAssetCacheMaxEntriesLabel, L"GeneratedAssetCacheMaxEntriesLabel", { L"%d" });
+    RequireFormat(g_ui.generatedAssetPrecacheMaxFilesLabel, L"GeneratedAssetPrecacheMaxFilesLabel", { L"%d" });
     RequireFormat(g_ui.shutdownPendingReason, L"ShutdownPendingReason", { L"%s" });
     RequireFormat(g_ui.shutdownDelayedNotification, L"ShutdownDelayedNotification", { L"%s" });
     RequireFormat(g_ui.previousForceShutdownCleanupWarning, L"PreviousForceShutdownCleanupWarning", { L"%s", L"%s", L"%s" });
@@ -675,6 +687,11 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.activeScales, L"ActiveScales", { L"%s" });
     RequireFormat(g_ui.savedAsset, L"SavedAsset", { L"%s" });
     RequireFormat(g_ui.savedScaledAsset, L"SavedScaledAsset", { L"%s", L"%d" });
+    RequireFormat(g_ui.generatedAssetCacheHit, L"GeneratedAssetCacheHit", { L"%s" });
+    RequireFormat(g_ui.generatedAssetCacheSaved, L"GeneratedAssetCacheSaved", { L"%s" });
+    RequireFormat(g_ui.generatedAssetCacheSummary, L"GeneratedAssetCacheSummary", { L"%s", L"%d" });
+    RequireFormat(g_ui.generatedAssetPrecacheSaved, L"GeneratedAssetPrecacheSaved", { L"%s" });
+    RequireFormat(g_ui.generatedAssetPrecacheSummary, L"GeneratedAssetPrecacheSummary", { L"%s", L"%d" });
     RequireFormat(g_ui.failedSaveAsset, L"FailedSaveAsset", { L"%s" });
     RequireFormat(g_ui.failedSaveScaledAsset, L"FailedSaveScaledAsset", { L"%s", L"%d" });
     RequireFormat(g_ui.savePngInvalidInput, L"SavePngInvalidInput", { L"%s" });

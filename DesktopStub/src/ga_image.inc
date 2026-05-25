@@ -302,6 +302,129 @@ Bitmap* ResizeWithFit(Bitmap* src, int w, int h, FitMode mode)
     return ResizeBitmapToMode(primaryWallpaper.get(), w, h, FitMode::Fill, Color(255, 0, 0, 0));
 }
 
+static int DesktopIconVisibleWidthForAsset(int assetWidth, int assetHeight, int logicalWidth, int logicalHeight)
+{
+    int logicalShortSide = std::min(logicalWidth, logicalHeight);
+    int assetShortSide = std::min(assetWidth, assetHeight);
+    if (logicalShortSide <= 0 || assetShortSide <= 0)
+        return 0;
+
+    int logicalVisibleW = 0;
+    if (logicalShortSide <= 60)
+        logicalVisibleW = std::max(1, logicalShortSide - 2);
+    else if (logicalShortSide <= 80)
+        logicalVisibleW = std::max(1, MulDiv(logicalShortSide, 38, 70));
+    else
+        logicalVisibleW = std::max(1, MulDiv(logicalShortSide, 74, 150));
+
+    return std::max(1, MulDiv(logicalVisibleW, assetShortSide, logicalShortSide));
+}
+
+static int DesktopIconCenterYForAsset(int assetHeight, int logicalWidth, int logicalHeight)
+{
+    int logicalShortSide = std::min(logicalWidth, logicalHeight);
+    if (logicalShortSide <= 0 || logicalHeight <= 0)
+        return assetHeight / 2;
+
+    int logicalCenterY = (logicalShortSide <= 80)
+        ? logicalHeight / 2
+        : MulDiv(logicalShortSide, 119, 300);
+    return MulDiv(logicalCenterY, assetHeight, logicalHeight);
+}
+
+#include "ga_desktop_icon_png.inc"
+
+// Decodes g_desktopIconPng from memory into a GDI+ Bitmap. Caller owns the result.
+static Bitmap* LoadEmbeddedDesktopIcon()
+{
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, sizeof(g_desktopIconPng));
+    if (!hMem) return nullptr;
+
+    void* pMem = GlobalLock(hMem);
+    if (!pMem) { GlobalFree(hMem); return nullptr; }
+    memcpy(pMem, g_desktopIconPng, sizeof(g_desktopIconPng));
+    GlobalUnlock(hMem);
+
+    IStream* rawStream = nullptr;
+    if (CreateStreamOnHGlobal(hMem, TRUE, &rawStream) != S_OK)
+    {
+        GlobalFree(hMem);
+        return nullptr;
+    }
+    struct StreamReleaser
+    {
+        void operator()(IStream* stream) const noexcept
+        {
+            if (stream)
+                stream->Release();
+        }
+    };
+    std::unique_ptr<IStream, StreamReleaser> stream(rawStream);
+
+    // Clone before releasing the stream; GDI+ bitmaps can retain stream-backed state.
+    std::unique_ptr<Bitmap> loaded(Bitmap::FromStream(stream.get()));
+    std::unique_ptr<Bitmap> bmp;
+    if (loaded && loaded->GetLastStatus() == Ok)
+    {
+        int loadedW = 0;
+        int loadedH = 0;
+        if (BitmapDimensionsToInt(loaded.get(), loadedW, loadedH))
+        {
+            Rect bounds(0, 0, loadedW, loadedH);
+            bmp.reset(loaded->Clone(bounds, PixelFormat32bppARGB));
+        }
+    }
+
+    if (!bmp || bmp->GetLastStatus() != Ok)
+        return nullptr;
+
+    return bmp.release();
+}
+
+static Bitmap* RenderDesktopIconAsset(Bitmap* icon, int assetWidth, int assetHeight, int logicalWidth, int logicalHeight)
+{
+    int iconW = 0;
+    int iconH = 0;
+    if (!BitmapDimensionsToInt(icon, iconW, iconH) || assetWidth <= 0 || assetHeight <= 0 || logicalWidth <= 0 || logicalHeight <= 0)
+        return nullptr;
+
+    auto out = std::make_unique<Bitmap>(assetWidth, assetHeight, PixelFormat32bppARGB);
+    if (!BitmapOk(out.get(), L"create desktop icon asset"))
+        return nullptr;
+
+    Graphics g(out.get());
+    if (!GraphicsOk(g, L"create desktop icon asset graphics") ||
+        !GdiOk(g.SetInterpolationMode(InterpolationModeHighQualityBicubic), L"set desktop icon interpolation") ||
+        !GdiOk(g.SetPixelOffsetMode(PixelOffsetModeHighQuality), L"set desktop icon pixel offset") ||
+        !GdiOk(g.Clear(Color(0, 0, 0, 0)), L"clear desktop icon asset"))
+        return nullptr;
+
+    int targetVisibleW = DesktopIconVisibleWidthForAsset(assetWidth, assetHeight, logicalWidth, logicalHeight);
+    if (targetVisibleW <= 0)
+        return nullptr;
+
+    int targetVisibleH = std::max(1, MulDiv(targetVisibleW, iconH, iconW));
+    if (targetVisibleW > assetWidth || targetVisibleH > assetHeight)
+    {
+        double fit = std::min(
+            static_cast<double>(assetWidth) / targetVisibleW,
+            static_cast<double>(assetHeight) / targetVisibleH);
+        targetVisibleW = std::max(1, static_cast<int>(targetVisibleW * fit + 0.5));
+        targetVisibleH = std::max(1, static_cast<int>(targetVisibleH * fit + 0.5));
+    }
+
+    int dx = (assetWidth - targetVisibleW) / 2;
+    int dy = DesktopIconCenterYForAsset(assetHeight, logicalWidth, logicalHeight) - (targetVisibleH / 2);
+    dy = ClampInt(dy, 0, std::max(0, assetHeight - targetVisibleH));
+
+    if (!GdiOk(
+        g.DrawImage(icon, Rect(dx, dy, targetVisibleW, targetVisibleH), 0, 0, iconW, iconH, UnitPixel),
+        L"draw desktop icon asset"))
+        return nullptr;
+
+    return out.release();
+}
+
 bool SavePNG(Bitmap* b, const wchar_t* f)
 {
     const wchar_t* pathForLog = (f && *f) ? f : L"(empty path)";
@@ -349,69 +472,5 @@ bool SavePNG(Bitmap* b, const wchar_t* f)
     LogWin32Failure(L"MoveFileExW", finalErr);
     SetLastError(finalErr);
     return false;
-}
-
-// Embedded 30x30 RGBA PNG — the Desktop icon written to disabled asset slots.
-static const BYTE g_desktopIconPng[] = {
-    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x1E, 0x00, 0x00, 0x00, 0x1E, 0x08, 0x06, 0x00, 0x00, 0x00, 0x3B, 0x30, 0xAE,
-    0xA2, 0x00, 0x00, 0x00, 0x01, 0x73, 0x52, 0x47, 0x42, 0x00, 0xAE, 0xCE, 0x1C, 0xE9, 0x00, 0x00,
-    0x00, 0x04, 0x67, 0x41, 0x4D, 0x41, 0x00, 0x00, 0xB1, 0x8F, 0x0B, 0xFC, 0x61, 0x05, 0x00, 0x00,
-    0x00, 0x09, 0x70, 0x48, 0x59, 0x73, 0x00, 0x00, 0x0E, 0xC2, 0x00, 0x00, 0x0E, 0xC2, 0x01, 0x15,
-    0x28, 0x4A, 0x80, 0x00, 0x00, 0x00, 0x62, 0x49, 0x44, 0x41, 0x54, 0x48, 0x4B, 0xED, 0xD0, 0xD1,
-    0x0A, 0x80, 0x20, 0x10, 0x44, 0xD1, 0xFD, 0xFF, 0x9F, 0x2E, 0x88, 0x0B, 0x31, 0x61, 0x64, 0xC1,
-    0xBA, 0x62, 0x73, 0x9E, 0xC4, 0x55, 0x2F, 0x18, 0xB6, 0xBE, 0xAD, 0x48, 0x7D, 0x98, 0x0F, 0x48,
-    0x47, 0xCE, 0xE1, 0x3E, 0x5C, 0x79, 0xC4, 0x71, 0xC1, 0xC8, 0x61, 0xC5, 0x48, 0xDC, 0xED, 0xB7,
-    0x1C, 0x8F, 0x5C, 0x30, 0x72, 0x58, 0x31, 0x12, 0x8C, 0x3E, 0xE3, 0x99, 0xF7, 0xE1, 0x16, 0x8E,
-    0x77, 0xE1, 0xCA, 0xA4, 0xE1, 0x0C, 0xE4, 0xFE, 0x1E, 0x66, 0x99, 0x66, 0xBE, 0xF0, 0x08, 0xE4,
-    0xCE, 0xF0, 0x68, 0x75, 0x61, 0x5B, 0x5C, 0xC4, 0x0E, 0xA0, 0xC4, 0x4A, 0xFC, 0x43, 0x87, 0x66,
-    0xD5, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82
-};
-
-// Decodes g_desktopIconPng from memory into a GDI+ Bitmap. Caller owns the result.
-static Bitmap* LoadEmbeddedDesktopIcon()
-{
-    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, sizeof(g_desktopIconPng));
-    if (!hMem) return nullptr;
-
-    void* pMem = GlobalLock(hMem);
-    if (!pMem) { GlobalFree(hMem); return nullptr; }
-    memcpy(pMem, g_desktopIconPng, sizeof(g_desktopIconPng));
-    GlobalUnlock(hMem);
-
-    IStream* rawStream = nullptr;
-    if (CreateStreamOnHGlobal(hMem, TRUE, &rawStream) != S_OK)
-    {
-        GlobalFree(hMem);
-        return nullptr;
-    }
-    struct StreamReleaser
-    {
-        void operator()(IStream* stream) const noexcept
-        {
-            if (stream)
-                stream->Release();
-        }
-    };
-    std::unique_ptr<IStream, StreamReleaser> stream(rawStream);
-
-    // Clone before releasing the stream; GDI+ bitmaps can retain stream-backed state.
-    std::unique_ptr<Bitmap> loaded(Bitmap::FromStream(stream.get()));
-    std::unique_ptr<Bitmap> bmp;
-    if (loaded && loaded->GetLastStatus() == Ok)
-    {
-        int loadedW = 0;
-        int loadedH = 0;
-        if (BitmapDimensionsToInt(loaded.get(), loadedW, loadedH))
-        {
-            Rect bounds(0, 0, loadedW, loadedH);
-            bmp.reset(loaded->Clone(bounds, PixelFormat32bppARGB));
-        }
-    }
-
-    if (!bmp || bmp->GetLastStatus() != Ok)
-        return nullptr;
-
-    return bmp.release();
 }
 

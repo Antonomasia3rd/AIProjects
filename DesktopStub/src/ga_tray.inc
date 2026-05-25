@@ -46,6 +46,8 @@ enum {
     ID_SCALE_150,
     ID_SCALE_200,
     ID_SCALE_400,
+    ID_GENERATED_ASSET_CACHE,
+    ID_GENERATED_ASSET_PRECACHE,
     ID_MANIFEST_OVERWRITE,
 
     // Assets
@@ -421,6 +423,18 @@ void Menu(HWND h)
     AppendMenuChecked(scaleMenu, MF_STRING | MF_DISABLED, 0, currentDpiLine.c_str());
     endSection(scaleMenu, g_ui.dpiScalesTitle);
 
+    HMENU cachingMenu = beginSection(g_ui.cachingTitle);
+    bool cacheEnabled = GeneratedAssetCacheEnabled();
+    bool cacheCanStore = cacheEnabled && GeneratedAssetCacheMaxEntries() > 0;
+    bool precacheConfigured = IniReadI(L"Settings", L"GeneratedAssetPrecache", 1) != 0;
+    addTo(cachingMenu, ID_GENERATED_ASSET_CACHE, g_ui.generatedAssetCache.c_str(), cacheEnabled);
+    addTo(cachingMenu, ID_GENERATED_ASSET_PRECACHE, g_ui.generatedAssetPrecache.c_str(), precacheConfigured, cacheCanStore);
+    std::wstring cacheMaxEntriesLine = FormatWide(g_ui.generatedAssetCacheMaxEntriesLabel.c_str(), GeneratedAssetCacheMaxEntries());
+    std::wstring precacheMaxFilesLine = FormatWide(g_ui.generatedAssetPrecacheMaxFilesLabel.c_str(), GeneratedAssetPrecacheMaxFiles());
+    AppendMenuChecked(cachingMenu, MF_STRING | MF_DISABLED, 0, cacheMaxEntriesLine.c_str());
+    AppendMenuChecked(cachingMenu, MF_STRING | MF_DISABLED, 0, precacheMaxFilesLine.c_str());
+    endSection(cachingMenu, g_ui.cachingTitle);
+
     HMENU manifestMenu = beginSection(g_ui.manifestTitle);
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
     std::wstring manifestSourceLine = FormatWide(g_ui.manifestSourceLabel.c_str(), manifestInfo.existing ? g_ui.manifestSourceExisting.c_str() : g_ui.manifestSourceGenerated.c_str());
@@ -695,6 +709,25 @@ void Menu(HWND h)
         *setting = value;
         IniWrite(L"Settings", key, value ? L"1" : L"0");
         Log(g_ui.generateScaleSummary.c_str(), scale, StateEnabled(value));
+    }
+    break;
+
+    case ID_GENERATED_ASSET_CACHE:
+    {
+        bool value = !GeneratedAssetCacheEnabled();
+        IniWrite(L"Settings", L"GeneratedAssetCache", value ? L"1" : L"0");
+        Log(g_ui.generatedAssetCacheSummary.c_str(), StateEnabled(value), GeneratedAssetCacheMaxEntries());
+    }
+    break;
+
+    case ID_GENERATED_ASSET_PRECACHE:
+    {
+        if (!GeneratedAssetCacheEnabled() || GeneratedAssetCacheMaxEntries() <= 0)
+            break;
+
+        bool value = IniReadI(L"Settings", L"GeneratedAssetPrecache", 1) == 0;
+        IniWrite(L"Settings", L"GeneratedAssetPrecache", value ? L"1" : L"0");
+        Log(g_ui.generatedAssetPrecacheSummary.c_str(), StateEnabled(value), GeneratedAssetPrecacheMaxFiles());
     }
     break;
 
