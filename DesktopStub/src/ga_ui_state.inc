@@ -39,6 +39,7 @@ struct UiStrings
     std::wstring deleteDisabledAssets;
     std::wstring wallpaperDetectionFallback;
     std::wstring generateScaleAuto;
+    std::wstring generateScaleAutoPreservesManualToggles;
     std::wstring generateScale100;
     std::wstring generateScale125;
     std::wstring generateScale150;
@@ -265,6 +266,14 @@ struct UiStrings
     std::wstring startupGenerationEnabled;
     std::wstring startupGenerationSkippedUnchanged;
     std::wstring startupGenerationSkippedNoWallpaper;
+    std::wstring startupGenerationReason;
+    std::wstring commandLineGenerationRequestReason;
+    std::wstring commandLineOnceReason;
+    std::wstring commandLineWallpaperReason;
+    std::wstring commandLineForceGenerateReason;
+    std::wstring manifestRegenerateReason;
+    std::wstring commandLineWallpaperPathInvalid;
+    std::wstring commandLineManifestSettingIgnored;
     std::wstring manualGenerationRequested;
     std::wstring generationRequestBusy;
     std::wstring emptyWallpaper;

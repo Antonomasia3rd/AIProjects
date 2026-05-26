@@ -63,7 +63,7 @@ static void QueueCommandLineGenerationRequest()
         return;
     }
 
-    QueueGenerate(wp, L"command-line generation request");
+    QueueGenerate(wp, g_ui.commandLineGenerationRequestReason);
 }
 
 static void HandleSingleInstanceRequest(WPARAM request)
@@ -289,6 +289,9 @@ static bool StoreCommandLineWallpaperRequest()
     if (!EnsureIniReadyForCommandLineSettings())
         return false;
 
+    if (!ValidateCommandLineWallpaperPath())
+        return false;
+
     if (!WriteIniValue(L"State", L"CommandLineWallpaperRequest", wp.c_str()))
     {
         DWORD err = GetLastError();
@@ -489,6 +492,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     LoadUiStrings();
     ValidateFormatStrings();
     NormalizeSeparatorStrings();
+    if (!ValidateCommandLineWallpaperPath())
+    {
+        ShowCommandLineMessage(g_commandLine.applyError, true);
+        ReleaseSingleInstanceMutex();
+        return 2;
+    }
     auto iniDone = steady_clock::now();
     LoadRuntimeSettingsFromIni(true);
 
@@ -639,7 +648,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
         bool ok = false;
         if (!wp.empty())
-            ok = Generate(wp.c_str(), L"command-line --once");
+            ok = Generate(wp.c_str(), g_ui.commandLineOnceReason.c_str());
         else
             LogText(g_ui.startupGenerationSkippedNoWallpaper);
 
@@ -665,8 +674,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             else
             {
                 LogText(g_ui.startupGenerationEnabled);
-                QueueGenerate(wp, hasCommandLineWallpaper ? L"command-line wallpaper" :
-                    (forceStartupGeneration ? L"command-line --generate" : g_ui.startupGenerationEnabled));
+                QueueGenerate(wp, hasCommandLineWallpaper ? g_ui.commandLineWallpaperReason :
+                    (forceStartupGeneration ? g_ui.commandLineForceGenerateReason : g_ui.startupGenerationReason));
             }
         }
         else

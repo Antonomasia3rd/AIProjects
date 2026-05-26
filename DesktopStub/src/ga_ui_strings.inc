@@ -164,6 +164,7 @@ void LoadUiStrings()
     g_ui.deleteDisabledAssets = IniReadS(L"Strings", L"DeleteDisabledAssets", L"Auto-delete disabled asset files");
     g_ui.wallpaperDetectionFallback = IniReadS(L"Strings", L"WallpaperDetectionFallback", L"Fallback when selected path is invalid");
     g_ui.generateScaleAuto = IniReadS(L"Strings", L"GenerateScaleAuto", L"Auto: current DPI scale");
+    g_ui.generateScaleAutoPreservesManualToggles = IniReadS(L"Strings", L"GenerateScaleAutoPreservesManualToggles", L"Manual scale checkboxes are remembered but ignored while Auto is enabled.");
     g_ui.generateScale100 = IniReadS(L"Strings", L"GenerateScale100", L"100%");
     g_ui.generateScale125 = IniReadS(L"Strings", L"GenerateScale125", L"125%");
     g_ui.generateScale150 = IniReadS(L"Strings", L"GenerateScale150", L"150%");
@@ -277,7 +278,7 @@ void LoadUiStrings()
     g_ui.liveTileModeReregistrationComplete = IniReadS(L"Strings", L"LiveTileModeReregistrationComplete", L"[i] Live Tile mode change re-registration completed.");
     g_ui.appxManifestCreated = IniReadS(L"Strings", L"AppxManifestCreated", L"[i] Created AppxManifest.xml: %s");
     g_ui.appxManifestExisting = IniReadS(L"Strings", L"AppxManifestExisting", L"[i] Using existing AppxManifest.xml: %s");
-    g_ui.appxManifestRegenerated = IniReadS(L"Strings", L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from configured defaults: %s");
+    g_ui.appxManifestRegenerated = IniReadS(L"Strings", L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s");
     g_ui.appxManifestCreateFailed = IniReadS(L"Strings", L"AppxManifestCreateFailed", L"[!] Failed to create AppxManifest.xml: %s");
     g_ui.appxManifestRegenerateFailed = IniReadS(L"Strings", L"AppxManifestRegenerateFailed", L"[!] Failed to regenerate AppxManifest.xml: %s");
     g_ui.manifestPath = IniReadS(L"Strings", L"ManifestPath", L"Manifest path: %s");
@@ -390,6 +391,14 @@ void LoadUiStrings()
     g_ui.startupGenerationEnabled = IniReadS(L"Strings", L"StartupGenerationEnabled", L"[i] Startup generation enabled.");
     g_ui.startupGenerationSkippedUnchanged = IniReadS(L"Strings", L"StartupGenerationSkippedUnchanged", L"[i] Startup generation skipped: wallpaper/config unchanged.");
     g_ui.startupGenerationSkippedNoWallpaper = IniReadS(L"Strings", L"StartupGenerationSkippedNoWallpaper", L"[!] Startup generation skipped: no wallpaper detected.");
+    g_ui.startupGenerationReason = IniReadS(L"Strings", L"StartupGenerationReason", L"startup generation");
+    g_ui.commandLineGenerationRequestReason = IniReadS(L"Strings", L"CommandLineGenerationRequestReason", L"command-line generation request");
+    g_ui.commandLineOnceReason = IniReadS(L"Strings", L"CommandLineOnceReason", L"command-line --once");
+    g_ui.commandLineWallpaperReason = IniReadS(L"Strings", L"CommandLineWallpaperReason", L"command-line wallpaper");
+    g_ui.commandLineForceGenerateReason = IniReadS(L"Strings", L"CommandLineForceGenerateReason", L"command-line --generate");
+    g_ui.manifestRegenerateReason = IniReadS(L"Strings", L"ManifestRegenerateReason", L"manifest regeneration");
+    g_ui.commandLineWallpaperPathInvalid = IniReadS(L"Strings", L"CommandLineWallpaperPathInvalid", L"Wallpaper path does not exist or is not a file: %s");
+    g_ui.commandLineManifestSettingIgnored = IniReadS(L"Strings", L"CommandLineManifestSettingIgnored", L"Manifest INI setting is no longer supported: %s. Edit AppxManifest.xml directly or use --regenerate-manifest to restore the built-in default manifest.");
     g_ui.manualGenerationRequested = IniReadS(L"Strings", L"ManualGenerationRequested", L"[i] Manual generation requested from the tray menu.");
     g_ui.generationRequestBusy = IniReadS(L"Strings", L"GenerationRequestBusy", L"[!] Generation request ignored: another operation is already running.");
     g_ui.emptyWallpaper = IniReadS(L"Strings", L"EmptyWallpaper", L"[!] Empty wallpaper.");
@@ -484,8 +493,8 @@ void LoadUiStrings()
     g_ui.manifestRestrictedCapabilityLabel = IniReadS(L"Strings", L"ManifestRestrictedCapabilityLabel", L"Manifest restricted capability: %s");
     g_ui.manifestSourceLabel = IniReadS(L"Strings", L"ManifestSourceLabel", L"Manifest source: %s");
     g_ui.manifestSourceExisting = IniReadS(L"Strings", L"ManifestSourceExisting", L"existing AppxManifest.xml");
-    g_ui.manifestSourceGenerated = IniReadS(L"Strings", L"ManifestSourceGenerated", L"generated from INI if missing");
-    g_ui.manifestRegenerateNow = IniReadS(L"Strings", L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from config");
+    g_ui.manifestSourceGenerated = IniReadS(L"Strings", L"ManifestSourceGenerated", L"generated from built-in defaults if missing");
+    g_ui.manifestRegenerateNow = IniReadS(L"Strings", L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from built-in defaults");
     g_ui.wallpaperDetectionMethodLabel = IniReadS(L"Strings", L"WallpaperDetectionMethodLabel", L"Wallpaper detection method: %s");
     g_ui.singleInstanceFailureActionLabel = IniReadS(L"Strings", L"SingleInstanceFailureActionLabel", L"Single-instance failure action: %s");
     g_ui.singleInstanceActionIgnore = IniReadS(L"Strings", L"SingleInstanceActionIgnore", L"Ignore");
@@ -678,6 +687,8 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.shutdownDelayedNotification, L"ShutdownDelayedNotification", { L"%s" });
     RequireFormat(g_ui.previousForceShutdownCleanupWarning, L"PreviousForceShutdownCleanupWarning", { L"%s", L"%s", L"%s" });
 
+    RequireFormat(g_ui.commandLineWallpaperPathInvalid, L"CommandLineWallpaperPathInvalid", { L"%s" });
+    RequireFormat(g_ui.commandLineManifestSettingIgnored, L"CommandLineManifestSettingIgnored", { L"%s" });
     RequireFormat(g_ui.startingWallpaperGeneration, L"StartingWallpaperGeneration", { L"%s" });
     RequireFormat(g_ui.wallpaperSource, L"WallpaperSource", { L"%s" });
     RequireFormat(g_ui.wallpaperImageLoaded, L"WallpaperImageLoaded", { L"%d", L"%d" });

@@ -130,6 +130,12 @@ call :IsSkipped GenerateAssets
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build GenerateAssets"
 pushd "%REPO%\DesktopStub" || exit /b 1
+call :Run powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%REPO%\DesktopStub\TestGenerateAssetsSource.ps1"
+if errorlevel 1 (
+  set "STATUS=%ERRORLEVEL%"
+  popd
+  exit /b !STATUS!
+)
 call :Run cmd.exe /d /c BuildGenerateAssets.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
