@@ -158,7 +158,6 @@ static const IniDefault g_defaults[] = {
     {L"Manifest", L"ShowNameOnTiles", L"square150x150Logo,wide310x150Logo,square310x310Logo"},
     {L"Manifest", L"EntryPoint", L"Windows.FullTrustApplication"},
     {L"Manifest", L"RestrictedCapability", L"runFullTrust"},
-    {L"Manifest", L"OverwriteExisting", L"0"},
 
     // Assets (IMPORTANT: correct defaults)
     {L"Assets", L"StoreLogo", L"0"},
@@ -317,8 +316,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"ManifestSourceLabel", L"Manifest source: %s"},
     {L"ManifestSourceExisting", L"existing AppxManifest.xml"},
     {L"ManifestSourceGenerated", L"generated from INI if missing"},
-    {L"ManifestOverwriteExistingLabel", L"Manifest overwrite existing: %s"},
-    {L"ManifestOverwriteExistingToggle", L"Overwrite existing AppxManifest.xml"},
+    {L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from config"},
     {L"WallpaperDetectionMethodLabel", L"Wallpaper detection method: %s"},
     {L"WallpaperDetectionFallback", L"Fallback when selected path is invalid"},
     {L"SingleInstanceFailureActionLabel", L"Single-instance failure action: %s"},
@@ -451,8 +449,9 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileModeReregistrationComplete", L"[i] Live Tile mode change re-registration completed."},
     {L"AppxManifestCreated", L"[i] Created AppxManifest.xml: %s"},
     {L"AppxManifestExisting", L"[i] Using existing AppxManifest.xml: %s"},
-    {L"AppxManifestOverwritten", L"[i] Updated AppxManifest.xml from configured defaults: %s"},
+    {L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from configured defaults: %s"},
     {L"AppxManifestCreateFailed", L"[!] Failed to create AppxManifest.xml: %s"},
+    {L"AppxManifestRegenerateFailed", L"[!] Failed to regenerate AppxManifest.xml: %s"},
     {L"ManifestPath", L"Manifest path: %s"},
     {L"UsingComRegistration", L"Using COM Appx registration..."},
     {L"ComRegistrationUri", L"[i] COM registration URI: %s"},

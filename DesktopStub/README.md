@@ -66,6 +66,7 @@ Command-line settings are saved to `GenerateAssets.ini`, the same configuration 
 GenerateAssets.exe --once
 GenerateAssets.exe --no-tray --console
 GenerateAssets.exe --ini D:\Temp\GenerateAssets.ini --set Settings.PollIntervalMs=5000
+GenerateAssets.exe --regenerate-manifest
 GenerateAssets.exe --wallpaper D:\Pictures\wallpaper.jpg --scales 100,200
 GenerateAssets.exe --exit
 ```
@@ -77,6 +78,7 @@ Supported options:
 - `--set Section.Key=Value`: set and save any INI value.
 - `--exit` / `--quit`: ask the running instance to exit gracefully.
 - `--once`: generate once and exit.
+- `--regenerate-manifest`: rewrite `AppxManifest.xml` once from the current INI/config.
 - `--generate` / `--generate-now`: force startup generation and keep running.
 - `--wallpaper <path>` or a bare wallpaper path: generate from that image.
 - `--no-monitor`: skip wallpaper/fit/DPI monitoring.

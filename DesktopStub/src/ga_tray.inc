@@ -50,7 +50,7 @@ enum {
     ID_SCALE_400,
     ID_GENERATED_ASSET_CACHE,
     ID_GENERATED_ASSET_PRECACHE,
-    ID_MANIFEST_OVERWRITE,
+    ID_MANIFEST_REGENERATE,
 
     // Assets
     ID_A1=2001, ID_A2, ID_A3, ID_A4, ID_A5, ID_A6
@@ -467,7 +467,7 @@ void Menu(HWND h)
     std::wstring manifestShowNameOnTilesLine = FormatWide(g_ui.manifestShowNameOnTilesLabel.c_str(), manifestInfo.showNameOnTiles.c_str());
     std::wstring manifestEntryPointLine = FormatWide(g_ui.manifestEntryPointLabel.c_str(), manifestInfo.entryPoint.c_str());
     std::wstring manifestRestrictedCapabilityLine = FormatWide(g_ui.manifestRestrictedCapabilityLabel.c_str(), manifestInfo.restrictedCapability.c_str());
-    addTo(manifestMenu, ID_MANIFEST_OVERWRITE, g_ui.manifestOverwriteExistingToggle.c_str(), ManifestOverwriteExisting());
+    addTo(manifestMenu, ID_MANIFEST_REGENERATE, g_ui.manifestRegenerateNow.c_str());
     AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSourceLine.c_str());
     AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestIdentityLine.c_str());
     AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherLine.c_str());
@@ -590,11 +590,22 @@ void Menu(HWND h)
     }
     break;
 
-    case ID_MANIFEST_OVERWRITE:
+    case ID_MANIFEST_REGENERATE:
     {
-        bool v = !ManifestOverwriteExisting();
-        IniWrite(L"Manifest", L"OverwriteExisting", v ? L"1" : L"0");
-        Log(g_ui.manifestOverwriteExistingLabel.c_str(), StateEnabled(v));
+        if (!RegenerateAppxManifestFromConfigAndLog())
+            break;
+
+        std::wstring wp = GetWallpaper();
+        if (wp.empty())
+        {
+            MessageBoxW(h,
+                g_ui.currentWallpaperNotFound.c_str(),
+                g_ui.generateNowTitle.c_str(),
+                MB_OK | MB_ICONWARNING);
+            break;
+        }
+
+        QueueGenerate(wp, g_ui.manifestRegenerateNow);
     }
     break;
 

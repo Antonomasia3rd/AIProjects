@@ -69,6 +69,7 @@ static void QueueCommandLineGenerationRequest()
 static void HandleSingleInstanceRequest(WPARAM request)
 {
     bool applyTrayIcon = (request & SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON) != 0;
+    bool regenerateManifest = (request & SINGLE_INSTANCE_FLAG_REGENERATE_MANIFEST) != 0;
 
     switch (request & SINGLE_INSTANCE_REQUEST_MASK)
     {
@@ -82,7 +83,14 @@ static void HandleSingleInstanceRequest(WPARAM request)
 
     case SINGLE_INSTANCE_REQUEST_GENERATE:
         ApplySettingsChangedByCommandLine(applyTrayIcon);
+        if (regenerateManifest && !RegenerateAppxManifestFromConfigAndLog())
+            return;
         QueueCommandLineGenerationRequest();
+        return;
+
+    case SINGLE_INSTANCE_REQUEST_REGENERATE_MANIFEST:
+        ApplySettingsChangedByCommandLine(applyTrayIcon);
+        RegenerateAppxManifestFromConfigAndLog();
         return;
 
     case SINGLE_INSTANCE_REQUEST_SHOW:
@@ -394,6 +402,17 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             }
             singleInstanceRequest = SINGLE_INSTANCE_REQUEST_GENERATE;
         }
+        else if (CommandLineShouldRegenerateManifest())
+        {
+            if (!ApplyCommandLineSettingsForExistingInstance())
+            {
+                ShowCommandLineMessage(g_commandLine.applyError, true);
+                CloseHandle(g_singleInstanceMutex);
+                g_singleInstanceMutex = nullptr;
+                return 2;
+            }
+            singleInstanceRequest = SINGLE_INSTANCE_REQUEST_REGENERATE_MANIFEST;
+        }
         else if (CommandLineHasPersistentSettings())
         {
             if (!ApplyCommandLineSettingsForExistingInstance())
@@ -408,6 +427,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
         if (CommandLineTrayIconChanged())
             singleInstanceRequest |= SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON;
+        if (CommandLineShouldRegenerateManifest())
+            singleInstanceRequest |= SINGLE_INSTANCE_FLAG_REGENERATE_MANIFEST;
 
         if (!SignalExistingInstance(singleInstanceRequest))
         {
@@ -492,17 +513,27 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     std::wstring startupManifestPath;
     bool startupManifestCreated = false;
     DWORD startupManifestError = ERROR_SUCCESS;
-    bool startupManifestReady = EnsureAppxManifest(startupManifestPath, startupManifestCreated, startupManifestError);
+    bool startupManifestReady = false;
+    if (CommandLineShouldRegenerateManifest())
+        startupManifestReady = RegenerateAppxManifestFromConfig(startupManifestPath, startupManifestError);
+    else
+        startupManifestReady = EnsureAppxManifest(startupManifestPath, startupManifestCreated, startupManifestError);
 
     Log(g_ui.singleInstanceScopeSummary.c_str(), g_singleInstanceMutexName.c_str());
     if (iniEncodingNormalizeResult == TextNormalizeResult::Changed)
         LogText(g_ui.iniEncodingNormalized);
     if (startupManifestCreated)
         Log(g_ui.appxManifestCreated.c_str(), startupManifestPath.c_str());
+    else if (CommandLineShouldRegenerateManifest() && startupManifestReady)
+        Log(g_ui.appxManifestRegenerated.c_str(), startupManifestPath.c_str());
     else if (!startupManifestReady)
     {
-        Log(g_ui.appxManifestCreateFailed.c_str(), startupManifestPath.c_str());
-        LogWin32Failure(L"Create AppxManifest.xml", startupManifestError);
+        Log((CommandLineShouldRegenerateManifest()
+            ? g_ui.appxManifestRegenerateFailed
+            : g_ui.appxManifestCreateFailed).c_str(), startupManifestPath.c_str());
+        LogWin32Failure(CommandLineShouldRegenerateManifest()
+            ? L"Regenerate AppxManifest.xml"
+            : L"Create AppxManifest.xml", startupManifestError);
     }
     Log(g_ui.generateOnStartupSummary.c_str(), StateEnabled(g_generateOnStartup));
     Log(g_ui.generateOnStartupOnlyWhenChangedSummary.c_str(), StateEnabled(g_generateOnStartupOnlyWhenChanged));
@@ -534,6 +565,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         LogWin32Failure(L"RegisterWindowMessageW(TaskbarCreated)", taskbarCreatedMessageError);
     if (!consoleCtrlHandlerInstalled)
         LogWin32Failure(L"SetConsoleCtrlHandler", consoleCtrlHandlerError);
+
+    if (CommandLineShouldRegenerateManifest() && !CommandLineShouldGenerateNow())
+    {
+        GdiplusShutdown(tk);
+        ReleaseSingleInstanceMutex();
+        return startupManifestReady ? 0 : 1;
+    }
 
     // Window
     WNDCLASSW wc{}; wc.lpfnWndProc=WndProc; wc.hInstance=hi; wc.lpszClassName=WINDOW_CLASS_NAME;

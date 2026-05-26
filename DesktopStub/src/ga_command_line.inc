@@ -15,6 +15,7 @@ struct CommandLineOptions
     bool exitRequested = false;
     bool generateOnce = false;
     bool forceGenerateOnStartup = false;
+    bool regenerateManifest = false;
     bool noMonitor = false;
     bool customIniPath = false;
     bool wallpaperSpecified = false;
@@ -37,8 +38,10 @@ static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW = 0;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_RELOAD_SETTINGS = 1;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_EXIT = 2;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_GENERATE = 3;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_REGENERATE_MANIFEST = 4;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MASK = 0x00FF;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON = 0x0100;
+static constexpr WPARAM SINGLE_INSTANCE_FLAG_REGENERATE_MANIFEST = 0x0200;
 
 static void AddCommandLineIniSetting(const std::wstring& section, const std::wstring& key, const std::wstring& value);
 
@@ -587,6 +590,13 @@ static bool ParseCommandLineOptions()
             g_commandLine.noMonitor = true;
             continue;
         }
+        if (IEquals(arg, L"--regenerate-manifest") ||
+            IEquals(arg, L"--overwrite-manifest") ||
+            IEquals(arg, L"--rebuild-manifest"))
+        {
+            g_commandLine.regenerateManifest = true;
+            continue;
+        }
         if (IEquals(arg, L"--generate") || IEquals(arg, L"--generate-now"))
         {
             g_commandLine.forceGenerateOnStartup = true;
@@ -712,6 +722,7 @@ static std::wstring CommandLineUsageText()
         L"  --set Section.Key=Value             Set and save any INI value.\r\n"
         L"  --exit, --quit                      Ask the running instance to exit.\r\n"
         L"  --once                              Generate once, then exit.\r\n"
+        L"  --regenerate-manifest               Rewrite AppxManifest.xml once from config.\r\n"
         L"  --generate, --generate-now           Force startup generation and keep running.\r\n"
         L"  --wallpaper <path>                  Generate from a specific image path.\r\n"
         L"  --no-monitor                        Do not start wallpaper/fit/DPI monitoring.\r\n"
@@ -803,6 +814,11 @@ static bool CommandLineShouldGenerateNow()
     return g_commandLine.forceGenerateOnStartup || g_commandLine.generateOnce;
 }
 
+static bool CommandLineShouldRegenerateManifest()
+{
+    return g_commandLine.regenerateManifest;
+}
+
 static bool CommandLineLiveTileModeChanged()
 {
     return g_commandLine.liveTileModeChanged;
@@ -860,6 +876,8 @@ static void LogCommandLineSummary()
         Log(L"[i] Command-line mode: exit running instance.");
     if (g_commandLine.forceGenerateOnStartup && !g_commandLine.generateOnce)
         Log(L"[i] Command-line mode: force startup generation.");
+    if (g_commandLine.regenerateManifest)
+        Log(L"[i] Command-line mode: regenerate AppxManifest.xml once.");
     if (g_commandLine.noMonitor && !g_commandLine.generateOnce)
         Log(L"[i] Command-line mode: monitoring disabled.");
     if (g_commandLine.wallpaperSpecified)
