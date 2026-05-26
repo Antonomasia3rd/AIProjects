@@ -62,6 +62,18 @@ jobs:
         shell: pwsh
         run: .github/scripts/Validate-ProjectMap.ps1
 
+      - name: Validate workflow project selector
+        shell: pwsh
+        run: .github/scripts/Test-WorkflowProjectSelection.ps1
+
+      - name: Scan repository policy warnings
+        shell: pwsh
+        run: .github/scripts/Invoke-PolicyWarnings.ps1
+
+      - name: Scan README consistency warnings
+        shell: pwsh
+        run: .github/scripts/Test-ReadmeConsistency.ps1
+
       - name: Detect projects to build
         id: detect
         shell: pwsh
@@ -240,6 +252,10 @@ jobs:
 
           $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
+      - name: Run smoke tests
+        shell: pwsh
+        run: .github/scripts/Smoke-WindowsBuild.ps1
+
       - name: Upload AllowContentAboveLock artifact
         if: needs.detect-projects.outputs.build_allow_content_above_lock == 'true'
         uses: actions/upload-artifact@v7.0.1
@@ -388,6 +404,14 @@ jobs:
             }
           }
 
+          $previousTag = $null
+          foreach ($candidate in $matchingTags) {
+            if ($candidate -ne $tag) {
+              $previousTag = $candidate
+              break
+            }
+          }
+
           if (-not $tag) {
             $maxVersion = 0
             $pattern = '^' + [regex]::Escape($releaseBase) + '-v(?<version>\d+)$'
@@ -402,9 +426,23 @@ jobs:
             $tag = "$releaseBase-v$($maxVersion + 1)"
           }
 
+          if (-not $previousTag) {
+            $previousTag = @($matchingTags | Where-Object { $_ -ne $tag } | Select-Object -First 1)
+          }
+
           $assets = @(Get-ChildItem -LiteralPath artifacts -Recurse -File | Sort-Object Name)
           if ($assets.Count -eq 0) {
             throw 'No workflow artifacts were downloaded for release upload.'
+          }
+
+          $commitSubjects = @()
+          if ($previousTag) {
+            $commitSubjects = @(git log --format='%h %s' "$previousTag..$fullSha")
+          } else {
+            $commitSubjects = @(git log --format='%h %s' -n 10 $fullSha)
+          }
+          if ($LASTEXITCODE -ne 0 -or -not $commitSubjects) {
+            $commitSubjects = @("${{ github.sha }}")
           }
 
           $checksumLines = @(
@@ -419,12 +457,19 @@ jobs:
             $checksumLines += "| ``$name`` | ``$hash`` |"
           }
 
+          $changeLines = @('## Changes', '')
+          foreach ($subject in $commitSubjects) {
+            $changeLines += "- $subject"
+          }
+
           $notes = @(
             "Automated Windows build for detected changes on main.",
             "",
             "Commit: ``$fullSha``",
             "Projects: $env:PROJECT_LIST",
             "Release family: ``$releaseBase-vN``",
+            "",
+            ($changeLines -join "`n"),
             "",
             ($checksumLines -join "`n")
           ) -join "`n"
