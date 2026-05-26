@@ -1,0 +1,84 @@
+name: Bug report
+description: Report a bug in one of the Windows utilities
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: dropdown
+    id: project
+    attributes:
+      label: Project
+      options:
+        - AllowContentAboveLock
+        - asusblink
+        - capsblink
+        - CharmTray
+        - DesktopStub
+        - DiscordRPC
+        - DNSAutoUpdate
+        - NowPlayingTile
+        - PhotoCollage
+        - RealTimeNotesDeskband
+        - SecureDesktopLauncher
+        - TaskSchedulerMigration
+        - YourPhoneHideBanner
+        - Other / unsure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Release / commit
+      description: Example: DesktopStub-v1, All-v2, or a commit SHA.
+    validations:
+      required: false
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version/build
+      description: Example: Windows 11 22H2 build 22621.x or Windows 10 1809 build 17763.x.
+    validations:
+      required: true
+  - type: dropdown
+    id: elevation
+    attributes:
+      label: Elevation / context
+      options:
+        - Standard user
+        - Administrator
+        - LocalSystem / service
+        - Packaged Appx context
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include commands, config changes, or UI actions.
+      placeholder: |
+        1. Run ...
+        2. Click ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Attach the local .log file when applicable. Remove private paths or secrets first.
+      render: text
+    validations:
+      required: false
