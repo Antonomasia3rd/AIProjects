@@ -20,7 +20,7 @@ if (-not (Test-Path -LiteralPath $readmePath -PathType Leaf)) {
     throw "Missing README: $readmePath"
 }
 
-$projects = Get-Content -LiteralPath $mapPath -Raw | ConvertFrom-Json
+$projects = @(Get-Content -LiteralPath $mapPath -Raw | ConvertFrom-Json)
 if (-not $projects -or $projects.Count -eq 0) {
     throw 'Project map must contain at least one project.'
 }
@@ -57,7 +57,8 @@ foreach ($project in $projects) {
         throw "Build script does not appear to handle skip key: $($project.skipKey)"
     }
 
-    if ($readme -notmatch [regex]::Escape("`$($project.folder)")) {
+    $readmeFolderToken = '`' + [string]$project.folder + '`'
+    if ($readme -notmatch [regex]::Escape($readmeFolderToken)) {
         throw "README project table does not appear to mention folder: $($project.folder)"
     }
 }
