@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security-sensitive report
+    url: https://github.com/Antonomasia3rd/AIProjects/security/advisories/new
+    about: Please use a private advisory for security-sensitive reports when appropriate.
