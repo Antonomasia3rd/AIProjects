@@ -49,94 +49,111 @@ jobs:
         shell: cmd
         run: .github\scripts\build-windows.cmd
 
+      - name: Write artifact checksum summary
+        shell: pwsh
+        run: |
+          $artifacts = @(
+            @{ Project = 'AllowContentAboveLock'; Path = 'AllowContentAboveLock/build/AllowContentAboveLock.exe' },
+            @{ Project = 'asusblink'; Path = 'asusblink/build/asusblink.exe' },
+            @{ Project = 'capsblink'; Path = 'capsblink/build/capsblink.exe' },
+            @{ Project = 'YourPhoneHideBanner'; Path = 'YourPhoneHideBanner/build/YourPhoneHideBanner.exe' },
+            @{ Project = 'DiscordRPC'; Path = 'DiscordRPC/build/DiscordRPC.exe' },
+            @{ Project = 'NowPlayingTile'; Path = 'NowPlayingTile/build/NowPlayingTile-windows-x64.zip' },
+            @{ Project = 'DesktopStub'; Path = 'DesktopStub/build/GenerateAssets.exe' },
+            @{ Project = 'CharmTray'; Path = 'CharmTray/build/CharmTray.exe' },
+            @{ Project = 'SecureDesktopLauncher'; Path = 'SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip' },
+            @{ Project = 'RealTimeNotesDeskband'; Path = 'RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip' }
+          )
+
+          $lines = @(
+            '## Windows build outputs',
+            '',
+            'GitHub Actions downloads workflow artifacts as ZIP archives. The hashes below are for the payload files inside those artifacts.',
+            '',
+            '| Project | File | SHA256 |',
+            '| --- | --- | --- |'
+          )
+
+          foreach ($item in $artifacts) {
+            if (-not (Test-Path -LiteralPath $item.Path -PathType Leaf)) {
+              throw "Build output missing: $($item.Path)"
+            }
+
+            $hash = (Get-FileHash -LiteralPath $item.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+            $name = Split-Path -Leaf $item.Path
+            $lines += "| $($item.Project) | ``$name`` | ``$hash`` |"
+          }
+
+          $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
       - name: Upload AllowContentAboveLock artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: AIProjects-AllowContentAboveLock-${{ github.sha }}
-          path: |
-            AllowContentAboveLock/build/AllowContentAboveLock.exe
-            AllowContentAboveLock/build/AllowContentAboveLock.exe.sha256
+          name: AllowContentAboveLock
+          path: AllowContentAboveLock/build/AllowContentAboveLock.exe
           if-no-files-found: error
 
       - name: Upload asusblink artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: AIProjects-asusblink-${{ github.sha }}
-          path: |
-            asusblink/build/asusblink.exe
-            asusblink/build/asusblink.exe.sha256
+          name: asusblink
+          path: asusblink/build/asusblink.exe
           if-no-files-found: error
 
       - name: Upload capsblink artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: AIProjects-capsblink-${{ github.sha }}
-          path: |
-            capsblink/build/capsblink.exe
-            capsblink/build/capsblink.exe.sha256
+          name: capsblink
+          path: capsblink/build/capsblink.exe
           if-no-files-found: error
 
       - name: Upload YourPhoneHideBanner artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: AIProjects-YourPhoneHideBanner-${{ github.sha }}
-          path: |
-            YourPhoneHideBanner/build/YourPhoneHideBanner.exe
-            YourPhoneHideBanner/build/YourPhoneHideBanner.exe.sha256
+          name: YourPhoneHideBanner
+          path: YourPhoneHideBanner/build/YourPhoneHideBanner.exe
           if-no-files-found: error
 
       - name: Upload DiscordRPC artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: AIProjects-DiscordRPC-${{ github.sha }}
-          path: |
-            DiscordRPC/build/DiscordRPC.exe
-            DiscordRPC/build/DiscordRPC.exe.sha256
+          name: DiscordRPC
+          path: DiscordRPC/build/DiscordRPC.exe
           if-no-files-found: error
 
       - name: Upload NowPlayingTile artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: AIProjects-NowPlayingTile-${{ github.sha }}
-          path: |
-            NowPlayingTile/build/NowPlayingTile-windows-x64.zip
-            NowPlayingTile/build/NowPlayingTile-windows-x64.zip.sha256
+          name: NowPlayingTile
+          path: NowPlayingTile/build/NowPlayingTile-windows-x64.zip
           if-no-files-found: error
 
       - name: Upload DesktopStub artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: AIProjects-DesktopStub-${{ github.sha }}
-          path: |
-            DesktopStub/build/GenerateAssets.exe
-            DesktopStub/build/GenerateAssets.exe.sha256
+          name: DesktopStub - GenerateAssets
+          path: DesktopStub/build/GenerateAssets.exe
           if-no-files-found: error
 
       - name: Upload CharmTray artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: AIProjects-CharmTray-${{ github.sha }}
-          path: |
-            CharmTray/build/CharmTray.exe
-            CharmTray/build/CharmTray.exe.sha256
+          name: CharmTray
+          path: CharmTray/build/CharmTray.exe
           if-no-files-found: error
 
       - name: Upload SecureDesktopLauncher artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: AIProjects-SecureDesktopLauncher-${{ github.sha }}
-          path: |
-            SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip
-            SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip.sha256
+          name: SecureDesktopLauncher
+          path: SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip
           if-no-files-found: error
 
       - name: Upload RealTimeNotesDeskband artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: AIProjects-RealTimeNotesDeskband-${{ github.sha }}
-          path: |
-            RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip
-            RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip.sha256
+          name: RealTimeNotesDeskband
+          path: RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip
           if-no-files-found: error
 
   attest-build-provenance:
@@ -192,25 +209,15 @@ jobs:
 
           $expected = @(
             'AllowContentAboveLock.exe',
-            'AllowContentAboveLock.exe.sha256',
             'asusblink.exe',
-            'asusblink.exe.sha256',
             'capsblink.exe',
-            'capsblink.exe.sha256',
             'YourPhoneHideBanner.exe',
-            'YourPhoneHideBanner.exe.sha256',
             'DiscordRPC.exe',
-            'DiscordRPC.exe.sha256',
             'NowPlayingTile-windows-x64.zip',
-            'NowPlayingTile-windows-x64.zip.sha256',
             'GenerateAssets.exe',
-            'GenerateAssets.exe.sha256',
             'CharmTray.exe',
-            'CharmTray.exe.sha256',
             'SecureDesktopLauncher-windows-x64.zip',
-            'SecureDesktopLauncher-windows-x64.zip.sha256',
-            'RealTimeNotesDeskband-windows-x64.zip',
-            'RealTimeNotesDeskband-windows-x64.zip.sha256'
+            'RealTimeNotesDeskband-windows-x64.zip'
           )
 
           $files = Get-ChildItem -LiteralPath artifacts -Recurse -File
@@ -221,5 +228,34 @@ jobs:
             }
             $match.FullName
           }
+
+          $checksumLines = @(
+            '<!-- AIProjects checksums -->',
+            '## SHA256 checksums',
+            '',
+            '| File | SHA256 |',
+            '| --- | --- |'
+          )
+          foreach ($asset in $assets) {
+            $name = Split-Path -Leaf $asset
+            $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+            $checksumLines += "| ``$name`` | ``$hash`` |"
+          }
+          $checksumBlock = $checksumLines -join "`n"
+
+          $currentBody = gh release view $env:RELEASE_TAG --json body -q .body
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $pattern = '(?s)<!-- AIProjects checksums -->.*$'
+          if ($currentBody -match $pattern) {
+            $newBody = [regex]::Replace($currentBody, $pattern, $checksumBlock)
+          } elseif ($currentBody.Trim()) {
+            $newBody = $currentBody.TrimEnd() + "`n`n" + $checksumBlock
+          } else {
+            $newBody = "Automated Windows binaries built by GitHub Actions.`n`n" + $checksumBlock
+          }
+
+          gh release edit $env:RELEASE_TAG --notes $newBody
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           gh release upload $env:RELEASE_TAG @assets --clobber
