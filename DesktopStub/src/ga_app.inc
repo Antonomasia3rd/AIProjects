@@ -277,6 +277,9 @@ static bool ApplyCommandLineSettingsForExistingInstance()
     if (!EnsureIniReadyForCommandLineSettings())
         return false;
 
+    if (!ValidateCommandLineWallpaperPath())
+        return false;
+
     return ApplyCommandLinePersistentSettings();
 }
 
@@ -483,6 +486,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     EnsureIniDefaults();
     EnsureIniStringDefaults();
     UpgradeRenamedStringDefaults();
+    if (!ValidateCommandLineWallpaperPath())
+    {
+        ShowCommandLineMessage(g_commandLine.applyError, true);
+        ReleaseSingleInstanceMutex();
+        return 2;
+    }
     if (!ApplyCommandLinePersistentSettings())
     {
         ShowCommandLineMessage(g_commandLine.applyError, true);
@@ -492,12 +501,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     LoadUiStrings();
     ValidateFormatStrings();
     NormalizeSeparatorStrings();
-    if (!ValidateCommandLineWallpaperPath())
-    {
-        ShowCommandLineMessage(g_commandLine.applyError, true);
-        ReleaseSingleInstanceMutex();
-        return 2;
-    }
     auto iniDone = steady_clock::now();
     LoadRuntimeSettingsFromIni(true);
 
