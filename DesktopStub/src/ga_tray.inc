@@ -428,6 +428,8 @@ void Menu(HWND h)
     addTo(scaleMenu, ID_SCALE_400, g_ui.generateScale400.c_str(), g_generateScale400, manualScalesEnabled);
     std::wstring currentDpiLine = FormatWide(g_ui.currentDpiScaleLabel.c_str(), CurrentDpiPercent(), CurrentAssetScale());
     AppendMenuChecked(scaleMenu, MF_STRING | MF_DISABLED, 0, currentDpiLine.c_str());
+    if (g_generateScaleAuto)
+        AppendMenuChecked(scaleMenu, MF_STRING | MF_DISABLED, 0, g_ui.generateScaleAutoPreservesManualToggles.c_str());
     endSection(scaleMenu, g_ui.dpiScalesTitle);
 
     HMENU cachingMenu = beginSection(g_ui.cachingTitle);
@@ -605,7 +607,7 @@ void Menu(HWND h)
             break;
         }
 
-        QueueGenerate(wp, g_ui.manifestRegenerateNow);
+        QueueGenerate(wp, g_ui.manifestRegenerateReason);
     }
     break;
 

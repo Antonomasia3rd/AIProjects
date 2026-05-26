@@ -32,6 +32,7 @@ struct CommandLineOptions
 
 static CommandLineOptions g_commandLine;
 void Log(const wchar_t* fmt, ...);
+std::wstring FormatWide(const wchar_t* fmt, ...);
 int IniReadI(const wchar_t* s, const wchar_t* k, int d);
 
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW = 0;
@@ -722,7 +723,7 @@ static std::wstring CommandLineUsageText()
         L"  --set Section.Key=Value             Set and save any INI value.\r\n"
         L"  --exit, --quit                      Ask the running instance to exit.\r\n"
         L"  --once                              Generate once, then exit.\r\n"
-        L"  --regenerate-manifest               Rewrite AppxManifest.xml once from config.\r\n"
+        L"  --regenerate-manifest               Rewrite AppxManifest.xml once from built-in defaults.\r\n"
         L"  --generate, --generate-now           Force startup generation and keep running.\r\n"
         L"  --wallpaper <path>                  Generate from a specific image path.\r\n"
         L"  --no-monitor                        Do not start wallpaper/fit/DPI monitoring.\r\n"
@@ -852,6 +853,39 @@ static bool CommandLineWallpaper(std::wstring& wallpaper)
     return true;
 }
 
+static bool CommandLineStringFormat1(const wchar_t* key, const wchar_t* fallback, const std::wstring& value, std::wstring& out)
+{
+    std::wstring fmt = fallback ? fallback : L"%s";
+    if (!g_iniPath.empty())
+    {
+        std::wstring configured = IniReadS(L"Strings", key, fmt.c_str());
+        if (!configured.empty())
+            fmt = configured;
+    }
+
+    out = FormatWide(fmt.c_str(), value.c_str());
+    if (out.empty())
+        out = value;
+    return true;
+}
+
+static bool ValidateCommandLineWallpaperPath()
+{
+    if (!g_commandLine.wallpaperSpecified)
+        return true;
+
+    DWORD attrs = GetFileAttributesW(g_commandLine.wallpaperPath.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0)
+        return true;
+
+    CommandLineStringFormat1(
+        L"CommandLineWallpaperPathInvalid",
+        L"Wallpaper path does not exist or is not a file: %s",
+        g_commandLine.wallpaperPath,
+        g_commandLine.applyError);
+    return false;
+}
+
 static bool CommandLineComRegistrationHelper(std::wstring& manifestPath)
 {
     if (!g_commandLine.comRegistrationHelper)
@@ -904,6 +938,17 @@ static bool CommandLineSettingChangesTrayIcon(const CommandLineIniSetting& entry
     return IEquals(entry.section, L"Settings") && IEquals(entry.key, L"TrayIcon");
 }
 
+static bool CommandLineSettingTargetsManifestEditor(const CommandLineIniSetting& entry)
+{
+    if (IEquals(entry.section, L"Manifest"))
+        return true;
+
+    if (IEquals(entry.section, L"Settings"))
+        return ToLowerCopy(TrimCopy(entry.key)).rfind(L"manifest", 0) == 0;
+
+    return false;
+}
+
 static bool ApplyCommandLinePersistentSettings()
 {
     g_commandLine.applyError.clear();
@@ -912,6 +957,17 @@ static bool ApplyCommandLinePersistentSettings()
 
     for (const auto& entry : g_commandLine.settings)
     {
+        if (CommandLineSettingTargetsManifestEditor(entry))
+        {
+            std::wstring settingName = entry.section + L"." + entry.key;
+            CommandLineStringFormat1(
+                L"CommandLineManifestSettingIgnored",
+                L"Manifest INI setting is no longer supported: %s. Edit AppxManifest.xml directly or use --regenerate-manifest to restore the built-in default manifest.",
+                settingName,
+                g_commandLine.applyError);
+            return false;
+        }
+
         bool changesLiveTileMode = CommandLineSettingChangesLiveTileMode(entry);
         bool changesTrayIcon = CommandLineSettingChangesTrayIcon(entry);
         if (!WriteIniValue(entry.section.c_str(), entry.key.c_str(), entry.value.c_str()))

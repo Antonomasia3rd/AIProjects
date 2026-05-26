@@ -194,11 +194,11 @@ $sourceChecks = @(
         -Failure 'Auto Live Tile mode must choose Live Tile updates only when the process has package identity'),
 
     (New-SourceCheck `
-        -Name 'Generated manifest launches GenerateAssets by default' `
+        -Name 'INI template does not expose manifest editor defaults' `
         -SourceName 'src\ga_config_defaults.inc' `
         -SourceText $defaults `
-        -Pattern '\{L"Manifest",\s*L"Executable",\s*L"GenerateAssets\.exe"\}' `
-        -Failure 'manifest executable default must point at GenerateAssets.exe so packaged launches have identity'),
+        -Pattern '(?s)BuildInitialIniTemplate(?!.*lines\.push_back\(L"\[Manifest\]"\))' `
+        -Failure 'INI template must not recreate the redundant [Manifest] editor section'),
 
     (New-SourceCheck `
         -Name 'Manifest executable fallback launches GenerateAssets' `
@@ -206,6 +206,27 @@ $sourceChecks = @(
         -SourceText $manifest `
         -Pattern 'ManifestSettingValidated\(L"Executable",\s*L"GenerateAssets\.exe",\s*L"ManifestExecutable",\s*IsManifestExecutableValue\)' `
         -Failure 'manifest executable fallback must point at GenerateAssets.exe'),
+
+    (New-SourceCheck `
+        -Name 'Manifest generation ignores redundant INI manifest editor' `
+        -SourceName 'src\ga_manifest.inc' `
+        -SourceText $manifest `
+        -Pattern '(?s)Manifest generation intentionally uses built-in defaults.*legacySettingsKey.*return fallback' `
+        -Failure 'generated AppxManifest.xml must use built-in defaults instead of a redundant INI manifest editor'),
+
+    (New-SourceCheck `
+        -Name 'Obsolete manifest INI editor is removed and blocked' `
+        -SourceName 'command-line/config sources' `
+        -SourceText ($commandLine + "`n" + $defaults) `
+        -Pattern '(?s)CommandLineSettingTargetsManifestEditor.*IEquals\(entry\.section,\s*L"Manifest"\).*RemoveObsoleteManifestIniSettings.*IEquals\(sectionName,\s*L"Manifest"\).*IsLegacyManifestSettingKey' `
+        -Failure 'the redundant [Manifest] INI editor must be removed from existing INIs and blocked from command-line writes'),
+
+    (New-SourceCheck `
+        -Name 'Manifest executable path rejects traversal segments' `
+        -SourceName 'src\ga_manifest.inc' `
+        -SourceText $manifest `
+        -Pattern '(?s)IsManifestSafeRelativePath.*segment == L"\.".*segment == L"\.\.".*IsManifestExecutableValue.*IsManifestSafeRelativePath' `
+        -Failure 'manifest executable validation must reject . and .. relative path segments'),
 
     (New-SourceCheck `
         -Name 'Live Tile update mode skips AppX registration path' `
@@ -370,6 +391,15 @@ $uiStringKeys = @(
     'GeneratedAssetPrecacheSaved',
     'GeneratedAssetPrecacheSummary',
     'ManifestRegenerateNow',
+    'GenerateScaleAutoPreservesManualToggles',
+    'StartupGenerationReason',
+    'CommandLineGenerationRequestReason',
+    'CommandLineOnceReason',
+    'CommandLineWallpaperReason',
+    'CommandLineForceGenerateReason',
+    'ManifestRegenerateReason',
+    'CommandLineWallpaperPathInvalid',
+    'CommandLineManifestSettingIgnored',
     'AppxManifestRegenerated',
     'AppxManifestRegenerateFailed'
 )

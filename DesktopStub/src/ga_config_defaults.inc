@@ -135,29 +135,6 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"SavePngReplaceRetries", L"3"},
     {L"Settings", L"SavePngReplaceRetryDelayMs", L"75"},
 
-    // Manifest
-    {L"Manifest", L"IdentityName", L""},
-    {L"Manifest", L"Publisher", L""},
-    {L"Manifest", L"PackageVersion", L"1.0.0.0"},
-    {L"Manifest", L"DisplayName", L"Desktop"},
-    {L"Manifest", L"PublisherDisplayName", L""},
-    {L"Manifest", L"Description", L"Desktop"},
-    {L"Manifest", L"Executable", L"GenerateAssets.exe"},
-    {L"Manifest", L"ApplicationId", L"App"},
-    {L"Manifest", L"TargetDeviceFamilyName", L"Windows.Desktop"},
-    {L"Manifest", L"MinVersion", L"10.0.15063.0"},
-    {L"Manifest", L"MaxVersionTested", L"10.0.15063.0"},
-    {L"Manifest", L"ResourceLanguage", L"en-us"},
-    {L"Manifest", L"PropertiesLogo", L"Assets\\StoreLogo.png"},
-    {L"Manifest", L"Square150x150Logo", L"Assets\\MediumTile.png"},
-    {L"Manifest", L"Square44x44Logo", L"Assets\\Square44x44Logo.png"},
-    {L"Manifest", L"Square71x71Logo", L"Assets\\SmallTile.png"},
-    {L"Manifest", L"Wide310x150Logo", L"Assets\\WideTile.png"},
-    {L"Manifest", L"Square310x310Logo", L"Assets\\LargeTile.png"},
-    {L"Manifest", L"BackgroundColor", L"transparent"},
-    {L"Manifest", L"ShowNameOnTiles", L"square150x150Logo,wide310x150Logo,square310x310Logo"},
-    {L"Manifest", L"EntryPoint", L"Windows.FullTrustApplication"},
-    {L"Manifest", L"RestrictedCapability", L"runFullTrust"},
 
     // Assets (IMPORTANT: correct defaults)
     {L"Assets", L"StoreLogo", L"0"},
@@ -218,6 +195,14 @@ static const StringDefault g_stringDefaults[] = {
     {L"ComPreferredMode", L"COM preferred with PowerShell fallback"},
     {L"ConsoleAllocated", L"[i] Console allocated."},
     {L"StartupGenerationEnabled", L"[i] Startup generation enabled."},
+    {L"StartupGenerationReason", L"startup generation"},
+    {L"CommandLineGenerationRequestReason", L"command-line generation request"},
+    {L"CommandLineOnceReason", L"command-line --once"},
+    {L"CommandLineWallpaperReason", L"command-line wallpaper"},
+    {L"CommandLineForceGenerateReason", L"command-line --generate"},
+    {L"ManifestRegenerateReason", L"manifest regeneration"},
+    {L"CommandLineWallpaperPathInvalid", L"Wallpaper path does not exist or is not a file: %s"},
+    {L"CommandLineManifestSettingIgnored", L"Manifest INI setting is no longer supported: %s. Edit AppxManifest.xml directly or use --regenerate-manifest to restore the built-in default manifest."},
     {L"StartupGenerationSkippedUnchanged", L"[i] Startup generation skipped: wallpaper/config unchanged."},
     {L"StartupGenerationSkippedNoWallpaper", L"[!] Startup generation skipped: no wallpaper detected."},
     {L"ManualGenerationRequested", L"[i] Manual generation requested from the tray menu."},
@@ -315,8 +300,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"ManifestRestrictedCapabilityLabel", L"Manifest restricted capability: %s"},
     {L"ManifestSourceLabel", L"Manifest source: %s"},
     {L"ManifestSourceExisting", L"existing AppxManifest.xml"},
-    {L"ManifestSourceGenerated", L"generated from INI if missing"},
-    {L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from config"},
+    {L"ManifestSourceGenerated", L"generated from built-in defaults if missing"},
+    {L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from built-in defaults"},
     {L"WallpaperDetectionMethodLabel", L"Wallpaper detection method: %s"},
     {L"WallpaperDetectionFallback", L"Fallback when selected path is invalid"},
     {L"SingleInstanceFailureActionLabel", L"Single-instance failure action: %s"},
@@ -350,6 +335,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"GenerateDesktopIconForDisabledEntries", L"Generate Desktop Icon for disabled entries"},
     {L"DeleteDisabledAssets", L"Auto-delete disabled asset files"},
     {L"GenerateScaleAuto", L"Auto: current DPI scale"},
+    {L"GenerateScaleAutoPreservesManualToggles", L"Manual scale checkboxes are remembered but ignored while Auto is enabled."},
     {L"GenerateScale100", L"100%"},
     {L"GenerateScale125", L"125%"},
     {L"GenerateScale150", L"150%"},
@@ -418,7 +404,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileModeChanged", L"Live Tile mode changed."},
     {L"LiveTileModeReregistrationQueued", L"[i] Queued one-time Appx re-registration because Live Tile mode changed."},
     {L"LiveTileModeReregistrationQueuedNoWallpaper", L"[!] Live Tile mode changed; one-time Appx re-registration is pending but current wallpaper could not be detected."},
-    {L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s."},
+    {L"StartingWallpaperGeneration", L"Starting wallpaper generation: %s"},
     {L"WallpaperSource", L"Wallpaper source: %s"},
     {L"WallpaperImageLoaded", L"[i] Wallpaper image loaded (%d x %d)."},
     {L"RenderModeSummary", L"[i] Render fit mode: %s"},
@@ -449,7 +435,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileModeReregistrationComplete", L"[i] Live Tile mode change re-registration completed."},
     {L"AppxManifestCreated", L"[i] Created AppxManifest.xml: %s"},
     {L"AppxManifestExisting", L"[i] Using existing AppxManifest.xml: %s"},
-    {L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from configured defaults: %s"},
+    {L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s"},
     {L"AppxManifestCreateFailed", L"[!] Failed to create AppxManifest.xml: %s"},
     {L"AppxManifestRegenerateFailed", L"[!] Failed to regenerate AppxManifest.xml: %s"},
     {L"ManifestPath", L"Manifest path: %s"},
@@ -596,15 +582,6 @@ static std::wstring BuildInitialIniTemplate()
     for (const auto& d : g_powerShellErrorMessageDefaults)
         lines.push_back(FormatIniAssignment(d.key, d.value));
     lines.push_back(L"");
-    lines.push_back(L"[Manifest]");
-    lines.push_back(L"; AppxManifest.xml generation. Existing legacy [Settings] Manifest*");
-    lines.push_back(L"; keys are still read as fallback.");
-    for (const auto& d : g_defaults)
-    {
-        if (wcscmp(d.section, L"Manifest") == 0)
-            lines.push_back(FormatIniAssignment(d.key, d.value));
-    }
-    lines.push_back(L"");
     lines.push_back(L"[Assets]");
     lines.push_back(L"; Toggle which AppX tile/logo assets are generated.");
     for (const auto& d : g_defaults)
@@ -740,6 +717,85 @@ static void RepairBrokenPowerShellOutputTruncatedDefault()
     SetIniCacheUnlocked(text);
 }
 
+
+static bool IsLegacyManifestSettingKey(const std::wstring& key)
+{
+    return ToLowerCopy(TrimCopy(key)).rfind(L"manifest", 0) == 0;
+}
+
+static void RemoveObsoleteManifestIniSettings()
+{
+    std::lock_guard<std::mutex> writeLock(g_iniWriteMutex);
+
+    std::wstring iniText;
+    if (!ReadIniFileForMutation(iniText))
+        return;
+
+    std::vector<std::wstring> lines = SplitLines(iniText);
+    if (!lines.empty())
+        StripLeadingBom(lines[0]);
+
+    std::vector<std::wstring> kept;
+    kept.reserve(lines.size());
+    bool inManifest = false;
+    bool inSettings = false;
+    bool changed = false;
+
+    for (const std::wstring& line : lines)
+    {
+        std::wstring sectionName;
+        if (TryParseIniSectionHeader(line, sectionName))
+        {
+            inManifest = IEquals(sectionName, L"Manifest");
+            inSettings = IEquals(sectionName, L"Settings");
+            if (inManifest)
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        if (inManifest)
+        {
+            changed = true;
+            continue;
+        }
+
+        if (inSettings)
+        {
+            std::wstring trimmed = TrimCopy(line);
+            if (!trimmed.empty() && trimmed.front() != L';' && trimmed.front() != L'#')
+            {
+                size_t eq = line.find(L'=');
+                if (eq != std::wstring::npos)
+                {
+                    std::wstring key = ParseIniName(line.substr(0, eq));
+                    if (IsLegacyManifestSettingKey(key))
+                    {
+                        changed = true;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        kept.push_back(line);
+    }
+
+    if (!changed)
+        return;
+
+    TrimTrailingEmptyLines(kept);
+    std::wstring text = JoinLines(kept);
+    if (!text.empty())
+        text += L"\r\n";
+    if (!WriteUtf8BomTextFile(g_iniPath, text))
+        return;
+
+    std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+    SetIniCacheUnlocked(text);
+}
+
 static void UpgradeRenamedStringDefaults()
 {
     RepairBrokenPowerShellOutputTruncatedDefault();
@@ -756,5 +812,10 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %d ms", L"PowerShell timeout: %s");
     UpgradeStringDefaultIfUnmodified(L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%d ms, cancel wait=%d ms", L"[i] COM registration timeout=%s, cancel wait=%d ms");
     UpgradeStringDefaultIfUnmodified(L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%d ms, poll=%d ms, terminate wait=%d ms)", L"[i] PowerShell executable: %s (timeout=%s, poll=%d ms, terminate wait=%d ms)");
+    UpgradeStringDefaultIfUnmodified(L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s.", L"Starting wallpaper generation: %s");
+    UpgradeStringDefaultIfUnmodified(L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from configured defaults: %s", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s");
+    UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from INI if missing", L"generated from built-in defaults if missing");
+    UpgradeStringDefaultIfUnmodified(L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from config", L"Regenerate AppxManifest.xml from built-in defaults");
+    RemoveObsoleteManifestIniSettings();
 }
 

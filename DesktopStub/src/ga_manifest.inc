@@ -100,14 +100,11 @@ static std::wstring EffectiveConfiguredLogPath()
 
 static std::wstring ManifestSetting(const wchar_t* key, const wchar_t* fallback, const wchar_t* legacySettingsKey = nullptr)
 {
-    std::wstring value = TrimCopy(IniReadS(L"Manifest", key, L""));
-    if (!value.empty())
-        return value;
-
-    if (legacySettingsKey)
-        value = TrimCopy(IniReadS(L"Settings", legacySettingsKey, L""));
-    if (!value.empty())
-        return value;
+    // Manifest generation intentionally uses built-in defaults. The old [Manifest]
+    // INI section and legacy [Settings] Manifest* keys are ignored so the INI
+    // does not become a second manifest editor next to AppxManifest.xml itself.
+    (void)key;
+    (void)legacySettingsKey;
     return fallback ? fallback : L"";
 }
 
@@ -189,23 +186,7 @@ static bool IsManifestResourceLanguageValue(const std::wstring& value)
     return true;
 }
 
-static bool IsManifestExecutableValue(const std::wstring& value)
-{
-    std::wstring v = TrimCopy(value);
-    if (v.empty() || v.front() == L'\\' || v.front() == L'/')
-        return false;
-    if (!PathIsRelativeW(v.c_str()))
-        return false;
-
-    for (wchar_t ch : v)
-    {
-        if (ch < 32 || ch == L'<' || ch == L'>' || ch == L'"' || ch == L'|' || ch == L'?' || ch == L'*' || ch == L':')
-            return false;
-    }
-    return true;
-}
-
-static bool IsManifestRelativeAssetPath(const std::wstring& value)
+static bool IsManifestSafeRelativePath(const std::wstring& value)
 {
     std::wstring v = TrimCopy(value);
     if (v.empty() || v.front() == L'\\' || v.front() == L'/')
@@ -232,6 +213,16 @@ static bool IsManifestRelativeAssetPath(const std::wstring& value)
     }
 
     return sawFileName;
+}
+
+static bool IsManifestExecutableValue(const std::wstring& value)
+{
+    return IsManifestSafeRelativePath(value);
+}
+
+static bool IsManifestRelativeAssetPath(const std::wstring& value)
+{
+    return IsManifestSafeRelativePath(value);
 }
 
 static bool IsManifestBackgroundColorValue(const std::wstring& value)
@@ -733,6 +724,88 @@ static bool ExtractXmlElementText(const std::wstring& xml, const wchar_t* elemen
     return true;
 }
 
+static bool ExtractXmlShowNameOnTiles(const std::wstring& xml, std::wstring& out)
+{
+    std::vector<std::wstring> tiles;
+    size_t from = 0;
+    size_t tag = 0;
+    size_t nameEnd = 0;
+    size_t tagEnd = 0;
+
+    while (FindXmlStartTagByLocalName(xml, L"ShowOn", from, tag, nameEnd, tagEnd))
+    {
+        std::wstring tile;
+        size_t pos = nameEnd;
+        while (pos < tagEnd)
+        {
+            while (pos < tagEnd && iswspace(xml[pos]) != 0)
+                ++pos;
+            if (pos >= tagEnd || xml[pos] == L'/')
+                break;
+
+            size_t attrStart = pos;
+            while (pos < tagEnd && IsXmlNameChar(xml[pos]))
+                ++pos;
+            if (pos == attrStart)
+            {
+                ++pos;
+                continue;
+            }
+
+            std::wstring attrLocalName = XmlLocalName(xml.substr(attrStart, pos - attrStart));
+            while (pos < tagEnd && iswspace(xml[pos]) != 0)
+                ++pos;
+            if (pos >= tagEnd || xml[pos] != L'=')
+                continue;
+            ++pos;
+            while (pos < tagEnd && iswspace(xml[pos]) != 0)
+                ++pos;
+            if (pos >= tagEnd)
+                break;
+
+            wchar_t quote = xml[pos];
+            size_t valueStart = pos;
+            size_t valueEnd = pos;
+            if (quote == L'\'' || quote == L'"')
+            {
+                valueStart = pos + 1;
+                valueEnd = xml.find(quote, valueStart);
+                if (valueEnd == std::wstring::npos || valueEnd > tagEnd)
+                    break;
+                pos = valueEnd + 1;
+            }
+            else
+            {
+                while (valueEnd < tagEnd && iswspace(xml[valueEnd]) == 0)
+                    ++valueEnd;
+                pos = valueEnd;
+            }
+
+            if (IEquals(attrLocalName, L"Tile"))
+            {
+                tile = XmlUnescape(xml.substr(valueStart, valueEnd - valueStart));
+                break;
+            }
+        }
+
+        if (!tile.empty())
+            tiles.push_back(tile);
+        from = tagEnd + 1;
+    }
+
+    if (tiles.empty())
+        return false;
+
+    out.clear();
+    for (size_t i = 0; i < tiles.size(); ++i)
+    {
+        if (i > 0)
+            out += L",";
+        out += tiles[i];
+    }
+    return true;
+}
+
 static std::vector<std::wstring> EffectiveManifestShowNameOnTiles()
 {
     std::wstring configured = ManifestSetting(
@@ -856,6 +929,7 @@ static ManifestDisplayInfo CurrentManifestDisplayInfo()
     ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Wide310x150Logo", info.wide310x150Logo);
     ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Square310x310Logo", info.square310x310Logo);
     ExtractXmlAttributeFromTag(xml, L"<rescap:Capability", L"Name", info.restrictedCapability);
+    ExtractXmlShowNameOnTiles(xml, info.showNameOnTiles);
     return info;
 }
 

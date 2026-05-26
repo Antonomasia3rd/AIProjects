@@ -1455,6 +1455,28 @@ static bool RegisterAppxManifest(const std::wstring& manifestPath, std::wstring&
     return ok;
 }
 
+
+static std::wstring CleanGenerationReasonForSentence(const wchar_t* reason)
+{
+    std::wstring text = TrimCopy(reason ? reason : L"");
+    if (text.empty())
+        text = g_ui.unspecifiedReason;
+
+    if (text.rfind(L"[i]", 0) == 0 || text.rfind(L"[!]", 0) == 0)
+        text = TrimCopy(text.substr(3));
+
+    while (!text.empty())
+    {
+        wchar_t ch = text.back();
+        if (ch == L'.' || ch == L'!' || ch == L'?' || ch == L':' || iswspace(ch) != 0)
+            text.pop_back();
+        else
+            break;
+    }
+
+    return text.empty() ? g_ui.unspecifiedReason : text;
+}
+
 bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 {
     auto generationStart = steady_clock::now();
@@ -1477,8 +1499,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         return false;
     }
 
-    const wchar_t* why = (reason && *reason) ? reason : g_ui.unspecifiedReason.c_str();
-    Log(g_ui.startingWallpaperGeneration.c_str(), why);
+    std::wstring why = CleanGenerationReasonForSentence(reason);
+    Log(g_ui.startingWallpaperGeneration.c_str(), why.c_str());
     Log(g_ui.wallpaperSource.c_str(), wp);
 
     if (g_notifyOnStart)
