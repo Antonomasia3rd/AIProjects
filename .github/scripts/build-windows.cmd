@@ -18,6 +18,8 @@ if /i "!ARG:~0,6!"=="/skip:" (
 ) else (
   set "SKIP_LIST=!SKIP_LIST!%~1,"
 )
+if /i "!ARG!"=="/skip:GenerateAssets" set "SKIP_LIST=!SKIP_LIST!DesktopStub,"
+if /i "!ARG!"=="--skip:GenerateAssets" set "SKIP_LIST=!SKIP_LIST!DesktopStub,"
 set "SKIP_LIST=!SKIP_LIST: =!"
 shift
 goto ParseArgs
@@ -44,7 +46,7 @@ call :BuildCapsBlink || goto Fail
 call :BuildYourPhoneHideBanner || goto Fail
 call :BuildDiscordRPC || goto Fail
 call :BuildNowPlayingTile || goto Fail
-call :BuildGenerateAssets || goto Fail
+call :BuildDesktopStub || goto Fail
 call :BuildCharmTray || goto Fail
 call :BuildSecureDesktopLauncher || goto Fail
 call :BuildRealTimeNotesDeskband || goto Fail
@@ -125,10 +127,10 @@ if not "%STATUS%"=="0" exit /b %STATUS%
 call :PackageNowPlayingTile
 exit /b %ERRORLEVEL%
 
-:BuildGenerateAssets
-call :IsSkipped GenerateAssets
+:BuildDesktopStub
+call :IsSkipped DesktopStub
 if "!SKIP_RESULT!"=="1" exit /b 0
-call :Section "Build GenerateAssets"
+call :Section "Build DesktopStub"
 pushd "%REPO%\DesktopStub" || exit /b 1
 call :Run powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%REPO%\DesktopStub\TestGenerateAssetsSource.ps1"
 if errorlevel 1 (
