@@ -16,8 +16,138 @@ permissions:
   contents: read
 
 jobs:
+  detect-projects:
+    name: Detect changed projects
+    runs-on: ubuntu-latest
+    outputs:
+      build_all: ${{ steps.detect.outputs.build_all }}
+      skip_args: ${{ steps.detect.outputs.skip_args }}
+      project_list: ${{ steps.detect.outputs.project_list }}
+      build_allow_content_above_lock: ${{ steps.detect.outputs.build_allow_content_above_lock }}
+      build_asusblink: ${{ steps.detect.outputs.build_asusblink }}
+      build_capsblink: ${{ steps.detect.outputs.build_capsblink }}
+      build_your_phone_hide_banner: ${{ steps.detect.outputs.build_your_phone_hide_banner }}
+      build_discord_rpc: ${{ steps.detect.outputs.build_discord_rpc }}
+      build_now_playing_tile: ${{ steps.detect.outputs.build_now_playing_tile }}
+      build_desktop_stub: ${{ steps.detect.outputs.build_desktop_stub }}
+      build_charm_tray: ${{ steps.detect.outputs.build_charm_tray }}
+      build_secure_desktop_launcher: ${{ steps.detect.outputs.build_secure_desktop_launcher }}
+      build_real_time_notes_deskband: ${{ steps.detect.outputs.build_real_time_notes_deskband }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Detect projects to build
+        id: detect
+        shell: pwsh
+        run: |
+          $projectMap = @(
+            @{ Key = 'AllowContentAboveLock'; Label = 'AllowContentAboveLock'; Prefix = 'AllowContentAboveLock/'; Output = 'build_allow_content_above_lock' },
+            @{ Key = 'asusblink'; Label = 'asusblink'; Prefix = 'asusblink/'; Output = 'build_asusblink' },
+            @{ Key = 'capsblink'; Label = 'capsblink'; Prefix = 'capsblink/'; Output = 'build_capsblink' },
+            @{ Key = 'YourPhoneHideBanner'; Label = 'YourPhoneHideBanner'; Prefix = 'YourPhoneHideBanner/'; Output = 'build_your_phone_hide_banner' },
+            @{ Key = 'DiscordRPC'; Label = 'DiscordRPC'; Prefix = 'DiscordRPC/'; Output = 'build_discord_rpc' },
+            @{ Key = 'NowPlayingTile'; Label = 'NowPlayingTile'; Prefix = 'NowPlayingTile/'; Output = 'build_now_playing_tile' },
+            @{ Key = 'GenerateAssets'; Label = 'DesktopStub'; Prefix = 'DesktopStub/'; Output = 'build_desktop_stub' },
+            @{ Key = 'CharmTray'; Label = 'CharmTray'; Prefix = 'CharmTray/'; Output = 'build_charm_tray' },
+            @{ Key = 'SecureDesktopLauncher'; Label = 'SecureDesktopLauncher'; Prefix = 'SecureDesktopLauncher/'; Output = 'build_secure_desktop_launcher' },
+            @{ Key = 'RealTimeNotesDeskband'; Label = 'RealTimeNotesDeskband'; Prefix = 'RealTimeNotesDeskband/'; Output = 'build_real_time_notes_deskband' }
+          )
+
+          $eventName = '${{ github.event_name }}'
+          $refName = '${{ github.ref }}'
+          $head = '${{ github.sha }}'
+          $forceAll = $eventName -eq 'workflow_dispatch' -or $eventName -eq 'release' -or $refName.StartsWith('refs/tags/')
+          $changed = @()
+
+          if (-not $forceAll) {
+            if ($eventName -eq 'pull_request') {
+              $base = '${{ github.event.pull_request.base.sha }}'
+              $head = '${{ github.event.pull_request.head.sha }}'
+            } else {
+              $base = '${{ github.event.before }}'
+              if ([string]::IsNullOrWhiteSpace($base) -or $base -match '^0+$') {
+                $base = "$head^"
+              }
+            }
+
+            $changed = @(git diff --name-only $base $head)
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning 'Could not diff changed files; falling back to a full build.'
+              $forceAll = $true
+              $changed = @()
+            }
+          }
+
+          if (-not $forceAll) {
+            $sharedChange = [bool]($changed | Where-Object {
+              $_ -like '.github/*' -or
+              $_ -eq '.gitattributes' -or
+              $_ -eq 'README.md'
+            })
+            if ($sharedChange) {
+              Write-Host 'Shared workflow/repository files changed; using a full build.'
+              $forceAll = $true
+            }
+          }
+
+          if ($forceAll) {
+            $selected = @($projectMap)
+          } else {
+            $selected = @($projectMap | Where-Object {
+              $prefix = $_.Prefix
+              [bool]($changed | Where-Object { $_ -like "$prefix*" })
+            })
+
+            if ($selected.Count -eq 0) {
+              Write-Host 'No project-specific changes detected; using a full build to keep CI meaningful.'
+              $forceAll = $true
+              $selected = @($projectMap)
+            }
+          }
+
+          $selectedKeys = @{}
+          foreach ($project in $selected) {
+            $selectedKeys[$project.Key] = $true
+          }
+
+          $skip = @()
+          foreach ($project in $projectMap) {
+            $build = $selectedKeys.ContainsKey($project.Key)
+            "$($project.Output)=$($build.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+            if (-not $build) {
+              $skip += "/skip:$($project.Key)"
+            }
+          }
+
+          if ($forceAll) {
+            $skip = @()
+          }
+
+          $projectList = ($selected | ForEach-Object { $_.Label }) -join ', '
+          "build_all=$($forceAll.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "skip_args=$($skip -join ' ')" >> $env:GITHUB_OUTPUT
+          "project_list=$projectList" >> $env:GITHUB_OUTPUT
+
+          "## Project selection" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "Build mode: **$(if ($forceAll) { 'full' } else { 'changed projects only' })**" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "Projects: $projectList" >> $env:GITHUB_STEP_SUMMARY
+          if ($changed.Count -gt 0) {
+            "" >> $env:GITHUB_STEP_SUMMARY
+            "Changed files:" >> $env:GITHUB_STEP_SUMMARY
+            foreach ($file in $changed) {
+              "- ``$file``" >> $env:GITHUB_STEP_SUMMARY
+            }
+          }
+
   build-windows:
     name: Build Windows binaries
+    needs: detect-projects
     runs-on: windows-2022
     permissions:
       contents: read
@@ -27,6 +157,7 @@ jobs:
         uses: actions/checkout@v6.0.2
 
       - name: Ensure MinGW-w64 for deskband build
+        if: needs.detect-projects.outputs.build_all == 'true' || needs.detect-projects.outputs.build_real_time_notes_deskband == 'true'
         shell: pwsh
         run: |
           if (Get-Command g++ -ErrorAction SilentlyContinue) {
@@ -47,7 +178,7 @@ jobs:
 
       - name: Build and package
         shell: cmd
-        run: .github\scripts\build-windows.cmd
+        run: .github\scripts\build-windows.cmd ${{ needs.detect-projects.outputs.skip_args }}
 
       - name: Write artifact checksum summary
         shell: pwsh
@@ -74,19 +205,26 @@ jobs:
             '| --- | --- | --- |'
           )
 
+          $count = 0
           foreach ($item in $artifacts) {
             if (-not (Test-Path -LiteralPath $item.Path -PathType Leaf)) {
-              throw "Build output missing: $($item.Path)"
+              continue
             }
 
             $hash = (Get-FileHash -LiteralPath $item.Path -Algorithm SHA256).Hash.ToLowerInvariant()
             $name = Split-Path -Leaf $item.Path
             $lines += "| $($item.Project) | ``$name`` | ``$hash`` |"
+            $count++
+          }
+
+          if ($count -eq 0) {
+            throw 'No build outputs were found.'
           }
 
           $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Upload AllowContentAboveLock artifact
+        if: needs.detect-projects.outputs.build_allow_content_above_lock == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: AllowContentAboveLock
@@ -94,6 +232,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload asusblink artifact
+        if: needs.detect-projects.outputs.build_asusblink == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: asusblink
@@ -101,6 +240,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload capsblink artifact
+        if: needs.detect-projects.outputs.build_capsblink == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: capsblink
@@ -108,6 +248,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload YourPhoneHideBanner artifact
+        if: needs.detect-projects.outputs.build_your_phone_hide_banner == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: YourPhoneHideBanner
@@ -115,6 +256,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload DiscordRPC artifact
+        if: needs.detect-projects.outputs.build_discord_rpc == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: DiscordRPC
@@ -122,6 +264,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload NowPlayingTile artifact
+        if: needs.detect-projects.outputs.build_now_playing_tile == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: NowPlayingTile
@@ -129,6 +272,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload DesktopStub artifact
+        if: needs.detect-projects.outputs.build_desktop_stub == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: DesktopStub - GenerateAssets
@@ -136,6 +280,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload CharmTray artifact
+        if: needs.detect-projects.outputs.build_charm_tray == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: CharmTray
@@ -143,6 +288,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload SecureDesktopLauncher artifact
+        if: needs.detect-projects.outputs.build_secure_desktop_launcher == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: SecureDesktopLauncher
@@ -150,6 +296,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload RealTimeNotesDeskband artifact
+        if: needs.detect-projects.outputs.build_real_time_notes_deskband == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: RealTimeNotesDeskband
@@ -176,6 +323,73 @@ jobs:
         uses: actions/attest-build-provenance@v4.1.0
         with:
           subject-path: artifacts/**
+
+  auto-release:
+    name: Create changed-project release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - detect-projects
+      - build-windows
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@v8.0.1
+        with:
+          path: artifacts
+
+      - name: Create or update automatic release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROJECT_LIST: ${{ needs.detect-projects.outputs.project_list }}
+        run: |
+          $fullSha = '${{ github.sha }}'
+          $shortSha = $fullSha.Substring(0, 7)
+          $tag = "windows-build-$shortSha"
+          $title = "Windows build $shortSha"
+          $assets = @(Get-ChildItem -LiteralPath artifacts -Recurse -File | Sort-Object Name)
+          if ($assets.Count -eq 0) {
+            throw 'No workflow artifacts were downloaded for release upload.'
+          }
+
+          $checksumLines = @(
+            '## SHA256 checksums',
+            '',
+            '| File | SHA256 |',
+            '| --- | --- |'
+          )
+          foreach ($asset in $assets) {
+            $name = Split-Path -Leaf $asset.FullName
+            $hash = (Get-FileHash -LiteralPath $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $checksumLines += "| ``$name`` | ``$hash`` |"
+          }
+
+          $notes = @(
+            "Automated Windows build for detected changes on main.",
+            "",
+            "Commit: ``$fullSha``",
+            "Projects: $env:PROJECT_LIST",
+            "",
+            ($checksumLines -join "`n")
+          ) -join "`n"
+
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          $notes | Out-File -FilePath $notesPath -Encoding utf8
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title $title --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            gh release create $tag --target $fullSha --title $title --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+          $assetPaths = @($assets | ForEach-Object { $_.FullName })
+          gh release upload $tag @assetPaths --clobber
 
   release-assets:
     name: Upload release assets
