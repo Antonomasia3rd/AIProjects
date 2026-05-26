@@ -6,6 +6,28 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      project:
+        description: Project to build, or All
+        required: false
+        default: All
+        type: choice
+        options:
+          - All
+          - AllowContentAboveLock
+          - asusblink
+          - capsblink
+          - YourPhoneHideBanner
+          - DiscordRPC
+          - NowPlayingTile
+          - DesktopStub
+          - CharmTray
+          - SecureDesktopLauncher
+          - RealTimeNotesDeskband
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -36,29 +58,32 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate project map
+        shell: pwsh
+        run: .github/scripts/Validate-ProjectMap.ps1
+
       - name: Detect projects to build
         id: detect
         shell: pwsh
         run: |
-          $projectMap = @(
-            @{ Key = 'AllowContentAboveLock'; Label = 'AllowContentAboveLock'; Prefix = 'AllowContentAboveLock/'; Output = 'build_allow_content_above_lock' },
-            @{ Key = 'asusblink'; Label = 'asusblink'; Prefix = 'asusblink/'; Output = 'build_asusblink' },
-            @{ Key = 'capsblink'; Label = 'capsblink'; Prefix = 'capsblink/'; Output = 'build_capsblink' },
-            @{ Key = 'YourPhoneHideBanner'; Label = 'YourPhoneHideBanner'; Prefix = 'YourPhoneHideBanner/'; Output = 'build_your_phone_hide_banner' },
-            @{ Key = 'DiscordRPC'; Label = 'DiscordRPC'; Prefix = 'DiscordRPC/'; Output = 'build_discord_rpc' },
-            @{ Key = 'NowPlayingTile'; Label = 'NowPlayingTile'; Prefix = 'NowPlayingTile/'; Output = 'build_now_playing_tile' },
-            @{ Key = 'GenerateAssets'; Label = 'DesktopStub'; Prefix = 'DesktopStub/'; Output = 'build_desktop_stub' },
-            @{ Key = 'CharmTray'; Label = 'CharmTray'; Prefix = 'CharmTray/'; Output = 'build_charm_tray' },
-            @{ Key = 'SecureDesktopLauncher'; Label = 'SecureDesktopLauncher'; Prefix = 'SecureDesktopLauncher/'; Output = 'build_secure_desktop_launcher' },
-            @{ Key = 'RealTimeNotesDeskband'; Label = 'RealTimeNotesDeskband'; Prefix = 'RealTimeNotesDeskband/'; Output = 'build_real_time_notes_deskband' }
-          )
-
+          $projectMap = @(Get-Content -LiteralPath '.github/project-map.json' -Raw | ConvertFrom-Json)
           $eventName = '${{ github.event_name }}'
+          $manualProject = '${{ github.event.inputs.project }}'
           $head = '${{ github.sha }}'
-          $forceAll = $eventName -eq 'workflow_dispatch'
+          $forceAll = $false
           $changed = @()
 
-          if (-not $forceAll) {
+          if ($eventName -eq 'workflow_dispatch') {
+            if ([string]::IsNullOrWhiteSpace($manualProject) -or $manualProject -eq 'All') {
+              $forceAll = $true
+              $selected = @($projectMap)
+            } else {
+              $selected = @($projectMap | Where-Object { $_.key -eq $manualProject })
+              if ($selected.Count -ne 1) {
+                throw "Unknown workflow_dispatch project: $manualProject"
+              }
+            }
+          } else {
             if ($eventName -eq 'pull_request') {
               $base = '${{ github.event.pull_request.base.sha }}'
               $head = '${{ github.event.pull_request.head.sha }}'
@@ -75,46 +100,50 @@ jobs:
               $forceAll = $true
               $changed = @()
             }
-          }
 
-          if (-not $forceAll) {
-            $sharedChange = [bool]($changed | Where-Object {
-              $_ -like '.github/*' -or
-              $_ -eq '.gitattributes' -or
-              $_ -eq 'README.md'
-            })
-            if ($sharedChange) {
-              Write-Host 'Shared workflow/repository files changed; using a full build.'
-              $forceAll = $true
+            if (-not $forceAll) {
+              $sharedChange = [bool]($changed | Where-Object {
+                $_ -like '.github/*' -or
+                $_ -eq '.gitattributes' -or
+                $_ -eq 'README.md'
+              })
+              if ($sharedChange) {
+                Write-Host 'Shared workflow/repository files changed; using a full build.'
+                $forceAll = $true
+              }
+            }
+
+            if ($forceAll) {
+              $selected = @($projectMap)
+            } else {
+              $selected = @($projectMap | Where-Object {
+                $prefix = "$($_.folder)/"
+                [bool]($changed | Where-Object { $_ -like "$prefix*" })
+              })
+
+              if ($selected.Count -eq 0) {
+                Write-Host 'No project-specific changes detected; using a full build to keep CI meaningful.'
+                $forceAll = $true
+                $selected = @($projectMap)
+              }
             }
           }
 
           if ($forceAll) {
             $selected = @($projectMap)
-          } else {
-            $selected = @($projectMap | Where-Object {
-              $prefix = $_.Prefix
-              [bool]($changed | Where-Object { $_ -like "$prefix*" })
-            })
-
-            if ($selected.Count -eq 0) {
-              Write-Host 'No project-specific changes detected; using a full build to keep CI meaningful.'
-              $forceAll = $true
-              $selected = @($projectMap)
-            }
           }
 
           $selectedKeys = @{}
           foreach ($project in $selected) {
-            $selectedKeys[$project.Key] = $true
+            $selectedKeys[$project.key] = $true
           }
 
           $skip = @()
           foreach ($project in $projectMap) {
-            $build = $selectedKeys.ContainsKey($project.Key)
-            "$($project.Output)=$($build.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+            $build = $selectedKeys.ContainsKey($project.key)
+            "$($project.buildOutput)=$($build.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
             if (-not $build) {
-              $skip += "/skip:$($project.Key)"
+              $skip += "/skip:$($project.skipKey)"
             }
           }
 
@@ -122,8 +151,8 @@ jobs:
             $skip = @()
           }
 
-          $projectList = ($selected | ForEach-Object { $_.Label }) -join ', '
-          $releaseBase = if ($selected.Count -eq 1 -and -not $forceAll) { $selected[0].Key } else { 'All' }
+          $projectList = ($selected | ForEach-Object { $_.label }) -join ', '
+          $releaseBase = if ($selected.Count -eq 1 -and -not $forceAll) { $selected[0].key } else { 'All' }
 
           "build_all=$($forceAll.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "skip_args=$($skip -join ' ')" >> $env:GITHUB_OUTPUT
@@ -132,7 +161,7 @@ jobs:
 
           "## Project selection" >> $env:GITHUB_STEP_SUMMARY
           "" >> $env:GITHUB_STEP_SUMMARY
-          "Build mode: **$(if ($forceAll) { 'full' } else { 'changed projects only' })**" >> $env:GITHUB_STEP_SUMMARY
+          "Build mode: **$(if ($forceAll) { 'full' } else { 'selected/changed projects only' })**" >> $env:GITHUB_STEP_SUMMARY
           "" >> $env:GITHUB_STEP_SUMMARY
           "Projects: $projectList" >> $env:GITHUB_STEP_SUMMARY
           "" >> $env:GITHUB_STEP_SUMMARY
@@ -183,19 +212,7 @@ jobs:
       - name: Write artifact checksum summary
         shell: pwsh
         run: |
-          $artifacts = @(
-            @{ Project = 'AllowContentAboveLock'; Path = 'AllowContentAboveLock/build/AllowContentAboveLock.exe' },
-            @{ Project = 'asusblink'; Path = 'asusblink/build/asusblink.exe' },
-            @{ Project = 'capsblink'; Path = 'capsblink/build/capsblink.exe' },
-            @{ Project = 'YourPhoneHideBanner'; Path = 'YourPhoneHideBanner/build/YourPhoneHideBanner.exe' },
-            @{ Project = 'DiscordRPC'; Path = 'DiscordRPC/build/DiscordRPC.exe' },
-            @{ Project = 'NowPlayingTile'; Path = 'NowPlayingTile/build/NowPlayingTile-windows-x64.zip' },
-            @{ Project = 'DesktopStub'; Path = 'DesktopStub/build/GenerateAssets.exe' },
-            @{ Project = 'CharmTray'; Path = 'CharmTray/build/CharmTray.exe' },
-            @{ Project = 'SecureDesktopLauncher'; Path = 'SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip' },
-            @{ Project = 'RealTimeNotesDeskband'; Path = 'RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip' }
-          )
-
+          $artifacts = @(Get-Content -LiteralPath '.github/project-map.json' -Raw | ConvertFrom-Json)
           $lines = @(
             '## Windows build outputs',
             '',
@@ -207,13 +224,13 @@ jobs:
 
           $count = 0
           foreach ($item in $artifacts) {
-            if (-not (Test-Path -LiteralPath $item.Path -PathType Leaf)) {
+            if (-not (Test-Path -LiteralPath $item.artifactPath -PathType Leaf)) {
               continue
             }
 
-            $hash = (Get-FileHash -LiteralPath $item.Path -Algorithm SHA256).Hash.ToLowerInvariant()
-            $name = Split-Path -Leaf $item.Path
-            $lines += "| $($item.Project) | ``$name`` | ``$hash`` |"
+            $hash = (Get-FileHash -LiteralPath $item.artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $name = Split-Path -Leaf $item.artifactPath
+            $lines += "| $($item.label) | ``$name`` | ``$hash`` |"
             $count++
           }
 
@@ -275,7 +292,7 @@ jobs:
         if: needs.detect-projects.outputs.build_desktop_stub == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: DesktopStub - GenerateAssets
+          name: DesktopStub
           path: DesktopStub/build/GenerateAssets.exe
           if-no-files-found: error
 
@@ -354,7 +371,6 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           $fullSha = '${{ github.sha }}'
-          $shortSha = $fullSha.Substring(0, 7)
           $releaseBase = if ($env:RELEASE_BASE) { $env:RELEASE_BASE } else { 'All' }
 
           git fetch --force --tags
@@ -386,7 +402,6 @@ jobs:
             $tag = "$releaseBase-v$($maxVersion + 1)"
           }
 
-          $title = $tag
           $assets = @(Get-ChildItem -LiteralPath artifacts -Recurse -File | Sort-Object Name)
           if ($assets.Count -eq 0) {
             throw 'No workflow artifacts were downloaded for release upload.'
@@ -419,10 +434,10 @@ jobs:
 
           gh release view $tag --repo $env:REPO *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release edit $tag --repo $env:REPO --title $title --notes-file $notesPath
+            gh release edit $tag --repo $env:REPO --title $tag --notes-file $notesPath
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            gh release create $tag --repo $env:REPO --target $fullSha --title $title --notes-file $notesPath
+            gh release create $tag --repo $env:REPO --target $fullSha --title $tag --notes-file $notesPath
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
