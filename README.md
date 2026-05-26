@@ -22,20 +22,19 @@ Small Windows utility projects and experiments. Most folders are standalone and 
 
 ## Prebuilt Releases
 
-Prebuilt executables are published through GitHub Releases for projects that produce binaries:
+Prebuilt Windows binaries are published automatically through GitHub Releases for projects that produce binaries.
 
-| Project | Release |
+Release tag families:
+
+| Change scope | Release tag family |
 | --- | --- |
-| AllowContentAboveLock | [AllowContentAboveLock v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/AllowContentAboveLock-v1) |
-| asusblink | [asusblink v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/asusblink-v1) |
-| CharmTray | [CharmTray v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/CharmTray-v1) |
-| GenerateAssets | [GenerateAssets v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/GenerateAssets-v1) |
-| DiscordRPC | [DiscordRPC v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/DiscordRPC-v1) |
-| NowPlayingTile | [NowPlayingTile v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/NowPlayingTile-v1) |
-| SecureDesktopLauncher | [SecureDesktopLauncher v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/SecureDesktopLauncher-v1) |
-| YourPhoneHideBanner | [YourPhoneHideBanner v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/YourPhoneHideBanner-v1) |
+| One project folder changed | `<Project>-vN`, for example `DesktopStub-v1`, `DiscordRPC-v1`, or `asusblink-v1` |
+| Shared workflow/repository files changed | `All-vN` |
+| Manual workflow run with `All` selected | `All-vN` |
 
-Projects without a release entry are source/script utilities or experiments.
+The `DesktopStub` release contains `GenerateAssets.exe`; the release family is still `DesktopStub-vN` so it matches the folder and repository project name.
+
+GitHub Actions artifacts are also available from each workflow run. Actions artifacts download as ZIP archives even when the artifact contains only one executable. SHA256 checksums are written to the workflow summary and to release notes instead of being uploaded as separate `.sha256` files.
 
 ## Build
 
@@ -59,7 +58,12 @@ Useful build options:
 ```cmd
 # Skip one or more projects.
 .github\scripts\build-windows.cmd /skip:asusblink,RealTimeNotesDeskband
+
+# Skip DesktopStub / GenerateAssets.
+.github\scripts\build-windows.cmd /skip:DesktopStub
 ```
+
+The Windows workflow project metadata lives in `.github/project-map.json`. Keep that map, `.github/workflows/build-windows.yml`, `.github/scripts/build-windows.cmd`, and this README in sync when adding or removing packaged projects. The workflow validates the project map before building.
 
 Each project README also lists direct build commands for that project. Generated outputs belong in project `build` folders and are ignored by git. If a compiler cannot overwrite a running EXE, close that program and rerun the build.
 
@@ -90,7 +94,7 @@ If a non-INI configuration format is unavoidable, it must still default to the s
 
 Do not change file or directory ACLs from these tools, installers, build scripts, or migration helpers. Past ACL-hardening attempts caused Windows integration failures in specific placements, including Start Menu related cases. Security checks may detect and warn about risky writable locations, but they must not modify ACLs, ownership, inheritance, integrity labels, or other access-control state.
 
-Use `DesktopStub\GenerateAssets` as the reference pattern for new fixes: create and normalize the INI next to the executable, preserve user-edited values, write the log next to the executable by default, expose path changes through the INI/UI when needed, and report write failures clearly. When changing another program, follow that implementation style for local config/log handling unless the maintainer explicitly approves a different pattern.
+Use `DesktopStub` / `GenerateAssets.exe` as the reference pattern for new fixes: create and normalize the INI next to the executable, preserve user-edited values, write the log next to the executable by default, expose path changes through the INI/UI when needed, and report write failures clearly. When changing another program, follow that implementation style for local config/log handling unless the maintainer explicitly approves a different pattern.
 
 Stop for maintainer input before making a decision that changes storage location, config/log format, migration behavior, compatibility guarantees, ACL/security enforcement, or OS integration behavior. When changing an existing program that already has registry/profile-based state, preserve or migrate existing user values where practical and do not choose a compatibility-breaking migration without maintainer approval.
 
