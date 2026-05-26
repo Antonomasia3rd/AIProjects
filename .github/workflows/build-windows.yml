@@ -335,6 +335,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
       - name: Download workflow artifacts
         uses: actions/download-artifact@v8.0.1
         with:
@@ -345,6 +348,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PROJECT_LIST: ${{ needs.detect-projects.outputs.project_list }}
+          REPO: ${{ github.repository }}
         run: |
           $fullSha = '${{ github.sha }}'
           $shortSha = $fullSha.Substring(0, 7)
@@ -379,17 +383,17 @@ jobs:
           $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           $notes | Out-File -FilePath $notesPath -Encoding utf8
 
-          gh release view $tag *> $null
+          gh release view $tag --repo $env:REPO *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release edit $tag --title $title --notes-file $notesPath
+            gh release edit $tag --repo $env:REPO --title $title --notes-file $notesPath
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            gh release create $tag --target $fullSha --title $title --notes-file $notesPath
+            gh release create $tag --repo $env:REPO --target $fullSha --title $title --notes-file $notesPath
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
           $assetPaths = @($assets | ForEach-Object { $_.FullName })
-          gh release upload $tag @assetPaths --clobber
+          gh release upload $tag @assetPaths --repo $env:REPO --clobber
 
   release-assets:
     name: Upload release assets
@@ -410,14 +414,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           if (-not $env:RELEASE_TAG) {
             throw 'Release tag was not resolved.'
           }
 
-          gh release view $env:RELEASE_TAG *> $null
+          gh release view $env:RELEASE_TAG --repo $env:REPO *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:RELEASE_TAG --title $env:RELEASE_TAG --notes "Automated Windows binaries built by GitHub Actions."
+            gh release create $env:RELEASE_TAG --repo $env:REPO --title $env:RELEASE_TAG --notes "Automated Windows binaries built by GitHub Actions."
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
@@ -457,7 +462,7 @@ jobs:
           }
           $checksumBlock = $checksumLines -join "`n"
 
-          $currentBody = gh release view $env:RELEASE_TAG --json body -q .body
+          $currentBody = gh release view $env:RELEASE_TAG --repo $env:REPO --json body -q .body
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $pattern = '(?s)<!-- AIProjects checksums -->.*$'
@@ -469,7 +474,7 @@ jobs:
             $newBody = "Automated Windows binaries built by GitHub Actions.`n`n" + $checksumBlock
           }
 
-          gh release edit $env:RELEASE_TAG --notes $newBody
+          gh release edit $env:RELEASE_TAG --repo $env:REPO --notes $newBody
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          gh release upload $env:RELEASE_TAG @assets --clobber
+          gh release upload $env:RELEASE_TAG @assets --repo $env:REPO --clobber
