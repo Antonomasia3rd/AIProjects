@@ -36,6 +36,8 @@ The `DesktopStub` release contains `GenerateAssets.exe`; the release family is s
 
 GitHub Actions artifacts are also available from each workflow run. Actions artifacts download as ZIP archives even when the artifact contains only one executable. SHA256 checksums are written to the workflow summary and to release notes instead of being uploaded as separate `.sha256` files.
 
+Published binaries are unsigned. Windows SmartScreen or antivirus tools may warn on first run; verify the release-note SHA256 hash or build from source if preferred.
+
 ## Build
 
 Common prerequisites:
@@ -61,6 +63,16 @@ Useful build options:
 
 # Skip DesktopStub / GenerateAssets.
 .github\scripts\build-windows.cmd /skip:DesktopStub
+```
+
+Run repository validation and smoke checks:
+
+```powershell
+.github\scripts\Validate-ProjectMap.ps1
+.github\scripts\Test-WorkflowProjectSelection.ps1
+.github\scripts\Invoke-PolicyWarnings.ps1
+.github\scripts\Test-ReadmeConsistency.ps1
+.github\scripts\Smoke-WindowsBuild.ps1
 ```
 
 The Windows workflow project metadata lives in `.github/project-map.json`. Keep that map, `.github/workflows/build-windows.yml`, `.github/scripts/build-windows.cmd`, and this README in sync when adding or removing packaged projects. The workflow validates the project map before building.
