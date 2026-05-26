@@ -151,8 +151,9 @@ struct UiStrings
     std::wstring liveTileModeReregistrationComplete;
     std::wstring appxManifestCreated;
     std::wstring appxManifestExisting;
-    std::wstring appxManifestOverwritten;
+    std::wstring appxManifestRegenerated;
     std::wstring appxManifestCreateFailed;
+    std::wstring appxManifestRegenerateFailed;
     std::wstring manifestPath;
     std::wstring usingComRegistration;
     std::wstring comRegistrationUri;
@@ -360,8 +361,7 @@ struct UiStrings
     std::wstring manifestSourceLabel;
     std::wstring manifestSourceExisting;
     std::wstring manifestSourceGenerated;
-    std::wstring manifestOverwriteExistingLabel;
-    std::wstring manifestOverwriteExistingToggle;
+    std::wstring manifestRegenerateNow;
     std::wstring wallpaperDetectionMethodLabel;
     std::wstring singleInstanceFailureActionLabel;
     std::wstring singleInstanceActionIgnore;

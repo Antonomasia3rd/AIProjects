@@ -277,8 +277,9 @@ void LoadUiStrings()
     g_ui.liveTileModeReregistrationComplete = IniReadS(L"Strings", L"LiveTileModeReregistrationComplete", L"[i] Live Tile mode change re-registration completed.");
     g_ui.appxManifestCreated = IniReadS(L"Strings", L"AppxManifestCreated", L"[i] Created AppxManifest.xml: %s");
     g_ui.appxManifestExisting = IniReadS(L"Strings", L"AppxManifestExisting", L"[i] Using existing AppxManifest.xml: %s");
-    g_ui.appxManifestOverwritten = IniReadS(L"Strings", L"AppxManifestOverwritten", L"[i] Updated AppxManifest.xml from configured defaults: %s");
+    g_ui.appxManifestRegenerated = IniReadS(L"Strings", L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from configured defaults: %s");
     g_ui.appxManifestCreateFailed = IniReadS(L"Strings", L"AppxManifestCreateFailed", L"[!] Failed to create AppxManifest.xml: %s");
+    g_ui.appxManifestRegenerateFailed = IniReadS(L"Strings", L"AppxManifestRegenerateFailed", L"[!] Failed to regenerate AppxManifest.xml: %s");
     g_ui.manifestPath = IniReadS(L"Strings", L"ManifestPath", L"Manifest path: %s");
     g_ui.usingComRegistration = IniReadS(L"Strings", L"UsingComRegistration", L"Using COM Appx registration...");
     g_ui.comRegistrationUri = IniReadS(L"Strings", L"ComRegistrationUri", L"[i] COM registration URI: %s");
@@ -484,8 +485,7 @@ void LoadUiStrings()
     g_ui.manifestSourceLabel = IniReadS(L"Strings", L"ManifestSourceLabel", L"Manifest source: %s");
     g_ui.manifestSourceExisting = IniReadS(L"Strings", L"ManifestSourceExisting", L"existing AppxManifest.xml");
     g_ui.manifestSourceGenerated = IniReadS(L"Strings", L"ManifestSourceGenerated", L"generated from INI if missing");
-    g_ui.manifestOverwriteExistingLabel = IniReadS(L"Strings", L"ManifestOverwriteExistingLabel", L"Manifest overwrite existing: %s");
-    g_ui.manifestOverwriteExistingToggle = IniReadS(L"Strings", L"ManifestOverwriteExistingToggle", L"Overwrite existing AppxManifest.xml");
+    g_ui.manifestRegenerateNow = IniReadS(L"Strings", L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from config");
     g_ui.wallpaperDetectionMethodLabel = IniReadS(L"Strings", L"WallpaperDetectionMethodLabel", L"Wallpaper detection method: %s");
     g_ui.singleInstanceFailureActionLabel = IniReadS(L"Strings", L"SingleInstanceFailureActionLabel", L"Single-instance failure action: %s");
     g_ui.singleInstanceActionIgnore = IniReadS(L"Strings", L"SingleInstanceActionIgnore", L"Ignore");
@@ -670,7 +670,6 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.manifestEntryPointLabel, L"ManifestEntryPointLabel", { L"%s" });
     RequireFormat(g_ui.manifestRestrictedCapabilityLabel, L"ManifestRestrictedCapabilityLabel", { L"%s" });
     RequireFormat(g_ui.manifestSourceLabel, L"ManifestSourceLabel", { L"%s" });
-    RequireFormat(g_ui.manifestOverwriteExistingLabel, L"ManifestOverwriteExistingLabel", { L"%s" });
     RequireFormat(g_ui.wallpaperDetectionMethodLabel, L"WallpaperDetectionMethodLabel", { L"%s" });
     RequireFormat(g_ui.singleInstanceFailureActionLabel, L"SingleInstanceFailureActionLabel", { L"%s" });
     RequireFormat(g_ui.generatedAssetCacheMaxEntriesLabel, L"GeneratedAssetCacheMaxEntriesLabel", { L"%d" });
@@ -705,8 +704,9 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.failedDeleteDisabledAsset, L"FailedDeleteDisabledAsset", { L"%s" });
     RequireFormat(g_ui.appxManifestCreated, L"AppxManifestCreated", { L"%s" });
     RequireFormat(g_ui.appxManifestExisting, L"AppxManifestExisting", { L"%s" });
-    RequireFormat(g_ui.appxManifestOverwritten, L"AppxManifestOverwritten", { L"%s" });
+    RequireFormat(g_ui.appxManifestRegenerated, L"AppxManifestRegenerated", { L"%s" });
     RequireFormat(g_ui.appxManifestCreateFailed, L"AppxManifestCreateFailed", { L"%s" });
+    RequireFormat(g_ui.appxManifestRegenerateFailed, L"AppxManifestRegenerateFailed", { L"%s" });
     RequireFormat(g_ui.manifestPath, L"ManifestPath", { L"%s" });
     RequireFormat(g_ui.comRegistrationUri, L"ComRegistrationUri", { L"%s" });
     RequireFormat(g_ui.comRegistrationTimeoutDetails, L"ComRegistrationTimeoutDetails", { L"%s", L"%d" });

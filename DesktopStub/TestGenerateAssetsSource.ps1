@@ -229,6 +229,20 @@ $sourceChecks = @(
         -Failure 'command-line options must expose Auto, Registration, and Live Tile update mode overrides'),
 
     (New-SourceCheck `
+        -Name 'Command line exposes one-shot manifest regeneration' `
+        -SourceName 'command-line/app sources' `
+        -SourceText ($commandLine + "`n" + $app) `
+        -Pattern '(?s)--regenerate-manifest.*CommandLineShouldRegenerateManifest.*RegenerateAppxManifestFromConfig' `
+        -Failure 'manifest regeneration must be available as a one-shot command-line action'),
+
+    (New-SourceCheck `
+        -Name 'Manifest tray action is one-shot' `
+        -SourceName 'src\ga_tray.inc' `
+        -SourceText $tray `
+        -Pattern '(?s)ID_MANIFEST_REGENERATE.*RegenerateAppxManifestFromConfigAndLog\(\).*QueueGenerate' `
+        -Failure 'tray manifest regeneration must execute once and queue generation instead of toggling a persistent INI setting'),
+
+    (New-SourceCheck `
         -Name 'Custom INI uses separate single-instance scope' `
         -SourceName 'src\ga_app.inc' `
         -SourceText $app `
@@ -354,7 +368,10 @@ $uiStringKeys = @(
     'GeneratedAssetCacheSaved',
     'GeneratedAssetCacheSummary',
     'GeneratedAssetPrecacheSaved',
-    'GeneratedAssetPrecacheSummary'
+    'GeneratedAssetPrecacheSummary',
+    'ManifestRegenerateNow',
+    'AppxManifestRegenerated',
+    'AppxManifestRegenerateFailed'
 )
 
 if ($ListChecks) {
@@ -381,6 +398,20 @@ Assert-SourceAbsent `
     -SourceText $liveTile `
     -Pattern 'updater\.Clear\s*\(' `
     -Failure 'Live Tile updater must not call Clear before Update because that causes a visible blank tile during refresh'
+
+Assert-SourceAbsent `
+    -Name 'Manifest overwrite is not a persistent default' `
+    -SourceName 'src\ga_config_defaults.inc' `
+    -SourceText $defaults `
+    -Pattern '\{L"Manifest",\s*L"OverwriteExisting"' `
+    -Failure 'manifest overwrite must not be recreated as a persistent INI default'
+
+Assert-SourceAbsent `
+    -Name 'Manifest overwrite is not persisted from tray' `
+    -SourceName 'src\ga_tray.inc' `
+    -SourceText $tray `
+    -Pattern 'IniWrite\(L"Manifest",\s*L"OverwriteExisting"' `
+    -Failure 'tray manifest regeneration must not write a persistent OverwriteExisting key'
 
 foreach ($key in $uiStringKeys) {
     Assert-UiStringWired -Key $key -Defaults $defaults -UiSources $uiSources

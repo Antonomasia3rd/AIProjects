@@ -132,41 +132,6 @@ static bool TryParseIntStrict(const std::wstring& value, int& parsed)
     return true;
 }
 
-static bool TryParseBoolStrict(const std::wstring& value, bool& parsed)
-{
-    std::wstring lowered = ToLowerCopy(TrimCopy(value));
-    if (lowered == L"1" || lowered == L"true" || lowered == L"yes" || lowered == L"on")
-    {
-        parsed = true;
-        return true;
-    }
-    if (lowered == L"0" || lowered == L"false" || lowered == L"no" || lowered == L"off")
-    {
-        parsed = false;
-        return true;
-    }
-    return false;
-}
-
-static int ManifestSettingI(const wchar_t* key, int fallback, const wchar_t* legacySettingsKey = nullptr)
-{
-    std::wstring value = TrimCopy(IniReadS(L"Manifest", key, L""));
-    if (value.empty() && legacySettingsKey)
-        value = TrimCopy(IniReadS(L"Settings", legacySettingsKey, L""));
-    if (value.empty())
-        return fallback;
-
-    int parsed = 0;
-    if (TryParseIntStrict(value, parsed))
-        return parsed;
-
-    bool boolValue = false;
-    if (TryParseBoolStrict(value, boolValue))
-        return boolValue ? 1 : 0;
-
-    return fallback;
-}
-
 static bool IsManifestSimpleTokenChar(wchar_t ch)
 {
     return IsAsciiAlnum(ch) || ch == L'_' || ch == L'-';
@@ -768,11 +733,6 @@ static bool ExtractXmlElementText(const std::wstring& xml, const wchar_t* elemen
     return true;
 }
 
-static bool ManifestOverwriteExisting()
-{
-    return ManifestSettingI(L"OverwriteExisting", 0, L"ManifestOverwriteExisting") != 0;
-}
-
 static std::vector<std::wstring> EffectiveManifestShowNameOnTiles()
 {
     std::wstring configured = ManifestSetting(
@@ -983,6 +943,36 @@ static std::wstring BuildDefaultAppxManifest()
     return manifest;
 }
 
+static bool RegenerateAppxManifestFromConfig(std::wstring& manifestPath, DWORD& error)
+{
+    manifestPath = GetExeDir() + L"\\AppxManifest.xml";
+    error = ERROR_SUCCESS;
+
+    if (WriteUtf8BomTextFile(manifestPath, BuildDefaultAppxManifest()))
+        return true;
+
+    error = GetLastError();
+    if (error == ERROR_SUCCESS)
+        error = ERROR_WRITE_FAULT;
+    return false;
+}
+
+static bool RegenerateAppxManifestFromConfigAndLog()
+{
+    std::wstring manifestPath;
+    DWORD manifestError = ERROR_SUCCESS;
+    if (RegenerateAppxManifestFromConfig(manifestPath, manifestError))
+    {
+        Log(g_ui.appxManifestRegenerated.c_str(), manifestPath.c_str());
+        return true;
+    }
+
+    Log(g_ui.appxManifestRegenerateFailed.c_str(), manifestPath.c_str());
+    Log(g_ui.win32FailureFmt.c_str(), L"Regenerate AppxManifest.xml",
+        manifestError, Win32ErrorString(manifestError).c_str());
+    return false;
+}
+
 static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD& error)
 {
     manifestPath = GetExeDir() + L"\\AppxManifest.xml";
@@ -994,19 +984,6 @@ static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD&
     {
         if ((attrs & FILE_ATTRIBUTE_DIRECTORY) == 0)
         {
-            if (ManifestOverwriteExisting())
-            {
-                if (WriteUtf8BomTextFile(manifestPath, BuildDefaultAppxManifest()))
-                {
-                    Log(g_ui.appxManifestOverwritten.c_str(), manifestPath.c_str());
-                    return true;
-                }
-
-                error = GetLastError();
-                if (error == ERROR_SUCCESS)
-                    error = ERROR_WRITE_FAULT;
-                return false;
-            }
             Log(g_ui.appxManifestExisting.c_str(), manifestPath.c_str());
             return true;
         }
