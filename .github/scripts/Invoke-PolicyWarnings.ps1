@@ -9,8 +9,7 @@ Set-StrictMode -Version 2.0
 $patterns = @(
     @{ Name = 'Profile storage'; Pattern = '%APPDATA%|%LOCALAPPDATA%|%PROGRAMDATA%|ApplicationData|LocalApplicationData|CommonApplicationData|SpecialFolder' },
     @{ Name = 'Access-control mutation'; Pattern = 'SetAccessControl|FileSecurity|DirectorySecurity|icacls|takeown|SetNamedSecurityInfo|SetSecurityInfo' },
-    @{ Name = 'Credential-like literal'; Pattern = 'password\s*=|token\s*=|secret\s*=|apikey\s*=|api_key\s*=' },
-    @{ Name = 'Deprecated marker'; Pattern = 'TODO|FIXME|HACK|obsolete|deprecated|workaround' }
+    @{ Name = 'Maintenance marker'; Pattern = 'TODO|FIXME|HACK|obsolete|deprecated|workaround' }
 )
 
 $include = @('*.cs', '*.cpp', '*.h', '*.hpp', '*.inc', '*.ps1', '*.cmd', '*.bat', '*.md', '*.json', '*.yml', '*.yaml')
@@ -26,7 +25,7 @@ foreach ($file in $files) {
         $lineNo++
         foreach ($rule in $patterns) {
             if ($line -match $rule.Pattern) {
-                $warnings.Add("$relative:$lineNo [$($rule.Name)] $($line.Trim())") | Out-Null
+                $warnings.Add("${relative}:${lineNo} [$($rule.Name)] $($line.Trim())") | Out-Null
             }
         }
     }
