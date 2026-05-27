@@ -120,7 +120,7 @@ call :IsSkipped NowPlayingTile
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build NowPlayingTile"
 pushd "%REPO%\NowPlayingTile" || exit /b 1
-call :Run cmd.exe /d /c build.cmd
+call :Run cmd.exe /d /c BuildNowPlayingTile.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
