@@ -1,93 +1,121 @@
 # NowPlayingTile
 
-Small background app that reads the current System Media Transport Controls (SMTC) session and updates a Windows Start Live Tile.
+`NowPlayingTile.exe` is a native Win32/C++ background app that reads the current System Media Transport Controls (SMTC) session and updates a Windows Start Live Tile.
 
-It is intended for Windows 10 Start, including ExplorerPatcher's Windows 10 Start menu on Windows 11. Direct `NowPlayingTile.exe` launches are supported for diagnostics/widget mode, but tile updates require package identity through the registered development package.
+It is intended for Windows 10 Start, including ExplorerPatcher's Windows 10 Start menu on Windows 11. The project is structured like `DesktopStub / GenerateAssets`: one native entry point, ordered `src\*.inc` fragments, one Visual Studio build command, and generated runtime/package files under `build`.
 
 ## Requirements
 
-- Windows 10, or Windows 11 with a Start implementation that still displays live tiles.
-- .NET Framework compiler at `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`.
-- PowerShell for Appx register/run helper scripts.
+- Windows 10, or Windows 11 with a Start implementation that still displays Live Tiles.
+- Visual Studio Build Tools with the C++ workload.
+- Windows 10/11 SDK with C++/WinRT headers and WinRT metadata.
 - Developer Mode or sideloading support for loose Appx registration.
 
 ## Build
 
+From the repository root:
+
 ```cmd
-build.cmd
+NowPlayingTile\BuildNowPlayingTile.cmd
+```
+
+Syntax-only check:
+
+```cmd
+NowPlayingTile\BuildNowPlayingTile.cmd check
 ```
 
 Output:
 
 ```text
-build\NowPlayingTile.exe
+NowPlayingTile\build\NowPlayingTile.exe
 ```
 
-The build also prepares generated manifest/assets under `build\`.
+If `build\NowPlayingTile.exe` is running, close it before rebuilding so the compiler can overwrite the output.
 
-## Register And Run
+## Run
 
-Register the dev package once:
-
-```powershell
-pwsh .\register-dev-package.ps1
+```cmd
+NowPlayingTile\build\NowPlayingTile.exe
 ```
 
-Launch the packaged background updater:
+On first launch the app creates runtime files next to the executable:
 
-```powershell
-pwsh .\launch-packaged.ps1
+- `NowPlayingTile.ini`
+- `NowPlayingTile.log`
+- `AppxManifest.xml`
+- `Assets\*`
+
+The manifest and assets are generated files. They are not tracked in the source tree, matching the way `DesktopStub / GenerateAssets` treats generated Appx files.
+
+## Register the Start Tile
+
+Live Tile updates need package identity. Normal launch works as the DesktopStub-style bootstrap path:
+
+```cmd
+NowPlayingTile\build\NowPlayingTile.exe
 ```
 
-Pin the packaged app entry to Start:
+If the executable is started directly from `build`, it generates `AppxManifest.xml` and `Assets`, registers the loose Appx package, launches the packaged `shell:AppsFolder\...!App` identity, then exits the unpackaged bootstrap process.
 
-```text
-shell:AppsFolder\NowPlayingTile.App_<package-family-suffix>!App
+Manual registration is still available for troubleshooting:
+
+```cmd
+NowPlayingTile\build\NowPlayingTile.exe --register
+NowPlayingTile\build\NowPlayingTile.exe --launch-packaged
 ```
 
-If Windows changes the package family suffix after re-registration, the register script prints the current `shell:AppsFolder\...!App` target.
+The registration action prints the current `shell:AppsFolder\...!App` target. Pin that packaged entry to Start if you want the tile visible.
 
-Start automatically at sign-in:
+To remove the registered package:
 
-```powershell
-pwsh .\install-startup.ps1
+```cmd
+NowPlayingTile\build\NowPlayingTile.exe --unregister
 ```
 
-Disable sign-in startup:
+To rewrite the generated manifest and default logo assets:
 
-```powershell
-pwsh .\uninstall-startup.ps1
-```
-
-Unregister the development package:
-
-```powershell
-pwsh .\unregister-dev-package.ps1
+```cmd
+NowPlayingTile\build\NowPlayingTile.exe --regenerate-manifest
 ```
 
 ## Optional Widget
 
-The old visible Win32 widget is still available, but opt-in:
+The visible Win32 widget is opt-in:
 
-```powershell
-pwsh .\launch-widget.ps1
-```
-
-Or directly:
-
-```powershell
-.\build\NowPlayingTile.exe --widget
+```cmd
+NowPlayingTile\build\NowPlayingTile.exe --widget
 ```
 
 Right-click the widget for refresh, always-on-top, and exit. Drag the window by holding the left mouse button anywhere on the widget.
 
-## Settings
+## Command Line
 
-Open settings:
-
-```powershell
-pwsh .\open-settings.ps1
+```cmd
+NowPlayingTile.exe --once
+NowPlayingTile.exe --widget --allow-multiple
+NowPlayingTile.exe --tray
+NowPlayingTile.exe --no-tray
+NowPlayingTile.exe --register
+NowPlayingTile.exe --launch-packaged
+NowPlayingTile.exe --unregister
+NowPlayingTile.exe --exit
 ```
+
+Supported options:
+
+- `--help`, `-h`, `/?`: show command-line help.
+- `--once`: read SMTC once, update the Live Tile, then exit.
+- `--widget` / `--show`: open the optional visible diagnostic widget.
+- `--tray` / `--no-tray`: override `ShowTrayIcon` for this invocation.
+- `--allow-multiple`: skip the single-instance guard.
+- `--register`: generate `AppxManifest.xml` and `Assets`, then register the loose package.
+- `--unregister`: remove the registered loose package.
+- `--launch-packaged` / `--launch`: launch the registered `shell:AppsFolder\...!App` entry.
+- `--regenerate-manifest`: rewrite the generated manifest and default logo assets.
+- `--exit` / `--quit`: ask the running background/widget instance to exit.
+
+## Settings
 
 Settings are stored at:
 
@@ -106,14 +134,16 @@ For the default build output, those files are `build\NowPlayingTile.ini` and `bu
 Available settings:
 
 ```ini
+# NowPlayingTile settings
 # TileLayout: Cycle, Text, Artwork, Combined
+[Settings]
 TileLayout=Cycle
 UpdateIntervalSeconds=2
 TileRefreshSeconds=60
 ShowTrayIcon=false
 ```
 
-`Cycle` is the default. It sends two live tile notifications: a text-only view and an artwork view. This avoids the artwork-only tile problem while still showing album/site artwork when Windows rotates the live tile queue.
+`Cycle` is the default. It sends two Live Tile notifications: a text-only view and an artwork view. This avoids the artwork-only tile problem while still showing album/site artwork when Windows rotates the Live Tile queue.
 
 ## Notes
 
@@ -131,20 +161,41 @@ Tile updates use:
 Windows.UI.Notifications.TileUpdateManager
 ```
 
-Running `NowPlayingTile.exe` directly does not provide package identity, so Start Live Tile updates are ignored. Launch through the registered `shell:AppsFolder\...!App` entry or `launch-packaged.ps1` for tile updates.
+Running `NowPlayingTile.exe` directly from `build` starts as an unpackaged process, so it bootstraps by registering the loose package and relaunching through the packaged identity. Live Tile updates are only attempted after that packaged relaunch.
+
+## Source Layout
+
+`NowPlayingTile.cpp` is the single translation-unit entry point. Most implementation code is split into ordered fragments under `NowPlayingTile\src`:
+
+- `npt_core.inc`: path helpers, logging, string helpers, XML escaping, and file URI helpers.
+- `npt_config_defaults.inc`: generated INI defaults and settings parsing.
+- `npt_command_line.inc`: command-line parsing and single-instance exit signaling.
+- `npt_manifest.inc`: generated Appx manifest/default logo assets and loose-package register/launch helpers.
+- `npt_media.inc`: SMTC media/session reading and artwork extraction.
+- `npt_live_tile.inc`: Live Tile XML payload generation and notification updates.
+- `npt_tray.inc`: hidden background window, timer loop, tray menu, and update scheduling.
+- `npt_widget.inc`: optional visible diagnostic widget.
+- `npt_app.inc`: `wWinMain`, process initialization, single-instance guard, and mode dispatch.
 
 ## Generated Files
 
-The `build` folder contains generated files:
+Generated/runtime files live under `NowPlayingTile\build` and are ignored by git:
 
 - `NowPlayingTile.exe`
 - `NowPlayingTile.ini`
 - `NowPlayingTile.log`
-- copied/generated Appx manifest output
-- generated tile assets
-
-The source manifest template is tracked at `package\AppxManifest.xml`.
+- `AppxManifest.xml`
+- `Assets\*`
+- `tile-artwork-*.jpg`
+- compiler object files under `obj\`
 
 ## Release
 
-Prebuilt binary: [NowPlayingTile v1](https://github.com/Antonomasia3rd/AIProjects/releases/tag/NowPlayingTile-v1).
+Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available.
+
+Normal launch behavior:
+
+- If the executable is started directly from `build`, it first generates `AppxManifest.xml` and `Assets`, registers the loose package, launches the packaged Start-menu identity, then exits the unpackaged bootstrap process.
+- If automatic registration fails, the unpackaged bootstrap process exits after logging the PowerShell/Appx deployment error instead of continuing to spam Live Tile update failures.
+- Live Tile updates only work from the packaged identity. The direct/unpackaged process cannot update the tile because Windows gives it no package identity.
+- `build\obj` contains MSVC intermediate `.obj` files. This matches `DesktopStub/BuildGenerateAssets.cmd`, which creates `build\obj\GenerateAssets.obj`; it is not source and can be deleted safely after a build.
