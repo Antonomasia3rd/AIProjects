@@ -142,7 +142,7 @@ call :Run cmd.exe /d /c BuildGenerateAssets.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%REPO%\DesktopStub\build\GenerateAssets.exe"
+call :RecordArtifact "%REPO%\DesktopStub\build\DesktopStub-windows-x64.zip"
 exit /b %ERRORLEVEL%
 
 :BuildCharmTray
