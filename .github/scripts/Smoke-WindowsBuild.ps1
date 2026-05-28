@@ -64,7 +64,12 @@ Write-Host "Running Windows build smoke tests..."
 
 $desktopStub = $projectMap | Where-Object { $_.key -eq 'DesktopStub' } | Select-Object -First 1
 if ($desktopStub) {
-    $exe = Join-Path $RepositoryRoot $desktopStub.artifactPath
+    $desktopStubSmokePath = $desktopStub.artifactPath
+    if (($desktopStub.PSObject.Properties.Name -contains 'smokePath') -and -not [string]::IsNullOrWhiteSpace($desktopStub.smokePath)) {
+        $desktopStubSmokePath = $desktopStub.smokePath
+    }
+
+    $exe = Join-Path $RepositoryRoot $desktopStubSmokePath
     if (Test-Path -LiteralPath $exe -PathType Leaf) {
         $tempRoot = Join-Path $env:RUNNER_TEMP ("DesktopStubSmoke-" + [Guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $tempRoot | Out-Null

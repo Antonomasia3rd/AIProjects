@@ -60,6 +60,7 @@
     "buildOutput": "build_desktop_stub",
     "artifactName": "DesktopStub",
     "artifactPath": "DesktopStub/build/DesktopStub-windows-x64.zip",
+    "smokePath": "DesktopStub/build/GenerateAssets.exe",
     "skipKey": "DesktopStub"
   },
   {
