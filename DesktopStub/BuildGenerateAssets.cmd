@@ -83,6 +83,16 @@ if errorlevel 1 (
 
 echo Building main GenerateAssets host...
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE GenerateAssets.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+if errorlevel 1 (
+    set "STATUS=%ERRORLEVEL%"
+    popd
+    exit /b %STATUS%
+)
+
+set "PACKAGE_ZIP=build\DesktopStub-windows-x64.zip"
+echo Packaging DesktopStub artifact...
+if exist "%PACKAGE_ZIP%" del /f /q "%PACKAGE_ZIP%"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -LiteralPath @('build\GenerateAssets.exe','build\GenerateAssetsLiveTileBroker.exe') -DestinationPath 'build\DesktopStub-windows-x64.zip' -Force"
 set "STATUS=%ERRORLEVEL%"
 popd
 
