@@ -219,7 +219,7 @@ $sourceChecks = @(
         -Name 'Manifest executable fallback uses Win10 host and Win8 broker' `
         -SourceName 'src\ga_manifest.inc' `
         -SourceText $manifest `
-        -Pattern '(?s)EffectiveManifestExecutable.*ManifestHostExecutableName\(\).*ConfiguredManifestCompatibilityTarget.*Win8LiveTileBrokerAppEnabled\(\).*ManifestLiveTileBrokerExecutableName\(\).*ManifestAppxActivationStubExecutableName\(\).*ManifestSettingValidated\(L"Executable",\s*fallback\.c_str\(\)' `
+        -Pattern '(?s)EffectiveManifestExecutable.*ConfiguredManifestCompatibilityTarget\(\).*ManifestHostExecutableName\(\).*target\s*!=\s*ManifestCompatibilityTarget::Windows10.*Win8LiveTileBrokerAppEnabled\(\).*ManifestLiveTileBrokerExecutableName\(\).*ManifestAppxActivationStubExecutableName\(\).*ManifestSettingValidated\(L"Executable",\s*fallback\.c_str\(\)' `
         -Failure 'manifest executable fallback must keep Windows 10 on GenerateAssets.exe while Windows 8/8.1 targets default to the packaged broker helper'),
 
     (New-SourceCheck `
