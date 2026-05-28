@@ -73,6 +73,26 @@ On first launch the app creates `GenerateAssets.ini` next to the executable. The
 
 Command-line settings are saved to `GenerateAssets.ini`, the same configuration file used by the tray menu. Action-only commands such as `--once`, `--generate`, `--no-monitor`, and `--exit` affect only that invocation.
 
+Live wallpaper capture is configurable from the tray menu, from command-line flags, or from `GenerateAssets.ini`:
+
+```ini
+[Settings]
+"LiveWallpaperCapture" = "1"
+"LiveWallpaperCaptureLively" = "1"
+"LiveWallpaperCaptureWallpaperEngine" = "1"
+"LiveWallpaperCaptureDelayMs" = "2500"
+"LiveWallpaperCaptureRefreshMs" = "10000"
+"LiveWallpaperCaptureScreenFallback" = "0"
+"LiveWallpaperCaptureStartupRefreshMs" = "1000"
+"LiveWallpaperCaptureStartupRefreshDurationMs" = "0"
+```
+
+When enabled, `GenerateAssets.exe` checks for Lively Wallpaper and Wallpaper Engine. If a live-wallpaper host window is actually present, it captures a still frame from that host and uses the temporary BMP snapshot as the wallpaper source for asset generation. This is intentionally different from older external AHK bridge scripts: the built-in implementation does **not** call `SystemParametersInfo` or `IDesktopWallpaper::SetWallpaper`, so it does not replace or restore the user's actual wallpaper.
+
+`LiveWallpaperCaptureRefreshMs=10000` is the default, so an active live-wallpaper host is recaptured about every 10 seconds. Set it to `0`/`once` if you only want one capture per provider lifetime. The startup recapture duration defaults to `0`/`off`; set `LiveWallpaperCaptureStartupRefreshDurationMs` to a positive value only if you want DesktopStub to collect warm-up snapshots briefly while a provider starts. Warm-up snapshots are not published one by one; the latest valid snapshot is published after the startup settle window ends.
+
+Lively detection is host-window based, not just process-based. If Lively is open but its wallpaper is stopped/closed, DesktopStub falls back to the normal Windows wallpaper instead of reusing a stale live snapshot. Candidate detection recognizes the confirmed Lively player hosts: `Lively.Player.WebView2.exe`, `Lively.Player.CefSharp.exe`, and the video-wallpaper plugin's real `Plugins\Mpv\mpv.exe` executable. `Lively.UI.WinUI.exe` is treated only as Lively's configuration UI and is never used as a capture candidate. `mpv.exe` matching is path-aware so an unrelated user-launched mpv window is not treated as a Lively wallpaper. Application wallpapers can use arbitrary app processes, so DesktopStub also allows a non-icon `WorkerW` with a visible monitor-sized child window. Captured windows that are tiny relative to the primary monitor are rejected, so small Lively UI/helper fragments do not get stretched into the tile. If `PrintWindow` returns a black GPU/WebView frame, the capture path rejects the blank/black frame instead of generating a black tile. The old screen-DC fallback is now disabled by default because it can capture the visible desktop, taskbar, icons, or the user's static wallpaper; enable `LiveWallpaperCaptureScreenFallback=1` only for debugging or as an explicit unsafe workaround.
+
 ```cmd
 GenerateAssets.exe --once
 GenerateAssets.exe --no-tray --console
@@ -100,7 +120,18 @@ Supported options:
 - `--live-tile-mode Auto|Registration|LiveTile`: set and save Live Tile update mode.
 - `--manifest-target Windows10|Windows81|Windows8`: set the generated AppX manifest dialect and regenerate `AppxManifest.xml`. Windows 10 remains the default.
 - `--manifest-win10`, `--manifest-win81` / `--manifest-win8.1`, `--manifest-win8` / `--manifest-win8.0`: shortcuts for `--manifest-target`.
+- `--win8-broker` / `--no-win8-broker`: set and save `Win8LiveTileBrokerApp`.
+- `--win8-background-task` / `--no-win8-background-task`: set and save `Win8LiveTileBackgroundTask`.
+- `--win8-oop-helper` / `--no-win8-oop-helper`: set and save `Win8LiveTileOopHelper`.
 - `--detect <method>`: set and save `WallpaperDetectionMethod`.
+- `--live-wallpaper-capture` / `--no-live-wallpaper-capture`: set and save live wallpaper snapshot capture.
+- `--live-wallpaper-lively` / `--no-live-wallpaper-lively`: set and save Lively Wallpaper snapshot capture.
+- `--live-wallpaper-wallpaper-engine` / `--no-live-wallpaper-wallpaper-engine`: set and save Wallpaper Engine snapshot capture.
+- `--live-wallpaper-screen-fallback` / `--no-live-wallpaper-screen-fallback`: set and save unsafe screen-copy fallback. It is off by default.
+- `--live-wallpaper-delay <ms>`: set and save `LiveWallpaperCaptureDelayMs` from 0 to 30000.
+- `--live-wallpaper-refresh <ms|once>`: set and save `LiveWallpaperCaptureRefreshMs` from 0 to 3600000. `once` maps to 0.
+- `--live-wallpaper-startup-refresh <ms|off>`: set and save `LiveWallpaperCaptureStartupRefreshMs` from 0 to 3600000. `off` maps to 0.
+- `--live-wallpaper-startup-refresh-duration <ms|off>`: set and save `LiveWallpaperCaptureStartupRefreshDurationMs` from 0 to 3600000. `off` maps to 0.
 - `--scales auto|all|100,125,150,200,400`: set and save generated DPI scales. `auto` ignores manual scale toggles while preserving their previous checkbox state for later.
 - `--asset Name=0|1`: set and save one asset toggle, such as `MediumTile=1`.
 
@@ -109,6 +140,7 @@ Supported options:
 - Generates Store logo, medium tile, square 44 logo, square 30 logo, small tile, wide tile, large tile, and splash screen assets.
 - Supports selected DPI scales plus automatic current-DPI scale generation.
 - Detects wallpaper through configurable methods, including slideshow-compatible methods.
+- Can internally capture a still frame from Lively Wallpaper or Wallpaper Engine and use that snapshot as the generation source, without overwriting the user's real Windows wallpaper.
 - Uses COM Appx registration by default with optional PowerShell-only mode and fallback behavior.
 - Can automatically use Live Tile notification updates when launched with package identity, with manual registration/Live Tile overrides.
 - Can dynamically create or regenerate `AppxManifest.xml` from built-in manifest defaults.

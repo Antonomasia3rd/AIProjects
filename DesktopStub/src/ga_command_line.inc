@@ -302,6 +302,32 @@ static void AddCommandLineBoolSetting(const wchar_t* section, const wchar_t* key
     AddCommandLineIniSetting(section ? section : L"", key ? key : L"", value ? L"1" : L"0");
 }
 
+static void AddCommandLineIntSetting(const wchar_t* section, const wchar_t* key, int value)
+{
+    AddCommandLineIniSetting(section ? section : L"", key ? key : L"", std::to_wstring(value));
+}
+
+static bool ParseCommandLineClampedInt(
+    const std::wstring& rawValue,
+    const wchar_t* optionName,
+    int minValue,
+    int maxValue,
+    int& value,
+    std::wstring& error)
+{
+    std::wstring trimmed = TrimCopy(rawValue);
+    int parsed = 0;
+    if (!TryParseIntStrict(trimmed, parsed) || parsed < minValue || parsed > maxValue)
+    {
+        error = std::wstring(optionName ? optionName : L"Option") +
+            L" expects an integer from " + std::to_wstring(minValue) +
+            L" to " + std::to_wstring(maxValue) + L".";
+        return false;
+    }
+    value = parsed;
+    return true;
+}
+
 static bool TryParseCommandLineBoolValue(const std::wstring& rawValue, bool& value)
 {
     std::wstring v = ToLowerCopy(TrimCopy(rawValue));
@@ -734,6 +760,96 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (IEquals(arg, L"--live-wallpaper-capture"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCapture", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-live-wallpaper-capture"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCapture", false);
+            continue;
+        }
+        if (IEquals(arg, L"--live-wallpaper-lively"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureLively", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-live-wallpaper-lively"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureLively", false);
+            continue;
+        }
+        if (IEquals(arg, L"--live-wallpaper-wallpaper-engine"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-live-wallpaper-wallpaper-engine"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", false);
+            continue;
+        }
+        if (IEquals(arg, L"--live-wallpaper-screen-fallback"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureScreenFallback", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-live-wallpaper-screen-fallback"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureScreenFallback", false);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--live-wallpaper-delay", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            int parsed = 0;
+            if (!ParseCommandLineClampedInt(value, L"--live-wallpaper-delay", 0, 30000, parsed, error))
+                return fail(error);
+            AddCommandLineIntSetting(L"Settings", L"LiveWallpaperCaptureDelayMs", parsed);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--live-wallpaper-refresh", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring refreshValue = ToLowerCopy(TrimCopy(value));
+            int parsed = 0;
+            if (refreshValue == L"once" || refreshValue == L"none" || refreshValue == L"off")
+                parsed = 0;
+            else if (!ParseCommandLineClampedInt(value, L"--live-wallpaper-refresh", 0, 3600000, parsed, error))
+                return fail(error);
+            AddCommandLineIntSetting(L"Settings", L"LiveWallpaperCaptureRefreshMs", parsed);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--live-wallpaper-startup-refresh", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring refreshValue = ToLowerCopy(TrimCopy(value));
+            int parsed = 0;
+            if (refreshValue == L"none" || refreshValue == L"off")
+                parsed = 0;
+            else if (!ParseCommandLineClampedInt(value, L"--live-wallpaper-startup-refresh", 0, 3600000, parsed, error))
+                return fail(error);
+            AddCommandLineIntSetting(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", parsed);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--live-wallpaper-startup-refresh-duration", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring refreshValue = ToLowerCopy(TrimCopy(value));
+            int parsed = 0;
+            if (refreshValue == L"none" || refreshValue == L"off")
+                parsed = 0;
+            else if (!ParseCommandLineClampedInt(value, L"--live-wallpaper-startup-refresh-duration", 0, 3600000, parsed, error))
+                return fail(error);
+            AddCommandLineIntSetting(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", parsed);
+            continue;
+        }
+
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--scales", value, error, matched))
             return fail(error);
         if (!matched && !CommandLineTryGetOptionValue(argc, argv, i, L"--scale", value, error, matched))
@@ -899,6 +1015,37 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (IEquals(arg, L"--win8-broker"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"Win8LiveTileBrokerApp", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-win8-broker"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"Win8LiveTileBrokerApp", false);
+            continue;
+        }
+        if (IEquals(arg, L"--win8-background-task"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"Win8LiveTileBackgroundTask", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-win8-background-task"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"Win8LiveTileBackgroundTask", false);
+            continue;
+        }
+        if (IEquals(arg, L"--win8-oop-helper"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"Win8LiveTileOopHelper", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-win8-oop-helper"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"Win8LiveTileOopHelper", false);
+            continue;
+        }
+
         if (!IsLikelyCommandLineOption(arg) && !g_commandLine.wallpaperSpecified)
         {
             if (!SetCommandLineWallpaperPath(arg, error))
@@ -940,7 +1087,26 @@ static std::wstring CommandLineUsageText()
         L"  --manifest-target <target>            Set and regenerate manifest: Windows10, Windows81, or Windows8.\r\n"
         L"  --manifest-win10|--manifest-win81|--manifest-win8\r\n"
         L"                                      Shortcuts for --manifest-target.\r\n"
+        L"  --win8-broker | --no-win8-broker    Enable/disable Win8/8.1 broker helper.\r\n"
+        L"  --win8-background-task | --no-win8-background-task\r\n"
+        L"                                      Enable/disable experimental background task helper.\r\n"
+        L"  --win8-oop-helper | --no-win8-oop-helper\r\n"
+        L"                                      Enable/disable experimental OOP helper.\r\n"
         L"  --detect <method>                   Set and save wallpaper detection method.\r\n"
+        L"  --live-wallpaper-capture | --no-live-wallpaper-capture\r\n"
+        L"                                      Enable/disable live wallpaper snapshots.\r\n"
+        L"  --live-wallpaper-lively | --no-live-wallpaper-lively\r\n"
+        L"                                      Enable/disable Lively Wallpaper snapshots.\r\n"
+        L"  --live-wallpaper-wallpaper-engine | --no-live-wallpaper-wallpaper-engine\r\n"
+        L"                                      Enable/disable Wallpaper Engine snapshots.\r\n"
+        L"  --live-wallpaper-screen-fallback | --no-live-wallpaper-screen-fallback\r\n"
+        L"                                      Enable/disable unsafe screen-copy fallback.\r\n"
+        L"  --live-wallpaper-delay <ms>          Set snapshot startup delay, 0-30000.\r\n"
+        L"  --live-wallpaper-refresh <ms|once>   Set snapshot refresh, 0-3600000; once=0.\r\n"
+        L"  --live-wallpaper-startup-refresh <ms|off>\r\n"
+        L"                                      Recapture during provider startup; off=0.\r\n"
+        L"  --live-wallpaper-startup-refresh-duration <ms|off>\r\n"
+        L"                                      Startup recapture window duration; off=0.\r\n"
         L"  --scales auto|all|100,125,150,200,400\r\n"
         L"                                      Set and save generated DPI scales.\r\n"
         L"  --asset Name=0|1                    Set and save an asset toggle.\r\n"

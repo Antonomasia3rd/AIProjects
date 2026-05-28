@@ -88,6 +88,7 @@ enum class ManifestCompatibilityTarget
 static const wchar_t* StateEnabled(bool v);
 static const wchar_t* StateOn(bool v);
 static int ClampInt(int value, int minValue, int maxValue);
+static bool TryParseIntStrict(const std::wstring& value, int& parsed);
 
 static std::wstring g_iniPath, g_logPath, g_exePath;
 static std::mutex g_pathMutex;

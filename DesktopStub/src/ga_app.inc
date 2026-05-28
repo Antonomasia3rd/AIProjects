@@ -1464,6 +1464,21 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         GeneratedAssetPrecacheMaxFiles());
     Log(g_ui.comRegistrationHelperSummary.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 1) != 0));
     Log(g_ui.wallpaperDetectionFallbackSummary.c_str(), StateEnabled(g_wallpaperDetectionFallbackOnInvalid));
+    int liveWallpaperCaptureRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
+    std::wstring liveWallpaperCaptureRefreshText = LiveWallpaperRefreshDisplayText(liveWallpaperCaptureRefreshMs);
+    Log(g_ui.liveWallpaperCaptureSummary.c_str(),
+        StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0),
+        StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureLively", 1) != 0),
+        StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) != 0),
+        IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
+        liveWallpaperCaptureRefreshText.c_str());
+    int liveWallpaperCaptureStartupRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", 1000, 0, 3600000);
+    int liveWallpaperCaptureStartupRefreshDurationMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", 0, 0, 3600000);
+    Log(g_ui.liveWallpaperCaptureStartupRefreshSummary.c_str(),
+        LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshMs).c_str(),
+        LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshDurationMs).c_str());
+    Log(g_ui.liveWallpaperCaptureScreenFallbackState.c_str(),
+        IniReadI(L"Settings", L"LiveWallpaperCaptureScreenFallback", 0) != 0 ? 1 : 0);
     if (singleInstanceMessageError != ERROR_SUCCESS)
         LogWin32Failure(L"RegisterWindowMessageW(single-instance)", singleInstanceMessageError);
     if (taskbarCreatedMessageError != ERROR_SUCCESS)
