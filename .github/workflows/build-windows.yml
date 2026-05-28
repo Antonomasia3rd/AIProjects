@@ -309,7 +309,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: DesktopStub
-          path: DesktopStub/build/GenerateAssets.exe
+          path: DesktopStub/build/DesktopStub-windows-x64.zip
           if-no-files-found: error
 
       - name: Upload CharmTray artifact
