@@ -357,30 +357,6 @@ static bool WallpaperEngineProcessImageLooksLikeCaptureHost(const std::wstring& 
         IEquals(baseName, L"webwallpaper64.exe");
 }
 
-static bool WindowProcessMatchesNames(HWND hwnd, std::initializer_list<const wchar_t*> imageNames)
-{
-    DWORD pid = 0;
-    GetWindowThreadProcessId(hwnd, &pid);
-    if (pid == 0)
-        return false;
-
-    std::wstring imagePath;
-    if (!QueryProcessImagePathForLiveWallpaper(pid, imagePath))
-        return false;
-
-    const wchar_t* baseName = PathFindFileNameW(imagePath.c_str());
-    if (!baseName || !*baseName)
-        baseName = imagePath.c_str();
-
-    for (const wchar_t* imageName : imageNames)
-    {
-        if (IEquals(baseName, imageName))
-            return true;
-    }
-
-    return false;
-}
-
 static bool WindowProcessMatchesLively(HWND hwnd)
 {
     DWORD pid = 0;
