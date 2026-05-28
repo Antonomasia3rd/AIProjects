@@ -14,6 +14,9 @@ enum {
     ID_LIVE_TILE_MODE_LIVE_TILE,
     ID_LIVE_TILE_RELAUNCH_ON_SWITCH,
     ID_CLEAR_LIVE_TILE_ON_SHUTDOWN,
+    ID_WIN8_LIVE_TILE_OOP_HELPER,
+    ID_WIN8_LIVE_TILE_BACKGROUND_TASK,
+    ID_WIN8_LIVE_TILE_BROKER_APP,
     ID_MANIFEST_TARGET_WINDOWS10,
     ID_MANIFEST_TARGET_WINDOWS81,
     ID_MANIFEST_TARGET_WINDOWS8,
@@ -47,6 +50,14 @@ enum {
     ID_WP_METHOD_TRANSCODED_WALLPAPER_FILE,
     ID_WP_METHOD_AUTO,
     ID_WP_METHOD_FALLBACK,
+    ID_LIVE_WALLPAPER_CAPTURE,
+    ID_LIVE_WALLPAPER_CAPTURE_LIVELY,
+    ID_LIVE_WALLPAPER_CAPTURE_WALLPAPER_ENGINE,
+    ID_LIVE_WALLPAPER_CAPTURE_SCREEN_FALLBACK,
+    ID_LIVE_WALLPAPER_CAPTURE_DELAY,
+    ID_LIVE_WALLPAPER_CAPTURE_REFRESH,
+    ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH,
+    ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH_DURATION,
     ID_SCALE_AUTO,
     ID_SCALE_100,
     ID_SCALE_125,
@@ -60,6 +71,60 @@ enum {
     // Assets
     ID_A1=2001, ID_A2, ID_A3, ID_A4, ID_A5, ID_A6, ID_A7, ID_A8
 };
+
+static int NextPresetValue(int current, const int* values, int count)
+{
+    if (!values || count <= 0)
+        return current;
+
+    for (int i = 0; i < count; ++i)
+    {
+        if (current < values[i])
+            return values[i];
+    }
+    return values[0];
+}
+
+static int NextLiveWallpaperCaptureDelayMs(int current)
+{
+    const int presets[] = { 0, 500, 1000, 2500, 5000, 10000 };
+    return NextPresetValue(current, presets, static_cast<int>(_countof(presets)));
+}
+
+static int NextLiveWallpaperCaptureRefreshMs(int current)
+{
+    const int presets[] = { 0, 1000, 2000, 5000, 10000, 30000, 60000 };
+    return NextPresetValue(current, presets, static_cast<int>(_countof(presets)));
+}
+
+static int NextLiveWallpaperCaptureStartupRefreshMs(int current)
+{
+    const int presets[] = { 0, 500, 1000, 2000, 5000, 10000 };
+    return NextPresetValue(current, presets, static_cast<int>(_countof(presets)));
+}
+
+static int NextLiveWallpaperCaptureStartupRefreshDurationMs(int current)
+{
+    const int presets[] = { 0, 5000, 10000, 15000, 30000, 60000 };
+    return NextPresetValue(current, presets, static_cast<int>(_countof(presets)));
+}
+
+static std::wstring LiveWallpaperMsDisplayText(int valueMs, const std::wstring& zeroText)
+{
+    if (valueMs <= 0)
+        return zeroText;
+    return FormatWide(g_ui.liveWallpaperCaptureMsText.c_str(), valueMs);
+}
+
+static std::wstring LiveWallpaperRefreshDisplayText(int refreshMs)
+{
+    return LiveWallpaperMsDisplayText(refreshMs, g_ui.liveWallpaperCaptureRefreshOnce);
+}
+
+static std::wstring LiveWallpaperOffDisplayText(int valueMs)
+{
+    return LiveWallpaperMsDisplayText(valueMs, g_ui.liveWallpaperCaptureOff);
+}
 
 static bool EnsureTrayIcon(DWORD* err = nullptr)
 {
@@ -337,6 +402,10 @@ void Menu(HWND h)
         AppendMenuChecked(liveTileMenu, MF_SEPARATOR, 0, nullptr);
         addTo(liveTileMenu, ID_LIVE_TILE_RELAUNCH_ON_SWITCH, g_ui.liveTileRelaunchOnSwitch.c_str(), g_liveTileRelaunchOnSwitch);
         addTo(liveTileMenu, ID_CLEAR_LIVE_TILE_ON_SHUTDOWN, g_ui.clearLiveTileOnShutdown.c_str(), g_clearLiveTileOnShutdown);
+        AppendMenuChecked(liveTileMenu, MF_SEPARATOR, 0, nullptr);
+        addTo(liveTileMenu, ID_WIN8_LIVE_TILE_BROKER_APP, g_ui.win8LiveTileBrokerApp.c_str(), IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) != 0);
+        addTo(liveTileMenu, ID_WIN8_LIVE_TILE_BACKGROUND_TASK, g_ui.win8LiveTileBackgroundTask.c_str(), IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0);
+        addTo(liveTileMenu, ID_WIN8_LIVE_TILE_OOP_HELPER, g_ui.win8LiveTileOopHelper.c_str(), IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) != 0);
     }
     endSection(liveTileMenu, g_ui.liveTileTitle);
 
@@ -416,6 +485,31 @@ void Menu(HWND h)
     std::wstring wallpaperDetectionLine = FormatWide(g_ui.wallpaperDetectionMethodLabel.c_str(), WallpaperDetectionMethodName(wallpaperMethod));
     AppendMenuChecked(methodsMenu, MF_STRING | MF_DISABLED, 0, wallpaperDetectionLine.c_str());
     endSection(methodsMenu, g_ui.methodsTitle);
+
+    HMENU liveWallpaperMenu = beginSection(g_ui.liveWallpaperCaptureTitle);
+    {
+        bool liveWallpaperCapture = IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0;
+        bool liveWallpaperCaptureLively = IniReadI(L"Settings", L"LiveWallpaperCaptureLively", 1) != 0;
+        bool liveWallpaperCaptureWallpaperEngine = IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) != 0;
+        bool liveWallpaperCaptureScreenFallback = IniReadI(L"Settings", L"LiveWallpaperCaptureScreenFallback", 0) != 0;
+        int liveWallpaperCaptureDelayMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000);
+        int liveWallpaperCaptureRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
+        int liveWallpaperCaptureStartupRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", 1000, 0, 3600000);
+        int liveWallpaperCaptureStartupRefreshDurationMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", 0, 0, 3600000);
+        std::wstring liveWallpaperCaptureDelayLine = FormatWide(g_ui.liveWallpaperCaptureDelayMsLabel.c_str(), liveWallpaperCaptureDelayMs);
+        std::wstring liveWallpaperCaptureRefreshLine = FormatWide(g_ui.liveWallpaperCaptureRefreshMsLabel.c_str(), LiveWallpaperRefreshDisplayText(liveWallpaperCaptureRefreshMs).c_str());
+        std::wstring liveWallpaperCaptureStartupRefreshLine = FormatWide(g_ui.liveWallpaperCaptureStartupRefreshMsLabel.c_str(), LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshMs).c_str());
+        std::wstring liveWallpaperCaptureStartupRefreshDurationLine = FormatWide(g_ui.liveWallpaperCaptureStartupRefreshDurationMsLabel.c_str(), LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshDurationMs).c_str());
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE, g_ui.liveWallpaperCapture.c_str(), liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_LIVELY, g_ui.liveWallpaperCaptureLively.c_str(), liveWallpaperCaptureLively, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_WALLPAPER_ENGINE, g_ui.liveWallpaperCaptureWallpaperEngine.c_str(), liveWallpaperCaptureWallpaperEngine, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_SCREEN_FALLBACK, g_ui.liveWallpaperCaptureScreenFallback.c_str(), liveWallpaperCaptureScreenFallback, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_DELAY, liveWallpaperCaptureDelayLine.c_str(), false, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_REFRESH, liveWallpaperCaptureRefreshLine.c_str(), false, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH, liveWallpaperCaptureStartupRefreshLine.c_str(), false, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH_DURATION, liveWallpaperCaptureStartupRefreshDurationLine.c_str(), false, liveWallpaperCapture);
+    }
+    endSection(liveWallpaperMenu, g_ui.liveWallpaperCaptureTitle);
 
     HMENU assetsMenu = beginSection(g_ui.assetsTitle);
     addTo(assetsMenu, ID_GENERATE_DESKTOP_ICON_DISABLED, g_ui.generateDesktopIconForDisabledEntries.c_str(), g_generateDesktopIconForDisabledEntries);
@@ -678,6 +772,30 @@ void Menu(HWND h)
     {
         g_clearLiveTileOnShutdown = !g_clearLiveTileOnShutdown;
         IniWrite(L"Settings", L"ClearLiveTileOnShutdown", g_clearLiveTileOnShutdown ? L"1" : L"0");
+    }
+    break;
+
+    case ID_WIN8_LIVE_TILE_BROKER_APP:
+    {
+        bool value = IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) == 0;
+        IniWrite(L"Settings", L"Win8LiveTileBrokerApp", value ? L"1" : L"0");
+        Log(g_ui.win8LiveTileBrokerAppState.c_str(), value ? 1 : 0);
+    }
+    break;
+
+    case ID_WIN8_LIVE_TILE_BACKGROUND_TASK:
+    {
+        bool value = IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) == 0;
+        IniWrite(L"Settings", L"Win8LiveTileBackgroundTask", value ? L"1" : L"0");
+        Log(g_ui.win8LiveTileBackgroundTaskState.c_str(), value ? 1 : 0);
+    }
+    break;
+
+    case ID_WIN8_LIVE_TILE_OOP_HELPER:
+    {
+        bool value = IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) == 0;
+        IniWrite(L"Settings", L"Win8LiveTileOopHelper", value ? L"1" : L"0");
+        Log(g_ui.win8LiveTileOopHelperState.c_str(), value ? 1 : 0);
     }
     break;
 
@@ -1018,6 +1136,89 @@ void Menu(HWND h)
         g_wallpaperDetectionFallbackOnInvalid = !g_wallpaperDetectionFallbackOnInvalid;
         IniWrite(L"Settings", L"WallpaperDetectionFallbackOnInvalid", g_wallpaperDetectionFallbackOnInvalid ? L"1" : L"0");
         Log(g_ui.wallpaperDetectionFallbackSummary.c_str(), StateEnabled(g_wallpaperDetectionFallbackOnInvalid));
+    }
+    break;
+
+    case ID_LIVE_WALLPAPER_CAPTURE:
+    {
+        bool value = IniReadI(L"Settings", L"LiveWallpaperCapture", 1) == 0;
+        IniWrite(L"Settings", L"LiveWallpaperCapture", value ? L"1" : L"0");
+        Log(g_ui.liveWallpaperCaptureSummary.c_str(),
+            StateEnabled(value),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureLively", 1) != 0),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) != 0),
+            IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
+            LiveWallpaperRefreshDisplayText(IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000)).c_str());
+    }
+    break;
+
+    case ID_LIVE_WALLPAPER_CAPTURE_LIVELY:
+    {
+        bool value = IniReadI(L"Settings", L"LiveWallpaperCaptureLively", 1) == 0;
+        IniWrite(L"Settings", L"LiveWallpaperCaptureLively", value ? L"1" : L"0");
+        Log(g_ui.liveWallpaperCaptureSummary.c_str(),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0),
+            StateEnabled(value),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) != 0),
+            IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
+            LiveWallpaperRefreshDisplayText(IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000)).c_str());
+    }
+    break;
+
+    case ID_LIVE_WALLPAPER_CAPTURE_WALLPAPER_ENGINE:
+    {
+        bool value = IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) == 0;
+        IniWrite(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", value ? L"1" : L"0");
+        Log(g_ui.liveWallpaperCaptureSummary.c_str(),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureLively", 1) != 0),
+            StateEnabled(value),
+            IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
+            LiveWallpaperRefreshDisplayText(IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000)).c_str());
+    }
+    break;
+
+    case ID_LIVE_WALLPAPER_CAPTURE_SCREEN_FALLBACK:
+    {
+        bool value = IniReadI(L"Settings", L"LiveWallpaperCaptureScreenFallback", 0) == 0;
+        IniWrite(L"Settings", L"LiveWallpaperCaptureScreenFallback", value ? L"1" : L"0");
+        Log(g_ui.liveWallpaperCaptureScreenFallbackState.c_str(), value ? 1 : 0);
+    }
+    break;
+
+    case ID_LIVE_WALLPAPER_CAPTURE_DELAY:
+    {
+        int current = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000);
+        int next = NextLiveWallpaperCaptureDelayMs(current);
+        IniWrite(L"Settings", L"LiveWallpaperCaptureDelayMs", std::to_wstring(next).c_str());
+        Log(g_ui.liveWallpaperCaptureDelayState.c_str(), next);
+    }
+    break;
+
+    case ID_LIVE_WALLPAPER_CAPTURE_REFRESH:
+    {
+        int current = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
+        int next = NextLiveWallpaperCaptureRefreshMs(current);
+        IniWrite(L"Settings", L"LiveWallpaperCaptureRefreshMs", std::to_wstring(next).c_str());
+        Log(g_ui.liveWallpaperCaptureRefreshState.c_str(), next);
+    }
+    break;
+
+    case ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH:
+    {
+        int current = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", 1000, 0, 3600000);
+        int next = NextLiveWallpaperCaptureStartupRefreshMs(current);
+        IniWrite(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", std::to_wstring(next).c_str());
+        Log(g_ui.liveWallpaperCaptureStartupRefreshState.c_str(), next);
+    }
+    break;
+
+    case ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH_DURATION:
+    {
+        int current = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", 0, 0, 3600000);
+        int next = NextLiveWallpaperCaptureStartupRefreshDurationMs(current);
+        IniWrite(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", std::to_wstring(next).c_str());
+        Log(g_ui.liveWallpaperCaptureStartupRefreshDurationState.c_str(), next);
     }
     break;
 
