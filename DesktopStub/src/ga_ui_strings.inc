@@ -1,4 +1,4 @@
-std::wstring Win32ErrorString(DWORD err)
+﻿std::wstring Win32ErrorString(DWORD err)
 {
     wchar_t* buf = nullptr;
     DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
@@ -18,11 +18,6 @@ std::wstring Win32ErrorString(DWORD err)
 
     if (buf) LocalFree(buf);
     return msg;
-}
-
-void LogWin32Failure(const wchar_t* what, DWORD err = GetLastError())
-{
-    Log(g_ui.win32FailureFmt.c_str(), what, err, Win32ErrorString(err).c_str());
 }
 
 static std::wstring FormatWideV(const wchar_t* fmt, va_list ap)
@@ -149,14 +144,28 @@ void LoadUiStrings()
     g_ui.assetsTitle = IniReadS(L"Strings", L"AssetsTitle", L"Assets:");
     g_ui.dpiScalesTitle = IniReadS(L"Strings", L"DpiScalesTitle", L"DPI Scales:");
     g_ui.cachingTitle = IniReadS(L"Strings", L"CachingTitle", L"Caching:");
+    g_ui.liveTileTitle = IniReadS(L"Strings", L"LiveTileTitle", L"Live Tile:");
 
     g_ui.listenWallpaper = IniReadS(L"Strings", L"ListenWallpaper", L"Listen Wallpaper");
     g_ui.trayIcon = IniReadS(L"Strings", L"TrayIcon", L"Tray Icon (this session)");
     g_ui.usePowerShell = IniReadS(L"Strings", L"UsePowerShell", L"PowerShell only");
     g_ui.experimentalLiveTileUpdate = IniReadS(L"Strings", L"ExperimentalLiveTileUpdate", L"Live Tile update mode");
+    g_ui.appxManifestTarget = IniReadS(L"Strings", L"AppxManifestTarget", L"AppxManifest target");
+    g_ui.appxManifestTargetWindows10 = IniReadS(L"Strings", L"AppxManifestTargetWindows10", L"Windows 10");
+    g_ui.appxManifestTargetWindows81 = IniReadS(L"Strings", L"AppxManifestTargetWindows81", L"Windows 8.1");
+    g_ui.appxManifestTargetWindows8 = IniReadS(L"Strings", L"AppxManifestTargetWindows8", L"Windows 8");
     g_ui.liveTileModeAuto = IniReadS(L"Strings", L"LiveTileModeAuto", L"Auto");
     g_ui.liveTileModeRegistration = IniReadS(L"Strings", L"LiveTileModeRegistration", L"Registration");
     g_ui.liveTileModeLiveTile = IniReadS(L"Strings", L"LiveTileModeLiveTile", L"Live Tile");
+    g_ui.liveTileModeEnabled = IniReadS(L"Strings", L"LiveTileModeEnabled", L"Enabled");
+    g_ui.liveTileModeDisabled = IniReadS(L"Strings", L"LiveTileModeDisabled", L"Disabled");
+    g_ui.liveTileRelaunchOnSwitch = IniReadS(L"Strings", L"LiveTileRelaunchOnSwitch", L"Relaunch on switch");
+    g_ui.clearLiveTileOnShutdown = IniReadS(L"Strings", L"ClearLiveTileOnShutdown", L"Clear Live Tile on shutdown");
+    g_ui.liveTileRelaunchToPackagedQueued = IniReadS(L"Strings", L"LiveTileRelaunchToPackagedQueued", L"[i] Live Tile mode changed; relaunching through the registered package entry.");
+    g_ui.liveTileRelaunchToUnpackagedQueued = IniReadS(L"Strings", L"LiveTileRelaunchToUnpackagedQueued", L"[i] Live Tile mode changed; relaunching as unpackaged desktop app.");
+    g_ui.liveTileClearOnShutdown = IniReadS(L"Strings", L"LiveTileClearOnShutdown", L"[i] Clearing Live Tile on shutdown.");
+    g_ui.liveTileClearOnShutdownSkipped = IniReadS(L"Strings", L"LiveTileClearOnShutdownSkipped", L"[i] Clear Live Tile on shutdown skipped: %s");
+    g_ui.liveTileClearOnShutdownSuccess = IniReadS(L"Strings", L"LiveTileClearOnShutdownSuccess", L"[i] Live Tile cleared on shutdown.");
     g_ui.generateOnStartup = IniReadS(L"Strings", L"GenerateOnStartup", L"Generate on Startup");
     g_ui.generateOnStartupOnlyWhenChanged = IniReadS(L"Strings", L"GenerateOnStartupOnlyWhenChanged", L"Generate on Startup only when changed");
     g_ui.hideDisabledEntries = IniReadS(L"Strings", L"HideDisabledEntries", L"Hide disabled entries");
@@ -243,6 +252,7 @@ void LoadUiStrings()
     g_ui.notificationTrayIconHidden = IniReadS(L"Strings", L"NotificationTrayIconHidden", L"Tray icon hidden for this session. Run GenerateAssets.exe again to restore it.");
     g_ui.manualGenerateTriggered = IniReadS(L"Strings", L"ManualGenerateTriggered", L"Manual generate triggered.");
     g_ui.liveTileModeChanged = IniReadS(L"Strings", L"LiveTileModeChanged", L"Live Tile mode changed.");
+    g_ui.manifestTargetChanged = IniReadS(L"Strings", L"ManifestTargetChanged", L"AppxManifest target changed.");
     g_ui.liveTileModeReregistrationQueued = IniReadS(L"Strings", L"LiveTileModeReregistrationQueued", L"[i] Queued one-time Appx re-registration because Live Tile mode changed.");
     g_ui.liveTileModeReregistrationQueuedNoWallpaper = IniReadS(L"Strings", L"LiveTileModeReregistrationQueuedNoWallpaper", L"[!] Live Tile mode changed; one-time Appx re-registration is pending but current wallpaper could not be detected.");
     g_ui.startingWallpaperGeneration = IniReadS(L"Strings", L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s.");
@@ -372,6 +382,7 @@ void LoadUiStrings()
     g_ui.powerShellRegistrationSummary = IniReadS(L"Strings", L"PowerShellRegistrationSummary", L"[i] PowerShell registration: %s");
     g_ui.usePowerShellSummary = IniReadS(L"Strings", L"UsePowerShellSummary", L"[i] UsePowerShell = %d (%s)");
     g_ui.liveTileUpdateSummary = IniReadS(L"Strings", L"LiveTileUpdateSummary", L"[i] Live Tile update mode: %s");
+    g_ui.manifestTargetSummary = IniReadS(L"Strings", L"ManifestTargetSummary", L"[i] AppxManifest target: %s");
     g_ui.wallpaperDetectionFallbackSummary = IniReadS(L"Strings", L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s");
     g_ui.trayIconSummary = IniReadS(L"Strings", L"TrayIconSummary", L"[i] Tray icon: %s");
     g_ui.consoleSummary = IniReadS(L"Strings", L"ConsoleSummary", L"[i] Console %s.");
@@ -469,6 +480,7 @@ void LoadUiStrings()
     g_ui.savePngReplaceRetryDelayMsLabel = IniReadS(L"Strings", L"SavePngReplaceRetryDelayMsLabel", L"PNG replace retry delay: %d ms");
     g_ui.timeoutInfiniteText = IniReadS(L"Strings", L"TimeoutInfiniteText", L"infinite");
     g_ui.manifestTitle = IniReadS(L"Strings", L"ManifestTitle", L"Manifest:");
+    g_ui.manifestDetailsTitle = IniReadS(L"Strings", L"ManifestDetailsTitle", L"Manifest details");
     g_ui.manifestIdentityNameLabel = IniReadS(L"Strings", L"ManifestIdentityNameLabel", L"Manifest identity: %s");
     g_ui.manifestPublisherLabel = IniReadS(L"Strings", L"ManifestPublisherLabel", L"Manifest publisher: %s");
     g_ui.manifestPackageVersionLabel = IniReadS(L"Strings", L"ManifestPackageVersionLabel", L"Manifest version: %s");
@@ -477,6 +489,7 @@ void LoadUiStrings()
     g_ui.manifestDescriptionLabel = IniReadS(L"Strings", L"ManifestDescriptionLabel", L"Manifest description: %s");
     g_ui.manifestExecutableLabel = IniReadS(L"Strings", L"ManifestExecutableLabel", L"Manifest executable: %s");
     g_ui.manifestApplicationIdLabel = IniReadS(L"Strings", L"ManifestApplicationIdLabel", L"Manifest app id: %s");
+    g_ui.manifestTargetLabel = IniReadS(L"Strings", L"ManifestTargetLabel", L"Manifest target: %s");
     g_ui.manifestTargetDeviceFamilyNameLabel = IniReadS(L"Strings", L"ManifestTargetDeviceFamilyNameLabel", L"Manifest target family: %s");
     g_ui.manifestMinVersionLabel = IniReadS(L"Strings", L"ManifestMinVersionLabel", L"Manifest min version: %s");
     g_ui.manifestMaxVersionTestedLabel = IniReadS(L"Strings", L"ManifestMaxVersionTestedLabel", L"Manifest max tested: %s");
@@ -484,6 +497,7 @@ void LoadUiStrings()
     g_ui.manifestPropertiesLogoLabel = IniReadS(L"Strings", L"ManifestPropertiesLogoLabel", L"Manifest properties logo: %s");
     g_ui.manifestSquare150x150LogoLabel = IniReadS(L"Strings", L"ManifestSquare150x150LogoLabel", L"Manifest square 150 logo: %s");
     g_ui.manifestSquare44x44LogoLabel = IniReadS(L"Strings", L"ManifestSquare44x44LogoLabel", L"Manifest square 44 logo: %s");
+    g_ui.manifestSquare30x30LogoLabel = IniReadS(L"Strings", L"ManifestSquare30x30LogoLabel", L"Manifest square 30 logo: %s");
     g_ui.manifestSquare71x71LogoLabel = IniReadS(L"Strings", L"ManifestSquare71x71LogoLabel", L"Manifest square 71 logo: %s");
     g_ui.manifestWide310x150LogoLabel = IniReadS(L"Strings", L"ManifestWide310x150LogoLabel", L"Manifest wide 310 logo: %s");
     g_ui.manifestSquare310x310LogoLabel = IniReadS(L"Strings", L"ManifestSquare310x310LogoLabel", L"Manifest square 310 logo: %s");
@@ -491,6 +505,7 @@ void LoadUiStrings()
     g_ui.manifestShowNameOnTilesLabel = IniReadS(L"Strings", L"ManifestShowNameOnTilesLabel", L"Manifest show names on: %s");
     g_ui.manifestEntryPointLabel = IniReadS(L"Strings", L"ManifestEntryPointLabel", L"Manifest entry point: %s");
     g_ui.manifestRestrictedCapabilityLabel = IniReadS(L"Strings", L"ManifestRestrictedCapabilityLabel", L"Manifest restricted capability: %s");
+    g_ui.manifestSplashScreenImageLabel = IniReadS(L"Strings", L"ManifestSplashScreenImageLabel", L"Manifest splash screen image: %s");
     g_ui.manifestSourceLabel = IniReadS(L"Strings", L"ManifestSourceLabel", L"Manifest source: %s");
     g_ui.manifestSourceExisting = IniReadS(L"Strings", L"ManifestSourceExisting", L"existing AppxManifest.xml");
     g_ui.manifestSourceGenerated = IniReadS(L"Strings", L"ManifestSourceGenerated", L"generated from built-in defaults if missing");
@@ -664,6 +679,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.manifestDescriptionLabel, L"ManifestDescriptionLabel", { L"%s" });
     RequireFormat(g_ui.manifestExecutableLabel, L"ManifestExecutableLabel", { L"%s" });
     RequireFormat(g_ui.manifestApplicationIdLabel, L"ManifestApplicationIdLabel", { L"%s" });
+    RequireFormat(g_ui.manifestTargetLabel, L"ManifestTargetLabel", { L"%s" });
     RequireFormat(g_ui.manifestTargetDeviceFamilyNameLabel, L"ManifestTargetDeviceFamilyNameLabel", { L"%s" });
     RequireFormat(g_ui.manifestMinVersionLabel, L"ManifestMinVersionLabel", { L"%s" });
     RequireFormat(g_ui.manifestMaxVersionTestedLabel, L"ManifestMaxVersionTestedLabel", { L"%s" });
@@ -671,6 +687,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.manifestPropertiesLogoLabel, L"ManifestPropertiesLogoLabel", { L"%s" });
     RequireFormat(g_ui.manifestSquare150x150LogoLabel, L"ManifestSquare150x150LogoLabel", { L"%s" });
     RequireFormat(g_ui.manifestSquare44x44LogoLabel, L"ManifestSquare44x44LogoLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSquare30x30LogoLabel, L"ManifestSquare30x30LogoLabel", { L"%s" });
     RequireFormat(g_ui.manifestSquare71x71LogoLabel, L"ManifestSquare71x71LogoLabel", { L"%s" });
     RequireFormat(g_ui.manifestWide310x150LogoLabel, L"ManifestWide310x150LogoLabel", { L"%s" });
     RequireFormat(g_ui.manifestSquare310x310LogoLabel, L"ManifestSquare310x310LogoLabel", { L"%s" });
@@ -678,6 +695,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.manifestShowNameOnTilesLabel, L"ManifestShowNameOnTilesLabel", { L"%s" });
     RequireFormat(g_ui.manifestEntryPointLabel, L"ManifestEntryPointLabel", { L"%s" });
     RequireFormat(g_ui.manifestRestrictedCapabilityLabel, L"ManifestRestrictedCapabilityLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSplashScreenImageLabel, L"ManifestSplashScreenImageLabel", { L"%s" });
     RequireFormat(g_ui.manifestSourceLabel, L"ManifestSourceLabel", { L"%s" });
     RequireFormat(g_ui.wallpaperDetectionMethodLabel, L"WallpaperDetectionMethodLabel", { L"%s" });
     RequireFormat(g_ui.singleInstanceFailureActionLabel, L"SingleInstanceFailureActionLabel", { L"%s" });
@@ -689,6 +707,7 @@ static void ValidateFormatStrings()
 
     RequireFormat(g_ui.commandLineWallpaperPathInvalid, L"CommandLineWallpaperPathInvalid", { L"%s" });
     RequireFormat(g_ui.commandLineManifestSettingIgnored, L"CommandLineManifestSettingIgnored", { L"%s" });
+    RequireFormat(g_ui.manifestTargetSummary, L"ManifestTargetSummary", { L"%s" });
     RequireFormat(g_ui.startingWallpaperGeneration, L"StartingWallpaperGeneration", { L"%s" });
     RequireFormat(g_ui.wallpaperSource, L"WallpaperSource", { L"%s" });
     RequireFormat(g_ui.wallpaperImageLoaded, L"WallpaperImageLoaded", { L"%d", L"%d" });

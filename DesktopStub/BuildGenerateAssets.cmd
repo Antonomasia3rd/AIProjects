@@ -48,17 +48,41 @@ if errorlevel 1 (
     exit /b %errorlevel%
 )
 
-if /I "%~1"=="check" (
-    cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /Zs GenerateAssets.cpp
+rem ---------------------------------------------------------------------------
+rem Build policy:
+rem   Older revisions had argument-controlled targets such as win8, win81,
+rem   broker, helpers, background, experiments, all, and check. That made local
+rem   builds ambiguous: the Windows 8/8.1 manifest path could be selected at
+rem   runtime while the packaged broker helper had not been built.
+rem
+rem   The script now deliberately ignores every argument and always builds the
+rem   same stable target set:
+rem     - GenerateAssets.exe
+rem     - GenerateAssetsLiveTileBroker.exe
+rem
+rem   The experimental background-task DLL remains in the source tree for
+rem   research, but it is not part of the normal one-command build.
+rem ---------------------------------------------------------------------------
+if not "%~1"=="" (
+    echo [i] BuildGenerateAssets.cmd now ignores build arguments and always builds the same target set.
+    echo [i] One or more arguments were supplied and ignored.
+)
+
+set "OUT_EXE=build\GenerateAssets.exe"
+set "OBJ_FILE=build\obj\GenerateAssets.obj"
+set "BROKER_EXE=build\GenerateAssetsLiveTileBroker.exe"
+set "BROKER_OBJ=build\obj\LiveTileBroker.obj"
+
+echo Building packaged Live Tile broker...
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE LiveTileBroker.cpp /Fe:%BROKER_EXE% /Fo:%BROKER_OBJ% /link windowsapp.lib runtimeobject.lib ole32.lib /SUBSYSTEM:WINDOWS
+if errorlevel 1 (
     set "STATUS=%ERRORLEVEL%"
     popd
     exit /b %STATUS%
 )
 
-set "OUT_EXE=build\GenerateAssets.exe"
-set "OBJ_FILE=build\obj\GenerateAssets.obj"
-
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE GenerateAssets.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib /SUBSYSTEM:WINDOWS
+echo Building main GenerateAssets host...
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE GenerateAssets.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 

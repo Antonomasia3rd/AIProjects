@@ -400,9 +400,97 @@ static std::wstring EffectiveManifestDescription()
     return ManifestSetting(L"Description", L"Desktop", L"ManifestDescription");
 }
 
+static std::wstring ManifestHostExecutableName()
+{
+    return L"GenerateAssets.exe";
+}
+
+static std::wstring ManifestAppxActivationStubExecutableName()
+{
+    return L"GenerateAssetsAppxStub.exe";
+}
+
+static std::wstring ManifestLiveTileBrokerExecutableName()
+{
+    return L"GenerateAssetsLiveTileBroker.exe";
+}
+
+static std::wstring ManifestLiveTileBrokerEntryPoint()
+{
+    return L"DesktopStub.LiveTileBroker.App";
+}
+
+static bool Win8LiveTileBrokerAppEnabled()
+{
+    // Experimental but now preferred for Win8/8.1 compatibility targets.
+    // This uses a real CoreApplication-based packaged WinRT app as the tile
+    // update broker instead of registering the main tray EXE as the RT app.
+    return IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) != 0;
+}
+
+static std::wstring ManifestLiveTileOopServerName()
+{
+    return L"DesktopStubLiveTileServer";
+}
+
+static std::wstring ManifestLiveTileOopRuntimeClassId()
+{
+    return L"DesktopStub.LiveTileUpdateServer";
+}
+
+
+static std::wstring ManifestLiveTileBackgroundTaskDllName()
+{
+    return L"GenerateAssetsLiveTileTask.dll";
+}
+
+static std::wstring ManifestLiveTileBackgroundTaskClassId()
+{
+    return L"DesktopStub.LiveTileBackgroundTask";
+}
+
+static std::wstring ManifestLiveTileBackgroundTaskName()
+{
+    return L"GenerateAssetsLiveTileUpdate";
+}
+
+static bool Win8LiveTileBackgroundTaskEnabled()
+{
+    // Experimental. This declares a WinRT background task and tries
+    // ApplicationTrigger before falling back to the foreground package-identity
+    // helper. In practice, ApplicationTrigger calls from the normal
+    // GenerateAssets.exe host fail because the host is deliberately unpackaged
+    // (0x80073D57: no application identity). Keep this disabled by default;
+    // set [Settings] Win8LiveTileBackgroundTask=1 only for targeted research.
+    return IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0;
+}
+
+static bool Win8LiveTileOopHelperEnabled()
+{
+    // Experimental. On Windows 10 with a Windows 8/8.1-style loose manifest,
+    // RoActivateInstance currently returns REGDB_E_CLASSNOTREG for this
+    // package-level out-of-process WinRT class. Keep it opt-in so the working
+    // foreground package-identity helper stays fast and predictable.
+    return IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) != 0;
+}
+
 static std::wstring EffectiveManifestExecutable()
 {
-    return ManifestSettingValidated(L"Executable", L"GenerateAssets.exe", L"ManifestExecutable", IsManifestExecutableValue);
+    // Windows 8/8.1-style activation launches the manifest executable as an
+    // immersive RT activation server and passes -ServerName:App.AppX... . If
+    // the registered executable is the same resident tray EXE, Windows keeps an
+    // empty immersive frame alive and can later report MoAppHang. The stabilized
+    // compatibility path uses a small packaged CoreApplication broker for Live
+    // Tile updates; the old copied activation stub remains available for tests.
+    ManifestCompatibilityTarget target = ConfiguredManifestCompatibilityTarget();
+    std::wstring fallback = ManifestHostExecutableName();
+    if (target != ManifestCompatibilityTarget::Windows10)
+    {
+        fallback = Win8LiveTileBrokerAppEnabled()
+            ? ManifestLiveTileBrokerExecutableName()
+            : ManifestAppxActivationStubExecutableName();
+    }
+    return ManifestSettingValidated(L"Executable", fallback.c_str(), L"ManifestExecutable", IsManifestExecutableValue);
 }
 
 static std::wstring EffectiveManifestApplicationId()
@@ -412,12 +500,24 @@ static std::wstring EffectiveManifestApplicationId()
 
 static std::wstring EffectiveManifestMinVersion()
 {
+    ManifestCompatibilityTarget target = ConfiguredManifestCompatibilityTarget();
+    if (target == ManifestCompatibilityTarget::Windows81)
+        return L"6.3.0";
+    if (target == ManifestCompatibilityTarget::Windows8)
+        return L"6.2.0";
+
     std::wstring version = ManifestSetting(L"MinVersion", L"10.0.15063.0", L"ManifestMinVersion");
     return IsManifestVersion(version) ? version : L"10.0.15063.0";
 }
 
 static std::wstring EffectiveManifestMaxVersionTested()
 {
+    ManifestCompatibilityTarget target = ConfiguredManifestCompatibilityTarget();
+    if (target == ManifestCompatibilityTarget::Windows81)
+        return L"6.3.0";
+    if (target == ManifestCompatibilityTarget::Windows8)
+        return L"6.2.0";
+
     std::wstring version = ManifestSetting(L"MaxVersionTested", L"10.0.15063.0", L"ManifestMaxVersionTested");
     return IsManifestVersion(version) ? version : L"10.0.15063.0";
 }
@@ -447,6 +547,11 @@ static std::wstring EffectiveManifestSquare44x44Logo()
     return ManifestSettingValidated(L"Square44x44Logo", L"Assets\\Square44x44Logo.png", L"ManifestSquare44x44Logo", IsManifestRelativeAssetPath);
 }
 
+static std::wstring EffectiveManifestSquare30x30Logo()
+{
+    return ManifestSettingValidated(L"Square30x30Logo", L"Assets\\Square30x30Logo.png", L"ManifestSquare30x30Logo", IsManifestRelativeAssetPath);
+}
+
 static std::wstring EffectiveManifestSquare71x71Logo()
 {
     return ManifestSettingValidated(L"Square71x71Logo", L"Assets\\SmallTile.png", L"ManifestSquare71x71Logo", IsManifestRelativeAssetPath);
@@ -467,13 +572,29 @@ static std::wstring EffectiveManifestBackgroundColor()
     return ManifestSettingValidated(L"BackgroundColor", L"transparent", L"ManifestBackgroundColor", IsManifestBackgroundColorValue);
 }
 
+static std::wstring EffectiveManifestSplashScreenImage()
+{
+    return ManifestSettingValidated(L"SplashScreenImage", L"Assets\\SplashScreen.png", L"ManifestSplashScreenImage", IsManifestRelativeAssetPath);
+}
+
 static std::wstring EffectiveManifestEntryPoint()
 {
+    if (ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10)
+    {
+        if (Win8LiveTileBrokerAppEnabled())
+            return ManifestLiveTileBrokerEntryPoint();
+        std::wstring classBase = SanitizeManifestToken(ExeBaseName(), L"GenerateAssets");
+        return classBase + L".App";
+    }
+
     return ManifestSettingValidated(L"EntryPoint", L"Windows.FullTrustApplication", L"ManifestEntryPoint", IsManifestNonEmptyDottedToken);
 }
 
 static std::wstring EffectiveManifestRestrictedCapability()
 {
+    if (ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10)
+        return L"";
+
     std::wstring value = ManifestSetting(L"RestrictedCapability", L"runFullTrust", L"ManifestRestrictedCapability");
     std::wstring lowered = ToLowerCopy(TrimCopy(value));
     if (lowered == L"0" || lowered == L"false" || lowered == L"off" || lowered == L"none")
@@ -847,6 +968,7 @@ static std::vector<std::wstring> EffectiveManifestShowNameOnTiles()
 struct ManifestDisplayInfo
 {
     bool existing = false;
+    std::wstring manifestTarget;
     std::wstring identityName;
     std::wstring publisher;
     std::wstring packageVersion;
@@ -862,6 +984,7 @@ struct ManifestDisplayInfo
     std::wstring propertiesLogo;
     std::wstring square150x150Logo;
     std::wstring square44x44Logo;
+    std::wstring square30x30Logo;
     std::wstring square71x71Logo;
     std::wstring wide310x150Logo;
     std::wstring square310x310Logo;
@@ -869,12 +992,14 @@ struct ManifestDisplayInfo
     std::wstring showNameOnTiles;
     std::wstring entryPoint;
     std::wstring restrictedCapability;
+    std::wstring splashScreenImage;
 };
 #pragma warning(pop)
 
 static ManifestDisplayInfo CurrentManifestDisplayInfo()
 {
     ManifestDisplayInfo info;
+    info.manifestTarget = ManifestCompatibilityTargetName(ConfiguredManifestCompatibilityTarget());
     info.identityName = EffectiveManifestIdentityName();
     info.publisher = EffectiveManifestPublisher();
     info.packageVersion = EffectiveManifestPackageVersion();
@@ -890,6 +1015,7 @@ static ManifestDisplayInfo CurrentManifestDisplayInfo()
     info.propertiesLogo = EffectiveManifestPropertiesLogo();
     info.square150x150Logo = EffectiveManifestSquare150x150Logo();
     info.square44x44Logo = EffectiveManifestSquare44x44Logo();
+    info.square30x30Logo = EffectiveManifestSquare30x30Logo();
     info.square71x71Logo = EffectiveManifestSquare71x71Logo();
     info.wide310x150Logo = EffectiveManifestWide310x150Logo();
     info.square310x310Logo = EffectiveManifestSquare310x310Logo();
@@ -897,6 +1023,7 @@ static ManifestDisplayInfo CurrentManifestDisplayInfo()
     info.showNameOnTiles = ManifestSetting(L"ShowNameOnTiles", L"square150x150Logo,wide310x150Logo,square310x310Logo", L"ManifestShowNameOnTiles");
     info.entryPoint = EffectiveManifestEntryPoint();
     info.restrictedCapability = EffectiveManifestRestrictedCapability();
+    info.splashScreenImage = EffectiveManifestSplashScreenImage();
 
     std::wstring manifestPath = GetExeDir() + L"\\AppxManifest.xml";
     DWORD attrs = GetFileAttributesW(manifestPath.c_str());
@@ -908,6 +1035,15 @@ static ManifestDisplayInfo CurrentManifestDisplayInfo()
         return info;
 
     info.existing = true;
+    if (xml.find(L"foundation/windows10") != std::wstring::npos || xml.find(L"<TargetDeviceFamily") != std::wstring::npos)
+        info.manifestTarget = L"Windows 10";
+    else
+    {
+        std::wstring osMin;
+        if (ExtractXmlElementText(xml, L"OSMinVersion", osMin))
+            info.manifestTarget = (osMin.rfind(L"6.2", 0) == 0) ? L"Windows 8" : L"Windows 8.1";
+    }
+
     ExtractXmlAttributeFromTag(xml, L"<Identity", L"Name", info.identityName);
     ExtractXmlAttributeFromTag(xml, L"<Identity", L"Publisher", info.publisher);
     ExtractXmlAttributeFromTag(xml, L"<Identity", L"Version", info.packageVersion);
@@ -919,22 +1055,32 @@ static ManifestDisplayInfo CurrentManifestDisplayInfo()
     ExtractXmlAttributeFromTag(xml, L"<TargetDeviceFamily", L"Name", info.targetDeviceFamilyName);
     ExtractXmlAttributeFromTag(xml, L"<TargetDeviceFamily", L"MinVersion", info.minVersion);
     ExtractXmlAttributeFromTag(xml, L"<TargetDeviceFamily", L"MaxVersionTested", info.maxVersionTested);
+    ExtractXmlElementText(xml, L"OSMinVersion", info.minVersion);
+    ExtractXmlElementText(xml, L"OSMaxVersionTested", info.maxVersionTested);
     ExtractXmlAttributeFromTag(xml, L"<Resource", L"Language", info.resourceLanguage);
     ExtractXmlElementText(xml, L"Logo", info.propertiesLogo);
     ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Description", info.description);
     ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Square150x150Logo", info.square150x150Logo);
     ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Square44x44Logo", info.square44x44Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Square30x30Logo", info.square30x30Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"SmallLogo", info.square30x30Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"Logo", info.square150x150Logo);
     ExtractXmlAttributeFromTag(xml, L"<uap:VisualElements", L"BackgroundColor", info.backgroundColor);
     ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Square71x71Logo", info.square71x71Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Square70x70Logo", info.square71x71Logo);
     ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Wide310x150Logo", info.wide310x150Logo);
+    ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"WideLogo", info.wide310x150Logo);
     ExtractXmlAttributeFromTag(xml, L"<uap:DefaultTile", L"Square310x310Logo", info.square310x310Logo);
     ExtractXmlAttributeFromTag(xml, L"<rescap:Capability", L"Name", info.restrictedCapability);
+    ExtractXmlAttributeFromTag(xml, L"<SplashScreen", L"Image", info.splashScreenImage);
     ExtractXmlShowNameOnTiles(xml, info.showNameOnTiles);
     return info;
 }
 
 static std::wstring BuildDefaultAppxManifest()
 {
+    ManifestCompatibilityTarget target = ConfiguredManifestCompatibilityTarget();
+
     std::wstring identity = XmlEscape(EffectiveManifestIdentityName());
     std::wstring publisher = XmlEscape(EffectiveManifestPublisher());
     std::wstring version = XmlEscape(EffectiveManifestPackageVersion());
@@ -950,77 +1096,260 @@ static std::wstring BuildDefaultAppxManifest()
     std::wstring propertiesLogo = XmlEscape(EffectiveManifestPropertiesLogo());
     std::wstring square150x150Logo = XmlEscape(EffectiveManifestSquare150x150Logo());
     std::wstring square44x44Logo = XmlEscape(EffectiveManifestSquare44x44Logo());
+    std::wstring square30x30Logo = XmlEscape(EffectiveManifestSquare30x30Logo());
     std::wstring square71x71Logo = XmlEscape(EffectiveManifestSquare71x71Logo());
     std::wstring wide310x150Logo = XmlEscape(EffectiveManifestWide310x150Logo());
     std::wstring square310x310Logo = XmlEscape(EffectiveManifestSquare310x310Logo());
     std::wstring backgroundColor = XmlEscape(EffectiveManifestBackgroundColor());
+    std::wstring splashScreenImage = XmlEscape(EffectiveManifestSplashScreenImage());
     std::wstring entryPoint = XmlEscape(EffectiveManifestEntryPoint());
     std::wstring restrictedCapability = XmlEscape(EffectiveManifestRestrictedCapability());
     std::vector<std::wstring> showNameOnTiles = EffectiveManifestShowNameOnTiles();
 
     std::wstring manifest;
     manifest += L"<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n";
-    manifest += L"<Package\r\n";
-    manifest += L"  xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\"\r\n";
-    manifest += L"  xmlns:uap=\"http://schemas.microsoft.com/appx/manifest/uap/windows10\"\r\n";
-    manifest += L"  xmlns:rescap=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities\"\r\n";
-    manifest += L"  IgnorableNamespaces=\"uap rescap\">\r\n\r\n";
-    manifest += L"  <Identity\r\n";
-    manifest += L"    Name=\"" + identity + L"\"\r\n";
-    manifest += L"    Publisher=\"" + publisher + L"\"\r\n";
-    manifest += L"    Version=\"" + version + L"\" />\r\n\r\n";
+
+    if (target == ManifestCompatibilityTarget::Windows10)
+    {
+        manifest += L"<Package\r\n";
+        manifest += L"  xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\"\r\n";
+        manifest += L"  xmlns:uap=\"http://schemas.microsoft.com/appx/manifest/uap/windows10\"\r\n";
+        manifest += L"  xmlns:rescap=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities\"\r\n";
+        manifest += L"  IgnorableNamespaces=\"uap rescap\">\r\n\r\n";
+        manifest += L"  <Identity\r\n";
+        manifest += L"    Name=\"" + identity + L"\"\r\n";
+        manifest += L"    Publisher=\"" + publisher + L"\"\r\n";
+        manifest += L"    Version=\"" + version + L"\" />\r\n\r\n";
+        manifest += L"  <Properties>\r\n";
+        manifest += L"    <DisplayName>" + displayName + L"</DisplayName>\r\n";
+        manifest += L"    <PublisherDisplayName>" + publisherDisplayName + L"</PublisherDisplayName>\r\n";
+        manifest += L"    <Logo>" + propertiesLogo + L"</Logo>\r\n";
+        manifest += L"  </Properties>\r\n\r\n";
+        manifest += L"  <Dependencies>\r\n";
+        manifest += L"    <TargetDeviceFamily Name=\"" + targetDeviceFamilyName + L"\"\r\n";
+        manifest += L"                        MinVersion=\"" + minVersion + L"\"\r\n";
+        manifest += L"                        MaxVersionTested=\"" + maxVersionTested + L"\" />\r\n";
+        manifest += L"  </Dependencies>\r\n\r\n";
+        manifest += L"  <Resources>\r\n";
+        manifest += L"    <Resource Language=\"" + resourceLanguage + L"\" />\r\n";
+        manifest += L"  </Resources>\r\n\r\n";
+        manifest += L"  <Applications>\r\n";
+        manifest += L"    <Application Id=\"" + appId + L"\"\r\n";
+        manifest += L"                 Executable=\"" + executable + L"\"\r\n";
+        manifest += L"                 EntryPoint=\"" + entryPoint + L"\">\r\n\r\n";
+        manifest += L"      <uap:VisualElements\r\n";
+        manifest += L"        DisplayName=\"" + displayName + L"\"\r\n";
+        manifest += L"        Description=\"" + description + L"\"\r\n";
+        manifest += L"        Square150x150Logo=\"" + square150x150Logo + L"\"\r\n";
+        manifest += L"        Square44x44Logo=\"" + square44x44Logo + L"\"\r\n";
+        manifest += L"        BackgroundColor=\"" + backgroundColor + L"\">\r\n\r\n";
+        manifest += L"        <uap:DefaultTile\r\n";
+        manifest += L"          Square71x71Logo=\"" + square71x71Logo + L"\"\r\n";
+        manifest += L"          Wide310x150Logo=\"" + wide310x150Logo + L"\"\r\n";
+        manifest += L"          Square310x310Logo=\"" + square310x310Logo + L"\">\r\n\r\n";
+        if (!showNameOnTiles.empty())
+        {
+            manifest += L"          <uap:ShowNameOnTiles>\r\n";
+            for (const std::wstring& tile : showNameOnTiles)
+                manifest += L"            <uap:ShowOn Tile=\"" + XmlEscape(tile) + L"\" />\r\n";
+            manifest += L"          </uap:ShowNameOnTiles>\r\n\r\n";
+        }
+        manifest += L"        </uap:DefaultTile>\r\n\r\n";
+        manifest += L"      </uap:VisualElements>\r\n";
+        manifest += L"    </Application>\r\n";
+        manifest += L"  </Applications>\r\n\r\n";
+        if (!restrictedCapability.empty())
+        {
+            manifest += L"  <Capabilities>\r\n";
+            manifest += L"    <rescap:Capability Name=\"" + restrictedCapability + L"\" />\r\n";
+            manifest += L"  </Capabilities>\r\n\r\n";
+        }
+        manifest += L"</Package>\r\n";
+        return manifest;
+    }
+
+    if (target == ManifestCompatibilityTarget::Windows81)
+    {
+        manifest += L"<Package xmlns=\"http://schemas.microsoft.com/appx/2010/manifest\" xmlns:m2=\"http://schemas.microsoft.com/appx/2013/manifest\">\r\n\r\n";
+        manifest += L"  <Identity Name=\"" + identity + L"\" Publisher=\"" + publisher + L"\" Version=\"" + version + L"\" ProcessorArchitecture=\"x64\" />\r\n\r\n";
+        manifest += L"  <Properties>\r\n";
+        manifest += L"    <DisplayName>" + displayName + L"</DisplayName>\r\n";
+        manifest += L"    <PublisherDisplayName>" + publisherDisplayName + L"</PublisherDisplayName>\r\n";
+        manifest += L"    <Logo>" + propertiesLogo + L"</Logo>\r\n";
+        manifest += L"  </Properties>\r\n\r\n";
+        manifest += L"  <Prerequisites>\r\n";
+        manifest += L"    <OSMinVersion>" + minVersion + L"</OSMinVersion>\r\n";
+        manifest += L"    <OSMaxVersionTested>" + maxVersionTested + L"</OSMaxVersionTested>\r\n";
+        manifest += L"  </Prerequisites>\r\n\r\n";
+        manifest += L"  <Resources>\r\n";
+        manifest += L"    <Resource m2:Scale=\"100\" />\r\n";
+        manifest += L"    <Resource Language=\"" + resourceLanguage + L"\" />\r\n";
+        manifest += L"  </Resources>\r\n\r\n";
+        manifest += L"  <Applications>\r\n";
+        manifest += L"    <Application Id=\"" + appId + L"\" Executable=\"" + executable + L"\" EntryPoint=\"" + entryPoint + L"\">\r\n";
+        manifest += L"      <m2:VisualElements DisplayName=\"" + displayName + L"\" Square150x150Logo=\"" + square150x150Logo + L"\" Square30x30Logo=\"" + square30x30Logo + L"\" Description=\"" + description + L"\" ForegroundText=\"light\" BackgroundColor=\"" + backgroundColor + L"\" ToastCapable=\"true\">\r\n";
+        manifest += L"        <m2:DefaultTile Square70x70Logo=\"" + square71x71Logo + L"\" Wide310x150Logo=\"" + wide310x150Logo + L"\" Square310x310Logo=\"" + square310x310Logo + L"\" DefaultSize=\"square150x150Logo\">\r\n";
+        if (!showNameOnTiles.empty())
+        {
+            manifest += L"          <m2:ShowNameOnTiles>\r\n";
+            for (const std::wstring& tile : showNameOnTiles)
+                manifest += L"            <m2:ShowOn Tile=\"" + XmlEscape(tile) + L"\" />\r\n";
+            manifest += L"          </m2:ShowNameOnTiles>\r\n";
+        }
+        manifest += L"        </m2:DefaultTile>\r\n";
+        manifest += L"        <m2:SplashScreen Image=\"" + splashScreenImage + L"\" />\r\n";
+        manifest += L"        <m2:ApplicationView MinWidth=\"width320\" />\r\n";
+        manifest += L"      </m2:VisualElements>\r\n";
+        if (Win8LiveTileBackgroundTaskEnabled())
+        {
+            manifest += L"      <Extensions>\r\n";
+            manifest += L"        <Extension Category=\"windows.backgroundTasks\" EntryPoint=\"" + ManifestLiveTileBackgroundTaskClassId() + L"\">\r\n";
+            manifest += L"          <BackgroundTasks>\r\n";
+            manifest += L"            <Task Type=\"systemEvent\" />\r\n";
+            manifest += L"          </BackgroundTasks>\r\n";
+            manifest += L"        </Extension>\r\n";
+            manifest += L"      </Extensions>\r\n";
+        }
+        manifest += L"    </Application>\r\n";
+        manifest += L"  </Applications>\r\n\r\n";
+        if (Win8LiveTileBackgroundTaskEnabled() || Win8LiveTileOopHelperEnabled())
+        {
+            manifest += L"  <Extensions>\r\n";
+            if (Win8LiveTileBackgroundTaskEnabled())
+            {
+                manifest += L"    <Extension Category=\"windows.activatableClass.inProcessServer\">\r\n";
+                manifest += L"      <InProcessServer>\r\n";
+                manifest += L"        <Path>" + ManifestLiveTileBackgroundTaskDllName() + L"</Path>\r\n";
+                manifest += L"        <ActivatableClass ActivatableClassId=\"" + ManifestLiveTileBackgroundTaskClassId() + L"\" ThreadingModel=\"both\" />\r\n";
+                manifest += L"      </InProcessServer>\r\n";
+                manifest += L"    </Extension>\r\n";
+            }
+            if (Win8LiveTileOopHelperEnabled())
+            {
+                manifest += L"    <Extension Category=\"windows.activatableClass.outOfProcessServer\">\r\n";
+                manifest += L"      <OutOfProcessServer ServerName=\"" + ManifestLiveTileOopServerName() + L"\">\r\n";
+                manifest += L"        <Path>" + executable + L"</Path>\r\n";
+                manifest += L"        <Instancing>singleInstance</Instancing>\r\n";
+                manifest += L"        <ActivatableClass ActivatableClassId=\"" + ManifestLiveTileOopRuntimeClassId() + L"\" />\r\n";
+                manifest += L"      </OutOfProcessServer>\r\n";
+                manifest += L"    </Extension>\r\n";
+            }
+            manifest += L"  </Extensions>\r\n";
+        }
+        manifest += L"</Package>\r\n";
+        return manifest;
+    }
+
+    manifest += L"<Package xmlns=\"http://schemas.microsoft.com/appx/2010/manifest\">\r\n\r\n";
+    manifest += L"  <Identity Name=\"" + identity + L"\" Publisher=\"" + publisher + L"\" Version=\"" + version + L"\" ProcessorArchitecture=\"x64\" />\r\n\r\n";
     manifest += L"  <Properties>\r\n";
     manifest += L"    <DisplayName>" + displayName + L"</DisplayName>\r\n";
     manifest += L"    <PublisherDisplayName>" + publisherDisplayName + L"</PublisherDisplayName>\r\n";
     manifest += L"    <Logo>" + propertiesLogo + L"</Logo>\r\n";
     manifest += L"  </Properties>\r\n\r\n";
-    manifest += L"  <Dependencies>\r\n";
-    manifest += L"    <TargetDeviceFamily Name=\"" + targetDeviceFamilyName + L"\"\r\n";
-    manifest += L"                        MinVersion=\"" + minVersion + L"\"\r\n";
-    manifest += L"                        MaxVersionTested=\"" + maxVersionTested + L"\" />\r\n";
-    manifest += L"  </Dependencies>\r\n\r\n";
+    manifest += L"  <Prerequisites>\r\n";
+    manifest += L"    <OSMinVersion>" + minVersion + L"</OSMinVersion>\r\n";
+    manifest += L"    <OSMaxVersionTested>" + maxVersionTested + L"</OSMaxVersionTested>\r\n";
+    manifest += L"  </Prerequisites>\r\n\r\n";
     manifest += L"  <Resources>\r\n";
     manifest += L"    <Resource Language=\"" + resourceLanguage + L"\" />\r\n";
     manifest += L"  </Resources>\r\n\r\n";
     manifest += L"  <Applications>\r\n";
-    manifest += L"    <Application Id=\"" + appId + L"\"\r\n";
-    manifest += L"                 Executable=\"" + executable + L"\"\r\n";
-    manifest += L"                 EntryPoint=\"" + entryPoint + L"\">\r\n\r\n";
-    manifest += L"      <uap:VisualElements\r\n";
-    manifest += L"        DisplayName=\"" + displayName + L"\"\r\n";
-    manifest += L"        Description=\"" + description + L"\"\r\n";
-    manifest += L"        Square150x150Logo=\"" + square150x150Logo + L"\"\r\n";
-    manifest += L"        Square44x44Logo=\"" + square44x44Logo + L"\"\r\n";
-    manifest += L"        BackgroundColor=\"" + backgroundColor + L"\">\r\n\r\n";
-    manifest += L"        <uap:DefaultTile\r\n";
-    manifest += L"          Square71x71Logo=\"" + square71x71Logo + L"\"\r\n";
-    manifest += L"          Wide310x150Logo=\"" + wide310x150Logo + L"\"\r\n";
-    manifest += L"          Square310x310Logo=\"" + square310x310Logo + L"\">\r\n\r\n";
-    if (!showNameOnTiles.empty())
+    manifest += L"    <Application Id=\"" + appId + L"\" Executable=\"" + executable + L"\" EntryPoint=\"" + entryPoint + L"\">\r\n";
+    manifest += L"      <VisualElements DisplayName=\"" + displayName + L"\" Logo=\"" + square150x150Logo + L"\" SmallLogo=\"" + square30x30Logo + L"\" Description=\"" + description + L"\" ForegroundText=\"light\" BackgroundColor=\"" + backgroundColor + L"\" ToastCapable=\"true\">\r\n";
+    manifest += L"        <DefaultTile WideLogo=\"" + wide310x150Logo + L"\" ShowName=\"allLogos\" />\r\n";
+    manifest += L"        <SplashScreen Image=\"" + splashScreenImage + L"\" />\r\n";
+    manifest += L"      </VisualElements>\r\n";
+    if (Win8LiveTileBackgroundTaskEnabled())
     {
-        manifest += L"          <uap:ShowNameOnTiles>\r\n";
-        for (const std::wstring& tile : showNameOnTiles)
-            manifest += L"            <uap:ShowOn Tile=\"" + XmlEscape(tile) + L"\" />\r\n";
-        manifest += L"          </uap:ShowNameOnTiles>\r\n\r\n";
+        manifest += L"      <Extensions>\r\n";
+        manifest += L"        <Extension Category=\"windows.backgroundTasks\" EntryPoint=\"" + ManifestLiveTileBackgroundTaskClassId() + L"\">\r\n";
+        manifest += L"          <BackgroundTasks>\r\n";
+        manifest += L"            <Task Type=\"systemEvent\" />\r\n";
+        manifest += L"          </BackgroundTasks>\r\n";
+        manifest += L"        </Extension>\r\n";
+        manifest += L"      </Extensions>\r\n";
     }
-    manifest += L"        </uap:DefaultTile>\r\n\r\n";
-    manifest += L"      </uap:VisualElements>\r\n";
     manifest += L"    </Application>\r\n";
     manifest += L"  </Applications>\r\n\r\n";
-    if (!restrictedCapability.empty())
+    if (Win8LiveTileBackgroundTaskEnabled() || Win8LiveTileOopHelperEnabled())
     {
-        manifest += L"  <Capabilities>\r\n";
-        manifest += L"    <rescap:Capability Name=\"" + restrictedCapability + L"\" />\r\n";
-        manifest += L"  </Capabilities>\r\n\r\n";
+        manifest += L"  <Extensions>\r\n";
+        if (Win8LiveTileBackgroundTaskEnabled())
+        {
+            manifest += L"    <Extension Category=\"windows.activatableClass.inProcessServer\">\r\n";
+            manifest += L"      <InProcessServer>\r\n";
+            manifest += L"        <Path>" + ManifestLiveTileBackgroundTaskDllName() + L"</Path>\r\n";
+            manifest += L"        <ActivatableClass ActivatableClassId=\"" + ManifestLiveTileBackgroundTaskClassId() + L"\" ThreadingModel=\"both\" />\r\n";
+            manifest += L"      </InProcessServer>\r\n";
+            manifest += L"    </Extension>\r\n";
+        }
+        if (Win8LiveTileOopHelperEnabled())
+        {
+            manifest += L"    <Extension Category=\"windows.activatableClass.outOfProcessServer\">\r\n";
+            manifest += L"      <OutOfProcessServer ServerName=\"" + ManifestLiveTileOopServerName() + L"\">\r\n";
+            manifest += L"        <Path>" + executable + L"</Path>\r\n";
+            manifest += L"        <Instancing>singleInstance</Instancing>\r\n";
+            manifest += L"        <ActivatableClass ActivatableClassId=\"" + ManifestLiveTileOopRuntimeClassId() + L"\" />\r\n";
+            manifest += L"      </OutOfProcessServer>\r\n";
+            manifest += L"    </Extension>\r\n";
+        }
+        manifest += L"  </Extensions>\r\n";
     }
     manifest += L"</Package>\r\n";
     return manifest;
+}
+
+static bool EnsureAppxActivationStubExecutable(DWORD& error)
+{
+    error = ERROR_SUCCESS;
+
+    ManifestCompatibilityTarget target = ConfiguredManifestCompatibilityTarget();
+    if (target == ManifestCompatibilityTarget::Windows10)
+        return true;
+
+    std::wstring executable = EffectiveManifestExecutable();
+    if (IEquals(executable, ManifestHostExecutableName()))
+        return true;
+
+    std::wstring dir = GetExeDir();
+    if (dir.empty() || g_exePath.empty())
+    {
+        error = ERROR_INVALID_PARAMETER;
+        SetLastError(error);
+        return false;
+    }
+
+    std::wstring targetPath = dir + L"\\" + executable;
+    if (IEquals(targetPath, g_exePath))
+        return true;
+
+    if (IEquals(executable, ManifestLiveTileBrokerExecutableName()))
+    {
+        DWORD attrs = GetFileAttributesW(targetPath.c_str());
+        if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY))
+            return true;
+        error = ERROR_FILE_NOT_FOUND;
+        SetLastError(error);
+        return false;
+    }
+
+    if (CopyFileW(g_exePath.c_str(), targetPath.c_str(), FALSE))
+        return true;
+
+    error = GetLastError();
+    if (error == ERROR_SUCCESS)
+        error = ERROR_WRITE_FAULT;
+    return false;
 }
 
 static bool RegenerateAppxManifestFromConfig(std::wstring& manifestPath, DWORD& error)
 {
     manifestPath = GetExeDir() + L"\\AppxManifest.xml";
     error = ERROR_SUCCESS;
+
+    if (!EnsureAppxActivationStubExecutable(error))
+        return false;
 
     if (WriteUtf8BomTextFile(manifestPath, BuildDefaultAppxManifest()))
         return true;
@@ -1058,6 +1387,8 @@ static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD&
     {
         if ((attrs & FILE_ATTRIBUTE_DIRECTORY) == 0)
         {
+            if (!EnsureAppxActivationStubExecutable(error))
+                return false;
             Log(g_ui.appxManifestExisting.c_str(), manifestPath.c_str());
             return true;
         }
@@ -1065,6 +1396,9 @@ static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD&
         SetLastError(error);
         return false;
     }
+
+    if (!EnsureAppxActivationStubExecutable(error))
+        return false;
 
     if (WriteUtf8BomTextFile(manifestPath, BuildDefaultAppxManifest()))
     {

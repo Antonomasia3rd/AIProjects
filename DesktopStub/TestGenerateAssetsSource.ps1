@@ -125,6 +125,7 @@ function Assert-UiStringWired {
 
 $generation = Read-Source 'src\ga_generation.inc'
 $app = Read-Source 'src\ga_app.inc'
+$buildScript = Read-Source 'BuildGenerateAssets.cmd'
 $image = Read-Source 'src\ga_image.inc'
 $desktopIcon = Read-Source 'src\ga_desktop_icon_png.inc'
 $registration = Read-Source 'src\ga_registration.inc'
@@ -144,6 +145,20 @@ $uiSources = Join-Source @(
 )
 
 $sourceChecks = @(
+    (New-SourceCheck `
+        -Name 'Build script ignores legacy target arguments' `
+        -SourceName 'BuildGenerateAssets.cmd' `
+        -SourceText $buildScript `
+        -Pattern '(?s)Build policy:.*ignores every argument.*GenerateAssetsLiveTileBroker\.exe.*if not "%~1"=="".*One or more arguments were supplied and ignored' `
+        -Failure 'BuildGenerateAssets.cmd must accept but ignore old target arguments so every invocation builds the same outputs'),
+
+    (New-SourceCheck `
+        -Name 'Build script always builds host and broker' `
+        -SourceName 'BuildGenerateAssets.cmd' `
+        -SourceText $buildScript `
+        -Pattern '(?s)echo Building packaged Live Tile broker\.\.\..*LiveTileBroker\.cpp.*echo Building main GenerateAssets host\.\.\..*GenerateAssets\.cpp' `
+        -Failure 'BuildGenerateAssets.cmd must always build both GenerateAssets.exe and GenerateAssetsLiveTileBroker.exe'),
+
     (New-SourceCheck `
         -Name 'Startup skip validates manifest-resolved assets' `
         -SourceName 'src\ga_generation.inc' `
@@ -201,11 +216,11 @@ $sourceChecks = @(
         -Failure 'INI template must not recreate the redundant [Manifest] editor section'),
 
     (New-SourceCheck `
-        -Name 'Manifest executable fallback launches GenerateAssets' `
+        -Name 'Manifest executable fallback uses Win10 host and Win8 broker' `
         -SourceName 'src\ga_manifest.inc' `
         -SourceText $manifest `
-        -Pattern 'ManifestSettingValidated\(L"Executable",\s*L"GenerateAssets\.exe",\s*L"ManifestExecutable",\s*IsManifestExecutableValue\)' `
-        -Failure 'manifest executable fallback must point at GenerateAssets.exe'),
+        -Pattern '(?s)EffectiveManifestExecutable.*ManifestHostExecutableName\(\).*ConfiguredManifestCompatibilityTarget.*Win8LiveTileBrokerAppEnabled\(\).*ManifestLiveTileBrokerExecutableName\(\).*ManifestAppxActivationStubExecutableName\(\).*ManifestSettingValidated\(L"Executable",\s*fallback\.c_str\(\)' `
+        -Failure 'manifest executable fallback must keep Windows 10 on GenerateAssets.exe while Windows 8/8.1 targets default to the packaged broker helper'),
 
     (New-SourceCheck `
         -Name 'Manifest generation ignores redundant INI manifest editor' `
@@ -362,10 +377,38 @@ $sourceChecks = @(
         -Failure 'Live Tile mode must write dedicated versioned Live*.png notification assets instead of relying on manifest logo assets or overwriting the displayed tile image in place'),
 
     (New-SourceCheck `
+        -Name 'Manifest target can generate Windows 10, 8.1, and 8 manifests' `
+        -SourceName 'manifest/command-line sources' `
+        -SourceText ($manifest + "`n" + $commandLine + "`n" + $tray) `
+        -Pattern '(?s)appx/2010/manifest.*xmlns:m2=.*2013/manifest.*AppxManifestTarget.*--manifest-target.*ID_MANIFEST_TARGET_WINDOWS10.*ID_MANIFEST_TARGET_WINDOWS81.*ID_MANIFEST_TARGET_WINDOWS8' `
+        -Failure 'manifest target selection must cover Windows 10, Windows 8.1, and Windows 8 from command line and tray'),
+
+    (New-SourceCheck `
+        -Name 'Windows 8 broker helper is the default stabilized Live Tile path' `
+        -SourceName 'manifest/live-tile/config sources' `
+        -SourceText ($defaults + "`n" + $manifest + "`n" + $liveTile) `
+        -Pattern '(?s)\{L"Settings",\s*L"Win8LiveTileOopHelper",\s*L"0"\}.*\{L"Settings",\s*L"Win8LiveTileBackgroundTask",\s*L"0"\}.*\{L"Settings",\s*L"Win8LiveTileBrokerApp",\s*L"1"\}.*Win8LiveTileBrokerApp.*IniReadI\(L"Settings",\s*L"Win8LiveTileBrokerApp",\s*1\).*Packaged WinRT Live Tile broker reported success' `
+        -Failure 'Windows 8/8.1 compatibility mode should default to the packaged WinRT broker while leaving background/OOP experiments disabled'),
+
+    (New-SourceCheck `
+        -Name 'Windows 8 app activation command line arguments are tolerated' `
+        -SourceName 'src\ga_command_line.inc' `
+        -SourceText $commandLine `
+        -Pattern '(?s)TryParseAppxActivationArgument.*-ServerName:.*IsAppxActivationServerNameOption.*IsIgnoredAppxActivationArgument.*-Embedding.*appxActivationServer' `
+        -Failure 'Windows 8/8.1-style AppX activation arguments such as -ServerName:... must not be rejected as unknown command-line options'),
+
+    (New-SourceCheck `
+        -Name 'Legacy Live Tile XML uses Windows 8/8.1 templates' `
+        -SourceName 'src\ga_live_tile.inc' `
+        -SourceText $liveTile `
+        -Pattern '(?s)LiveTileTemplateForTarget.*TileSquare150x150Image.*TileSquareImage.*TileWide310x150Image.*TileWideImage.*TileSquare310x310Image.*visual version=.*2' `
+        -Failure 'Windows 8/8.1 manifest targets must use legacy tile notification templates instead of Windows 10 adaptive templates'),
+
+    (New-SourceCheck `
         -Name 'Live Tile XML uses dedicated notification assets' `
         -SourceName 'src\ga_live_tile.inc' `
         -SourceText $liveTile `
-        -Pattern '(?s)BuildLiveTileXml.*const std::vector<LiveTileUpdateAsset>& liveTileAssets.*for \(const auto& asset : liveTileAssets\).*LiveTileAssetUriIfValid\(exeDir,\s*asset\.file\).*AppendLiveTileImageBinding\(xml,\s*asset\.binding' `
+        -Pattern '(?s)BuildLiveTileXml.*const std::vector<LiveTileUpdateAsset>& liveTileAssets.*for \(const auto& asset : liveTileAssets\).*LiveTileTemplateForTarget\(asset\.binding\).*LiveTileAssetUriIfValid\(exeDir,\s*asset\.file\).*AppendLiveTileImageBinding\(xml,\s*templateName' `
         -Failure 'Live Tile XML must reference the generated Live*.png update assets')
 )
 
@@ -390,6 +433,14 @@ $uiStringKeys = @(
     'GeneratedAssetCacheSummary',
     'GeneratedAssetPrecacheSaved',
     'GeneratedAssetPrecacheSummary',
+    'ManifestTargetSummary',
+    'AppxManifestTarget',
+    'AppxManifestTargetWindows10',
+    'AppxManifestTargetWindows81',
+    'AppxManifestTargetWindows8',
+    'ManifestTargetLabel',
+    'ManifestSquare30x30LogoLabel',
+    'ManifestSplashScreenImageLabel',
     'ManifestRegenerateNow',
     'GenerateScaleAutoPreservesManualToggles',
     'StartupGenerationReason',
@@ -421,6 +472,13 @@ Write-Host 'This checks source guardrails only; it does not build or launch the 
 foreach ($check in $sourceChecks) {
     Assert-SourceCheck $check
 }
+
+Assert-SourceAbsent `
+    -Name 'Build script no longer has argument-selected targets' `
+    -SourceName 'BuildGenerateAssets.cmd' `
+    -SourceText $buildScript `
+    -Pattern 'BUILD_BROKER|BUILD_BACKGROUND_TASK|unknown build option|:ParseArgs|:ShowHelp' `
+    -Failure 'BuildGenerateAssets.cmd must not restore argument-selected target branches'
 
 Assert-SourceAbsent `
     -Name 'Live Tile update does not clear the existing tile first' `

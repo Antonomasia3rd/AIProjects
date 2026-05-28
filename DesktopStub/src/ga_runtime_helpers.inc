@@ -1,4 +1,4 @@
-bool UsePowerShell()
+﻿bool UsePowerShell()
 {
     return IniReadI(L"Settings", L"UsePowerShell", 0) != 0;
 }
@@ -17,6 +17,25 @@ static LiveTileUpdateMode ConfiguredLiveTileUpdateMode()
     }
 }
 
+static ManifestCompatibilityTarget ConfiguredManifestCompatibilityTarget()
+{
+    ManifestCompatibilityTarget target = static_cast<ManifestCompatibilityTarget>(g_manifestCompatibilityTarget.load());
+    switch (target)
+    {
+    case ManifestCompatibilityTarget::Windows10:
+    case ManifestCompatibilityTarget::Windows81:
+    case ManifestCompatibilityTarget::Windows8:
+        return target;
+    default:
+        return ManifestCompatibilityTarget::Windows10;
+    }
+}
+
+static std::wstring ManifestCompatibilityTargetSummaryText()
+{
+    return ManifestCompatibilityTargetName(ConfiguredManifestCompatibilityTarget());
+}
+
 static bool CurrentProcessHasPackageIdentity()
 {
     UINT32 length = 0;
@@ -29,6 +48,17 @@ static LiveTileUpdateMode EffectiveLiveTileUpdateMode()
     LiveTileUpdateMode mode = ConfiguredLiveTileUpdateMode();
     if (mode != LiveTileUpdateMode::Auto)
         return mode;
+
+    // Windows 8/8.1 manifest mode is meant for the Start Screen / Live Tile
+    // compatibility path. The resident tray process is still unpackaged, but it
+    // can ask the registered package activation stub to perform the actual
+    // TileUpdateManager call under package identity. Treat Auto as LiveTile for
+    // these manifest targets so wallpaper changes generate live-tile assets and
+    // route the update through the stub.
+    ManifestCompatibilityTarget target = ConfiguredManifestCompatibilityTarget();
+    if (target == ManifestCompatibilityTarget::Windows81 ||
+        target == ManifestCompatibilityTarget::Windows8)
+        return LiveTileUpdateMode::LiveTile;
 
     return CurrentProcessHasPackageIdentity()
         ? LiveTileUpdateMode::LiveTile

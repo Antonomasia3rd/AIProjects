@@ -1,4 +1,4 @@
-static std::wstring ExceptionTextToWide(const std::exception& ex)
+﻿static std::wstring ExceptionTextToWide(const std::exception& ex)
 {
     const char* text = ex.what();
     if (text && *text)
@@ -146,6 +146,11 @@ static void LogWin32FailureText(const wchar_t* what, DWORD err)
     Log(g_ui.win32FailureFmt.c_str(), what, err, Win32ErrorString(err).c_str());
 }
 
+void LogWin32Failure(const wchar_t* what, DWORD err = GetLastError())
+{
+    LogWin32FailureText(what, err);
+}
+
 static void ApplyConsoleSetting(bool enable, bool writeIni, bool logState)
 {
     std::lock_guard<std::mutex> applyLock(g_consoleApplyMutex);
@@ -265,6 +270,10 @@ static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
     g_generateOnStartupOnlyWhenChanged = IniReadI(L"Settings", L"GenerateOnStartupOnlyWhenChanged", 1) != 0;
     g_liveTileUpdateMode = static_cast<int>(ParseLiveTileUpdateModeValue(
         IniReadS(L"Settings", L"ExperimentalLiveTileUpdate", L"Auto")));
+    g_liveTileRelaunchOnSwitch = IniReadI(L"Settings", L"LiveTileRelaunchOnSwitch", 0) != 0;
+    g_clearLiveTileOnShutdown = IniReadI(L"Settings", L"ClearLiveTileOnShutdown", 1) != 0;
+    g_manifestCompatibilityTarget = static_cast<int>(ParseManifestCompatibilityTargetValue(
+        IniReadS(L"Settings", L"AppxManifestTarget", L"Windows10")));
     g_hideDisabled = IniReadI(L"Settings", L"HideDisabledEntries", 0) != 0;
     g_generateDesktopIconForDisabledEntries = IniReadI(L"Settings", L"GenerateDesktopIconForDisabledEntries", 1) != 0;
     g_deleteDisabledAssets = IniReadI(L"Settings", L"DeleteDisabledAssets", 0) != 0;

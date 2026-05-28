@@ -1,4 +1,4 @@
-// -----------------------------------------------------------------------------
+﻿// -----------------------------------------------------------------------------
 // Command-line parsing and persisted INI setting changes
 // -----------------------------------------------------------------------------
 struct CommandLineIniSetting
@@ -20,11 +20,16 @@ struct CommandLineOptions
     bool customIniPath = false;
     bool wallpaperSpecified = false;
     bool comRegistrationHelper = false;
+    bool appxActivationServer = false;
+    bool launchedFromAppxStub = false;
+    bool launchedFromModeSwitch = false;
+    DWORD waitForPid = 0;
     std::wstring parseError;
     std::wstring applyError;
     std::wstring iniPath;
     std::wstring wallpaperPath;
     std::wstring comRegistrationHelperManifestPath;
+    std::wstring appxActivationServerName;
     std::vector<CommandLineIniSetting> settings;
     bool liveTileModeChanged = false;
     bool trayIconChanged = false;
@@ -40,6 +45,7 @@ static constexpr WPARAM SINGLE_INSTANCE_REQUEST_RELOAD_SETTINGS = 1;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_EXIT = 2;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_GENERATE = 3;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_REGENERATE_MANIFEST = 4;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_MESSAGEBOX = 5;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MASK = 0x00FF;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON = 0x0100;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_REGENERATE_MANIFEST = 0x0200;
@@ -107,6 +113,67 @@ static bool IsValidLiveTileUpdateMode(LiveTileUpdateMode mode)
 static void AddCommandLineLiveTileModeSetting(LiveTileUpdateMode mode)
 {
     AddCommandLineIniSetting(L"Settings", L"ExperimentalLiveTileUpdate", LiveTileUpdateModeIniValue(mode));
+}
+
+static ManifestCompatibilityTarget ParseManifestCompatibilityTargetValue(
+    const std::wstring& rawValue,
+    ManifestCompatibilityTarget fallback = ManifestCompatibilityTarget::Windows10)
+{
+    std::wstring v = ToLowerCopy(TrimCopy(rawValue));
+    if (v.empty())
+        return fallback;
+
+    if (v == L"10" || v == L"win10" || v == L"windows10" ||
+        v == L"windows 10" || v == L"default")
+        return ManifestCompatibilityTarget::Windows10;
+    if (v == L"8.1" || v == L"81" || v == L"win81" || v == L"win8.1" ||
+        v == L"windows81" || v == L"windows8.1" || v == L"windows 8.1")
+        return ManifestCompatibilityTarget::Windows81;
+    if (v == L"8" || v == L"8.0" || v == L"80" || v == L"win8" || v == L"win80" ||
+        v == L"windows8" || v == L"windows 8" || v == L"windows 8.0")
+        return ManifestCompatibilityTarget::Windows8;
+
+    return fallback;
+}
+
+static std::wstring ManifestCompatibilityTargetIniValue(ManifestCompatibilityTarget target)
+{
+    switch (target)
+    {
+    case ManifestCompatibilityTarget::Windows81:
+        return L"Windows81";
+    case ManifestCompatibilityTarget::Windows8:
+        return L"Windows8";
+    case ManifestCompatibilityTarget::Windows10:
+    default:
+        return L"Windows10";
+    }
+}
+
+static const wchar_t* ManifestCompatibilityTargetName(ManifestCompatibilityTarget target)
+{
+    switch (target)
+    {
+    case ManifestCompatibilityTarget::Windows81:
+        return L"Windows 8.1";
+    case ManifestCompatibilityTarget::Windows8:
+        return L"Windows 8";
+    case ManifestCompatibilityTarget::Windows10:
+    default:
+        return L"Windows 10";
+    }
+}
+
+static bool IsValidManifestCompatibilityTarget(ManifestCompatibilityTarget target)
+{
+    return target == ManifestCompatibilityTarget::Windows10 ||
+        target == ManifestCompatibilityTarget::Windows81 ||
+        target == ManifestCompatibilityTarget::Windows8;
+}
+
+static void AddCommandLineManifestTargetSetting(ManifestCompatibilityTarget target)
+{
+    AddCommandLineIniSetting(L"Settings", L"AppxManifestTarget", ManifestCompatibilityTargetIniValue(target));
 }
 
 static std::wstring QuoteCommandLineArg(const std::wstring& arg)
@@ -459,6 +526,64 @@ static bool IsLikelyCommandLineOption(const std::wstring& arg)
     return !arg.empty() && (arg[0] == L'-' || arg[0] == L'/');
 }
 
+static bool CommandLineStartsWithI(const std::wstring& text, const wchar_t* prefix)
+{
+    std::wstring p = prefix ? prefix : L"";
+    return text.size() >= p.size() && IEquals(text.substr(0, p.size()), p);
+}
+
+static bool TryParseAppxActivationArgument(const std::wstring& arg, std::wstring& serverName)
+{
+    serverName.clear();
+
+    static const wchar_t* prefixes[] = {
+        L"-ServerName:",
+        L"/ServerName:",
+        L"--ServerName:",
+        L"-ServerName=",
+        L"/ServerName=",
+        L"--ServerName=",
+    };
+
+    for (const wchar_t* prefix : prefixes)
+    {
+        if (CommandLineStartsWithI(arg, prefix))
+        {
+            serverName = arg.substr(wcslen(prefix));
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool IsAppxActivationServerNameOption(const std::wstring& arg)
+{
+    return IEquals(arg, L"-ServerName") ||
+        IEquals(arg, L"/ServerName") ||
+        IEquals(arg, L"--ServerName");
+}
+
+static bool IsIgnoredAppxActivationArgument(const std::wstring& arg)
+{
+    return IEquals(arg, L"-Embedding") ||
+        IEquals(arg, L"/Embedding") ||
+        IEquals(arg, L"--embedding");
+}
+
+static bool IsInternalAppActivationActionArgument(const std::wstring& arg)
+{
+    // IApplicationActivationManager::ActivateApplication appends its argument
+    // string to the executable command line. These action tokens are not
+    // wallpaper paths; accepting them here prevents a packaged relaunch like
+    // "relaunch-live-tile" from being converted into
+    // "<exe-dir>\relaunch-live-tile" and rejected by wallpaper validation.
+    return IEquals(arg, L"relaunch-live-tile") ||
+        IEquals(arg, L"tile-update") ||
+        IEquals(arg, L"tile-clear") ||
+        IEquals(arg, L"show-messagebox");
+}
+
 static bool SetCommandLineWallpaperPath(const std::wstring& rawPath, std::wstring& error)
 {
     std::wstring path;
@@ -506,6 +631,50 @@ static bool ParseCommandLineOptions()
         if (IEquals(arg, L"--exit") || IEquals(arg, L"--quit"))
         {
             g_commandLine.exitRequested = true;
+            continue;
+        }
+
+        if (TryParseAppxActivationArgument(arg, value))
+        {
+            g_commandLine.appxActivationServer = true;
+            g_commandLine.appxActivationServerName = value;
+            continue;
+        }
+        if (IsAppxActivationServerNameOption(arg))
+        {
+            g_commandLine.appxActivationServer = true;
+            if (i + 1 < argc)
+                g_commandLine.appxActivationServerName = argv[++i] ? argv[i] : L"";
+            continue;
+        }
+        if (IsIgnoredAppxActivationArgument(arg))
+        {
+            g_commandLine.appxActivationServer = true;
+            continue;
+        }
+        if (IEquals(arg, L"--launched-from-appx-stub"))
+        {
+            g_commandLine.launchedFromAppxStub = true;
+            continue;
+        }
+        if (IEquals(arg, L"--launched-from-mode-switch"))
+        {
+            g_commandLine.launchedFromModeSwitch = true;
+            continue;
+        }
+        if (IsInternalAppActivationActionArgument(arg))
+        {
+            continue;
+        }
+
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--ga-wait-for-pid", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            int pid = 0;
+            if (!CommandLineParseInteger(value, pid) || pid <= 0)
+                return fail(L"Invalid process id after --ga-wait-for-pid: " + value + L".");
+            g_commandLine.waitForPid = static_cast<DWORD>(pid);
             continue;
         }
 
@@ -697,6 +866,39 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (IEquals(arg, L"--manifest-win10"))
+        {
+            AddCommandLineManifestTargetSetting(ManifestCompatibilityTarget::Windows10);
+            g_commandLine.regenerateManifest = true;
+            continue;
+        }
+        if (IEquals(arg, L"--manifest-win81") || IEquals(arg, L"--manifest-win8.1"))
+        {
+            AddCommandLineManifestTargetSetting(ManifestCompatibilityTarget::Windows81);
+            g_commandLine.regenerateManifest = true;
+            continue;
+        }
+        if (IEquals(arg, L"--manifest-win8") || IEquals(arg, L"--manifest-win80") || IEquals(arg, L"--manifest-win8.0"))
+        {
+            AddCommandLineManifestTargetSetting(ManifestCompatibilityTarget::Windows8);
+            g_commandLine.regenerateManifest = true;
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--manifest-target", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring trimmed = TrimCopy(value);
+            ManifestCompatibilityTarget target = ParseManifestCompatibilityTargetValue(trimmed, static_cast<ManifestCompatibilityTarget>(-1));
+            if (!IsValidManifestCompatibilityTarget(target))
+            {
+                return fail(L"Unsupported manifest target: " + trimmed + L". Supported values are Windows10, Windows81, and Windows8.");
+            }
+            AddCommandLineManifestTargetSetting(target);
+            g_commandLine.regenerateManifest = true;
+            continue;
+        }
+
         if (!IsLikelyCommandLineOption(arg) && !g_commandLine.wallpaperSpecified)
         {
             if (!SetCommandLineWallpaperPath(arg, error))
@@ -735,6 +937,9 @@ static std::wstring CommandLineUsageText()
         L"  --live-tile | --no-live-tile         Set and save Live Tile update mode.\r\n"
         L"  --live-tile-auto                     Set and save automatic Live Tile update mode.\r\n"
         L"  --live-tile-mode <mode>              Set mode: Auto, Registration, or LiveTile.\r\n"
+        L"  --manifest-target <target>            Set and regenerate manifest: Windows10, Windows81, or Windows8.\r\n"
+        L"  --manifest-win10|--manifest-win81|--manifest-win8\r\n"
+        L"                                      Shortcuts for --manifest-target.\r\n"
         L"  --detect <method>                   Set and save wallpaper detection method.\r\n"
         L"  --scales auto|all|100,125,150,200,400\r\n"
         L"                                      Set and save generated DPI scales.\r\n"
@@ -916,6 +1121,19 @@ static void LogCommandLineSummary()
         Log(L"[i] Command-line mode: monitoring disabled.");
     if (g_commandLine.wallpaperSpecified)
         Log(L"[i] Command-line wallpaper: %s", g_commandLine.wallpaperPath.c_str());
+    if (g_commandLine.appxActivationServer)
+    {
+        if (!g_commandLine.appxActivationServerName.empty())
+            Log(L"[i] AppX activation server argument ignored: %s", g_commandLine.appxActivationServerName.c_str());
+        else
+            Log(L"[i] AppX activation argument ignored.");
+    }
+    if (g_commandLine.launchedFromAppxStub)
+        Log(L"[i] Command-line launch source: AppX activation stub.");
+    if (g_commandLine.launchedFromModeSwitch)
+        Log(L"[i] Command-line launch source: Live Tile mode switch relaunch.");
+    if (g_commandLine.waitForPid != 0)
+        Log(L"[i] Command-line parent wait pid: %lu", static_cast<unsigned long>(g_commandLine.waitForPid));
 
     for (const auto& entry : g_commandLine.settings)
         Log(L"[i] Command-line setting: [%s] %s = %s", entry.section.c_str(), entry.key.c_str(), entry.value.c_str());
@@ -936,6 +1154,18 @@ static bool CommandLineSettingChangesLiveTileMode(const CommandLineIniSetting& e
 static bool CommandLineSettingChangesTrayIcon(const CommandLineIniSetting& entry)
 {
     return IEquals(entry.section, L"Settings") && IEquals(entry.key, L"TrayIcon");
+}
+
+static bool CommandLineSettingChangesManifestTarget(const CommandLineIniSetting& entry)
+{
+    if (!IEquals(entry.section, L"Settings") || !IEquals(entry.key, L"AppxManifestTarget"))
+        return false;
+
+    ManifestCompatibilityTarget before = ParseManifestCompatibilityTargetValue(
+        IniReadS(L"Settings", L"AppxManifestTarget", L"Windows10"));
+    ManifestCompatibilityTarget after = ParseManifestCompatibilityTargetValue(entry.value, ManifestCompatibilityTarget::Windows10);
+
+    return before != after;
 }
 
 static bool CommandLineSettingTargetsManifestEditor(const CommandLineIniSetting& entry)
@@ -970,6 +1200,7 @@ static bool ApplyCommandLinePersistentSettings()
 
         bool changesLiveTileMode = CommandLineSettingChangesLiveTileMode(entry);
         bool changesTrayIcon = CommandLineSettingChangesTrayIcon(entry);
+        bool changesManifestTarget = CommandLineSettingChangesManifestTarget(entry);
         if (!WriteIniValue(entry.section.c_str(), entry.key.c_str(), entry.value.c_str()))
         {
             DWORD err = GetLastError();
@@ -985,6 +1216,8 @@ static bool ApplyCommandLinePersistentSettings()
             g_commandLine.liveTileModeChanged = true;
         if (changesTrayIcon)
             g_commandLine.trayIconChanged = true;
+        if (changesManifestTarget)
+            g_commandLine.regenerateManifest = true;
     }
 
     return true;
