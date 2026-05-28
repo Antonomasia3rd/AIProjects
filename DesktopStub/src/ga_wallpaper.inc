@@ -15,7 +15,8 @@ enum class LiveWallpaperProvider
 {
     None,
     Lively,
-    WallpaperEngine
+    WallpaperEngine,
+    Generic
 };
 
 static std::atomic<bool> g_liveWallpaperCapturePending(false);
@@ -42,6 +43,8 @@ static const wchar_t* LiveWallpaperProviderName(LiveWallpaperProvider provider)
         return g_ui.liveWallpaperProviderLively.empty() ? L"Lively" : g_ui.liveWallpaperProviderLively.c_str();
     case LiveWallpaperProvider::WallpaperEngine:
         return g_ui.liveWallpaperProviderWallpaperEngine.empty() ? L"Wallpaper Engine" : g_ui.liveWallpaperProviderWallpaperEngine.c_str();
+    case LiveWallpaperProvider::Generic:
+        return g_ui.liveWallpaperProviderGeneric.empty() ? L"Generic" : g_ui.liveWallpaperProviderGeneric.c_str();
     case LiveWallpaperProvider::None:
     default:
         return g_ui.liveWallpaperProviderNone.empty() ? L"None" : g_ui.liveWallpaperProviderNone.c_str();
@@ -197,6 +200,11 @@ static bool LiveWallpaperCaptureWallpaperEngineEnabled()
     return IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) != 0;
 }
 
+static bool LiveWallpaperCaptureGenericEnabled()
+{
+    return IniReadI(L"Settings", L"LiveWallpaperCaptureGeneric", 1) != 0;
+}
+
 static int LiveWallpaperCaptureDelayMs()
 {
     return IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000);
@@ -337,6 +345,18 @@ static bool IsWallpaperEngineRunning()
     });
 }
 
+static bool WallpaperEngineProcessImageLooksLikeCaptureHost(const std::wstring& baseName, const std::wstring&)
+{
+    // Wallpaper Engine keeps the wallpaper host under wallpaper32/64.exe.
+    // Chromium web-wallpaper subprocesses are accepted as secondary renderers
+    // if they ever own a useful child window, but wallpaper32/64.exe remains
+    // the app-running signal.
+    return IEquals(baseName, L"wallpaper32.exe") ||
+        IEquals(baseName, L"wallpaper64.exe") ||
+        IEquals(baseName, L"webwallpaper32.exe") ||
+        IEquals(baseName, L"webwallpaper64.exe");
+}
+
 static bool WindowProcessMatchesNames(HWND hwnd, std::initializer_list<const wchar_t*> imageNames)
 {
     DWORD pid = 0;
@@ -379,6 +399,24 @@ static bool WindowProcessMatchesLively(HWND hwnd)
     return LivelyProcessImageLooksLikeCaptureHost(baseName, imagePath);
 }
 
+static bool WindowProcessMatchesWallpaperEngine(HWND hwnd)
+{
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == 0)
+        return false;
+
+    std::wstring imagePath;
+    if (!QueryProcessImagePathForLiveWallpaper(pid, imagePath))
+        return false;
+
+    const wchar_t* baseName = PathFindFileNameW(imagePath.c_str());
+    if (!baseName || !*baseName)
+        baseName = imagePath.c_str();
+
+    return WallpaperEngineProcessImageLooksLikeCaptureHost(baseName, imagePath);
+}
+
 static bool WindowProcessMatchesProvider(HWND hwnd, LiveWallpaperProvider provider)
 {
     switch (provider)
@@ -386,10 +424,9 @@ static bool WindowProcessMatchesProvider(HWND hwnd, LiveWallpaperProvider provid
     case LiveWallpaperProvider::Lively:
         return WindowProcessMatchesLively(hwnd);
     case LiveWallpaperProvider::WallpaperEngine:
-        return WindowProcessMatchesNames(hwnd, {
-            L"wallpaper32.exe",
-            L"wallpaper64.exe"
-        });
+        return WindowProcessMatchesWallpaperEngine(hwnd);
+    case LiveWallpaperProvider::Generic:
+        return false;
     case LiveWallpaperProvider::None:
     default:
         return false;
@@ -407,10 +444,29 @@ static bool RectLooksPotentialWallpaperSized(const RECT& rc)
     return LiveWallpaperCaptureRectLooksLargeEnough(width, height, minWidth, minHeight);
 }
 
+static bool WindowLooksGenericLiveWallpaperCandidate(HWND hwnd)
+{
+    if (!hwnd || !IsWindow(hwnd) || !IsWindowVisible(hwnd))
+        return false;
+
+    wchar_t className[128] = {};
+    GetClassNameW(hwnd, className, _countof(className));
+    if (IEquals(className, L"SHELLDLL_DefView"))
+        return false;
+
+    RECT rc{};
+    return GetWindowRect(hwnd, &rc) && RectLooksPotentialWallpaperSized(rc);
+}
+
+static bool HasPotentialLiveWallpaperChildWindow(HWND root);
+
 static bool WindowOrDescendantProcessMatchesProvider(HWND root, LiveWallpaperProvider provider)
 {
     if (!root || !IsWindow(root))
         return false;
+
+    if (provider == LiveWallpaperProvider::Generic)
+        return HasPotentialLiveWallpaperChildWindow(root);
 
     if (WindowProcessMatchesProvider(root, provider))
         return true;
@@ -481,6 +537,20 @@ static bool HasPotentialLiveWallpaperChildWindow(HWND root)
     return context.found;
 }
 
+
+static bool HasGenericLiveWallpaperHost()
+{
+    HWND worker = nullptr;
+    while ((worker = FindWindowExW(nullptr, worker, L"WorkerW", nullptr)) != nullptr)
+    {
+        if (FindWindowExW(worker, nullptr, L"SHELLDLL_DefView", nullptr) != nullptr)
+            continue;
+        if (HasPotentialLiveWallpaperChildWindow(worker))
+            return true;
+    }
+    return false;
+}
+
 static LiveWallpaperProvider DetectActiveLiveWallpaperProvider()
 {
     if (!LiveWallpaperCaptureEnabled())
@@ -491,6 +561,9 @@ static LiveWallpaperProvider DetectActiveLiveWallpaperProvider()
 
     if (LiveWallpaperCaptureLivelyEnabled() && IsLivelyRunning())
         return LiveWallpaperProvider::Lively;
+
+    if (LiveWallpaperCaptureGenericEnabled() && HasGenericLiveWallpaperHost())
+        return LiveWallpaperProvider::Generic;
 
     return LiveWallpaperProvider::None;
 }
@@ -548,6 +621,9 @@ static std::wstring GetLiveWallpaperSnapshotPath(LiveWallpaperProvider provider,
         break;
     case LiveWallpaperProvider::WallpaperEngine:
         fileName = L"LiveWallpaperSnapshot_WallpaperEngine_" + slot + L".bmp";
+        break;
+    case LiveWallpaperProvider::Generic:
+        fileName = L"LiveWallpaperSnapshot_Generic_" + slot + L".bmp";
         break;
     case LiveWallpaperProvider::None:
     default:
@@ -817,12 +893,20 @@ static bool AddProviderDescendantWindowCandidates(std::vector<HWND>& candidates,
         if (!IsWindowVisible(hwnd))
             return TRUE;
 
-        if (!WindowProcessMatchesProvider(hwnd, ctx->provider))
-            return TRUE;
+        if (ctx->provider == LiveWallpaperProvider::Generic)
+        {
+            if (!WindowLooksGenericLiveWallpaperCandidate(hwnd))
+                return TRUE;
+        }
+        else
+        {
+            if (!WindowProcessMatchesProvider(hwnd, ctx->provider))
+                return TRUE;
 
-        RECT rc{};
-        if (!GetWindowRect(hwnd, &rc) || !RectLooksPotentialWallpaperSized(rc))
-            return TRUE;
+            RECT rc{};
+            if (!GetWindowRect(hwnd, &rc) || !RectLooksPotentialWallpaperSized(rc))
+                return TRUE;
+        }
 
         AddUniqueWindowCandidate(*ctx->candidates, hwnd);
         ctx->added = true;
@@ -857,8 +941,6 @@ static std::vector<HWND> FindLiveWallpaperWindowCandidates(LiveWallpaperProvider
             // leak into the tile.
             if (!addedDescendant)
                 AddUniqueWindowCandidate(workerCandidates, worker);
-            else
-                AddUniqueWindowCandidate(workerCandidates, worker);
             continue;
         }
 
@@ -881,6 +963,12 @@ static std::vector<HWND> FindLiveWallpaperWindowCandidates(LiveWallpaperProvider
         auto* ctx = reinterpret_cast<FindProviderWindowContext*>(lParam);
         if (!ctx || !ctx->candidates || !IsWindow(hwnd))
             return TRUE;
+        if (ctx->provider == LiveWallpaperProvider::Generic)
+        {
+            AddProviderDescendantWindowCandidates(*ctx->candidates, hwnd, ctx->provider);
+            return TRUE;
+        }
+
         if (!WindowProcessMatchesProvider(hwnd, ctx->provider))
             return TRUE;
 

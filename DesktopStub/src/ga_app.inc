@@ -1470,6 +1470,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0),
         StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureLively", 1) != 0),
         StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) != 0),
+        StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureGeneric", 1) != 0),
         IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
         liveWallpaperCaptureRefreshText.c_str());
     int liveWallpaperCaptureStartupRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", 1000, 0, 3600000);

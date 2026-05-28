@@ -53,6 +53,7 @@ enum {
     ID_LIVE_WALLPAPER_CAPTURE,
     ID_LIVE_WALLPAPER_CAPTURE_LIVELY,
     ID_LIVE_WALLPAPER_CAPTURE_WALLPAPER_ENGINE,
+    ID_LIVE_WALLPAPER_CAPTURE_GENERIC,
     ID_LIVE_WALLPAPER_CAPTURE_SCREEN_FALLBACK,
     ID_LIVE_WALLPAPER_CAPTURE_DELAY,
     ID_LIVE_WALLPAPER_CAPTURE_REFRESH,
@@ -491,6 +492,7 @@ void Menu(HWND h)
         bool liveWallpaperCapture = IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0;
         bool liveWallpaperCaptureLively = IniReadI(L"Settings", L"LiveWallpaperCaptureLively", 1) != 0;
         bool liveWallpaperCaptureWallpaperEngine = IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) != 0;
+        bool liveWallpaperCaptureGeneric = IniReadI(L"Settings", L"LiveWallpaperCaptureGeneric", 1) != 0;
         bool liveWallpaperCaptureScreenFallback = IniReadI(L"Settings", L"LiveWallpaperCaptureScreenFallback", 0) != 0;
         int liveWallpaperCaptureDelayMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000);
         int liveWallpaperCaptureRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
@@ -503,6 +505,7 @@ void Menu(HWND h)
         addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE, g_ui.liveWallpaperCapture.c_str(), liveWallpaperCapture);
         addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_LIVELY, g_ui.liveWallpaperCaptureLively.c_str(), liveWallpaperCaptureLively, liveWallpaperCapture);
         addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_WALLPAPER_ENGINE, g_ui.liveWallpaperCaptureWallpaperEngine.c_str(), liveWallpaperCaptureWallpaperEngine, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_GENERIC, g_ui.liveWallpaperCaptureGeneric.c_str(), liveWallpaperCaptureGeneric, liveWallpaperCapture);
         addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_SCREEN_FALLBACK, g_ui.liveWallpaperCaptureScreenFallback.c_str(), liveWallpaperCaptureScreenFallback, liveWallpaperCapture);
         addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_DELAY, liveWallpaperCaptureDelayLine.c_str(), false, liveWallpaperCapture);
         addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_REFRESH, liveWallpaperCaptureRefreshLine.c_str(), false, liveWallpaperCapture);
@@ -1147,6 +1150,7 @@ void Menu(HWND h)
             StateEnabled(value),
             StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureLively", 1) != 0),
             StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) != 0),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureGeneric", 1) != 0),
             IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
             LiveWallpaperRefreshDisplayText(IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000)).c_str());
     }
@@ -1160,6 +1164,7 @@ void Menu(HWND h)
             StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0),
             StateEnabled(value),
             StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) != 0),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureGeneric", 1) != 0),
             IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
             LiveWallpaperRefreshDisplayText(IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000)).c_str());
     }
@@ -1172,6 +1177,22 @@ void Menu(HWND h)
         Log(g_ui.liveWallpaperCaptureSummary.c_str(),
             StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0),
             StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureLively", 1) != 0),
+            StateEnabled(value),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureGeneric", 1) != 0),
+            IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
+            LiveWallpaperRefreshDisplayText(IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000)).c_str());
+    }
+    break;
+
+
+    case ID_LIVE_WALLPAPER_CAPTURE_GENERIC:
+    {
+        bool value = IniReadI(L"Settings", L"LiveWallpaperCaptureGeneric", 1) == 0;
+        IniWrite(L"Settings", L"LiveWallpaperCaptureGeneric", value ? L"1" : L"0");
+        Log(g_ui.liveWallpaperCaptureSummary.c_str(),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureLively", 1) != 0),
+            StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", 1) != 0),
             StateEnabled(value),
             IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
             LiveWallpaperRefreshDisplayText(IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000)).c_str());

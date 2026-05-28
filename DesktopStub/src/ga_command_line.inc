@@ -790,6 +790,16 @@ static bool ParseCommandLineOptions()
             AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", false);
             continue;
         }
+        if (IEquals(arg, L"--live-wallpaper-generic"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureGeneric", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-live-wallpaper-generic"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureGeneric", false);
+            continue;
+        }
         if (IEquals(arg, L"--live-wallpaper-screen-fallback"))
         {
             AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureScreenFallback", true);
