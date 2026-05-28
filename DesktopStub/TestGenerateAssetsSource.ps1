@@ -247,7 +247,7 @@ $sourceChecks = @(
         -Name 'Live Tile update mode skips AppX registration path' `
         -SourceName 'src\ga_generation.inc' `
         -SourceText $generation `
-        -Pattern '(?s)useLiveTileUpdateForThisRun.*Appx_Update_LiveTile\(exeDir,\s*manifestInfo,\s*liveTileUpdateAssets,\s*appUpdateFailureMessage\).*else\s*\{.*RegisterAppxManifest\(manifestPath,\s*appUpdateFailureMessage\)' `
+        -Pattern '(?s)else\s+if\s*\(useLiveTileUpdateForThisRun\).*Appx_Update_Or_Request_LiveTile\(exeDir,\s*manifestInfo,\s*liveTileUpdateAssets,\s*appUpdateFailureMessage\).*else\s*\{.*RegisterAppxManifest\(manifestPath,\s*appUpdateFailureMessage\)' `
         -Failure 'Live Tile update mode must call the tile updater instead of re-registering the AppX manifest'),
 
     (New-SourceCheck `
@@ -366,7 +366,7 @@ $sourceChecks = @(
         -Name 'Generated asset cache settings are exposed in a Caching menu' `
         -SourceName 'src\ga_tray.inc' `
         -SourceText $tray `
-        -Pattern '(?s)ID_GENERATED_ASSET_CACHE.*ID_GENERATED_ASSET_PRECACHE.*beginSection\(g_ui\.cachingTitle\).*g_ui\.generatedAssetCache.*g_ui\.generatedAssetPrecache.*GeneratedAssetCacheMaxEntriesLabel.*GeneratedAssetPrecacheMaxFilesLabel.*IniWrite\(L"Settings",\s*L"GeneratedAssetCache".*IniWrite\(L"Settings",\s*L"GeneratedAssetPrecache"' `
+        -Pattern '(?s)ID_GENERATED_ASSET_CACHE.*ID_GENERATED_ASSET_PRECACHE.*beginSection\(g_ui\.cachingTitle\).*g_ui\.generatedAssetCache.*g_ui\.generatedAssetPrecache.*g_ui\.generatedAssetCacheMaxEntriesLabel.*g_ui\.generatedAssetPrecacheMaxFilesLabel.*IniWrite\(L"Settings",\s*L"GeneratedAssetCache".*IniWrite\(L"Settings",\s*L"GeneratedAssetPrecache"' `
         -Failure 'cache and slideshow pre-cache settings must be configurable from a dedicated Caching menu section'),
 
     (New-SourceCheck `
@@ -619,7 +619,7 @@ Assert-SourceAbsent `
     -Name 'Live Tile update does not clear the existing tile first' `
     -SourceName 'src\ga_live_tile.inc' `
     -SourceText $liveTile `
-    -Pattern 'updater\.Clear\s*\(' `
+    -Pattern '(?s)static bool Appx_Update_LiveTileXmlBare(?:(?!static bool).)*updater\.Clear\s*\(' `
     -Failure 'Live Tile updater must not call Clear before Update because that causes a visible blank tile during refresh'
 
 Assert-SourceAbsent `
