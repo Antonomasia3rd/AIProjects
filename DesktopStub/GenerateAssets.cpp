@@ -1,4 +1,4 @@
-﻿// compile command: cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE GenerateAssets.cpp /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib /SUBSYSTEM:WINDOWS
+﻿// compile command: cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE GenerateAssets.cpp /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 #define NOMINMAX
 #include <windows.h>
 #include <gdiplus.h>
@@ -24,11 +24,19 @@
 #include <utility>
 #include <cstdint>
 #include <memory>
+#include <new>
 #include <commdlg.h>
 #include <appmodel.h>
+#include <tlhelp32.h>
+#include <roapi.h>
+#include <activation.h>
+#include <inspectable.h>
+#include <winstring.h>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.ApplicationModel.Background.h>
 #include <winrt/Windows.Data.Xml.Dom.h>
 #include <winrt/Windows.Management.Deployment.h>
 #include <winrt/Windows.UI.Notifications.h>
@@ -68,6 +76,13 @@ enum class LiveTileUpdateMode
     Registration,
     LiveTile,
     Auto
+};
+
+enum class ManifestCompatibilityTarget
+{
+    Windows10,
+    Windows81,
+    Windows8
 };
 
 static const wchar_t* StateEnabled(bool v);

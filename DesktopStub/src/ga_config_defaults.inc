@@ -9,6 +9,10 @@ static std::atomic<bool> g_wallpaperDetectionFallbackOnInvalid(true);
 static std::atomic<bool> g_generateOnStartup(true);
 static std::atomic<bool> g_generateOnStartupOnlyWhenChanged(true);
 static std::atomic<int> g_liveTileUpdateMode(static_cast<int>(LiveTileUpdateMode::Auto));
+static std::atomic<bool> g_liveTileRelaunchOnSwitch(false);
+static std::atomic<bool> g_clearLiveTileOnShutdown(true);
+static std::atomic<int> g_relaunchAfterExit(0);
+static std::atomic<int> g_manifestCompatibilityTarget(static_cast<int>(ManifestCompatibilityTarget::Windows10));
 static std::atomic<bool> g_hideDisabled(false);
 static std::atomic<bool> g_showMenuAsDropdown(true);
 static std::atomic<bool> g_notificationsEnabled(true);
@@ -63,6 +67,7 @@ static std::atomic<unsigned long> g_pollWakeGeneration(0);
 static constexpr UINT WM_APP_SHUTDOWN_READY = WM_APP + 1;
 static constexpr UINT WM_APP_REQUEST_SHUTDOWN = WM_APP + 2;
 static constexpr UINT_PTR SHUTDOWN_NOTICE_TIMER_ID = 1;
+static constexpr UINT_PTR APPX_ACTIVATION_REQUEST_TIMER_ID = 2;
 static std::atomic<HWND> g_shutdownWindow(nullptr);
 static std::atomic<bool> g_consoleControlShutdownPending(false);
 
@@ -100,6 +105,12 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"DisableFitting", L"0"},
     {L"Settings", L"UsePowerShell", L"0"},
     {L"Settings", L"ExperimentalLiveTileUpdate", L"Auto"},
+    {L"Settings", L"LiveTileRelaunchOnSwitch", L"0"},
+    {L"Settings", L"ClearLiveTileOnShutdown", L"1"},
+    {L"Settings", L"AppxManifestTarget", L"Windows10"},
+    {L"Settings", L"Win8LiveTileOopHelper", L"0"},
+    {L"Settings", L"Win8LiveTileBackgroundTask", L"0"},
+    {L"Settings", L"Win8LiveTileBrokerApp", L"1"},
     {L"Settings", L"HideDisabledEntries", L"0"},
     {L"Settings", L"GenerateDesktopIconForDisabledEntries", L"1"},
     {L"Settings", L"DeleteDisabledAssets", L"0"},
@@ -140,9 +151,11 @@ static const IniDefault g_defaults[] = {
     {L"Assets", L"StoreLogo", L"0"},
     {L"Assets", L"MediumTile", L"1"},
     {L"Assets", L"Square44x44Logo", L"0"},
+    {L"Assets", L"Square30x30Logo", L"0"},
     {L"Assets", L"SmallTile", L"0"},
     {L"Assets", L"WideTile", L"1"},
     {L"Assets", L"LargeTile", L"1"},
+    {L"Assets", L"SplashScreen", L"0"},
 
 };
 
@@ -178,6 +191,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"PowerShellRegistrationSummary", L"[i] PowerShell registration: %s"},
     {L"UsePowerShellSummary", L"[i] UsePowerShell = %d (%s)"},
     {L"LiveTileUpdateSummary", L"[i] Live Tile update mode: %s"},
+    {L"ManifestTargetSummary", L"[i] AppxManifest target: %s"},
     {L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s"},
     {L"TrayIconSummary", L"[i] Tray icon: %s"},
     {L"ConsoleSummary", L"[i] Console %s."},
@@ -276,6 +290,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"SavePngReplaceRetryDelayMsLabel", L"PNG replace retry delay: %d ms"},
     {L"TimeoutInfiniteText", L"infinite"},
     {L"ManifestTitle", L"Manifest:"},
+    {L"ManifestDetailsTitle", L"Manifest details"},
     {L"ManifestIdentityNameLabel", L"Manifest identity: %s"},
     {L"ManifestPublisherLabel", L"Manifest publisher: %s"},
     {L"ManifestPackageVersionLabel", L"Manifest version: %s"},
@@ -284,6 +299,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"ManifestDescriptionLabel", L"Manifest description: %s"},
     {L"ManifestExecutableLabel", L"Manifest executable: %s"},
     {L"ManifestApplicationIdLabel", L"Manifest app id: %s"},
+    {L"ManifestTargetLabel", L"Manifest target: %s"},
     {L"ManifestTargetDeviceFamilyNameLabel", L"Manifest target family: %s"},
     {L"ManifestMinVersionLabel", L"Manifest min version: %s"},
     {L"ManifestMaxVersionTestedLabel", L"Manifest max tested: %s"},
@@ -291,6 +307,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"ManifestPropertiesLogoLabel", L"Manifest properties logo: %s"},
     {L"ManifestSquare150x150LogoLabel", L"Manifest square 150 logo: %s"},
     {L"ManifestSquare44x44LogoLabel", L"Manifest square 44 logo: %s"},
+    {L"ManifestSquare30x30LogoLabel", L"Manifest square 30 logo: %s"},
     {L"ManifestSquare71x71LogoLabel", L"Manifest square 71 logo: %s"},
     {L"ManifestWide310x150LogoLabel", L"Manifest wide 310 logo: %s"},
     {L"ManifestSquare310x310LogoLabel", L"Manifest square 310 logo: %s"},
@@ -298,6 +315,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"ManifestShowNameOnTilesLabel", L"Manifest show names on: %s"},
     {L"ManifestEntryPointLabel", L"Manifest entry point: %s"},
     {L"ManifestRestrictedCapabilityLabel", L"Manifest restricted capability: %s"},
+    {L"ManifestSplashScreenImageLabel", L"Manifest splash screen image: %s"},
     {L"ManifestSourceLabel", L"Manifest source: %s"},
     {L"ManifestSourceExisting", L"existing AppxManifest.xml"},
     {L"ManifestSourceGenerated", L"generated from built-in defaults if missing"},
@@ -326,9 +344,25 @@ static const StringDefault g_stringDefaults[] = {
     {L"TrayIcon", L"Tray Icon (this session)"},
     {L"UsePowerShell", L"PowerShell only"},
     {L"ExperimentalLiveTileUpdate", L"Live Tile update mode"},
+    {L"AppxManifestTarget", L"AppxManifest target"},
+    {L"AppxManifestTargetWindows10", L"Windows 10"},
+    {L"AppxManifestTargetWindows81", L"Windows 8.1"},
+    {L"AppxManifestTargetWindows8", L"Windows 8"},
+    {L"Win8LiveTileOopHelper", L"Experimental Win8/8.1 OOP Live Tile helper (disabled; failed with class registration on loose packages)"},
+    {L"Win8LiveTileBackgroundTask", L"Experimental Win8/8.1 background task Live Tile helper (disabled; future research)"},
+    {L"Win8LiveTileBrokerApp", L"Use packaged WinRT broker app for Win8/8.1 Live Tile updates (recommended)"},
     {L"LiveTileModeAuto", L"Auto"},
     {L"LiveTileModeRegistration", L"Registration"},
     {L"LiveTileModeLiveTile", L"Live Tile"},
+    {L"LiveTileModeEnabled", L"Enabled"},
+    {L"LiveTileModeDisabled", L"Disabled"},
+    {L"LiveTileRelaunchOnSwitch", L"Relaunch on switch"},
+    {L"ClearLiveTileOnShutdown", L"Clear Live Tile on shutdown"},
+    {L"LiveTileRelaunchToPackagedQueued", L"[i] Live Tile mode changed; relaunching through the registered package entry."},
+    {L"LiveTileRelaunchToUnpackagedQueued", L"[i] Live Tile mode changed; relaunching as unpackaged desktop app."},
+    {L"LiveTileClearOnShutdown", L"[i] Clearing Live Tile on shutdown."},
+    {L"LiveTileClearOnShutdownSkipped", L"[i] Clear Live Tile on shutdown skipped: %s"},
+    {L"LiveTileClearOnShutdownSuccess", L"[i] Live Tile cleared on shutdown."},
     {L"GenerateOnStartup", L"Generate on Startup"},
     {L"GenerateOnStartupOnlyWhenChanged", L"Generate on Startup only when changed"},
     {L"HideDisabledEntries", L"Hide disabled entries"},
@@ -402,6 +436,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"NotificationTrayIconHidden", L"Tray icon hidden for this session. Run GenerateAssets.exe again to restore it."},
     {L"ManualGenerateTriggered", L"Manual generate triggered."},
     {L"LiveTileModeChanged", L"Live Tile mode changed."},
+    {L"ManifestTargetChanged", L"AppxManifest target changed."},
     {L"LiveTileModeReregistrationQueued", L"[i] Queued one-time Appx re-registration because Live Tile mode changed."},
     {L"LiveTileModeReregistrationQueuedNoWallpaper", L"[!] Live Tile mode changed; one-time Appx re-registration is pending but current wallpaper could not be detected."},
     {L"StartingWallpaperGeneration", L"Starting wallpaper generation: %s"},

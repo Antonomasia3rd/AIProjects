@@ -6,9 +6,11 @@ static const Tile g_tiles[] = {
     {L"StoreLogo",       L"Assets\\StoreLogo.png", 50,50},
     {L"MediumTile",      L"Assets\\MediumTile.png",150,150},
     {L"Square44x44Logo", L"Assets\\Square44x44Logo.png",44,44},
+    {L"Square30x30Logo", L"Assets\\Square30x30Logo.png",30,30},
     {L"SmallTile",       L"Assets\\SmallTile.png",71,71},
     {L"WideTile",        L"Assets\\WideTile.png",310,150},
     {L"LargeTile",       L"Assets\\LargeTile.png",310,310},
+    {L"SplashScreen",    L"Assets\\SplashScreen.png",620,300},
 };
 
 struct LiveTileAsset { const wchar_t* name; const wchar_t* file; int w,h; const wchar_t* binding; };
@@ -53,6 +55,11 @@ static std::wstring g_generatedAssetPrecacheWallpaper;
 static void WakePollThread();
 static bool GenerationWorkPending();
 static bool Appx_Update_LiveTile(
+    const std::wstring& exeDir,
+    const ManifestDisplayInfo& manifestInfo,
+    const std::vector<LiveTileUpdateAsset>& liveTileAssets,
+    std::wstring& failureMessage);
+static bool Appx_Update_Or_Request_LiveTile(
     const std::wstring& exeDir,
     const ManifestDisplayInfo& manifestInfo,
     const std::vector<LiveTileUpdateAsset>& liveTileAssets,
@@ -603,12 +610,16 @@ static std::wstring ManifestAssetPathForTile(const ManifestDisplayInfo& info, co
         path = info.square150x150Logo;
     else if (wcscmp(tile.name, L"Square44x44Logo") == 0)
         path = info.square44x44Logo;
+    else if (wcscmp(tile.name, L"Square30x30Logo") == 0)
+        path = info.square30x30Logo;
     else if (wcscmp(tile.name, L"SmallTile") == 0)
         path = info.square71x71Logo;
     else if (wcscmp(tile.name, L"WideTile") == 0)
         path = info.wide310x150Logo;
     else if (wcscmp(tile.name, L"LargeTile") == 0)
         path = info.square310x310Logo;
+    else if (wcscmp(tile.name, L"SplashScreen") == 0)
+        path = info.splashScreenImage;
 
     return IsManifestRelativeAssetPath(path) ? path : tile.file;
 }
@@ -1791,19 +1802,31 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 
             if (liveTileUpdateMode)
             {
-                appUpdateOk = Appx_Update_LiveTile(exeDir, manifestInfo, liveTileUpdateAssets, appUpdateFailureMessage);
-                if (!appUpdateOk)
+                bool deferLiveTileUpdateUntilPackagedRelaunch =
+                    g_relaunchAfterExit.load() == 1 &&
+                    !CurrentProcessHasPackageIdentity() &&
+                    ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10;
+
+                if (deferLiveTileUpdateUntilPackagedRelaunch)
                 {
-                    appUpdateFailureIsLiveTile = true;
-                    if (appUpdateFailureMessage.empty())
-                        appUpdateFailureMessage = g_ui.liveTileUpdateFailed;
+                    LogText(L"[i] Live Tile update deferred until the packaged relaunch starts with package identity.");
+                }
+                else
+                {
+                    appUpdateOk = Appx_Update_Or_Request_LiveTile(exeDir, manifestInfo, liveTileUpdateAssets, appUpdateFailureMessage);
+                    if (!appUpdateOk)
+                    {
+                        appUpdateFailureIsLiveTile = true;
+                        if (appUpdateFailureMessage.empty())
+                            appUpdateFailureMessage = g_ui.liveTileUpdateFailed;
+                    }
                 }
             }
         }
     }
     else if (useLiveTileUpdateForThisRun)
     {
-        appUpdateOk = Appx_Update_LiveTile(exeDir, manifestInfo, liveTileUpdateAssets, appUpdateFailureMessage);
+        appUpdateOk = Appx_Update_Or_Request_LiveTile(exeDir, manifestInfo, liveTileUpdateAssets, appUpdateFailureMessage);
         appUpdateFailureIsLiveTile = !appUpdateOk;
         if (!appUpdateOk && appUpdateFailureMessage.empty())
             appUpdateFailureMessage = g_ui.liveTileUpdateFailed;
@@ -2172,7 +2195,7 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
     return requestId;
 }
 
-static void QueueLiveTileModeReregistration()
+static bool QueueLiveTileModeReregistration()
 {
     SetLiveTileModeReregistrationPending(true);
 
@@ -2180,11 +2203,11 @@ static void QueueLiveTileModeReregistration()
     if (wp.empty())
     {
         LogText(g_ui.liveTileModeReregistrationQueuedNoWallpaper);
-        return;
+        return false;
     }
 
     LogText(g_ui.liveTileModeReregistrationQueued);
-    QueueGenerate(wp, g_ui.liveTileModeChanged);
+    return QueueGenerate(wp, g_ui.liveTileModeChanged) != 0;
 }
 
 static void JoinQueuedGenerations()
@@ -2232,13 +2255,19 @@ void PollThread()
             bool generationSucceeded = false;
             if (TryGetGenerationCompletion(pendingPollGenerationId, generationSucceeded))
             {
-                if (generationSucceeded)
-                {
-                    last = pendingWallpaper;
-                    lastFit = pendingFit;
-                    lastDpiScale = pendingDpiScale;
-                    emptyWallpaperAlreadyReported = false;
-                }
+                // Treat a completed poll-triggered generation attempt as the new
+                // observation baseline even when the AppX/Live Tile side fails.
+                // Otherwise a persistent post-generation failure (for example,
+                // Live Tile mode selected while this instance is unpackaged) makes
+                // the poller see the same wallpaper as "changed" forever and it
+                // re-runs generation every debounce interval.
+                last = pendingWallpaper;
+                lastFit = pendingFit;
+                lastDpiScale = pendingDpiScale;
+                emptyWallpaperAlreadyReported = false;
+
+                if (!generationSucceeded)
+                    LogText(L"[i] Poll baseline updated after failed generation attempt to avoid retrying the same wallpaper change endlessly.");
 
                 pendingPollGeneration = false;
                 pendingPollGenerationId = 0;

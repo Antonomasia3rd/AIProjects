@@ -12,6 +12,11 @@ enum {
     ID_LIVE_TILE_MODE_AUTO,
     ID_LIVE_TILE_MODE_REGISTRATION,
     ID_LIVE_TILE_MODE_LIVE_TILE,
+    ID_LIVE_TILE_RELAUNCH_ON_SWITCH,
+    ID_CLEAR_LIVE_TILE_ON_SHUTDOWN,
+    ID_MANIFEST_TARGET_WINDOWS10,
+    ID_MANIFEST_TARGET_WINDOWS81,
+    ID_MANIFEST_TARGET_WINDOWS8,
     ID_LOGFILE,
     ID_LOG_RENAME,
     ID_LOG_OPEN,
@@ -53,7 +58,7 @@ enum {
     ID_MANIFEST_REGENERATE,
 
     // Assets
-    ID_A1=2001, ID_A2, ID_A3, ID_A4, ID_A5, ID_A6
+    ID_A1=2001, ID_A2, ID_A3, ID_A4, ID_A5, ID_A6, ID_A7, ID_A8
 };
 
 static bool EnsureTrayIcon(DWORD* err = nullptr)
@@ -316,18 +321,24 @@ void Menu(HWND h)
     addTo(generalMenu, ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
     addTo(generalMenu, ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);
     addTo(generalMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
-    {
-        LiveTileUpdateMode liveTileMode = ConfiguredLiveTileUpdateMode();
-        addTo(generalMenu, ID_LIVE_TILE_MODE_AUTO, g_ui.experimentalLiveTileUpdate + L": " + g_ui.liveTileModeAuto, liveTileMode == LiveTileUpdateMode::Auto);
-        addTo(generalMenu, ID_LIVE_TILE_MODE_REGISTRATION, g_ui.experimentalLiveTileUpdate + L": " + g_ui.liveTileModeRegistration, liveTileMode == LiveTileUpdateMode::Registration);
-        addTo(generalMenu, ID_LIVE_TILE_MODE_LIVE_TILE, g_ui.experimentalLiveTileUpdate + L": " + g_ui.liveTileModeLiveTile, liveTileMode == LiveTileUpdateMode::LiveTile);
-    }
     addTo(generalMenu, ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
     addTo(generalMenu, ID_GENERATE_STARTUP_CHANGED_ONLY, g_ui.generateOnStartupOnlyWhenChanged.c_str(), g_generateOnStartupOnlyWhenChanged, g_generateOnStartup);
     addTo(generalMenu, ID_HIDE_DISABLED, g_ui.hideDisabledEntries.c_str(), g_hideDisabled);
     addTo(generalMenu, ID_CONSOLE, g_ui.showConsole.c_str(), g_console);
     addTo(generalMenu, ID_GENERATE_NOW, g_ui.generateNow.c_str());
     endSection(generalMenu, g_ui.generalTitle);
+
+    HMENU liveTileMenu = beginSection(g_ui.liveTileTitle);
+    {
+        LiveTileUpdateMode liveTileMode = ConfiguredLiveTileUpdateMode();
+        addTo(liveTileMenu, ID_LIVE_TILE_MODE_LIVE_TILE, g_ui.liveTileModeEnabled.c_str(), liveTileMode == LiveTileUpdateMode::LiveTile);
+        addTo(liveTileMenu, ID_LIVE_TILE_MODE_REGISTRATION, g_ui.liveTileModeDisabled.c_str(), liveTileMode == LiveTileUpdateMode::Registration);
+        addTo(liveTileMenu, ID_LIVE_TILE_MODE_AUTO, g_ui.liveTileModeAuto.c_str(), liveTileMode == LiveTileUpdateMode::Auto);
+        AppendMenuChecked(liveTileMenu, MF_SEPARATOR, 0, nullptr);
+        addTo(liveTileMenu, ID_LIVE_TILE_RELAUNCH_ON_SWITCH, g_ui.liveTileRelaunchOnSwitch.c_str(), g_liveTileRelaunchOnSwitch);
+        addTo(liveTileMenu, ID_CLEAR_LIVE_TILE_ON_SHUTDOWN, g_ui.clearLiveTileOnShutdown.c_str(), g_clearLiveTileOnShutdown);
+    }
+    endSection(liveTileMenu, g_ui.liveTileTitle);
 
     HMENU notificationsMenu = beginSection(g_ui.notificationsTitle);
     addTo(notificationsMenu, ID_NOTIF_ENABLED, g_ui.notificationsEnabled.c_str(), g_notificationsEnabled);
@@ -410,11 +421,11 @@ void Menu(HWND h)
     addTo(assetsMenu, ID_GENERATE_DESKTOP_ICON_DISABLED, g_ui.generateDesktopIconForDisabledEntries.c_str(), g_generateDesktopIconForDisabledEntries);
     addTo(assetsMenu, ID_DELETE_DISABLED_ASSETS, g_ui.deleteDisabledAssets.c_str(), g_deleteDisabledAssets, !g_generateDesktopIconForDisabledEntries);
     const wchar_t* keys[] = {
-        L"StoreLogo",L"MediumTile",L"Square44x44Logo",
-        L"SmallTile",L"WideTile",L"LargeTile"
+        L"StoreLogo", L"MediumTile", L"Square44x44Logo", L"Square30x30Logo",
+        L"SmallTile", L"WideTile", L"LargeTile", L"SplashScreen"
     };
-    for (int i=0;i<6;i++)
-        addTo(assetsMenu, static_cast<UINT>(ID_A1 + i), keys[i], IniReadI(L"Assets",keys[i],0)!=0);
+    for (int i = 0; i < static_cast<int>(_countof(keys)); i++)
+        addTo(assetsMenu, static_cast<UINT>(ID_A1 + i), keys[i], IniReadI(L"Assets", keys[i], 0) != 0);
     endSection(assetsMenu, g_ui.assetsTitle);
 
     HMENU scaleMenu = beginSection(g_ui.dpiScalesTitle);
@@ -447,6 +458,7 @@ void Menu(HWND h)
     HMENU manifestMenu = beginSection(g_ui.manifestTitle);
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
     std::wstring manifestSourceLine = FormatWide(g_ui.manifestSourceLabel.c_str(), manifestInfo.existing ? g_ui.manifestSourceExisting.c_str() : g_ui.manifestSourceGenerated.c_str());
+    std::wstring manifestTargetLine = FormatWide(g_ui.manifestTargetLabel.c_str(), manifestInfo.manifestTarget.c_str());
     std::wstring manifestIdentityLine = FormatWide(g_ui.manifestIdentityNameLabel.c_str(), manifestInfo.identityName.c_str());
     std::wstring manifestPublisherLine = FormatWide(g_ui.manifestPublisherLabel.c_str(), manifestInfo.publisher.c_str());
     std::wstring manifestPackageVersionLine = FormatWide(g_ui.manifestPackageVersionLabel.c_str(), manifestInfo.packageVersion.c_str());
@@ -462,6 +474,7 @@ void Menu(HWND h)
     std::wstring manifestPropertiesLogoLine = FormatWide(g_ui.manifestPropertiesLogoLabel.c_str(), manifestInfo.propertiesLogo.c_str());
     std::wstring manifestSquare150x150LogoLine = FormatWide(g_ui.manifestSquare150x150LogoLabel.c_str(), manifestInfo.square150x150Logo.c_str());
     std::wstring manifestSquare44x44LogoLine = FormatWide(g_ui.manifestSquare44x44LogoLabel.c_str(), manifestInfo.square44x44Logo.c_str());
+    std::wstring manifestSquare30x30LogoLine = FormatWide(g_ui.manifestSquare30x30LogoLabel.c_str(), manifestInfo.square30x30Logo.c_str());
     std::wstring manifestSquare71x71LogoLine = FormatWide(g_ui.manifestSquare71x71LogoLabel.c_str(), manifestInfo.square71x71Logo.c_str());
     std::wstring manifestWide310x150LogoLine = FormatWide(g_ui.manifestWide310x150LogoLabel.c_str(), manifestInfo.wide310x150Logo.c_str());
     std::wstring manifestSquare310x310LogoLine = FormatWide(g_ui.manifestSquare310x310LogoLabel.c_str(), manifestInfo.square310x310Logo.c_str());
@@ -469,30 +482,52 @@ void Menu(HWND h)
     std::wstring manifestShowNameOnTilesLine = FormatWide(g_ui.manifestShowNameOnTilesLabel.c_str(), manifestInfo.showNameOnTiles.c_str());
     std::wstring manifestEntryPointLine = FormatWide(g_ui.manifestEntryPointLabel.c_str(), manifestInfo.entryPoint.c_str());
     std::wstring manifestRestrictedCapabilityLine = FormatWide(g_ui.manifestRestrictedCapabilityLabel.c_str(), manifestInfo.restrictedCapability.c_str());
+    std::wstring manifestSplashScreenImageLine = FormatWide(g_ui.manifestSplashScreenImageLabel.c_str(), manifestInfo.splashScreenImage.c_str());
     addTo(manifestMenu, ID_MANIFEST_REGENERATE, g_ui.manifestRegenerateNow.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSourceLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestIdentityLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPackageVersionLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestDisplayNameLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherDisplayNameLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestDescriptionLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestExecutableLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestApplicationIdLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestTargetDeviceFamilyNameLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestMinVersionLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestMaxVersionTestedLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestResourceLanguageLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestPropertiesLogoLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare150x150LogoLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare44x44LogoLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare71x71LogoLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestWide310x150LogoLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestSquare310x310LogoLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestBackgroundColorLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestShowNameOnTilesLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestEntryPointLine.c_str());
-    AppendMenuChecked(manifestMenu, MF_STRING | MF_DISABLED, 0, manifestRestrictedCapabilityLine.c_str());
+    {
+        ManifestCompatibilityTarget manifestTarget = ConfiguredManifestCompatibilityTarget();
+        addTo(manifestMenu, ID_MANIFEST_TARGET_WINDOWS10, g_ui.appxManifestTargetWindows10.c_str(), manifestTarget == ManifestCompatibilityTarget::Windows10);
+        addTo(manifestMenu, ID_MANIFEST_TARGET_WINDOWS81, g_ui.appxManifestTargetWindows81.c_str(), manifestTarget == ManifestCompatibilityTarget::Windows81);
+        addTo(manifestMenu, ID_MANIFEST_TARGET_WINDOWS8, g_ui.appxManifestTargetWindows8.c_str(), manifestTarget == ManifestCompatibilityTarget::Windows8);
+    }
+
+    HMENU manifestDetailsMenu = CreatePopupMenu();
+    if (!manifestDetailsMenu)
+    {
+        LogWin32Failure(L"CreatePopupMenu(manifest details)");
+        manifestDetailsMenu = manifestMenu;
+    }
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSourceLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestTargetLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestIdentityLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestPackageVersionLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestDisplayNameLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherDisplayNameLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestDescriptionLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestExecutableLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestApplicationIdLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestTargetDeviceFamilyNameLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestMinVersionLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestMaxVersionTestedLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestResourceLanguageLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestPropertiesLogoLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSquare150x150LogoLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSquare44x44LogoLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSquare30x30LogoLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSquare71x71LogoLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestWide310x150LogoLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSquare310x310LogoLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestBackgroundColorLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestShowNameOnTilesLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestEntryPointLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestRestrictedCapabilityLine.c_str());
+    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSplashScreenImageLine.c_str());
+    if (manifestDetailsMenu != manifestMenu)
+    {
+        if (!AppendMenuChecked(manifestMenu, MF_POPUP, (UINT_PTR)manifestDetailsMenu, g_ui.manifestDetailsTitle.c_str()))
+            DestroyMenu(manifestDetailsMenu);
+    }
     endSection(manifestMenu, g_ui.manifestTitle);
 
     HMENU advancedMenu = beginSection(g_ui.advancedTitle);
@@ -584,11 +619,65 @@ void Menu(HWND h)
 
         if (ConfiguredLiveTileUpdateMode() != newLiveTileMode)
         {
+            bool wasPackaged = CurrentProcessHasPackageIdentity();
+            bool relaunchOnSwitch = g_liveTileRelaunchOnSwitch.load();
             g_liveTileUpdateMode = static_cast<int>(newLiveTileMode);
             IniWrite(L"Settings", L"ExperimentalLiveTileUpdate", LiveTileUpdateModeIniValue(newLiveTileMode).c_str());
             Log(g_ui.liveTileUpdateSummary.c_str(), LiveTileUpdateModeSummaryText().c_str());
-            QueueLiveTileModeReregistration();
+
+            bool requestPackagedRelaunch = relaunchOnSwitch &&
+                newLiveTileMode == LiveTileUpdateMode::LiveTile &&
+                !wasPackaged &&
+                ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10;
+            bool requestUnpackagedRelaunch = relaunchOnSwitch &&
+                newLiveTileMode == LiveTileUpdateMode::Registration &&
+                wasPackaged;
+
+            if (requestPackagedRelaunch)
+            {
+                // Enabling Live Tile from the unpackaged tray process must first
+                // re-register the manifest/static assets for the new mode.
+                // Otherwise the packaged instance starts before the Start icon has
+                // been changed back to the Desktop/disabled static asset.
+                g_relaunchAfterExit = 1;
+                if (!QueueLiveTileModeReregistration())
+                {
+                    g_relaunchAfterExit = 0;
+                    break;
+                }
+                LogText(g_ui.liveTileRelaunchToPackagedQueued);
+                RequestGracefulShutdown(h);
+            }
+            else if (requestUnpackagedRelaunch)
+            {
+                // Disabling from a packaged instance cannot safely call
+                // RegisterPackageByFullName while that same package process is
+                // still running. Mark it pending, exit the package identity first,
+                // then let the unpackaged relaunch do the registration.
+                SetLiveTileModeReregistrationPending(true);
+                g_relaunchAfterExit = 2;
+                LogText(g_ui.liveTileRelaunchToUnpackagedQueued);
+                RequestGracefulShutdown(h);
+            }
+            else
+            {
+                QueueLiveTileModeReregistration();
+            }
         }
+    }
+    break;
+
+    case ID_LIVE_TILE_RELAUNCH_ON_SWITCH:
+    {
+        g_liveTileRelaunchOnSwitch = !g_liveTileRelaunchOnSwitch;
+        IniWrite(L"Settings", L"LiveTileRelaunchOnSwitch", g_liveTileRelaunchOnSwitch ? L"1" : L"0");
+    }
+    break;
+
+    case ID_CLEAR_LIVE_TILE_ON_SHUTDOWN:
+    {
+        g_clearLiveTileOnShutdown = !g_clearLiveTileOnShutdown;
+        IniWrite(L"Settings", L"ClearLiveTileOnShutdown", g_clearLiveTileOnShutdown ? L"1" : L"0");
     }
     break;
 
@@ -607,6 +696,7 @@ void Menu(HWND h)
             break;
         }
 
+        SetLiveTileModeReregistrationPending(true);
         QueueGenerate(wp, g_ui.manifestRegenerateReason);
     }
     break;
@@ -665,6 +755,40 @@ void Menu(HWND h)
             LogText(g_ui.manualGenerationRequested);
             QueueGenerate(wp, g_ui.manualGenerateTriggered);
         }
+    }
+    break;
+
+    case ID_MANIFEST_TARGET_WINDOWS10:
+    case ID_MANIFEST_TARGET_WINDOWS81:
+    case ID_MANIFEST_TARGET_WINDOWS8:
+    {
+        ManifestCompatibilityTarget newTarget = ManifestCompatibilityTarget::Windows10;
+        if (cmd == ID_MANIFEST_TARGET_WINDOWS81)
+            newTarget = ManifestCompatibilityTarget::Windows81;
+        else if (cmd == ID_MANIFEST_TARGET_WINDOWS8)
+            newTarget = ManifestCompatibilityTarget::Windows8;
+
+        if (ConfiguredManifestCompatibilityTarget() == newTarget)
+            break;
+
+        g_manifestCompatibilityTarget = static_cast<int>(newTarget);
+        IniWrite(L"Settings", L"AppxManifestTarget", ManifestCompatibilityTargetIniValue(newTarget).c_str());
+        Log(g_ui.manifestTargetSummary.c_str(), ManifestCompatibilityTargetSummaryText().c_str());
+        if (!RegenerateAppxManifestFromConfigAndLog())
+            break;
+
+        std::wstring wp = GetWallpaper();
+        if (wp.empty())
+        {
+            MessageBoxW(h,
+                g_ui.currentWallpaperNotFound.c_str(),
+                g_ui.generateNowTitle.c_str(),
+                MB_OK | MB_ICONWARNING);
+            break;
+        }
+
+        SetLiveTileModeReregistrationPending(true);
+        QueueGenerate(wp, g_ui.manifestRegenerateReason);
     }
     break;
 
@@ -961,7 +1085,7 @@ void Menu(HWND h)
     break;
 
     default:
-        if (cmd>=ID_A1 && cmd<=ID_A6){
+        if (cmd >= ID_A1 && cmd < ID_A1 + _countof(keys)){
             int i = static_cast<int>(cmd) - ID_A1;
             const wchar_t* k = keys[i];
             bool nv = IniReadI(L"Assets",k,0) == 0;
@@ -970,6 +1094,17 @@ void Menu(HWND h)
         }
         break;
     }
+}
+
+static void HandleExistingInstanceMessageBoxRequest()
+{
+    if (!g_notificationsEnabled || !g_notifyOnAlreadyRunning)
+        return;
+
+    MessageBoxW(g_hwnd ? g_hwnd : nullptr,
+        g_ui.notificationAlreadyRunning.c_str(),
+        g_ui.notificationTitle.c_str(),
+        MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
 }
 
 static void HandleExistingInstanceRequest()

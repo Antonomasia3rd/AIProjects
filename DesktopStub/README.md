@@ -6,31 +6,30 @@ The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale
 
 ## Requirements
 
-- Windows 10/11.
+- Windows 10/11 for the running utility and normal Desktop Bridge registration. The manifest generator can also emit Windows 8 or Windows 8.1-style AppX XML for Start Screen/Live Tile simulator compatibility.
 - Visual Studio Build Tools with the C++ workload.
 - Developer Mode or sideloading support may be required for Appx registration, depending on Windows policy.
 
 ## Build
 
-From the repository root:
+Run the build script once:
 
 ```cmd
 DesktopStub\BuildGenerateAssets.cmd
 ```
 
-If `build\GenerateAssets.exe` is running, close it before rebuilding so the compiler can overwrite the output.
-
-Syntax-only check:
-
-```cmd
-DesktopStub\BuildGenerateAssets.cmd check
-```
-
-Output:
+The script now ignores all command-line arguments for compatibility with older habits such as `win8`, `win81`, `broker`, `helpers`, `background`, `experiments`, `all`, or `check`. Every invocation builds the same stable target set:
 
 ```text
 DesktopStub\build\GenerateAssets.exe
+DesktopStub\build\GenerateAssetsLiveTileBroker.exe
 ```
+
+This avoids the old split where a Windows 8/8.1 manifest could be selected at runtime while the broker helper was missing because the build was run without the right argument.
+
+The experimental background-task DLL remains in the source tree for research, but it is intentionally not part of the normal one-command build.
+
+If `build\GenerateAssets.exe` or `build\GenerateAssetsLiveTileBroker.exe` is running, close it before rebuilding so the compiler can overwrite the output.
 
 ## Developer Checks
 
@@ -44,7 +43,19 @@ Use `-ListChecks` to print the guardrails without running assertions.
 
 ## Run
 
+For first-time/default Windows 10 usage:
+
 ```cmd
+DesktopStub\build\GenerateAssets.exe
+```
+
+You do not need to run `--manifest-win8` or `--manifest-win81` unless you are deliberately switching this build into the Windows 8/8.1 compatibility experiment. The generated manifest target defaults to Windows 10.
+
+For Windows 8/8.1 Start Screen simulator testing, switch the generated manifest target after the normal build. The broker is already produced by `BuildGenerateAssets.cmd`; extra build arguments are ignored.
+
+```cmd
+DesktopStub\BuildGenerateAssets.cmd
+DesktopStub\build\GenerateAssets.exe --manifest-win8
 DesktopStub\build\GenerateAssets.exe
 ```
 
@@ -54,7 +65,7 @@ On first launch the app creates `GenerateAssets.ini` next to the executable. The
 - notifications and logging;
 - wallpaper fitting and detection methods;
 - asset generation targets and DPI scales;
-- manifest status and one-shot regeneration;
+- manifest target selection, status, and one-shot regeneration;
 - registration mode and fallback behavior;
 - Live Tile update mode;
 - advanced timing/error options;
@@ -87,13 +98,15 @@ Supported options:
 - `--live-tile` / `--no-live-tile`: set and save Live Tile update mode.
 - `--live-tile-auto`: set and save automatic Live Tile update mode.
 - `--live-tile-mode Auto|Registration|LiveTile`: set and save Live Tile update mode.
+- `--manifest-target Windows10|Windows81|Windows8`: set the generated AppX manifest dialect and regenerate `AppxManifest.xml`. Windows 10 remains the default.
+- `--manifest-win10`, `--manifest-win81` / `--manifest-win8.1`, `--manifest-win8` / `--manifest-win8.0`: shortcuts for `--manifest-target`.
 - `--detect <method>`: set and save `WallpaperDetectionMethod`.
 - `--scales auto|all|100,125,150,200,400`: set and save generated DPI scales. `auto` ignores manual scale toggles while preserving their previous checkbox state for later.
 - `--asset Name=0|1`: set and save one asset toggle, such as `MediumTile=1`.
 
 ## Important Features
 
-- Generates Store logo, medium tile, square 44 logo, small tile, wide tile, and large tile assets.
+- Generates Store logo, medium tile, square 44 logo, square 30 logo, small tile, wide tile, large tile, and splash screen assets.
 - Supports selected DPI scales plus automatic current-DPI scale generation.
 - Detects wallpaper through configurable methods, including slideshow-compatible methods.
 - Uses COM Appx registration by default with optional PowerShell-only mode and fallback behavior.
@@ -105,7 +118,7 @@ Supported options:
 
 ## Source Layout
 
-`GenerateAssets.cpp` is the single translation-unit entry point. Most implementation code is split into ordered fragments under `DesktopStub\src`:
+`GenerateAssets.cpp` is the main host translation-unit entry point. Most implementation code is split into ordered fragments under `DesktopStub\src`:
 
 - `ga_core.inc`: low-level file, text, INI, and process-output helpers.
 - `ga_config_defaults.inc`: runtime globals and generated INI/string defaults.
@@ -123,31 +136,51 @@ Supported options:
 - `ga_live_tile.inc`: Live Tile notification update handling.
 - `ga_tray.inc`: tray menu and tray notifications.
 - `ga_app.inc`: window procedure and application startup/shutdown.
+- `ga_livetile_broker_app.inc`: implementation of the optional packaged WinRT Live Tile broker. `LiveTileBroker.cpp` is only a tiny wrapper because the broker must build as a separate executable.
+- `ga_livetile_background_task_dll.inc`: implementation of the disabled experimental background-task DLL. `LiveTileBackgroundTask.cpp` is only a tiny wrapper because the task must build as a separate DLL.
 
 ## Generated Files
 
 Generated/runtime files live under `DesktopStub\build` and are ignored by git:
 
 - `GenerateAssets.exe`
+- `GenerateAssetsLiveTileBroker.exe`
+- `GenerateAssetsAppxStub.exe` when legacy fallback mode is selected
+- `GenerateAssetsLiveTileTask.dll` only if manually built for the disabled background-task experiment
 - `GenerateAssets.ini`
 - `GenerateAssets.log`
+- `GenerateAssets.appxactivation.log`
+- `GenerateAssets.livetile.pending.xml`
 - `AppxManifest.xml`
 - `Assets\*`
 - compiler object files under `obj\`
+
+## Manifest Target Compatibility
+
+`AppxManifestTarget=Windows10` is the default. It keeps the existing Windows 10 Desktop Bridge-style manifest with `TargetDeviceFamily`, `Windows.FullTrustApplication`, and `runFullTrust`.
+
+For Start Screen / Live Tile simulator experiments, the generator can instead emit legacy AppX manifest shapes:
+
+- `Windows81`: uses the Windows 8.1-era base namespace plus `m2` 2013 extensions, `<Prerequisites>`, `m2:VisualElements`, `Square150x150Logo`, `Square30x30Logo`, `m2:DefaultTile`, 70/150/310 tile names, splash screen, and Live Tile XML with `TileSquare150x150Image`, `TileWide310x150Image`, and `TileSquare310x310Image`.
+- `Windows8`: uses the Windows 8 base namespace, `<Prerequisites>`, unprefixed `VisualElements`, `Logo`, `SmallLogo`, `DefaultTile WideLogo`, and Live Tile XML with the older `TileSquareImage` / `TileWideImage` templates. There is no 310x310 large-tile notification binding for this target.
+
+For Windows 8/8.1 targets, the default compatibility helper is now `GenerateAssetsLiveTileBroker.exe`, a tiny CoreApplication-based WinRT broker app. The normal `GenerateAssets.exe` remains the unpackaged tray/wallpaper monitor; the broker only exists so the registered package can update the Live Tile under package identity. The standard build script always builds this broker, regardless of arguments, before `--manifest-win8` or `--manifest-win81` are used. Set `[Settings] Win8LiveTileBrokerApp=0` and regenerate the manifest to fall back to the older `GenerateAssetsAppxStub.exe` behavior.
+
+Experimental helper paths remain in the source for later testing, but they are disabled by default: `[Settings] Win8LiveTileBackgroundTask=0` and `[Settings] Win8LiveTileOopHelper=0`. The background-task path currently requires package identity for the caller; the OOP-server path did not register reliably with the loose Windows 8-style package.
 
 ## Live Tile Update
 
 `ExperimentalLiveTileUpdate=Auto` is the default Live Tile update mode in `GenerateAssets.ini`.
 
-In `Auto`, a Start tile launch through the registered `shell:AppsFolder\<PackageFamilyName>!App` entry normally starts `GenerateAssets.exe` with package identity, so successful asset regeneration updates the tile through `Windows.UI.Notifications.TileUpdateManager`. A direct `GenerateAssets.exe` launch normally has no package identity, so successful asset regeneration uses the registration path and refreshes the Start entry by re-registering `AppxManifest.xml`.
+In `Auto`, Windows 10 Desktop Bridge mode updates the tile directly when `GenerateAssets.exe` is running with package identity. In Windows 8/8.1 compatibility mode, the normal unpackaged host writes `GenerateAssets.livetile.pending.xml`, mirrors it into the package `LocalState` folder, then activates the packaged WinRT broker (`GenerateAssetsLiveTileBroker.exe`) so the broker can apply the Live Tile update under package identity.
 
 The mode is user-configurable from the tray menu, command line, or INI:
 
-- `Auto`: choose Live Tile update only when the current process has package identity.
-- `LiveTile` or `1`: always try `TileUpdateManager`; without package identity the app logs a clear failure.
-- `Registration` or `0`: always refresh by re-registering `AppxManifest.xml`.
+- `Auto`: Windows 10 uses direct Live Tile updates only when package identity is present; Windows 8/8.1 compatibility targets use the packaged broker.
+- `LiveTile` or `1`: always try the Live Tile path. On Windows 8/8.1 targets this means broker activation from the normal unpackaged host.
+- `Registration` or `0`: refresh by re-registering `AppxManifest.xml` instead of using the Live Tile notification path.
 
-New generated manifests point at `GenerateAssets.exe`, so registered Start launches can carry package identity. Existing `AppxManifest.xml` files are kept unless you explicitly use `--regenerate-manifest` or the tray regeneration action. The INI no longer exposes a separate `[Manifest]` editor because that duplicated the manifest file itself.
+For Windows 8/8.1 targets, generated manifests point at `GenerateAssetsLiveTileBroker.exe` by default, not the resident tray app. This avoids the earlier fake-RT activation/MoAppHang behavior. Existing `AppxManifest.xml` files are kept unless you explicitly use `--regenerate-manifest`, `--manifest-win8`, `--manifest-win81`, or the tray regeneration action.
 
 When Live Tile update is active, static manifest logo assets are treated as disabled so stale registered assets are not refreshed with wallpaper images. If **Generate Desktop Icon for disabled entries** is enabled, those static assets become desktop-icon placeholders; otherwise they are deleted. The Live Tile notification itself uses separate generated files under `Assets\Live*.png`.
 
@@ -156,3 +189,14 @@ Changing the Live Tile update mode queues one asset regeneration and one Appx re
 ## Release
 
 Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available.
+
+## Notes for fix28
+
+`BuildGenerateAssets.cmd` no longer has argument-selected build modes. It always builds the main host and the stable packaged Live Tile broker; any supplied arguments are accepted but ignored.
+
+Live Tile menu additions from the previous fix remain:
+
+- **Relaunch on switch**: when enabled, switching Live Tile to **Enabled** from an unpackaged Windows 10 instance queues a relaunch through the registered package entry; switching to **Disabled** from a packaged instance queues a relaunch as the normal unpackaged desktop app.
+- **Clear Live Tile on shutdown**: enabled by default. Packaged instances clear the live tile during graceful shutdown. Win8/8.1 broker mode can request a package-side clear through the broker.
+
+The wallpaper poller updates its internal baseline after a failed poll-triggered generation attempt. This prevents repeated regeneration of the same wallpaper when the tile/app registration stage fails after assets were generated successfully.

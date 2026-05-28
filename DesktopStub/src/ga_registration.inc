@@ -35,7 +35,8 @@ static std::wstring PowerShellEncodedCommand(const std::wstring& command)
 static std::wstring PowerShellUtf8Preamble()
 {
     return L"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
-        L"$OutputEncoding = [System.Text.Encoding]::UTF8; ";
+        L"$OutputEncoding = [System.Text.Encoding]::UTF8; "
+        L"$ProgressPreference = 'SilentlyContinue'; ";
 }
 
 static std::wstring DefaultPowerShellExe()
@@ -233,7 +234,7 @@ bool PS_Run(const std::wstring& cmd)
     std::wstring timeoutDisplay = TimeoutDisplayText(timeoutMs);
     Log(g_ui.powerShellLaunchDetails.c_str(), powerShellExe.c_str(), timeoutDisplay.c_str(), pollMs, terminateWaitMs);
 
-    std::wstring cmdline = QuoteCommandLineArg(powerShellExe) + L" -NoProfile -ExecutionPolicy Bypass -EncodedCommand " + PowerShellEncodedCommand(PowerShellUtf8Preamble() + cmd);
+    std::wstring cmdline = QuoteCommandLineArg(powerShellExe) + L" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + PowerShellEncodedCommand(PowerShellUtf8Preamble() + cmd);
 
     BOOL ok = CreateProcessW(nullptr, &cmdline[0], nullptr,nullptr, TRUE,
         CREATE_NO_WINDOW, nullptr,nullptr, &si, &pi);

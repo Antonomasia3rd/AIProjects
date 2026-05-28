@@ -1,4 +1,4 @@
-// Logging buffer
+﻿// Logging buffer
 static std::mutex g_logMutex;
 static std::vector<std::wstring> g_logBuf;
 static std::atomic<bool> g_logWriteFailureReported(false);
@@ -24,14 +24,28 @@ struct UiStrings
     std::wstring assetsTitle;
     std::wstring dpiScalesTitle;
     std::wstring cachingTitle;
+    std::wstring liveTileTitle;
 
     std::wstring listenWallpaper;
     std::wstring trayIcon;
     std::wstring usePowerShell;
     std::wstring experimentalLiveTileUpdate;
+    std::wstring appxManifestTarget;
+    std::wstring appxManifestTargetWindows10;
+    std::wstring appxManifestTargetWindows81;
+    std::wstring appxManifestTargetWindows8;
     std::wstring liveTileModeAuto;
     std::wstring liveTileModeRegistration;
     std::wstring liveTileModeLiveTile;
+    std::wstring liveTileModeEnabled;
+    std::wstring liveTileModeDisabled;
+    std::wstring liveTileRelaunchOnSwitch;
+    std::wstring clearLiveTileOnShutdown;
+    std::wstring liveTileRelaunchToPackagedQueued;
+    std::wstring liveTileRelaunchToUnpackagedQueued;
+    std::wstring liveTileClearOnShutdown;
+    std::wstring liveTileClearOnShutdownSkipped;
+    std::wstring liveTileClearOnShutdownSuccess;
     std::wstring generateOnStartup;
     std::wstring generateOnStartupOnlyWhenChanged;
     std::wstring hideDisabledEntries;
@@ -118,6 +132,7 @@ struct UiStrings
     std::wstring notificationTrayIconHidden;
     std::wstring manualGenerateTriggered;
     std::wstring liveTileModeChanged;
+    std::wstring manifestTargetChanged;
     std::wstring liveTileModeReregistrationQueued;
     std::wstring liveTileModeReregistrationQueuedNoWallpaper;
     std::wstring startingWallpaperGeneration;
@@ -247,6 +262,7 @@ struct UiStrings
     std::wstring powerShellRegistrationSummary;
     std::wstring usePowerShellSummary;
     std::wstring liveTileUpdateSummary;
+    std::wstring manifestTargetSummary;
     std::wstring wallpaperDetectionFallbackSummary;
     std::wstring trayIconSummary;
     std::wstring consoleSummary;
@@ -345,6 +361,7 @@ struct UiStrings
     std::wstring savePngReplaceRetryDelayMsLabel;
     std::wstring timeoutInfiniteText;
     std::wstring manifestTitle;
+    std::wstring manifestDetailsTitle;
     std::wstring manifestIdentityNameLabel;
     std::wstring manifestPublisherLabel;
     std::wstring manifestPackageVersionLabel;
@@ -353,6 +370,7 @@ struct UiStrings
     std::wstring manifestDescriptionLabel;
     std::wstring manifestExecutableLabel;
     std::wstring manifestApplicationIdLabel;
+    std::wstring manifestTargetLabel;
     std::wstring manifestTargetDeviceFamilyNameLabel;
     std::wstring manifestMinVersionLabel;
     std::wstring manifestMaxVersionTestedLabel;
@@ -360,6 +378,7 @@ struct UiStrings
     std::wstring manifestPropertiesLogoLabel;
     std::wstring manifestSquare150x150LogoLabel;
     std::wstring manifestSquare44x44LogoLabel;
+    std::wstring manifestSquare30x30LogoLabel;
     std::wstring manifestSquare71x71LogoLabel;
     std::wstring manifestWide310x150LogoLabel;
     std::wstring manifestSquare310x310LogoLabel;
@@ -367,6 +386,7 @@ struct UiStrings
     std::wstring manifestShowNameOnTilesLabel;
     std::wstring manifestEntryPointLabel;
     std::wstring manifestRestrictedCapabilityLabel;
+    std::wstring manifestSplashScreenImageLabel;
     std::wstring manifestSourceLabel;
     std::wstring manifestSourceExisting;
     std::wstring manifestSourceGenerated;
