@@ -485,6 +485,20 @@ $sourceChecks += @(
         -Failure 'Lively.UI.WinUI.exe is the configuration UI and must not be captured as a wallpaper host'),
 
     (New-SourceCheck `
+        -Name 'Wallpaper Engine web wallpaper subprocesses are capture hosts' `
+        -SourceName 'src\ga_wallpaper.inc' `
+        -SourceText (Read-Source 'src\ga_wallpaper.inc') `
+        -Pattern 'webwallpaper32\.exe.*webwallpaper64\.exe|webwallpaper64\.exe.*webwallpaper32\.exe' `
+        -Failure 'Wallpaper Engine web wallpapers should accept webwallpaper32/64.exe as capture host subprocesses'),
+
+    (New-SourceCheck `
+        -Name 'Generic WorkerW live wallpaper capture is available' `
+        -SourceName 'src\ga_wallpaper.inc' `
+        -SourceText (Read-Source 'src\ga_wallpaper.inc') `
+        -Pattern 'LiveWallpaperProvider::Generic' `
+        -Failure 'live wallpaper capture should include a generic WorkerW provider for non-Lively/non-Wallpaper-Engine apps'),
+
+    (New-SourceCheck `
         -Name 'Live wallpaper refresh defaults to ten seconds' `
         -SourceName 'src\ga_config_defaults.inc' `
         -SourceText (Read-Source 'src\ga_config_defaults.inc') `
@@ -564,6 +578,7 @@ $uiStringKeys = @(
     'LiveWallpaperCapture',
     'LiveWallpaperCaptureLively',
     'LiveWallpaperCaptureWallpaperEngine',
+    'LiveWallpaperCaptureGeneric',
     'LiveWallpaperCaptureScreenFallback',
     'LiveWallpaperCaptureDelayMsLabel',
     'LiveWallpaperCaptureRefreshMsLabel',
@@ -575,6 +590,7 @@ $uiStringKeys = @(
     'LiveWallpaperProviderNone',
     'LiveWallpaperProviderLively',
     'LiveWallpaperProviderWallpaperEngine',
+    'LiveWallpaperProviderGeneric',
     'LiveWallpaperCaptureSummary',
     'LiveWallpaperCaptureDelayState',
     'LiveWallpaperCaptureRefreshState',
