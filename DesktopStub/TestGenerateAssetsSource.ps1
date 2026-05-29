@@ -647,19 +647,21 @@ Assert-SourceAbsent `
     -Pattern 'LiveWallpaperCaptureLively|LiveWallpaperCaptureWallpaperEngine|live-wallpaper-lively|live-wallpaper-wallpaper-engine|LiveWallpaperProviderLively|LiveWallpaperProviderWallpaperEngine' `
     -Failure 'legacy provider-specific live wallpaper settings/strings/command-line switches should stay removed'
 
-$legacyLiveWallpaperProviderLabelPattern = (
-    ('G' + 'eneric') + '|' +
-    ('g' + 'eneric') + '|' +
-    ('LiveWallpaperCapture' + 'G' + 'eneric') + '|' +
-    ('LiveWallpaperProvider' + 'G' + 'eneric') + '|' +
-    ('live-wallpaper-' + 'g' + 'eneric')
+$legacyLiveWallpaperNamedUiPattern = (
+    'Capture ' + ('g' + 'eneric') + ' WorkerW live wallpaper|' +
+    ('G' + 'eneric') + ' live wallpaper|' +
+    ('G' + 'eneric') + '=|' +
+    'LiveWallpaperSnapshot_' + ('G' + 'eneric') + '|' +
+    'LiveWallpaperCapture' + ('G' + 'eneric') + '|' +
+    'LiveWallpaperProvider' + ('G' + 'eneric') + '|' +
+    'live-wallpaper-' + ('g' + 'eneric')
 )
 
 Assert-SourceAbsent `
-    -Name 'Legacy named live wallpaper provider UI was removed' `
+    -Name 'Legacy named live wallpaper UI was removed' `
     -SourceName 'source tree' `
     -SourceText (Join-Source @('README.md','src\ga_config_defaults.inc','src\ga_command_line.inc','src\ga_tray.inc','src\ga_ui_strings.inc','src\ga_ui_state.inc','src\ga_wallpaper.inc')) `
-    -Pattern $legacyLiveWallpaperProviderLabelPattern `
+    -Pattern $legacyLiveWallpaperNamedUiPattern `
     -Failure 'after provider-specific live wallpaper capture was removed, the remaining WorkerW detector should be presented as the normal live wallpaper detector'
 
 foreach ($key in $uiStringKeys) {
