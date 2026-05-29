@@ -770,36 +770,6 @@ static bool ParseCommandLineOptions()
             AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCapture", false);
             continue;
         }
-        if (IEquals(arg, L"--live-wallpaper-lively"))
-        {
-            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureLively", true);
-            continue;
-        }
-        if (IEquals(arg, L"--no-live-wallpaper-lively"))
-        {
-            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureLively", false);
-            continue;
-        }
-        if (IEquals(arg, L"--live-wallpaper-wallpaper-engine"))
-        {
-            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", true);
-            continue;
-        }
-        if (IEquals(arg, L"--no-live-wallpaper-wallpaper-engine"))
-        {
-            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureWallpaperEngine", false);
-            continue;
-        }
-        if (IEquals(arg, L"--live-wallpaper-generic"))
-        {
-            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureGeneric", true);
-            continue;
-        }
-        if (IEquals(arg, L"--no-live-wallpaper-generic"))
-        {
-            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureGeneric", false);
-            continue;
-        }
         if (IEquals(arg, L"--live-wallpaper-screen-fallback"))
         {
             AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureScreenFallback", true);
@@ -1105,10 +1075,6 @@ static std::wstring CommandLineUsageText()
         L"  --detect <method>                   Set and save wallpaper detection method.\r\n"
         L"  --live-wallpaper-capture | --no-live-wallpaper-capture\r\n"
         L"                                      Enable/disable live wallpaper snapshots.\r\n"
-        L"  --live-wallpaper-lively | --no-live-wallpaper-lively\r\n"
-        L"                                      Enable/disable Lively Wallpaper snapshots.\r\n"
-        L"  --live-wallpaper-wallpaper-engine | --no-live-wallpaper-wallpaper-engine\r\n"
-        L"                                      Enable/disable Wallpaper Engine snapshots.\r\n"
         L"  --live-wallpaper-screen-fallback | --no-live-wallpaper-screen-fallback\r\n"
         L"                                      Enable/disable unsafe screen-copy fallback.\r\n"
         L"  --live-wallpaper-delay <ms>          Set snapshot startup delay, 0-30000.\r\n"

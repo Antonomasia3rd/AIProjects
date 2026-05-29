@@ -178,11 +178,8 @@ void LoadUiStrings()
     g_ui.generateDesktopIconForDisabledEntries = IniReadS(L"Strings", L"GenerateDesktopIconForDisabledEntries", L"Generate Desktop Icon for disabled entries");
     g_ui.deleteDisabledAssets = IniReadS(L"Strings", L"DeleteDisabledAssets", L"Auto-delete disabled asset files");
     g_ui.wallpaperDetectionFallback = IniReadS(L"Strings", L"WallpaperDetectionFallback", L"Fallback when selected path is invalid");
-    g_ui.liveWallpaperCaptureTitle = IniReadS(L"Strings", L"LiveWallpaperCaptureTitle", L"Live Wallpaper Capture:");
+    g_ui.liveWallpaperCaptureTitle = IniReadS(L"Strings", L"LiveWallpaperCaptureTitle", L"Live Wallpaper Detection:");
     g_ui.liveWallpaperCapture = IniReadS(L"Strings", L"LiveWallpaperCapture", L"Capture live wallpaper snapshot");
-    g_ui.liveWallpaperCaptureLively = IniReadS(L"Strings", L"LiveWallpaperCaptureLively", L"Capture Lively Wallpaper");
-    g_ui.liveWallpaperCaptureWallpaperEngine = IniReadS(L"Strings", L"LiveWallpaperCaptureWallpaperEngine", L"Capture Wallpaper Engine");
-    g_ui.liveWallpaperCaptureGeneric = IniReadS(L"Strings", L"LiveWallpaperCaptureGeneric", L"Capture generic WorkerW live wallpaper");
     g_ui.liveWallpaperCaptureScreenFallback = IniReadS(L"Strings", L"LiveWallpaperCaptureScreenFallback", L"Unsafe screen fallback (may capture desktop)");
     g_ui.liveWallpaperCaptureDelayMsLabel = IniReadS(L"Strings", L"LiveWallpaperCaptureDelayMsLabel", L"Capture delay: %d ms");
     g_ui.liveWallpaperCaptureRefreshMsLabel = IniReadS(L"Strings", L"LiveWallpaperCaptureRefreshMsLabel", L"Capture refresh: %s");
@@ -192,9 +189,7 @@ void LoadUiStrings()
     g_ui.liveWallpaperCaptureOff = IniReadS(L"Strings", L"LiveWallpaperCaptureOff", L"off");
     g_ui.liveWallpaperCaptureMsText = IniReadS(L"Strings", L"LiveWallpaperCaptureMsText", L"%d ms");
     g_ui.liveWallpaperProviderNone = IniReadS(L"Strings", L"LiveWallpaperProviderNone", L"None");
-    g_ui.liveWallpaperProviderLively = IniReadS(L"Strings", L"LiveWallpaperProviderLively", L"Lively");
-    g_ui.liveWallpaperProviderWallpaperEngine = IniReadS(L"Strings", L"LiveWallpaperProviderWallpaperEngine", L"Wallpaper Engine");
-    g_ui.liveWallpaperProviderGeneric = IniReadS(L"Strings", L"LiveWallpaperProviderGeneric", L"Generic live wallpaper");
+    g_ui.liveWallpaperProviderLive = IniReadS(L"Strings", L"LiveWallpaperProviderLive", L"Live wallpaper");
     g_ui.generateScaleAuto = IniReadS(L"Strings", L"GenerateScaleAuto", L"Auto: current DPI scale");
     g_ui.generateScaleAutoPreservesManualToggles = IniReadS(L"Strings", L"GenerateScaleAutoPreservesManualToggles", L"Manual scale checkboxes are remembered but ignored while Auto is enabled.");
     g_ui.generateScale100 = IniReadS(L"Strings", L"GenerateScale100", L"100%");
@@ -407,7 +402,7 @@ void LoadUiStrings()
     g_ui.liveTileUpdateSummary = IniReadS(L"Strings", L"LiveTileUpdateSummary", L"[i] Live Tile update mode: %s");
     g_ui.manifestTargetSummary = IniReadS(L"Strings", L"ManifestTargetSummary", L"[i] AppxManifest target: %s");
     g_ui.wallpaperDetectionFallbackSummary = IniReadS(L"Strings", L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s");
-    g_ui.liveWallpaperCaptureSummary = IniReadS(L"Strings", L"LiveWallpaperCaptureSummary", L"[i] Live wallpaper capture: %s (Lively=%s, Wallpaper Engine=%s, Generic=%s, delay=%d ms, refresh=%s)");
+    g_ui.liveWallpaperCaptureSummary = IniReadS(L"Strings", L"LiveWallpaperCaptureSummary", L"[i] Live wallpaper capture: %s (delay=%d ms, refresh=%s)");
     g_ui.liveWallpaperCaptureDelayState = IniReadS(L"Strings", L"LiveWallpaperCaptureDelayState", L"[i] LiveWallpaperCaptureDelayMs = %d");
     g_ui.liveWallpaperCaptureRefreshState = IniReadS(L"Strings", L"LiveWallpaperCaptureRefreshState", L"[i] LiveWallpaperCaptureRefreshMs = %d");
     g_ui.liveWallpaperCaptureStartupRefreshState = IniReadS(L"Strings", L"LiveWallpaperCaptureStartupRefreshState", L"[i] LiveWallpaperCaptureStartupRefreshMs = %d");
@@ -646,7 +641,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.win8LiveTileOopHelperState, L"Win8LiveTileOopHelperState", { L"%d" });
     RequireFormat(g_ui.win8LiveTileBackgroundTaskState, L"Win8LiveTileBackgroundTaskState", { L"%d" });
     RequireFormat(g_ui.win8LiveTileBrokerAppState, L"Win8LiveTileBrokerAppState", { L"%d" });
-    RequireFormat(g_ui.liveWallpaperCaptureSummary, L"LiveWallpaperCaptureSummary", { L"%s", L"%s", L"%s", L"%s", L"%d", L"%s" });
+    RequireFormat(g_ui.liveWallpaperCaptureSummary, L"LiveWallpaperCaptureSummary", { L"%s", L"%d", L"%s" });
     RequireFormat(g_ui.liveWallpaperCaptureDelayState, L"LiveWallpaperCaptureDelayState", { L"%d" });
     RequireFormat(g_ui.liveWallpaperCaptureRefreshState, L"LiveWallpaperCaptureRefreshState", { L"%d" });
     RequireFormat(g_ui.liveWallpaperCaptureStartupRefreshState, L"LiveWallpaperCaptureStartupRefreshState", { L"%d" });
