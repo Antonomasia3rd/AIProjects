@@ -182,7 +182,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"OnText", L"on"},
     {L"OffText", L"off"},
 
-    {L"TrayTip", L"Desktop Tile Generator"},
+    {L"TrayTip", L"DesktopStub"},
     {L"ExeLabel", L"[i] EXE: %s"},
     {L"IniLabel", L"[i] INI: %s"},
     {L"LogFileLabel", L"[i] Log file: %s"},
@@ -458,16 +458,16 @@ static const StringDefault g_stringDefaults[] = {
     {L"WallpaperNotFound", L"Could not detect current wallpaper."},
     {L"CurrentWallpaperNotFound", L"Could not detect current wallpaper."},
     {L"ProgramStarting", L"Program starting..."},
-    {L"NotificationTitle", L"Desktop Tile Generator"},
+    {L"NotificationTitle", L"DesktopStub"},
     {L"NotificationGenerationStarted", L"Wallpaper generation started."},
     {L"NotificationGenerationSuccess", L"Wallpaper generation completed successfully."},
     {L"NotificationGenerationFailed", L"Wallpaper generation failed."},
     {L"NotificationGenerationBusy", L"Wallpaper generation is already running."},
-    {L"NotificationAlreadyRunning", L"Desktop Tile Generator is already running."},
-    {L"NotificationAlreadyRunningTrayPersistent", L"Desktop Tile Generator is already running. Tray icon is enabled in the config, so it will stay visible after restart."},
-    {L"NotificationAlreadyRunningTraySession", L"Desktop Tile Generator is already running. Tray icon is visible for this session only; it will be hidden again after restart because TrayIcon=0 in the config."},
+    {L"NotificationAlreadyRunning", L"DesktopStub is already running."},
+    {L"NotificationAlreadyRunningTrayPersistent", L"DesktopStub is already running. Tray icon is enabled in the config, so it will stay visible after restart."},
+    {L"NotificationAlreadyRunningTraySession", L"DesktopStub is already running. Tray icon is visible for this session only; it will be hidden again after restart because TrayIcon=0 in the config."},
     {L"NotificationSingleInstanceFailure", L"Single-instance protection failed; another copy may run."},
-    {L"NotificationTrayIconHidden", L"Tray icon hidden for this session. Run GenerateAssets.exe again to restore it."},
+    {L"NotificationTrayIconHidden", L"Tray icon hidden for this session. Run DesktopStub.exe again to restore it."},
     {L"ManualGenerateTriggered", L"Manual generate triggered."},
     {L"LiveTileModeChanged", L"Live Tile mode changed."},
     {L"ManifestTargetChanged", L"AppxManifest target changed."},
@@ -626,7 +626,7 @@ static std::wstring BuildInitialIniTemplate()
 {
     std::vector<std::wstring> lines;
     lines.push_back(L"; ============================================================");
-    lines.push_back(L"; GenerateAssets - Configuration");
+    lines.push_back(L"; DesktopStub - Configuration");
     lines.push_back(L"; ============================================================");
     lines.push_back(L"; Keys and values are quoted so ; and # can be used literally");
     lines.push_back(L"; inside strings. Keep required printf tokens such as %s/%d.");

@@ -18,8 +18,8 @@ if /i "!ARG:~0,6!"=="/skip:" (
 ) else (
   set "SKIP_LIST=!SKIP_LIST!%~1,"
 )
-if /i "!ARG!"=="/skip:GenerateAssets" set "SKIP_LIST=!SKIP_LIST!DesktopStub,"
-if /i "!ARG!"=="--skip:GenerateAssets" set "SKIP_LIST=!SKIP_LIST!DesktopStub,"
+if /i "!ARG!"=="/skip:DesktopStub" set "SKIP_LIST=!SKIP_LIST!DesktopStub,"
+if /i "!ARG!"=="--skip:DesktopStub" set "SKIP_LIST=!SKIP_LIST!DesktopStub,"
 set "SKIP_LIST=!SKIP_LIST: =!"
 shift
 goto ParseArgs
@@ -134,19 +134,19 @@ call :IsSkipped DesktopStub
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build DesktopStub"
 pushd "%REPO%\DesktopStub" || exit /b 1
-call :Run powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%REPO%\DesktopStub\TestGenerateAssetsSource.ps1"
+call :Run powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%REPO%\DesktopStub\TestDesktopStubSource.ps1"
 if errorlevel 1 (
   set "STATUS=%ERRORLEVEL%"
   popd
   exit /b !STATUS!
 )
-call :Run cmd.exe /d /c BuildGenerateAssets.cmd
+call :Run cmd.exe /d /c BuildDesktopStub.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%REPO%\DesktopStub\build\GenerateAssets.exe"
+call :RecordArtifact "%REPO%\DesktopStub\build\DesktopStub.exe"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%REPO%\DesktopStub\build\GenerateAssetsLiveTileBroker.exe"
+call :RecordArtifact "%REPO%\DesktopStub\build\DesktopStubLiveTileBroker.exe"
 exit /b %ERRORLEVEL%
 
 :BuildCharmTray

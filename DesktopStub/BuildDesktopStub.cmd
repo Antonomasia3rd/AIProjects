@@ -57,20 +57,20 @@ rem   runtime while the packaged broker helper had not been built.
 rem
 rem   The script now deliberately ignores every argument and always builds the
 rem   same stable target set:
-rem     - GenerateAssets.exe
-rem     - GenerateAssetsLiveTileBroker.exe
+rem     - DesktopStub.exe
+rem     - DesktopStubLiveTileBroker.exe
 rem
 rem   The experimental background-task DLL remains in the source tree for
 rem   research, but it is not part of the normal one-command build.
 rem ---------------------------------------------------------------------------
 if not "%~1"=="" (
-    echo [i] BuildGenerateAssets.cmd now ignores build arguments and always builds the same target set.
+    echo [i] BuildDesktopStub.cmd now ignores build arguments and always builds the same target set.
     echo [i] One or more arguments were supplied and ignored.
 )
 
-set "OUT_EXE=build\GenerateAssets.exe"
-set "OBJ_FILE=build\obj\GenerateAssets.obj"
-set "BROKER_EXE=build\GenerateAssetsLiveTileBroker.exe"
+set "OUT_EXE=build\DesktopStub.exe"
+set "OBJ_FILE=build\obj\DesktopStub.obj"
+set "BROKER_EXE=build\DesktopStubLiveTileBroker.exe"
 set "BROKER_OBJ=build\obj\LiveTileBroker.obj"
 
 echo Building packaged Live Tile broker...
@@ -81,8 +81,8 @@ if errorlevel 1 (
     exit /b %STATUS%
 )
 
-echo Building main GenerateAssets host...
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE GenerateAssets.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+echo Building main DesktopStub host...
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 

@@ -84,7 +84,7 @@ static std::wstring ExeBaseName()
     if (dot != std::wstring::npos)
         name.erase(dot);
 
-    return name.empty() ? L"GenerateAssets" : name;
+    return name.empty() ? L"DesktopStub" : name;
 }
 
 static std::wstring DefaultLogPath()
@@ -373,7 +373,7 @@ static std::wstring EffectiveManifestIdentityName()
 
 static std::wstring EffectiveManifestPublisher()
 {
-    std::wstring publisher = ManifestSettingValidated(L"Publisher", L"CN=DesktopTileGenerator", L"ManifestPublisher", IsManifestPublisherValue);
+    std::wstring publisher = ManifestSettingValidated(L"Publisher", L"CN=DesktopStub", L"ManifestPublisher", IsManifestPublisherValue);
     if (ToLowerCopy(publisher).rfind(L"cn=", 0) != 0)
         publisher = L"CN=" + publisher;
     return publisher;
@@ -392,7 +392,7 @@ static std::wstring EffectiveManifestDisplayName()
 
 static std::wstring EffectiveManifestPublisherDisplayName()
 {
-    return ManifestSetting(L"PublisherDisplayName", L"Desktop Tile Generator", L"ManifestPublisherDisplayName");
+    return ManifestSetting(L"PublisherDisplayName", L"DesktopStub", L"ManifestPublisherDisplayName");
 }
 
 static std::wstring EffectiveManifestDescription()
@@ -402,17 +402,17 @@ static std::wstring EffectiveManifestDescription()
 
 static std::wstring ManifestHostExecutableName()
 {
-    return L"GenerateAssets.exe";
+    return L"DesktopStub.exe";
 }
 
 static std::wstring ManifestAppxActivationStubExecutableName()
 {
-    return L"GenerateAssetsAppxStub.exe";
+    return L"DesktopStubAppxStub.exe";
 }
 
 static std::wstring ManifestLiveTileBrokerExecutableName()
 {
-    return L"GenerateAssetsLiveTileBroker.exe";
+    return L"DesktopStubLiveTileBroker.exe";
 }
 
 static std::wstring ManifestLiveTileBrokerEntryPoint()
@@ -441,7 +441,7 @@ static std::wstring ManifestLiveTileOopRuntimeClassId()
 
 static std::wstring ManifestLiveTileBackgroundTaskDllName()
 {
-    return L"GenerateAssetsLiveTileTask.dll";
+    return L"DesktopStubLiveTileTask.dll";
 }
 
 static std::wstring ManifestLiveTileBackgroundTaskClassId()
@@ -451,7 +451,7 @@ static std::wstring ManifestLiveTileBackgroundTaskClassId()
 
 static std::wstring ManifestLiveTileBackgroundTaskName()
 {
-    return L"GenerateAssetsLiveTileUpdate";
+    return L"DesktopStubLiveTileUpdate";
 }
 
 static bool Win8LiveTileBackgroundTaskEnabled()
@@ -459,7 +459,7 @@ static bool Win8LiveTileBackgroundTaskEnabled()
     // Experimental. This declares a WinRT background task and tries
     // ApplicationTrigger before falling back to the foreground package-identity
     // helper. In practice, ApplicationTrigger calls from the normal
-    // GenerateAssets.exe host fail because the host is deliberately unpackaged
+    // DesktopStub.exe host fail because the host is deliberately unpackaged
     // (0x80073D57: no application identity). Keep this disabled by default;
     // set [Settings] Win8LiveTileBackgroundTask=1 only for targeted research.
     return IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0;
@@ -583,7 +583,7 @@ static std::wstring EffectiveManifestEntryPoint()
     {
         if (Win8LiveTileBrokerAppEnabled())
             return ManifestLiveTileBrokerEntryPoint();
-        std::wstring classBase = SanitizeManifestToken(ExeBaseName(), L"GenerateAssets");
+        std::wstring classBase = SanitizeManifestToken(ExeBaseName(), L"DesktopStub");
         return classBase + L".App";
     }
 

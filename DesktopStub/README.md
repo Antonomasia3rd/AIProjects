@@ -1,6 +1,6 @@
-# DesktopStub / GenerateAssets
+# DesktopStub
 
-`GenerateAssets.exe` is a tray utility that generates Windows Start tile assets from the current desktop wallpaper and registers a loose Appx manifest for a desktop tile entry.
+`DesktopStub.exe` is a tray utility that generates Windows Start tile assets from the current desktop wallpaper and registers a loose Appx manifest for a desktop tile entry.
 
 The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale settings, then regenerate assets and re-register the manifest automatically. Most behavior is configurable through the tray menu and generated INI file.
 
@@ -15,28 +15,28 @@ The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale
 Run the build script once:
 
 ```cmd
-DesktopStub\BuildGenerateAssets.cmd
+DesktopStub\BuildDesktopStub.cmd
 ```
 
 The script now ignores all command-line arguments for compatibility with older habits such as `win8`, `win81`, `broker`, `helpers`, `background`, `experiments`, `all`, or `check`. Every invocation builds the same stable target set:
 
 ```text
-DesktopStub\build\GenerateAssets.exe
-DesktopStub\build\GenerateAssetsLiveTileBroker.exe
+DesktopStub\build\DesktopStub.exe
+DesktopStub\build\DesktopStubLiveTileBroker.exe
 ```
 
 This avoids the old split where a Windows 8/8.1 manifest could be selected at runtime while the broker helper was missing because the build was run without the right argument.
 
 The experimental background-task DLL remains in the source tree for research, but it is intentionally not part of the normal one-command build.
 
-If `build\GenerateAssets.exe` or `build\GenerateAssetsLiveTileBroker.exe` is running, close it before rebuilding so the compiler can overwrite the output.
+If `build\DesktopStub.exe` or `build\DesktopStubLiveTileBroker.exe` is running, close it before rebuilding so the compiler can overwrite the output.
 
 ## Developer Checks
 
-`TestGenerateAssetsSource.ps1` is a maintainer regression guard. It does not build or launch `GenerateAssets.exe`; it scans the source for safety fixes that should not be accidentally removed.
+`TestDesktopStubSource.ps1` is a maintainer regression guard. It does not build or launch `DesktopStub.exe`; it scans the source for safety fixes that should not be accidentally removed.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File DesktopStub\TestGenerateAssetsSource.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File DesktopStub\TestDesktopStubSource.ps1
 ```
 
 Use `-ListChecks` to print the guardrails without running assertions.
@@ -46,20 +46,20 @@ Use `-ListChecks` to print the guardrails without running assertions.
 For first-time/default Windows 10 usage:
 
 ```cmd
-DesktopStub\build\GenerateAssets.exe
+DesktopStub\build\DesktopStub.exe
 ```
 
 You do not need to run `--manifest-win8` or `--manifest-win81` unless you are deliberately switching this build into the Windows 8/8.1 compatibility experiment. The generated manifest target defaults to Windows 10.
 
-For Windows 8/8.1 Start Screen simulator testing, switch the generated manifest target after the normal build. The broker is already produced by `BuildGenerateAssets.cmd`; extra build arguments are ignored.
+For Windows 8/8.1 Start Screen simulator testing, switch the generated manifest target after the normal build. The broker is already produced by `BuildDesktopStub.cmd`; extra build arguments are ignored.
 
 ```cmd
-DesktopStub\BuildGenerateAssets.cmd
-DesktopStub\build\GenerateAssets.exe --manifest-win8
-DesktopStub\build\GenerateAssets.exe
+DesktopStub\BuildDesktopStub.cmd
+DesktopStub\build\DesktopStub.exe --manifest-win8
+DesktopStub\build\DesktopStub.exe
 ```
 
-On first launch the app creates `GenerateAssets.ini` next to the executable. The tray menu exposes:
+On first launch the app creates `DesktopStub.ini` next to the executable. The tray menu exposes:
 
 - general settings;
 - notifications and logging;
@@ -71,9 +71,9 @@ On first launch the app creates `GenerateAssets.ini` next to the executable. The
 - advanced timing/error options;
 - startup/cleanup actions.
 
-Command-line settings are saved to `GenerateAssets.ini`, the same configuration file used by the tray menu. Action-only commands such as `--once`, `--generate`, `--no-monitor`, and `--exit` affect only that invocation.
+Command-line settings are saved to `DesktopStub.ini`, the same configuration file used by the tray menu. Action-only commands such as `--once`, `--generate`, `--no-monitor`, and `--exit` affect only that invocation.
 
-Live wallpaper capture is configurable from the tray menu, from command-line flags, or from `GenerateAssets.ini`:
+Live wallpaper capture is configurable from the tray menu, from command-line flags, or from `DesktopStub.ini`:
 
 ```ini
 [Settings]
@@ -85,19 +85,19 @@ Live wallpaper capture is configurable from the tray menu, from command-line fla
 "LiveWallpaperCaptureStartupRefreshDurationMs" = "0"
 ```
 
-When enabled, `GenerateAssets.exe` scans the desktop WorkerW live-wallpaper host tree. If a live-wallpaper host window is actually present, it captures a still frame from that host and uses the temporary BMP snapshot as the wallpaper source for asset generation. This is intentionally different from older external AHK bridge scripts: the built-in implementation does **not** call `SystemParametersInfo` or `IDesktopWallpaper::SetWallpaper`, so it does not replace or restore the user's actual wallpaper.
+When enabled, `DesktopStub.exe` scans the desktop WorkerW live-wallpaper host tree. If a live-wallpaper host window is actually present, it captures a still frame from that host and uses the temporary BMP snapshot as the wallpaper source for asset generation. This is intentionally different from older external AHK bridge scripts: the built-in implementation does **not** call `SystemParametersInfo` or `IDesktopWallpaper::SetWallpaper`, so it does not replace or restore the user's actual wallpaper.
 
 `LiveWallpaperCaptureRefreshMs=10000` is the default, so an active live-wallpaper host is recaptured about every 10 seconds. Set it to `0`/`once` if you only want one capture per host lifetime. The startup recapture duration defaults to `0`/`off`; set `LiveWallpaperCaptureStartupRefreshDurationMs` to a positive value only if you want DesktopStub to collect warm-up snapshots briefly while a provider starts. Warm-up snapshots are not published one by one; the latest valid snapshot is published after the startup settle window ends.
 
 The live-wallpaper capture path does not look for a specific process name. It scans only non-icon `WorkerW` desktop-host windows and accepts visible monitor-sized child windows inside those `WorkerW` trees as candidates. This covers Lively, Wallpaper Engine, N0va Desktop, and arbitrary app-wallpaper modes that embed their renderer under the desktop. It intentionally does not enumerate arbitrary top-level windows, because a normal foreground app can also be large and visible. Captured windows that are tiny relative to the primary monitor are rejected, so small UI/helper fragments do not get stretched into the tile. If a WorkerW-hosted child renderer such as Wallpaper Engine's `WPEDesktopDX11Window` or `WPEDesktopCEFWindow` returns a black frame from `PrintWindow`, the capture path keeps the same non-icon `WorkerW` parent as a later fallback while still staying WorkerW-only. If every candidate returns a black GPU/WebView frame, the capture path rejects the blank/black frame instead of generating a black tile. The old screen-DC fallback is disabled by default because it can capture the visible desktop, taskbar, icons, or the user's static wallpaper; enable `LiveWallpaperCaptureScreenFallback=1` only for debugging or as an explicit unsafe workaround.
 
 ```cmd
-GenerateAssets.exe --once
-GenerateAssets.exe --no-tray --console
-GenerateAssets.exe --ini D:\Temp\GenerateAssets.ini --set Settings.PollIntervalMs=5000
-GenerateAssets.exe --regenerate-manifest
-GenerateAssets.exe --wallpaper D:\Pictures\wallpaper.jpg --scales 100,200
-GenerateAssets.exe --exit
+DesktopStub.exe --once
+DesktopStub.exe --no-tray --console
+DesktopStub.exe --ini D:\Temp\DesktopStub.ini --set Settings.PollIntervalMs=5000
+DesktopStub.exe --regenerate-manifest
+DesktopStub.exe --wallpaper D:\Pictures\wallpaper.jpg --scales 100,200
+DesktopStub.exe --exit
 ```
 
 Supported options:
@@ -146,7 +146,7 @@ Supported options:
 
 ## Source Layout
 
-`GenerateAssets.cpp` is the main host translation-unit entry point. Most implementation code is split into ordered fragments under `DesktopStub\src`:
+`DesktopStub.cpp` is the main host translation-unit entry point. Most implementation code is split into ordered fragments under `DesktopStub\src`:
 
 - `ga_core.inc`: low-level file, text, INI, and process-output helpers.
 - `ga_config_defaults.inc`: runtime globals and generated INI/string defaults.
@@ -171,14 +171,14 @@ Supported options:
 
 Generated/runtime files live under `DesktopStub\build` and are ignored by git:
 
-- `GenerateAssets.exe`
-- `GenerateAssetsLiveTileBroker.exe`
-- `GenerateAssetsAppxStub.exe` when legacy fallback mode is selected
-- `GenerateAssetsLiveTileTask.dll` only if manually built for the disabled background-task experiment
-- `GenerateAssets.ini`
-- `GenerateAssets.log`
-- `GenerateAssets.appxactivation.log`
-- `GenerateAssets.livetile.pending.xml`
+- `DesktopStub.exe`
+- `DesktopStubLiveTileBroker.exe`
+- `DesktopStubAppxStub.exe` when legacy fallback mode is selected
+- `DesktopStubLiveTileTask.dll` only if manually built for the disabled background-task experiment
+- `DesktopStub.ini`
+- `DesktopStub.log`
+- `DesktopStub.appxactivation.log`
+- `DesktopStub.livetile.pending.xml`
 - `AppxManifest.xml`
 - `Assets\*`
 - compiler object files under `obj\`
@@ -192,15 +192,15 @@ For Start Screen / Live Tile simulator experiments, the generator can instead em
 - `Windows81`: uses the Windows 8.1-era base namespace plus `m2` 2013 extensions, `<Prerequisites>`, `m2:VisualElements`, `Square150x150Logo`, `Square30x30Logo`, `m2:DefaultTile`, 70/150/310 tile names, splash screen, and Live Tile XML with `TileSquare150x150Image`, `TileWide310x150Image`, and `TileSquare310x310Image`.
 - `Windows8`: uses the Windows 8 base namespace, `<Prerequisites>`, unprefixed `VisualElements`, `Logo`, `SmallLogo`, `DefaultTile WideLogo`, and Live Tile XML with the older `TileSquareImage` / `TileWideImage` templates. There is no 310x310 large-tile notification binding for this target.
 
-For Windows 8/8.1 targets, the default compatibility helper is now `GenerateAssetsLiveTileBroker.exe`, a tiny CoreApplication-based WinRT broker app. The normal `GenerateAssets.exe` remains the unpackaged tray/wallpaper monitor; the broker only exists so the registered package can update the Live Tile under package identity. The standard build script always builds this broker, regardless of arguments, before `--manifest-win8` or `--manifest-win81` are used. Set `[Settings] Win8LiveTileBrokerApp=0` and regenerate the manifest to fall back to the older `GenerateAssetsAppxStub.exe` behavior.
+For Windows 8/8.1 targets, the default compatibility helper is now `DesktopStubLiveTileBroker.exe`, a tiny CoreApplication-based WinRT broker app. The normal `DesktopStub.exe` remains the unpackaged tray/wallpaper monitor; the broker only exists so the registered package can update the Live Tile under package identity. The standard build script always builds this broker, regardless of arguments, before `--manifest-win8` or `--manifest-win81` are used. Set `[Settings] Win8LiveTileBrokerApp=0` and regenerate the manifest to fall back to the older `DesktopStubAppxStub.exe` behavior.
 
 Experimental helper paths remain in the source for later testing, but they are disabled by default: `[Settings] Win8LiveTileBackgroundTask=0` and `[Settings] Win8LiveTileOopHelper=0`. The background-task path currently requires package identity for the caller; the OOP-server path did not register reliably with the loose Windows 8-style package.
 
 ## Live Tile Update
 
-`ExperimentalLiveTileUpdate=Auto` is the default Live Tile update mode in `GenerateAssets.ini`.
+`ExperimentalLiveTileUpdate=Auto` is the default Live Tile update mode in `DesktopStub.ini`.
 
-In `Auto`, Windows 10 Desktop Bridge mode updates the tile directly when `GenerateAssets.exe` is running with package identity. In Windows 8/8.1 compatibility mode, the normal unpackaged host writes `GenerateAssets.livetile.pending.xml`, mirrors it into the package `LocalState` folder, then activates the packaged WinRT broker (`GenerateAssetsLiveTileBroker.exe`) so the broker can apply the Live Tile update under package identity.
+In `Auto`, Windows 10 Desktop Bridge mode updates the tile directly when `DesktopStub.exe` is running with package identity. In Windows 8/8.1 compatibility mode, the normal unpackaged host writes `DesktopStub.livetile.pending.xml`, mirrors it into the package `LocalState` folder, then activates the packaged WinRT broker (`DesktopStubLiveTileBroker.exe`) so the broker can apply the Live Tile update under package identity.
 
 The mode is user-configurable from the tray menu, command line, or INI:
 
@@ -208,7 +208,7 @@ The mode is user-configurable from the tray menu, command line, or INI:
 - `LiveTile` or `1`: always try the Live Tile path. On Windows 8/8.1 targets this means broker activation from the normal unpackaged host.
 - `Registration` or `0`: refresh by re-registering `AppxManifest.xml` instead of using the Live Tile notification path.
 
-For Windows 8/8.1 targets, generated manifests point at `GenerateAssetsLiveTileBroker.exe` by default, not the resident tray app. This avoids the earlier fake-RT activation/MoAppHang behavior. Existing `AppxManifest.xml` files are kept unless you explicitly use `--regenerate-manifest`, `--manifest-win8`, `--manifest-win81`, or the tray regeneration action.
+For Windows 8/8.1 targets, generated manifests point at `DesktopStubLiveTileBroker.exe` by default, not the resident tray app. This avoids the earlier fake-RT activation/MoAppHang behavior. Existing `AppxManifest.xml` files are kept unless you explicitly use `--regenerate-manifest`, `--manifest-win8`, `--manifest-win81`, or the tray regeneration action.
 
 When Live Tile update is active, static manifest logo assets are treated as disabled so stale registered assets are not refreshed with wallpaper images. If **Generate Desktop Icon for disabled entries** is enabled, those static assets become desktop-icon placeholders; otherwise they are deleted. The Live Tile notification itself uses separate generated files under `Assets\Live*.png`.
 
@@ -220,7 +220,7 @@ Prebuilt binaries are published through the repository's Windows build workflow 
 
 ## Notes for fix28
 
-`BuildGenerateAssets.cmd` no longer has argument-selected build modes. It always builds the main host and the stable packaged Live Tile broker; any supplied arguments are accepted but ignored.
+`BuildDesktopStub.cmd` no longer has argument-selected build modes. It always builds the main host and the stable packaged Live Tile broker; any supplied arguments are accepted but ignored.
 
 Live Tile menu additions from the previous fix remain:
 

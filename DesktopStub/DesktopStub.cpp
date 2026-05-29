@@ -1,4 +1,4 @@
-﻿// compile command: cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE GenerateAssets.cpp /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+﻿// compile command: cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub.cpp /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 #define NOMINMAX
 #include <windows.h>
 #include <gdiplus.h>
@@ -93,10 +93,10 @@ static bool TryParseIntStrict(const std::wstring& value, int& parsed);
 static std::wstring g_iniPath, g_logPath, g_exePath;
 static std::mutex g_pathMutex;
 static std::atomic<int> g_logAppendLockWaitMs(1000);
-static constexpr const wchar_t* WINDOW_CLASS_NAME = L"DesktopTileGeneratorTrayWnd";
-static constexpr const wchar_t* COM_REGISTRATION_HELPER_ARG = L"--ga-com-register";
-static constexpr const wchar_t* SINGLE_INSTANCE_MUTEX_BASE = L"Local\\DesktopTileGenerator.GenerateAssets";
-static constexpr const wchar_t* SINGLE_INSTANCE_MESSAGE_BASE = L"DesktopTileGenerator.RestoreRunningInstance";
+static constexpr const wchar_t* WINDOW_CLASS_NAME = L"DesktopStubTrayWnd";
+static constexpr const wchar_t* COM_REGISTRATION_HELPER_ARG = L"--ds-com-register";
+static constexpr const wchar_t* SINGLE_INSTANCE_MUTEX_BASE = L"Local\\DesktopStub";
+static constexpr const wchar_t* SINGLE_INSTANCE_MESSAGE_BASE = L"DesktopStub.RestoreRunningInstance";
 static std::wstring g_singleInstanceMutexName;
 static std::wstring g_singleInstanceMessageName;
 static std::wstring g_instanceWindowTitle;

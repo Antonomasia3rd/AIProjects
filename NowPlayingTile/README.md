@@ -2,7 +2,7 @@
 
 `NowPlayingTile.exe` is a native Win32/C++ background app that reads the current System Media Transport Controls (SMTC) session and updates a Windows Start Live Tile.
 
-It is intended for Windows 10 Start, including ExplorerPatcher's Windows 10 Start menu on Windows 11. The project is structured like `DesktopStub / GenerateAssets`: one native entry point, ordered `src\*.inc` fragments, one Visual Studio build command, and generated runtime/package files under `build`.
+It is intended for Windows 10 Start, including ExplorerPatcher's Windows 10 Start menu on Windows 11. The project is structured like `DesktopStub`: one native entry point, ordered `src\*.inc` fragments, one Visual Studio build command, and generated runtime/package files under `build`.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ On first launch the app creates runtime files next to the executable:
 - `AppxManifest.xml`
 - `Assets\*`
 
-The manifest and assets are generated files. They are not tracked in the source tree, matching the way `DesktopStub / GenerateAssets` treats generated Appx files.
+The manifest and assets are generated files. They are not tracked in the source tree, matching the way `DesktopStub` treats generated Appx files.
 
 ## Register the Start Tile
 
@@ -198,4 +198,4 @@ Normal launch behavior:
 - If the executable is started directly from `build`, it first generates `AppxManifest.xml` and `Assets`, registers the loose package, launches the packaged Start-menu identity, then exits the unpackaged bootstrap process.
 - If automatic registration fails, the unpackaged bootstrap process exits after logging the PowerShell/Appx deployment error instead of continuing to spam Live Tile update failures.
 - Live Tile updates only work from the packaged identity. The direct/unpackaged process cannot update the tile because Windows gives it no package identity.
-- `build\obj` contains MSVC intermediate `.obj` files. This matches `DesktopStub/BuildGenerateAssets.cmd`, which creates `build\obj\GenerateAssets.obj`; it is not source and can be deleted safely after a build.
+- `build\obj` contains MSVC intermediate `.obj` files. This matches `DesktopStub/BuildDesktopStub.cmd`, which creates `build\obj\DesktopStub.obj`; it is not source and can be deleted safely after a build.
