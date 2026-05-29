@@ -165,6 +165,7 @@ jobs:
 
           $projectList = ($selected | ForEach-Object { $_.label }) -join ', '
           $releaseBase = if ($selected.Count -eq 1 -and -not $forceAll) { $selected[0].key } else { 'All' }
+          $releaseFamilies = ($selected | ForEach-Object { "``$($_.key)-vN``" }) -join ', '
 
           "build_all=$($forceAll.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "skip_args=$($skip -join ' ')" >> $env:GITHUB_OUTPUT
@@ -177,7 +178,7 @@ jobs:
           "" >> $env:GITHUB_STEP_SUMMARY
           "Projects: $projectList" >> $env:GITHUB_STEP_SUMMARY
           "" >> $env:GITHUB_STEP_SUMMARY
-          "Release tag family: ``$releaseBase-vN``" >> $env:GITHUB_STEP_SUMMARY
+          "Release families: $releaseFamilies" >> $env:GITHUB_STEP_SUMMARY
           if ($changed.Count -gt 0) {
             "" >> $env:GITHUB_STEP_SUMMARY
             "Changed files:" >> $env:GITHUB_STEP_SUMMARY
@@ -358,7 +359,7 @@ jobs:
           subject-path: artifacts/**
 
   auto-release:
-    name: Create changed-project release
+    name: Create project releases
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs:
       - detect-projects
@@ -378,113 +379,11 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create or update automatic release
+      - name: Create or update automatic releases
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           PROJECT_LIST: ${{ needs.detect-projects.outputs.project_list }}
-          RELEASE_BASE: ${{ needs.detect-projects.outputs.release_base }}
           REPO: ${{ github.repository }}
-        run: |
-          $fullSha = '${{ github.sha }}'
-          $releaseBase = if ($env:RELEASE_BASE) { $env:RELEASE_BASE } else { 'All' }
-
-          git fetch --force --tags
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          $matchingTags = @(git tag --list "$releaseBase-v*" --sort=-v:refname)
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          $tag = $null
-          foreach ($candidate in $matchingTags) {
-            $candidateSha = (git rev-list -n 1 $candidate).Trim()
-            if ($LASTEXITCODE -eq 0 -and $candidateSha -eq $fullSha) {
-              $tag = $candidate
-              break
-            }
-          }
-
-          $previousTag = $null
-          foreach ($candidate in $matchingTags) {
-            if ($candidate -ne $tag) {
-              $previousTag = $candidate
-              break
-            }
-          }
-
-          if (-not $tag) {
-            $maxVersion = 0
-            $pattern = '^' + [regex]::Escape($releaseBase) + '-v(?<version>\d+)$'
-            foreach ($candidate in $matchingTags) {
-              if ($candidate -match $pattern) {
-                $version = [int]$Matches.version
-                if ($version -gt $maxVersion) {
-                  $maxVersion = $version
-                }
-              }
-            }
-            $tag = "$releaseBase-v$($maxVersion + 1)"
-          }
-
-          if (-not $previousTag) {
-            $previousTag = @($matchingTags | Where-Object { $_ -ne $tag } | Select-Object -First 1)
-          }
-
-          $assets = @(Get-ChildItem -LiteralPath artifacts -Recurse -File | Sort-Object Name)
-          if ($assets.Count -eq 0) {
-            throw 'No workflow artifacts were downloaded for release upload.'
-          }
-
-          $commitSubjects = @()
-          if ($previousTag) {
-            $commitSubjects = @(git log --format='%h %s' "$previousTag..$fullSha")
-          } else {
-            $commitSubjects = @(git log --format='%h %s' -n 10 $fullSha)
-          }
-          if ($LASTEXITCODE -ne 0 -or -not $commitSubjects) {
-            $commitSubjects = @("${{ github.sha }}")
-          }
-
-          $checksumLines = @(
-            '## SHA256 checksums',
-            '',
-            '| File | SHA256 |',
-            '| --- | --- |'
-          )
-          foreach ($asset in $assets) {
-            $name = Split-Path -Leaf $asset.FullName
-            $hash = (Get-FileHash -LiteralPath $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            $checksumLines += "| ``$name`` | ``$hash`` |"
-          }
-
-          $changeLines = @('## Changes', '')
-          foreach ($subject in $commitSubjects) {
-            $changeLines += "- $subject"
-          }
-
-          $notes = @(
-            "Automated Windows build for detected changes on main.",
-            "",
-            "Commit: ``$fullSha``",
-            "Projects: $env:PROJECT_LIST",
-            "Release family: ``$releaseBase-vN``",
-            "",
-            ($changeLines -join "`n"),
-            "",
-            ($checksumLines -join "`n")
-          ) -join "`n"
-
-          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
-          $notes | Out-File -FilePath $notesPath -Encoding utf8
-
-          gh release view $tag --repo $env:REPO *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release edit $tag --repo $env:REPO --title $tag --notes-file $notesPath
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          } else {
-            gh release create $tag --repo $env:REPO --target $fullSha --title $tag --notes-file $notesPath
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-
-          $assetPaths = @($assets | ForEach-Object { $_.FullName })
-          gh release upload $tag @assetPaths --repo $env:REPO --clobber
+          FULL_SHA: ${{ github.sha }}
+        run: .github/scripts/Publish-ProjectReleases.ps1 -ArtifactsRoot artifacts
