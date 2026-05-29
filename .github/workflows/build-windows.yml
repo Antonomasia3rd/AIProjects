@@ -218,7 +218,7 @@ jobs:
           }
           $mingwBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Build and package
+      - name: Build
         shell: cmd
         run: .github\scripts\build-windows.cmd ${{ needs.detect-projects.outputs.skip_args }}
 
@@ -229,7 +229,7 @@ jobs:
           $lines = @(
             '## Windows build outputs',
             '',
-            'GitHub Actions downloads workflow artifacts as ZIP archives. The hashes below are for the payload files inside those artifacts.',
+            'GitHub Actions downloads workflow artifacts as ZIP archives. The hashes below are for the primary payload files inside those artifacts.',
             '',
             '| Project | File | SHA256 |',
             '| --- | --- | --- |'
@@ -305,7 +305,17 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: NowPlayingTile
-          path: NowPlayingTile/build/NowPlayingTile-windows-x64.zip
+          path: |
+            NowPlayingTile/build/NowPlayingTile.exe
+            NowPlayingTile/README.md
+            NowPlayingTile/register-dev-package.ps1
+            NowPlayingTile/unregister-dev-package.ps1
+            NowPlayingTile/launch-packaged.ps1
+            NowPlayingTile/launch-widget.ps1
+            NowPlayingTile/install-startup.ps1
+            NowPlayingTile/uninstall-startup.ps1
+            NowPlayingTile/open-settings.ps1
+            NowPlayingTile/package/**
           if-no-files-found: error
 
       - name: Upload DesktopStub artifact
@@ -331,7 +341,10 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: SecureDesktopLauncher
-          path: SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip
+          path: |
+            SecureDesktopLauncher/build/SecureDesktopLauncher.exe
+            SecureDesktopLauncher/build/SecureDesktopPasswordLauncher.exe
+            SecureDesktopLauncher/README.md
           if-no-files-found: error
 
       - name: Upload RealTimeNotesDeskband artifact
@@ -339,7 +352,12 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: RealTimeNotesDeskband
-          path: RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip
+          path: |
+            RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll
+            RealTimeNotesDeskband/README.md
+            RealTimeNotesDeskband/RegisterDeskband.cmd
+            RealTimeNotesDeskband/UnregisterDeskband.cmd
+            RealTimeNotesDeskband/ConfigureDeskband.cmd
           if-no-files-found: error
 
   attest-build-provenance:
