@@ -237,14 +237,17 @@ jobs:
 
           $count = 0
           foreach ($item in $artifacts) {
-            if (-not (Test-Path -LiteralPath $item.artifactPath -PathType Leaf)) {
-              continue
-            }
+            $paths = @($item.artifactPath)
+            foreach ($path in $paths) {
+              if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                continue
+              }
 
-            $hash = (Get-FileHash -LiteralPath $item.artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
-            $name = Split-Path -Leaf $item.artifactPath
-            $lines += "| $($item.label) | ``$name`` | ``$hash`` |"
-            $count++
+              $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+              $name = Split-Path -Leaf $path
+              $lines += "| $($item.label) | ``$name`` | ``$hash`` |"
+              $count++
+            }
           }
 
           if ($count -eq 0) {
@@ -310,7 +313,9 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: DesktopStub
-          path: DesktopStub/build/DesktopStub-windows-x64.zip
+          path: |
+            DesktopStub/build/GenerateAssets.exe
+            DesktopStub/build/GenerateAssetsLiveTileBroker.exe
           if-no-files-found: error
 
       - name: Upload CharmTray artifact
