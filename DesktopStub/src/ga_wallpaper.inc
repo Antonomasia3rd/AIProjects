@@ -331,7 +331,7 @@ static std::wstring GetLiveWallpaperSnapshotDirectory()
     while (!base.empty() && (base.back() == L'\\' || base.back() == L'/'))
         base.pop_back();
 
-    std::wstring dir = base + L"\\DesktopTileGenerator";
+    std::wstring dir = base + L"\\DesktopStub";
     if (!EnsureDirectoryExistsSimple(dir))
         return L"";
     return dir;

@@ -324,8 +324,8 @@ jobs:
         with:
           name: DesktopStub
           path: |
-            DesktopStub/build/GenerateAssets.exe
-            DesktopStub/build/GenerateAssetsLiveTileBroker.exe
+            DesktopStub/build/DesktopStub.exe
+            DesktopStub/build/DesktopStubLiveTileBroker.exe
           if-no-files-found: error
 
       - name: Upload CharmTray artifact

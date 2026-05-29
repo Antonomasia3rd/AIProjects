@@ -1,5 +1,5 @@
 ﻿// Experimental Win8/8.1-style packaged WinRT broker app for Live Tile updates.
-// Unlike GenerateAssetsAppxStub.exe, this is a real CoreApplication-based
+// Unlike DesktopStubAppxStub.exe, this is a real CoreApplication-based
 // Windows Runtime app executable. It is intended to satisfy the old RT app
 // activation contract, update the tile under package identity, then exit as
 // quickly as possible.
@@ -38,12 +38,12 @@ static std::wstring ModuleDir()
 
 static std::wstring PendingXmlPath()
 {
-    return ModuleDir() + L"\\GenerateAssets.livetile.pending.xml";
+    return ModuleDir() + L"\\DesktopStub.livetile.pending.xml";
 }
 
 static std::wstring ActivationLogPath()
 {
-    return ModuleDir() + L"\\GenerateAssets.appxactivation.log";
+    return ModuleDir() + L"\\DesktopStub.appxactivation.log";
 }
 
 static std::wstring LocalStateDir()
@@ -68,22 +68,22 @@ static std::wstring LocalStatePath(const wchar_t* fileName)
 
 static std::wstring LocalStateActivationLogPath()
 {
-    return LocalStatePath(L"GenerateAssets.appxactivation.log");
+    return LocalStatePath(L"DesktopStub.appxactivation.log");
 }
 
 static std::wstring LocalStatePendingXmlPath()
 {
-    return LocalStatePath(L"GenerateAssets.livetile.pending.xml");
+    return LocalStatePath(L"DesktopStub.livetile.pending.xml");
 }
 
 static std::wstring PendingClearPath()
 {
-    return ModuleDir() + L"\\GenerateAssets.livetile.clear";
+    return ModuleDir() + L"\\DesktopStub.livetile.clear";
 }
 
 static std::wstring LocalStatePendingClearPath()
 {
-    return LocalStatePath(L"GenerateAssets.livetile.clear");
+    return LocalStatePath(L"DesktopStub.livetile.clear");
 }
 
 static std::wstring TrimCopy(const std::wstring& s)

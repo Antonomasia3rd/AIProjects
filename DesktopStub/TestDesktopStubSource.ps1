@@ -1,9 +1,9 @@
 ﻿<#
 .SYNOPSIS
-Maintainer-only source regression checks for GenerateAssets.
+Maintainer-only source regression checks for DesktopStub.
 
 .DESCRIPTION
-This script does not build or launch GenerateAssets.exe. It verifies that a
+This script does not build or launch DesktopStub.exe. It verifies that a
 small set of source-level safety fixes remain present, covering paths that are
 awkward to exercise manually: manifest-resolved startup asset validation, COM
 registration diagnostics, force-shutdown cleanup recording, and matching UI
@@ -27,7 +27,7 @@ function Read-Source {
 
     $path = Join-Path $ProjectRoot $RelativePath
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "GenerateAssets source regression: missing source file '$RelativePath'"
+        throw "DesktopStub source regression: missing source file '$RelativePath'"
     }
 
     Get-Content -LiteralPath $path -Raw
@@ -62,7 +62,7 @@ function Assert-SourceCheck {
 
     $script:CheckCount++
     if ($Check.SourceText -notmatch $Check.Pattern) {
-        throw "GenerateAssets source regression: $($Check.Failure) [$($Check.Name) in $($Check.SourceName)]"
+        throw "DesktopStub source regression: $($Check.Failure) [$($Check.Name) in $($Check.SourceName)]"
     }
 
     Write-Host "ok - $($Check.Name)"
@@ -79,7 +79,7 @@ function Assert-SourceAbsent {
 
     $script:CheckCount++
     if ($SourceText -match $Pattern) {
-        throw "GenerateAssets source regression: $Failure [$Name in $SourceName]"
+        throw "DesktopStub source regression: $Failure [$Name in $SourceName]"
     }
 
     Write-Host "ok - $Name"
@@ -125,7 +125,7 @@ function Assert-UiStringWired {
 
 $generation = Read-Source 'src\ga_generation.inc'
 $app = Read-Source 'src\ga_app.inc'
-$buildScript = Read-Source 'BuildGenerateAssets.cmd'
+$buildScript = Read-Source 'BuildDesktopStub.cmd'
 $image = Read-Source 'src\ga_image.inc'
 $desktopIcon = Read-Source 'src\ga_desktop_icon_png.inc'
 $registration = Read-Source 'src\ga_registration.inc'
@@ -147,17 +147,17 @@ $uiSources = Join-Source @(
 $sourceChecks = @(
     (New-SourceCheck `
         -Name 'Build script ignores legacy target arguments' `
-        -SourceName 'BuildGenerateAssets.cmd' `
+        -SourceName 'BuildDesktopStub.cmd' `
         -SourceText $buildScript `
-        -Pattern '(?s)Build policy:.*ignores every argument.*GenerateAssetsLiveTileBroker\.exe.*if not "%~1"=="".*One or more arguments were supplied and ignored' `
-        -Failure 'BuildGenerateAssets.cmd must accept but ignore old target arguments so every invocation builds the same outputs'),
+        -Pattern '(?s)Build policy:.*ignores every argument.*DesktopStubLiveTileBroker\.exe.*if not "%~1"=="".*One or more arguments were supplied and ignored' `
+        -Failure 'BuildDesktopStub.cmd must accept but ignore old target arguments so every invocation builds the same outputs'),
 
     (New-SourceCheck `
         -Name 'Build script always builds host and broker' `
-        -SourceName 'BuildGenerateAssets.cmd' `
+        -SourceName 'BuildDesktopStub.cmd' `
         -SourceText $buildScript `
-        -Pattern '(?s)echo Building packaged Live Tile broker\.\.\..*LiveTileBroker\.cpp.*echo Building main GenerateAssets host\.\.\..*GenerateAssets\.cpp' `
-        -Failure 'BuildGenerateAssets.cmd must always build both GenerateAssets.exe and GenerateAssetsLiveTileBroker.exe'),
+        -Pattern '(?s)echo Building packaged Live Tile broker\.\.\..*LiveTileBroker\.cpp.*echo Building main DesktopStub host\.\.\..*DesktopStub\.cpp' `
+        -Failure 'BuildDesktopStub.cmd must always build both DesktopStub.exe and DesktopStubLiveTileBroker.exe'),
 
     (New-SourceCheck `
         -Name 'Startup skip validates manifest-resolved assets' `
@@ -220,7 +220,7 @@ $sourceChecks = @(
         -SourceName 'src\ga_manifest.inc' `
         -SourceText $manifest `
         -Pattern '(?s)EffectiveManifestExecutable.*ConfiguredManifestCompatibilityTarget\(\).*ManifestHostExecutableName\(\).*target\s*!=\s*ManifestCompatibilityTarget::Windows10.*Win8LiveTileBrokerAppEnabled\(\).*ManifestLiveTileBrokerExecutableName\(\).*ManifestAppxActivationStubExecutableName\(\).*ManifestSettingValidated\(L"Executable",\s*fallback\.c_str\(\)' `
-        -Failure 'manifest executable fallback must keep Windows 10 on GenerateAssets.exe while Windows 8/8.1 targets default to the packaged broker helper'),
+        -Failure 'manifest executable fallback must keep Windows 10 on DesktopStub.exe while Windows 8/8.1 targets default to the packaged broker helper'),
 
     (New-SourceCheck `
         -Name 'Manifest generation ignores redundant INI manifest editor' `
@@ -289,7 +289,7 @@ $sourceChecks = @(
         -Name 'Command-line requests fail when existing instance cannot be signaled' `
         -SourceName 'src\ga_app.inc' `
         -SourceText $app `
-        -Pattern '(?s)if \(!SignalExistingInstance\(singleInstanceRequest\)\).*\(singleInstanceRequest\s*&\s*SINGLE_INSTANCE_REQUEST_MASK\)\s*!=\s*SINGLE_INSTANCE_REQUEST_SHOW.*ShowCommandLineMessage\(L"Failed to signal the running GenerateAssets instance\.",\s*true\).*return 2' `
+        -Pattern '(?s)if \(!SignalExistingInstance\(singleInstanceRequest\)\).*\(singleInstanceRequest\s*&\s*SINGLE_INSTANCE_REQUEST_MASK\)\s*!=\s*SINGLE_INSTANCE_REQUEST_SHOW.*ShowCommandLineMessage\(L"Failed to signal the running DesktopStub instance\.",\s*true\).*return 2' `
         -Failure 'command-line exit/generate/reload requests must not report success when the running instance cannot be signaled'),
 
     (New-SourceCheck `
@@ -588,7 +588,7 @@ $uiStringKeys = @(
 )
 
 if ($ListChecks) {
-    Write-Host 'GenerateAssets source regression guardrails:'
+    Write-Host 'DesktopStub source regression guardrails:'
     foreach ($check in $sourceChecks) {
         Write-Host "- $($check.Name)"
     }
@@ -598,7 +598,7 @@ if ($ListChecks) {
     return
 }
 
-Write-Host 'Running GenerateAssets maintainer source regression checks...'
+Write-Host 'Running DesktopStub maintainer source regression checks...'
 Write-Host 'This checks source guardrails only; it does not build or launch the app.'
 
 foreach ($check in $sourceChecks) {
@@ -607,10 +607,10 @@ foreach ($check in $sourceChecks) {
 
 Assert-SourceAbsent `
     -Name 'Build script no longer has argument-selected targets' `
-    -SourceName 'BuildGenerateAssets.cmd' `
+    -SourceName 'BuildDesktopStub.cmd' `
     -SourceText $buildScript `
     -Pattern 'BUILD_BROKER|BUILD_BACKGROUND_TASK|unknown build option|:ParseArgs|:ShowHelp' `
-    -Failure 'BuildGenerateAssets.cmd must not restore argument-selected target branches'
+    -Failure 'BuildDesktopStub.cmd must not restore argument-selected target branches'
 
 Assert-SourceAbsent `
     -Name 'Live Tile update does not clear the existing tile first' `
@@ -668,4 +668,4 @@ foreach ($key in $uiStringKeys) {
     Assert-UiStringWired -Key $key -Defaults $defaults -UiSources $uiSources
 }
 
-Write-Host "GenerateAssets source regression checks passed ($script:CheckCount checks)."
+Write-Host "DesktopStub source regression checks passed ($script:CheckCount checks)."

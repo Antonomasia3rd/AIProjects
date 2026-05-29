@@ -258,16 +258,16 @@ void LoadUiStrings()
     g_ui.currentWallpaperNotFound = IniReadS(L"Strings", L"CurrentWallpaperNotFound", L"Could not detect current wallpaper.");
 
     g_ui.programStarting = IniReadS(L"Strings", L"ProgramStarting", L"Program starting...");
-    g_ui.notificationTitle = IniReadS(L"Strings", L"NotificationTitle", L"Desktop Tile Generator");
+    g_ui.notificationTitle = IniReadS(L"Strings", L"NotificationTitle", L"DesktopStub");
     g_ui.notificationGenerationStarted = IniReadS(L"Strings", L"NotificationGenerationStarted", L"Wallpaper generation started.");
     g_ui.notificationGenerationSuccess = IniReadS(L"Strings", L"NotificationGenerationSuccess", L"Wallpaper generation completed successfully.");
     g_ui.notificationGenerationFailed = IniReadS(L"Strings", L"NotificationGenerationFailed", L"Wallpaper generation failed.");
     g_ui.notificationGenerationBusy = IniReadS(L"Strings", L"NotificationGenerationBusy", L"Wallpaper generation is already running.");
-    g_ui.notificationAlreadyRunning = IniReadS(L"Strings", L"NotificationAlreadyRunning", L"Desktop Tile Generator is already running.");
-    g_ui.notificationAlreadyRunningTrayPersistent = IniReadS(L"Strings", L"NotificationAlreadyRunningTrayPersistent", L"Desktop Tile Generator is already running. Tray icon is enabled in the config, so it will stay visible after restart.");
-    g_ui.notificationAlreadyRunningTraySession = IniReadS(L"Strings", L"NotificationAlreadyRunningTraySession", L"Desktop Tile Generator is already running. Tray icon is visible for this session only; it will be hidden again after restart because TrayIcon=0 in the config.");
+    g_ui.notificationAlreadyRunning = IniReadS(L"Strings", L"NotificationAlreadyRunning", L"DesktopStub is already running.");
+    g_ui.notificationAlreadyRunningTrayPersistent = IniReadS(L"Strings", L"NotificationAlreadyRunningTrayPersistent", L"DesktopStub is already running. Tray icon is enabled in the config, so it will stay visible after restart.");
+    g_ui.notificationAlreadyRunningTraySession = IniReadS(L"Strings", L"NotificationAlreadyRunningTraySession", L"DesktopStub is already running. Tray icon is visible for this session only; it will be hidden again after restart because TrayIcon=0 in the config.");
     g_ui.notificationSingleInstanceFailure = IniReadS(L"Strings", L"NotificationSingleInstanceFailure", L"Single-instance protection failed; another copy may run.");
-    g_ui.notificationTrayIconHidden = IniReadS(L"Strings", L"NotificationTrayIconHidden", L"Tray icon hidden for this session. Run GenerateAssets.exe again to restore it.");
+    g_ui.notificationTrayIconHidden = IniReadS(L"Strings", L"NotificationTrayIconHidden", L"Tray icon hidden for this session. Run DesktopStub.exe again to restore it.");
     g_ui.manualGenerateTriggered = IniReadS(L"Strings", L"ManualGenerateTriggered", L"Manual generate triggered.");
     g_ui.liveTileModeChanged = IniReadS(L"Strings", L"LiveTileModeChanged", L"Live Tile mode changed.");
     g_ui.manifestTargetChanged = IniReadS(L"Strings", L"ManifestTargetChanged", L"AppxManifest target changed.");
@@ -385,7 +385,7 @@ void LoadUiStrings()
     g_ui.onText = IniReadS(L"Strings", L"OnText", L"on");
     g_ui.offText = IniReadS(L"Strings", L"OffText", L"off");
 
-    g_ui.trayTip = IniReadS(L"Strings", L"TrayTip", L"Desktop Tile Generator");
+    g_ui.trayTip = IniReadS(L"Strings", L"TrayTip", L"DesktopStub");
     g_ui.exeLabel = IniReadS(L"Strings", L"ExeLabel", L"[i] EXE: %s");
     g_ui.iniLabel = IniReadS(L"Strings", L"IniLabel", L"[i] INI: %s");
     g_ui.logFileLabel = IniReadS(L"Strings", L"LogFileLabel", L"[i] Log file: %s");

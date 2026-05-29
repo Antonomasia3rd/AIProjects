@@ -1,6 +1,6 @@
 // Experimental Win8/8.1-style Live Tile background task helper.
 // Built as a small WinRT component DLL and declared in AppxManifest.xml.
-// The task reads GenerateAssets.livetile.pending.xml next to the DLL, updates
+// The task reads DesktopStub.livetile.pending.xml next to the DLL, updates
 // the app tile under package identity, logs the result, and exits.
 #define NOMINMAX
 #include <windows.h>
@@ -39,12 +39,12 @@ static std::wstring ModuleDir()
 
 static std::wstring PendingXmlPath()
 {
-    return ModuleDir() + L"\\GenerateAssets.livetile.pending.xml";
+    return ModuleDir() + L"\\DesktopStub.livetile.pending.xml";
 }
 
 static std::wstring ActivationLogPath()
 {
-    return ModuleDir() + L"\\GenerateAssets.appxactivation.log";
+    return ModuleDir() + L"\\DesktopStub.appxactivation.log";
 }
 
 static std::wstring TrimCopy(const std::wstring& s)

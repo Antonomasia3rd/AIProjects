@@ -36,9 +36,6 @@ foreach ($project in $projectMap) {
         $warnings.Add("$folder/README.md may be missing safety/privilege notes.") | Out-Null
     }
 
-    if ($label -eq 'DesktopStub' -and $text -match 'GenerateAssets-v\d+') {
-        $warnings.Add('DesktopStub README still appears to reference GenerateAssets release tags.') | Out-Null
-    }
 }
 
 if ($warnings.Count -eq 0) {

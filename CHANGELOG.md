@@ -6,7 +6,7 @@ Release tag families:
 
 - `<Project>-vN` for each built project, for example `DesktopStub-vN`, `DiscordRPC-vN`, or `asusblink-vN`.
 - Full builds and shared workflow/repository changes publish one release per built project, each in that project's `<Project>-vN` family.
-- `DesktopStub-vN` contains `GenerateAssets.exe` and `GenerateAssetsLiveTileBroker.exe`.
+- `DesktopStub-vN` contains `DesktopStub.exe` and `DesktopStubLiveTileBroker.exe`.
 
 Older releases are intentionally kept when practical so users can compare behavior across versions and identify when regressions started.
 
@@ -24,4 +24,4 @@ Older releases are intentionally kept when practical so users can compare behavi
 
 ### DesktopStub
 
-- Release family is `DesktopStub-vN`; the built executable remains `GenerateAssets.exe` for compatibility.
+- Release family is `DesktopStub-vN`; the built executable is `DesktopStub.exe`.

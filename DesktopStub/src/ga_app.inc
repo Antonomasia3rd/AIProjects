@@ -144,7 +144,7 @@ static std::wstring ModeSwitchRelaunchArguments(bool forceGenerate, bool waitFor
 {
     std::wstring args = L"--launched-from-mode-switch";
     if (waitForThisProcessToExit)
-        args += L" --ga-wait-for-pid " + std::to_wstring(GetCurrentProcessId());
+        args += L" --ds-wait-for-pid " + std::to_wstring(GetCurrentProcessId());
     if (forceGenerate)
         args += L" --generate";
     if (g_commandLine.customIniPath)
@@ -428,7 +428,7 @@ static bool SignalExistingInstance(WPARAM request = SINGLE_INSTANCE_REQUEST_SHOW
 
 static std::wstring AppxActivationTraceLogPath()
 {
-    return GetExeDir() + L"\\GenerateAssets.appxactivation.log";
+    return GetExeDir() + L"\\DesktopStub.appxactivation.log";
 }
 
 static void AppxActivationTrace(const std::wstring& message)
@@ -449,7 +449,7 @@ static void AppxActivationTrace(const std::wstring& message)
 
 static std::wstring AppxActivationRequestPath()
 {
-    return GetExeDir() + L"\\GenerateAssets.appxactivation.request";
+    return GetExeDir() + L"\\DesktopStub.appxactivation.request";
 }
 
 static bool WriteAppxActivationRequest(const wchar_t* action)
@@ -1332,7 +1332,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         {
             if ((singleInstanceRequest & SINGLE_INSTANCE_REQUEST_MASK) != SINGLE_INSTANCE_REQUEST_SHOW)
             {
-                ShowCommandLineMessage(L"Failed to signal the running GenerateAssets instance.", true);
+                ShowCommandLineMessage(L"Failed to signal the running DesktopStub instance.", true);
                 CloseHandle(g_singleInstanceMutex);
                 g_singleInstanceMutex = nullptr;
                 return 2;
@@ -1341,8 +1341,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             if (IniReadI(L"Settings", L"NotificationsEnabled", 1) != 0 &&
                 IniReadI(L"Settings", L"NotifyOnAlreadyRunning", 1) != 0)
             {
-                std::wstring title = StartupString(L"NotificationTitle", L"Desktop Tile Generator");
-                std::wstring message = StartupString(L"NotificationAlreadyRunning", L"Desktop Tile Generator is already running.");
+                std::wstring title = StartupString(L"NotificationTitle", L"DesktopStub");
+                std::wstring message = StartupString(L"NotificationAlreadyRunning", L"DesktopStub is already running.");
                 MessageBoxW(nullptr,
                     message.c_str(),
                     title.c_str(),

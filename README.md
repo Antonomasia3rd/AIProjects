@@ -10,7 +10,7 @@ Small Windows utility projects and experiments. Most folders are standalone and 
 | `asusblink` | C# tray/console app | ASUS ACPI LED controller for mic LED, keyboard backlight states, and HDD-activity keyboard patterns. |
 | `capsblink` | C# console app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
 | `CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
-| `DesktopStub` | C++ Win32 tray app | Builds `GenerateAssets.exe`, a desktop wallpaper tile-asset generator and loose Appx registrar. |
+| `DesktopStub` | C++ Win32 tray app | Builds `DesktopStub.exe`, a desktop wallpaper tile-asset generator and loose Appx registrar. |
 | `DiscordRPC` | C# tray/console app | Discord Rich Presence app with IPC, optional Gateway mode, dynamic placeholders, and a tray config UI. |
 | `DNSAutoUpdate` | PowerShell loop | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
 | `NowPlayingTile` | C# app plus Appx scripts | SMTC-based Windows Start live tile updater with optional widget mode. |
@@ -32,7 +32,7 @@ Release tag families:
 | Shared workflow/repository files changed | one release per built project, each in that project's `<Project>-vN` family |
 | Manual workflow run with `All` selected | one release per built project, each in that project's `<Project>-vN` family |
 
-The `DesktopStub` release contains `GenerateAssets.exe` and `GenerateAssetsLiveTileBroker.exe`; the release family is still `DesktopStub-vN` so it matches the folder and repository project name.
+The `DesktopStub` release contains `DesktopStub.exe` and `DesktopStubLiveTileBroker.exe`; the release family is still `DesktopStub-vN` so it matches the folder and repository project name.
 
 GitHub Actions workflow artifacts are also available from each workflow run. GitHub downloads each workflow artifact as an archive, but the artifact payload and release assets are direct project files rather than project-created release ZIPs. SHA256 checksums are written to the workflow summary and to release notes instead of being uploaded as separate `.sha256` files.
 
@@ -61,7 +61,7 @@ Useful build options:
 # Skip one or more projects.
 .github\scripts\build-windows.cmd /skip:asusblink,RealTimeNotesDeskband
 
-# Skip DesktopStub / GenerateAssets.
+# Skip DesktopStub.
 .github\scripts\build-windows.cmd /skip:DesktopStub
 ```
 
@@ -106,7 +106,7 @@ If a non-INI configuration format is unavoidable, it must still default to the s
 
 Do not change file or directory ACLs from these tools, installers, build scripts, or migration helpers. Past ACL-hardening attempts caused Windows integration failures in specific placements, including Start Menu related cases. Security checks may detect and warn about risky writable locations, but they must not modify ACLs, ownership, inheritance, integrity labels, or other access-control state.
 
-Use `DesktopStub` / `GenerateAssets.exe` as the reference pattern for new fixes: create and normalize the INI next to the executable, preserve user-edited values, write the log next to the executable by default, expose path changes through the INI/UI when needed, and report write failures clearly. When changing another program, follow that implementation style for local config/log handling unless the maintainer explicitly approves a different pattern.
+Use `DesktopStub` / `DesktopStub.exe` as the reference pattern for new fixes: create and normalize the INI next to the executable, preserve user-edited values, write the log next to the executable by default, expose path changes through the INI/UI when needed, and report write failures clearly. When changing another program, follow that implementation style for local config/log handling unless the maintainer explicitly approves a different pattern.
 
 Stop for maintainer input before making a decision that changes storage location, config/log format, migration behavior, compatibility guarantees, ACL/security enforcement, or OS integration behavior. When changing an existing program that already has registry/profile-based state, preserve or migrate existing user values where practical and do not choose a compatibility-breaking migration without maintainer approval.
 

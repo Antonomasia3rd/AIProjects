@@ -695,13 +695,13 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
-        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--ga-wait-for-pid", value, error, matched))
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--ds-wait-for-pid", value, error, matched))
             return fail(error);
         if (matched)
         {
             int pid = 0;
             if (!CommandLineParseInteger(value, pid) || pid <= 0)
-                return fail(L"Invalid process id after --ga-wait-for-pid: " + value + L".");
+                return fail(L"Invalid process id after --ds-wait-for-pid: " + value + L".");
             g_commandLine.waitForPid = static_cast<DWORD>(pid);
             continue;
         }
@@ -1097,7 +1097,7 @@ static bool ParseCommandLineOptions()
 static std::wstring CommandLineUsageText()
 {
     return
-        L"GenerateAssets.exe [options] [wallpaper-path]\r\n"
+        L"DesktopStub.exe [options] [wallpaper-path]\r\n"
         L"\r\n"
         L"Options:\r\n"
         L"  --help, -h, /?                      Show this help.\r\n"
@@ -1151,11 +1151,11 @@ static std::wstring CommandLineUsageText()
         L"  --set Settings.Key=Value            Set any other INI-backed setting directly.\r\n"
         L"\r\n"
         L"Examples:\r\n"
-        L"  GenerateAssets.exe --once\r\n"
-        L"  GenerateAssets.exe --no-tray --console\r\n"
-        L"  GenerateAssets.exe --ini D:\\Temp\\GenerateAssets.ini --set Settings.PollIntervalMs=5000\r\n"
-        L"  GenerateAssets.exe --wallpaper D:\\Pictures\\wallpaper.jpg --scales 100,200\r\n"
-        L"  GenerateAssets.exe --exit\r\n";
+        L"  DesktopStub.exe --once\r\n"
+        L"  DesktopStub.exe --no-tray --console\r\n"
+        L"  DesktopStub.exe --ini D:\\Temp\\DesktopStub.ini --set Settings.PollIntervalMs=5000\r\n"
+        L"  DesktopStub.exe --wallpaper D:\\Pictures\\wallpaper.jpg --scales 100,200\r\n"
+        L"  DesktopStub.exe --exit\r\n";
 }
 
 static bool WriteCommandLineTextToConsole(const std::wstring& text, bool errorOutput)
@@ -1206,7 +1206,7 @@ static void ShowCommandLineMessage(const std::wstring& text, bool error)
     MessageBoxW(
         nullptr,
         text.c_str(),
-        error ? L"GenerateAssets command line" : L"GenerateAssets",
+        error ? L"DesktopStub command line" : L"DesktopStub",
         MB_OK | (error ? MB_ICONERROR : MB_ICONINFORMATION));
 }
 

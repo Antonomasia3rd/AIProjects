@@ -59,8 +59,8 @@
     "folder": "DesktopStub",
     "buildOutput": "build_desktop_stub",
     "artifactName": "DesktopStub",
-    "artifactPath": "DesktopStub/build/GenerateAssets.exe",
-    "smokePath": "DesktopStub/build/GenerateAssets.exe",
+    "artifactPath": "DesktopStub/build/DesktopStub.exe",
+    "smokePath": "DesktopStub/build/DesktopStub.exe",
     "skipKey": "DesktopStub"
   },
   {
