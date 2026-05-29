@@ -60,9 +60,6 @@ struct UiStrings
     std::wstring wallpaperDetectionFallback;
     std::wstring liveWallpaperCaptureTitle;
     std::wstring liveWallpaperCapture;
-    std::wstring liveWallpaperCaptureLively;
-    std::wstring liveWallpaperCaptureWallpaperEngine;
-    std::wstring liveWallpaperCaptureGeneric;
     std::wstring liveWallpaperCaptureScreenFallback;
     std::wstring liveWallpaperCaptureDelayMsLabel;
     std::wstring liveWallpaperCaptureRefreshMsLabel;
@@ -72,9 +69,7 @@ struct UiStrings
     std::wstring liveWallpaperCaptureOff;
     std::wstring liveWallpaperCaptureMsText;
     std::wstring liveWallpaperProviderNone;
-    std::wstring liveWallpaperProviderLively;
-    std::wstring liveWallpaperProviderWallpaperEngine;
-    std::wstring liveWallpaperProviderGeneric;
+    std::wstring liveWallpaperProviderLive;
     std::wstring liveWallpaperCaptureSummary;
     std::wstring liveWallpaperCaptureDelayState;
     std::wstring liveWallpaperCaptureRefreshState;

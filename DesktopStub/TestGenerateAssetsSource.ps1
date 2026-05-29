@@ -433,21 +433,21 @@ $sourceChecks += @(
         -SourceName 'src\ga_wallpaper.inc' `
         -SourceText (Read-Source 'src\ga_wallpaper.inc') `
         -Pattern 'HasPotentialLiveWallpaperChildWindow' `
-        -Failure 'Lively being open is not enough; capture should require a live wallpaper host/child window'),
+        -Failure 'live wallpaper capture should require a real WorkerW host/child window'),
 
     (New-SourceCheck `
         -Name 'Live wallpaper capture rejects tiny helper windows' `
         -SourceName 'src\ga_wallpaper.inc' `
         -SourceText (Read-Source 'src\ga_wallpaper.inc') `
         -Pattern 'LiveWallpaperCaptureRectLooksLargeEnough' `
-        -Failure 'live wallpaper capture must reject tiny helper windows such as 136x39 Lively UI fragments'),
+        -Failure 'live wallpaper capture must reject tiny helper windows such as 136x39 UI fragments'),
 
     (New-SourceCheck `
         -Name 'Live wallpaper startup recapture is supported' `
         -SourceName 'src\ga_wallpaper.inc' `
         -SourceText (Read-Source 'src\ga_wallpaper.inc') `
         -Pattern 'LiveWallpaperCaptureStartupRefreshMs' `
-        -Failure 'live wallpaper capture must retry briefly while Lively/WebView2 is still starting'),
+        -Failure 'live wallpaper capture must retry briefly while WorkerW-hosted renderers are still starting'),
 
     (New-SourceCheck `
         -Name 'Live wallpaper snapshots use rotating paths' `
@@ -464,46 +464,25 @@ $sourceChecks += @(
         -Failure 'startup recapture should settle and publish the latest good snapshot once instead of regenerating repeatedly'),
 
     (New-SourceCheck `
-        -Name 'Lively video wallpaper uses plugin mpv executable' `
+        -Name 'WorkerW live wallpaper capture is available' `
         -SourceName 'src\ga_wallpaper.inc' `
         -SourceText (Read-Source 'src\ga_wallpaper.inc') `
-        -Pattern 'Plugins\\Mpv\\.*mpv\.exe|Lively Wallpaper\\Plugins\\Mpv' `
-        -Failure 'Lively video wallpaper should recognize the real Plugins\Mpv\mpv.exe host, not a nonexistent Lively.Player.Mpv.exe'),
+        -Pattern 'LiveWallpaperProvider::Active' `
+        -Failure 'live wallpaper capture should include a WorkerW provider for unknown WorkerW-hosted live wallpaper apps'),
 
     (New-SourceCheck `
-        -Name 'Lively mpv matching is path-aware' `
+        -Name 'Live wallpaper capture is WorkerW-only' `
         -SourceName 'src\ga_wallpaper.inc' `
         -SourceText (Read-Source 'src\ga_wallpaper.inc') `
-        -Pattern 'unrelated mpv\.exe is not treated as a' `
-        -Failure 'mpv.exe should be path-aware so unrelated mpv windows are not captured as Lively wallpapers'),
+        -Pattern 'Capture is intentionally limited' `
+        -Failure 'live wallpaper capture must not enumerate arbitrary top-level app windows'),
 
     (New-SourceCheck `
-        -Name 'Lively UI process is not a capture host' `
+        -Name 'WorkerW parent fallback is kept for DirectX wallpaper hosts' `
         -SourceName 'src\ga_wallpaper.inc' `
         -SourceText (Read-Source 'src\ga_wallpaper.inc') `
-        -Pattern 'configuration UI and must never be used as a' `
-        -Failure 'Lively.UI.WinUI.exe is the configuration UI and must not be captured as a wallpaper host'),
-
-    (New-SourceCheck `
-        -Name 'Wallpaper Engine web wallpaper subprocesses are capture hosts' `
-        -SourceName 'src\ga_wallpaper.inc' `
-        -SourceText (Read-Source 'src\ga_wallpaper.inc') `
-        -Pattern 'webwallpaper32\.exe.*webwallpaper64\.exe|webwallpaper64\.exe.*webwallpaper32\.exe' `
-        -Failure 'Wallpaper Engine web wallpapers should accept webwallpaper32/64.exe as capture host subprocesses'),
-
-    (New-SourceCheck `
-        -Name 'Generic WorkerW live wallpaper capture is available' `
-        -SourceName 'src\ga_wallpaper.inc' `
-        -SourceText (Read-Source 'src\ga_wallpaper.inc') `
-        -Pattern 'LiveWallpaperProvider::Generic' `
-        -Failure 'live wallpaper capture should include a generic WorkerW provider for non-Lively/non-Wallpaper-Engine apps'),
-
-    (New-SourceCheck `
-        -Name 'Generic live wallpaper capture is WorkerW-only' `
-        -SourceName 'src\ga_wallpaper.inc' `
-        -SourceText (Read-Source 'src\ga_wallpaper.inc') `
-        -Pattern 'Generic provider is intentionally WorkerW-only' `
-        -Failure 'generic fallback capture must not enumerate arbitrary top-level app windows'),
+        -Pattern '(?s)workerCandidates.*AddUniqueWindowCandidate\(workerCandidates, worker\)|AddUniqueWindowCandidate\(workerCandidates, worker\).*workerCandidates' `
+        -Failure 'WorkerW detection should keep the non-icon WorkerW parent as a fallback when child PrintWindow capture is black'),
 
     (New-SourceCheck `
         -Name 'Live wallpaper refresh defaults to ten seconds' `
@@ -583,9 +562,6 @@ $uiStringKeys = @(
     'AppxManifestRegenerateFailed',
     'LiveWallpaperCaptureTitle',
     'LiveWallpaperCapture',
-    'LiveWallpaperCaptureLively',
-    'LiveWallpaperCaptureWallpaperEngine',
-    'LiveWallpaperCaptureGeneric',
     'LiveWallpaperCaptureScreenFallback',
     'LiveWallpaperCaptureDelayMsLabel',
     'LiveWallpaperCaptureRefreshMsLabel',
@@ -595,9 +571,7 @@ $uiStringKeys = @(
     'LiveWallpaperCaptureOff',
     'LiveWallpaperCaptureMsText',
     'LiveWallpaperProviderNone',
-    'LiveWallpaperProviderLively',
-    'LiveWallpaperProviderWallpaperEngine',
-    'LiveWallpaperProviderGeneric',
+    'LiveWallpaperProviderLive',
     'LiveWallpaperCaptureSummary',
     'LiveWallpaperCaptureDelayState',
     'LiveWallpaperCaptureRefreshState',
@@ -658,6 +632,27 @@ Assert-SourceAbsent `
     -SourceText $tray `
     -Pattern 'IniWrite\(L"Manifest",\s*L"OverwriteExisting"' `
     -Failure 'tray manifest regeneration must not write a persistent OverwriteExisting key'
+
+Assert-SourceAbsent `
+    -Name 'Provider-specific live wallpaper code was removed' `
+    -SourceName 'src\ga_wallpaper.inc' `
+    -SourceText (Read-Source 'src\ga_wallpaper.inc') `
+    -Pattern 'LivelyProcess|WallpaperEngineProcess|WindowProcessMatchesLively|WindowProcessMatchesWallpaperEngine|IsLivelyRunning|IsWallpaperEngineRunning|webwallpaper64\.exe|Lively\.Player' `
+    -Failure 'legacy Lively/Wallpaper Engine-specific live wallpaper detection should stay removed; WorkerW detection is the maintained path'
+
+Assert-SourceAbsent `
+    -Name 'Provider-specific live wallpaper settings were removed' `
+    -SourceName 'source tree' `
+    -SourceText (Join-Source @('src\ga_config_defaults.inc','src\ga_command_line.inc','src\ga_tray.inc','src\ga_ui_strings.inc','src\ga_ui_state.inc')) `
+    -Pattern 'LiveWallpaperCaptureLively|LiveWallpaperCaptureWallpaperEngine|live-wallpaper-lively|live-wallpaper-wallpaper-engine|LiveWallpaperProviderLively|LiveWallpaperProviderWallpaperEngine' `
+    -Failure 'legacy provider-specific live wallpaper settings/strings/command-line switches should stay removed'
+
+Assert-SourceAbsent `
+    -Name 'Legacy generic live wallpaper UI was removed' `
+    -SourceName 'source tree' `
+    -SourceText (Join-Source @('README.md','src\ga_config_defaults.inc','src\ga_command_line.inc','src\ga_tray.inc','src\ga_ui_strings.inc','src\ga_ui_state.inc','src\ga_wallpaper.inc')) `
+    -Pattern 'Generic|generic|LiveWallpaperCaptureGeneric|LiveWallpaperProviderGeneric|live-wallpaper-generic' `
+    -Failure 'after provider-specific live wallpaper capture was removed, the remaining WorkerW detector should be presented as the normal live wallpaper detector, not as Generic'
 
 foreach ($key in $uiStringKeys) {
     Assert-UiStringWired -Key $key -Defaults $defaults -UiSources $uiSources

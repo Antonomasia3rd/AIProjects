@@ -98,9 +98,6 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"WallpaperDetectionFallbackOnInvalid", L"1"},
     {L"Settings", L"WallpaperDetectionLogRepeatMs", L"60000"},
     {L"Settings", L"LiveWallpaperCapture", L"1"},
-    {L"Settings", L"LiveWallpaperCaptureLively", L"1"},
-    {L"Settings", L"LiveWallpaperCaptureWallpaperEngine", L"1"},
-    {L"Settings", L"LiveWallpaperCaptureGeneric", L"1"},
     {L"Settings", L"LiveWallpaperCaptureDelayMs", L"2500"},
     {L"Settings", L"LiveWallpaperCaptureRefreshMs", L"10000"},
     {L"Settings", L"LiveWallpaperCaptureScreenFallback", L"0"},
@@ -202,7 +199,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileUpdateSummary", L"[i] Live Tile update mode: %s"},
     {L"ManifestTargetSummary", L"[i] AppxManifest target: %s"},
     {L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s"},
-    {L"LiveWallpaperCaptureSummary", L"[i] Live wallpaper capture: %s (Lively=%s, Wallpaper Engine=%s, Generic=%s, delay=%d ms, refresh=%s)"},
+    {L"LiveWallpaperCaptureSummary", L"[i] Live wallpaper capture: %s (delay=%d ms, refresh=%s)"},
     {L"LiveWallpaperCaptureDelayState", L"[i] LiveWallpaperCaptureDelayMs = %d"},
     {L"LiveWallpaperCaptureRefreshState", L"[i] LiveWallpaperCaptureRefreshMs = %d"},
     {L"LiveWallpaperCaptureStartupRefreshState", L"[i] LiveWallpaperCaptureStartupRefreshMs = %d"},
@@ -347,11 +344,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from built-in defaults"},
     {L"WallpaperDetectionMethodLabel", L"Wallpaper detection method: %s"},
     {L"WallpaperDetectionFallback", L"Fallback when selected path is invalid"},
-    {L"LiveWallpaperCaptureTitle", L"Live Wallpaper Capture:"},
+    {L"LiveWallpaperCaptureTitle", L"Live Wallpaper Detection:"},
     {L"LiveWallpaperCapture", L"Capture live wallpaper snapshot"},
-    {L"LiveWallpaperCaptureLively", L"Capture Lively Wallpaper"},
-    {L"LiveWallpaperCaptureWallpaperEngine", L"Capture Wallpaper Engine"},
-    {L"LiveWallpaperCaptureGeneric", L"Capture generic WorkerW live wallpaper"},
     {L"LiveWallpaperCaptureScreenFallback", L"Unsafe screen fallback (may capture desktop)"},
     {L"LiveWallpaperCaptureDelayMsLabel", L"Capture delay: %d ms"},
     {L"LiveWallpaperCaptureRefreshMsLabel", L"Capture refresh: %s"},
@@ -361,9 +355,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveWallpaperCaptureOff", L"off"},
     {L"LiveWallpaperCaptureMsText", L"%d ms"},
     {L"LiveWallpaperProviderNone", L"None"},
-    {L"LiveWallpaperProviderLively", L"Lively"},
-    {L"LiveWallpaperProviderWallpaperEngine", L"Wallpaper Engine"},
-    {L"LiveWallpaperProviderGeneric", L"Generic live wallpaper"},
+    {L"LiveWallpaperProviderLive", L"Live wallpaper"},
     {L"SingleInstanceFailureActionLabel", L"Single-instance failure action: %s"},
     {L"SingleInstanceActionIgnore", L"Ignore"},
     {L"SingleInstanceActionWarn", L"Warn"},
@@ -651,9 +643,9 @@ static std::wstring BuildInitialIniTemplate()
     lines.push_back(L"; WallpaperDetectionMethod options:");
     lines.push_back(L"; TranscodedImageCache, SystemParametersInfo, DesktopWallpaperCOM,");
     lines.push_back(L"; TranscodedWallpaperFile, Auto.");
-    lines.push_back(L"; Live wallpaper capture support: when Lively or Wallpaper Engine is");
-    lines.push_back(L"; detected, GenerateAssets can capture a still frame internally instead");
-    lines.push_back(L"; of changing the user's real wallpaper.");
+    lines.push_back(L"; Live wallpaper capture support scans non-icon WorkerW desktop-host");
+    lines.push_back(L"; trees and can capture a still frame internally instead of changing");
+    lines.push_back(L"; the user's real wallpaper.");
     lines.push_back(L"");
     lines.push_back(L"[PowerShellErrorMessages]");
     lines.push_back(L"; Optional HRESULT/error-code matches for PowerShell registration failures.");
