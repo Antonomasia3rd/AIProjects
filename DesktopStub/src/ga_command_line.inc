@@ -1080,7 +1080,7 @@ static std::wstring CommandLineUsageText()
         L"  --live-wallpaper-delay <ms>          Set snapshot startup delay, 0-30000.\r\n"
         L"  --live-wallpaper-refresh <ms|once>   Set snapshot refresh, 0-3600000; once=0.\r\n"
         L"  --live-wallpaper-startup-refresh <ms|off>\r\n"
-        L"                                      Recapture during provider startup; off=0.\r\n"
+        L"                                      Recapture during live wallpaper startup; off=0.\r\n"
         L"  --live-wallpaper-startup-refresh-duration <ms|off>\r\n"
         L"                                      Startup recapture window duration; off=0.\r\n"
         L"  --scales auto|all|100,125,150,200,400\r\n"
