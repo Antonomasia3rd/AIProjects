@@ -29,11 +29,6 @@ if not exist "%CSC%" (
   echo ERROR: C# compiler not found at "%CSC%".
   goto Fail
 )
-where tar.exe >nul 2>nul
-if errorlevel 1 (
-  echo ERROR: tar.exe is required to create release ZIP files.
-  goto Fail
-)
 where certutil.exe >nul 2>nul
 if errorlevel 1 (
   echo ERROR: certutil.exe is required to create SHA256 files.
@@ -124,7 +119,14 @@ call :Run cmd.exe /d /c BuildNowPlayingTile.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
-call :PackageNowPlayingTile
+call :RecordArtifact "%REPO%\NowPlayingTile\build\NowPlayingTile.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%REPO%\NowPlayingTile\README.md"
+if errorlevel 1 exit /b %ERRORLEVEL%
+for %%F in (register-dev-package.ps1 unregister-dev-package.ps1 launch-packaged.ps1 launch-widget.ps1 install-startup.ps1 uninstall-startup.ps1 open-settings.ps1) do (
+  call :RecordArtifactIfExists "%REPO%\NowPlayingTile\%%F" || exit /b !ERRORLEVEL!
+)
+call :RecordArtifactsUnderDir "%REPO%\NowPlayingTile\package"
 exit /b %ERRORLEVEL%
 
 :BuildDesktopStub
@@ -172,7 +174,11 @@ if "%STATUS%"=="0" (
 )
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
-call :PackageSecureDesktopLauncher
+call :RecordArtifact "%REPO%\SecureDesktopLauncher\build\SecureDesktopLauncher.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%REPO%\SecureDesktopLauncher\build\SecureDesktopPasswordLauncher.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%REPO%\SecureDesktopLauncher\README.md"
 exit /b %ERRORLEVEL%
 
 :BuildRealTimeNotesDeskband
@@ -189,87 +195,13 @@ call :Run cmd.exe /d /c BuildDeskband.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
-call :PackageRealTimeNotesDeskband
-exit /b %ERRORLEVEL%
-
-:PackageNowPlayingTile
-call :Section "Package NowPlayingTile"
-call :CreatePackageRoot NowPlayingTile || exit /b %ERRORLEVEL%
-copy /y "%REPO%\NowPlayingTile\build\NowPlayingTile.exe" "%PKG_ROOT%\" >nul || exit /b %ERRORLEVEL%
-copy /y "%REPO%\NowPlayingTile\README.md" "%PKG_ROOT%\" >nul || exit /b %ERRORLEVEL%
-for %%F in (register-dev-package.ps1 unregister-dev-package.ps1 launch-packaged.ps1 launch-widget.ps1 install-startup.ps1 uninstall-startup.ps1 open-settings.ps1) do (
-  if exist "%REPO%\NowPlayingTile\%%F" copy /y "%REPO%\NowPlayingTile\%%F" "%PKG_ROOT%\" >nul || exit /b !ERRORLEVEL!
-)
-if exist "%REPO%\NowPlayingTile\package" xcopy /e /i /y "%REPO%\NowPlayingTile\package" "%PKG_ROOT%\package\" >nul || exit /b %ERRORLEVEL%
-call :WriteBuildInfo "%PKG_ROOT%" || exit /b %ERRORLEVEL%
-set "ZIP=%REPO%\NowPlayingTile\build\NowPlayingTile-windows-x64.zip"
-if exist "%ZIP%" del /f /q "%ZIP%" >nul 2>nul
-tar.exe -a -c -f "%ZIP%" -C "%PKG_ROOT%" .
-set "STATUS=%ERRORLEVEL%"
-rmdir /s /q "%PKG_ROOT%" >nul 2>nul
-if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%ZIP%"
-exit /b %ERRORLEVEL%
-
-:PackageSecureDesktopLauncher
-call :Section "Package SecureDesktopLauncher"
-call :CreatePackageRoot SecureDesktopLauncher || exit /b %ERRORLEVEL%
-copy /y "%REPO%\SecureDesktopLauncher\build\SecureDesktopLauncher.exe" "%PKG_ROOT%\" >nul || exit /b %ERRORLEVEL%
-copy /y "%REPO%\SecureDesktopLauncher\build\SecureDesktopPasswordLauncher.exe" "%PKG_ROOT%\" >nul || exit /b %ERRORLEVEL%
-copy /y "%REPO%\SecureDesktopLauncher\README.md" "%PKG_ROOT%\" >nul || exit /b %ERRORLEVEL%
-call :WriteBuildInfo "%PKG_ROOT%" || exit /b %ERRORLEVEL%
-set "ZIP=%REPO%\SecureDesktopLauncher\build\SecureDesktopLauncher-windows-x64.zip"
-if exist "%ZIP%" del /f /q "%ZIP%" >nul 2>nul
-tar.exe -a -c -f "%ZIP%" -C "%PKG_ROOT%" .
-set "STATUS=%ERRORLEVEL%"
-rmdir /s /q "%PKG_ROOT%" >nul 2>nul
-if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%ZIP%"
-exit /b %ERRORLEVEL%
-
-:PackageRealTimeNotesDeskband
-call :Section "Package RealTimeNotesDeskband"
-call :CreatePackageRoot RealTimeNotesDeskband || exit /b %ERRORLEVEL%
-copy /y "%REPO%\RealTimeNotesDeskband\build\RealTimeNotesDeskband.dll" "%PKG_ROOT%\" >nul || exit /b %ERRORLEVEL%
-copy /y "%REPO%\RealTimeNotesDeskband\README.md" "%PKG_ROOT%\" >nul || exit /b %ERRORLEVEL%
+call :RecordArtifact "%REPO%\RealTimeNotesDeskband\build\RealTimeNotesDeskband.dll"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%REPO%\RealTimeNotesDeskband\README.md"
+if errorlevel 1 exit /b %ERRORLEVEL%
 for %%F in (RegisterDeskband.cmd UnregisterDeskband.cmd ConfigureDeskband.cmd) do (
-  if exist "%REPO%\RealTimeNotesDeskband\%%F" copy /y "%REPO%\RealTimeNotesDeskband\%%F" "%PKG_ROOT%\" >nul || exit /b !ERRORLEVEL!
+  call :RecordArtifactIfExists "%REPO%\RealTimeNotesDeskband\%%F" || exit /b !ERRORLEVEL!
 )
-call :WriteBuildInfo "%PKG_ROOT%" || exit /b %ERRORLEVEL%
-set "ZIP=%REPO%\RealTimeNotesDeskband\build\RealTimeNotesDeskband-windows-x64.zip"
-if exist "%ZIP%" del /f /q "%ZIP%" >nul 2>nul
-tar.exe -a -c -f "%ZIP%" -C "%PKG_ROOT%" .
-set "STATUS=%ERRORLEVEL%"
-rmdir /s /q "%PKG_ROOT%" >nul 2>nul
-if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%ZIP%"
-exit /b %ERRORLEVEL%
-
-:CreatePackageRoot
-set "PKG_ROOT=%TEMP%\AIProjects-%~1-%RANDOM%%RANDOM%"
-if exist "%PKG_ROOT%" rmdir /s /q "%PKG_ROOT%" >nul 2>nul
-mkdir "%PKG_ROOT%"
-exit /b %ERRORLEVEL%
-
-:WriteBuildInfo
-set "DEST=%~1"
-set "BUILD_SHA=%GITHUB_SHA%"
-if not defined BUILD_SHA (
-  for /f "delims=" %%I in ('git -C "%REPO%" rev-parse HEAD 2^>nul') do if not defined BUILD_SHA set "BUILD_SHA=%%I"
-)
-set "BUILD_REF=%GITHUB_REF%"
-if not defined BUILD_REF (
-  for /f "delims=" %%I in ('git -C "%REPO%" branch --show-current 2^>nul') do if not defined BUILD_REF set "BUILD_REF=%%I"
-)
-set "BUILD_REPO=%GITHUB_REPOSITORY%"
-if not defined BUILD_REPO set "BUILD_REPO=local"
-(
-  echo Repository: !BUILD_REPO!
-  echo Ref: !BUILD_REF!
-  echo Commit: !BUILD_SHA!
-  echo BuiltOnLocal: %DATE% %TIME%
-  echo Builder: GitHub Actions workflow when downloaded from a GitHub run or release.
-) > "%DEST%\BUILD_INFO.txt"
 exit /b %ERRORLEVEL%
 
 :WriteChecksums
@@ -299,6 +231,15 @@ if not exist "%~1" (
   exit /b 1
 )
 for %%I in ("%~1") do echo %%~fI>>"%ARTIFACTS%"
+exit /b 0
+
+:RecordArtifactIfExists
+if exist "%~1" call :RecordArtifact "%~1"
+exit /b %ERRORLEVEL%
+
+:RecordArtifactsUnderDir
+if not exist "%~1\" exit /b 0
+for /r "%~1" %%F in (*) do call :RecordArtifact "%%~fF" || exit /b !ERRORLEVEL!
 exit /b 0
 
 :IsSkipped
