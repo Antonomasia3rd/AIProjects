@@ -64,7 +64,37 @@ enum {
     ID_SCALE_400,
     ID_GENERATED_ASSET_CACHE,
     ID_GENERATED_ASSET_PRECACHE,
+    ID_GENERATED_ASSET_CACHE_MAX_ENTRIES,
+    ID_GENERATED_ASSET_PRECACHE_MAX_FILES,
     ID_MANIFEST_REGENERATE,
+
+    // Advanced configurable settings
+    ID_ADV_POLL_INTERVAL,
+    ID_ADV_CONFIRM_MS,
+    ID_ADV_DEBOUNCE_MIN_MS,
+    ID_ADV_POLL_INITIAL_BYPASS_MS,
+    ID_ADV_INI_CACHE_REFRESH_MS,
+    ID_ADV_WALLPAPER_DETECTION_LOG_REPEAT_MS,
+    ID_ADV_NOTIFICATION_TIMEOUT_MS,
+    ID_ADV_SHUTDOWN_INITIAL_MS,
+    ID_ADV_SHUTDOWN_REPEAT_MS,
+    ID_ADV_SINGLE_INSTANCE_SIGNAL_RETRIES,
+    ID_ADV_SINGLE_INSTANCE_SIGNAL_DELAY_MS,
+    ID_ADV_COM_REGISTRATION_TIMEOUT_MS,
+    ID_ADV_COM_REGISTRATION_CANCEL_WAIT_MS,
+    ID_ADV_COM_REGISTRATION_USE_HELPER,
+    ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS,
+    ID_ADV_LOG_BUFFER_LINES,
+    ID_ADV_LOG_APPEND_LOCK_WAIT_MS,
+    ID_ADV_POWER_SHELL_EXE,
+    ID_ADV_POWER_SHELL_POLL_MS,
+    ID_ADV_POWER_SHELL_TIMEOUT_MS,
+    ID_ADV_POWER_SHELL_TERMINATE_WAIT_MS,
+    ID_ADV_POWER_SHELL_OUTPUT_LIMIT,
+    ID_ADV_REGISTRATION_UNRESOLVED_BLOCK_MS,
+    ID_ADV_SAVE_PNG_REPLACE_RETRIES,
+    ID_ADV_SAVE_PNG_REPLACE_RETRY_DELAY_MS,
+    ID_ADV_SINGLE_INSTANCE_FAILURE_ACTION,
 
     // Assets
     ID_A1=2001, ID_A2, ID_A3, ID_A4, ID_A5, ID_A6, ID_A7, ID_A8
@@ -122,6 +152,97 @@ static std::wstring LiveWallpaperRefreshDisplayText(int refreshMs)
 static std::wstring LiveWallpaperOffDisplayText(int valueMs)
 {
     return LiveWallpaperMsDisplayText(valueMs, g_ui.liveWallpaperCaptureOff);
+}
+
+static int ReadSettingClamped(const wchar_t* key, int fallback, int minValue, int maxValue)
+{
+    return IniReadClampedI(L"Settings", key, fallback, minValue, maxValue);
+}
+
+static int NextSettingPreset(int current, std::initializer_list<int> values)
+{
+    if (values.size() == 0)
+        return current;
+
+    std::vector<int> sorted(values.begin(), values.end());
+    std::sort(sorted.begin(), sorted.end());
+    sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
+    return NextPresetValue(current, sorted.data(), static_cast<int>(sorted.size()));
+}
+
+static void WriteSettingInt(const wchar_t* key, int value)
+{
+    IniWrite(L"Settings", key, std::to_wstring(value).c_str());
+    ReloadRuntimeSettingsFromIni();
+    Log(L"[i] Setting changed: [%s] %s = %d", L"Settings", key ? key : L"", value);
+}
+
+static void WriteSettingBool(const wchar_t* key, bool value)
+{
+    IniWrite(L"Settings", key, value ? L"1" : L"0");
+    ReloadRuntimeSettingsFromIni();
+    Log(L"[i] Setting changed: [%s] %s = %s", L"Settings", key ? key : L"", StateEnabled(value));
+}
+
+static void ToggleSettingBool(const wchar_t* key, int fallback)
+{
+    bool value = IniReadI(L"Settings", key, fallback) == 0;
+    WriteSettingBool(key, value);
+}
+
+static void CycleSettingIntPreset(
+    const wchar_t* key,
+    int fallback,
+    int minValue,
+    int maxValue,
+    std::initializer_list<int> presets)
+{
+    int current = ReadSettingClamped(key, fallback, minValue, maxValue);
+    int next = NextSettingPreset(current, presets);
+    next = ClampInt(next, minValue, maxValue);
+    WriteSettingInt(key, next);
+}
+
+static const wchar_t* NextSingleInstanceFailureActionName(ErrorAction current)
+{
+    switch (current)
+    {
+    case ErrorAction::Ignore: return L"Warn";
+    case ErrorAction::Warn: return L"Exit";
+    case ErrorAction::Exit: return L"Crash";
+    case ErrorAction::Crash:
+    default: return L"Ignore";
+    }
+}
+
+static void CycleSingleInstanceFailureActionSetting()
+{
+    const wchar_t* next = NextSingleInstanceFailureActionName(CurrentSingleInstanceFailureAction());
+    IniWrite(L"Settings", L"SingleInstanceFailureAction", next);
+    Log(L"[i] Setting changed: [%s] %s = %s", L"Settings", L"SingleInstanceFailureAction", next);
+}
+
+static void ChoosePowerShellExe(HWND owner)
+{
+    std::vector<wchar_t> file(32768, L'\0');
+    wcsncpy_s(file.data(), file.size(), ReadPowerShellExe().c_str(), _TRUNCATE);
+
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = owner;
+    std::wstring filter = L"Executable files\0*.exe\0All files\0*.*\0\0";
+    ofn.lpstrFilter = filter.c_str();
+    ofn.lpstrFile = file.data();
+    ofn.nMaxFile = static_cast<DWORD>(file.size());
+    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.lpstrDefExt = L"exe";
+    ofn.lpstrTitle = L"Select PowerShell executable";
+
+    if (GetOpenFileNameW(&ofn))
+    {
+        IniWrite(L"Settings", L"PowerShellExe", file.data());
+        Log(L"[i] Setting changed: [%s] %s = %s", L"Settings", L"PowerShellExe", file.data());
+    }
 }
 
 static bool EnsureTrayIcon(DWORD* err = nullptr)
@@ -539,8 +660,8 @@ void Menu(HWND h)
     addTo(cachingMenu, ID_GENERATED_ASSET_PRECACHE, g_ui.generatedAssetPrecache.c_str(), precacheConfigured, cacheCanStore);
     std::wstring cacheMaxEntriesLine = FormatWide(g_ui.generatedAssetCacheMaxEntriesLabel.c_str(), GeneratedAssetCacheMaxEntries());
     std::wstring precacheMaxFilesLine = FormatWide(g_ui.generatedAssetPrecacheMaxFilesLabel.c_str(), GeneratedAssetPrecacheMaxFiles());
-    AppendMenuChecked(cachingMenu, MF_STRING | MF_DISABLED, 0, cacheMaxEntriesLine.c_str());
-    AppendMenuChecked(cachingMenu, MF_STRING | MF_DISABLED, 0, precacheMaxFilesLine.c_str());
+    addTo(cachingMenu, ID_GENERATED_ASSET_CACHE_MAX_ENTRIES, cacheMaxEntriesLine);
+    addTo(cachingMenu, ID_GENERATED_ASSET_PRECACHE_MAX_FILES, precacheMaxFilesLine, false, cacheCanStore);
     endSection(cachingMenu, g_ui.cachingTitle);
 
     HMENU manifestMenu = beginSection(g_ui.manifestTitle);
@@ -649,32 +770,32 @@ void Menu(HWND h)
     std::wstring savePngReplaceRetriesLine = FormatWide(g_ui.savePngReplaceRetriesLabel.c_str(), IniReadClampedI(L"Settings", L"SavePngReplaceRetries", 3, 0, 20));
     std::wstring savePngReplaceRetryDelayLine = FormatWide(g_ui.savePngReplaceRetryDelayMsLabel.c_str(), IniReadClampedI(L"Settings", L"SavePngReplaceRetryDelayMs", 75, 0, 5000));
     std::wstring singleInstanceLine = FormatWide(g_ui.singleInstanceFailureActionLabel.c_str(), ErrorActionName(CurrentSingleInstanceFailureAction()));
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, pollLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, confirmLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, debounceLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, pollInitialBypassLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, iniCacheRefreshLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, wallpaperDetectionLogRepeatLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, notificationTimeoutLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, shutdownInitialLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, shutdownRepeatLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, signalRetriesLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, signalDelayLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, comRegistrationTimeoutLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, comRegistrationCancelWaitLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, comRegistrationHelperLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, trayHideDelayLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, logBufferLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, logAppendLockWaitLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellExeLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellPollLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellTimeoutLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellTerminateWaitLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, powerShellOutputLimitLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, registrationUnresolvedBlockLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, savePngReplaceRetriesLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, savePngReplaceRetryDelayLine.c_str());
-    AppendMenuChecked(advancedMenu, MF_STRING | MF_DISABLED, 0, singleInstanceLine.c_str());
+    addTo(advancedMenu, ID_ADV_POLL_INTERVAL, pollLine);
+    addTo(advancedMenu, ID_ADV_CONFIRM_MS, confirmLine);
+    addTo(advancedMenu, ID_ADV_DEBOUNCE_MIN_MS, debounceLine);
+    addTo(advancedMenu, ID_ADV_POLL_INITIAL_BYPASS_MS, pollInitialBypassLine);
+    addTo(advancedMenu, ID_ADV_INI_CACHE_REFRESH_MS, iniCacheRefreshLine);
+    addTo(advancedMenu, ID_ADV_WALLPAPER_DETECTION_LOG_REPEAT_MS, wallpaperDetectionLogRepeatLine);
+    addTo(advancedMenu, ID_ADV_NOTIFICATION_TIMEOUT_MS, notificationTimeoutLine);
+    addTo(advancedMenu, ID_ADV_SHUTDOWN_INITIAL_MS, shutdownInitialLine);
+    addTo(advancedMenu, ID_ADV_SHUTDOWN_REPEAT_MS, shutdownRepeatLine);
+    addTo(advancedMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_RETRIES, signalRetriesLine);
+    addTo(advancedMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_DELAY_MS, signalDelayLine);
+    addTo(advancedMenu, ID_ADV_COM_REGISTRATION_TIMEOUT_MS, comRegistrationTimeoutLine);
+    addTo(advancedMenu, ID_ADV_COM_REGISTRATION_CANCEL_WAIT_MS, comRegistrationCancelWaitLine);
+    addTo(advancedMenu, ID_ADV_COM_REGISTRATION_USE_HELPER, comRegistrationHelperLine, IniReadI(L"Settings", L"ComRegistrationUseHelper", 1) != 0);
+    addTo(advancedMenu, ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS, trayHideDelayLine);
+    addTo(advancedMenu, ID_ADV_LOG_BUFFER_LINES, logBufferLine);
+    addTo(advancedMenu, ID_ADV_LOG_APPEND_LOCK_WAIT_MS, logAppendLockWaitLine);
+    addTo(advancedMenu, ID_ADV_POWER_SHELL_EXE, powerShellExeLine);
+    addTo(advancedMenu, ID_ADV_POWER_SHELL_POLL_MS, powerShellPollLine);
+    addTo(advancedMenu, ID_ADV_POWER_SHELL_TIMEOUT_MS, powerShellTimeoutLine);
+    addTo(advancedMenu, ID_ADV_POWER_SHELL_TERMINATE_WAIT_MS, powerShellTerminateWaitLine);
+    addTo(advancedMenu, ID_ADV_POWER_SHELL_OUTPUT_LIMIT, powerShellOutputLimitLine);
+    addTo(advancedMenu, ID_ADV_REGISTRATION_UNRESOLVED_BLOCK_MS, registrationUnresolvedBlockLine);
+    addTo(advancedMenu, ID_ADV_SAVE_PNG_REPLACE_RETRIES, savePngReplaceRetriesLine);
+    addTo(advancedMenu, ID_ADV_SAVE_PNG_REPLACE_RETRY_DELAY_MS, savePngReplaceRetryDelayLine);
+    addTo(advancedMenu, ID_ADV_SINGLE_INSTANCE_FAILURE_ACTION, singleInstanceLine);
     endSection(advancedMenu, g_ui.advancedTitle);
 
     if (showMenuAsDropdown)
@@ -996,6 +1117,120 @@ void Menu(HWND h)
         Log(g_ui.generatedAssetPrecacheSummary.c_str(), StateEnabled(value), GeneratedAssetPrecacheMaxFiles());
     }
     break;
+
+    case ID_GENERATED_ASSET_CACHE_MAX_ENTRIES:
+        CycleSettingIntPreset(L"GeneratedAssetCacheMaxEntries", 64, 0, 10000, { 0, 8, 16, 32, 64, 128, 256, 512, 1000, 5000, 10000 });
+        break;
+
+    case ID_GENERATED_ASSET_PRECACHE_MAX_FILES:
+        if (GeneratedAssetCacheEnabled() && GeneratedAssetCacheMaxEntries() > 0)
+            CycleSettingIntPreset(L"GeneratedAssetPrecacheMaxFiles", 16, 0, 10000, { 0, 4, 8, 16, 32, 64, 128, 256, 512, 1000, 5000, 10000 });
+        break;
+
+    case ID_ADV_POLL_INTERVAL:
+        CycleSettingIntPreset(L"PollIntervalMs", 2000, 250, 60000, { 250, 500, 1000, 2000, 5000, 10000, 30000, 60000 });
+        break;
+
+    case ID_ADV_CONFIRM_MS:
+        CycleSettingIntPreset(L"ConfirmMs", 800, 0, 10000, { 0, 250, 500, 800, 1000, 1500, 2500, 5000, 10000 });
+        break;
+
+    case ID_ADV_DEBOUNCE_MIN_MS:
+        CycleSettingIntPreset(L"DebounceMinMs", 1200, 0, 60000, { 0, 500, 800, 1200, 2000, 5000, 10000, 30000, 60000 });
+        break;
+
+    case ID_ADV_POLL_INITIAL_BYPASS_MS:
+        CycleSettingIntPreset(L"PollInitialDebounceBypassMs", 5000, 0, 60000, { 0, 1000, 2500, 5000, 10000, 30000, 60000 });
+        break;
+
+    case ID_ADV_INI_CACHE_REFRESH_MS:
+        CycleSettingIntPreset(L"IniCacheRefreshMs", 250, 0, 60000, { 0, 100, 250, 500, 1000, 2500, 5000, 10000, 60000 });
+        break;
+
+    case ID_ADV_WALLPAPER_DETECTION_LOG_REPEAT_MS:
+        CycleSettingIntPreset(L"WallpaperDetectionLogRepeatMs", 60000, 0, 3600000, { 0, 10000, 30000, 60000, 300000, 600000, 1800000, 3600000 });
+        break;
+
+    case ID_ADV_NOTIFICATION_TIMEOUT_MS:
+        CycleSettingIntPreset(L"NotificationTimeoutMs", 4000, 1000, 60000, { 1000, 2000, 4000, 8000, 15000, 30000, 60000 });
+        break;
+
+    case ID_ADV_SHUTDOWN_INITIAL_MS:
+        CycleSettingIntPreset(L"ShutdownInitialNoticeMs", 1000, 250, 60000, { 250, 500, 1000, 2000, 5000, 10000, 30000, 60000 });
+        break;
+
+    case ID_ADV_SHUTDOWN_REPEAT_MS:
+        CycleSettingIntPreset(L"ShutdownRepeatNoticeMs", 5000, 250, 60000, { 250, 1000, 2500, 5000, 10000, 30000, 60000 });
+        break;
+
+    case ID_ADV_SINGLE_INSTANCE_SIGNAL_RETRIES:
+        CycleSettingIntPreset(L"SingleInstanceSignalRetries", 50, 0, 200, { 0, 1, 5, 10, 25, 50, 100, 200 });
+        break;
+
+    case ID_ADV_SINGLE_INSTANCE_SIGNAL_DELAY_MS:
+        CycleSettingIntPreset(L"SingleInstanceSignalDelayMs", 100, 0, 5000, { 0, 25, 50, 100, 250, 500, 1000, 2500, 5000 });
+        break;
+
+    case ID_ADV_COM_REGISTRATION_TIMEOUT_MS:
+        CycleSettingIntPreset(L"ComRegistrationTimeoutMs", 120000, 0, 600000, { 0, 30000, 60000, 120000, 180000, 300000, 600000 });
+        break;
+
+    case ID_ADV_COM_REGISTRATION_CANCEL_WAIT_MS:
+        CycleSettingIntPreset(L"ComRegistrationCancelWaitMs", 5000, 0, 60000, { 0, 1000, 2500, 5000, 10000, 30000, 60000 });
+        break;
+
+    case ID_ADV_COM_REGISTRATION_USE_HELPER:
+        ToggleSettingBool(L"ComRegistrationUseHelper", 1);
+        break;
+
+    case ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS:
+        CycleSettingIntPreset(L"TrayIconHiddenDelayMs", 750, 0, 10000, { 0, 250, 500, 750, 1000, 2000, 5000, 10000 });
+        break;
+
+    case ID_ADV_LOG_BUFFER_LINES:
+        CycleSettingIntPreset(L"LogBufferLines", 1024, 1, 100000, { 1, 100, 500, 1024, 2500, 5000, 10000, 50000, 100000 });
+        break;
+
+    case ID_ADV_LOG_APPEND_LOCK_WAIT_MS:
+        CycleSettingIntPreset(L"LogAppendLockWaitMs", 1000, 0, 60000, { 0, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000 });
+        break;
+
+    case ID_ADV_POWER_SHELL_EXE:
+        ChoosePowerShellExe(h);
+        break;
+
+    case ID_ADV_POWER_SHELL_POLL_MS:
+        CycleSettingIntPreset(L"PowerShellPollMs", 50, 10, 1000, { 10, 25, 50, 100, 250, 500, 1000 });
+        break;
+
+    case ID_ADV_POWER_SHELL_TIMEOUT_MS:
+        CycleSettingIntPreset(L"PowerShellTimeoutMs", 120000, 0, 600000, { 0, 30000, 60000, 120000, 180000, 300000, 600000 });
+        break;
+
+    case ID_ADV_POWER_SHELL_TERMINATE_WAIT_MS:
+        CycleSettingIntPreset(L"PowerShellTerminateWaitMs", 5000, 0, 60000, { 0, 1000, 2500, 5000, 10000, 30000, 60000 });
+        break;
+
+    case ID_ADV_POWER_SHELL_OUTPUT_LIMIT:
+        CycleSettingIntPreset(L"PowerShellOutputMessageBoxChars", 6000, 0, 60000, { 0, 1000, 3000, 6000, 10000, 30000, 60000 });
+        g_powerShellOutputMessageBoxChars = IniReadClampedI(L"Settings", L"PowerShellOutputMessageBoxChars", 6000, 0, 60000);
+        break;
+
+    case ID_ADV_REGISTRATION_UNRESOLVED_BLOCK_MS:
+        CycleSettingIntPreset(L"RegistrationUnresolvedBlockMs", 300000, 0, 3600000, { 0, 30000, 60000, 120000, 300000, 600000, 1800000, 3600000 });
+        break;
+
+    case ID_ADV_SAVE_PNG_REPLACE_RETRIES:
+        CycleSettingIntPreset(L"SavePngReplaceRetries", 3, 0, 20, { 0, 1, 2, 3, 5, 10, 20 });
+        break;
+
+    case ID_ADV_SAVE_PNG_REPLACE_RETRY_DELAY_MS:
+        CycleSettingIntPreset(L"SavePngReplaceRetryDelayMs", 75, 0, 5000, { 0, 25, 50, 75, 100, 250, 500, 1000, 2500, 5000 });
+        break;
+
+    case ID_ADV_SINGLE_INSTANCE_FAILURE_ACTION:
+        CycleSingleInstanceFailureActionSetting();
+        break;
 
     case ID_SHOW_MENU_DROPDOWN:
     {
