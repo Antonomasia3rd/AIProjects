@@ -499,6 +499,13 @@ $sourceChecks += @(
         -Failure 'live wallpaper capture should include a generic WorkerW provider for non-Lively/non-Wallpaper-Engine apps'),
 
     (New-SourceCheck `
+        -Name 'Generic live wallpaper capture is WorkerW-only' `
+        -SourceName 'src\ga_wallpaper.inc' `
+        -SourceText (Read-Source 'src\ga_wallpaper.inc') `
+        -Pattern 'Generic provider is intentionally WorkerW-only' `
+        -Failure 'generic fallback capture must not enumerate arbitrary top-level app windows'),
+
+    (New-SourceCheck `
         -Name 'Live wallpaper refresh defaults to ten seconds' `
         -SourceName 'src\ga_config_defaults.inc' `
         -SourceText (Read-Source 'src\ga_config_defaults.inc') `
