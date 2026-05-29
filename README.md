@@ -28,13 +28,13 @@ Release tag families:
 
 | Change scope | Release tag family |
 | --- | --- |
-| One project folder changed | `<Project>-vN`, for example `DesktopStub-v1`, `DiscordRPC-v1`, or `asusblink-v1` |
-| Shared workflow/repository files changed | `All-vN` |
-| Manual workflow run with `All` selected | `All-vN` |
+| Any built project | `<Project>-vN`, for example `DesktopStub-v1`, `DiscordRPC-v1`, or `asusblink-v1` |
+| Shared workflow/repository files changed | one release per built project, each in that project's `<Project>-vN` family |
+| Manual workflow run with `All` selected | one release per built project, each in that project's `<Project>-vN` family |
 
-The `DesktopStub` release contains `GenerateAssets.exe`; the release family is still `DesktopStub-vN` so it matches the folder and repository project name.
+The `DesktopStub` release contains `GenerateAssets.exe` and `GenerateAssetsLiveTileBroker.exe`; the release family is still `DesktopStub-vN` so it matches the folder and repository project name.
 
-GitHub Actions artifacts are also available from each workflow run. Actions artifacts download as ZIP archives even when the artifact contains only one executable. SHA256 checksums are written to the workflow summary and to release notes instead of being uploaded as separate `.sha256` files.
+GitHub Actions workflow artifacts are also available from each workflow run. GitHub downloads each workflow artifact as an archive, but the artifact payload and release assets are direct project files rather than project-created release ZIPs. SHA256 checksums are written to the workflow summary and to release notes instead of being uploaded as separate `.sha256` files.
 
 Published binaries are unsigned. Windows SmartScreen or antivirus tools may warn on first run; verify the release-note SHA256 hash or build from source if preferred.
 
@@ -49,7 +49,7 @@ Common prerequisites:
 - MinGW-w64 `g++` for `RealTimeNotesDeskband`.
 - PowerShell 5.1 or newer for script-only utilities and Appx helper scripts.
 
-Build all packaged Windows artifacts:
+Build all Windows binary artifacts:
 
 ```cmd
 .github\scripts\build-windows.cmd
@@ -75,7 +75,7 @@ Run repository validation and smoke checks:
 .github\scripts\Smoke-WindowsBuild.ps1
 ```
 
-The Windows workflow project metadata lives in `.github/project-map.json`. Keep that map, `.github/workflows/build-windows.yml`, `.github/scripts/build-windows.cmd`, and this README in sync when adding or removing packaged projects. The workflow validates the project map before building.
+The Windows workflow project metadata lives in `.github/project-map.json`. Keep that map, `.github/workflows/build-windows.yml`, `.github/scripts/build-windows.cmd`, and this README in sync when adding or removing projects that produce Windows artifacts. The workflow validates the project map before building.
 
 Each project README also lists direct build commands for that project. Generated outputs belong in project `build` folders and are ignored by git. If a compiler cannot overwrite a running EXE, close that program and rerun the build.
 
@@ -93,7 +93,7 @@ Read the project README before running a tool, use an elevated shell where docum
 
 ## Repository Policy
 
-Tracked files are source, build scripts, templates/manifests, and documentation. Local configs, logs, generated assets, binaries, object files, and release ZIPs are ignored.
+Tracked files are source, build scripts, templates/manifests, and documentation. Local configs, logs, generated assets, binaries, object files, and generated release archives are ignored.
 
 Runtime configuration and logs must stay local to each program. By default, every binary must use `.ini` and `.log` files beside itself with the same base name as the binary:
 
