@@ -529,9 +529,11 @@ static bool ApplyCommandLineAssetOverride(const std::wstring& rawValue, std::wst
         L"StoreLogo",
         L"MediumTile",
         L"Square44x44Logo",
+        L"Square30x30Logo",
         L"SmallTile",
         L"WideTile",
         L"LargeTile",
+        L"SplashScreen",
     };
 
     for (const wchar_t* assetKey : assetKeys)
@@ -850,6 +852,47 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (IEquals(arg, L"--generated-asset-cache"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"GeneratedAssetCache", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-generated-asset-cache"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"GeneratedAssetCache", false);
+            continue;
+        }
+        if (IEquals(arg, L"--generated-asset-precache"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"GeneratedAssetPrecache", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-generated-asset-precache"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"GeneratedAssetPrecache", false);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--generated-asset-cache-max", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            int parsed = 0;
+            if (!ParseCommandLineClampedInt(value, L"--generated-asset-cache-max", 0, 10000, parsed, error))
+                return fail(error);
+            AddCommandLineIntSetting(L"Settings", L"GeneratedAssetCacheMaxEntries", parsed);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--generated-asset-precache-max", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            int parsed = 0;
+            if (!ParseCommandLineClampedInt(value, L"--generated-asset-precache-max", 0, 10000, parsed, error))
+                return fail(error);
+            AddCommandLineIntSetting(L"Settings", L"GeneratedAssetPrecacheMaxFiles", parsed);
+            continue;
+        }
+
         if (IEquals(arg, L"--once"))
         {
             g_commandLine.generateOnce = true;
@@ -931,6 +974,16 @@ static bool ParseCommandLineOptions()
         if (IEquals(arg, L"--com") || IEquals(arg, L"--com-registration") || IEquals(arg, L"--no-powershell"))
         {
             AddCommandLineBoolSetting(L"Settings", L"UsePowerShell", false);
+            continue;
+        }
+        if (IEquals(arg, L"--com-helper") || IEquals(arg, L"--com-registration-helper"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"ComRegistrationUseHelper", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-com-helper") || IEquals(arg, L"--no-com-registration-helper"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"ComRegistrationUseHelper", false);
             continue;
         }
         if (IEquals(arg, L"--live-tile"))
@@ -1061,6 +1114,7 @@ static std::wstring CommandLineUsageText()
         L"  --logging | --no-logging            Set and save file logging.\r\n"
         L"  --notifications | --no-notifications Set and save tray notifications.\r\n"
         L"  --powershell | --com-registration    Set and save registration command mode.\r\n"
+        L"  --com-helper | --no-com-helper      Enable/disable COM isolation helper.\r\n"
         L"  --live-tile | --no-live-tile         Set and save Live Tile update mode.\r\n"
         L"  --live-tile-auto                     Set and save automatic Live Tile update mode.\r\n"
         L"  --live-tile-mode <mode>              Set mode: Auto, Registration, or LiveTile.\r\n"
@@ -1086,6 +1140,15 @@ static std::wstring CommandLineUsageText()
         L"  --scales auto|all|100,125,150,200,400\r\n"
         L"                                      Set and save generated DPI scales.\r\n"
         L"  --asset Name=0|1                    Set and save an asset toggle.\r\n"
+        L"                                      Names: StoreLogo, MediumTile, Square44x44Logo,\r\n"
+        L"                                      Square30x30Logo, SmallTile, WideTile, LargeTile, SplashScreen.\r\n"
+        L"  --generated-asset-cache | --no-generated-asset-cache\r\n"
+        L"                                      Enable/disable generated asset cache.\r\n"
+        L"  --generated-asset-precache | --no-generated-asset-precache\r\n"
+        L"                                      Enable/disable slideshow pre-cache.\r\n"
+        L"  --generated-asset-cache-max <n>      Set cache max entries, 0-10000.\r\n"
+        L"  --generated-asset-precache-max <n>   Set pre-cache max files, 0-10000.\r\n"
+        L"  --set Settings.Key=Value            Set any other INI-backed setting directly.\r\n"
         L"\r\n"
         L"Examples:\r\n"
         L"  GenerateAssets.exe --once\r\n"
