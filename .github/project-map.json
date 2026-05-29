@@ -50,7 +50,7 @@
     "folder": "NowPlayingTile",
     "buildOutput": "build_now_playing_tile",
     "artifactName": "NowPlayingTile",
-    "artifactPath": "NowPlayingTile/build/NowPlayingTile-windows-x64.zip",
+    "artifactPath": "NowPlayingTile/build/NowPlayingTile.exe",
     "skipKey": "NowPlayingTile"
   },
   {
@@ -78,7 +78,7 @@
     "folder": "SecureDesktopLauncher",
     "buildOutput": "build_secure_desktop_launcher",
     "artifactName": "SecureDesktopLauncher",
-    "artifactPath": "SecureDesktopLauncher/build/SecureDesktopLauncher-windows-x64.zip",
+    "artifactPath": "SecureDesktopLauncher/build/SecureDesktopLauncher.exe",
     "skipKey": "SecureDesktopLauncher"
   },
   {
@@ -87,7 +87,7 @@
     "folder": "RealTimeNotesDeskband",
     "buildOutput": "build_real_time_notes_deskband",
     "artifactName": "RealTimeNotesDeskband",
-    "artifactPath": "RealTimeNotesDeskband/build/RealTimeNotesDeskband-windows-x64.zip",
+    "artifactPath": "RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll",
     "skipKey": "RealTimeNotesDeskband"
   }
 ]
