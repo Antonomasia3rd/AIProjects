@@ -928,6 +928,20 @@ static std::vector<HWND> FindLiveWallpaperWindowCandidates(LiveWallpaperProvider
             AddUniqueWindowCandidate(genericWorkerWsWithChildren, worker);
     }
 
+    if (provider == LiveWallpaperProvider::Generic)
+    {
+        // Generic provider is intentionally WorkerW-only. Do not enumerate
+        // arbitrary top-level windows here: a normal app can be monitor-sized
+        // and visible, but that does not make it a desktop wallpaper host.
+        // This keeps fallback detection useful for unknown WorkerW-based live
+        // wallpaper apps without accidentally snapshotting the foreground app.
+        for (HWND hwnd : workerCandidates)
+            AddUniqueWindowCandidate(candidates, hwnd);
+        for (HWND hwnd : genericWorkerWsWithChildren)
+            AddUniqueWindowCandidate(candidates, hwnd);
+        return candidates;
+    }
+
     struct FindProviderWindowContext
     {
         LiveWallpaperProvider provider;
@@ -939,11 +953,6 @@ static std::vector<HWND> FindLiveWallpaperWindowCandidates(LiveWallpaperProvider
         auto* ctx = reinterpret_cast<FindProviderWindowContext*>(lParam);
         if (!ctx || !ctx->candidates || !IsWindow(hwnd))
             return TRUE;
-        if (ctx->provider == LiveWallpaperProvider::Generic)
-        {
-            AddProviderDescendantWindowCandidates(*ctx->candidates, hwnd, ctx->provider);
-            return TRUE;
-        }
 
         if (!WindowProcessMatchesProvider(hwnd, ctx->provider))
             return TRUE;
