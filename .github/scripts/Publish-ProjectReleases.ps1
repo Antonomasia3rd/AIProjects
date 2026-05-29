@@ -57,7 +57,7 @@ try {
     $summary = @(
         '## Automatic project releases',
         '',
-        'Each built project is released in its own `Project-vN` tag family. ZIP build outputs are expanded before upload so release assets contain the actual binaries.',
+        'Each built project is released in its own `Project-vN` tag family. Workflow artifact payload files are uploaded to the matching project release as individual assets.',
         '',
         '| Project | Release | Uploaded assets |',
         '| --- | --- | --- |'
@@ -113,8 +113,6 @@ try {
         }
         New-Item -ItemType Directory -Path $releaseWorkRoot -Force | Out-Null
 
-        $expandedRoot = Join-Path $releaseWorkRoot '_expanded'
-        New-Item -ItemType Directory -Path $expandedRoot -Force | Out-Null
         $uploadRoot = Join-Path $releaseWorkRoot 'upload'
         New-Item -ItemType Directory -Path $uploadRoot -Force | Out-Null
 
@@ -135,7 +133,7 @@ try {
 
             if ($usedNames.ContainsKey($name)) {
                 $fallback = if ([string]::IsNullOrWhiteSpace($FallbackName)) { $name } else { $FallbackName }
-                $fallback = ($fallback -replace '[\\/]+', '-')
+                $fallback = ($fallback -replace '[\/]+', '-')
                 $fallback = [System.IO.Path]::GetFileName($fallback)
                 if (-not [string]::IsNullOrWhiteSpace($fallback) -and -not $usedNames.ContainsKey($fallback)) {
                     $name = $fallback
@@ -157,21 +155,9 @@ try {
             $releaseAssets.Add($destination)
         }
 
-        $zipIndex = 0
         foreach ($file in @($entry.Files | Sort-Object FullName)) {
-            if ($file.Extension -ieq '.zip') {
-                $zipIndex++
-                $destination = Join-Path $expandedRoot ("zip-$zipIndex")
-                New-Item -ItemType Directory -Path $destination -Force | Out-Null
-                Expand-Archive -LiteralPath $file.FullName -DestinationPath $destination -Force
-                $expandedFiles = @(Get-ChildItem -LiteralPath $destination -Recurse -File | Sort-Object FullName)
-                foreach ($expandedFile in $expandedFiles) {
-                    $relative = $expandedFile.FullName.Substring($destination.Length).TrimStart('\', '/')
-                    Add-ReleaseAsset -SourcePath $expandedFile.FullName -PreferredName $expandedFile.Name -FallbackName $relative
-                }
-            } else {
-                Add-ReleaseAsset -SourcePath $file.FullName -PreferredName $file.Name
-            }
+            $relative = $file.FullName.Substring($artifactRoot.Length).TrimStart('\', '/')
+            Add-ReleaseAsset -SourcePath $file.FullName -PreferredName $file.Name -FallbackName $relative
         }
 
         if ($releaseAssets.Count -eq 0) {
@@ -212,7 +198,7 @@ try {
             "Built projects: $ProjectList",
             "Release family: ``$releaseBase-vN``",
             "",
-            "ZIP build outputs are expanded before upload, so release assets contain the actual binaries/files.",
+            "Release assets are direct files from the workflow artifact payload for this project.",
             "",
             ($changeLines -join "`n"),
             "",
