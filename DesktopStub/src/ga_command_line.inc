@@ -695,23 +695,47 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
-        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--ds-wait-for-pid", value, error, matched))
+        const wchar_t* waitForPidArgUsed = nullptr;
+        if (!CommandLineTryGetOptionValue(argc, argv, i, WAIT_FOR_PID_ARG, value, error, matched))
             return fail(error);
+        if (matched)
+        {
+            waitForPidArgUsed = WAIT_FOR_PID_ARG;
+        }
+        else
+        {
+            if (!CommandLineTryGetOptionValue(argc, argv, i, WAIT_FOR_PID_ARG_LEGACY, value, error, matched))
+                return fail(error);
+            if (matched)
+                waitForPidArgUsed = WAIT_FOR_PID_ARG_LEGACY;
+        }
         if (matched)
         {
             int pid = 0;
             if (!CommandLineParseInteger(value, pid) || pid <= 0)
-                return fail(L"Invalid process id after --ds-wait-for-pid: " + value + L".");
+                return fail(L"Invalid process id after " + std::wstring(waitForPidArgUsed ? waitForPidArgUsed : WAIT_FOR_PID_ARG) + L": " + value + L".");
             g_commandLine.waitForPid = static_cast<DWORD>(pid);
             continue;
         }
 
+        const wchar_t* comHelperArgUsed = nullptr;
         if (!CommandLineTryGetOptionValue(argc, argv, i, COM_REGISTRATION_HELPER_ARG, value, error, matched))
             return fail(error);
         if (matched)
         {
+            comHelperArgUsed = COM_REGISTRATION_HELPER_ARG;
+        }
+        else
+        {
+            if (!CommandLineTryGetOptionValue(argc, argv, i, COM_REGISTRATION_HELPER_ARG_LEGACY, value, error, matched))
+                return fail(error);
+            if (matched)
+                comHelperArgUsed = COM_REGISTRATION_HELPER_ARG_LEGACY;
+        }
+        if (matched)
+        {
             if (TrimCopy(value).empty())
-                return fail(L"Missing manifest path after " + std::wstring(COM_REGISTRATION_HELPER_ARG) + L".");
+                return fail(L"Missing manifest path after " + std::wstring(comHelperArgUsed ? comHelperArgUsed : COM_REGISTRATION_HELPER_ARG) + L".");
             g_commandLine.comRegistrationHelper = true;
             g_commandLine.comRegistrationHelperManifestPath = value;
             continue;
@@ -1094,10 +1118,26 @@ static bool ParseCommandLineOptions()
     return true;
 }
 
+static std::wstring CommandLineProgramName()
+{
+    std::wstring name = g_exePath;
+    size_t slash = name.find_last_of(L"\\/");
+    if (slash != std::wstring::npos)
+        name.erase(0, slash + 1);
+    return name.empty() ? L"DesktopStub.exe" : name;
+}
+
 static std::wstring CommandLineUsageText()
 {
-    return
-        L"DesktopStub.exe [options] [wallpaper-path]\r\n"
+    std::wstring exe = CommandLineProgramName();
+    std::wstring iniExampleName = exe;
+    size_t iniExampleDot = iniExampleName.find_last_of(L'.');
+    if (iniExampleDot != std::wstring::npos)
+        iniExampleName.erase(iniExampleDot);
+    if (iniExampleName.empty())
+        iniExampleName = L"DesktopStub";
+
+    std::wstring text = exe + L" [options] [wallpaper-path]\r\n"
         L"\r\n"
         L"Options:\r\n"
         L"  --help, -h, /?                      Show this help.\r\n"
@@ -1150,12 +1190,13 @@ static std::wstring CommandLineUsageText()
         L"  --generated-asset-precache-max <n>   Set pre-cache max files, 0-10000.\r\n"
         L"  --set Settings.Key=Value            Set any other INI-backed setting directly.\r\n"
         L"\r\n"
-        L"Examples:\r\n"
-        L"  DesktopStub.exe --once\r\n"
-        L"  DesktopStub.exe --no-tray --console\r\n"
-        L"  DesktopStub.exe --ini D:\\Temp\\DesktopStub.ini --set Settings.PollIntervalMs=5000\r\n"
-        L"  DesktopStub.exe --wallpaper D:\\Pictures\\wallpaper.jpg --scales 100,200\r\n"
-        L"  DesktopStub.exe --exit\r\n";
+        L"Examples:\r\n";
+    text += L"  " + exe + L" --once\r\n";
+    text += L"  " + exe + L" --no-tray --console\r\n";
+    text += L"  " + exe + L" --ini D:\\Temp\\" + iniExampleName + L".ini --set Settings.PollIntervalMs=5000\r\n";
+    text += L"  " + exe + L" --wallpaper D:\\Pictures\\wallpaper.jpg --scales 100,200\r\n";
+    text += L"  " + exe + L" --exit\r\n";
+    return text;
 }
 
 static bool WriteCommandLineTextToConsole(const std::wstring& text, bool errorOutput)
