@@ -30,6 +30,130 @@ if (-not (Test-Path -LiteralPath $ArtifactsRoot -PathType Container)) {
     throw "Artifacts directory not found: $ArtifactsRoot"
 }
 
+function Get-ArtifactTreeSummary {
+    param(
+        [Parameter(Mandatory=$true)][string]$Root,
+        [int]$MaxEntries = 120
+    )
+
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        return @("<missing: $Root>")
+    }
+
+    $items = @(Get-ChildItem -LiteralPath $Root -Force -Recurse | Sort-Object FullName)
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($items | Select-Object -First $MaxEntries)) {
+        $relative = $item.FullName.Substring($Root.Length).TrimStart('\', '/')
+        if ([string]::IsNullOrWhiteSpace($relative)) {
+            $relative = '.'
+        }
+
+        if ($item.PSIsContainer) {
+            $lines.Add("DIR  $relative")
+        } else {
+            $lines.Add("FILE $relative ($($item.Length) bytes)")
+        }
+    }
+
+    if ($items.Count -gt $MaxEntries) {
+        $lines.Add("... $($items.Count - $MaxEntries) more item(s) omitted")
+    }
+
+    return @($lines)
+}
+
+function Get-ProjectArtifactLeafNames {
+    param([Parameter(Mandatory=$true)]$Project)
+
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($artifactPath in @($Project.artifactPath)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$artifactPath)) {
+            $leaf = Split-Path -Leaf ([string]$artifactPath)
+            if (-not [string]::IsNullOrWhiteSpace($leaf)) {
+                $names.Add($leaf)
+            }
+        }
+    }
+
+    return @($names | Select-Object -Unique)
+}
+
+function Resolve-DownloadedProjectArtifact {
+    param(
+        [Parameter(Mandatory=$true)]$Project,
+        [Parameter(Mandatory=$true)][string]$ArtifactsRoot
+    )
+
+    $artifactName = [string]$Project.artifactName
+    $namedRoot = Join-Path $ArtifactsRoot $artifactName
+    if (Test-Path -LiteralPath $namedRoot -PathType Container) {
+        $files = @(Get-ChildItem -LiteralPath $namedRoot -Recurse -File)
+        if ($files.Count -gt 0) {
+            return [pscustomobject]@{
+                Project = $Project
+                ArtifactRoot = $namedRoot
+                Files = $files
+                Source = "named artifact directory: $artifactName"
+            }
+        }
+    }
+
+    # Some download-artifact versions/options can leave or produce a single zip
+    # payload instead of an expanded <artifact name> directory. Accept that too.
+    $zipPath = Join-Path $ArtifactsRoot ($artifactName + '.zip')
+    if (Test-Path -LiteralPath $zipPath -PathType Leaf) {
+        $expandedRoot = Join-Path $env:RUNNER_TEMP ('release-artifact-' + $artifactName)
+        if (Test-Path -LiteralPath $expandedRoot) {
+            Remove-Item -LiteralPath $expandedRoot -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $expandedRoot -Force | Out-Null
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $expandedRoot -Force
+        $files = @(Get-ChildItem -LiteralPath $expandedRoot -Recurse -File)
+        if ($files.Count -gt 0) {
+            return [pscustomobject]@{
+                Project = $Project
+                ArtifactRoot = $expandedRoot
+                Files = $files
+                Source = "zip artifact: $artifactName.zip"
+            }
+        }
+    }
+
+    # When only one artifact is downloaded, newer action behavior may extract
+    # the payload directly into the requested download path instead of creating
+    # artifacts/<artifactName>. Treat that as this project only when expected
+    # project output file names are present at the download root.
+    $expectedLeafNames = @(Get-ProjectArtifactLeafNames -Project $Project)
+    if ($expectedLeafNames.Count -gt 0) {
+        $allFiles = @(Get-ChildItem -LiteralPath $ArtifactsRoot -Recurse -File)
+        $matchingFiles = @($allFiles | Where-Object { $expectedLeafNames -contains $_.Name })
+        if ($matchingFiles.Count -gt 0) {
+            $rootFiles = @(Get-ChildItem -LiteralPath $ArtifactsRoot -File -ErrorAction SilentlyContinue)
+            $childDirectories = @(Get-ChildItem -LiteralPath $ArtifactsRoot -Directory -ErrorAction SilentlyContinue)
+
+            if ($rootFiles.Count -gt 0 -and $childDirectories.Count -eq 0) {
+                return [pscustomobject]@{
+                    Project = $Project
+                    ArtifactRoot = $ArtifactsRoot
+                    Files = $rootFiles
+                    Source = 'direct artifact payload at download root'
+                }
+            }
+
+            # Fallback for an unexpected nested layout: release the files that
+            # match the project map rather than failing the whole release job.
+            return [pscustomobject]@{
+                Project = $Project
+                ArtifactRoot = $ArtifactsRoot
+                Files = $matchingFiles
+                Source = 'matched project artifact files in unexpected layout'
+            }
+        }
+    }
+
+    return $null
+}
+
 Push-Location $RepositoryRoot
 try {
     git fetch --force --tags
@@ -37,20 +161,18 @@ try {
 
     $projectsWithArtifacts = @()
     foreach ($project in $projectMap) {
-        $artifactRoot = Join-Path $ArtifactsRoot ([string]$project.artifactName)
-        if (Test-Path -LiteralPath $artifactRoot -PathType Container) {
-            $files = @(Get-ChildItem -LiteralPath $artifactRoot -Recurse -File)
-            if ($files.Count -gt 0) {
-                $projectsWithArtifacts += [pscustomobject]@{
-                    Project = $project
-                    ArtifactRoot = $artifactRoot
-                    Files = $files
-                }
-            }
+        $entry = Resolve-DownloadedProjectArtifact -Project $project -ArtifactsRoot $ArtifactsRoot
+        if ($entry) {
+            Write-Host "Found release artifact payload for $($project.label): $($entry.Source)"
+            $projectsWithArtifacts += $entry
         }
     }
 
     if ($projectsWithArtifacts.Count -eq 0) {
+        Write-Host 'Downloaded artifact tree:'
+        foreach ($line in @(Get-ArtifactTreeSummary -Root $ArtifactsRoot)) {
+            Write-Host "  $line"
+        }
         throw 'No downloaded project artifacts were found for release upload.'
     }
 
