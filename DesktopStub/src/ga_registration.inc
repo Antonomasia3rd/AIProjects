@@ -731,7 +731,7 @@ static AppxRegistrationResult Appx_Register_COM_OutOfProcess(const std::wstring&
 
 AppxRegistrationResult Appx_Register_COM(const std::wstring& manifestPath)
 {
-    if (IniReadI(L"Settings", L"ComRegistrationUseHelper", 1) != 0)
+    if (IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)
         return Appx_Register_COM_OutOfProcess(manifestPath);
     return Appx_Register_COM_InProcess(manifestPath);
 }

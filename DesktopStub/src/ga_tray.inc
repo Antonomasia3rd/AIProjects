@@ -499,32 +499,85 @@ void Menu(HWND h)
     };
 
     addTo(m, ID_SHOW_MENU_DROPDOWN, g_ui.showMenuAsDropdown.c_str(), showMenuAsDropdown);
+    addTo(m, ID_GENERATE_NOW, g_ui.generateNow.c_str());
     AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
 
     HMENU generalMenu = beginSection(g_ui.generalTitle);
     addTo(generalMenu, ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
     addTo(generalMenu, ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);
-    addTo(generalMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
     addTo(generalMenu, ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
     addTo(generalMenu, ID_GENERATE_STARTUP_CHANGED_ONLY, g_ui.generateOnStartupOnlyWhenChanged.c_str(), g_generateOnStartupOnlyWhenChanged, g_generateOnStartup);
     addTo(generalMenu, ID_HIDE_DISABLED, g_ui.hideDisabledEntries.c_str(), g_hideDisabled);
     addTo(generalMenu, ID_CONSOLE, g_ui.showConsole.c_str(), g_console);
-    addTo(generalMenu, ID_GENERATE_NOW, g_ui.generateNow.c_str());
     endSection(generalMenu, g_ui.generalTitle);
 
     HMENU liveTileMenu = beginSection(g_ui.liveTileTitle);
     {
         LiveTileUpdateMode liveTileMode = ConfiguredLiveTileUpdateMode();
-        addTo(liveTileMenu, ID_LIVE_TILE_MODE_LIVE_TILE, g_ui.liveTileModeEnabled.c_str(), liveTileMode == LiveTileUpdateMode::LiveTile);
-        addTo(liveTileMenu, ID_LIVE_TILE_MODE_REGISTRATION, g_ui.liveTileModeDisabled.c_str(), liveTileMode == LiveTileUpdateMode::Registration);
-        addTo(liveTileMenu, ID_LIVE_TILE_MODE_AUTO, g_ui.liveTileModeAuto.c_str(), liveTileMode == LiveTileUpdateMode::Auto);
-        AppendMenuChecked(liveTileMenu, MF_SEPARATOR, 0, nullptr);
-        addTo(liveTileMenu, ID_LIVE_TILE_RELAUNCH_ON_SWITCH, g_ui.liveTileRelaunchOnSwitch.c_str(), g_liveTileRelaunchOnSwitch);
-        addTo(liveTileMenu, ID_CLEAR_LIVE_TILE_ON_SHUTDOWN, g_ui.clearLiveTileOnShutdown.c_str(), g_clearLiveTileOnShutdown);
-        AppendMenuChecked(liveTileMenu, MF_SEPARATOR, 0, nullptr);
-        addTo(liveTileMenu, ID_WIN8_LIVE_TILE_BROKER_APP, g_ui.win8LiveTileBrokerApp.c_str(), IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) != 0);
-        addTo(liveTileMenu, ID_WIN8_LIVE_TILE_BACKGROUND_TASK, g_ui.win8LiveTileBackgroundTask.c_str(), IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0);
-        addTo(liveTileMenu, ID_WIN8_LIVE_TILE_OOP_HELPER, g_ui.win8LiveTileOopHelper.c_str(), IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) != 0);
+
+        HMENU modeMenu = CreatePopupMenu();
+        if (modeMenu)
+        {
+            addTo(modeMenu, ID_LIVE_TILE_MODE_LIVE_TILE, g_ui.liveTileModeEnabled.c_str(), liveTileMode == LiveTileUpdateMode::LiveTile);
+            addTo(modeMenu, ID_LIVE_TILE_MODE_REGISTRATION, g_ui.liveTileModeDisabled.c_str(), liveTileMode == LiveTileUpdateMode::Registration);
+            addTo(modeMenu, ID_LIVE_TILE_MODE_AUTO, g_ui.liveTileModeAuto.c_str(), liveTileMode == LiveTileUpdateMode::Auto);
+            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)modeMenu, L"Mode"))
+                DestroyMenu(modeMenu);
+        }
+        else
+        {
+            LogWin32Failure(L"CreatePopupMenu(Live Tile Mode)");
+            addTo(liveTileMenu, ID_LIVE_TILE_MODE_LIVE_TILE, g_ui.liveTileModeEnabled.c_str(), liveTileMode == LiveTileUpdateMode::LiveTile);
+            addTo(liveTileMenu, ID_LIVE_TILE_MODE_REGISTRATION, g_ui.liveTileModeDisabled.c_str(), liveTileMode == LiveTileUpdateMode::Registration);
+            addTo(liveTileMenu, ID_LIVE_TILE_MODE_AUTO, g_ui.liveTileModeAuto.c_str(), liveTileMode == LiveTileUpdateMode::Auto);
+        }
+
+        HMENU registrationMenu = CreatePopupMenu();
+        if (registrationMenu)
+        {
+            addTo(registrationMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
+            addTo(registrationMenu, ID_ADV_COM_REGISTRATION_USE_HELPER, g_ui.comRegistrationHelperLabel.empty() ? L"COM isolation helper" : FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)), IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
+            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)registrationMenu, L"Registration"))
+                DestroyMenu(registrationMenu);
+        }
+        else
+        {
+            LogWin32Failure(L"CreatePopupMenu(Live Tile Registration)");
+            addTo(liveTileMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
+            addTo(liveTileMenu, ID_ADV_COM_REGISTRATION_USE_HELPER, g_ui.comRegistrationHelperLabel.empty() ? L"COM isolation helper" : FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)), IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
+        }
+
+        HMENU runtimeMenu = CreatePopupMenu();
+        if (runtimeMenu)
+        {
+            addTo(runtimeMenu, ID_LIVE_TILE_RELAUNCH_ON_SWITCH, g_ui.liveTileRelaunchOnSwitch.c_str(), g_liveTileRelaunchOnSwitch);
+            addTo(runtimeMenu, ID_CLEAR_LIVE_TILE_ON_SHUTDOWN, g_ui.clearLiveTileOnShutdown.c_str(), g_clearLiveTileOnShutdown);
+            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)runtimeMenu, L"Runtime behavior"))
+                DestroyMenu(runtimeMenu);
+        }
+        else
+        {
+            LogWin32Failure(L"CreatePopupMenu(Live Tile Runtime)");
+            addTo(liveTileMenu, ID_LIVE_TILE_RELAUNCH_ON_SWITCH, g_ui.liveTileRelaunchOnSwitch.c_str(), g_liveTileRelaunchOnSwitch);
+            addTo(liveTileMenu, ID_CLEAR_LIVE_TILE_ON_SHUTDOWN, g_ui.clearLiveTileOnShutdown.c_str(), g_clearLiveTileOnShutdown);
+        }
+
+        HMENU win8Menu = CreatePopupMenu();
+        if (win8Menu)
+        {
+            addTo(win8Menu, ID_WIN8_LIVE_TILE_BROKER_APP, g_ui.win8LiveTileBrokerApp.c_str(), IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) != 0);
+            addTo(win8Menu, ID_WIN8_LIVE_TILE_BACKGROUND_TASK, g_ui.win8LiveTileBackgroundTask.c_str(), IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0);
+            addTo(win8Menu, ID_WIN8_LIVE_TILE_OOP_HELPER, g_ui.win8LiveTileOopHelper.c_str(), IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) != 0);
+            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)win8Menu, L"Windows 8 / 8.1"))
+                DestroyMenu(win8Menu);
+        }
+        else
+        {
+            LogWin32Failure(L"CreatePopupMenu(Live Tile Windows 8)");
+            addTo(liveTileMenu, ID_WIN8_LIVE_TILE_BROKER_APP, g_ui.win8LiveTileBrokerApp.c_str(), IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) != 0);
+            addTo(liveTileMenu, ID_WIN8_LIVE_TILE_BACKGROUND_TASK, g_ui.win8LiveTileBackgroundTask.c_str(), IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0);
+            addTo(liveTileMenu, ID_WIN8_LIVE_TILE_OOP_HELPER, g_ui.win8LiveTileOopHelper.c_str(), IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) != 0);
+        }
     }
     endSection(liveTileMenu, g_ui.liveTileTitle);
 
@@ -757,7 +810,7 @@ void Menu(HWND h)
     std::wstring powerShellTimeoutText = TimeoutDisplayText(powerShellTimeoutMs);
     std::wstring comRegistrationTimeoutLine = FormatWide(g_ui.comRegistrationTimeoutMsLabel.c_str(), comRegistrationTimeoutText.c_str());
     std::wstring comRegistrationCancelWaitLine = FormatWide(g_ui.comRegistrationCancelWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"ComRegistrationCancelWaitMs", 5000, 0, 60000));
-    std::wstring comRegistrationHelperLine = FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 1) != 0));
+    std::wstring comRegistrationHelperLine = FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0));
     std::wstring trayHideDelayLine = FormatWide(g_ui.trayIconHiddenDelayMsLabel.c_str(), IniReadClampedI(L"Settings", L"TrayIconHiddenDelayMs", 750, 0, 10000));
     std::wstring logBufferLine = FormatWide(g_ui.logBufferLinesLabel.c_str(), IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000));
     std::wstring logAppendLockWaitLine = FormatWide(g_ui.logAppendLockWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000));
@@ -783,7 +836,7 @@ void Menu(HWND h)
     addTo(advancedMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_DELAY_MS, signalDelayLine);
     addTo(advancedMenu, ID_ADV_COM_REGISTRATION_TIMEOUT_MS, comRegistrationTimeoutLine);
     addTo(advancedMenu, ID_ADV_COM_REGISTRATION_CANCEL_WAIT_MS, comRegistrationCancelWaitLine);
-    addTo(advancedMenu, ID_ADV_COM_REGISTRATION_USE_HELPER, comRegistrationHelperLine, IniReadI(L"Settings", L"ComRegistrationUseHelper", 1) != 0);
+    addTo(advancedMenu, ID_ADV_COM_REGISTRATION_USE_HELPER, comRegistrationHelperLine, IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
     addTo(advancedMenu, ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS, trayHideDelayLine);
     addTo(advancedMenu, ID_ADV_LOG_BUFFER_LINES, logBufferLine);
     addTo(advancedMenu, ID_ADV_LOG_APPEND_LOCK_WAIT_MS, logAppendLockWaitLine);
@@ -1186,7 +1239,7 @@ void Menu(HWND h)
         break;
 
     case ID_ADV_COM_REGISTRATION_USE_HELPER:
-        ToggleSettingBool(L"ComRegistrationUseHelper", 1);
+        ToggleSettingBool(L"ComRegistrationUseHelper", 0);
         break;
 
     case ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS:

@@ -9,7 +9,7 @@ static std::atomic<bool> g_wallpaperDetectionFallbackOnInvalid(true);
 static std::atomic<bool> g_generateOnStartup(true);
 static std::atomic<bool> g_generateOnStartupOnlyWhenChanged(true);
 static std::atomic<int> g_liveTileUpdateMode(static_cast<int>(LiveTileUpdateMode::Auto));
-static std::atomic<bool> g_liveTileRelaunchOnSwitch(false);
+static std::atomic<bool> g_liveTileRelaunchOnSwitch(true);
 static std::atomic<bool> g_clearLiveTileOnShutdown(true);
 static std::atomic<int> g_relaunchAfterExit(0);
 static std::atomic<int> g_manifestCompatibilityTarget(static_cast<int>(ManifestCompatibilityTarget::Windows10));
@@ -20,7 +20,7 @@ static std::atomic<bool> g_notifyOnStart(false);
 static std::atomic<bool> g_notifyOnSuccess(false);
 static std::atomic<bool> g_notifyOnFailure(true);
 static std::atomic<bool> g_notifyOnBusy(false);
-static std::atomic<bool> g_notifyOnAlreadyRunning(true);
+static std::atomic<bool> g_notifyOnAlreadyRunning(false);
 static std::atomic<bool> g_notifyOnSingleInstanceFailure(true);
 static std::atomic<bool> g_generateDesktopIconForDisabledEntries(true);
 static std::atomic<bool> g_deleteDisabledAssets(false);
@@ -111,7 +111,7 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"DisableFitting", L"0"},
     {L"Settings", L"UsePowerShell", L"0"},
     {L"Settings", L"ExperimentalLiveTileUpdate", L"Auto"},
-    {L"Settings", L"LiveTileRelaunchOnSwitch", L"0"},
+    {L"Settings", L"LiveTileRelaunchOnSwitch", L"1"},
     {L"Settings", L"ClearLiveTileOnShutdown", L"1"},
     {L"Settings", L"AppxManifestTarget", L"Windows10"},
     {L"Settings", L"Win8LiveTileOopHelper", L"0"},
@@ -132,7 +132,7 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"NotifyOnSuccess", L"0"},
     {L"Settings", L"NotifyOnFailure", L"1"},
     {L"Settings", L"NotifyOnBusy", L"0"},
-    {L"Settings", L"NotifyOnAlreadyRunning", L"1"},
+    {L"Settings", L"NotifyOnAlreadyRunning", L"0"},
     {L"Settings", L"NotifyOnSingleInstanceFailure", L"1"},
     {L"Settings", L"NotificationTimeoutMs", L"4000"},
     {L"Settings", L"ShutdownInitialNoticeMs", L"1000"},
@@ -142,7 +142,7 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"SingleInstanceFailureAction", L"Warn"},
     {L"Settings", L"ComRegistrationTimeoutMs", L"120000"},
     {L"Settings", L"ComRegistrationCancelWaitMs", L"5000"},
-    {L"Settings", L"ComRegistrationUseHelper", L"1"},
+    {L"Settings", L"ComRegistrationUseHelper", L"0"},
     {L"Settings", L"PowerShellExe", L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"},
     {L"Settings", L"PowerShellPollMs", L"50"},
     {L"Settings", L"PowerShellTimeoutMs", L"120000"},

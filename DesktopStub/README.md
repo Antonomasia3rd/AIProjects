@@ -137,7 +137,7 @@ Supported options:
 - Supports selected DPI scales plus automatic current-DPI scale generation.
 - Detects wallpaper through configurable methods, including slideshow-compatible methods.
 - Can internally capture a still frame from WorkerW-hosted live wallpaper apps and use that snapshot as the generation source, without overwriting the user's real Windows wallpaper.
-- Uses COM Appx registration by default with optional PowerShell-only mode and fallback behavior.
+- Uses COM Appx registration by default with optional PowerShell-only mode and fallback behavior; the COM isolation helper is disabled by default to avoid spawning an extra helper process on normal registration.
 - Can automatically use Live Tile notification updates when launched with package identity, with manual registration/Live Tile overrides.
 - Can dynamically create or regenerate `AppxManifest.xml` from built-in manifest defaults.
 - Supports quoted INI values and inline comments.
@@ -214,7 +214,7 @@ When Live Tile update is active, static manifest logo assets are treated as disa
 
 Changing the Live Tile update mode queues one asset regeneration and one Appx re-registration before normal Live Tile updates resume. This refreshes Windows' cached static assets after switching modes. If the app is cold-started from the Start tile while forced `LiveTile` mode is configured and that one-time static icon refresh has not successfully completed yet, the packaged instance relaunches through the unpackaged process first so the same re-registration path still runs.
 
-The mismatch relaunch guard can be changed from the command line with `--live-tile-relaunch-on-mismatch` or `--no-live-tile-relaunch-on-mismatch`. The INI key remains `LiveTileRelaunchOnSwitch` for backward compatibility with existing configs.
+The mismatch relaunch guard is enabled by default and can be changed from the command line with `--live-tile-relaunch-on-mismatch` or `--no-live-tile-relaunch-on-mismatch`. The INI key remains `LiveTileRelaunchOnSwitch` for backward compatibility with existing configs.
 
 ## Release
 
