@@ -144,7 +144,7 @@ static std::wstring ModeSwitchRelaunchArguments(bool forceGenerate, bool waitFor
 {
     std::wstring args = L"--launched-from-mode-switch";
     if (waitForThisProcessToExit)
-        args += L" --ds-wait-for-pid " + std::to_wstring(GetCurrentProcessId());
+        args += L" " + std::wstring(WAIT_FOR_PID_ARG) + L" " + std::to_wstring(GetCurrentProcessId());
     if (forceGenerate)
         args += L" --generate";
     if (g_commandLine.customIniPath)
@@ -386,7 +386,14 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
 // -----------------------------------------------------------------------------
 static void ConfigureSingleInstanceIdentity(const std::wstring& exeDir, const std::wstring& iniPath, bool customIniPath)
 {
-    std::wstring scope = ToLowerCopy(customIniPath ? iniPath : exeDir);
+    (void)customIniPath;
+
+    // Scope by the effective INI path, not only by the containing directory.
+    // This preserves the legacy portable behavior where copying/renaming the
+    // executable in the same folder gives each name its own INI and its own
+    // resident instance, for example GenerateAssets.exe -> GenerateAssets.ini
+    // and DeskStub.exe -> DeskStub.ini.
+    std::wstring scope = ToLowerCopy(!iniPath.empty() ? iniPath : exeDir);
     uint64_t hash = 14695981039346656037ull;
     HashWide(hash, scope);
     std::wstring suffix = Hex64(hash);
@@ -428,7 +435,7 @@ static bool SignalExistingInstance(WPARAM request = SINGLE_INSTANCE_REQUEST_SHOW
 
 static std::wstring AppxActivationTraceLogPath()
 {
-    return GetExeDir() + L"\\DesktopStub.appxactivation.log";
+    return GetExeDir() + L"\\" + PortableHostBaseName() + L".appxactivation.log";
 }
 
 static void AppxActivationTrace(const std::wstring& message)
@@ -449,7 +456,7 @@ static void AppxActivationTrace(const std::wstring& message)
 
 static std::wstring AppxActivationRequestPath()
 {
-    return GetExeDir() + L"\\DesktopStub.appxactivation.request";
+    return GetExeDir() + L"\\" + PortableHostBaseName() + L".appxactivation.request";
 }
 
 static bool WriteAppxActivationRequest(const wchar_t* action)

@@ -73,18 +73,38 @@ static bool IsAsciiAlnum(wchar_t ch)
     return IsAsciiAlpha(ch) || IsAsciiDigit(ch);
 }
 
-static std::wstring ExeBaseName()
+static std::wstring ExeFileName()
 {
     std::wstring name = g_exePath;
     size_t slash = name.find_last_of(L"\\/");
     if (slash != std::wstring::npos)
         name.erase(0, slash + 1);
 
+    return name.empty() ? L"DesktopStub.exe" : name;
+}
+
+static std::wstring ExeBaseName()
+{
+    std::wstring name = ExeFileName();
     size_t dot = name.find_last_of(L'.');
     if (dot != std::wstring::npos)
         name.erase(dot);
 
     return name.empty() ? L"DesktopStub" : name;
+}
+
+static std::wstring PortableHostBaseName()
+{
+    std::wstring base = ExeBaseName();
+    constexpr const wchar_t* appxStubSuffix = L"AppxStub";
+    constexpr size_t appxStubSuffixLen = 8;
+    if (base.size() > appxStubSuffixLen &&
+        IEquals(base.substr(base.size() - appxStubSuffixLen), appxStubSuffix))
+    {
+        base.resize(base.size() - appxStubSuffixLen);
+    }
+
+    return base.empty() ? L"DesktopStub" : base;
 }
 
 static std::wstring DefaultLogPath()
@@ -402,12 +422,12 @@ static std::wstring EffectiveManifestDescription()
 
 static std::wstring ManifestHostExecutableName()
 {
-    return L"DesktopStub.exe";
+    return PortableHostBaseName() + L".exe";
 }
 
 static std::wstring ManifestAppxActivationStubExecutableName()
 {
-    return L"DesktopStubAppxStub.exe";
+    return PortableHostBaseName() + L"AppxStub.exe";
 }
 
 static std::wstring ManifestLiveTileBrokerExecutableName()
@@ -1387,8 +1407,41 @@ static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD&
     {
         if ((attrs & FILE_ATTRIBUTE_DIRECTORY) == 0)
         {
+            std::wstring xml;
+            bool readExistingXml = ReadTextFile(manifestPath, xml);
+
+            std::wstring existingExecutable;
+            std::wstring expectedExecutable = EffectiveManifestExecutable();
+            bool executableMismatch =
+                readExistingXml &&
+                ExtractXmlAttributeFromTag(xml, L"<Application ", L"Executable", existingExecutable) &&
+                !IEquals(existingExecutable, expectedExecutable);
+
+            std::wstring existingIdentityName;
+            std::wstring expectedIdentityName = EffectiveManifestIdentityName();
+            bool identityNameMismatch =
+                readExistingXml &&
+                ExtractXmlAttributeFromTag(xml, L"<Identity ", L"Name", existingIdentityName) &&
+                !IEquals(existingIdentityName, expectedIdentityName);
+
             if (!EnsureAppxActivationStubExecutable(error))
                 return false;
+
+            if (executableMismatch || identityNameMismatch)
+            {
+                Log(L"[i] Existing AppxManifest.xml no longer matches the current EXE name or manifest defaults. Regenerating manifest.");
+                if (WriteUtf8BomTextFile(manifestPath, BuildDefaultAppxManifest()))
+                {
+                    created = true;
+                    return true;
+                }
+
+                error = GetLastError();
+                if (error == ERROR_SUCCESS)
+                    error = ERROR_WRITE_FAULT;
+                return false;
+            }
+
             Log(g_ui.appxManifestExisting.c_str(), manifestPath.c_str());
             return true;
         }

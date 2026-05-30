@@ -467,7 +467,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"NotificationAlreadyRunningTrayPersistent", L"DesktopStub is already running. Tray icon is enabled in the config, so it will stay visible after restart."},
     {L"NotificationAlreadyRunningTraySession", L"DesktopStub is already running. Tray icon is visible for this session only; it will be hidden again after restart because TrayIcon=0 in the config."},
     {L"NotificationSingleInstanceFailure", L"Single-instance protection failed; another copy may run."},
-    {L"NotificationTrayIconHidden", L"Tray icon hidden for this session. Run DesktopStub.exe again to restore it."},
+    {L"NotificationTrayIconHidden", L"Tray icon hidden for this session. Run this executable again to restore it."},
     {L"ManualGenerateTriggered", L"Manual generate triggered."},
     {L"LiveTileModeChanged", L"Live Tile mode changed."},
     {L"ManifestTargetChanged", L"AppxManifest target changed."},

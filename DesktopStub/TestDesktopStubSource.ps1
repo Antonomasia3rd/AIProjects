@@ -220,7 +220,21 @@ $sourceChecks = @(
         -SourceName 'src\ga_manifest.inc' `
         -SourceText $manifest `
         -Pattern '(?s)EffectiveManifestExecutable.*ConfiguredManifestCompatibilityTarget\(\).*ManifestHostExecutableName\(\).*target\s*!=\s*ManifestCompatibilityTarget::Windows10.*Win8LiveTileBrokerAppEnabled\(\).*ManifestLiveTileBrokerExecutableName\(\).*ManifestAppxActivationStubExecutableName\(\).*ManifestSettingValidated\(L"Executable",\s*fallback\.c_str\(\)' `
-        -Failure 'manifest executable fallback must keep Windows 10 on DesktopStub.exe while Windows 8/8.1 targets default to the packaged broker helper'),
+        -Failure 'manifest executable fallback must keep Windows 10 on the current host EXE while Windows 8/8.1 targets default to the packaged broker helper'),
+
+    (New-SourceCheck `
+        -Name 'Manifest host executable follows renamed EXE' `
+        -SourceName 'src\ga_manifest.inc' `
+        -SourceText $manifest `
+        -Pattern '(?s)PortableHostBaseName.*AppxStub.*ManifestHostExecutableName\(\).*PortableHostBaseName\(\) \+ L"\.exe".*ManifestAppxActivationStubExecutableName\(\).*PortableHostBaseName\(\) \+ L"AppxStub\.exe"' `
+        -Failure 'renaming DesktopStub.exe to GenerateAssets.exe or DeskStub.exe must make the manifest point at the current host EXE and matching AppxStub copy'),
+
+    (New-SourceCheck `
+        -Name 'Existing manifest is regenerated after EXE rename' `
+        -SourceName 'src\ga_manifest.inc' `
+        -SourceText $manifest `
+        -Pattern '(?s)EnsureAppxManifest.*existingExecutable.*expectedExecutable = EffectiveManifestExecutable\(\).*executableMismatch.*BuildDefaultAppxManifest\(\)' `
+        -Failure 'renaming the EXE must repair an existing AppxManifest.xml that still points at the old executable name'),
 
     (New-SourceCheck `
         -Name 'Manifest generation ignores redundant INI manifest editor' `
@@ -279,11 +293,11 @@ $sourceChecks = @(
         -Failure 'tray manifest regeneration must execute once and queue generation instead of toggling a persistent INI setting'),
 
     (New-SourceCheck `
-        -Name 'Custom INI uses separate single-instance scope' `
+        -Name 'Effective INI uses separate single-instance scope' `
         -SourceName 'src\ga_app.inc' `
         -SourceText $app `
-        -Pattern '(?s)ConfigureSingleInstanceIdentity\(const std::wstring& exeDir,\s*const std::wstring& iniPath,\s*bool customIniPath\).*customIniPath\s*\?\s*iniPath\s*:\s*exeDir.*ConfigureSingleInstanceIdentity\(dir,\s*g_iniPath,\s*g_commandLine\.customIniPath\)' `
-        -Failure 'alternate --ini runs must not signal the default running instance'),
+        -Pattern '(?s)ConfigureSingleInstanceIdentity\(const std::wstring& exeDir,\s*const std::wstring& iniPath,\s*bool customIniPath\).*Scope by the effective INI path.*!iniPath\.empty\(\)\s*\?\s*iniPath\s*:\s*exeDir.*ConfigureSingleInstanceIdentity\(dir,\s*g_iniPath,\s*g_commandLine\.customIniPath\)' `
+        -Failure 'renamed EXE/default INI and alternate --ini runs must not signal each other unless they share the same INI'),
 
     (New-SourceCheck `
         -Name 'Command-line requests fail when existing instance cannot be signaled' `
@@ -389,6 +403,13 @@ $sourceChecks = @(
         -SourceText ($defaults + "`n" + $manifest + "`n" + $liveTile) `
         -Pattern '(?s)\{L"Settings",\s*L"Win8LiveTileOopHelper",\s*L"0"\}.*\{L"Settings",\s*L"Win8LiveTileBackgroundTask",\s*L"0"\}.*\{L"Settings",\s*L"Win8LiveTileBrokerApp",\s*L"1"\}.*Win8LiveTileBrokerApp.*IniReadI\(L"Settings",\s*L"Win8LiveTileBrokerApp",\s*1\).*Packaged WinRT Live Tile broker reported success' `
         -Failure 'Windows 8/8.1 compatibility mode should default to the packaged WinRT broker while leaving background/OOP experiments disabled'),
+
+    (New-SourceCheck `
+        -Name 'Renamed helper command-line aliases are tolerated' `
+        -SourceName 'src\ga_command_line.inc' `
+        -SourceText $commandLine `
+        -Pattern '(?s)WAIT_FOR_PID_ARG.*WAIT_FOR_PID_ARG_LEGACY.*COM_REGISTRATION_HELPER_ARG.*COM_REGISTRATION_HELPER_ARG_LEGACY' `
+        -Failure 'internal helper command-line parsing must accept both DesktopStub-era and GenerateAssets-era hidden switches'),
 
     (New-SourceCheck `
         -Name 'Windows 8 app activation command line arguments are tolerated' `
