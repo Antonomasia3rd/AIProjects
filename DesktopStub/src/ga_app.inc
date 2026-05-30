@@ -152,6 +152,56 @@ static std::wstring ModeSwitchRelaunchArguments(bool forceGenerate, bool waitFor
     return args;
 }
 
+static bool LiveTileRuntimeConditionMismatch(bool& shouldRunPackaged)
+{
+    if (!g_liveTileRelaunchOnSwitch.load())
+        return false;
+
+    if (!LiveTileModeHasFixedRuntime(
+            ConfiguredLiveTileUpdateMode(),
+            ConfiguredManifestCompatibilityTarget(),
+            shouldRunPackaged))
+        return false;
+
+    return CurrentProcessHasPackageIdentity() != shouldRunPackaged;
+}
+
+static bool QueueLiveTileRuntimeConditionRelaunch(HWND h)
+{
+    bool shouldRunPackaged = false;
+    if (!LiveTileRuntimeConditionMismatch(shouldRunPackaged))
+        return false;
+
+    if (shouldRunPackaged)
+    {
+        // We are unpackaged while the fixed Live Tile mode requires package
+        // identity. Re-register first so the package entry points at the latest
+        // manifest/assets, then exit and relaunch through the registered package.
+        g_relaunchAfterExit = 1;
+        if (!QueueLiveTileModeReregistration())
+        {
+            g_relaunchAfterExit = 0;
+            return false;
+        }
+
+        LogText(g_ui.liveTileRelaunchToPackagedQueued);
+        RequestGracefulShutdown(h);
+        return true;
+    }
+
+    // We are packaged while the fixed Registration/disabled mode requires the
+    // normal unpackaged desktop process. This happens when the Start tile is
+    // clicked while no resident instance is running after Live Tile was disabled.
+    // The unpackaged relaunch waits for this packaged PID to exit before it
+    // touches the manifest, avoiding "the app is still running" registration
+    // failures.
+    SetLiveTileModeReregistrationPending(true);
+    g_relaunchAfterExit = 2;
+    LogText(g_ui.liveTileRelaunchToUnpackagedQueued);
+    RequestGracefulShutdown(h);
+    return true;
+}
+
 static bool StartUnpackagedRelaunchViaCmdBroker(const std::wstring& arguments, DWORD* errorOut)
 {
     if (errorOut)
@@ -1541,6 +1591,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     if (g_consoleControlShutdownPending.exchange(false))
         RequestGracefulShutdown(g_hwnd);
 
+    bool queuedLiveTileRuntimeRelaunch = false;
+    if (!g_shutdownRequested)
+        queuedLiveTileRuntimeRelaunch = QueueLiveTileRuntimeConditionRelaunch(g_hwnd);
+
     if (singleInstanceMutexFailure != ERROR_SUCCESS)
     {
         int exitCode = HandleSingleInstanceMutexFailure(singleInstanceMutexFailure);
@@ -1552,7 +1606,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         }
     }
 
-    if (CommandLineLiveTileModeChanged())
+    if (!queuedLiveTileRuntimeRelaunch && CommandLineLiveTileModeChanged())
     {
         if (CommandLineShouldGenerateOnce())
             SetLiveTileModeReregistrationPending(true);
@@ -1560,7 +1614,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             QueueLiveTileModeReregistration();
     }
 
-    if (CommandLineShouldGenerateOnce())
+    if (!queuedLiveTileRuntimeRelaunch && CommandLineShouldGenerateOnce())
     {
         std::wstring wp;
         if (!CommandLineWallpaper(wp))
@@ -1580,13 +1634,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     }
 
     bool queuedPendingLiveTileModeReregistration = false;
-    if (!g_shutdownRequested && LiveTileModeReregistrationPending())
+    if (!g_shutdownRequested && !queuedLiveTileRuntimeRelaunch && LiveTileModeReregistrationPending())
         queuedPendingLiveTileModeReregistration = QueueLiveTileModeReregistration();
 
     bool forceStartupGeneration = CommandLineShouldForceStartupGeneration();
     std::wstring commandLineWallpaper;
     bool hasCommandLineWallpaper = CommandLineWallpaper(commandLineWallpaper);
-    if (!g_shutdownRequested && !queuedPendingLiveTileModeReregistration &&
+    if (!g_shutdownRequested && !queuedLiveTileRuntimeRelaunch && !queuedPendingLiveTileModeReregistration &&
         (g_generateOnStartup || forceStartupGeneration || hasCommandLineWallpaper))
     {
         std::wstring wp = hasCommandLineWallpaper ? commandLineWallpaper : GetWallpaper();
@@ -1610,7 +1664,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     }
 
     std::thread th;
-    if (!CommandLineShouldSkipMonitor())
+    if (!g_shutdownRequested && !CommandLineShouldSkipMonitor())
     {
         try
         {

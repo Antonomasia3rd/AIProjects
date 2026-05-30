@@ -1025,6 +1025,20 @@ static bool ParseCommandLineOptions()
             AddCommandLineLiveTileModeSetting(LiveTileUpdateMode::Auto);
             continue;
         }
+        if (IEquals(arg, L"--live-tile-relaunch-on-mismatch") ||
+            IEquals(arg, L"--relaunch-on-live-tile-mismatch") ||
+            IEquals(arg, L"--live-tile-relaunch-on-switch"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveTileRelaunchOnSwitch", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-live-tile-relaunch-on-mismatch") ||
+            IEquals(arg, L"--no-relaunch-on-live-tile-mismatch") ||
+            IEquals(arg, L"--no-live-tile-relaunch-on-switch"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"LiveTileRelaunchOnSwitch", false);
+            continue;
+        }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--live-tile-mode", value, error, matched))
             return fail(error);
         if (matched)
@@ -1158,6 +1172,8 @@ static std::wstring CommandLineUsageText()
         L"  --live-tile | --no-live-tile         Set and save Live Tile update mode.\r\n"
         L"  --live-tile-auto                     Set and save automatic Live Tile update mode.\r\n"
         L"  --live-tile-mode <mode>              Set mode: Auto, Registration, or LiveTile.\r\n"
+        L"  --live-tile-relaunch-on-mismatch | --no-live-tile-relaunch-on-mismatch\r\n"
+        L"                                      Relaunch when process package state does not match mode.\r\n"
         L"  --manifest-target <target>            Set and regenerate manifest: Windows10, Windows81, or Windows8.\r\n"
         L"  --manifest-win10|--manifest-win81|--manifest-win8\r\n"
         L"                                      Shortcuts for --manifest-target.\r\n"
@@ -1377,7 +1393,7 @@ static void LogCommandLineSummary()
     if (g_commandLine.launchedFromAppxStub)
         Log(L"[i] Command-line launch source: AppX activation stub.");
     if (g_commandLine.launchedFromModeSwitch)
-        Log(L"[i] Command-line launch source: Live Tile mode switch relaunch.");
+        Log(L"[i] Command-line launch source: Live Tile runtime mismatch relaunch.");
     if (g_commandLine.waitForPid != 0)
         Log(L"[i] Command-line parent wait pid: %lu", static_cast<unsigned long>(g_commandLine.waitForPid));
 
