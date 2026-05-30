@@ -50,6 +50,8 @@ enum {
     ID_WP_METHOD_TRANSCODED_WALLPAPER_FILE,
     ID_WP_METHOD_AUTO,
     ID_WP_METHOD_FALLBACK,
+    ID_WALLPAPER_DECODE_LOW_MEMORY,
+    ID_WALLPAPER_DECODE_MAX_LONG_EDGE,
     ID_LIVE_WALLPAPER_CAPTURE,
     ID_LIVE_WALLPAPER_CAPTURE_SCREEN_FALLBACK,
     ID_LIVE_WALLPAPER_CAPTURE_DELAY,
@@ -102,7 +104,7 @@ enum {
     ID_ADV_SINGLE_INSTANCE_SIGNAL_DELAY_MS,
     ID_ADV_COM_REGISTRATION_TIMEOUT_MS,
     ID_ADV_COM_REGISTRATION_CANCEL_WAIT_MS,
-    ID_ADV_COM_REGISTRATION_USE_HELPER,
+    ID_COM_REGISTRATION_USE_HELPER,
     ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS,
     ID_ADV_LOG_BUFFER_LINES,
     ID_ADV_LOG_APPEND_LOCK_WAIT_MS,
@@ -172,6 +174,13 @@ static std::wstring LiveWallpaperRefreshDisplayText(int refreshMs)
 static std::wstring LiveWallpaperOffDisplayText(int valueMs)
 {
     return LiveWallpaperMsDisplayText(valueMs, g_ui.liveWallpaperCaptureOff);
+}
+
+static std::wstring WallpaperDecodeMaxLongEdgeDisplayText(int valuePx)
+{
+    if (valuePx <= 0)
+        return g_ui.wallpaperDecodeAuto;
+    return FormatWide(g_ui.wallpaperDecodePxText.c_str(), valuePx);
 }
 
 static int ReadSettingClamped(const wchar_t* key, int fallback, int minValue, int maxValue)
@@ -592,7 +601,7 @@ void Menu(HWND h)
             addTo(modeMenu, ID_LIVE_TILE_MODE_LIVE_TILE, g_ui.liveTileModeEnabled.c_str(), liveTileMode == LiveTileUpdateMode::LiveTile);
             addTo(modeMenu, ID_LIVE_TILE_MODE_REGISTRATION, g_ui.liveTileModeDisabled.c_str(), liveTileMode == LiveTileUpdateMode::Registration);
             addTo(modeMenu, ID_LIVE_TILE_MODE_AUTO, g_ui.liveTileModeAuto.c_str(), liveTileMode == LiveTileUpdateMode::Auto);
-            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)modeMenu, L"Mode"))
+            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)modeMenu, g_ui.liveTileModeTitle.c_str()))
                 DestroyMenu(modeMenu);
         }
         else
@@ -607,15 +616,15 @@ void Menu(HWND h)
         if (registrationMenu)
         {
             addTo(registrationMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
-            addTo(registrationMenu, ID_ADV_COM_REGISTRATION_USE_HELPER, g_ui.comRegistrationHelperLabel.empty() ? L"COM isolation helper" : FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)), IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
-            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)registrationMenu, L"Registration"))
+            addTo(registrationMenu, ID_COM_REGISTRATION_USE_HELPER, FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)), IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
+            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)registrationMenu, g_ui.liveTileRegistrationTitle.c_str()))
                 DestroyMenu(registrationMenu);
         }
         else
         {
             LogWin32Failure(L"CreatePopupMenu(Live Tile Registration)");
             addTo(liveTileMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
-            addTo(liveTileMenu, ID_ADV_COM_REGISTRATION_USE_HELPER, g_ui.comRegistrationHelperLabel.empty() ? L"COM isolation helper" : FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)), IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
+            addTo(liveTileMenu, ID_COM_REGISTRATION_USE_HELPER, FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)), IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
         }
 
         HMENU runtimeMenu = CreatePopupMenu();
@@ -623,7 +632,7 @@ void Menu(HWND h)
         {
             addTo(runtimeMenu, ID_LIVE_TILE_RELAUNCH_ON_SWITCH, g_ui.liveTileRelaunchOnSwitch.c_str(), g_liveTileRelaunchOnSwitch);
             addTo(runtimeMenu, ID_CLEAR_LIVE_TILE_ON_SHUTDOWN, g_ui.clearLiveTileOnShutdown.c_str(), g_clearLiveTileOnShutdown);
-            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)runtimeMenu, L"Runtime behavior"))
+            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)runtimeMenu, g_ui.liveTileRuntimeTitle.c_str()))
                 DestroyMenu(runtimeMenu);
         }
         else
@@ -639,7 +648,7 @@ void Menu(HWND h)
             addTo(win8Menu, ID_WIN8_LIVE_TILE_BROKER_APP, g_ui.win8LiveTileBrokerApp.c_str(), IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) != 0);
             addTo(win8Menu, ID_WIN8_LIVE_TILE_BACKGROUND_TASK, g_ui.win8LiveTileBackgroundTask.c_str(), IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0);
             addTo(win8Menu, ID_WIN8_LIVE_TILE_OOP_HELPER, g_ui.win8LiveTileOopHelper.c_str(), IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) != 0);
-            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)win8Menu, L"Windows 8 / 8.1"))
+            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)win8Menu, g_ui.liveTileWindows8Title.c_str()))
                 DestroyMenu(win8Menu);
         }
         else
@@ -793,6 +802,12 @@ void Menu(HWND h)
     addTo(methodsMenu, ID_WP_METHOD_TRANSCODED_WALLPAPER_FILE, WallpaperDetectionMethodName(WallpaperDetectionMethod::TranscodedWallpaperFile), wallpaperMethod == WallpaperDetectionMethod::TranscodedWallpaperFile);
     addTo(methodsMenu, ID_WP_METHOD_AUTO, WallpaperDetectionMethodName(WallpaperDetectionMethod::Auto), wallpaperMethod == WallpaperDetectionMethod::Auto);
     addTo(methodsMenu, ID_WP_METHOD_FALLBACK, g_ui.wallpaperDetectionFallback.c_str(), g_wallpaperDetectionFallbackOnInvalid);
+    bool wallpaperDecodeLowMemory = IniReadI(L"Settings", L"WallpaperDecodeLowMemory", 1) != 0;
+    int wallpaperDecodeMaxLongEdge = IniReadClampedI(L"Settings", L"WallpaperDecodeMaxLongEdge", 0, 0, 32768);
+    std::wstring wallpaperDecodeMaxLongEdgeText = WallpaperDecodeMaxLongEdgeDisplayText(wallpaperDecodeMaxLongEdge);
+    std::wstring wallpaperDecodeMaxLongEdgeLine = FormatWide(g_ui.wallpaperDecodeMaxLongEdgeLabel.c_str(), wallpaperDecodeMaxLongEdgeText.c_str());
+    addTo(methodsMenu, ID_WALLPAPER_DECODE_LOW_MEMORY, g_ui.wallpaperDecodeLowMemory.c_str(), wallpaperDecodeLowMemory);
+    addTo(methodsMenu, ID_WALLPAPER_DECODE_MAX_LONG_EDGE, wallpaperDecodeMaxLongEdgeLine);
     std::wstring wallpaperDetectionLine = FormatWide(g_ui.wallpaperDetectionMethodLabel.c_str(), WallpaperDetectionMethodName(wallpaperMethod));
     AppendMenuChecked(methodsMenu, MF_STRING | MF_DISABLED, 0, wallpaperDetectionLine.c_str());
     endSection(methodsMenu, g_ui.methodsTitle);
@@ -949,7 +964,6 @@ void Menu(HWND h)
     std::wstring powerShellTimeoutText = TimeoutDisplayText(powerShellTimeoutMs);
     std::wstring comRegistrationTimeoutLine = FormatWide(g_ui.comRegistrationTimeoutMsLabel.c_str(), comRegistrationTimeoutText.c_str());
     std::wstring comRegistrationCancelWaitLine = FormatWide(g_ui.comRegistrationCancelWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"ComRegistrationCancelWaitMs", 5000, 0, 60000));
-    std::wstring comRegistrationHelperLine = FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0));
     std::wstring trayHideDelayLine = FormatWide(g_ui.trayIconHiddenDelayMsLabel.c_str(), IniReadClampedI(L"Settings", L"TrayIconHiddenDelayMs", 750, 0, 10000));
     std::wstring logBufferLine = FormatWide(g_ui.logBufferLinesLabel.c_str(), IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000));
     std::wstring logAppendLockWaitLine = FormatWide(g_ui.logAppendLockWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000));
@@ -975,7 +989,6 @@ void Menu(HWND h)
     addTo(advancedMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_DELAY_MS, signalDelayLine);
     addTo(advancedMenu, ID_ADV_COM_REGISTRATION_TIMEOUT_MS, comRegistrationTimeoutLine);
     addTo(advancedMenu, ID_ADV_COM_REGISTRATION_CANCEL_WAIT_MS, comRegistrationCancelWaitLine);
-    addTo(advancedMenu, ID_ADV_COM_REGISTRATION_USE_HELPER, comRegistrationHelperLine, IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
     addTo(advancedMenu, ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS, trayHideDelayLine);
     addTo(advancedMenu, ID_ADV_LOG_BUFFER_LINES, logBufferLine);
     addTo(advancedMenu, ID_ADV_LOG_APPEND_LOCK_WAIT_MS, logAppendLockWaitLine);
@@ -1423,6 +1436,14 @@ void Menu(HWND h)
         ToggleTileTextBool(L"ApplyToLogos", 0);
         break;
 
+    case ID_WALLPAPER_DECODE_LOW_MEMORY:
+        ToggleSettingBool(L"WallpaperDecodeLowMemory", 1);
+        break;
+
+    case ID_WALLPAPER_DECODE_MAX_LONG_EDGE:
+        CycleSettingIntPreset(L"WallpaperDecodeMaxLongEdge", 0, 0, 32768, { 0, 1024, 1920, 2560, 3840, 4096, 7680, 8192, 16384, 32768 });
+        break;
+
     case ID_GENERATED_ASSET_CACHE:
     {
         bool value = !GeneratedAssetCacheEnabled();
@@ -1503,7 +1524,7 @@ void Menu(HWND h)
         CycleSettingIntPreset(L"ComRegistrationCancelWaitMs", 5000, 0, 60000, { 0, 1000, 2500, 5000, 10000, 30000, 60000 });
         break;
 
-    case ID_ADV_COM_REGISTRATION_USE_HELPER:
+    case ID_COM_REGISTRATION_USE_HELPER:
         ToggleSettingBool(L"ComRegistrationUseHelper", 0);
         break;
 

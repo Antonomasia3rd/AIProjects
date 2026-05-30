@@ -76,6 +76,10 @@ struct UiStrings
     std::wstring liveTileModeLiveTile;
     std::wstring liveTileModeEnabled;
     std::wstring liveTileModeDisabled;
+    std::wstring liveTileModeTitle;
+    std::wstring liveTileRegistrationTitle;
+    std::wstring liveTileRuntimeTitle;
+    std::wstring liveTileWindows8Title;
     std::wstring liveTileRelaunchOnSwitch;
     std::wstring clearLiveTileOnShutdown;
     std::wstring liveTileRelaunchToPackagedQueued;
@@ -89,6 +93,10 @@ struct UiStrings
     std::wstring generateDesktopIconForDisabledEntries;
     std::wstring deleteDisabledAssets;
     std::wstring wallpaperDetectionFallback;
+    std::wstring wallpaperDecodeLowMemory;
+    std::wstring wallpaperDecodeMaxLongEdgeLabel;
+    std::wstring wallpaperDecodeAuto;
+    std::wstring wallpaperDecodePxText;
     std::wstring liveWallpaperCaptureTitle;
     std::wstring liveWallpaperCapture;
     std::wstring liveWallpaperCaptureScreenFallback;
