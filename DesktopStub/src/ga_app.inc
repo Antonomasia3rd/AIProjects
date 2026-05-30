@@ -170,7 +170,27 @@ static bool QueueLiveTileRuntimeConditionRelaunch(HWND h)
 {
     bool shouldRunPackaged = false;
     if (!LiveTileRuntimeConditionMismatch(shouldRunPackaged))
+    {
+        // Cold-starting from the Start tile already gives this process package
+        // identity, so the runtime condition can look "correct" even when the
+        // one-time manifest refresh for LiveTile mode was never performed.
+        // Bounce through the unpackaged process first so AppxManifest can be
+        // re-registered with the Desktop/static icon before the packaged Live
+        // Tile runtime continues.
+        if (g_liveTileRelaunchOnSwitch.load() &&
+            CurrentProcessHasPackageIdentity() &&
+            FixedPackagedLiveTileModeNeedsUnpackagedReregistration())
+        {
+            SetLiveTileModeReregistrationPending(true);
+            g_relaunchAfterExit = 2;
+            LogText(g_ui.liveTileModeReregistrationQueued);
+            LogText(L"[i] Live Tile static icon refresh is pending; relaunching as unpackaged desktop app first.");
+            RequestGracefulShutdown(h);
+            return true;
+        }
+
         return false;
+    }
 
     if (shouldRunPackaged)
     {
