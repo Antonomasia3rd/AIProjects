@@ -25,3 +25,4 @@ Older releases are intentionally kept when practical so users can compare behavi
 ### DesktopStub
 
 - Release family is `DesktopStub-vN`; the built executable is `DesktopStub.exe`.
+- Changed Live Tile relaunch handling from a mode-switch-only action into a runtime-condition repair. When enabled, packaged launches with Live Tile disabled relaunch as the unpackaged desktop app before manifest registration, and unpackaged launches with Live Tile forced on relaunch through the registered package entry.

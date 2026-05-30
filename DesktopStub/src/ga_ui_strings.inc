@@ -165,10 +165,10 @@ void LoadUiStrings()
     g_ui.liveTileModeLiveTile = IniReadS(L"Strings", L"LiveTileModeLiveTile", L"Live Tile");
     g_ui.liveTileModeEnabled = IniReadS(L"Strings", L"LiveTileModeEnabled", L"Enabled");
     g_ui.liveTileModeDisabled = IniReadS(L"Strings", L"LiveTileModeDisabled", L"Disabled");
-    g_ui.liveTileRelaunchOnSwitch = IniReadS(L"Strings", L"LiveTileRelaunchOnSwitch", L"Relaunch on switch");
+    g_ui.liveTileRelaunchOnSwitch = IniReadS(L"Strings", L"LiveTileRelaunchOnSwitch", L"Relaunch when runtime mismatches");
     g_ui.clearLiveTileOnShutdown = IniReadS(L"Strings", L"ClearLiveTileOnShutdown", L"Clear Live Tile on shutdown");
-    g_ui.liveTileRelaunchToPackagedQueued = IniReadS(L"Strings", L"LiveTileRelaunchToPackagedQueued", L"[i] Live Tile mode changed; relaunching through the registered package entry.");
-    g_ui.liveTileRelaunchToUnpackagedQueued = IniReadS(L"Strings", L"LiveTileRelaunchToUnpackagedQueued", L"[i] Live Tile mode changed; relaunching as unpackaged desktop app.");
+    g_ui.liveTileRelaunchToPackagedQueued = IniReadS(L"Strings", L"LiveTileRelaunchToPackagedQueued", L"[i] Live Tile runtime mismatch detected; relaunching through the registered package entry.");
+    g_ui.liveTileRelaunchToUnpackagedQueued = IniReadS(L"Strings", L"LiveTileRelaunchToUnpackagedQueued", L"[i] Live Tile runtime mismatch detected; relaunching as unpackaged desktop app.");
     g_ui.liveTileClearOnShutdown = IniReadS(L"Strings", L"LiveTileClearOnShutdown", L"[i] Clearing Live Tile on shutdown.");
     g_ui.liveTileClearOnShutdownSkipped = IniReadS(L"Strings", L"LiveTileClearOnShutdownSkipped", L"[i] Clear Live Tile on shutdown skipped: %s");
     g_ui.liveTileClearOnShutdownSuccess = IniReadS(L"Strings", L"LiveTileClearOnShutdownSuccess", L"[i] Live Tile cleared on shutdown.");

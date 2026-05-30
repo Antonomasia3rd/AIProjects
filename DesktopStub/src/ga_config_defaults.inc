@@ -390,10 +390,10 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileModeLiveTile", L"Live Tile"},
     {L"LiveTileModeEnabled", L"Enabled"},
     {L"LiveTileModeDisabled", L"Disabled"},
-    {L"LiveTileRelaunchOnSwitch", L"Relaunch on switch"},
+    {L"LiveTileRelaunchOnSwitch", L"Relaunch when runtime mismatches"},
     {L"ClearLiveTileOnShutdown", L"Clear Live Tile on shutdown"},
-    {L"LiveTileRelaunchToPackagedQueued", L"[i] Live Tile mode changed; relaunching through the registered package entry."},
-    {L"LiveTileRelaunchToUnpackagedQueued", L"[i] Live Tile mode changed; relaunching as unpackaged desktop app."},
+    {L"LiveTileRelaunchToPackagedQueued", L"[i] Live Tile runtime mismatch detected; relaunching through the registered package entry."},
+    {L"LiveTileRelaunchToUnpackagedQueued", L"[i] Live Tile runtime mismatch detected; relaunching as unpackaged desktop app."},
     {L"LiveTileClearOnShutdown", L"[i] Clearing Live Tile on shutdown."},
     {L"LiveTileClearOnShutdownSkipped", L"[i] Clear Live Tile on shutdown skipped: %s"},
     {L"LiveTileClearOnShutdownSuccess", L"[i] Live Tile cleared on shutdown."},
@@ -875,6 +875,9 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"TrayIcon", L"Tray Icon", L"Tray Icon (this session)");
     UpgradeStringDefaultIfUnmodified(L"ExperimentalLiveTileUpdate", L"Experimental Live Tile update", L"Live Tile update mode");
     UpgradeStringDefaultIfUnmodified(L"LiveTileUpdateSummary", L"[i] Experimental Live Tile update: %s", L"[i] Live Tile update mode: %s");
+    UpgradeStringDefaultIfUnmodified(L"LiveTileRelaunchOnSwitch", L"Relaunch on switch", L"Relaunch when runtime mismatches");
+    UpgradeStringDefaultIfUnmodified(L"LiveTileRelaunchToPackagedQueued", L"[i] Live Tile mode changed; relaunching through the registered package entry.", L"[i] Live Tile runtime mismatch detected; relaunching through the registered package entry.");
+    UpgradeStringDefaultIfUnmodified(L"LiveTileRelaunchToUnpackagedQueued", L"[i] Live Tile mode changed; relaunching as unpackaged desktop app.", L"[i] Live Tile runtime mismatch detected; relaunching as unpackaged desktop app.");
     UpgradeStringDefaultIfUnmodified(L"MissingManifestAssets", L"[!] Registration failed and manifest assets are missing: %s", L"[!] Registration failed and manifest assets are missing or invalid: %s");
     UpgradeStringDefaultIfUnmodified(L"NotificationMissingManifestAssets", L"Registration failed because one or more manifest assets are missing.", L"Registration failed; one or more manifest assets are missing or invalid.");
     UpgradeStringDefaultIfUnmodified(L"NotificationMissingManifestAssets", L"Registration failed because one or more manifest assets are missing or invalid.", L"Registration failed; one or more manifest assets are missing or invalid.");

@@ -834,12 +834,18 @@ void Menu(HWND h)
             IniWrite(L"Settings", L"ExperimentalLiveTileUpdate", LiveTileUpdateModeIniValue(newLiveTileMode).c_str());
             Log(g_ui.liveTileUpdateSummary.c_str(), LiveTileUpdateModeSummaryText().c_str());
 
+            bool shouldRunPackagedForNewMode = false;
+            bool newModeHasFixedRuntime = LiveTileModeHasFixedRuntime(
+                newLiveTileMode,
+                ConfiguredManifestCompatibilityTarget(),
+                shouldRunPackagedForNewMode);
             bool requestPackagedRelaunch = relaunchOnSwitch &&
-                newLiveTileMode == LiveTileUpdateMode::LiveTile &&
-                !wasPackaged &&
-                ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10;
+                newModeHasFixedRuntime &&
+                shouldRunPackagedForNewMode &&
+                !wasPackaged;
             bool requestUnpackagedRelaunch = relaunchOnSwitch &&
-                newLiveTileMode == LiveTileUpdateMode::Registration &&
+                newModeHasFixedRuntime &&
+                !shouldRunPackagedForNewMode &&
                 wasPackaged;
 
             if (requestPackagedRelaunch)

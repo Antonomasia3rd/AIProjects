@@ -214,6 +214,8 @@ When Live Tile update is active, static manifest logo assets are treated as disa
 
 Changing the Live Tile update mode queues one asset regeneration and one Appx re-registration before normal Live Tile updates resume. This refreshes Windows' cached static assets after switching modes.
 
+The mismatch relaunch guard can be changed from the command line with `--live-tile-relaunch-on-mismatch` or `--no-live-tile-relaunch-on-mismatch`. The INI key remains `LiveTileRelaunchOnSwitch` for backward compatibility with existing configs.
+
 ## Release
 
 Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available.
@@ -224,7 +226,7 @@ Prebuilt binaries are published through the repository's Windows build workflow 
 
 Live Tile menu additions from the previous fix remain:
 
-- **Relaunch on switch**: when enabled, switching Live Tile to **Enabled** from an unpackaged Windows 10 instance queues a relaunch through the registered package entry; switching to **Disabled** from a packaged instance queues a relaunch as the normal unpackaged desktop app.
+- **Relaunch when runtime mismatches**: when enabled, startup and mode changes compare the configured Live Tile mode with the current process state. `LiveTile` mode relaunches an unpackaged Windows 10 process through the registered package entry; `Registration`/disabled mode relaunches a packaged process as the normal unpackaged desktop app before re-registering the manifest. This also repairs the case where a user clicks the tile while no resident instance is running after Live Tile was force-disabled.
 - **Clear Live Tile on shutdown**: enabled by default. Packaged instances clear the live tile during graceful shutdown. Win8/8.1 broker mode can request a package-side clear through the broker.
 
 The wallpaper poller updates its internal baseline after a failed poll-triggered generation attempt. This prevents repeated regeneration of the same wallpaper when the tile/app registration stage fails after assets were generated successfully.

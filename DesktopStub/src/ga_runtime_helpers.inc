@@ -70,6 +70,31 @@ static bool UseExperimentalLiveTileUpdate()
     return EffectiveLiveTileUpdateMode() == LiveTileUpdateMode::LiveTile;
 }
 
+static bool LiveTileModeHasFixedRuntime(LiveTileUpdateMode mode, ManifestCompatibilityTarget target, bool& shouldRunPackaged)
+{
+    // Windows 10 Registration mode must run from the normal unpackaged desktop
+    // process so it can re-register the loose AppX package. LiveTile mode must
+    // run with package identity so TileUpdateManager has the required context.
+    // Auto is intentionally excluded because its effective mode depends on the
+    // current package identity and would otherwise cause pointless relaunches.
+    if (target != ManifestCompatibilityTarget::Windows10)
+        return false;
+
+    if (mode == LiveTileUpdateMode::LiveTile)
+    {
+        shouldRunPackaged = true;
+        return true;
+    }
+
+    if (mode == LiveTileUpdateMode::Registration)
+    {
+        shouldRunPackaged = false;
+        return true;
+    }
+
+    return false;
+}
+
 static std::wstring LiveTileUpdateModeSummaryText()
 {
     LiveTileUpdateMode configured = ConfiguredLiveTileUpdateMode();
