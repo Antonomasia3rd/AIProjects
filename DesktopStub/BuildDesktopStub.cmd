@@ -82,7 +82,7 @@ if errorlevel 1 (
 )
 
 echo Building main DesktopStub host...
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 
