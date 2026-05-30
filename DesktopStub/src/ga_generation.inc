@@ -985,6 +985,43 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     return Hex64(hash);
 }
 
+static std::wstring BuildLiveTileModeReregistrationStateKey()
+{
+    std::wstring state;
+    ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
+
+    state += L"v=2;";
+    state += L"mode=" + LiveTileUpdateModeIniValue(ConfiguredLiveTileUpdateMode()) + L";";
+    state += L"target=" + ManifestCompatibilityTargetIniValue(ConfiguredManifestCompatibilityTarget()) + L";";
+    state += L"identity=" + manifestInfo.identityName + L";";
+    state += L"appId=" + manifestInfo.applicationId + L";";
+    state += L"exe=" + manifestInfo.executable + L";";
+    state += L"displayName=" + manifestInfo.displayName + L";";
+    state += L"desktopIconForDisabled=" + IntToWString(g_generateDesktopIconForDisabledEntries ? 1 : 0) + L";";
+    state += L"hideDisabled=" + IntToWString(g_hideDisabled ? 1 : 0) + L";";
+    state += L"deleteDisabled=" + IntToWString(g_deleteDisabledAssets ? 1 : 0) + L";";
+
+    for (const auto& t : g_tiles)
+        state += std::wstring(t.name) + L"=" + IntToWString(IniReadI(L"Assets", t.name, 0) ? 1 : 0) + L";";
+
+    uint64_t hash = 14695981039346656037ull;
+    HashWide(hash, state);
+    return Hex64(hash);
+}
+
+static bool LiveTileModeReregistrationStateIsCurrent()
+{
+    std::wstring last = IniReadS(L"State", L"LastLiveTileModeReregistrationKey", L"");
+    return !last.empty() && IEquals(last, BuildLiveTileModeReregistrationStateKey());
+}
+
+static void StoreLiveTileModeReregistrationState()
+{
+    std::wstring key = BuildLiveTileModeReregistrationStateKey();
+    if (!key.empty())
+        IniWrite(L"State", L"LastLiveTileModeReregistrationKey", key.c_str());
+}
+
 static bool LiveTileModeReregistrationPending()
 {
     return IniReadI(L"State", L"LiveTileModeReregistrationPending", 0) != 0;
@@ -993,6 +1030,21 @@ static bool LiveTileModeReregistrationPending()
 static void SetLiveTileModeReregistrationPending(bool pending)
 {
     IniWrite(L"State", L"LiveTileModeReregistrationPending", pending ? L"1" : L"0");
+}
+
+static bool FixedPackagedLiveTileModeNeedsUnpackagedReregistration()
+{
+    bool shouldRunPackaged = false;
+    if (!LiveTileModeHasFixedRuntime(
+            ConfiguredLiveTileUpdateMode(),
+            ConfiguredManifestCompatibilityTarget(),
+            shouldRunPackaged))
+        return false;
+
+    if (!shouldRunPackaged)
+        return false;
+
+    return LiveTileModeReregistrationPending() || !LiveTileModeReregistrationStateIsCurrent();
 }
 
 static bool StartupGenerationCanSkip(const std::wstring& wallpaperPath)
@@ -1798,6 +1850,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         if (appUpdateOk)
         {
             SetLiveTileModeReregistrationPending(false);
+            StoreLiveTileModeReregistrationState();
             LogText(g_ui.liveTileModeReregistrationComplete);
 
             if (liveTileUpdateMode)
@@ -1834,6 +1887,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
     else
     {
         appUpdateOk = RegisterAppxManifest(manifestPath, appUpdateFailureMessage);
+        if (appUpdateOk)
+            StoreLiveTileModeReregistrationState();
     }
 
     bool ok = assetsOk && appUpdateOk;
