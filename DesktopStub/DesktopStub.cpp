@@ -61,6 +61,7 @@ using namespace Gdiplus;
 using namespace std::chrono;
 
 std::wstring IniReadS(const wchar_t* s, const wchar_t* k, const wchar_t* d);
+int IniReadI(const wchar_t* s, const wchar_t* k, int d);
 void IniWrite(const wchar_t* s, const wchar_t* k, const wchar_t* v);
 
 enum class ErrorAction

@@ -53,6 +53,405 @@ static bool BitmapDimensionsToInt(Bitmap* bitmap, int& width, int& height)
     return true;
 }
 
+static bool TryParseHexNibble(wchar_t ch, BYTE& value)
+{
+    if (ch >= L'0' && ch <= L'9')
+    {
+        value = static_cast<BYTE>(ch - L'0');
+        return true;
+    }
+    if (ch >= L'a' && ch <= L'f')
+    {
+        value = static_cast<BYTE>(10 + ch - L'a');
+        return true;
+    }
+    if (ch >= L'A' && ch <= L'F')
+    {
+        value = static_cast<BYTE>(10 + ch - L'A');
+        return true;
+    }
+    return false;
+}
+
+static bool TryParseHexByte(const std::wstring& text, size_t offset, BYTE& value)
+{
+    if (offset + 1 >= text.size())
+        return false;
+    BYTE hi = 0;
+    BYTE lo = 0;
+    if (!TryParseHexNibble(text[offset], hi) || !TryParseHexNibble(text[offset + 1], lo))
+        return false;
+    value = static_cast<BYTE>((hi << 4) | lo);
+    return true;
+}
+
+static Color ParseTileTextColor(const std::wstring& raw, Color fallback)
+{
+    std::wstring value = TrimCopy(raw);
+    if (!value.empty() && value.front() == L'#')
+        value.erase(value.begin());
+
+    BYTE a = 255;
+    BYTE r = 255;
+    BYTE g = 255;
+    BYTE b = 255;
+
+    if (value.size() == 8)
+    {
+        if (TryParseHexByte(value, 0, a) &&
+            TryParseHexByte(value, 2, r) &&
+            TryParseHexByte(value, 4, g) &&
+            TryParseHexByte(value, 6, b))
+            return Color(a, r, g, b);
+    }
+    else if (value.size() == 6)
+    {
+        if (TryParseHexByte(value, 0, r) &&
+            TryParseHexByte(value, 2, g) &&
+            TryParseHexByte(value, 4, b))
+            return Color(255, r, g, b);
+    }
+
+    return fallback;
+}
+
+static std::wstring TileTextPrimaryText()
+{
+    return TrimCopy(IniReadS(L"TileText", L"Text", L""));
+}
+
+static std::wstring TileTextSecondaryText()
+{
+    return TrimCopy(IniReadS(L"TileText", L"SecondaryText", L""));
+}
+
+static std::wstring TileTextBadgeText()
+{
+    return TrimCopy(IniReadS(L"TileText", L"BadgeText", L""));
+}
+
+static bool TileTextOverlayEnabled()
+{
+    return IniReadI(L"TileText", L"Enabled", 0) != 0 &&
+        (!TileTextPrimaryText().empty() ||
+            !TileTextSecondaryText().empty() ||
+            !TileTextBadgeText().empty());
+}
+
+static bool TileTextAppliesToTileName(const wchar_t* tileName)
+{
+    std::wstring name = tileName ? tileName : L"";
+    if (IEquals(name, L"MediumTile") || IEquals(name, L"LiveMediumTile"))
+        return IniReadI(L"TileText", L"ApplyToMediumTile", 1) != 0;
+    if (IEquals(name, L"WideTile") || IEquals(name, L"LiveWideTile"))
+        return IniReadI(L"TileText", L"ApplyToWideTile", 1) != 0;
+    if (IEquals(name, L"LargeTile") || IEquals(name, L"LiveLargeTile"))
+        return IniReadI(L"TileText", L"ApplyToLargeTile", 1) != 0;
+    if (IEquals(name, L"SmallTile"))
+        return IniReadI(L"TileText", L"ApplyToSmallTile", 0) != 0;
+    if (IEquals(name, L"StoreLogo") ||
+        IEquals(name, L"Square44x44Logo") ||
+        IEquals(name, L"Square30x30Logo"))
+        return IniReadI(L"TileText", L"ApplyToLogos", 0) != 0;
+    return false;
+}
+
+static const wchar_t* NormalizeTileTextHorizontalAlignValue(const std::wstring& raw, const wchar_t* fallback)
+{
+    std::wstring value = ToLowerCopy(TrimCopy(raw));
+    if (value == L"left")
+        return L"Left";
+    if (value == L"right")
+        return L"Right";
+    if (value == L"center" || value == L"middle")
+        return L"Center";
+    return fallback && *fallback ? fallback : L"Center";
+}
+
+static const wchar_t* NormalizeTileTextVerticalAlignValue(const std::wstring& raw, const wchar_t* fallback)
+{
+    std::wstring value = ToLowerCopy(TrimCopy(raw));
+    if (value == L"top")
+        return L"Top";
+    if (value == L"center" || value == L"middle")
+        return L"Center";
+    if (value == L"bottom")
+        return L"Bottom";
+    return fallback && *fallback ? fallback : L"Top";
+}
+
+static const wchar_t* NormalizedTileTextHorizontalAlign()
+{
+    return NormalizeTileTextHorizontalAlignValue(IniReadS(L"TileText", L"HorizontalAlign", L"Center"), L"Center");
+}
+
+static const wchar_t* NormalizedTileTextVerticalAlign()
+{
+    return NormalizeTileTextVerticalAlignValue(IniReadS(L"TileText", L"VerticalAlign", L"Top"), L"Top");
+}
+
+static const wchar_t* NormalizedTileTextBadgeHorizontalAlign()
+{
+    return NormalizeTileTextHorizontalAlignValue(IniReadS(L"TileText", L"BadgeHorizontalAlign", L"Right"), L"Right");
+}
+
+static const wchar_t* NormalizedTileTextBadgeVerticalAlign()
+{
+    return NormalizeTileTextVerticalAlignValue(IniReadS(L"TileText", L"BadgeVerticalAlign", L"Top"), L"Top");
+}
+
+static std::unique_ptr<FontFamily> CreateTileTextFontFamily()
+{
+    std::wstring fontName = TrimCopy(IniReadS(L"TileText", L"Font", L"Segoe UI"));
+    if (fontName.empty())
+        fontName = L"Segoe UI";
+
+    std::unique_ptr<FontFamily> family(new FontFamily(fontName.c_str()));
+    if (!family || family->GetLastStatus() != Ok)
+        family.reset(new FontFamily(L"Segoe UI"));
+    if (!family || family->GetLastStatus() != Ok)
+        family.reset(new FontFamily(L"Arial"));
+    return family;
+}
+
+static int TileTextFontStyle(const wchar_t* boldKey, int boldFallback)
+{
+    int fontStyle = FontStyleRegular;
+    if (IniReadI(L"TileText", boldKey, boldFallback) != 0)
+        fontStyle |= FontStyleBold;
+    if (IniReadI(L"TileText", L"Italic", 0) != 0)
+        fontStyle |= FontStyleItalic;
+    return fontStyle;
+}
+
+static StringAlignment TileTextHorizontalStringAlignment(const std::wstring& value)
+{
+    std::wstring align = ToLowerCopy(value);
+    if (align == L"left")
+        return StringAlignmentNear;
+    if (align == L"right")
+        return StringAlignmentFar;
+    return StringAlignmentCenter;
+}
+
+static StringAlignment TileTextVerticalStringAlignment(const std::wstring& value)
+{
+    std::wstring align = ToLowerCopy(value);
+    if (align == L"top")
+        return StringAlignmentNear;
+    if (align == L"bottom")
+        return StringAlignmentFar;
+    return StringAlignmentCenter;
+}
+
+static bool DrawTileTextString(
+    Graphics& graphics,
+    const std::wstring& text,
+    Font& font,
+    const RectF& layout,
+    StringFormat& format,
+    SolidBrush& brush,
+    double scale,
+    const wchar_t* operation)
+{
+    if (text.empty())
+        return true;
+
+    if (IniReadI(L"TileText", L"Shadow", 1) != 0)
+    {
+        int shadowOffset = std::max(1, static_cast<int>(scale + 0.5));
+        RectF shadowLayout = layout;
+        shadowLayout.X += static_cast<REAL>(shadowOffset);
+        shadowLayout.Y += static_cast<REAL>(shadowOffset);
+        Color shadowColor = ParseTileTextColor(IniReadS(L"TileText", L"ShadowColor", L"#AA000000"), Color(170, 0, 0, 0));
+        SolidBrush shadowBrush(shadowColor);
+        if (!GdiOk(graphics.DrawString(text.c_str(), static_cast<INT>(text.size()), &font, shadowLayout, &format, &shadowBrush), operation))
+            return false;
+    }
+
+    return GdiOk(graphics.DrawString(text.c_str(), static_cast<INT>(text.size()), &font, layout, &format, &brush), operation);
+}
+
+static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int logicalWidth, int logicalHeight)
+{
+    if (!bitmap || !TileTextOverlayEnabled() || !TileTextAppliesToTileName(tileName))
+        return true;
+
+    int bitmapWidth = 0;
+    int bitmapHeight = 0;
+    if (!BitmapDimensionsToInt(bitmap, bitmapWidth, bitmapHeight))
+        return false;
+
+    std::wstring primaryText = TileTextPrimaryText();
+    std::wstring secondaryText = TileTextSecondaryText();
+    std::wstring badgeText = TileTextBadgeText();
+    if (primaryText.empty() && secondaryText.empty() && badgeText.empty())
+        return true;
+
+    int primaryFontSize = IniReadClampedI(L"TileText", L"FontSize", 18, 6, 256);
+    int secondaryFontSize = IniReadClampedI(L"TileText", L"SecondaryFontSize", 12, 6, 256);
+    int badgeFontSize = IniReadClampedI(L"TileText", L"BadgeFontSize", 40, 6, 256);
+    int marginX = IniReadClampedI(L"TileText", L"MarginX", 8, 0, 1000);
+    int marginY = IniReadClampedI(L"TileText", L"MarginY", 10, 0, 1000);
+    int lineGap = IniReadClampedI(L"TileText", L"LineGap", 2, 0, 1000);
+    int maxSecondaryLines = IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 1, 20);
+
+    double scale = 1.0;
+    if (logicalWidth > 0 && logicalHeight > 0)
+    {
+        scale = std::min(
+            static_cast<double>(bitmapWidth) / logicalWidth,
+            static_cast<double>(bitmapHeight) / logicalHeight);
+    }
+    if (scale <= 0.0)
+        scale = 1.0;
+
+    REAL scaledPrimaryFontSize = static_cast<REAL>(std::max(1, static_cast<int>(primaryFontSize * scale + 0.5)));
+    REAL scaledSecondaryFontSize = static_cast<REAL>(std::max(1, static_cast<int>(secondaryFontSize * scale + 0.5)));
+    REAL scaledBadgeFontSize = static_cast<REAL>(std::max(1, static_cast<int>(badgeFontSize * scale + 0.5)));
+    REAL scaledLineGap = static_cast<REAL>(std::max(0, static_cast<int>(lineGap * scale + 0.5)));
+    int scaledMarginX = std::max(0, static_cast<int>(marginX * scale + 0.5));
+    int scaledMarginY = std::max(0, static_cast<int>(marginY * scale + 0.5));
+
+    RectF content(
+        static_cast<REAL>(scaledMarginX),
+        static_cast<REAL>(scaledMarginY),
+        static_cast<REAL>(std::max(1, bitmapWidth - scaledMarginX * 2)),
+        static_cast<REAL>(std::max(1, bitmapHeight - scaledMarginY * 2)));
+
+    std::unique_ptr<FontFamily> family = CreateTileTextFontFamily();
+    if (!family || family->GetLastStatus() != Ok)
+        return false;
+
+    Font primaryFont(family.get(), scaledPrimaryFontSize, TileTextFontStyle(L"Bold", 0), UnitPixel);
+    Font secondaryFont(family.get(), scaledSecondaryFontSize, TileTextFontStyle(L"SecondaryBold", 0), UnitPixel);
+    Font badgeFont(family.get(), scaledBadgeFontSize, TileTextFontStyle(L"BadgeBold", 0), UnitPixel);
+    if (primaryFont.GetLastStatus() != Ok || secondaryFont.GetLastStatus() != Ok || badgeFont.GetLastStatus() != Ok)
+        return false;
+
+    Graphics graphics(bitmap);
+    if (!GraphicsOk(graphics, L"create tile text graphics"))
+        return false;
+
+    graphics.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
+    graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+
+    std::wstring hAlign = ToLowerCopy(NormalizedTileTextHorizontalAlign());
+    std::wstring vAlign = ToLowerCopy(NormalizedTileTextVerticalAlign());
+    std::wstring badgeHAlign = ToLowerCopy(NormalizedTileTextBadgeHorizontalAlign());
+    std::wstring badgeVAlign = ToLowerCopy(NormalizedTileTextBadgeVerticalAlign());
+
+    REAL primaryLineHeight = scaledPrimaryFontSize * 1.25f;
+    REAL secondaryLineHeight = scaledSecondaryFontSize * 1.20f;
+    REAL secondaryBlockHeight = secondaryText.empty() ? 0.0f : secondaryLineHeight * static_cast<REAL>(maxSecondaryLines);
+    REAL blockHeight = 0.0f;
+    if (!primaryText.empty())
+        blockHeight += primaryLineHeight;
+    if (!primaryText.empty() && !secondaryText.empty())
+        blockHeight += scaledLineGap;
+    if (!secondaryText.empty())
+        blockHeight += secondaryBlockHeight;
+    if (blockHeight <= 0.0f)
+        blockHeight = primaryLineHeight;
+
+    REAL textY = content.Y;
+    if (vAlign == L"center")
+        textY = content.Y + std::max(0.0f, (content.Height - blockHeight) / 2.0f);
+    else if (vAlign == L"bottom")
+        textY = content.Y + std::max(0.0f, content.Height - blockHeight);
+
+    REAL badgeReserve = 0.0f;
+    if (!badgeText.empty() && (badgeHAlign == L"right" || badgeHAlign == L"left") && (!primaryText.empty() || !secondaryText.empty()))
+        badgeReserve = std::min(content.Width * 0.42f, std::max(scaledBadgeFontSize * 1.35f, content.Width * 0.24f));
+
+    RectF textContent = content;
+    if (badgeReserve > 0.0f && badgeHAlign == L"right" && hAlign != L"right")
+        textContent.Width = std::max(1.0f, textContent.Width - badgeReserve);
+    else if (badgeReserve > 0.0f && badgeHAlign == L"left" && hAlign != L"left")
+    {
+        textContent.X += badgeReserve;
+        textContent.Width = std::max(1.0f, textContent.Width - badgeReserve);
+    }
+
+    StringFormat textFormat;
+    textFormat.SetAlignment(TileTextHorizontalStringAlignment(hAlign));
+    textFormat.SetLineAlignment(StringAlignmentNear);
+    textFormat.SetTrimming(StringTrimmingEllipsisWord);
+    textFormat.SetFormatFlags(StringFormatFlagsLineLimit);
+
+    Color primaryColor = ParseTileTextColor(IniReadS(L"TileText", L"Color", L"#FFFFFFFF"), Color(255, 255, 255, 255));
+    Color secondaryColor = ParseTileTextColor(IniReadS(L"TileText", L"SecondaryColor", L"#CCFFFFFF"), Color(204, 255, 255, 255));
+    Color badgeColor = ParseTileTextColor(IniReadS(L"TileText", L"BadgeColor", L"#FFFFFFFF"), Color(255, 255, 255, 255));
+    SolidBrush primaryBrush(primaryColor);
+    SolidBrush secondaryBrush(secondaryColor);
+    SolidBrush badgeBrush(badgeColor);
+
+    if (!primaryText.empty())
+    {
+        RectF primaryRect(textContent.X, textY, textContent.Width, primaryLineHeight + scaledLineGap);
+        if (!DrawTileTextString(graphics, primaryText, primaryFont, primaryRect, textFormat, primaryBrush, scale, L"draw primary tile text"))
+            return false;
+        textY += primaryLineHeight + scaledLineGap;
+    }
+
+    if (!secondaryText.empty())
+    {
+        RectF secondaryRect(textContent.X, textY, textContent.Width, std::max(1.0f, content.Y + content.Height - textY));
+        if (!DrawTileTextString(graphics, secondaryText, secondaryFont, secondaryRect, textFormat, secondaryBrush, scale, L"draw secondary tile text"))
+            return false;
+    }
+
+    if (!badgeText.empty())
+    {
+        StringFormat badgeFormat;
+        badgeFormat.SetAlignment(TileTextHorizontalStringAlignment(badgeHAlign));
+        badgeFormat.SetLineAlignment(TileTextVerticalStringAlignment(badgeVAlign));
+        badgeFormat.SetTrimming(StringTrimmingEllipsisCharacter);
+        badgeFormat.SetFormatFlags(StringFormatFlagsLineLimit);
+        if (!DrawTileTextString(graphics, badgeText, badgeFont, content, badgeFormat, badgeBrush, scale, L"draw tile badge text"))
+            return false;
+    }
+
+    return true;
+}
+
+static std::wstring TileTextXmlText()
+{
+    if (!TileTextOverlayEnabled())
+        return L"";
+    return TileTextPrimaryText();
+}
+
+static std::wstring TileTextXmlSecondaryText()
+{
+    if (!TileTextOverlayEnabled())
+        return L"";
+    return TileTextSecondaryText();
+}
+
+static std::wstring TileTextXmlBadgeText()
+{
+    if (!TileTextOverlayEnabled())
+        return L"";
+    return TileTextBadgeText();
+}
+
+static std::wstring TileTextXmlHorizontalAlign()
+{
+    std::wstring value = ToLowerCopy(NormalizedTileTextHorizontalAlign());
+    if (value == L"left" || value == L"right")
+        return value;
+    return L"center";
+}
+
+static std::wstring TileTextXmlBadgeHorizontalAlign()
+{
+    std::wstring value = ToLowerCopy(NormalizedTileTextBadgeHorizontalAlign());
+    if (value == L"left" || value == L"right")
+        return value;
+    return L"center";
+}
+
 static Bitmap* ResizeBitmapToMode(Bitmap* src, int w, int h, FitMode mode, Color background)
 {
     int sw = 0;

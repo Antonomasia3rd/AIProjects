@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 This repository uses project-scoped release tags for Windows binaries.
 
@@ -29,3 +29,5 @@ Older releases are intentionally kept when practical so users can compare behavi
 - Fixed cold Start/tile activation in forced `LiveTile` mode so a stale one-time static icon/AppxManifest refresh relaunches through the unpackaged process first, matching the tray-switch path.
 - Changed DesktopStub defaults: `LiveTileRelaunchOnSwitch=1`, `NotifyOnAlreadyRunning=0`, and `ComRegistrationUseHelper=0`.
 - Tidied the tray menu by moving **Generate now** to the top level and nesting Live Tile mode/registration/runtime/Windows 8 options instead of separating them with dividers.
+- Added optional tile text overlays configurable by INI, tray menu, and command line. Windows 10 Live Tile mode emits the text into Live Tile XML, while registration/static-image modes bake the text into generated tile PNGs.
+- Improved tile text overlay parity: baked/static mode now defaults to top placement like Live Tile XML, and supports secondary/body text plus a large badge/counter text for Calendar/Mail-style tile layouts.
