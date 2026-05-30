@@ -1053,6 +1053,163 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (IEquals(arg, L"--tile-text-enable"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"Enabled", true);
+            continue;
+        }
+        if (IEquals(arg, L"--tile-text-disable"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"Enabled", false);
+            continue;
+        }
+        if (IEquals(arg, L"--tile-text-clear"))
+        {
+            AddCommandLineIniSetting(L"TileText", L"Text", L"");
+            continue;
+        }
+        if (IEquals(arg, L"--tile-text-secondary-clear") || IEquals(arg, L"--tile-subtext-clear"))
+        {
+            AddCommandLineIniSetting(L"TileText", L"SecondaryText", L"");
+            continue;
+        }
+        if (IEquals(arg, L"--tile-text-badge-clear") || IEquals(arg, L"--tile-badge-clear"))
+        {
+            AddCommandLineIniSetting(L"TileText", L"BadgeText", L"");
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            AddCommandLineIniSetting(L"TileText", L"Text", value);
+            AddCommandLineBoolSetting(L"TileText", L"Enabled", !TrimCopy(value).empty());
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-secondary", value, error, matched))
+            return fail(error);
+        if (!matched && !CommandLineTryGetOptionValue(argc, argv, i, L"--tile-subtext", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            AddCommandLineIniSetting(L"TileText", L"SecondaryText", value);
+            if (!TrimCopy(value).empty())
+                AddCommandLineBoolSetting(L"TileText", L"Enabled", true);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-badge", value, error, matched))
+            return fail(error);
+        if (!matched && !CommandLineTryGetOptionValue(argc, argv, i, L"--tile-badge", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            AddCommandLineIniSetting(L"TileText", L"BadgeText", value);
+            if (!TrimCopy(value).empty())
+                AddCommandLineBoolSetting(L"TileText", L"Enabled", true);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-align", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring v = ToLowerCopy(TrimCopy(value));
+            if (v != L"left" && v != L"center" && v != L"right")
+                return fail(L"Unsupported tile text alignment: " + value + L". Supported values are left, center, right.");
+            AddCommandLineIniSetting(L"TileText", L"HorizontalAlign", v == L"left" ? L"Left" : (v == L"right" ? L"Right" : L"Center"));
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-valign", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring v = ToLowerCopy(TrimCopy(value));
+            if (v != L"top" && v != L"center" && v != L"middle" && v != L"bottom")
+                return fail(L"Unsupported tile text vertical alignment: " + value + L". Supported values are top, center, bottom.");
+            AddCommandLineIniSetting(L"TileText", L"VerticalAlign", v == L"top" ? L"Top" : (v == L"bottom" ? L"Bottom" : L"Center"));
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-badge-align", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring v = ToLowerCopy(TrimCopy(value));
+            if (v != L"left" && v != L"center" && v != L"right")
+                return fail(L"Unsupported tile badge alignment: " + value + L". Supported values are left, center, right.");
+            AddCommandLineIniSetting(L"TileText", L"BadgeHorizontalAlign", v == L"left" ? L"Left" : (v == L"right" ? L"Right" : L"Center"));
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-badge-valign", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring v = ToLowerCopy(TrimCopy(value));
+            if (v != L"top" && v != L"center" && v != L"middle" && v != L"bottom")
+                return fail(L"Unsupported tile badge vertical alignment: " + value + L". Supported values are top, center, bottom.");
+            AddCommandLineIniSetting(L"TileText", L"BadgeVerticalAlign", v == L"top" ? L"Top" : (v == L"bottom" ? L"Bottom" : L"Center"));
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-font-size", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            int parsed = 0;
+            if (!TryParseIntStrict(value, parsed) || parsed < 6 || parsed > 256)
+                return fail(L"Invalid --tile-text-font-size value: " + value + L". Expected 6-256.");
+            AddCommandLineIntSetting(L"TileText", L"FontSize", parsed);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-secondary-font-size", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            int parsed = 0;
+            if (!TryParseIntStrict(value, parsed) || parsed < 6 || parsed > 256)
+                return fail(L"Invalid --tile-text-secondary-font-size value: " + value + L". Expected 6-256.");
+            AddCommandLineIntSetting(L"TileText", L"SecondaryFontSize", parsed);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-badge-font-size", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            int parsed = 0;
+            if (!TryParseIntStrict(value, parsed) || parsed < 6 || parsed > 256)
+                return fail(L"Invalid --tile-text-badge-font-size value: " + value + L". Expected 6-256.");
+            AddCommandLineIntSetting(L"TileText", L"BadgeFontSize", parsed);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-color", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            AddCommandLineIniSetting(L"TileText", L"Color", value);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-secondary-color", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            AddCommandLineIniSetting(L"TileText", L"SecondaryColor", value);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-badge-color", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            AddCommandLineIniSetting(L"TileText", L"BadgeColor", value);
+            continue;
+        }
+        if (IEquals(arg, L"--tile-text-shadow"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"Shadow", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-tile-text-shadow"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"Shadow", false);
+            continue;
+        }
+
         if (IEquals(arg, L"--manifest-win10"))
         {
             AddCommandLineManifestTargetSetting(ManifestCompatibilityTarget::Windows10);
@@ -1174,6 +1331,18 @@ static std::wstring CommandLineUsageText()
         L"  --live-tile-mode <mode>              Set mode: Auto, Registration, or LiveTile.\r\n"
         L"  --live-tile-relaunch-on-mismatch | --no-live-tile-relaunch-on-mismatch\r\n"
         L"                                      Relaunch when process package state does not match mode.\r\n"
+        L"  --tile-text <text>                  Set tile text overlay text and enable it if non-empty.\r\n"
+        L"  --tile-text-enable | --tile-text-disable\r\n"
+        L"                                      Enable/disable tile text overlay.\r\n"
+        L"  --tile-text-clear                  Clear tile text overlay text.\r\n"
+        L"  --tile-text-align <left|center|right>\r\n"
+        L"                                      Set horizontal text alignment.\r\n"
+        L"  --tile-text-valign <top|center|bottom>\r\n"
+        L"                                      Set vertical text alignment.\r\n"
+        L"  --tile-text-font-size <px>          Set text size, 6-256 px.\r\n"
+        L"  --tile-text-color <#AARRGGBB>       Set static/baked text color.\r\n"
+        L"  --tile-text-shadow | --no-tile-text-shadow\r\n"
+        L"                                      Enable/disable baked text shadow.\r\n"
         L"  --manifest-target <target>            Set and regenerate manifest: Windows10, Windows81, or Windows8.\r\n"
         L"  --manifest-win10|--manifest-win81|--manifest-win8\r\n"
         L"                                      Shortcuts for --manifest-target.\r\n"

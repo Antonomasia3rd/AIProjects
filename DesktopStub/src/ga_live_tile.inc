@@ -118,7 +118,8 @@ static void AppendLiveTileImageBinding(
     std::wstring& xml,
     const wchar_t* templateName,
     const std::wstring& imageUri,
-    int overlay)
+    int overlay,
+    const wchar_t* assetName)
 {
     if (!templateName || !*templateName || imageUri.empty())
         return;
@@ -142,6 +143,72 @@ static void AppendLiveTileImageBinding(
         xml += L"\"";
     }
     xml += L"/>\r\n";
+
+    std::wstring tileText = TileTextXmlText();
+    std::wstring secondaryText = TileTextXmlSecondaryText();
+    std::wstring badgeText = TileTextXmlBadgeText();
+    if (LiveTileUsesAdaptiveXml() && TileTextAppliesToTileName(assetName) &&
+        (!tileText.empty() || !secondaryText.empty() || !badgeText.empty()))
+    {
+        if (!badgeText.empty() && (!tileText.empty() || !secondaryText.empty()))
+        {
+            xml += L"      <group>\r\n";
+            xml += L"        <subgroup hint-weight=\"3\">\r\n";
+            if (!tileText.empty())
+            {
+                xml += L"          <text hint-style=\"caption\" hint-align=\"";
+                xml += TileTextXmlHorizontalAlign();
+                xml += L"\">";
+                xml += XmlEscape(tileText);
+                xml += L"</text>\r\n";
+            }
+            if (!secondaryText.empty())
+            {
+                xml += L"          <text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-align=\"";
+                xml += TileTextXmlHorizontalAlign();
+                xml += L"\">";
+                xml += XmlEscape(secondaryText);
+                xml += L"</text>\r\n";
+            }
+            xml += L"        </subgroup>\r\n";
+            xml += L"        <subgroup hint-weight=\"1\">\r\n";
+            xml += L"          <text hint-style=\"title\" hint-align=\"";
+            xml += TileTextXmlBadgeHorizontalAlign();
+            xml += L"\">";
+            xml += XmlEscape(badgeText);
+            xml += L"</text>\r\n";
+            xml += L"        </subgroup>\r\n";
+            xml += L"      </group>\r\n";
+        }
+        else
+        {
+            if (!badgeText.empty())
+            {
+                xml += L"      <text hint-style=\"title\" hint-align=\"";
+                xml += TileTextXmlBadgeHorizontalAlign();
+                xml += L"\">";
+                xml += XmlEscape(badgeText);
+                xml += L"</text>\r\n";
+            }
+            if (!tileText.empty())
+            {
+                xml += L"      <text hint-style=\"caption\" hint-align=\"";
+                xml += TileTextXmlHorizontalAlign();
+                xml += L"\">";
+                xml += XmlEscape(tileText);
+                xml += L"</text>\r\n";
+            }
+            if (!secondaryText.empty())
+            {
+                xml += L"      <text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-align=\"";
+                xml += TileTextXmlHorizontalAlign();
+                xml += L"\">";
+                xml += XmlEscape(secondaryText);
+                xml += L"</text>\r\n";
+            }
+        }
+    }
+
     xml += L"    </binding>\r\n";
 }
 
@@ -171,7 +238,7 @@ static std::wstring BuildLiveTileXml(
         std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file);
         if (!uri.empty())
             hasUsableAsset = true;
-        AppendLiveTileImageBinding(xml, templateName, uri, 0);
+        AppendLiveTileImageBinding(xml, templateName, uri, 0, asset.name);
     }
 
     if (!hasUsableAsset)

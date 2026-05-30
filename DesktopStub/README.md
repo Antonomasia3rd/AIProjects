@@ -1,4 +1,4 @@
-# DesktopStub
+﻿# DesktopStub
 
 `DesktopStub.exe` is a tray utility that generates Windows Start tile assets from the current desktop wallpaper and registers a loose Appx manifest for a desktop tile entry.
 
@@ -116,6 +116,10 @@ Supported options:
 - `--live-tile` / `--no-live-tile`: set and save Live Tile update mode.
 - `--live-tile-auto`: set and save automatic Live Tile update mode.
 - `--live-tile-mode Auto|Registration|LiveTile`: set and save Live Tile update mode.
+- `--tile-text <text>`, `--tile-text-secondary <text>` / `--tile-subtext <text>`, and `--tile-text-badge <text>` / `--tile-badge <text>`: configure optional primary, secondary, and badge text overlays.
+- `--tile-text-enable`, `--tile-text-disable`, `--tile-text-clear`, `--tile-text-secondary-clear`, and `--tile-text-badge-clear`: enable/disable or clear overlay parts.
+- `--tile-text-align left|center|right`, `--tile-text-valign top|center|bottom`, `--tile-text-badge-align left|center|right`, `--tile-text-badge-valign top|center|bottom`: configure text/badge placement.
+- `--tile-text-font-size <px>`, `--tile-text-secondary-font-size <px>`, `--tile-text-badge-font-size <px>`, `--tile-text-color <#AARRGGBB>`, `--tile-text-secondary-color <#AARRGGBB>`, `--tile-text-badge-color <#AARRGGBB>`, `--tile-text-shadow`, `--no-tile-text-shadow`: configure text style.
 - `--manifest-target Windows10|Windows81|Windows8`: set the generated AppX manifest dialect and regenerate `AppxManifest.xml`. Windows 10 remains the default.
 - `--manifest-win10`, `--manifest-win81` / `--manifest-win8.1`, `--manifest-win8` / `--manifest-win8.0`: shortcuts for `--manifest-target`.
 - `--win8-broker` / `--no-win8-broker`: set and save `Win8LiveTileBrokerApp`.
@@ -139,6 +143,7 @@ Supported options:
 - Can internally capture a still frame from WorkerW-hosted live wallpaper apps and use that snapshot as the generation source, without overwriting the user's real Windows wallpaper.
 - Uses COM Appx registration by default with optional PowerShell-only mode and fallback behavior; the COM isolation helper is disabled by default to avoid spawning an extra helper process on normal registration.
 - Can automatically use Live Tile notification updates when launched with package identity, with manual registration/Live Tile overrides.
+- Supports optional tile text overlays. In Windows 10 Live Tile mode the text is emitted into the Live Tile XML; in registration/static-image modes it is baked into generated tile PNGs to simulate the same appearance.
 - Can dynamically create or regenerate `AppxManifest.xml` from built-in manifest defaults.
 - Supports quoted INI values and inline comments.
 - Keeps detailed logs and exposes registration output from the tray.
@@ -215,6 +220,36 @@ When Live Tile update is active, static manifest logo assets are treated as disa
 Changing the Live Tile update mode queues one asset regeneration and one Appx re-registration before normal Live Tile updates resume. This refreshes Windows' cached static assets after switching modes. If the app is cold-started from the Start tile while forced `LiveTile` mode is configured and that one-time static icon refresh has not successfully completed yet, the packaged instance relaunches through the unpackaged process first so the same re-registration path still runs.
 
 The mismatch relaunch guard is enabled by default and can be changed from the command line with `--live-tile-relaunch-on-mismatch` or `--no-live-tile-relaunch-on-mismatch`. The INI key remains `LiveTileRelaunchOnSwitch` for backward compatibility with existing configs.
+
+## Tile Text Overlay
+
+`[TileText]` controls an optional text overlay for generated tiles. It is disabled by default. In Windows 10 Live Tile mode, DesktopStub adds the configured text to the Live Tile XML notification so Windows renders it as a tile text layer. In registration/static-image mode, DesktopStub draws the text directly onto the generated PNG assets so non-LiveTile mode can visually simulate the same feature. Windows 8/8.1 compatibility Live Tile targets also bake the text into the notification images because those legacy XML templates are image-focused.
+
+Default configuration:
+
+```ini
+[TileText]
+Enabled=0
+Text=
+Font=Segoe UI
+FontSize=18
+Bold=0
+Italic=0
+Color=#FFFFFFFF
+Shadow=1
+ShadowColor=#AA000000
+HorizontalAlign=Center
+VerticalAlign=Bottom
+MarginX=8
+MarginY=10
+ApplyToMediumTile=1
+ApplyToWideTile=1
+ApplyToLargeTile=1
+ApplyToSmallTile=0
+ApplyToLogos=0
+```
+
+When Live Tile mode disables static manifest assets, DesktopStub does not bake text into the generated desktop-icon placeholder assets. This keeps the static icon behind the Live Tile clean.
 
 ## Release
 

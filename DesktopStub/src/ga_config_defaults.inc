@@ -163,6 +163,38 @@ static const IniDefault g_defaults[] = {
     {L"Assets", L"LargeTile", L"1"},
     {L"Assets", L"SplashScreen", L"0"},
 
+    // Tile text overlay
+    {L"TileText", L"Enabled", L"0"},
+    {L"TileText", L"Text", L""},
+    {L"TileText", L"SecondaryText", L""},
+    {L"TileText", L"BadgeText", L""},
+    {L"TileText", L"Font", L"Segoe UI"},
+    {L"TileText", L"FontSize", L"18"},
+    {L"TileText", L"SecondaryFontSize", L"12"},
+    {L"TileText", L"BadgeFontSize", L"40"},
+    {L"TileText", L"Bold", L"0"},
+    {L"TileText", L"SecondaryBold", L"0"},
+    {L"TileText", L"BadgeBold", L"0"},
+    {L"TileText", L"Italic", L"0"},
+    {L"TileText", L"Color", L"#FFFFFFFF"},
+    {L"TileText", L"SecondaryColor", L"#CCFFFFFF"},
+    {L"TileText", L"BadgeColor", L"#FFFFFFFF"},
+    {L"TileText", L"Shadow", L"1"},
+    {L"TileText", L"ShadowColor", L"#AA000000"},
+    {L"TileText", L"HorizontalAlign", L"Center"},
+    {L"TileText", L"VerticalAlign", L"Top"},
+    {L"TileText", L"BadgeHorizontalAlign", L"Right"},
+    {L"TileText", L"BadgeVerticalAlign", L"Top"},
+    {L"TileText", L"MarginX", L"8"},
+    {L"TileText", L"MarginY", L"10"},
+    {L"TileText", L"LineGap", L"2"},
+    {L"TileText", L"MaxSecondaryLines", L"2"},
+    {L"TileText", L"ApplyToMediumTile", L"1"},
+    {L"TileText", L"ApplyToWideTile", L"1"},
+    {L"TileText", L"ApplyToLargeTile", L"1"},
+    {L"TileText", L"ApplyToSmallTile", L"0"},
+    {L"TileText", L"ApplyToLogos", L"0"},
+
 };
 
 static const IniDefault g_powerShellErrorMessageDefaults[] = {
@@ -397,6 +429,37 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileClearOnShutdown", L"[i] Clearing Live Tile on shutdown."},
     {L"LiveTileClearOnShutdownSkipped", L"[i] Clear Live Tile on shutdown skipped: %s"},
     {L"LiveTileClearOnShutdownSuccess", L"[i] Live Tile cleared on shutdown."},
+    {L"TileAppearanceTitle", L"Tile appearance:"},
+    {L"TileTextTitle", L"Text overlay"},
+    {L"TileTextEnabled", L"Enable text overlay"},
+    {L"TileTextEdit", L"Edit text..."},
+    {L"TileTextClear", L"Clear text"},
+    {L"TileTextCurrent", L"Text: %s"},
+    {L"TileTextSecondaryEdit", L"Edit secondary text..."},
+    {L"TileTextSecondaryClear", L"Clear secondary text"},
+    {L"TileTextSecondaryCurrent", L"Secondary: %s"},
+    {L"TileTextBadgeEdit", L"Edit badge text..."},
+    {L"TileTextBadgeClear", L"Clear badge text"},
+    {L"TileTextBadgeCurrent", L"Badge: %s"},
+    {L"TileTextHorizontalAlign", L"Text horizontal: %s"},
+    {L"TileTextVerticalAlign", L"Text vertical: %s"},
+    {L"TileTextBadgeHorizontalAlign", L"Badge horizontal: %s"},
+    {L"TileTextBadgeVerticalAlign", L"Badge vertical: %s"},
+    {L"TileTextFontSize", L"Primary font size: %d px"},
+    {L"TileTextSecondaryFontSize", L"Secondary font size: %d px"},
+    {L"TileTextBadgeFontSize", L"Badge font size: %d px"},
+    {L"TileTextShadow", L"Shadow"},
+    {L"TileTextApplyMedium", L"Apply to Medium tile"},
+    {L"TileTextApplyWide", L"Apply to Wide tile"},
+    {L"TileTextApplyLarge", L"Apply to Large tile"},
+    {L"TileTextApplySmall", L"Apply to Small tile"},
+    {L"TileTextApplyLogos", L"Apply to logos"},
+    {L"TileTextEdited", L"[i] Tile text changed: %s"},
+    {L"TileTextCleared", L"[i] Tile text cleared."},
+    {L"TileTextSummary", L"[i] Tile text overlay: %s (%s)"},
+    {L"TileTextInputTitle", L"Edit tile text"},
+    {L"TileTextSecondaryInputTitle", L"Edit secondary tile text"},
+    {L"TileTextBadgeInputTitle", L"Edit tile badge text"},
     {L"GenerateOnStartup", L"Generate on Startup"},
     {L"GenerateOnStartupOnlyWhenChanged", L"Generate on Startup only when changed"},
     {L"HideDisabledEntries", L"Hide disabled entries"},
@@ -662,6 +725,14 @@ static std::wstring BuildInitialIniTemplate()
             lines.push_back(FormatIniAssignment(d.key, d.value));
     }
     lines.push_back(L"");
+    lines.push_back(L"[TileText]");
+    lines.push_back(L"; Optional text overlay for tiles. Live Tile mode uses XML text; static mode bakes the text into generated PNG assets.");
+    for (const auto& d : g_defaults)
+    {
+        if (wcscmp(d.section, L"TileText") == 0)
+            lines.push_back(FormatIniAssignment(d.key, d.value));
+    }
+    lines.push_back(L"");
     lines.push_back(L"[Strings]");
     lines.push_back(L"; User-visible strings. Keep format tokens unchanged.");
     for (const auto& d : g_stringDefaults)
@@ -868,6 +939,18 @@ static void RemoveObsoleteManifestIniSettings()
     SetIniCacheUnlocked(text);
 }
 
+static void UpgradeTileTextDefaultAlignment()
+{
+    if (IniReadI(L"State", L"TileTextVerticalAlignDefaultMigrated", 0) != 0)
+        return;
+
+    std::wstring current = ToLowerCopy(TrimCopy(IniReadS(L"TileText", L"VerticalAlign", L"")));
+    if (current.empty() || current == L"bottom")
+        IniWrite(L"TileText", L"VerticalAlign", L"Top");
+
+    IniWrite(L"State", L"TileTextVerticalAlignDefaultMigrated", L"1");
+}
+
 static void UpgradeRenamedStringDefaults()
 {
     RepairBrokenPowerShellOutputTruncatedDefault();
@@ -891,6 +974,7 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from configured defaults: %s", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s");
     UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from INI if missing", L"generated from built-in defaults if missing");
     UpgradeStringDefaultIfUnmodified(L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from config", L"Regenerate AppxManifest.xml from built-in defaults");
+    UpgradeTileTextDefaultAlignment();
     RemoveObsoleteManifestIniSettings();
 }
 

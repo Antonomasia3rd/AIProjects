@@ -341,10 +341,11 @@ static DLGITEMTEMPLATE* AlignDialogItem(WORD*& p)
     return item;
 }
 
-INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
+INT_PTR ShowTextInputDialog(HWND parent, const std::wstring& title, std::wstring& value, bool allowEmpty)
 {
+    std::wstring dialogTitle = title.empty() ? g_ui.renameDialogTitle : title;
     size_t stringBytes =
-        (g_ui.renameDialogTitle.size() + g_ui.okText.size() + g_ui.cancelText.size() + 64) * sizeof(wchar_t);
+        (dialogTitle.size() + g_ui.okText.size() + g_ui.cancelText.size() + 64) * sizeof(wchar_t);
     std::vector<BYTE> tmpl(4096 + stringBytes);
     DLGTEMPLATE* dlg = (DLGTEMPLATE*)tmpl.data();
 
@@ -357,7 +358,7 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
     *p++ = 0; // no menu
     *p++ = 0; // default class
 
-    AppendDialogTemplateString(p, g_ui.renameDialogTitle);
+    AppendDialogTemplateString(p, dialogTitle);
     *p++ = 9; // font size
     AppendDialogTemplateString(p, L"Segoe UI");
     // ---- Edit box ----
@@ -393,12 +394,23 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
     AppendDialogTemplateString(p, g_ui.cancelText);
     *p++ = 0;
 
+    struct TextInputDialogState
+    {
+        std::wstring* value;
+        bool allowEmpty;
+    } state{ &value, allowEmpty };
+
     return DialogBoxIndirectParamW(
         GetModuleHandleW(nullptr),
         (DLGTEMPLATE*)tmpl.data(),
         parent,
         RenameDlgProc,
-        (LPARAM)&path
+        (LPARAM)&state
     );
+}
+
+INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
+{
+    return ShowTextInputDialog(parent, g_ui.renameDialogTitle, path, false);
 }
 

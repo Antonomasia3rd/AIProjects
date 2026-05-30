@@ -67,6 +67,26 @@ enum {
     ID_GENERATED_ASSET_CACHE_MAX_ENTRIES,
     ID_GENERATED_ASSET_PRECACHE_MAX_FILES,
     ID_MANIFEST_REGENERATE,
+    ID_TILE_TEXT_ENABLED,
+    ID_TILE_TEXT_EDIT,
+    ID_TILE_TEXT_CLEAR,
+    ID_TILE_TEXT_SECONDARY_EDIT,
+    ID_TILE_TEXT_SECONDARY_CLEAR,
+    ID_TILE_TEXT_BADGE_EDIT,
+    ID_TILE_TEXT_BADGE_CLEAR,
+    ID_TILE_TEXT_H_ALIGN,
+    ID_TILE_TEXT_V_ALIGN,
+    ID_TILE_TEXT_BADGE_H_ALIGN,
+    ID_TILE_TEXT_BADGE_V_ALIGN,
+    ID_TILE_TEXT_FONT_SIZE,
+    ID_TILE_TEXT_SECONDARY_FONT_SIZE,
+    ID_TILE_TEXT_BADGE_FONT_SIZE,
+    ID_TILE_TEXT_SHADOW,
+    ID_TILE_TEXT_APPLY_MEDIUM,
+    ID_TILE_TEXT_APPLY_WIDE,
+    ID_TILE_TEXT_APPLY_LARGE,
+    ID_TILE_TEXT_APPLY_SMALL,
+    ID_TILE_TEXT_APPLY_LOGOS,
 
     // Advanced configurable settings
     ID_ADV_POLL_INTERVAL,
@@ -201,6 +221,47 @@ static void CycleSettingIntPreset(
     int next = NextSettingPreset(current, presets);
     next = ClampInt(next, minValue, maxValue);
     WriteSettingInt(key, next);
+}
+
+static const wchar_t* NextTileTextHorizontalAlign(const std::wstring& current)
+{
+    std::wstring value = ToLowerCopy(TrimCopy(current));
+    if (value == L"left")
+        return L"Center";
+    if (value == L"center")
+        return L"Right";
+    return L"Left";
+}
+
+static const wchar_t* NextTileTextVerticalAlign(const std::wstring& current)
+{
+    std::wstring value = ToLowerCopy(TrimCopy(current));
+    if (value == L"top")
+        return L"Center";
+    if (value == L"center" || value == L"middle")
+        return L"Bottom";
+    return L"Top";
+}
+
+static void WriteTileTextBool(const wchar_t* key, bool value)
+{
+    IniWrite(L"TileText", key, value ? L"1" : L"0");
+    Log(L"[i] Setting changed: [%s] %s = %s", L"TileText", key ? key : L"", StateEnabled(value));
+}
+
+static void ToggleTileTextBool(const wchar_t* key, int fallback)
+{
+    bool value = IniReadI(L"TileText", key, fallback) == 0;
+    WriteTileTextBool(key, value);
+}
+
+static void CycleTileTextFontSize(const wchar_t* key, int fallback, const std::wstring& logFormat)
+{
+    int current = IniReadClampedI(L"TileText", key, fallback, 6, 256);
+    int next = NextSettingPreset(current, { 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64 });
+    next = ClampInt(next, 6, 256);
+    IniWrite(L"TileText", key, std::to_wstring(next).c_str());
+    Log(logFormat.c_str(), next);
 }
 
 static const wchar_t* NextSingleInstanceFailureActionName(ErrorAction current)
@@ -351,14 +412,20 @@ void ShowPSLog(HWND h)
 
 INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) noexcept
 {
-    static std::wstring* pPath = nullptr;
+    struct TextInputDialogState
+    {
+        std::wstring* value;
+        bool allowEmpty;
+    };
+    static TextInputDialogState* state = nullptr;
 
     switch (msg)
     {
     case WM_INITDIALOG:
     {
-        pPath = (std::wstring*)lParam;
-        SetDlgItemTextW(hDlg, 1001, pPath->c_str()); // edit box
+        state = reinterpret_cast<TextInputDialogState*>(lParam);
+        if (state && state->value)
+            SetDlgItemTextW(hDlg, 1001, state->value->c_str()); // edit box
         return TRUE;
     }
 
@@ -372,9 +439,9 @@ INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
             std::vector<wchar_t> buf((size_t)len + 1);
             GetWindowTextW(edit, buf.data(), (int)buf.size());
 
-            if (buf[0])
+            if ((buf[0] || (state && state->allowEmpty)) && state && state->value)
             {
-                *pPath = buf.data();
+                *state->value = buf.data();
                 EndDialog(hDlg, IDOK);
             }
             else
@@ -389,6 +456,10 @@ INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
             return TRUE;
         }
         break;
+
+    case WM_DESTROY:
+        state = nullptr;
+        return FALSE;
     }
     return FALSE;
 }
@@ -580,6 +651,74 @@ void Menu(HWND h)
         }
     }
     endSection(liveTileMenu, g_ui.liveTileTitle);
+
+    HMENU tileAppearanceMenu = beginSection(g_ui.tileAppearanceTitle);
+    {
+        HMENU textMenu = showMenuAsDropdown ? CreatePopupMenu() : tileAppearanceMenu;
+        if (!textMenu)
+        {
+            LogWin32Failure(L"CreatePopupMenu(Tile Text)");
+            textMenu = tileAppearanceMenu;
+        }
+
+        auto shortTileText = [](const std::wstring& value) -> std::wstring
+        {
+            std::wstring text = TrimCopy(value);
+            if (text.empty())
+                return L"(empty)";
+            std::replace(text.begin(), text.end(), L'\r', L' ');
+            std::replace(text.begin(), text.end(), L'\n', L' ');
+            if (text.size() > 48)
+                text = text.substr(0, 45) + L"...";
+            return text;
+        };
+
+        bool tileTextEnabled = IniReadI(L"TileText", L"Enabled", 0) != 0;
+        std::wstring tileText = TrimCopy(IniReadS(L"TileText", L"Text", L""));
+        std::wstring secondaryText = TrimCopy(IniReadS(L"TileText", L"SecondaryText", L""));
+        std::wstring badgeText = TrimCopy(IniReadS(L"TileText", L"BadgeText", L""));
+        std::wstring textLine = FormatWide(g_ui.tileTextCurrent.c_str(), shortTileText(tileText).c_str());
+        std::wstring secondaryLine = FormatWide(g_ui.tileTextSecondaryCurrent.c_str(), shortTileText(secondaryText).c_str());
+        std::wstring badgeLine = FormatWide(g_ui.tileTextBadgeCurrent.c_str(), shortTileText(badgeText).c_str());
+        std::wstring hLine = FormatWide(g_ui.tileTextHorizontalAlign.c_str(), NormalizedTileTextHorizontalAlign());
+        std::wstring vLine = FormatWide(g_ui.tileTextVerticalAlign.c_str(), NormalizedTileTextVerticalAlign());
+        std::wstring badgeHLine = FormatWide(g_ui.tileTextBadgeHorizontalAlign.c_str(), NormalizedTileTextBadgeHorizontalAlign());
+        std::wstring badgeVLine = FormatWide(g_ui.tileTextBadgeVerticalAlign.c_str(), NormalizedTileTextBadgeVerticalAlign());
+        std::wstring fontSizeLine = FormatWide(g_ui.tileTextFontSize.c_str(), IniReadClampedI(L"TileText", L"FontSize", 18, 6, 256));
+        std::wstring secondaryFontSizeLine = FormatWide(g_ui.tileTextSecondaryFontSize.c_str(), IniReadClampedI(L"TileText", L"SecondaryFontSize", 12, 6, 256));
+        std::wstring badgeFontSizeLine = FormatWide(g_ui.tileTextBadgeFontSize.c_str(), IniReadClampedI(L"TileText", L"BadgeFontSize", 40, 6, 256));
+
+        addTo(textMenu, ID_TILE_TEXT_ENABLED, g_ui.tileTextEnabled.c_str(), tileTextEnabled);
+        addTo(textMenu, ID_TILE_TEXT_EDIT, g_ui.tileTextEdit.c_str());
+        addTo(textMenu, ID_TILE_TEXT_CLEAR, g_ui.tileTextClear.c_str(), false, !tileText.empty());
+        AppendMenuChecked(textMenu, MF_STRING | MF_DISABLED, 0, textLine.c_str());
+        addTo(textMenu, ID_TILE_TEXT_SECONDARY_EDIT, g_ui.tileTextSecondaryEdit.c_str());
+        addTo(textMenu, ID_TILE_TEXT_SECONDARY_CLEAR, g_ui.tileTextSecondaryClear.c_str(), false, !secondaryText.empty());
+        AppendMenuChecked(textMenu, MF_STRING | MF_DISABLED, 0, secondaryLine.c_str());
+        addTo(textMenu, ID_TILE_TEXT_BADGE_EDIT, g_ui.tileTextBadgeEdit.c_str());
+        addTo(textMenu, ID_TILE_TEXT_BADGE_CLEAR, g_ui.tileTextBadgeClear.c_str(), false, !badgeText.empty());
+        AppendMenuChecked(textMenu, MF_STRING | MF_DISABLED, 0, badgeLine.c_str());
+        addTo(textMenu, ID_TILE_TEXT_H_ALIGN, hLine);
+        addTo(textMenu, ID_TILE_TEXT_V_ALIGN, vLine);
+        addTo(textMenu, ID_TILE_TEXT_BADGE_H_ALIGN, badgeHLine);
+        addTo(textMenu, ID_TILE_TEXT_BADGE_V_ALIGN, badgeVLine);
+        addTo(textMenu, ID_TILE_TEXT_FONT_SIZE, fontSizeLine);
+        addTo(textMenu, ID_TILE_TEXT_SECONDARY_FONT_SIZE, secondaryFontSizeLine);
+        addTo(textMenu, ID_TILE_TEXT_BADGE_FONT_SIZE, badgeFontSizeLine);
+        addTo(textMenu, ID_TILE_TEXT_SHADOW, g_ui.tileTextShadow.c_str(), IniReadI(L"TileText", L"Shadow", 1) != 0);
+        addTo(textMenu, ID_TILE_TEXT_APPLY_MEDIUM, g_ui.tileTextApplyMedium.c_str(), IniReadI(L"TileText", L"ApplyToMediumTile", 1) != 0);
+        addTo(textMenu, ID_TILE_TEXT_APPLY_WIDE, g_ui.tileTextApplyWide.c_str(), IniReadI(L"TileText", L"ApplyToWideTile", 1) != 0);
+        addTo(textMenu, ID_TILE_TEXT_APPLY_LARGE, g_ui.tileTextApplyLarge.c_str(), IniReadI(L"TileText", L"ApplyToLargeTile", 1) != 0);
+        addTo(textMenu, ID_TILE_TEXT_APPLY_SMALL, g_ui.tileTextApplySmall.c_str(), IniReadI(L"TileText", L"ApplyToSmallTile", 0) != 0);
+        addTo(textMenu, ID_TILE_TEXT_APPLY_LOGOS, g_ui.tileTextApplyLogos.c_str(), IniReadI(L"TileText", L"ApplyToLogos", 0) != 0);
+
+        if (showMenuAsDropdown && textMenu != tileAppearanceMenu)
+        {
+            if (!AppendMenuChecked(tileAppearanceMenu, MF_POPUP, (UINT_PTR)textMenu, g_ui.tileTextTitle.c_str()))
+                DestroyMenu(textMenu);
+        }
+    }
+    endSection(tileAppearanceMenu, g_ui.tileAppearanceTitle);
 
     HMENU notificationsMenu = beginSection(g_ui.notificationsTitle);
     addTo(notificationsMenu, ID_NOTIF_ENABLED, g_ui.notificationsEnabled.c_str(), g_notificationsEnabled);
@@ -1157,6 +1296,132 @@ void Menu(HWND h)
         Log(g_ui.generateScaleSummary.c_str(), scale, StateEnabled(value));
     }
     break;
+
+    case ID_TILE_TEXT_ENABLED:
+        ToggleTileTextBool(L"Enabled", 0);
+        break;
+
+    case ID_TILE_TEXT_EDIT:
+    {
+        std::wstring text = IniReadS(L"TileText", L"Text", L"");
+        if (ShowTextInputDialog(h, g_ui.tileTextInputTitle, text, true) == IDOK)
+        {
+            IniWrite(L"TileText", L"Text", text.c_str());
+            if (!TrimCopy(text).empty())
+                IniWrite(L"TileText", L"Enabled", L"1");
+            Log(g_ui.tileTextEdited.c_str(), text.c_str());
+        }
+    }
+    break;
+
+    case ID_TILE_TEXT_CLEAR:
+        IniWrite(L"TileText", L"Text", L"");
+        LogText(g_ui.tileTextCleared);
+        break;
+
+    case ID_TILE_TEXT_SECONDARY_EDIT:
+    {
+        std::wstring text = IniReadS(L"TileText", L"SecondaryText", L"");
+        if (ShowTextInputDialog(h, g_ui.tileTextSecondaryInputTitle, text, true) == IDOK)
+        {
+            IniWrite(L"TileText", L"SecondaryText", text.c_str());
+            if (!TrimCopy(text).empty())
+                IniWrite(L"TileText", L"Enabled", L"1");
+            Log(g_ui.tileTextEdited.c_str(), text.c_str());
+        }
+    }
+    break;
+
+    case ID_TILE_TEXT_SECONDARY_CLEAR:
+        IniWrite(L"TileText", L"SecondaryText", L"");
+        LogText(g_ui.tileTextCleared);
+        break;
+
+    case ID_TILE_TEXT_BADGE_EDIT:
+    {
+        std::wstring text = IniReadS(L"TileText", L"BadgeText", L"");
+        if (ShowTextInputDialog(h, g_ui.tileTextBadgeInputTitle, text, true) == IDOK)
+        {
+            IniWrite(L"TileText", L"BadgeText", text.c_str());
+            if (!TrimCopy(text).empty())
+                IniWrite(L"TileText", L"Enabled", L"1");
+            Log(g_ui.tileTextEdited.c_str(), text.c_str());
+        }
+    }
+    break;
+
+    case ID_TILE_TEXT_BADGE_CLEAR:
+        IniWrite(L"TileText", L"BadgeText", L"");
+        LogText(g_ui.tileTextCleared);
+        break;
+
+    case ID_TILE_TEXT_H_ALIGN:
+    {
+        const wchar_t* next = NextTileTextHorizontalAlign(IniReadS(L"TileText", L"HorizontalAlign", L"Center"));
+        IniWrite(L"TileText", L"HorizontalAlign", next);
+        Log(g_ui.tileTextHorizontalAlign.c_str(), next);
+    }
+    break;
+
+    case ID_TILE_TEXT_V_ALIGN:
+    {
+        const wchar_t* next = NextTileTextVerticalAlign(IniReadS(L"TileText", L"VerticalAlign", L"Top"));
+        IniWrite(L"TileText", L"VerticalAlign", next);
+        Log(g_ui.tileTextVerticalAlign.c_str(), next);
+    }
+    break;
+
+    case ID_TILE_TEXT_BADGE_H_ALIGN:
+    {
+        const wchar_t* next = NextTileTextHorizontalAlign(IniReadS(L"TileText", L"BadgeHorizontalAlign", L"Right"));
+        IniWrite(L"TileText", L"BadgeHorizontalAlign", next);
+        Log(g_ui.tileTextBadgeHorizontalAlign.c_str(), next);
+    }
+    break;
+
+    case ID_TILE_TEXT_BADGE_V_ALIGN:
+    {
+        const wchar_t* next = NextTileTextVerticalAlign(IniReadS(L"TileText", L"BadgeVerticalAlign", L"Top"));
+        IniWrite(L"TileText", L"BadgeVerticalAlign", next);
+        Log(g_ui.tileTextBadgeVerticalAlign.c_str(), next);
+    }
+    break;
+
+    case ID_TILE_TEXT_FONT_SIZE:
+        CycleTileTextFontSize(L"FontSize", 18, g_ui.tileTextFontSize);
+        break;
+
+    case ID_TILE_TEXT_SECONDARY_FONT_SIZE:
+        CycleTileTextFontSize(L"SecondaryFontSize", 12, g_ui.tileTextSecondaryFontSize);
+        break;
+
+    case ID_TILE_TEXT_BADGE_FONT_SIZE:
+        CycleTileTextFontSize(L"BadgeFontSize", 40, g_ui.tileTextBadgeFontSize);
+        break;
+
+    case ID_TILE_TEXT_SHADOW:
+        ToggleTileTextBool(L"Shadow", 1);
+        break;
+
+    case ID_TILE_TEXT_APPLY_MEDIUM:
+        ToggleTileTextBool(L"ApplyToMediumTile", 1);
+        break;
+
+    case ID_TILE_TEXT_APPLY_WIDE:
+        ToggleTileTextBool(L"ApplyToWideTile", 1);
+        break;
+
+    case ID_TILE_TEXT_APPLY_LARGE:
+        ToggleTileTextBool(L"ApplyToLargeTile", 1);
+        break;
+
+    case ID_TILE_TEXT_APPLY_SMALL:
+        ToggleTileTextBool(L"ApplyToSmallTile", 0);
+        break;
+
+    case ID_TILE_TEXT_APPLY_LOGOS:
+        ToggleTileTextBool(L"ApplyToLogos", 0);
+        break;
 
     case ID_GENERATED_ASSET_CACHE:
     {

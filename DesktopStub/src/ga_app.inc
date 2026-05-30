@@ -1539,6 +1539,16 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.generatedAssetPrecacheSummary.c_str(),
         StateEnabled(GeneratedAssetPrecacheEnabled()),
         GeneratedAssetPrecacheMaxFiles());
+    std::wstring tileTextSummary = TileTextPrimaryText();
+    std::wstring tileTextSecondarySummary = TileTextSecondaryText();
+    std::wstring tileTextBadgeSummary = TileTextBadgeText();
+    if (!tileTextSecondarySummary.empty())
+        tileTextSummary += (tileTextSummary.empty() ? L"" : L" / ") + tileTextSecondarySummary;
+    if (!tileTextBadgeSummary.empty())
+        tileTextSummary += std::wstring(tileTextSummary.empty() ? L"" : L" / ") + L"badge=" + tileTextBadgeSummary;
+    Log(g_ui.tileTextSummary.c_str(),
+        StateEnabled(IniReadI(L"TileText", L"Enabled", 0) != 0),
+        tileTextSummary.c_str());
     Log(g_ui.comRegistrationHelperSummary.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0));
     Log(g_ui.wallpaperDetectionFallbackSummary.c_str(), StateEnabled(g_wallpaperDetectionFallbackOnInvalid));
     int liveWallpaperCaptureRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
