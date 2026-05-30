@@ -1416,7 +1416,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             }
 
             if (IniReadI(L"Settings", L"NotificationsEnabled", 1) != 0 &&
-                IniReadI(L"Settings", L"NotifyOnAlreadyRunning", 1) != 0)
+                IniReadI(L"Settings", L"NotifyOnAlreadyRunning", 0) != 0)
             {
                 std::wstring title = StartupString(L"NotificationTitle", L"DesktopStub");
                 std::wstring message = StartupString(L"NotificationAlreadyRunning", L"DesktopStub is already running.");
@@ -1539,7 +1539,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.generatedAssetPrecacheSummary.c_str(),
         StateEnabled(GeneratedAssetPrecacheEnabled()),
         GeneratedAssetPrecacheMaxFiles());
-    Log(g_ui.comRegistrationHelperSummary.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 1) != 0));
+    Log(g_ui.comRegistrationHelperSummary.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0));
     Log(g_ui.wallpaperDetectionFallbackSummary.c_str(), StateEnabled(g_wallpaperDetectionFallbackOnInvalid));
     int liveWallpaperCaptureRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
     std::wstring liveWallpaperCaptureRefreshText = LiveWallpaperRefreshDisplayText(liveWallpaperCaptureRefreshMs);

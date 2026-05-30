@@ -270,7 +270,7 @@ static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
     g_generateOnStartupOnlyWhenChanged = IniReadI(L"Settings", L"GenerateOnStartupOnlyWhenChanged", 1) != 0;
     g_liveTileUpdateMode = static_cast<int>(ParseLiveTileUpdateModeValue(
         IniReadS(L"Settings", L"ExperimentalLiveTileUpdate", L"Auto")));
-    g_liveTileRelaunchOnSwitch = IniReadI(L"Settings", L"LiveTileRelaunchOnSwitch", 0) != 0;
+    g_liveTileRelaunchOnSwitch = IniReadI(L"Settings", L"LiveTileRelaunchOnSwitch", 1) != 0;
     g_clearLiveTileOnShutdown = IniReadI(L"Settings", L"ClearLiveTileOnShutdown", 1) != 0;
     g_manifestCompatibilityTarget = static_cast<int>(ParseManifestCompatibilityTargetValue(
         IniReadS(L"Settings", L"AppxManifestTarget", L"Windows10")));
@@ -289,7 +289,7 @@ static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
     g_notifyOnSuccess = IniReadI(L"Settings", L"NotifyOnSuccess", 0) != 0;
     g_notifyOnFailure = IniReadI(L"Settings", L"NotifyOnFailure", 1) != 0;
     g_notifyOnBusy = IniReadI(L"Settings", L"NotifyOnBusy", 0) != 0;
-    g_notifyOnAlreadyRunning = IniReadI(L"Settings", L"NotifyOnAlreadyRunning", 1) != 0;
+    g_notifyOnAlreadyRunning = IniReadI(L"Settings", L"NotifyOnAlreadyRunning", 0) != 0;
     g_notifyOnSingleInstanceFailure = IniReadI(L"Settings", L"NotifyOnSingleInstanceFailure", 1) != 0;
     g_listenWallpaper = IniReadI(L"Settings", L"ListenWallpaper", 1) != 0;
     g_listenFit = IniReadI(L"Settings", L"ListenFit", 1) != 0;

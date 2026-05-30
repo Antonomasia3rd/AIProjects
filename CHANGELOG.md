@@ -27,3 +27,5 @@ Older releases are intentionally kept when practical so users can compare behavi
 - Release family is `DesktopStub-vN`; the built executable is `DesktopStub.exe`.
 - Changed Live Tile relaunch handling from a mode-switch-only action into a runtime-condition repair. When enabled, packaged launches with Live Tile disabled relaunch as the unpackaged desktop app before manifest registration, and unpackaged launches with Live Tile forced on relaunch through the registered package entry.
 - Fixed cold Start/tile activation in forced `LiveTile` mode so a stale one-time static icon/AppxManifest refresh relaunches through the unpackaged process first, matching the tray-switch path.
+- Changed DesktopStub defaults: `LiveTileRelaunchOnSwitch=1`, `NotifyOnAlreadyRunning=0`, and `ComRegistrationUseHelper=0`.
+- Tidied the tray menu by moving **Generate now** to the top level and nesting Live Tile mode/registration/runtime/Windows 8 options instead of separating them with dividers.
