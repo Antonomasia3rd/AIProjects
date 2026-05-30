@@ -196,6 +196,10 @@ void LoadUiStrings()
     g_ui.liveTileModeLiveTile = IniReadS(L"Strings", L"LiveTileModeLiveTile", L"Live Tile");
     g_ui.liveTileModeEnabled = IniReadS(L"Strings", L"LiveTileModeEnabled", L"Enabled");
     g_ui.liveTileModeDisabled = IniReadS(L"Strings", L"LiveTileModeDisabled", L"Disabled");
+    g_ui.liveTileModeTitle = IniReadS(L"Strings", L"LiveTileModeTitle", L"Mode");
+    g_ui.liveTileRegistrationTitle = IniReadS(L"Strings", L"LiveTileRegistrationTitle", L"Registration");
+    g_ui.liveTileRuntimeTitle = IniReadS(L"Strings", L"LiveTileRuntimeTitle", L"Runtime behavior");
+    g_ui.liveTileWindows8Title = IniReadS(L"Strings", L"LiveTileWindows8Title", L"Windows 8 / 8.1");
     g_ui.liveTileRelaunchOnSwitch = IniReadS(L"Strings", L"LiveTileRelaunchOnSwitch", L"Relaunch when runtime mismatches");
     g_ui.clearLiveTileOnShutdown = IniReadS(L"Strings", L"ClearLiveTileOnShutdown", L"Clear Live Tile on shutdown");
     g_ui.liveTileRelaunchToPackagedQueued = IniReadS(L"Strings", L"LiveTileRelaunchToPackagedQueued", L"[i] Live Tile runtime mismatch detected; relaunching through the registered package entry.");
@@ -209,6 +213,10 @@ void LoadUiStrings()
     g_ui.generateDesktopIconForDisabledEntries = IniReadS(L"Strings", L"GenerateDesktopIconForDisabledEntries", L"Generate Desktop Icon for disabled entries");
     g_ui.deleteDisabledAssets = IniReadS(L"Strings", L"DeleteDisabledAssets", L"Auto-delete disabled asset files");
     g_ui.wallpaperDetectionFallback = IniReadS(L"Strings", L"WallpaperDetectionFallback", L"Fallback when selected path is invalid");
+    g_ui.wallpaperDecodeLowMemory = IniReadS(L"Strings", L"WallpaperDecodeLowMemory", L"Low-memory wallpaper decode");
+    g_ui.wallpaperDecodeMaxLongEdgeLabel = IniReadS(L"Strings", L"WallpaperDecodeMaxLongEdgeLabel", L"Wallpaper decode max edge: %s");
+    g_ui.wallpaperDecodeAuto = IniReadS(L"Strings", L"WallpaperDecodeAuto", L"auto");
+    g_ui.wallpaperDecodePxText = IniReadS(L"Strings", L"WallpaperDecodePxText", L"%d px");
     g_ui.liveWallpaperCaptureTitle = IniReadS(L"Strings", L"LiveWallpaperCaptureTitle", L"Live Wallpaper Detection:");
     g_ui.liveWallpaperCapture = IniReadS(L"Strings", L"LiveWallpaperCapture", L"Capture live wallpaper snapshot");
     g_ui.liveWallpaperCaptureScreenFallback = IniReadS(L"Strings", L"LiveWallpaperCaptureScreenFallback", L"Unsafe screen fallback (may capture desktop)");
@@ -792,6 +800,8 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.liveWallpaperCaptureStartupRefreshMsLabel, L"LiveWallpaperCaptureStartupRefreshMsLabel", { L"%s" });
     RequireFormat(g_ui.liveWallpaperCaptureStartupRefreshDurationMsLabel, L"LiveWallpaperCaptureStartupRefreshDurationMsLabel", { L"%s" });
     RequireFormat(g_ui.liveWallpaperCaptureMsText, L"LiveWallpaperCaptureMsText", { L"%d" });
+    RequireFormat(g_ui.wallpaperDecodeMaxLongEdgeLabel, L"WallpaperDecodeMaxLongEdgeLabel", { L"%s" });
+    RequireFormat(g_ui.wallpaperDecodePxText, L"WallpaperDecodePxText", { L"%d" });
     RequireFormat(g_ui.wallpaperDetectionMethodLabel, L"WallpaperDetectionMethodLabel", { L"%s" });
     RequireFormat(g_ui.singleInstanceFailureActionLabel, L"SingleInstanceFailureActionLabel", { L"%s" });
     RequireFormat(g_ui.generatedAssetCacheMaxEntriesLabel, L"GeneratedAssetCacheMaxEntriesLabel", { L"%d" });

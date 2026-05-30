@@ -796,6 +796,31 @@ static bool ParseCommandLineOptions()
             AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCapture", false);
             continue;
         }
+        if (IEquals(arg, L"--wallpaper-decode-low-memory") || IEquals(arg, L"--low-memory-wallpaper-decode"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"WallpaperDecodeLowMemory", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-wallpaper-decode-low-memory") || IEquals(arg, L"--no-low-memory-wallpaper-decode"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"WallpaperDecodeLowMemory", false);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--wallpaper-decode-max-long-edge", value, error, matched))
+            return fail(error);
+        if (!matched && !CommandLineTryGetOptionValue(argc, argv, i, L"--wallpaper-decode-max", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring decodeValue = ToLowerCopy(TrimCopy(value));
+            int parsed = 0;
+            if (decodeValue == L"auto" || decodeValue == L"none" || decodeValue == L"off")
+                parsed = 0;
+            else if (!ParseCommandLineClampedInt(value, L"--wallpaper-decode-max-long-edge", 0, 32768, parsed, error))
+                return fail(error);
+            AddCommandLineIntSetting(L"Settings", L"WallpaperDecodeMaxLongEdge", parsed);
+            continue;
+        }
         if (IEquals(arg, L"--live-wallpaper-screen-fallback"))
         {
             AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCaptureScreenFallback", true);
@@ -1354,6 +1379,10 @@ static std::wstring CommandLineUsageText()
         L"  --detect <method>                   Set and save wallpaper detection method.\r\n"
         L"  --live-wallpaper-capture | --no-live-wallpaper-capture\r\n"
         L"                                      Enable/disable live wallpaper snapshots.\r\n"
+        L"  --wallpaper-decode-low-memory | --no-wallpaper-decode-low-memory\r\n"
+        L"                                      Enable/disable low-memory static wallpaper decode.\r\n"
+        L"  --wallpaper-decode-max-long-edge <px|auto>\r\n"
+        L"                                      Set decode cap, 0-32768; auto=0.\r\n"
         L"  --live-wallpaper-screen-fallback | --no-live-wallpaper-screen-fallback\r\n"
         L"                                      Enable/disable unsafe screen-copy fallback.\r\n"
         L"  --live-wallpaper-delay <ms>          Set snapshot startup delay, 0-30000.\r\n"
