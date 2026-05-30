@@ -951,6 +951,8 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     std::wstring state;
     state += L"v=4;";
     state += L"wallpaper=" + FileFingerprint(wallpaperPath) + L";";
+    state += L"wallpaperDecodeLowMemory=" + IntToWString(IniReadI(L"Settings", L"WallpaperDecodeLowMemory", 1) ? 1 : 0) + L";";
+    state += L"wallpaperDecodeMaxLongEdge=" + IntToWString(IniReadClampedI(L"Settings", L"WallpaperDecodeMaxLongEdge", 0, 0, 32768)) + L";";
     state += L"exe=" + FileFingerprint(g_exePath) + L";";
     state += L"manifest=" + FileFingerprint(GetExeDir() + L"\\AppxManifest.xml") + L";";
     state += L"method=" + std::wstring(WallpaperDetectionMethodName(CurrentWallpaperDetectionMethod())) + L";";
@@ -1159,6 +1161,123 @@ static bool ShouldBakeTileTextIntoAssets(bool liveTileUpdateMode)
     return !liveTileUpdateMode || ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10;
 }
 
+static bool GenerationHasWallpaperBackedAssets(bool liveTileUpdateMode)
+{
+    if (liveTileUpdateMode)
+        return true;
+
+    for (const auto& t : g_tiles)
+    {
+        if (IniReadI(L"Assets", t.name, 0) != 0)
+            return true;
+    }
+    return false;
+}
+
+static void AddLongEdgeCandidate(int& maxLongEdge, int width, int height)
+{
+    if (width > 0)
+        maxLongEdge = std::max(maxLongEdge, width);
+    if (height > 0)
+        maxLongEdge = std::max(maxLongEdge, height);
+}
+
+static int MaxWallpaperBackedAssetLongEdge(const std::vector<int>& scales, bool liveTileUpdateMode)
+{
+    int maxLongEdge = 0;
+
+    if (!liveTileUpdateMode)
+    {
+        for (const auto& t : g_tiles)
+        {
+            if (IniReadI(L"Assets", t.name, 0) == 0)
+                continue;
+
+            AddLongEdgeCandidate(maxLongEdge, t.w, t.h);
+            for (int scale : scales)
+                AddLongEdgeCandidate(maxLongEdge, ScalePixels(t.w, scale), ScalePixels(t.h, scale));
+        }
+    }
+
+    if (liveTileUpdateMode)
+    {
+        for (const auto& t : g_liveTileAssets)
+            AddLongEdgeCandidate(maxLongEdge, t.w, t.h);
+    }
+
+    return maxLongEdge;
+}
+
+static int MaxWallpaperDecodeLongEdgeForGeneration(const std::vector<int>& scales, bool liveTileUpdateMode)
+{
+    if (!GenerationHasWallpaperBackedAssets(liveTileUpdateMode))
+        return 0;
+
+    int maxLongEdge = MaxWallpaperBackedAssetLongEdge(scales, liveTileUpdateMode);
+
+    // A wallpaper larger than the visible desktop cannot contribute extra detail
+    // to the desktop-backed tile image, but it can cost hundreds of MB when GDI+
+    // decodes it at native size. Use the monitor/virtual desktop as the automatic
+    // decode ceiling, while still honoring unusually large generated assets.
+    if (!g_disableFitting)
+    {
+        FitMode wallpaperFit = GetWallpaperFit();
+        if ((wallpaperFit == FitMode::Center || wallpaperFit == FitMode::Tile) &&
+            IniReadClampedI(L"Settings", L"WallpaperDecodeMaxLongEdge", 0, 0, 32768) <= 0)
+        {
+            // Center/Tile currently use the source bitmap's own pixel size as part
+            // of their visual result. Keep the old full-size decode for those
+            // modes unless the user explicitly sets WallpaperDecodeMaxLongEdge.
+            return 0;
+        }
+
+        RECT primaryRect{};
+        if (GetPrimaryMonitorRect(primaryRect))
+            AddLongEdgeCandidate(maxLongEdge, primaryRect.right - primaryRect.left, primaryRect.bottom - primaryRect.top);
+
+        if (wallpaperFit == FitMode::Span)
+        {
+            RECT virtualRect{};
+            if (GetVirtualDesktopRect(virtualRect))
+                AddLongEdgeCandidate(maxLongEdge, virtualRect.right - virtualRect.left, virtualRect.bottom - virtualRect.top);
+        }
+    }
+
+    if (maxLongEdge <= 0)
+        maxLongEdge = 2048;
+    return ClampInt(maxLongEdge, 1, 32768);
+}
+
+static void LogWallpaperBitmapLoad(const WallpaperBitmapLoadInfo& info, Bitmap* bitmap)
+{
+    int bitmapWidth = 0;
+    int bitmapHeight = 0;
+    if (!BitmapDimensionsToInt(bitmap, bitmapWidth, bitmapHeight))
+    {
+        LogText(g_ui.failedLoadWallpaper);
+        return;
+    }
+
+    if (info.usedWic && info.downscaled)
+    {
+        Log(L"[i] Wallpaper image loaded with low-memory WIC decode: %u x %u -> %u x %u (max long edge=%d).",
+            info.originalWidth,
+            info.originalHeight,
+            info.loadedWidth,
+            info.loadedHeight,
+            info.maxLongEdge);
+        return;
+    }
+
+    if (info.usedWic)
+    {
+        Log(L"[i] Wallpaper image loaded with WIC: %u x %u.", info.loadedWidth, info.loadedHeight);
+        return;
+    }
+
+    Log(g_ui.wallpaperImageLoaded.c_str(), bitmapWidth, bitmapHeight);
+}
+
 static bool RenderWallpaperToGeneratedAssetCache(
     const std::wstring& exeDir,
     const ManifestDisplayInfo& manifestInfo,
@@ -1178,7 +1297,11 @@ static bool RenderWallpaperToGeneratedAssetCache(
     std::wstring stagingCacheDir = cacheDir + L".precache." + NewLiveTileAssetToken();
     DeleteDirectoryTree(stagingCacheDir);
 
-    std::unique_ptr<Bitmap> src(new Bitmap(wallpaperPath.c_str()));
+    WallpaperBitmapLoadInfo wallpaperLoadInfo{};
+    std::unique_ptr<Bitmap> src = LoadWallpaperBitmapForRender(
+        wallpaperPath,
+        MaxWallpaperDecodeLongEdgeForGeneration(scales, liveTileUpdateMode),
+        &wallpaperLoadInfo);
     if (!src || src->GetLastStatus() != Ok)
         return false;
 
@@ -1665,15 +1788,19 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 
     if (!restoredFromGeneratedAssetCache)
     {
-        auto src = std::make_unique<Bitmap>(wp);
-        if (src->GetLastStatus() != Ok)
+        WallpaperBitmapLoadInfo wallpaperLoadInfo{};
+        std::unique_ptr<Bitmap> src = LoadWallpaperBitmapForRender(
+            wp,
+            MaxWallpaperDecodeLongEdgeForGeneration(scales, liveTileUpdateMode),
+            &wallpaperLoadInfo);
+        if (!src || src->GetLastStatus() != Ok)
         {
             LogText(g_ui.failedLoadWallpaper);
             if (g_notifyOnFailure)
                 NotifyTrayBalloon(g_ui.notificationTitle, g_ui.failedLoadWallpaper, NIIF_ERROR);
             return false;
         }
-        Log(g_ui.wallpaperImageLoaded.c_str(), static_cast<int>(src->GetWidth()), static_cast<int>(src->GetHeight()));
+        LogWallpaperBitmapLoad(wallpaperLoadInfo, src.get());
 
         FitMode renderMode = FitMode::Fill;
         std::unique_ptr<Bitmap> preparedWallpaper;

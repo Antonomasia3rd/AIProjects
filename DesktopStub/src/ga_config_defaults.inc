@@ -97,6 +97,8 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"WallpaperDetectionMethod", L"TranscodedImageCache"},
     {L"Settings", L"WallpaperDetectionFallbackOnInvalid", L"1"},
     {L"Settings", L"WallpaperDetectionLogRepeatMs", L"60000"},
+    {L"Settings", L"WallpaperDecodeLowMemory", L"1"},
+    {L"Settings", L"WallpaperDecodeMaxLongEdge", L"0"},
     {L"Settings", L"LiveWallpaperCapture", L"1"},
     {L"Settings", L"LiveWallpaperCaptureDelayMs", L"2500"},
     {L"Settings", L"LiveWallpaperCaptureRefreshMs", L"10000"},

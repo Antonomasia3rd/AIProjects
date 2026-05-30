@@ -1,7 +1,8 @@
-﻿// compile command: cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub.cpp /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+﻿// compile command: cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub.cpp /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 #define NOMINMAX
 #include <windows.h>
 #include <gdiplus.h>
+#include <wincodec.h>
 #include <shlwapi.h>
 #include <shellapi.h>
 #include <shlobj.h>

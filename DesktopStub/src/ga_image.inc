@@ -53,6 +53,243 @@ static bool BitmapDimensionsToInt(Bitmap* bitmap, int& width, int& height)
     return true;
 }
 
+struct WallpaperBitmapLoadInfo
+{
+    UINT originalWidth = 0;
+    UINT originalHeight = 0;
+    UINT loadedWidth = 0;
+    UINT loadedHeight = 0;
+    int maxLongEdge = 0;
+    bool usedWic = false;
+    bool downscaled = false;
+};
+
+struct ComApartmentScope
+{
+    HRESULT hr = E_FAIL;
+    bool uninitialize = false;
+
+    explicit ComApartmentScope(DWORD flags = COINIT_MULTITHREADED)
+    {
+        hr = CoInitializeEx(nullptr, flags);
+        uninitialize = SUCCEEDED(hr);
+        if (hr == RPC_E_CHANGED_MODE)
+            hr = S_OK;
+    }
+
+    ~ComApartmentScope()
+    {
+        if (uninitialize)
+            CoUninitialize();
+    }
+
+    bool ok() const { return SUCCEEDED(hr); }
+};
+
+template <typename T>
+struct ComReleaser
+{
+    void operator()(T* p) const noexcept
+    {
+        if (p)
+            p->Release();
+    }
+};
+
+template <typename T>
+using UniqueComPtr = std::unique_ptr<T, ComReleaser<T>>;
+
+static UINT ScaleDimensionForLongEdge(UINT value, UINT sourceLongEdge, UINT targetLongEdge)
+{
+    if (value == 0 || sourceLongEdge == 0 || targetLongEdge == 0 || sourceLongEdge <= targetLongEdge)
+        return value;
+
+    unsigned long long scaled =
+        (static_cast<unsigned long long>(value) * targetLongEdge + sourceLongEdge / 2u) /
+        sourceLongEdge;
+    if (scaled < 1)
+        scaled = 1;
+    if (scaled > static_cast<unsigned long long>(UINT_MAX))
+        scaled = UINT_MAX;
+    return static_cast<UINT>(scaled);
+}
+
+static std::unique_ptr<Bitmap> TryLoadWicBitmapForRender(
+    const std::wstring& path,
+    int maxLongEdge,
+    WallpaperBitmapLoadInfo& info)
+{
+    info = WallpaperBitmapLoadInfo{};
+    info.maxLongEdge = maxLongEdge;
+    if (path.empty() || maxLongEdge <= 0)
+        return nullptr;
+
+    ComApartmentScope apartment;
+    if (!apartment.ok())
+        return nullptr;
+
+    IWICImagingFactory* rawFactory = nullptr;
+    HRESULT hr = CoCreateInstance(
+        CLSID_WICImagingFactory,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&rawFactory));
+    if (FAILED(hr) || !rawFactory)
+        return nullptr;
+    UniqueComPtr<IWICImagingFactory> factory(rawFactory);
+
+    IWICBitmapDecoder* rawDecoder = nullptr;
+    hr = factory->CreateDecoderFromFilename(
+        path.c_str(),
+        nullptr,
+        GENERIC_READ,
+        WICDecodeMetadataCacheOnDemand,
+        &rawDecoder);
+    if (FAILED(hr) || !rawDecoder)
+        return nullptr;
+    UniqueComPtr<IWICBitmapDecoder> decoder(rawDecoder);
+
+    IWICBitmapFrameDecode* rawFrame = nullptr;
+    hr = decoder->GetFrame(0, &rawFrame);
+    if (FAILED(hr) || !rawFrame)
+        return nullptr;
+    UniqueComPtr<IWICBitmapFrameDecode> frame(rawFrame);
+
+    UINT srcW = 0;
+    UINT srcH = 0;
+    hr = frame->GetSize(&srcW, &srcH);
+    if (FAILED(hr) || srcW == 0 || srcH == 0 || srcW > static_cast<UINT>(INT_MAX) || srcH > static_cast<UINT>(INT_MAX))
+        return nullptr;
+
+    info.originalWidth = srcW;
+    info.originalHeight = srcH;
+
+    UINT sourceLongEdge = std::max(srcW, srcH);
+    UINT targetLongEdge = static_cast<UINT>(std::max(1, maxLongEdge));
+    UINT dstW = ScaleDimensionForLongEdge(srcW, sourceLongEdge, targetLongEdge);
+    UINT dstH = ScaleDimensionForLongEdge(srcH, sourceLongEdge, targetLongEdge);
+    if (dstW == 0 || dstH == 0 || dstW > static_cast<UINT>(INT_MAX) || dstH > static_cast<UINT>(INT_MAX))
+        return nullptr;
+
+    IWICBitmapSource* source = frame.get();
+    UniqueComPtr<IWICBitmapScaler> scaler;
+    if (sourceLongEdge > targetLongEdge)
+    {
+        IWICBitmapScaler* rawScaler = nullptr;
+        hr = factory->CreateBitmapScaler(&rawScaler);
+        if (FAILED(hr) || !rawScaler)
+            return nullptr;
+        scaler.reset(rawScaler);
+        hr = scaler->Initialize(frame.get(), dstW, dstH, WICBitmapInterpolationModeFant);
+        if (FAILED(hr))
+            return nullptr;
+        source = scaler.get();
+        info.downscaled = true;
+    }
+
+    IWICFormatConverter* rawConverter = nullptr;
+    hr = factory->CreateFormatConverter(&rawConverter);
+    if (FAILED(hr) || !rawConverter)
+        return nullptr;
+    UniqueComPtr<IWICFormatConverter> converter(rawConverter);
+
+    hr = converter->Initialize(
+        source,
+        GUID_WICPixelFormat32bppBGRA,
+        WICBitmapDitherTypeNone,
+        nullptr,
+        0.0,
+        WICBitmapPaletteTypeCustom);
+    if (FAILED(hr))
+        return nullptr;
+
+    const UINT wicStride = dstW * 4u;
+    const size_t wicBytes = static_cast<size_t>(wicStride) * static_cast<size_t>(dstH);
+    if (wicBytes == 0 || wicBytes > static_cast<size_t>(INT_MAX))
+        return nullptr;
+
+    std::vector<BYTE> pixels(wicBytes);
+    hr = converter->CopyPixels(nullptr, wicStride, static_cast<UINT>(pixels.size()), pixels.data());
+    if (FAILED(hr))
+        return nullptr;
+
+    std::unique_ptr<Bitmap> bitmap(new Bitmap(static_cast<INT>(dstW), static_cast<INT>(dstH), PixelFormat32bppARGB));
+    if (!BitmapOk(bitmap.get(), L"create WIC decoded wallpaper bitmap"))
+        return nullptr;
+
+    Rect lockRect(0, 0, static_cast<INT>(dstW), static_cast<INT>(dstH));
+    BitmapData data{};
+    if (!GdiOk(bitmap->LockBits(&lockRect, ImageLockModeWrite, PixelFormat32bppARGB, &data), L"lock WIC decoded wallpaper bitmap"))
+        return nullptr;
+
+    BYTE* base = static_cast<BYTE*>(data.Scan0);
+    bool copied = base != nullptr && data.Stride != 0;
+    if (copied)
+    {
+        const int absStride = data.Stride < 0 ? -data.Stride : data.Stride;
+        if (absStride < static_cast<int>(wicStride))
+        {
+            copied = false;
+        }
+        else
+        {
+            for (UINT y = 0; y < dstH; ++y)
+            {
+                BYTE* dstRow = data.Stride >= 0
+                    ? base + static_cast<size_t>(y) * static_cast<size_t>(data.Stride)
+                    : base + static_cast<size_t>(dstH - 1u - y) * static_cast<size_t>(absStride);
+                memcpy(dstRow, pixels.data() + static_cast<size_t>(y) * static_cast<size_t>(wicStride), wicStride);
+            }
+        }
+    }
+
+    Status unlockStatus = bitmap->UnlockBits(&data);
+    if (!copied || unlockStatus != Ok)
+        return nullptr;
+
+    info.usedWic = true;
+    info.loadedWidth = dstW;
+    info.loadedHeight = dstH;
+    return bitmap;
+}
+
+static std::unique_ptr<Bitmap> LoadWallpaperBitmapForRender(
+    const std::wstring& path,
+    int autoMaxLongEdge,
+    WallpaperBitmapLoadInfo* loadInfo = nullptr)
+{
+    WallpaperBitmapLoadInfo info{};
+    int configuredMaxLongEdge = IniReadClampedI(L"Settings", L"WallpaperDecodeMaxLongEdge", 0, 0, 32768);
+    int maxLongEdge = configuredMaxLongEdge > 0 ? configuredMaxLongEdge : autoMaxLongEdge;
+
+    if (IniReadI(L"Settings", L"WallpaperDecodeLowMemory", 1) != 0 && maxLongEdge > 0)
+    {
+        std::unique_ptr<Bitmap> wicBitmap = TryLoadWicBitmapForRender(path, maxLongEdge, info);
+        if (wicBitmap)
+        {
+            if (loadInfo)
+                *loadInfo = info;
+            return wicBitmap;
+        }
+    }
+
+    std::unique_ptr<Bitmap> bitmap(new Bitmap(path.c_str()));
+    if (bitmap && bitmap->GetLastStatus() == Ok)
+    {
+        UINT w = bitmap->GetWidth();
+        UINT h = bitmap->GetHeight();
+        info.originalWidth = w;
+        info.originalHeight = h;
+        info.loadedWidth = w;
+        info.loadedHeight = h;
+    }
+    info.maxLongEdge = maxLongEdge;
+
+    if (loadInfo)
+        *loadInfo = info;
+    return bitmap;
+}
+
 static bool TryParseHexNibble(wchar_t ch, BYTE& value)
 {
     if (ch >= L'0' && ch <= L'9')
