@@ -475,9 +475,11 @@ void LoadUiStrings()
     g_ui.comPreferredMode = IniReadS(L"Strings", L"ComPreferredMode", L"COM preferred with PowerShell fallback");
     g_ui.consoleAllocated = IniReadS(L"Strings", L"ConsoleAllocated", L"[i] Console allocated.");
     g_ui.startupGenerationEnabled = IniReadS(L"Strings", L"StartupGenerationEnabled", L"[i] Startup generation enabled.");
+    g_ui.startupGenerationRestoringClearedLiveTile = IniReadS(L"Strings", L"StartupGenerationRestoringClearedLiveTile", L"[i] Startup generation restoring Live Tile because it was cleared on shutdown.");
     g_ui.startupGenerationSkippedUnchanged = IniReadS(L"Strings", L"StartupGenerationSkippedUnchanged", L"[i] Startup generation skipped: wallpaper/config unchanged.");
     g_ui.startupGenerationSkippedNoWallpaper = IniReadS(L"Strings", L"StartupGenerationSkippedNoWallpaper", L"[!] Startup generation skipped: no wallpaper detected.");
     g_ui.startupGenerationReason = IniReadS(L"Strings", L"StartupGenerationReason", L"startup generation");
+    g_ui.startupLiveTileRestoreReason = IniReadS(L"Strings", L"StartupLiveTileRestoreReason", L"startup Live Tile restore");
     g_ui.commandLineGenerationRequestReason = IniReadS(L"Strings", L"CommandLineGenerationRequestReason", L"command-line generation request");
     g_ui.commandLineOnceReason = IniReadS(L"Strings", L"CommandLineOnceReason", L"command-line --once");
     g_ui.commandLineWallpaperReason = IniReadS(L"Strings", L"CommandLineWallpaperReason", L"command-line wallpaper");

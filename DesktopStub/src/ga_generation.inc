@@ -1065,6 +1065,21 @@ static void SetLiveTileModeReregistrationPending(bool pending)
     IniWrite(L"State", L"LiveTileModeReregistrationPending", pending ? L"1" : L"0");
 }
 
+static bool LiveTileWasClearedOnShutdown()
+{
+    return IniReadI(L"State", L"LiveTileClearedOnShutdown", 0) != 0;
+}
+
+static void SetLiveTileClearedOnShutdown(bool cleared)
+{
+    IniWrite(L"State", L"LiveTileClearedOnShutdown", cleared ? L"1" : L"0");
+}
+
+static bool StartupLiveTileClearedStateNeedsGeneration()
+{
+    return UseExperimentalLiveTileUpdate() && LiveTileWasClearedOnShutdown();
+}
+
 static bool FixedPackagedLiveTileModeNeedsUnpackagedReregistration()
 {
     bool shouldRunPackaged = false;
@@ -1085,6 +1100,8 @@ static bool StartupGenerationCanSkip(const std::wstring& wallpaperPath)
     if (!g_generateOnStartupOnlyWhenChanged)
         return false;
     if (LiveTileModeReregistrationPending())
+        return false;
+    if (StartupLiveTileClearedStateNeedsGeneration())
         return false;
 
     std::wstring last = IniReadS(L"State", L"LastSuccessfulGenerationKey", L"");
@@ -2095,6 +2112,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         if (!restoredFromGeneratedAssetCache)
             SaveGeneratedAssetCache(exeDir, BuildGenerationStateKey(wp), generatedAssetCacheFiles);
         StoreSuccessfulGenerationState(wp);
+        SetLiveTileClearedOnShutdown(false);
         LogText(liveTileUpdateMode ? g_ui.assetGenerationLiveTileFinished : g_ui.assetGenerationFinished);
         if (g_notifyOnSuccess)
             NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationSuccess, NIIF_INFO);

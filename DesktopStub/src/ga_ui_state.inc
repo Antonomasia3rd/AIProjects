@@ -355,9 +355,11 @@ struct UiStrings
     std::wstring comPreferredMode;
     std::wstring consoleAllocated;
     std::wstring startupGenerationEnabled;
+    std::wstring startupGenerationRestoringClearedLiveTile;
     std::wstring startupGenerationSkippedUnchanged;
     std::wstring startupGenerationSkippedNoWallpaper;
     std::wstring startupGenerationReason;
+    std::wstring startupLiveTileRestoreReason;
     std::wstring commandLineGenerationRequestReason;
     std::wstring commandLineOnceReason;
     std::wstring commandLineWallpaperReason;
