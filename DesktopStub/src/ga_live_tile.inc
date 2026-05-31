@@ -81,13 +81,17 @@ static std::wstring ManifestAssetUri(const std::wstring& manifestAssetPath)
     return L"ms-appx:///" + PercentEncodeUriPath(path);
 }
 
-static std::wstring LiveTileAssetUriIfValid(const std::wstring& exeDir, const std::wstring& manifestAssetPath)
+static std::wstring LiveTileAssetUriIfValid(
+    const std::wstring& exeDir,
+    const std::wstring& manifestAssetPath,
+    int expectedWidth,
+    int expectedHeight)
 {
     if (!IsManifestRelativeAssetPath(manifestAssetPath))
         return L"";
 
     std::wstring fullPath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
-    if (!IsValidGeneratedPng(fullPath))
+    if (!IsValidGeneratedPngWithDimensions(fullPath, expectedWidth, expectedHeight))
         return L"";
 
     return ManifestAssetUri(manifestAssetPath);
@@ -235,7 +239,7 @@ static std::wstring BuildLiveTileXml(
         if (!templateName)
             continue;
 
-        std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file);
+        std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file, asset.w, asset.h);
         if (!uri.empty())
             hasUsableAsset = true;
         AppendLiveTileImageBinding(xml, templateName, uri, 0, asset.name);
@@ -384,7 +388,7 @@ static bool Appx_Update_LiveTileFromPendingXmlForActivationStub(std::wstring& fa
     // Win8/8.1 compatibility mode.
     std::vector<LiveTileUpdateAsset> fallbackAssets;
     for (const auto& t : g_liveTileAssets)
-        fallbackAssets.push_back({ t.name, t.file, t.binding, t.file });
+        fallbackAssets.push_back({ t.name, t.file, t.binding, t.file, t.w, t.h });
 
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
     tileXml = BuildLiveTileXml(GetExeDir(), manifestInfo, fallbackAssets);
@@ -419,10 +423,14 @@ static std::wstring LiveTileActivationTraceLogPath()
 
 static std::wstring LocalAppDataPath()
 {
-    wchar_t buffer[32768]{};
-    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buffer, static_cast<DWORD>(32768));
-    if (n > 0 && n < 32768)
-        return std::wstring(buffer, n);
+    DWORD needed = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
+    if (needed > 0)
+    {
+        std::vector<wchar_t> buffer(needed);
+        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buffer.data(), needed);
+        if (n > 0 && n < needed)
+            return std::wstring(buffer.data(), n);
+    }
 
     PWSTR known = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &known)) && known)
@@ -1072,13 +1080,17 @@ static bool ActivatePackagedLiveTileUpdateOopServer(
 
     HSTRING className = nullptr;
     HRESULT hr = WindowsCreateString(classId.c_str(), static_cast<UINT32>(classId.size()), &className);
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(hr) && className)
     {
         ::IInspectable* instance = nullptr;
         hr = RoActivateInstance(className, &instance);
         if (instance)
             instance->Release();
         WindowsDeleteString(className);
+    }
+    else if (SUCCEEDED(hr))
+    {
+        hr = E_POINTER;
     }
 
     if (shouldUninit)

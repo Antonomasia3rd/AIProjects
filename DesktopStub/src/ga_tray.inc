@@ -1516,12 +1516,12 @@ void Menu(HWND h)
     break;
 
     case ID_GENERATED_ASSET_CACHE_MAX_ENTRIES:
-        CycleSettingIntPreset(L"GeneratedAssetCacheMaxEntries", 64, 0, 10000, { 0, 8, 16, 32, 64, 128, 256, 512, 1000, 5000, 10000 });
+        CycleSettingIntPreset(L"GeneratedAssetCacheMaxEntries", 64, 0, 4096, { 0, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096 });
         break;
 
     case ID_GENERATED_ASSET_PRECACHE_MAX_FILES:
         if (GeneratedAssetCacheEnabled() && GeneratedAssetCacheMaxEntries() > 0)
-            CycleSettingIntPreset(L"GeneratedAssetPrecacheMaxFiles", 16, 0, 10000, { 0, 4, 8, 16, 32, 64, 128, 256, 512, 1000, 5000, 10000 });
+            CycleSettingIntPreset(L"GeneratedAssetPrecacheMaxFiles", 16, 0, 256, { 0, 4, 8, 16, 32, 64, 128, 256 });
         break;
 
     case ID_ADV_POLL_INTERVAL:

@@ -26,12 +26,16 @@ struct LiveTileUpdateAsset
     const wchar_t* stableFile;
     const wchar_t* binding;
     std::wstring file;
+    int w;
+    int h;
 };
 
 struct GeneratedAssetCacheFile
 {
     std::wstring cacheRelativePath;
     std::wstring activePath;
+    int expectedWidth;
+    int expectedHeight;
 };
 
 struct GenerationCompletionRecord
@@ -67,6 +71,7 @@ static bool Appx_Update_Or_Request_LiveTile(
 static std::wstring ResolveManifestAssetPath(const std::wstring& exeDir, const std::wstring& assetPath);
 static std::wstring ManifestAssetPathForTile(const ManifestDisplayInfo& info, const Tile& tile);
 static bool IsValidGeneratedPng(const std::wstring& path);
+static bool IsValidGeneratedPngWithDimensions(const std::wstring& path, int expectedWidth, int expectedHeight);
 
 static std::wstring FileNameFromPath(const std::wstring& path)
 {
@@ -285,20 +290,22 @@ static std::wstring GeneratedAssetCacheFilePath(const std::wstring& cacheDir, co
 
 static std::wstring ManifestGeneratedAssetCacheName(const wchar_t* tileName)
 {
-    return L"Manifest\\" + std::wstring(tileName ? tileName : L"Asset") + L".png";
+    return L"Assets\\" + std::wstring(tileName ? tileName : L"Asset") + L".png";
 }
 
 static std::wstring LiveGeneratedAssetCacheName(const wchar_t* tileName)
 {
-    return L"Live\\" + std::wstring(tileName ? tileName : L"Asset") + L".png";
+    return L"Assets\\" + std::wstring(tileName ? tileName : L"Asset") + L".png";
 }
 
 static void AddGeneratedAssetCacheFile(
     std::vector<GeneratedAssetCacheFile>& files,
     const std::wstring& cacheRelativePath,
-    const std::wstring& activePath)
+    const std::wstring& activePath,
+    int expectedWidth,
+    int expectedHeight)
 {
-    if (cacheRelativePath.empty() || activePath.empty())
+    if (cacheRelativePath.empty() || activePath.empty() || expectedWidth <= 0 || expectedHeight <= 0)
         return;
 
     for (const auto& file : files)
@@ -307,7 +314,7 @@ static void AddGeneratedAssetCacheFile(
             IEquals(file.activePath, activePath))
             return;
     }
-    files.push_back({ cacheRelativePath, activePath });
+    files.push_back({ cacheRelativePath, activePath, expectedWidth, expectedHeight });
 }
 
 static bool CopyPngFileAtomically(const std::wstring& sourcePath, const std::wstring& targetPath)
@@ -420,10 +427,15 @@ static std::vector<GeneratedAssetCacheFile> BuildGeneratedAssetCacheFileList(
             continue;
 
         std::wstring cacheName = ManifestGeneratedAssetCacheName(t.name);
-        AddGeneratedAssetCacheFile(files, cacheName, outPath);
+        AddGeneratedAssetCacheFile(files, cacheName, outPath, t.w, t.h);
 
         for (int scale : scales)
-            AddGeneratedAssetCacheFile(files, ScaleAssetPath(cacheName, scale), ScaleAssetPath(outPath, scale));
+            AddGeneratedAssetCacheFile(
+                files,
+                ScaleAssetPath(cacheName, scale),
+                ScaleAssetPath(outPath, scale),
+                ScalePixels(t.w, scale),
+                ScalePixels(t.h, scale));
     }
 
     if (liveTileUpdateMode)
@@ -432,8 +444,8 @@ static std::vector<GeneratedAssetCacheFile> BuildGeneratedAssetCacheFileList(
         {
             std::wstring updateAssetPath = VersionedLiveTileAssetPath(t, liveTileToken);
             std::wstring outPath = ResolveManifestAssetPath(exeDir, updateAssetPath);
-            liveTileUpdateAssets.push_back({ t.name, t.file, t.binding, updateAssetPath });
-            AddGeneratedAssetCacheFile(files, LiveGeneratedAssetCacheName(t.name), outPath);
+            liveTileUpdateAssets.push_back({ t.name, t.file, t.binding, updateAssetPath, t.w, t.h });
+            AddGeneratedAssetCacheFile(files, LiveGeneratedAssetCacheName(t.name), outPath, t.w, t.h);
         }
     }
 
@@ -449,7 +461,10 @@ static bool GeneratedAssetCacheFilesPresent(
 
     for (const auto& file : files)
     {
-        if (!IsValidGeneratedPng(GeneratedAssetCacheFilePath(cacheDir, file.cacheRelativePath)))
+        if (!IsValidGeneratedPngWithDimensions(
+                GeneratedAssetCacheFilePath(cacheDir, file.cacheRelativePath),
+                file.expectedWidth,
+                file.expectedHeight))
             return false;
     }
 
@@ -536,7 +551,8 @@ static bool TryRestoreGeneratedAssetCache(
     for (const auto& file : files)
     {
         std::wstring sourcePath = GeneratedAssetCacheFilePath(cacheDir, file.cacheRelativePath);
-        if (!CopyPngFileAtomically(sourcePath, file.activePath) || !IsValidGeneratedPng(file.activePath))
+        if (!CopyPngFileAtomically(sourcePath, file.activePath) ||
+            !IsValidGeneratedPngWithDimensions(file.activePath, file.expectedWidth, file.expectedHeight))
         {
             liveTileUpdateAssets.clear();
             return false;
@@ -566,7 +582,7 @@ static void SaveGeneratedAssetCache(
     bool ok = true;
     for (const auto& file : files)
     {
-        if (!IsValidGeneratedPng(file.activePath))
+        if (!IsValidGeneratedPngWithDimensions(file.activePath, file.expectedWidth, file.expectedHeight))
         {
             ok = false;
             continue;
@@ -660,8 +676,48 @@ static uint32_t ReadPngBigEndian32(const BYTE* p)
         static_cast<uint32_t>(p[3]);
 }
 
-static bool IsValidGeneratedPng(const std::wstring& path)
+static uint32_t PngCrc32Update(uint32_t crc, const BYTE* data, size_t len)
 {
+    for (size_t i = 0; i < len; ++i)
+    {
+        crc ^= static_cast<uint32_t>(data[i]);
+        for (int bit = 0; bit < 8; ++bit)
+        {
+            uint32_t mask = 0u - (crc & 1u);
+            crc = (crc >> 1) ^ (0xEDB88320u & mask);
+        }
+    }
+    return crc;
+}
+
+static bool PngChunkTypeEquals(const BYTE* type, const char (&name)[5])
+{
+    return memcmp(type, name, 4) == 0;
+}
+
+static bool ReadPngExact(HANDLE h, BYTE* buffer, DWORD len)
+{
+    DWORD total = 0;
+    while (total < len)
+    {
+        DWORD read = 0;
+        if (!ReadFile(h, buffer + total, len - total, &read, nullptr) || read == 0)
+            return false;
+        total += read;
+    }
+    return true;
+}
+
+struct GeneratedPngInfo
+{
+    uint32_t width = 0;
+    uint32_t height = 0;
+};
+
+static bool TryReadGeneratedPngInfo(const std::wstring& path, GeneratedPngInfo& info)
+{
+    info = {};
+
     WIN32_FILE_ATTRIBUTE_DATA data{};
     if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data))
         return false;
@@ -673,30 +729,164 @@ static bool IsValidGeneratedPng(const std::wstring& path)
     size.HighPart = data.nFileSizeHigh;
     if (size.QuadPart < 33)
         return false;
+    if (size.QuadPart > 64ull * 1024ull * 1024ull)
+        return false;
 
-    BYTE header[33] = {};
     HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
     if (h == INVALID_HANDLE_VALUE)
         return false;
 
-    DWORD read = 0;
-    bool ok = ReadFile(h, header, sizeof(header), &read, nullptr) && read == sizeof(header);
-    CloseHandle(h);
-    if (!ok)
-        return false;
+    bool ok = false;
+    bool parseOk = true;
+    unsigned long long pos = 0;
 
     static const BYTE pngSignature[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
-    if (memcmp(header, pngSignature, sizeof(pngSignature)) != 0)
+    BYTE signature[sizeof(pngSignature)] = {};
+    if (!ReadPngExact(h, signature, static_cast<DWORD>(sizeof(signature))) ||
+        memcmp(signature, pngSignature, sizeof(pngSignature)) != 0)
+    {
+        CloseHandle(h);
         return false;
-    if (ReadPngBigEndian32(header + 8) != 13)
-        return false;
-    if (memcmp(header + 12, "IHDR", 4) != 0)
+    }
+
+    pos = sizeof(pngSignature);
+    bool sawIhdr = false;
+    bool sawIdat = false;
+    bool sawIend = false;
+    while (pos + 12 <= size.QuadPart)
+    {
+        BYTE chunkHeader[8] = {};
+        if (!ReadPngExact(h, chunkHeader, sizeof(chunkHeader)))
+        {
+            parseOk = false;
+            break;
+        }
+        pos += sizeof(chunkHeader);
+
+        uint32_t chunkLen = ReadPngBigEndian32(chunkHeader);
+        BYTE chunkType[4] = {};
+        memcpy(chunkType, chunkHeader + 4, sizeof(chunkType));
+
+        if (chunkLen > size.QuadPart - pos - 4)
+        {
+            parseOk = false;
+            break;
+        }
+
+        uint32_t crc = PngCrc32Update(0xFFFFFFFFu, chunkType, sizeof(chunkType));
+        BYTE ihdr[13] = {};
+        if (PngChunkTypeEquals(chunkType, "IHDR"))
+        {
+            if (chunkLen != sizeof(ihdr) || !ReadPngExact(h, ihdr, sizeof(ihdr)))
+            {
+                parseOk = false;
+                break;
+            }
+            crc = PngCrc32Update(crc, ihdr, sizeof(ihdr));
+            pos += chunkLen;
+        }
+        else
+        {
+            uint32_t remaining = chunkLen;
+            BYTE chunkBuffer[4096] = {};
+            while (remaining > 0)
+            {
+                DWORD request = remaining > sizeof(chunkBuffer) ? sizeof(chunkBuffer) : remaining;
+                if (!ReadPngExact(h, chunkBuffer, request))
+                {
+                    parseOk = false;
+                    break;
+                }
+                crc = PngCrc32Update(crc, chunkBuffer, request);
+                remaining -= request;
+                pos += request;
+            }
+            if (!parseOk)
+                break;
+        }
+
+        BYTE crcBytes[4] = {};
+        if (!ReadPngExact(h, crcBytes, sizeof(crcBytes)))
+        {
+            parseOk = false;
+            break;
+        }
+        pos += sizeof(crcBytes);
+
+        uint32_t expectedCrc = ReadPngBigEndian32(crcBytes);
+        if (~crc != expectedCrc)
+        {
+            parseOk = false;
+            break;
+        }
+
+        if (PngChunkTypeEquals(chunkType, "IHDR"))
+        {
+            if (sawIhdr || pos != 33)
+            {
+                parseOk = false;
+                break;
+            }
+            uint32_t width = ReadPngBigEndian32(ihdr);
+            uint32_t height = ReadPngBigEndian32(ihdr + 4);
+            if (width == 0 || height == 0)
+            {
+                parseOk = false;
+                break;
+            }
+            info.width = width;
+            info.height = height;
+            sawIhdr = true;
+        }
+        else if (!sawIhdr)
+        {
+            parseOk = false;
+            break;
+        }
+        else if (PngChunkTypeEquals(chunkType, "IDAT"))
+        {
+            if (chunkLen == 0 || sawIend)
+            {
+                parseOk = false;
+                break;
+            }
+            sawIdat = true;
+        }
+        else if (PngChunkTypeEquals(chunkType, "IEND"))
+        {
+            if (chunkLen != 0 || !sawIdat)
+            {
+                parseOk = false;
+                break;
+            }
+            sawIend = true;
+            break;
+        }
+    }
+
+    ok = parseOk && sawIhdr && sawIdat && sawIend && pos == size.QuadPart;
+    CloseHandle(h);
+    return ok;
+}
+
+static bool IsValidGeneratedPng(const std::wstring& path)
+{
+    GeneratedPngInfo info{};
+    return TryReadGeneratedPngInfo(path, info);
+}
+
+static bool IsValidGeneratedPngWithDimensions(const std::wstring& path, int expectedWidth, int expectedHeight)
+{
+    if (expectedWidth <= 0 || expectedHeight <= 0)
         return false;
 
-    uint32_t width = ReadPngBigEndian32(header + 16);
-    uint32_t height = ReadPngBigEndian32(header + 20);
-    return width > 0 && height > 0;
+    GeneratedPngInfo info{};
+    if (!TryReadGeneratedPngInfo(path, info))
+        return false;
+
+    return info.width == static_cast<uint32_t>(expectedWidth) &&
+        info.height == static_cast<uint32_t>(expectedHeight);
 }
 
 static bool LooksLikeUriPath(const std::wstring& path)
@@ -733,9 +923,11 @@ static std::vector<std::wstring> CurrentManifestAssetPaths()
     AddUniqueManifestAsset(assets, info.propertiesLogo);
     AddUniqueManifestAsset(assets, info.square150x150Logo);
     AddUniqueManifestAsset(assets, info.square44x44Logo);
+    AddUniqueManifestAsset(assets, info.square30x30Logo);
     AddUniqueManifestAsset(assets, info.square71x71Logo);
     AddUniqueManifestAsset(assets, info.wide310x150Logo);
     AddUniqueManifestAsset(assets, info.square310x310Logo);
+    AddUniqueManifestAsset(assets, info.splashScreenImage);
     return assets;
 }
 
@@ -886,13 +1078,13 @@ static bool StartupGeneratedAssetsPresent(const std::wstring& exeDir)
                 continue;
             }
 
-            if (!IsValidGeneratedPng(basePath))
+            if (!IsValidGeneratedPngWithDimensions(basePath, t.w, t.h))
                 return false;
 
             for (int scale : scales)
             {
                 std::wstring scaledPath = ScaleAssetPath(basePath, scale);
-                if (!IsValidGeneratedPng(scaledPath))
+                if (!IsValidGeneratedPngWithDimensions(scaledPath, ScalePixels(t.w, scale), ScalePixels(t.h, scale)))
                     return false;
             }
         }
@@ -900,7 +1092,7 @@ static bool StartupGeneratedAssetsPresent(const std::wstring& exeDir)
         for (const auto& asset : g_liveTileAssets)
         {
             std::wstring path = ResolveManifestAssetPath(exeDir, asset.file);
-            if (!IsValidGeneratedPng(path))
+            if (!IsValidGeneratedPngWithDimensions(path, asset.w, asset.h))
                 return false;
         }
 
@@ -912,7 +1104,7 @@ static bool StartupGeneratedAssetsPresent(const std::wstring& exeDir)
         std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
         std::wstring basePath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
 
-        if (!IsValidGeneratedPng(basePath))
+        if (!IsValidGeneratedPngWithDimensions(basePath, t.w, t.h))
             return false;
 
         bool generatedByCurrentConfig =
@@ -924,7 +1116,7 @@ static bool StartupGeneratedAssetsPresent(const std::wstring& exeDir)
         for (int scale : scales)
         {
             std::wstring scaledPath = ScaleAssetPath(basePath, scale);
-            if (!IsValidGeneratedPng(scaledPath))
+            if (!IsValidGeneratedPngWithDimensions(scaledPath, ScalePixels(t.w, scale), ScalePixels(t.h, scale)))
                 return false;
         }
     }
@@ -1905,7 +2097,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
                 if (ok)
                 {
                     Log(g_ui.generatedDesktopIconAsset.c_str(), outPath.c_str());
-                    AddGeneratedAssetCacheFile(generatedAssetCacheFiles, ManifestGeneratedAssetCacheName(t.name), outPath);
+                    AddGeneratedAssetCacheFile(generatedAssetCacheFiles, ManifestGeneratedAssetCacheName(t.name), outPath, t.w, t.h);
                 }
                 else
                 {
@@ -1922,7 +2114,12 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
                     if (scaledOk)
                     {
                         Log(g_ui.savedScaledAsset.c_str(), scaledPath.c_str(), scale);
-                        AddGeneratedAssetCacheFile(generatedAssetCacheFiles, ScaleAssetPath(ManifestGeneratedAssetCacheName(t.name), scale), scaledPath);
+                        AddGeneratedAssetCacheFile(
+                            generatedAssetCacheFiles,
+                            ScaleAssetPath(ManifestGeneratedAssetCacheName(t.name), scale),
+                            scaledPath,
+                            scaledW,
+                            scaledH);
                     }
                     else
                     {
@@ -1946,7 +2143,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
             if (saved)
             {
                 Log(g_ui.savedAsset.c_str(), outPath.c_str());
-                AddGeneratedAssetCacheFile(generatedAssetCacheFiles, ManifestGeneratedAssetCacheName(t.name), outPath);
+                AddGeneratedAssetCacheFile(generatedAssetCacheFiles, ManifestGeneratedAssetCacheName(t.name), outPath, t.w, t.h);
             }
             else
             {
@@ -1968,7 +2165,12 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
                 if (scaledSaved)
                 {
                     Log(g_ui.savedScaledAsset.c_str(), scaledPath.c_str(), scale);
-                    AddGeneratedAssetCacheFile(generatedAssetCacheFiles, ScaleAssetPath(ManifestGeneratedAssetCacheName(t.name), scale), scaledPath);
+                    AddGeneratedAssetCacheFile(
+                        generatedAssetCacheFiles,
+                        ScaleAssetPath(ManifestGeneratedAssetCacheName(t.name), scale),
+                        scaledPath,
+                        scaledW,
+                        scaledH);
                 }
                 else
                 {
@@ -2025,8 +2227,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
                     assetsOk = false;
                 else
                 {
-                    liveTileUpdateAssets.push_back({ t.name, t.file, t.binding, updateAssetPath });
-                    AddGeneratedAssetCacheFile(generatedAssetCacheFiles, LiveGeneratedAssetCacheName(t.name), outPath);
+                    liveTileUpdateAssets.push_back({ t.name, t.file, t.binding, updateAssetPath, t.w, t.h });
+                    AddGeneratedAssetCacheFile(generatedAssetCacheFiles, LiveGeneratedAssetCacheName(t.name), outPath, t.w, t.h);
                 }
             }
         }

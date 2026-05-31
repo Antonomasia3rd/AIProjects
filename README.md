@@ -12,12 +12,12 @@ Small Windows utility projects and experiments. Most folders are standalone and 
 | `CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
 | `DesktopStub` | C++ Win32 tray app | Builds `DesktopStub.exe`, a desktop wallpaper tile-asset generator and loose Appx registrar. |
 | `DiscordRPC` | C# tray/console app | Discord Rich Presence app with IPC, optional Gateway mode, dynamic placeholders, and a tray config UI. |
-| `DNSAutoUpdate` | PowerShell loop | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
-| `NowPlayingTile` | C# app plus Appx scripts | SMTC-based Windows Start live tile updater with optional widget mode. |
-| `PhotoCollage` | PowerShell script | Creates a simple JPEG grid/collage from images in a folder. |
+| `DNSAutoUpdate` | C# DNS updater | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
+| `NowPlayingTile` | C# app plus Appx helpers | SMTC-based Windows Start live tile updater with optional widget mode. |
+| `PhotoCollage` | C# console app | Creates a simple JPEG grid/collage from images in a folder. |
 | `RealTimeNotesDeskband` | C++ Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes resources. |
 | `SecureDesktopLauncher` | C++ service/tools | Launches trusted configured programs on secure desktops, with an optional password-gated launcher. |
-| `TaskSchedulerMigration` | PowerShell script | Re-registers scheduled tasks from an old SID to a new user/account. |
+| `TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
 | `YourPhoneHideBanner` | C# Windows service | Suppresses Phone Link notification banners and sounds for loaded users. |
 
 ## Prebuilt Releases
@@ -47,7 +47,7 @@ Common prerequisites:
 - .NET Framework compiler at `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` for C# projects.
 - Visual Studio Build Tools with the C++ workload for MSVC projects.
 - MinGW-w64 `g++` for `RealTimeNotesDeskband`.
-- PowerShell 5.1 or newer for script-only utilities and Appx helper scripts.
+- `dnscmd.exe` for `DNSAutoUpdate` on Windows DNS Server systems.
 
 Build all Windows binary artifacts:
 
@@ -67,12 +67,12 @@ Useful build options:
 
 Run repository validation and smoke checks:
 
-```powershell
-.github\scripts\Validate-ProjectMap.ps1
-.github\scripts\Test-WorkflowProjectSelection.ps1
-.github\scripts\Invoke-PolicyWarnings.ps1
-.github\scripts\Test-ReadmeConsistency.ps1
-.github\scripts\Smoke-WindowsBuild.ps1
+```cmd
+.github\scripts\Validate-ProjectMap.cmd
+.github\scripts\Test-WorkflowProjectSelection.cmd
+.github\scripts\Invoke-PolicyWarnings.cmd
+.github\scripts\Test-ReadmeConsistency.cmd
+.github\scripts\Smoke-WindowsBuild.cmd
 ```
 
 The Windows workflow project metadata lives in `.github/project-map.json`. Keep that map, `.github/workflows/build-windows.yml`, `.github/scripts/build-windows.cmd`, and this README in sync when adding or removing projects that produce Windows artifacts. The workflow validates the project map before building.
@@ -87,9 +87,9 @@ Several tools intentionally modify system state:
 - `DNSAutoUpdate` adds and removes exact DNS A records in its managed allowlist;
 - `SecureDesktopLauncher` can launch processes as `LocalSystem` on secure desktops;
 - `TaskSchedulerMigration` re-registers matching scheduled tasks;
-- Appx scripts register or unregister loose development packages.
+- Appx helpers register or unregister loose development packages.
 
-Read the project README before running a tool, use an elevated shell where documented, and use `-WhatIf` for PowerShell scripts that support it.
+Read the project README before running a tool, use an elevated shell where documented, and use `-WhatIf` or `--what-if` for tools that support preview mode.
 
 ## Repository Policy
 
@@ -102,7 +102,7 @@ Runtime configuration and logs must stay local to each program. By default, ever
 <binary directory>\<binary name>.log
 ```
 
-If a non-INI configuration format is unavoidable, it must still default to the same directory and base name as the binary. Script-only tools should use the script directory and script base name by default. Do not use the registry, `%APPDATA%`, `%LOCALAPPDATA%`, `%PROGRAMDATA%`, the process working directory, or other global/user profile locations for app-owned configuration or logs. Registry writes are acceptable only for OS integration that is the explicit purpose of the tool, such as service registration, COM/deskband registration, scheduled-task migration, or Windows settings the tool is designed to manage.
+If a non-INI configuration format is unavoidable, it must still default to the same directory and base name as the binary. Helper utilities should keep their generated logs and state beside the helper executable or project wrapper by default. Do not use the registry, `%APPDATA%`, `%LOCALAPPDATA%`, `%PROGRAMDATA%`, the process working directory, or other global/user profile locations for app-owned configuration or logs. Registry writes are acceptable only for OS integration that is the explicit purpose of the tool, such as service registration, COM/deskband registration, scheduled-task migration, or Windows settings the tool is designed to manage.
 
 Do not change file or directory ACLs from these tools, installers, build scripts, or migration helpers. Past ACL-hardening attempts caused Windows integration failures in specific placements, including Start Menu related cases. Security checks may detect and warn about risky writable locations, but they must not modify ACLs, ownership, inheritance, integrity labels, or other access-control state.
 

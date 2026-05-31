@@ -28,27 +28,41 @@ static bool AcquireGdiPlus()
 
 static void ReleaseGdiPlus()
 {
-    std::lock_guard<std::mutex> lk(g_gdiPlusMutex);
-    if (g_gdiPlusUseCount > 0)
-        --g_gdiPlusUseCount;
-
-    if (g_gdiPlusUseCount == 0 && g_gdiPlusToken != 0 && !g_keepGdiPlusLoaded.load())
+    bool released = false;
     {
-        ULONG_PTR token = g_gdiPlusToken;
-        g_gdiPlusToken = 0;
-        GdiplusShutdown(token);
+        std::lock_guard<std::mutex> lk(g_gdiPlusMutex);
+        if (g_gdiPlusUseCount > 0)
+            --g_gdiPlusUseCount;
+
+        if (g_gdiPlusUseCount == 0 && g_gdiPlusToken != 0 && !g_keepGdiPlusLoaded.load())
+        {
+            ULONG_PTR token = g_gdiPlusToken;
+            g_gdiPlusToken = 0;
+            GdiplusShutdown(token);
+            released = true;
+        }
     }
+
+    if (released)
+        TrimIdleWorkingSetIfConfigured();
 }
 
 static void ReleaseIdleGdiPlusIfAllowed()
 {
-    std::lock_guard<std::mutex> lk(g_gdiPlusMutex);
-    if (g_gdiPlusUseCount == 0 && g_gdiPlusToken != 0 && !g_keepGdiPlusLoaded.load())
+    bool released = false;
     {
-        ULONG_PTR token = g_gdiPlusToken;
-        g_gdiPlusToken = 0;
-        GdiplusShutdown(token);
+        std::lock_guard<std::mutex> lk(g_gdiPlusMutex);
+        if (g_gdiPlusUseCount == 0 && g_gdiPlusToken != 0 && !g_keepGdiPlusLoaded.load())
+        {
+            ULONG_PTR token = g_gdiPlusToken;
+            g_gdiPlusToken = 0;
+            GdiplusShutdown(token);
+            released = true;
+        }
     }
+
+    if (released)
+        TrimIdleWorkingSetIfConfigured();
 }
 
 static void ShutdownGdiPlusForExit()
@@ -88,8 +102,10 @@ struct ScopedGdiPlus
 // GDI+ PNG save helpers
 // -----------------------------------------------------------------------------
 static CLSID g_png{};
+static std::mutex g_pngMutex;
 bool FindPngEncoder()
 {
+    std::lock_guard<std::mutex> lk(g_pngMutex);
     if (g_png.Data1) return true;
 
     UINT n=0, sz=0;

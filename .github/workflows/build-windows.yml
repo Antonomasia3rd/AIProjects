@@ -35,7 +35,7 @@ permissions:
 jobs:
   detect-projects:
     name: Detect changed projects
-    runs-on: ubuntu-latest
+    runs-on: windows-2022
     outputs:
       build_all: ${{ steps.detect.outputs.build_all }}
       skip_args: ${{ steps.detect.outputs.skip_args }}
@@ -59,133 +59,32 @@ jobs:
           fetch-depth: 0
 
       - name: Validate project map
-        shell: pwsh
-        run: .github/scripts/Validate-ProjectMap.ps1
+        shell: cmd
+        run: .github\scripts\Validate-ProjectMap.cmd
 
       - name: Validate workflow project selector
-        shell: pwsh
-        run: .github/scripts/Test-WorkflowProjectSelection.ps1
+        shell: cmd
+        run: .github\scripts\Test-WorkflowProjectSelection.cmd
 
       - name: Scan repository policy warnings
-        shell: pwsh
-        run: .github/scripts/Invoke-PolicyWarnings.ps1
+        shell: cmd
+        run: .github\scripts\Invoke-PolicyWarnings.cmd
 
       - name: Scan README consistency warnings
-        shell: pwsh
-        run: .github/scripts/Test-ReadmeConsistency.ps1
+        shell: cmd
+        run: .github\scripts\Test-ReadmeConsistency.cmd
 
       - name: Detect projects to build
         id: detect
-        shell: pwsh
-        run: |
-          $projectMap = @(Get-Content -LiteralPath '.github/project-map.json' -Raw | ConvertFrom-Json)
-          $eventName = '${{ github.event_name }}'
-          $manualProject = '${{ github.event.inputs.project }}'
-          $head = '${{ github.sha }}'
-          $forceAll = $false
-          $changed = @()
-
-          if ($eventName -eq 'workflow_dispatch') {
-            if ([string]::IsNullOrWhiteSpace($manualProject) -or $manualProject -eq 'All') {
-              $forceAll = $true
-              $selected = @($projectMap)
-            } else {
-              $selected = @($projectMap | Where-Object { $_.key -eq $manualProject })
-              if ($selected.Count -ne 1) {
-                throw "Unknown workflow_dispatch project: $manualProject"
-              }
-            }
-          } else {
-            if ($eventName -eq 'pull_request') {
-              $base = '${{ github.event.pull_request.base.sha }}'
-              $head = '${{ github.event.pull_request.head.sha }}'
-            } else {
-              $base = '${{ github.event.before }}'
-              if ([string]::IsNullOrWhiteSpace($base) -or $base -match '^0+$') {
-                $base = "$head^"
-              }
-            }
-
-            $changed = @(git diff --name-only $base $head)
-            if ($LASTEXITCODE -ne 0) {
-              Write-Warning 'Could not diff changed files; falling back to a full build.'
-              $forceAll = $true
-              $changed = @()
-            }
-
-            if (-not $forceAll) {
-              $sharedChange = [bool]($changed | Where-Object {
-                $_ -like '.github/*' -or
-                $_ -eq '.gitattributes' -or
-                $_ -eq 'README.md'
-              })
-              if ($sharedChange) {
-                Write-Host 'Shared workflow/repository files changed; using a full build.'
-                $forceAll = $true
-              }
-            }
-
-            if ($forceAll) {
-              $selected = @($projectMap)
-            } else {
-              $selected = @($projectMap | Where-Object {
-                $prefix = "$($_.folder)/"
-                [bool]($changed | Where-Object { $_ -like "$prefix*" })
-              })
-
-              if ($selected.Count -eq 0) {
-                Write-Host 'No project-specific changes detected; using a full build to keep CI meaningful.'
-                $forceAll = $true
-                $selected = @($projectMap)
-              }
-            }
-          }
-
-          if ($forceAll) {
-            $selected = @($projectMap)
-          }
-
-          $selectedKeys = @{}
-          foreach ($project in $selected) {
-            $selectedKeys[$project.key] = $true
-          }
-
-          $skip = @()
-          foreach ($project in $projectMap) {
-            $build = $selectedKeys.ContainsKey($project.key)
-            "$($project.buildOutput)=$($build.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-            if (-not $build) {
-              $skip += "/skip:$($project.skipKey)"
-            }
-          }
-
-          if ($forceAll) {
-            $skip = @()
-          }
-
-          $projectList = ($selected | ForEach-Object { $_.label }) -join ', '
-          $releaseBase = if ($selected.Count -eq 1 -and -not $forceAll) { $selected[0].key } else { 'All' }
-          $releaseFamilies = ($selected | ForEach-Object { "``$($_.key)-vN``" }) -join ', '
-
-          "build_all=$($forceAll.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-          "skip_args=$($skip -join ' ')" >> $env:GITHUB_OUTPUT
-          "project_list=$projectList" >> $env:GITHUB_OUTPUT
-          "release_base=$releaseBase" >> $env:GITHUB_OUTPUT
-
-          "## Project selection" >> $env:GITHUB_STEP_SUMMARY
-          "" >> $env:GITHUB_STEP_SUMMARY
-          "Build mode: **$(if ($forceAll) { 'full' } else { 'selected/changed projects only' })**" >> $env:GITHUB_STEP_SUMMARY
-          "" >> $env:GITHUB_STEP_SUMMARY
-          "Projects: $projectList" >> $env:GITHUB_STEP_SUMMARY
-          "" >> $env:GITHUB_STEP_SUMMARY
-          "Release families: $releaseFamilies" >> $env:GITHUB_STEP_SUMMARY
-          if ($changed.Count -gt 0) {
-            "" >> $env:GITHUB_STEP_SUMMARY
-            "Changed files:" >> $env:GITHUB_STEP_SUMMARY
-            foreach ($file in $changed) {
-              "- ``$file``" >> $env:GITHUB_STEP_SUMMARY
-            }
-          }
+        shell: cmd
+        run: >
+          .github\scripts\Detect-Projects.cmd
+          --event "${{ github.event_name }}"
+          --manual-project "${{ github.event.inputs.project }}"
+          --sha "${{ github.sha }}"
+          --before "${{ github.event.before }}"
+          --pull-base "${{ github.event.pull_request.base.sha }}"
+          --pull-head "${{ github.event.pull_request.head.sha }}"
 
   build-windows:
     name: Build Windows binaries
@@ -200,65 +99,20 @@ jobs:
 
       - name: Ensure MinGW-w64 for deskband build
         if: needs.detect-projects.outputs.build_all == 'true' || needs.detect-projects.outputs.build_real_time_notes_deskband == 'true'
-        shell: pwsh
-        run: |
-          if (Get-Command g++ -ErrorAction SilentlyContinue) {
-            g++ --version | Select-Object -First 1
-            exit 0
-          }
-
-          choco install mingw --version=13.2.0 -y --no-progress
-          $mingwBin = 'C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin'
-          if (-not (Test-Path $mingwBin)) {
-            $mingwBin = Get-ChildItem 'C:\ProgramData\chocolatey\lib\mingw\tools\install' -Directory -Recurse -Filter bin |
-              Select-Object -First 1 -ExpandProperty FullName
-          }
-          if (-not $mingwBin -or -not (Test-Path $mingwBin)) {
-            throw 'MinGW-w64 was installed, but g++.exe could not be located.'
-          }
-          $mingwBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: cmd
+        run: .github\scripts\Ensure-Mingw.cmd
 
       - name: Build
         shell: cmd
         run: .github\scripts\build-windows.cmd ${{ needs.detect-projects.outputs.skip_args }}
 
       - name: Write artifact checksum summary
-        shell: pwsh
-        run: |
-          $artifacts = @(Get-Content -LiteralPath '.github/project-map.json' -Raw | ConvertFrom-Json)
-          $lines = @(
-            '## Windows build outputs',
-            '',
-            'GitHub Actions downloads workflow artifacts as ZIP archives. The hashes below are for the primary payload files inside those artifacts.',
-            '',
-            '| Project | File | SHA256 |',
-            '| --- | --- | --- |'
-          )
-
-          $count = 0
-          foreach ($item in $artifacts) {
-            $paths = @($item.artifactPath)
-            foreach ($path in $paths) {
-              if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-                continue
-              }
-
-              $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-              $name = Split-Path -Leaf $path
-              $lines += "| $($item.label) | ``$name`` | ``$hash`` |"
-              $count++
-            }
-          }
-
-          if ($count -eq 0) {
-            throw 'No build outputs were found.'
-          }
-
-          $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+        shell: cmd
+        run: .github\scripts\Write-ChecksumSummary.cmd
 
       - name: Run smoke tests
-        shell: pwsh
-        run: .github/scripts/Smoke-WindowsBuild.ps1
+        shell: cmd
+        run: .github\scripts\Smoke-WindowsBuild.cmd
 
       - name: Upload AllowContentAboveLock artifact
         if: needs.detect-projects.outputs.build_allow_content_above_lock == 'true'
@@ -308,13 +162,6 @@ jobs:
           path: |
             NowPlayingTile/build/NowPlayingTile.exe
             NowPlayingTile/README.md
-            NowPlayingTile/register-dev-package.ps1
-            NowPlayingTile/unregister-dev-package.ps1
-            NowPlayingTile/launch-packaged.ps1
-            NowPlayingTile/launch-widget.ps1
-            NowPlayingTile/install-startup.ps1
-            NowPlayingTile/uninstall-startup.ps1
-            NowPlayingTile/open-settings.ps1
             NowPlayingTile/package/**
           if-no-files-found: error
 
@@ -403,10 +250,10 @@ jobs:
           path: artifacts
 
       - name: Create or update automatic releases
-        shell: pwsh
+        shell: cmd
         env:
           GH_TOKEN: ${{ github.token }}
           PROJECT_LIST: ${{ needs.detect-projects.outputs.project_list }}
           REPO: ${{ github.repository }}
           FULL_SHA: ${{ github.sha }}
-        run: .github/scripts/Publish-ProjectReleases.ps1 -ArtifactsRoot artifacts
+        run: .github\scripts\Publish-ProjectReleases.cmd -ArtifactsRoot artifacts

@@ -154,7 +154,12 @@ void LogWin32Failure(const wchar_t* what, DWORD err = GetLastError())
 static void TrimIdleWorkingSetIfConfigured()
 {
     if (g_compactCrtHeapOnIdle.load())
-        _heapmin();
+    {
+        errno = 0;
+        int heapStatus = _heapmin();
+        if (heapStatus != 0 && errno != 0)
+            Log(L"[w] _heapmin failed while compacting the idle CRT heap, errno=%d.", errno);
+    }
 
     if (!g_trimWorkingSetOnIdle.load())
         return;
