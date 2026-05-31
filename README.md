@@ -18,6 +18,7 @@ Small Windows utility projects and experiments. Most folders are standalone and 
 | `RealTimeNotesDeskband` | C++ Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes resources. |
 | `SecureDesktopLauncher` | C++ service/tools | Launches trusted configured programs on secure desktops, with an optional password-gated launcher. |
 | `TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
+| `WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
 | `YourPhoneHideBanner` | C# Windows service | Suppresses Phone Link notification banners and sounds for loaded users. |
 
 ## Prebuilt Releases
@@ -54,6 +55,9 @@ Build all Windows binary artifacts:
 ```cmd
 .github\scripts\build-windows.cmd
 ```
+
+`WindhawkMods` contains source-only `.wh.cpp` files that are imported, compiled,
+and loaded by Windhawk. They are not built by the repository Windows workflow.
 
 Useful build options:
 
