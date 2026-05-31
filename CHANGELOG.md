@@ -12,6 +12,10 @@ Older releases are intentionally kept when practical so users can compare behavi
 
 ## Unreleased
 
+### WindhawkMods
+
+- Added source-only Windhawk mod sources for Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix.
+
 ### Repository workflow
 
 - Centralized Windows build metadata in `.github/project-map.json`.
