@@ -786,14 +786,48 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
-        if (IEquals(arg, L"--trim-working-set-on-idle") || IEquals(arg, L"--low-idle-memory"))
+        if (IEquals(arg, L"--trim-working-set-on-idle"))
         {
             AddCommandLineBoolSetting(L"Settings", L"TrimWorkingSetOnIdle", true);
             continue;
         }
-        if (IEquals(arg, L"--no-trim-working-set-on-idle") || IEquals(arg, L"--no-low-idle-memory"))
+        if (IEquals(arg, L"--no-trim-working-set-on-idle"))
         {
             AddCommandLineBoolSetting(L"Settings", L"TrimWorkingSetOnIdle", false);
+            continue;
+        }
+        if (IEquals(arg, L"--low-idle-memory"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"TrimWorkingSetOnIdle", true);
+            AddCommandLineBoolSetting(L"Settings", L"CompactCrtHeapOnIdle", true);
+            AddCommandLineBoolSetting(L"Settings", L"KeepGdiPlusLoaded", false);
+            continue;
+        }
+        if (IEquals(arg, L"--no-low-idle-memory"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"TrimWorkingSetOnIdle", false);
+            AddCommandLineBoolSetting(L"Settings", L"CompactCrtHeapOnIdle", false);
+            AddCommandLineBoolSetting(L"Settings", L"KeepGdiPlusLoaded", true);
+            continue;
+        }
+        if (IEquals(arg, L"--compact-crt-heap-on-idle"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"CompactCrtHeapOnIdle", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-compact-crt-heap-on-idle"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"CompactCrtHeapOnIdle", false);
+            continue;
+        }
+        if (IEquals(arg, L"--keep-gdiplus-loaded") || IEquals(arg, L"--no-lazy-gdiplus"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"KeepGdiPlusLoaded", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-keep-gdiplus-loaded") || IEquals(arg, L"--lazy-gdiplus"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"KeepGdiPlusLoaded", false);
             continue;
         }
 
@@ -1362,6 +1396,12 @@ static std::wstring CommandLineUsageText()
         L"  --notifications | --no-notifications Set and save tray notifications.\r\n"
         L"  --trim-working-set-on-idle | --no-trim-working-set-on-idle\r\n"
         L"                                      Lower idle Task Manager memory by trimming the working set.\r\n"
+        L"  --compact-crt-heap-on-idle | --no-compact-crt-heap-on-idle\r\n"
+        L"                                      Release free CRT heap pages after idle work.\r\n"
+        L"  --keep-gdiplus-loaded | --no-keep-gdiplus-loaded\r\n"
+        L"                                      Keep/release GDI+ after image work for speed vs lower private bytes.\r\n"
+        L"  --low-idle-memory | --no-low-idle-memory\r\n"
+        L"                                      Convenience profile for lower idle memory vs warmer image runtime.\r\n"
         L"  --powershell | --com-registration    Set and save registration command mode.\r\n"
         L"  --com-helper | --no-com-helper      Enable/disable COM isolation helper.\r\n"
         L"  --live-tile | --no-live-tile         Set and save Live Tile update mode.\r\n"

@@ -1,4 +1,90 @@
 ﻿// -----------------------------------------------------------------------------
+// Lazy GDI+ lifetime
+// -----------------------------------------------------------------------------
+static std::mutex g_gdiPlusMutex;
+static ULONG_PTR g_gdiPlusToken = 0;
+static unsigned int g_gdiPlusUseCount = 0;
+
+static bool AcquireGdiPlus()
+{
+    std::lock_guard<std::mutex> lk(g_gdiPlusMutex);
+
+    if (g_gdiPlusToken == 0)
+    {
+        GdiplusStartupInput input{};
+        ULONG_PTR token = 0;
+        Status status = GdiplusStartup(&token, &input, nullptr);
+        if (status != Ok)
+        {
+            LogText(g_ui.gdiPlusStartupFailedMessage);
+            return false;
+        }
+        g_gdiPlusToken = token;
+    }
+
+    ++g_gdiPlusUseCount;
+    return true;
+}
+
+static void ReleaseGdiPlus()
+{
+    std::lock_guard<std::mutex> lk(g_gdiPlusMutex);
+    if (g_gdiPlusUseCount > 0)
+        --g_gdiPlusUseCount;
+
+    if (g_gdiPlusUseCount == 0 && g_gdiPlusToken != 0 && !g_keepGdiPlusLoaded.load())
+    {
+        ULONG_PTR token = g_gdiPlusToken;
+        g_gdiPlusToken = 0;
+        GdiplusShutdown(token);
+    }
+}
+
+static void ReleaseIdleGdiPlusIfAllowed()
+{
+    std::lock_guard<std::mutex> lk(g_gdiPlusMutex);
+    if (g_gdiPlusUseCount == 0 && g_gdiPlusToken != 0 && !g_keepGdiPlusLoaded.load())
+    {
+        ULONG_PTR token = g_gdiPlusToken;
+        g_gdiPlusToken = 0;
+        GdiplusShutdown(token);
+    }
+}
+
+static void ShutdownGdiPlusForExit()
+{
+    std::lock_guard<std::mutex> lk(g_gdiPlusMutex);
+    if (g_gdiPlusToken != 0)
+    {
+        ULONG_PTR token = g_gdiPlusToken;
+        g_gdiPlusToken = 0;
+        g_gdiPlusUseCount = 0;
+        GdiplusShutdown(token);
+    }
+}
+
+struct ScopedGdiPlus
+{
+    bool acquired = false;
+
+    ScopedGdiPlus()
+        : acquired(AcquireGdiPlus())
+    {
+    }
+
+    ~ScopedGdiPlus()
+    {
+        if (acquired)
+            ReleaseGdiPlus();
+    }
+
+    bool ok() const { return acquired; }
+
+    ScopedGdiPlus(const ScopedGdiPlus&) = delete;
+    ScopedGdiPlus& operator=(const ScopedGdiPlus&) = delete;
+};
+
+// -----------------------------------------------------------------------------
 // GDI+ PNG save helpers
 // -----------------------------------------------------------------------------
 static CLSID g_png{};

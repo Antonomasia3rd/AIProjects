@@ -36,6 +36,8 @@ static std::atomic<int> g_shutdownRepeatNoticeMs(5000);
 static std::atomic<int> g_trayIconHiddenDelayMs(750);
 static std::atomic<int> g_logBufferLines(1024);
 static std::atomic<bool> g_trimWorkingSetOnIdle(true);
+static std::atomic<bool> g_compactCrtHeapOnIdle(true);
+static std::atomic<bool> g_keepGdiPlusLoaded(false);
 static std::atomic<int> g_pollInitialDebounceBypassMs(5000);
 static std::atomic<int> g_wallpaperDetectionLogRepeatMs(60000);
 static std::atomic<int> g_powerShellOutputMessageBoxChars(6000);
@@ -90,6 +92,8 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"LogBufferLines", L"1024"},
     {L"Settings", L"LogAppendLockWaitMs", L"1000"},
     {L"Settings", L"TrimWorkingSetOnIdle", L"1"},
+    {L"Settings", L"CompactCrtHeapOnIdle", L"1"},
+    {L"Settings", L"KeepGdiPlusLoaded", L"0"},
     {L"Settings", L"TrayIcon", L"1"},
     {L"Settings", L"TrayIconHiddenDelayMs", L"750"},
     {L"Settings", L"ShowConsole", L"0"},
@@ -254,6 +258,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"TrayIconSummary", L"[i] Tray icon: %s"},
     {L"ConsoleSummary", L"[i] Console %s."},
     {L"TrimWorkingSetOnIdleSummary", L"[i] Idle working-set trimming: %s"},
+    {L"CompactCrtHeapOnIdleSummary", L"[i] Idle CRT heap compaction: %s"},
+    {L"KeepGdiPlusLoadedSummary", L"[i] Keep GDI+ loaded after image work: %s"},
     {L"LoggingSummary", L"[i] Logging %s."},
     {L"GenerateOnStartupSummary", L"[i] Generate on Startup: %s"},
     {L"GenerateOnStartupOnlyWhenChangedSummary", L"[i] Startup generation only when changed: %s"},
@@ -343,6 +349,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"LogAppendLockWaitMsLabel", L"Log append lock wait: %d ms"},
     {L"TrimWorkingSetOnIdle", L"Trim working set when idle"},
     {L"TrimWorkingSetOperation", L"SetProcessWorkingSetSize(trim idle working set)"},
+    {L"CompactCrtHeapOnIdle", L"Compact CRT heap when idle"},
+    {L"KeepGdiPlusLoaded", L"Keep GDI+ loaded after image work"},
     {L"PowerShellExeLabel", L"PowerShell executable: %s"},
     {L"PowerShellPollMsLabel", L"PowerShell poll: %d ms"},
     {L"PowerShellTimeoutMsLabel", L"PowerShell timeout: %s"},

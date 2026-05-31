@@ -259,6 +259,8 @@ void LoadUiStrings()
     g_ui.generateNow = IniReadS(L"Strings", L"GenerateNow", L"Generate now");
     g_ui.trimWorkingSetOnIdle = IniReadS(L"Strings", L"TrimWorkingSetOnIdle", L"Trim working set when idle");
     g_ui.trimWorkingSetOperation = IniReadS(L"Strings", L"TrimWorkingSetOperation", L"SetProcessWorkingSetSize(trim idle working set)");
+    g_ui.compactCrtHeapOnIdle = IniReadS(L"Strings", L"CompactCrtHeapOnIdle", L"Compact CRT heap when idle");
+    g_ui.keepGdiPlusLoaded = IniReadS(L"Strings", L"KeepGdiPlusLoaded", L"Keep GDI+ loaded after image work");
 
     g_ui.loggingEnable = IniReadS(L"Strings", L"LoggingEnable", L"Enable");
     g_ui.changePath = IniReadS(L"Strings", L"ChangePath", L"Change path...");
@@ -465,6 +467,8 @@ void LoadUiStrings()
     g_ui.consoleSummary = IniReadS(L"Strings", L"ConsoleSummary", L"[i] Console %s.");
     g_ui.loggingSummary = IniReadS(L"Strings", L"LoggingSummary", L"[i] Logging %s.");
     g_ui.trimWorkingSetOnIdleSummary = IniReadS(L"Strings", L"TrimWorkingSetOnIdleSummary", L"[i] Idle working-set trimming: %s");
+    g_ui.compactCrtHeapOnIdleSummary = IniReadS(L"Strings", L"CompactCrtHeapOnIdleSummary", L"[i] Idle CRT heap compaction: %s");
+    g_ui.keepGdiPlusLoadedSummary = IniReadS(L"Strings", L"KeepGdiPlusLoadedSummary", L"[i] Keep GDI+ loaded after image work: %s");
     g_ui.generateOnStartupSummary = IniReadS(L"Strings", L"GenerateOnStartupSummary", L"[i] Generate on Startup: %s");
     g_ui.generateOnStartupOnlyWhenChangedSummary = IniReadS(L"Strings", L"GenerateOnStartupOnlyWhenChangedSummary", L"[i] Startup generation only when changed: %s");
     g_ui.hideDisabledEntriesSummary = IniReadS(L"Strings", L"HideDisabledEntriesSummary", L"[i] Hide disabled entries: %s");

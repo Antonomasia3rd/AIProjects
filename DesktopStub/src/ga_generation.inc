@@ -652,6 +652,14 @@ static bool TryGetGenerationCompletion(unsigned long long id, bool& success)
     return false;
 }
 
+static uint32_t ReadPngBigEndian32(const BYTE* p)
+{
+    return (static_cast<uint32_t>(p[0]) << 24) |
+        (static_cast<uint32_t>(p[1]) << 16) |
+        (static_cast<uint32_t>(p[2]) << 8) |
+        static_cast<uint32_t>(p[3]);
+}
+
 static bool IsValidGeneratedPng(const std::wstring& path)
 {
     WIN32_FILE_ATTRIBUTE_DATA data{};
@@ -663,11 +671,32 @@ static bool IsValidGeneratedPng(const std::wstring& path)
     ULARGE_INTEGER size{};
     size.LowPart = data.nFileSizeLow;
     size.HighPart = data.nFileSizeHigh;
-    if (size.QuadPart == 0)
+    if (size.QuadPart < 33)
         return false;
 
-    Bitmap probe(path.c_str());
-    return probe.GetLastStatus() == Ok && probe.GetWidth() > 0 && probe.GetHeight() > 0;
+    BYTE header[33] = {};
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        return false;
+
+    DWORD read = 0;
+    bool ok = ReadFile(h, header, sizeof(header), &read, nullptr) && read == sizeof(header);
+    CloseHandle(h);
+    if (!ok)
+        return false;
+
+    static const BYTE pngSignature[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+    if (memcmp(header, pngSignature, sizeof(pngSignature)) != 0)
+        return false;
+    if (ReadPngBigEndian32(header + 8) != 13)
+        return false;
+    if (memcmp(header + 12, "IHDR", 4) != 0)
+        return false;
+
+    uint32_t width = ReadPngBigEndian32(header + 16);
+    uint32_t height = ReadPngBigEndian32(header + 20);
+    return width > 0 && height > 0;
 }
 
 static bool LooksLikeUriPath(const std::wstring& path)
@@ -1310,6 +1339,10 @@ static bool RenderWallpaperToGeneratedAssetCache(
         GeneratedAssetCacheComplete(exeDir, manifestInfo, scales, liveTileUpdateMode, stateKey))
         return false;
 
+    ScopedGdiPlus gdi;
+    if (!gdi.ok())
+        return false;
+
     std::wstring cacheDir = GeneratedAssetCacheDir(exeDir, stateKey);
     std::wstring stagingCacheDir = cacheDir + L".precache." + NewLiveTileAssetToken();
     DeleteDirectoryTree(stagingCacheDir);
@@ -1807,6 +1840,10 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 
     if (!restoredFromGeneratedAssetCache)
     {
+        ScopedGdiPlus gdi;
+        if (!gdi.ok())
+            return false;
+
         WallpaperBitmapLoadInfo wallpaperLoadInfo{};
         std::unique_ptr<Bitmap> src = LoadWallpaperBitmapForRender(
             wp,
