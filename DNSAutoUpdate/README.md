@@ -1,12 +1,12 @@
 # DNSAutoUpdate
 
-PowerShell loop that keeps selected Windows DNS Server A records synchronized with the server's current IPv4 addresses.
+C# console loop that keeps selected Windows DNS Server A records synchronized with the server's current IPv4 addresses.
 
 The script only manages an explicit set of exact DNS owner names. For each managed name, stale A records are removed and missing current A records are added each cycle. Records outside the managed allowlist are ignored.
 
 ## Requirements
 
-- Windows Server or a Windows installation with the DNS Server PowerShell module.
+- Windows Server or a Windows installation with `dnscmd.exe` available.
 - Administrator rights to modify DNS records.
 - A DNS zone that the machine is allowed to update.
 
@@ -14,34 +14,34 @@ The script only manages an explicit set of exact DNS owner names. For each manag
 
 From this folder:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.local"
+```cmd
+DNSAutoUpdate.cmd -ZoneName "server.local"
 ```
 
 Legacy/default behavior manages the zone root owner name `@`.
 
 Manage root plus subfolder/node records:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.local" -SubFolder "app","files" -SleepSeconds 60
+```cmd
+DNSAutoUpdate.cmd -ZoneName "server.local" -SubFolder "app,files" -SleepSeconds 60
 ```
 
 Use an explicit managed allowlist instead of the legacy root-plus-subfolder selection:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.local" -ManagedRecordName "@","app","files"
+```cmd
+DNSAutoUpdate.cmd -ZoneName "server.local" -ManagedRecordName "@,app,files"
 ```
 
 Manage only non-root names:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.local" -NoRootRecord -SubFolder "app","files"
+```cmd
+DNSAutoUpdate.cmd -ZoneName "server.local" -NoRootRecord -SubFolder "app,files"
 ```
 
 Preview DNS changes without applying them:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.local" -ManagedRecordName "@","app" -WhatIf
+```cmd
+DNSAutoUpdate.cmd -ZoneName "server.local" -ManagedRecordName "@,app" -WhatIf
 ```
 
 ## Parameters
@@ -50,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.l
 - `-SubFolder`: optional DNS owner names to maintain in addition to `@` when `-ManagedRecordName` is not supplied.
 - `-ManagedRecordName`: explicit exact owner-name allowlist. When supplied, `-SubFolder` and `-NoRootRecord` are ignored for owner-name selection.
 - `-NoRootRecord`: do not manage `@` when using legacy `-SubFolder` selection.
-- `-LogFile`: log file path. Default: `DNSAutoUpdate.log` beside `DNSAutoUpdate.ps1`. Relative paths resolve from the script directory.
+- `-LogFile`: log file path. Default: `DNSAutoUpdate.log` beside the compiled helper executable. Relative paths resolve from the helper directory.
 - `-MaxLogMegabytes`: rotate the log when it reaches this size. Default: `10`; `0` disables rotation.
 - `-LogRetentionCount`: number of rotated logs to keep. Default: `5`; `0` deletes the current log when the size cap is reached.
 - `-SleepSeconds`: delay between scan cycles. Default: `20`.
@@ -67,6 +67,6 @@ powershell -ExecutionPolicy Bypass -File .\DNSAutoUpdate.ps1 -ZoneName "server.l
 - Use `-ManagedRecordName` for production jobs so the owner-name allowlist is obvious in the scheduled command.
 - If no eligible IPv4 address remains, the cycle skips DNS changes instead of deleting records.
 - Loopback, APIPA, `0.0.0.0`, unpreferred addresses, and excluded virtual adapters are ignored by default.
-- The repository root also contains a `DNSAutoUpdate.ps1` convenience wrapper that forwards to this script with the same parameters.
-- The script runs forever until the PowerShell process is stopped.
+- The repository root also contains a `DNSAutoUpdate.cmd` convenience wrapper that forwards to this utility with the same parameters.
+- The utility runs forever until the process is stopped.
 - Generated logs are ignored by git. Long-running jobs should keep log rotation enabled or send `-LogFile` to a managed logging location.

@@ -971,7 +971,7 @@ static bool ParseCommandLineOptions()
         if (matched)
         {
             int parsed = 0;
-            if (!ParseCommandLineClampedInt(value, L"--generated-asset-cache-max", 0, 10000, parsed, error))
+            if (!ParseCommandLineClampedInt(value, L"--generated-asset-cache-max", 0, 4096, parsed, error))
                 return fail(error);
             AddCommandLineIntSetting(L"Settings", L"GeneratedAssetCacheMaxEntries", parsed);
             continue;
@@ -981,7 +981,7 @@ static bool ParseCommandLineOptions()
         if (matched)
         {
             int parsed = 0;
-            if (!ParseCommandLineClampedInt(value, L"--generated-asset-precache-max", 0, 10000, parsed, error))
+            if (!ParseCommandLineClampedInt(value, L"--generated-asset-precache-max", 0, 256, parsed, error))
                 return fail(error);
             AddCommandLineIntSetting(L"Settings", L"GeneratedAssetPrecacheMaxFiles", parsed);
             continue;
@@ -1453,8 +1453,8 @@ static std::wstring CommandLineUsageText()
         L"                                      Enable/disable generated asset cache.\r\n"
         L"  --generated-asset-precache | --no-generated-asset-precache\r\n"
         L"                                      Enable/disable slideshow pre-cache.\r\n"
-        L"  --generated-asset-cache-max <n>      Set cache max entries, 0-10000.\r\n"
-        L"  --generated-asset-precache-max <n>   Set pre-cache max files, 0-10000.\r\n"
+        L"  --generated-asset-cache-max <n>      Set cache max entries, 0-4096.\r\n"
+        L"  --generated-asset-precache-max <n>   Set pre-cache max files, 0-256.\r\n"
         L"  --set Settings.Key=Value            Set any other INI-backed setting directly.\r\n"
         L"\r\n"
         L"Examples:\r\n";

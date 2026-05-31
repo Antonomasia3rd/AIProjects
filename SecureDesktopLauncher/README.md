@@ -28,8 +28,8 @@ build_password_launcher.cmd check
 
 Source checks for launch invariants:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\TestSecureDesktopLauncherSource.ps1
+```cmd
+TestSecureDesktopLauncherSource.cmd
 ```
 
 Side-by-side builds when installed files are locked:

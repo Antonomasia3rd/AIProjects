@@ -123,9 +123,6 @@ call :RecordArtifact "%REPO%\NowPlayingTile\build\NowPlayingTile.exe"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%REPO%\NowPlayingTile\README.md"
 if errorlevel 1 exit /b %ERRORLEVEL%
-for %%F in (register-dev-package.ps1 unregister-dev-package.ps1 launch-packaged.ps1 launch-widget.ps1 install-startup.ps1 uninstall-startup.ps1 open-settings.ps1) do (
-  call :RecordArtifactIfExists "%REPO%\NowPlayingTile\%%F" || exit /b !ERRORLEVEL!
-)
 call :RecordArtifactsUnderDir "%REPO%\NowPlayingTile\package"
 exit /b %ERRORLEVEL%
 
@@ -134,7 +131,7 @@ call :IsSkipped DesktopStub
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build DesktopStub"
 pushd "%REPO%\DesktopStub" || exit /b 1
-call :Run powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%REPO%\DesktopStub\TestDesktopStubSource.ps1"
+call :Run cmd.exe /d /c TestDesktopStubSource.cmd
 if errorlevel 1 (
   set "STATUS=%ERRORLEVEL%"
   popd
@@ -166,6 +163,12 @@ call :IsSkipped SecureDesktopLauncher
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build SecureDesktopLauncher"
 pushd "%REPO%\SecureDesktopLauncher" || exit /b 1
+call :Run cmd.exe /d /c TestSecureDesktopLauncherSource.cmd
+if errorlevel 1 (
+  set "STATUS=%ERRORLEVEL%"
+  popd
+  exit /b !STATUS!
+)
 call :Run cmd.exe /d /c build_launcher.cmd
 set "STATUS=%ERRORLEVEL%"
 if "%STATUS%"=="0" (

@@ -33,13 +33,13 @@ If `build\DesktopStub.exe` or `build\DesktopStubLiveTileBroker.exe` is running, 
 
 ## Developer Checks
 
-`TestDesktopStubSource.ps1` is a maintainer regression guard. It does not build or launch `DesktopStub.exe`; it scans the source for safety fixes that should not be accidentally removed.
+`TestDesktopStubSource.cmd` builds and runs a small C++ maintainer regression guard. It does not build or launch `DesktopStub.exe`; it scans the source for safety fixes that should not be accidentally removed.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File DesktopStub\TestDesktopStubSource.ps1
+```cmd
+DesktopStub\TestDesktopStubSource.cmd
 ```
 
-Use `-ListChecks` to print the guardrails without running assertions.
+Use `--list` to print the guardrails without running assertions. The helper binary is emitted under `DesktopStub\build` and is not part of the DesktopStub runtime.
 
 ## Run
 
@@ -91,6 +91,10 @@ When enabled, `DesktopStub.exe` scans the desktop WorkerW live-wallpaper host tr
 
 Large static wallpapers are decoded through WIC's scaler by default before being handed to GDI+. This avoids decoding an 8K/very large wallpaper into a full native-size 32bpp GDI+ bitmap when the generated tile assets only need desktop/asset-sized pixels. Configure this from `DesktopStub.ini`, the tray menu under **Methods**, or command-line flags. Set `[Settings] WallpaperDecodeLowMemory=0` or pass `--no-wallpaper-decode-low-memory` to force the old full-size GDI+ decode path. Leave `[Settings] WallpaperDecodeMaxLongEdge=0` / `--wallpaper-decode-max-long-edge auto` for automatic monitor/asset-based sizing, or set a positive pixel value to force a specific maximum long edge. Automatic low-memory decode keeps the old full-size path for Center/Tile wallpaper modes unless `WallpaperDecodeMaxLongEdge` is explicitly set.
 
+Idle memory reduction is enabled by default. DesktopStub releases GDI+ after image work, compacts the CRT heap, and trims the process working set when it returns to idle. Use `[Settings] TrimWorkingSetOnIdle`, `[Settings] CompactCrtHeapOnIdle`, and `[Settings] KeepGdiPlusLoaded`, or the matching command-line flags, to trade lower idle memory against warmer image-generation startup.
+
+Generated asset caching is enabled by default. Repeated wallpaper states can reuse validated PNG assets without loading the wallpaper again, and slideshow siblings can be pre-cached in the background. Cache files are verified as complete PNGs with the exact expected tile dimensions, including chunk CRCs and IDAT/IEND presence, before they can suppress regeneration. Use the tray **Caching** menu or the `--generated-asset-*` command-line flags to tune or disable this behavior.
+
 The live-wallpaper capture path does not look for a specific process name. It scans only non-icon `WorkerW` desktop-host windows and accepts visible monitor-sized child windows inside those `WorkerW` trees as candidates. This covers Lively, Wallpaper Engine, N0va Desktop, and arbitrary app-wallpaper modes that embed their renderer under the desktop. It intentionally does not enumerate arbitrary top-level windows, because a normal foreground app can also be large and visible. Captured windows that are tiny relative to the primary monitor are rejected, so small UI/helper fragments do not get stretched into the tile. If a WorkerW-hosted child renderer such as Wallpaper Engine's `WPEDesktopDX11Window` or `WPEDesktopCEFWindow` returns a black frame from `PrintWindow`, the capture path keeps the same non-icon `WorkerW` parent as a later fallback while still staying WorkerW-only. If every candidate returns a black GPU/WebView frame, the capture path rejects the blank/black frame instead of generating a black tile. The old screen-DC fallback is disabled by default because it can capture the visible desktop, taskbar, icons, or the user's static wallpaper; enable `LiveWallpaperCaptureScreenFallback=1` only for debugging or as an explicit unsafe workaround.
 
 ```cmd
@@ -114,6 +118,10 @@ Supported options:
 - `--wallpaper <path>` or a bare wallpaper path: generate from that image.
 - `--no-monitor`: skip wallpaper/fit/DPI monitoring.
 - `--tray` / `--no-tray`, `--console` / `--no-console`, `--logging` / `--no-logging`, `--notifications` / `--no-notifications`.
+- `--trim-working-set-on-idle` / `--no-trim-working-set-on-idle`: lower idle Task Manager memory by trimming the working set.
+- `--compact-crt-heap-on-idle` / `--no-compact-crt-heap-on-idle`: release free CRT heap pages after idle work.
+- `--keep-gdiplus-loaded` / `--no-keep-gdiplus-loaded`: keep or release GDI+ after image work for speed vs lower idle memory.
+- `--low-idle-memory` / `--no-low-idle-memory`: convenience profile for lower idle memory vs warmer image runtime.
 - `--powershell` / `--com-registration`: set and save registration command mode.
 - `--live-tile` / `--no-live-tile`: set and save Live Tile update mode.
 - `--live-tile-auto`: set and save automatic Live Tile update mode.
@@ -138,6 +146,10 @@ Supported options:
 - `--live-wallpaper-startup-refresh-duration <ms|off>`: set and save `LiveWallpaperCaptureStartupRefreshDurationMs` from 0 to 3600000. `off` maps to 0.
 - `--scales auto|all|100,125,150,200,400`: set and save generated DPI scales. `auto` ignores manual scale toggles while preserving their previous checkbox state for later.
 - `--asset Name=0|1`: set and save one asset toggle, such as `MediumTile=1`.
+- `--generated-asset-cache` / `--no-generated-asset-cache`: enable or disable generated asset cache restore/save.
+- `--generated-asset-precache` / `--no-generated-asset-precache`: enable or disable slideshow sibling pre-cache.
+- `--generated-asset-cache-max <n>`: set cache max entries from 0 to 4096.
+- `--generated-asset-precache-max <n>`: set pre-cache max files from 0 to 256.
 
 ## Important Features
 
@@ -148,6 +160,7 @@ Supported options:
 - Uses COM Appx registration by default with optional PowerShell-only mode and fallback behavior; the COM isolation helper is disabled by default to avoid spawning an extra helper process on normal registration.
 - Can automatically use Live Tile notification updates when launched with package identity, with manual registration/Live Tile overrides.
 - Supports optional tile text overlays. In Windows 10 Live Tile mode the text is emitted into the Live Tile XML; in registration/static-image modes it is baked into generated tile PNGs to simulate the same appearance.
+- Uses low-memory wallpaper decode, generated asset caching, lazy GDI+, and idle working-set trimming to keep large-wallpaper generation from permanently inflating resident memory.
 - Can dynamically create or regenerate `AppxManifest.xml` from built-in manifest defaults.
 - Supports quoted INI values and inline comments.
 - Keeps detailed logs and exposes registration output from the tray.
