@@ -2,11 +2,11 @@
 setlocal EnableExtensions
 
 set "SCRIPT_DIR=%~dp0"
-for %%I in ("%SCRIPT_DIR%..\..") do set "REPO=%%~fI"
+for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
 set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-set "OUT_DIR=%REPO%\.github\build"
+set "OUT_DIR=%REPO_ROOT%\.github\build"
 set "OUT=%OUT_DIR%\RepoTools.exe"
-set "SRC=%REPO%\.github\tools\RepoTools.cs"
+set "SRC=%REPO_ROOT%\.github\tools\RepoTools.cs"
 
 if not exist "%CSC%" (
   echo ERROR: C# compiler not found at "%CSC%".
@@ -31,7 +31,7 @@ if errorlevel 1 (
 
 copy /y "%TMP_OUT%" "%OUT%" >nul 2>nul
 
-"%TMP_OUT%" %* --repository-root "%REPO%"
+"%TMP_OUT%" %* --repository-root "%REPO_ROOT%"
 set "STATUS=%ERRORLEVEL%"
 rmdir /s /q "%TMP_DIR%" >nul 2>nul
 exit /b %STATUS%

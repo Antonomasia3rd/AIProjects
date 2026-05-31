@@ -40,6 +40,7 @@ jobs:
       build_all: ${{ steps.detect.outputs.build_all }}
       skip_args: ${{ steps.detect.outputs.skip_args }}
       project_list: ${{ steps.detect.outputs.project_list }}
+      release_project_list: ${{ steps.detect.outputs.release_project_list }}
       release_base: ${{ steps.detect.outputs.release_base }}
       build_allow_content_above_lock: ${{ steps.detect.outputs.build_allow_content_above_lock }}
       build_asusblink: ${{ steps.detect.outputs.build_asusblink }}
@@ -230,7 +231,7 @@ jobs:
 
   auto-release:
     name: Create project releases
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-projects.outputs.release_project_list != ''
     needs:
       - detect-projects
       - build-windows
@@ -254,6 +255,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PROJECT_LIST: ${{ needs.detect-projects.outputs.project_list }}
+          RELEASE_PROJECT_LIST: ${{ needs.detect-projects.outputs.release_project_list }}
           REPO: ${{ github.repository }}
           FULL_SHA: ${{ github.sha }}
         run: .github\scripts\Publish-ProjectReleases.cmd -ArtifactsRoot artifacts
