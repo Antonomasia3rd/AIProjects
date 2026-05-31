@@ -18,8 +18,13 @@ static HWND g_hwnd = nullptr;
 struct UiStrings
 {
     std::wstring generalTitle;
+    std::wstring wallpaperTitle;
+    std::wstring appearanceAssetsTitle;
+    std::wstring diagnosticsTitle;
     std::wstring loggingTitle;
     std::wstring wallpaperFittingTitle;
+    std::wstring wallpaperDetectionTitle;
+    std::wstring wallpaperDecodeTitle;
     std::wstring methodsTitle;
     std::wstring assetsTitle;
     std::wstring dpiScalesTitle;
@@ -404,6 +409,13 @@ struct UiStrings
 
     std::wstring changeDetected;
     std::wstring advancedTitle;
+    std::wstring advancedTimingTitle;
+    std::wstring advancedShutdownTitle;
+    std::wstring advancedRegistrationTitle;
+    std::wstring advancedLoggingTitle;
+    std::wstring advancedPowerShellTitle;
+    std::wstring advancedPngSaveTitle;
+    std::wstring advancedSingleInstanceTitle;
     std::wstring pollIntervalLabel;
     std::wstring confirmMsLabel;
     std::wstring debounceMinMsLabel;
