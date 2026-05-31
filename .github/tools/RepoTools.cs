@@ -971,16 +971,44 @@ static class RepoTools
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        using (var process = Process.Start(psi))
+        using (var process = new Process())
         {
-            string output = process.StandardOutput.ReadToEnd();
-            string error = process.StandardError.ReadToEnd();
+            process.StartInfo = psi;
+
+            var output = new StringBuilder();
+            var error = new StringBuilder();
+            var outputLock = new object();
+            var errorLock = new object();
+
+            process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            {
+                if (e.Data == null)
+                    return;
+                lock (outputLock)
+                    output.AppendLine(e.Data);
+            };
+            process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            {
+                if (e.Data == null)
+                    return;
+                lock (errorLock)
+                    error.AppendLine(e.Data);
+            };
+
+            if (!process.Start())
+                throw new InvalidOperationException("Failed to start process: " + file + " " + arguments);
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
             if (!process.WaitForExit(timeoutMs))
             {
                 try { process.Kill(); } catch { }
+                try { process.WaitForExit(); } catch { }
                 throw new TimeoutException("Process timed out: " + file + " " + arguments);
             }
-            return new ProcessResult { ExitCode = process.ExitCode, Output = output, Error = error };
+
+            process.WaitForExit();
+            return new ProcessResult { ExitCode = process.ExitCode, Output = output.ToString(), Error = error.ToString() };
         }
     }
 

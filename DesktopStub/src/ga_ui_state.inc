@@ -217,6 +217,9 @@ struct UiStrings
     std::wstring startingWallpaperGeneration;
     std::wstring wallpaperSource;
     std::wstring wallpaperImageLoaded;
+    std::wstring wallpaperImageLoadedWic;
+    std::wstring wallpaperImageLoadedWicDownscaled;
+    std::wstring wallpaperImageLoadedWicMemoryConstrained;
     std::wstring renderModeSummary;
     std::wstring assetsDirectoryReady;
     std::wstring failedLoadWallpaper;
@@ -294,6 +297,9 @@ struct UiStrings
     std::wstring liveTileUpdateException;
     std::wstring liveTileUpdateMessage;
     std::wstring liveTilePackageIdentity;
+    std::wstring liveTilePackagedHelperReportedSuccess;
+    std::wstring liveTilePackagedBrokerReportedSuccess;
+    std::wstring liveTilePackagedHelperNoSuccess;
     std::wstring generationUnhandledException;
     std::wstring generationThreadStartFailed;
     std::wstring pollThreadUnhandledException;

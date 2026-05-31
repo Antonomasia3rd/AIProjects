@@ -324,6 +324,9 @@ void LoadUiStrings()
     g_ui.startingWallpaperGeneration = IniReadS(L"Strings", L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s.");
     g_ui.wallpaperSource = IniReadS(L"Strings", L"WallpaperSource", L"Wallpaper source: %s");
     g_ui.wallpaperImageLoaded = IniReadS(L"Strings", L"WallpaperImageLoaded", L"[i] Wallpaper image loaded (%d x %d).");
+    g_ui.wallpaperImageLoadedWic = IniReadS(L"Strings", L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with WIC: %lu x %lu.");
+    g_ui.wallpaperImageLoadedWicDownscaled = IniReadS(L"Strings", L"WallpaperImageLoadedWicDownscaled", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu -> %lu x %lu (max long edge=%d).");
+    g_ui.wallpaperImageLoadedWicMemoryConstrained = IniReadS(L"Strings", L"WallpaperImageLoadedWicMemoryConstrained", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu -> %lu x %lu (requested %lu x %lu; memory-limited from max long edge=%d).");
     g_ui.renderModeSummary = IniReadS(L"Strings", L"RenderModeSummary", L"[i] Render fit mode: %s");
     g_ui.assetsDirectoryReady = IniReadS(L"Strings", L"AssetsDirectoryReady", L"[i] Assets directory ready: %s");
     g_ui.failedLoadWallpaper = IniReadS(L"Strings", L"FailedLoadWallpaper", L"Failed to load wallpaper image.");
@@ -402,6 +405,9 @@ void LoadUiStrings()
     g_ui.liveTileUpdateException = IniReadS(L"Strings", L"LiveTileUpdateException", L"Live Tile update threw exception: 0x%08X");
     g_ui.liveTileUpdateMessage = IniReadS(L"Strings", L"LiveTileUpdateMessage", L"Live Tile message: %s");
     g_ui.liveTilePackageIdentity = IniReadS(L"Strings", L"LiveTilePackageIdentity", L"[i] Live Tile package identity: %s");
+    g_ui.liveTilePackagedHelperReportedSuccess = IniReadS(L"Strings", L"LiveTilePackagedHelperReportedSuccess", L"[i] Packaged Live Tile helper reported success.");
+    g_ui.liveTilePackagedBrokerReportedSuccess = IniReadS(L"Strings", L"LiveTilePackagedBrokerReportedSuccess", L"[i] Packaged WinRT Live Tile broker reported success.");
+    g_ui.liveTilePackagedHelperNoSuccess = IniReadS(L"Strings", L"LiveTilePackagedHelperNoSuccess", L"Packaged Live Tile helper did not report success after activation: %s (package=%s, pid=%lu).");
     g_ui.generationUnhandledException = IniReadS(L"Strings", L"GenerationUnhandledException", L"[!] Generation worker caught an unhandled exception: %s");
     g_ui.generationThreadStartFailed = IniReadS(L"Strings", L"GenerationThreadStartFailed", L"[!] Failed to start generation worker thread: %s");
     g_ui.pollThreadUnhandledException = IniReadS(L"Strings", L"PollThreadUnhandledException", L"[!] Wallpaper poll thread stopped after an unhandled exception: %s");
@@ -751,6 +757,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.liveTileUpdateException, L"LiveTileUpdateException", { L"%08X" });
     RequireFormat(g_ui.liveTileUpdateMessage, L"LiveTileUpdateMessage", { L"%s" });
     RequireFormat(g_ui.liveTilePackageIdentity, L"LiveTilePackageIdentity", { L"%s" });
+    RequireFormat(g_ui.liveTilePackagedHelperNoSuccess, L"LiveTilePackagedHelperNoSuccess", { L"%s", L"%s", L"%lu" });
     RequireFormat(g_ui.gdiPlusOperationFailed, L"GdiPlusOperationFailed", { L"%s", L"%d" });
     RequireFormat(g_ui.win32FailureFmt, L"Win32FailureFmt", { L"%s", L"%lu", L"%s" });
     RequireFormat(g_ui.logPathChanged, L"LogPathChanged", { L"%s" });
@@ -838,6 +845,9 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.startingWallpaperGeneration, L"StartingWallpaperGeneration", { L"%s" });
     RequireFormat(g_ui.wallpaperSource, L"WallpaperSource", { L"%s" });
     RequireFormat(g_ui.wallpaperImageLoaded, L"WallpaperImageLoaded", { L"%d", L"%d" });
+    RequireFormat(g_ui.wallpaperImageLoadedWic, L"WallpaperImageLoadedWic", { L"%lu", L"%lu" });
+    RequireFormat(g_ui.wallpaperImageLoadedWicDownscaled, L"WallpaperImageLoadedWicDownscaled", { L"%lu", L"%lu", L"%lu", L"%lu", L"%d" });
+    RequireFormat(g_ui.wallpaperImageLoadedWicMemoryConstrained, L"WallpaperImageLoadedWicMemoryConstrained", { L"%lu", L"%lu", L"%lu", L"%lu", L"%lu", L"%lu", L"%d" });
     RequireFormat(g_ui.renderModeSummary, L"RenderModeSummary", { L"%s" });
     RequireFormat(g_ui.assetsDirectoryReady, L"AssetsDirectoryReady", { L"%s" });
     RequireFormat(g_ui.skippingAssetDisabled, L"SkippingAssetDisabled", { L"%s" });

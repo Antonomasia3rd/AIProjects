@@ -693,7 +693,7 @@ static std::wstring TryGetLiveWallpaperSnapshot()
 
     std::vector<HWND> candidates = FindLiveWallpaperWindowCandidates(provider);
 
-    std::lock_guard<std::mutex> lk(s_liveWallpaperMutex);
+    std::unique_lock<std::mutex> lk(s_liveWallpaperMutex);
     auto now = steady_clock::now();
 
     int startupRefreshMs = LiveWallpaperCaptureStartupRefreshMs();
@@ -752,8 +752,13 @@ static std::wstring TryGetLiveWallpaperSnapshot()
         long long elapsedMs = duration_cast<milliseconds>(now - s_activeSince).count();
         if (elapsedMs < delayMs)
         {
+            steady_clock::time_point activeSinceBeforeDelay = s_activeSince;
+            lk.unlock();
             Sleep(static_cast<DWORD>(delayMs - elapsedMs));
+            lk.lock();
             now = steady_clock::now();
+            if (provider != s_activeProvider || activeSinceBeforeDelay != s_activeSince)
+                return L"";
         }
     }
 
@@ -761,6 +766,7 @@ static std::wstring TryGetLiveWallpaperSnapshot()
     {
         capturedPath.clear();
         std::wstring path = GetLiveWallpaperSnapshotPath(provider, ++s_captureSequence);
+        steady_clock::time_point activeSinceBeforeCapture = s_activeSince;
         if (path.empty())
         {
             std::wstring key = L"live-wallpaper-temp-path:" + std::wstring(LiveWallpaperProviderName(provider));
@@ -768,6 +774,8 @@ static std::wstring TryGetLiveWallpaperSnapshot()
                 Log(g_ui.liveWallpaperCaptureSnapshotPathFailed.c_str(), LiveWallpaperProviderName(provider));
             return false;
         }
+
+        lk.unlock();
 
         bool rejectedBlank = false;
         bool rejectedTooSmall = false;
@@ -822,8 +830,13 @@ static std::wstring TryGetLiveWallpaperSnapshot()
                 else
                     Log(g_ui.liveWallpaperCaptureSnapshotFailed.c_str(), LiveWallpaperProviderName(provider));
             }
+            lk.lock();
             return false;
         }
+
+        lk.lock();
+        if (provider != s_activeProvider || activeSinceBeforeCapture != s_activeSince)
+            return false;
 
         s_lastCapture = steady_clock::now();
         capturedPath = path;

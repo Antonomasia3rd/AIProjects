@@ -562,8 +562,8 @@ static bool LiveTileSuccessLogContainsNewSuccess(const LiveTileSuccessLogWatch& 
 
     std::wstring tail;
     return ReadUtf8FileTailAsWide(watch.path, watch.previousSize, tail) &&
-        tail.find(L"Live Tile update completed under package identity") != std::wstring::npos ||
-        tail.find(L"Live Tile cleared under package identity") != std::wstring::npos;
+        (tail.find(L"Live Tile update completed under package identity") != std::wstring::npos ||
+            tail.find(L"Live Tile cleared under package identity") != std::wstring::npos);
 }
 
 static bool WaitForPackagedLiveTileHelperSuccess(const std::vector<LiveTileSuccessLogWatch>& watches, DWORD timeoutMs)
@@ -1269,11 +1269,19 @@ static bool ActivatePackagedLiveTileUpdateStub(
         appUserModelId.c_str(), packageFullName.c_str(), static_cast<unsigned long>(pid));
 
     if (WaitForPackagedLiveTileHelperSuccess(successWatches, 5000))
+    {
+        // Maintainer guardrail: Packaged WinRT Live Tile broker reported success.
         LogText((Win8LiveTileBrokerAppEnabled() && ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10) ?
-            L"[i] Packaged WinRT Live Tile broker reported success." :
-            L"[i] Packaged Live Tile helper reported success.");
+            g_ui.liveTilePackagedBrokerReportedSuccess :
+            g_ui.liveTilePackagedHelperReportedSuccess);
+        return true;
+    }
 
-    return true;
+    failureMessage = FormatWide(g_ui.liveTilePackagedHelperNoSuccess.c_str(),
+        appUserModelId.c_str(),
+        packageFullName.c_str(),
+        static_cast<unsigned long>(pid));
+    return false;
 }
 
 static bool Appx_Request_LiveTileUpdateViaPackagedActivation(
