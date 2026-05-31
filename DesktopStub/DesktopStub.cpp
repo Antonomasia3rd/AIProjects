@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <memory>
 #include <new>
+#include <cmath>
 #include <commdlg.h>
 #include <appmodel.h>
 #include <tlhelp32.h>

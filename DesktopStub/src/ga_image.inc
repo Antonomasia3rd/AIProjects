@@ -161,9 +161,12 @@ struct WallpaperBitmapLoadInfo
     UINT originalHeight = 0;
     UINT loadedWidth = 0;
     UINT loadedHeight = 0;
+    UINT requestedWidth = 0;
+    UINT requestedHeight = 0;
     int maxLongEdge = 0;
     bool usedWic = false;
     bool downscaled = false;
+    bool memoryConstrained = false;
 };
 
 struct ComApartmentScope
@@ -214,6 +217,63 @@ static UINT ScaleDimensionForLongEdge(UINT value, UINT sourceLongEdge, UINT targ
     if (scaled > static_cast<unsigned long long>(UINT_MAX))
         scaled = UINT_MAX;
     return static_cast<UINT>(scaled);
+}
+
+static bool TryWicDecodeByteCount(UINT width, UINT height, size_t& bytes)
+{
+    bytes = 0;
+    if (width == 0 || height == 0)
+        return false;
+
+    const size_t stride = static_cast<size_t>(width) * 4u;
+    if (stride / 4u != static_cast<size_t>(width))
+        return false;
+    if (static_cast<size_t>(height) > static_cast<size_t>(-1) / stride)
+        return false;
+
+    bytes = stride * static_cast<size_t>(height);
+    return true;
+}
+
+static bool ConstrainWicDecodeDimensionsToMemory(UINT& width, UINT& height)
+{
+    size_t bytes = 0;
+    if (TryWicDecodeByteCount(width, height, bytes) && bytes <= static_cast<size_t>(INT_MAX))
+        return false;
+
+    const long double maxPixels = static_cast<long double>(INT_MAX) / 4.0L;
+    const long double currentPixels = static_cast<long double>(width) * static_cast<long double>(height);
+    if (currentPixels <= 0.0L)
+        return false;
+
+    long double scale = std::sqrt(maxPixels / currentPixels);
+    if (!(scale > 0.0L) || scale >= 1.0L)
+        return false;
+
+    long double scaledWidth = std::floor(static_cast<long double>(width) * scale);
+    long double scaledHeight = std::floor(static_cast<long double>(height) * scale);
+    UINT constrainedWidth = scaledWidth < 1.0L ? 1u : static_cast<UINT>(scaledWidth);
+    UINT constrainedHeight = scaledHeight < 1.0L ? 1u : static_cast<UINT>(scaledHeight);
+
+    while ((!TryWicDecodeByteCount(constrainedWidth, constrainedHeight, bytes) ||
+        bytes > static_cast<size_t>(INT_MAX)) &&
+        (constrainedWidth > 1 || constrainedHeight > 1))
+    {
+        if (constrainedWidth >= constrainedHeight && constrainedWidth > 1)
+            --constrainedWidth;
+        else if (constrainedHeight > 1)
+            --constrainedHeight;
+        else
+            break;
+    }
+
+    if (!TryWicDecodeByteCount(constrainedWidth, constrainedHeight, bytes) ||
+        bytes == 0 || bytes > static_cast<size_t>(INT_MAX))
+        return false;
+
+    width = constrainedWidth;
+    height = constrainedHeight;
+    return true;
 }
 
 static std::unique_ptr<Bitmap> TryLoadWicBitmapForRender(
@@ -273,9 +333,15 @@ static std::unique_ptr<Bitmap> TryLoadWicBitmapForRender(
     if (dstW == 0 || dstH == 0 || dstW > static_cast<UINT>(INT_MAX) || dstH > static_cast<UINT>(INT_MAX))
         return nullptr;
 
+    info.requestedWidth = dstW;
+    info.requestedHeight = dstH;
+    info.memoryConstrained = ConstrainWicDecodeDimensionsToMemory(dstW, dstH);
+    if (dstW == 0 || dstH == 0 || dstW > static_cast<UINT>(INT_MAX) || dstH > static_cast<UINT>(INT_MAX))
+        return nullptr;
+
     IWICBitmapSource* source = frame.get();
     UniqueComPtr<IWICBitmapScaler> scaler;
-    if (sourceLongEdge > targetLongEdge)
+    if (dstW != srcW || dstH != srcH)
     {
         IWICBitmapScaler* rawScaler = nullptr;
         hr = factory->CreateBitmapScaler(&rawScaler);
@@ -306,7 +372,9 @@ static std::unique_ptr<Bitmap> TryLoadWicBitmapForRender(
         return nullptr;
 
     const UINT wicStride = dstW * 4u;
-    const size_t wicBytes = static_cast<size_t>(wicStride) * static_cast<size_t>(dstH);
+    size_t wicBytes = 0;
+    if (!TryWicDecodeByteCount(dstW, dstH, wicBytes))
+        return nullptr;
     if (wicBytes == 0 || wicBytes > static_cast<size_t>(INT_MAX))
         return nullptr;
 

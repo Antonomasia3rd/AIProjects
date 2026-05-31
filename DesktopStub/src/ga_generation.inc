@@ -1104,14 +1104,14 @@ static bool StartupGeneratedAssetsPresent(const std::wstring& exeDir)
         std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
         std::wstring basePath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
 
-        if (!IsValidGeneratedPngWithDimensions(basePath, t.w, t.h))
-            return false;
-
         bool generatedByCurrentConfig =
             IniReadI(L"Assets", t.name, 0) != 0 ||
             g_generateDesktopIconForDisabledEntries;
         if (!generatedByCurrentConfig)
             continue;
+
+        if (!IsValidGeneratedPngWithDimensions(basePath, t.w, t.h))
+            return false;
 
         for (int scale : scales)
         {
@@ -1496,20 +1496,35 @@ static void LogWallpaperBitmapLoad(const WallpaperBitmapLoadInfo& info, Bitmap* 
         return;
     }
 
+    if (info.usedWic && info.memoryConstrained)
+    {
+        Log(g_ui.wallpaperImageLoadedWicMemoryConstrained.c_str(),
+            static_cast<unsigned long>(info.originalWidth),
+            static_cast<unsigned long>(info.originalHeight),
+            static_cast<unsigned long>(info.loadedWidth),
+            static_cast<unsigned long>(info.loadedHeight),
+            static_cast<unsigned long>(info.requestedWidth),
+            static_cast<unsigned long>(info.requestedHeight),
+            info.maxLongEdge);
+        return;
+    }
+
     if (info.usedWic && info.downscaled)
     {
-        Log(L"[i] Wallpaper image loaded with low-memory WIC decode: %u x %u -> %u x %u (max long edge=%d).",
-            info.originalWidth,
-            info.originalHeight,
-            info.loadedWidth,
-            info.loadedHeight,
+        Log(g_ui.wallpaperImageLoadedWicDownscaled.c_str(),
+            static_cast<unsigned long>(info.originalWidth),
+            static_cast<unsigned long>(info.originalHeight),
+            static_cast<unsigned long>(info.loadedWidth),
+            static_cast<unsigned long>(info.loadedHeight),
             info.maxLongEdge);
         return;
     }
 
     if (info.usedWic)
     {
-        Log(L"[i] Wallpaper image loaded with WIC: %u x %u.", info.loadedWidth, info.loadedHeight);
+        Log(g_ui.wallpaperImageLoadedWic.c_str(),
+            static_cast<unsigned long>(info.loadedWidth),
+            static_cast<unsigned long>(info.loadedHeight));
         return;
     }
 
