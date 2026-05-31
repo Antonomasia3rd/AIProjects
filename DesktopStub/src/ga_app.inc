@@ -135,9 +135,14 @@ static void MaybeClearLiveTileOnShutdown()
     LogText(g_ui.liveTileClearOnShutdown);
     std::wstring failure;
     if (Appx_Clear_Or_Request_LiveTile(failure))
+    {
+        SetLiveTileClearedOnShutdown(UseExperimentalLiveTileUpdate());
         LogText(g_ui.liveTileClearOnShutdownSuccess);
+    }
     else
+    {
         Log(g_ui.liveTileClearOnShutdownSkipped.c_str(), failure.empty() ? g_ui.unknownError.c_str() : failure.c_str());
+    }
 }
 
 static std::wstring ModeSwitchRelaunchArguments(bool forceGenerate, bool waitForThisProcessToExit)
@@ -1668,23 +1673,27 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         queuedPendingLiveTileModeReregistration = QueueLiveTileModeReregistration();
 
     bool forceStartupGeneration = CommandLineShouldForceStartupGeneration();
+    bool liveTileNeedsStartupRestore = StartupLiveTileClearedStateNeedsGeneration();
     std::wstring commandLineWallpaper;
     bool hasCommandLineWallpaper = CommandLineWallpaper(commandLineWallpaper);
     if (!g_shutdownRequested && !queuedLiveTileRuntimeRelaunch && !queuedPendingLiveTileModeReregistration &&
-        (g_generateOnStartup || forceStartupGeneration || hasCommandLineWallpaper))
+        (g_generateOnStartup || forceStartupGeneration || liveTileNeedsStartupRestore || hasCommandLineWallpaper))
     {
         std::wstring wp = hasCommandLineWallpaper ? commandLineWallpaper : GetWallpaper();
         if (!wp.empty())
         {
-            if (!forceStartupGeneration && !hasCommandLineWallpaper && StartupGenerationCanSkip(wp))
+            if (!forceStartupGeneration && !liveTileNeedsStartupRestore && !hasCommandLineWallpaper && StartupGenerationCanSkip(wp))
             {
                 LogText(g_ui.startupGenerationSkippedUnchanged);
             }
             else
             {
-                LogText(g_ui.startupGenerationEnabled);
+                LogText(liveTileNeedsStartupRestore
+                    ? g_ui.startupGenerationRestoringClearedLiveTile
+                    : g_ui.startupGenerationEnabled);
                 QueueGenerate(wp, hasCommandLineWallpaper ? g_ui.commandLineWallpaperReason :
-                    (forceStartupGeneration ? g_ui.commandLineForceGenerateReason : g_ui.startupGenerationReason));
+                    (forceStartupGeneration ? g_ui.commandLineForceGenerateReason :
+                        (liveTileNeedsStartupRestore ? g_ui.startupLiveTileRestoreReason : g_ui.startupGenerationReason)));
             }
         }
         else
