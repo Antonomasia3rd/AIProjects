@@ -138,11 +138,16 @@ void EnsureIniDefaults()
 void LoadUiStrings()
 {
     g_ui.generalTitle = IniReadS(L"Strings", L"GeneralTitle", L"General:");
+    g_ui.wallpaperTitle = IniReadS(L"Strings", L"WallpaperTitle", L"Wallpaper:");
+    g_ui.appearanceAssetsTitle = IniReadS(L"Strings", L"AppearanceAssetsTitle", L"Appearance && assets:");
+    g_ui.diagnosticsTitle = IniReadS(L"Strings", L"DiagnosticsTitle", L"Diagnostics:");
     g_ui.loggingTitle = IniReadS(L"Strings", L"LoggingTitle", L"Logging:");
-    g_ui.wallpaperFittingTitle = IniReadS(L"Strings", L"WallpaperFittingTitle", L"Wallpaper Fitting:");
+    g_ui.wallpaperFittingTitle = IniReadS(L"Strings", L"WallpaperFittingTitle", L"Wallpaper fitting:");
+    g_ui.wallpaperDetectionTitle = IniReadS(L"Strings", L"WallpaperDetectionTitle", L"Wallpaper detection");
+    g_ui.wallpaperDecodeTitle = IniReadS(L"Strings", L"WallpaperDecodeTitle", L"Decode memory");
     g_ui.methodsTitle = IniReadS(L"Strings", L"MethodsTitle", L"Methods:");
     g_ui.assetsTitle = IniReadS(L"Strings", L"AssetsTitle", L"Assets:");
-    g_ui.dpiScalesTitle = IniReadS(L"Strings", L"DpiScalesTitle", L"DPI Scales:");
+    g_ui.dpiScalesTitle = IniReadS(L"Strings", L"DpiScalesTitle", L"DPI scales:");
     g_ui.cachingTitle = IniReadS(L"Strings", L"CachingTitle", L"Caching:");
     g_ui.liveTileTitle = IniReadS(L"Strings", L"LiveTileTitle", L"Live Tile:");
     g_ui.tileAppearanceTitle = IniReadS(L"Strings", L"TileAppearanceTitle", L"Tile appearance:");
@@ -523,6 +528,13 @@ void LoadUiStrings()
     g_ui.unspecifiedReason = IniReadS(L"Strings", L"UnspecifiedReason", L"an unspecified reason");
     g_ui.changeDetected = IniReadS(L"Strings", L"ChangeDetected", L"change detected");
     g_ui.advancedTitle = IniReadS(L"Strings", L"AdvancedTitle", L"Advanced:");
+    g_ui.advancedTimingTitle = IniReadS(L"Strings", L"AdvancedTimingTitle", L"Timing && detection");
+    g_ui.advancedShutdownTitle = IniReadS(L"Strings", L"AdvancedShutdownTitle", L"Shutdown && tray");
+    g_ui.advancedRegistrationTitle = IniReadS(L"Strings", L"AdvancedRegistrationTitle", L"Registration");
+    g_ui.advancedLoggingTitle = IniReadS(L"Strings", L"AdvancedLoggingTitle", L"Logging internals");
+    g_ui.advancedPowerShellTitle = IniReadS(L"Strings", L"AdvancedPowerShellTitle", L"PowerShell");
+    g_ui.advancedPngSaveTitle = IniReadS(L"Strings", L"AdvancedPngSaveTitle", L"PNG saving");
+    g_ui.advancedSingleInstanceTitle = IniReadS(L"Strings", L"AdvancedSingleInstanceTitle", L"Single instance");
     g_ui.pollIntervalLabel = IniReadS(L"Strings", L"PollIntervalLabel", L"Poll interval: %d ms");
     g_ui.confirmMsLabel = IniReadS(L"Strings", L"ConfirmMsLabel", L"Confirm: %d ms");
     g_ui.debounceMinMsLabel = IniReadS(L"Strings", L"DebounceMinMsLabel", L"Debounce min: %d ms");

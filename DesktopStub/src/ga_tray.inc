@@ -578,18 +578,99 @@ void Menu(HWND h)
         }
     };
 
+    auto beginNestedMenu = [&](HMENU parent, const wchar_t* logName) -> HMENU {
+        HMENU submenu = CreatePopupMenu();
+        if (!submenu)
+        {
+            LogWin32Failure(logName);
+            return parent ? parent : m;
+        }
+        return submenu;
+    };
+
+    auto endNestedMenu = [&](HMENU parent, HMENU child, const std::wstring& title) {
+        if (!parent || !child)
+            return;
+        if (child == parent)
+        {
+            AppendMenuChecked(parent, MF_SEPARATOR, 0, nullptr);
+            return;
+        }
+        std::wstring popupTitle = menuTitle(title);
+        if (!AppendMenuChecked(parent, MF_POPUP, (UINT_PTR)child, popupTitle.c_str()))
+            DestroyMenu(child);
+    };
+
     addTo(m, ID_SHOW_MENU_DROPDOWN, g_ui.showMenuAsDropdown.c_str(), showMenuAsDropdown);
     addTo(m, ID_GENERATE_NOW, g_ui.generateNow.c_str());
     AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
 
     HMENU generalMenu = beginSection(g_ui.generalTitle);
-    addTo(generalMenu, ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
     addTo(generalMenu, ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);
     addTo(generalMenu, ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
     addTo(generalMenu, ID_GENERATE_STARTUP_CHANGED_ONLY, g_ui.generateOnStartupOnlyWhenChanged.c_str(), g_generateOnStartupOnlyWhenChanged, g_generateOnStartup);
     addTo(generalMenu, ID_HIDE_DISABLED, g_ui.hideDisabledEntries.c_str(), g_hideDisabled);
     addTo(generalMenu, ID_CONSOLE, g_ui.showConsole.c_str(), g_console);
     endSection(generalMenu, g_ui.generalTitle);
+
+    HMENU wallpaperMenu = beginSection(g_ui.wallpaperTitle);
+    addTo(wallpaperMenu, ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
+    HMENU fittingMenu = beginNestedMenu(wallpaperMenu, L"CreatePopupMenu(Wallpaper fitting)");
+    addTo(fittingMenu, ID_DISABLE_FIT, g_ui.disableFitting.c_str(), g_disableFitting);
+    addTo(fittingMenu, ID_LISTEN_FIT, g_ui.listenFit.c_str(), g_listenFit, !g_disableFitting);
+    FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
+    std::wstring fitLine;
+    if (g_disableFitting)
+        fitLine = g_ui.fitModeForced;
+    else {
+        fitLine = g_ui.fitModePrefix;
+        fitLine += FitModeToString(mode);
+    }
+    AppendMenuChecked(fittingMenu, MF_STRING | MF_DISABLED, 0, fitLine.c_str());
+    endNestedMenu(wallpaperMenu, fittingMenu, g_ui.wallpaperFittingTitle);
+
+    HMENU methodsMenu = beginNestedMenu(wallpaperMenu, L"CreatePopupMenu(Wallpaper detection)");
+    WallpaperDetectionMethod wallpaperMethod = CurrentWallpaperDetectionMethod();
+    addTo(methodsMenu, ID_WP_METHOD_TRANSCODED_CACHE, WallpaperDetectionMethodName(WallpaperDetectionMethod::TranscodedImageCache), wallpaperMethod == WallpaperDetectionMethod::TranscodedImageCache);
+    addTo(methodsMenu, ID_WP_METHOD_SYSTEM_PARAMETERS, WallpaperDetectionMethodName(WallpaperDetectionMethod::SystemParametersInfo), wallpaperMethod == WallpaperDetectionMethod::SystemParametersInfo);
+    addTo(methodsMenu, ID_WP_METHOD_DESKTOP_WALLPAPER_COM, WallpaperDetectionMethodName(WallpaperDetectionMethod::DesktopWallpaperCOM), wallpaperMethod == WallpaperDetectionMethod::DesktopWallpaperCOM);
+    addTo(methodsMenu, ID_WP_METHOD_TRANSCODED_WALLPAPER_FILE, WallpaperDetectionMethodName(WallpaperDetectionMethod::TranscodedWallpaperFile), wallpaperMethod == WallpaperDetectionMethod::TranscodedWallpaperFile);
+    addTo(methodsMenu, ID_WP_METHOD_AUTO, WallpaperDetectionMethodName(WallpaperDetectionMethod::Auto), wallpaperMethod == WallpaperDetectionMethod::Auto);
+    addTo(methodsMenu, ID_WP_METHOD_FALLBACK, g_ui.wallpaperDetectionFallback.c_str(), g_wallpaperDetectionFallbackOnInvalid);
+    std::wstring wallpaperDetectionLine = FormatWide(g_ui.wallpaperDetectionMethodLabel.c_str(), WallpaperDetectionMethodName(wallpaperMethod));
+    AppendMenuChecked(methodsMenu, MF_STRING | MF_DISABLED, 0, wallpaperDetectionLine.c_str());
+    endNestedMenu(wallpaperMenu, methodsMenu, g_ui.wallpaperDetectionTitle);
+
+    HMENU wallpaperDecodeMenu = beginNestedMenu(wallpaperMenu, L"CreatePopupMenu(Wallpaper decode)");
+    bool wallpaperDecodeLowMemory = IniReadI(L"Settings", L"WallpaperDecodeLowMemory", 1) != 0;
+    int wallpaperDecodeMaxLongEdge = IniReadClampedI(L"Settings", L"WallpaperDecodeMaxLongEdge", 0, 0, 32768);
+    std::wstring wallpaperDecodeMaxLongEdgeText = WallpaperDecodeMaxLongEdgeDisplayText(wallpaperDecodeMaxLongEdge);
+    std::wstring wallpaperDecodeMaxLongEdgeLine = FormatWide(g_ui.wallpaperDecodeMaxLongEdgeLabel.c_str(), wallpaperDecodeMaxLongEdgeText.c_str());
+    addTo(wallpaperDecodeMenu, ID_WALLPAPER_DECODE_LOW_MEMORY, g_ui.wallpaperDecodeLowMemory.c_str(), wallpaperDecodeLowMemory);
+    addTo(wallpaperDecodeMenu, ID_WALLPAPER_DECODE_MAX_LONG_EDGE, wallpaperDecodeMaxLongEdgeLine);
+    endNestedMenu(wallpaperMenu, wallpaperDecodeMenu, g_ui.wallpaperDecodeTitle);
+
+    HMENU liveWallpaperMenu = beginNestedMenu(wallpaperMenu, L"CreatePopupMenu(Live Wallpaper Detection)");
+    {
+        bool liveWallpaperCapture = IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0;
+        bool liveWallpaperCaptureScreenFallback = IniReadI(L"Settings", L"LiveWallpaperCaptureScreenFallback", 0) != 0;
+        int liveWallpaperCaptureDelayMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000);
+        int liveWallpaperCaptureRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
+        int liveWallpaperCaptureStartupRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", 1000, 0, 3600000);
+        int liveWallpaperCaptureStartupRefreshDurationMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", 0, 0, 3600000);
+        std::wstring liveWallpaperCaptureDelayLine = FormatWide(g_ui.liveWallpaperCaptureDelayMsLabel.c_str(), liveWallpaperCaptureDelayMs);
+        std::wstring liveWallpaperCaptureRefreshLine = FormatWide(g_ui.liveWallpaperCaptureRefreshMsLabel.c_str(), LiveWallpaperRefreshDisplayText(liveWallpaperCaptureRefreshMs).c_str());
+        std::wstring liveWallpaperCaptureStartupRefreshLine = FormatWide(g_ui.liveWallpaperCaptureStartupRefreshMsLabel.c_str(), LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshMs).c_str());
+        std::wstring liveWallpaperCaptureStartupRefreshDurationLine = FormatWide(g_ui.liveWallpaperCaptureStartupRefreshDurationMsLabel.c_str(), LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshDurationMs).c_str());
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE, g_ui.liveWallpaperCapture.c_str(), liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_SCREEN_FALLBACK, g_ui.liveWallpaperCaptureScreenFallback.c_str(), liveWallpaperCaptureScreenFallback, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_DELAY, liveWallpaperCaptureDelayLine.c_str(), false, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_REFRESH, liveWallpaperCaptureRefreshLine.c_str(), false, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH, liveWallpaperCaptureStartupRefreshLine.c_str(), false, liveWallpaperCapture);
+        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH_DURATION, liveWallpaperCaptureStartupRefreshDurationLine.c_str(), false, liveWallpaperCapture);
+    }
+    endNestedMenu(wallpaperMenu, liveWallpaperMenu, g_ui.liveWallpaperCaptureTitle);
+    endSection(wallpaperMenu, g_ui.wallpaperTitle);
 
     HMENU liveTileMenu = beginSection(g_ui.liveTileTitle);
     {
@@ -661,13 +742,14 @@ void Menu(HWND h)
     }
     endSection(liveTileMenu, g_ui.liveTileTitle);
 
-    HMENU tileAppearanceMenu = beginSection(g_ui.tileAppearanceTitle);
+    HMENU appearanceAssetsMenu = beginSection(g_ui.appearanceAssetsTitle);
+    HMENU tileTextMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Tile Text)");
     {
-        HMENU textMenu = showMenuAsDropdown ? CreatePopupMenu() : tileAppearanceMenu;
+        HMENU textMenu = tileTextMenu;
         if (!textMenu)
         {
             LogWin32Failure(L"CreatePopupMenu(Tile Text)");
-            textMenu = tileAppearanceMenu;
+            textMenu = appearanceAssetsMenu;
         }
 
         auto shortTileText = [](const std::wstring& value) -> std::wstring
@@ -720,120 +802,10 @@ void Menu(HWND h)
         addTo(textMenu, ID_TILE_TEXT_APPLY_LARGE, g_ui.tileTextApplyLarge.c_str(), IniReadI(L"TileText", L"ApplyToLargeTile", 1) != 0);
         addTo(textMenu, ID_TILE_TEXT_APPLY_SMALL, g_ui.tileTextApplySmall.c_str(), IniReadI(L"TileText", L"ApplyToSmallTile", 0) != 0);
         addTo(textMenu, ID_TILE_TEXT_APPLY_LOGOS, g_ui.tileTextApplyLogos.c_str(), IniReadI(L"TileText", L"ApplyToLogos", 0) != 0);
-
-        if (showMenuAsDropdown && textMenu != tileAppearanceMenu)
-        {
-            if (!AppendMenuChecked(tileAppearanceMenu, MF_POPUP, (UINT_PTR)textMenu, g_ui.tileTextTitle.c_str()))
-                DestroyMenu(textMenu);
-        }
     }
-    endSection(tileAppearanceMenu, g_ui.tileAppearanceTitle);
+    endNestedMenu(appearanceAssetsMenu, tileTextMenu, g_ui.tileTextTitle);
 
-    HMENU notificationsMenu = beginSection(g_ui.notificationsTitle);
-    addTo(notificationsMenu, ID_NOTIF_ENABLED, g_ui.notificationsEnabled.c_str(), g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_START, g_ui.notifyOnStart.c_str(), g_notifyOnStart, g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_SUCCESS, g_ui.notifyOnSuccess.c_str(), g_notifyOnSuccess, g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_FAILURE, g_ui.notifyOnFailure.c_str(), g_notifyOnFailure, g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_BUSY, g_ui.notifyOnBusy.c_str(), g_notifyOnBusy, g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_ALREADY_RUNNING, g_ui.notifyOnAlreadyRunning.c_str(), g_notifyOnAlreadyRunning, g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_SINGLE_INSTANCE_FAILURE, g_ui.notifyOnSingleInstanceFailure.c_str(), g_notifyOnSingleInstanceFailure, g_notificationsEnabled);
-    endSection(notificationsMenu, g_ui.notificationsTitle);
-
-    HMENU loggingMenu = beginSection(g_ui.loggingTitle);
-    addTo(loggingMenu, ID_LOG, g_ui.loggingEnable.c_str(), g_logging);
-    addTo(loggingMenu, ID_LOGFILE, g_ui.changePath.c_str(), false, g_logging);
-    addTo(loggingMenu, ID_LOG_RENAME, g_ui.renamePath.c_str(), false, g_logging);
-    addTo(loggingMenu, ID_LOG_OPEN, g_ui.openInExplorer.c_str(), false, g_logging);
-    addTo(loggingMenu, ID_LOG_RESET, g_ui.resetDefault.c_str(), false, g_logging);
-    addTo(loggingMenu, ID_SHOW_PSLOG, g_ui.showPowerShellLog.c_str());
-
-    std::wstring pathLine = g_ui.logPathPrefix + GetLogPathCopy();
-    HMENU hPath = CreatePopupMenu();
-    if (!hPath)
-        LogWin32Failure(L"CreatePopupMenu(log path)");
-    else
-    {
-        AppendMenuChecked(hPath, MF_STRING | MF_DISABLED, 0, pathLine.c_str());
-        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPath, g_ui.logPathTitle.c_str()))
-            DestroyMenu(hPath);
-    }
-
-    std::wstring psLine = g_ui.psStatusPrefix;
-    {
-        std::lock_guard<std::mutex> lk(g_psMutex);
-        if (!g_psMsg.empty())
-            psLine += g_psMsg;
-        else if (g_psErr)
-            psLine += g_ui.errorTitle.c_str();
-        else
-            psLine += g_ui.okText.c_str();
-    }
-
-    HMENU hPs = CreatePopupMenu();
-    if (!hPs)
-        LogWin32Failure(L"CreatePopupMenu(PowerShell status)");
-    else
-    {
-        AppendMenuChecked(hPs, MF_STRING | MF_DISABLED, 0, psLine.c_str());
-        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPs, g_ui.psStatusTitle.c_str()))
-            DestroyMenu(hPs);
-    }
-    endSection(loggingMenu, g_ui.loggingTitle);
-
-    HMENU fittingMenu = beginSection(g_ui.wallpaperFittingTitle);
-    addTo(fittingMenu, ID_DISABLE_FIT, g_ui.disableFitting.c_str(), g_disableFitting);
-    addTo(fittingMenu, ID_LISTEN_FIT, g_ui.listenFit.c_str(), g_listenFit, !g_disableFitting);
-    FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
-    std::wstring fitLine;
-    if (g_disableFitting)
-        fitLine = g_ui.fitModeForced;
-    else {
-        fitLine = g_ui.fitModePrefix;
-        fitLine += FitModeToString(mode);
-    }
-    AppendMenuChecked(fittingMenu, MF_STRING | MF_DISABLED, 0, fitLine.c_str());
-    endSection(fittingMenu, g_ui.wallpaperFittingTitle);
-
-    HMENU methodsMenu = beginSection(g_ui.methodsTitle);
-    WallpaperDetectionMethod wallpaperMethod = CurrentWallpaperDetectionMethod();
-    addTo(methodsMenu, ID_WP_METHOD_TRANSCODED_CACHE, WallpaperDetectionMethodName(WallpaperDetectionMethod::TranscodedImageCache), wallpaperMethod == WallpaperDetectionMethod::TranscodedImageCache);
-    addTo(methodsMenu, ID_WP_METHOD_SYSTEM_PARAMETERS, WallpaperDetectionMethodName(WallpaperDetectionMethod::SystemParametersInfo), wallpaperMethod == WallpaperDetectionMethod::SystemParametersInfo);
-    addTo(methodsMenu, ID_WP_METHOD_DESKTOP_WALLPAPER_COM, WallpaperDetectionMethodName(WallpaperDetectionMethod::DesktopWallpaperCOM), wallpaperMethod == WallpaperDetectionMethod::DesktopWallpaperCOM);
-    addTo(methodsMenu, ID_WP_METHOD_TRANSCODED_WALLPAPER_FILE, WallpaperDetectionMethodName(WallpaperDetectionMethod::TranscodedWallpaperFile), wallpaperMethod == WallpaperDetectionMethod::TranscodedWallpaperFile);
-    addTo(methodsMenu, ID_WP_METHOD_AUTO, WallpaperDetectionMethodName(WallpaperDetectionMethod::Auto), wallpaperMethod == WallpaperDetectionMethod::Auto);
-    addTo(methodsMenu, ID_WP_METHOD_FALLBACK, g_ui.wallpaperDetectionFallback.c_str(), g_wallpaperDetectionFallbackOnInvalid);
-    bool wallpaperDecodeLowMemory = IniReadI(L"Settings", L"WallpaperDecodeLowMemory", 1) != 0;
-    int wallpaperDecodeMaxLongEdge = IniReadClampedI(L"Settings", L"WallpaperDecodeMaxLongEdge", 0, 0, 32768);
-    std::wstring wallpaperDecodeMaxLongEdgeText = WallpaperDecodeMaxLongEdgeDisplayText(wallpaperDecodeMaxLongEdge);
-    std::wstring wallpaperDecodeMaxLongEdgeLine = FormatWide(g_ui.wallpaperDecodeMaxLongEdgeLabel.c_str(), wallpaperDecodeMaxLongEdgeText.c_str());
-    addTo(methodsMenu, ID_WALLPAPER_DECODE_LOW_MEMORY, g_ui.wallpaperDecodeLowMemory.c_str(), wallpaperDecodeLowMemory);
-    addTo(methodsMenu, ID_WALLPAPER_DECODE_MAX_LONG_EDGE, wallpaperDecodeMaxLongEdgeLine);
-    std::wstring wallpaperDetectionLine = FormatWide(g_ui.wallpaperDetectionMethodLabel.c_str(), WallpaperDetectionMethodName(wallpaperMethod));
-    AppendMenuChecked(methodsMenu, MF_STRING | MF_DISABLED, 0, wallpaperDetectionLine.c_str());
-    endSection(methodsMenu, g_ui.methodsTitle);
-
-    HMENU liveWallpaperMenu = beginSection(g_ui.liveWallpaperCaptureTitle);
-    {
-        bool liveWallpaperCapture = IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0;
-        bool liveWallpaperCaptureScreenFallback = IniReadI(L"Settings", L"LiveWallpaperCaptureScreenFallback", 0) != 0;
-        int liveWallpaperCaptureDelayMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000);
-        int liveWallpaperCaptureRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
-        int liveWallpaperCaptureStartupRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", 1000, 0, 3600000);
-        int liveWallpaperCaptureStartupRefreshDurationMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", 0, 0, 3600000);
-        std::wstring liveWallpaperCaptureDelayLine = FormatWide(g_ui.liveWallpaperCaptureDelayMsLabel.c_str(), liveWallpaperCaptureDelayMs);
-        std::wstring liveWallpaperCaptureRefreshLine = FormatWide(g_ui.liveWallpaperCaptureRefreshMsLabel.c_str(), LiveWallpaperRefreshDisplayText(liveWallpaperCaptureRefreshMs).c_str());
-        std::wstring liveWallpaperCaptureStartupRefreshLine = FormatWide(g_ui.liveWallpaperCaptureStartupRefreshMsLabel.c_str(), LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshMs).c_str());
-        std::wstring liveWallpaperCaptureStartupRefreshDurationLine = FormatWide(g_ui.liveWallpaperCaptureStartupRefreshDurationMsLabel.c_str(), LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshDurationMs).c_str());
-        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE, g_ui.liveWallpaperCapture.c_str(), liveWallpaperCapture);
-        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_SCREEN_FALLBACK, g_ui.liveWallpaperCaptureScreenFallback.c_str(), liveWallpaperCaptureScreenFallback, liveWallpaperCapture);
-        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_DELAY, liveWallpaperCaptureDelayLine.c_str(), false, liveWallpaperCapture);
-        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_REFRESH, liveWallpaperCaptureRefreshLine.c_str(), false, liveWallpaperCapture);
-        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH, liveWallpaperCaptureStartupRefreshLine.c_str(), false, liveWallpaperCapture);
-        addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH_DURATION, liveWallpaperCaptureStartupRefreshDurationLine.c_str(), false, liveWallpaperCapture);
-    }
-    endSection(liveWallpaperMenu, g_ui.liveWallpaperCaptureTitle);
-
-    HMENU assetsMenu = beginSection(g_ui.assetsTitle);
+    HMENU assetsMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Assets)");
     addTo(assetsMenu, ID_GENERATE_DESKTOP_ICON_DISABLED, g_ui.generateDesktopIconForDisabledEntries.c_str(), g_generateDesktopIconForDisabledEntries);
     addTo(assetsMenu, ID_DELETE_DISABLED_ASSETS, g_ui.deleteDisabledAssets.c_str(), g_deleteDisabledAssets, !g_generateDesktopIconForDisabledEntries);
     const wchar_t* keys[] = {
@@ -842,9 +814,9 @@ void Menu(HWND h)
     };
     for (int i = 0; i < static_cast<int>(_countof(keys)); i++)
         addTo(assetsMenu, static_cast<UINT>(ID_A1 + i), keys[i], IniReadI(L"Assets", keys[i], 0) != 0);
-    endSection(assetsMenu, g_ui.assetsTitle);
+    endNestedMenu(appearanceAssetsMenu, assetsMenu, g_ui.assetsTitle);
 
-    HMENU scaleMenu = beginSection(g_ui.dpiScalesTitle);
+    HMENU scaleMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(DPI scales)");
     addTo(scaleMenu, ID_SCALE_AUTO, g_ui.generateScaleAuto.c_str(), g_generateScaleAuto);
     // Manual scale items are greyed out while Auto is active (they are ignored by GetConfiguredScales)
     bool manualScalesEnabled = !g_generateScaleAuto;
@@ -857,9 +829,9 @@ void Menu(HWND h)
     AppendMenuChecked(scaleMenu, MF_STRING | MF_DISABLED, 0, currentDpiLine.c_str());
     if (g_generateScaleAuto)
         AppendMenuChecked(scaleMenu, MF_STRING | MF_DISABLED, 0, g_ui.generateScaleAutoPreservesManualToggles.c_str());
-    endSection(scaleMenu, g_ui.dpiScalesTitle);
+    endNestedMenu(appearanceAssetsMenu, scaleMenu, g_ui.dpiScalesTitle);
 
-    HMENU cachingMenu = beginSection(g_ui.cachingTitle);
+    HMENU cachingMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Caching)");
     bool cacheEnabled = GeneratedAssetCacheEnabled();
     bool cacheCanStore = cacheEnabled && GeneratedAssetCacheMaxEntries() > 0;
     bool precacheConfigured = IniReadI(L"Settings", L"GeneratedAssetPrecache", 1) != 0;
@@ -869,9 +841,9 @@ void Menu(HWND h)
     std::wstring precacheMaxFilesLine = FormatWide(g_ui.generatedAssetPrecacheMaxFilesLabel.c_str(), GeneratedAssetPrecacheMaxFiles());
     addTo(cachingMenu, ID_GENERATED_ASSET_CACHE_MAX_ENTRIES, cacheMaxEntriesLine);
     addTo(cachingMenu, ID_GENERATED_ASSET_PRECACHE_MAX_FILES, precacheMaxFilesLine, false, cacheCanStore);
-    endSection(cachingMenu, g_ui.cachingTitle);
+    endNestedMenu(appearanceAssetsMenu, cachingMenu, g_ui.cachingTitle);
 
-    HMENU manifestMenu = beginSection(g_ui.manifestTitle);
+    HMENU manifestMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Manifest)");
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
     std::wstring manifestSourceLine = FormatWide(g_ui.manifestSourceLabel.c_str(), manifestInfo.existing ? g_ui.manifestSourceExisting.c_str() : g_ui.manifestSourceGenerated.c_str());
     std::wstring manifestTargetLine = FormatWide(g_ui.manifestTargetLabel.c_str(), manifestInfo.manifestTarget.c_str());
@@ -944,7 +916,61 @@ void Menu(HWND h)
         if (!AppendMenuChecked(manifestMenu, MF_POPUP, (UINT_PTR)manifestDetailsMenu, g_ui.manifestDetailsTitle.c_str()))
             DestroyMenu(manifestDetailsMenu);
     }
-    endSection(manifestMenu, g_ui.manifestTitle);
+    endNestedMenu(appearanceAssetsMenu, manifestMenu, g_ui.manifestTitle);
+    endSection(appearanceAssetsMenu, g_ui.appearanceAssetsTitle);
+
+    HMENU diagnosticsMenu = beginSection(g_ui.diagnosticsTitle);
+    HMENU notificationsMenu = beginNestedMenu(diagnosticsMenu, L"CreatePopupMenu(Notifications)");
+    addTo(notificationsMenu, ID_NOTIF_ENABLED, g_ui.notificationsEnabled.c_str(), g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_START, g_ui.notifyOnStart.c_str(), g_notifyOnStart, g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_SUCCESS, g_ui.notifyOnSuccess.c_str(), g_notifyOnSuccess, g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_FAILURE, g_ui.notifyOnFailure.c_str(), g_notifyOnFailure, g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_BUSY, g_ui.notifyOnBusy.c_str(), g_notifyOnBusy, g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_ALREADY_RUNNING, g_ui.notifyOnAlreadyRunning.c_str(), g_notifyOnAlreadyRunning, g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_SINGLE_INSTANCE_FAILURE, g_ui.notifyOnSingleInstanceFailure.c_str(), g_notifyOnSingleInstanceFailure, g_notificationsEnabled);
+    endNestedMenu(diagnosticsMenu, notificationsMenu, g_ui.notificationsTitle);
+
+    HMENU loggingMenu = beginNestedMenu(diagnosticsMenu, L"CreatePopupMenu(Logging)");
+    addTo(loggingMenu, ID_LOG, g_ui.loggingEnable.c_str(), g_logging);
+    addTo(loggingMenu, ID_LOGFILE, g_ui.changePath.c_str(), false, g_logging);
+    addTo(loggingMenu, ID_LOG_RENAME, g_ui.renamePath.c_str(), false, g_logging);
+    addTo(loggingMenu, ID_LOG_OPEN, g_ui.openInExplorer.c_str(), false, g_logging);
+    addTo(loggingMenu, ID_LOG_RESET, g_ui.resetDefault.c_str(), false, g_logging);
+    addTo(loggingMenu, ID_SHOW_PSLOG, g_ui.showPowerShellLog.c_str());
+
+    std::wstring pathLine = g_ui.logPathPrefix + GetLogPathCopy();
+    HMENU hPath = CreatePopupMenu();
+    if (!hPath)
+        LogWin32Failure(L"CreatePopupMenu(log path)");
+    else
+    {
+        AppendMenuChecked(hPath, MF_STRING | MF_DISABLED, 0, pathLine.c_str());
+        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPath, g_ui.logPathTitle.c_str()))
+            DestroyMenu(hPath);
+    }
+
+    std::wstring psLine = g_ui.psStatusPrefix;
+    {
+        std::lock_guard<std::mutex> lk(g_psMutex);
+        if (!g_psMsg.empty())
+            psLine += g_psMsg;
+        else if (g_psErr)
+            psLine += g_ui.errorTitle.c_str();
+        else
+            psLine += g_ui.okText.c_str();
+    }
+
+    HMENU hPs = CreatePopupMenu();
+    if (!hPs)
+        LogWin32Failure(L"CreatePopupMenu(PowerShell status)");
+    else
+    {
+        AppendMenuChecked(hPs, MF_STRING | MF_DISABLED, 0, psLine.c_str());
+        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPs, g_ui.psStatusTitle.c_str()))
+            DestroyMenu(hPs);
+    }
+    endNestedMenu(diagnosticsMenu, loggingMenu, g_ui.loggingTitle);
+    endSection(diagnosticsMenu, g_ui.diagnosticsTitle);
 
     HMENU advancedMenu = beginSection(g_ui.advancedTitle);
     std::wstring pollLine = FormatWide(g_ui.pollIntervalLabel.c_str(), IniReadClampedI(L"Settings", L"PollIntervalMs", 2000, 250, 60000));
@@ -976,31 +1002,51 @@ void Menu(HWND h)
     std::wstring savePngReplaceRetriesLine = FormatWide(g_ui.savePngReplaceRetriesLabel.c_str(), IniReadClampedI(L"Settings", L"SavePngReplaceRetries", 3, 0, 20));
     std::wstring savePngReplaceRetryDelayLine = FormatWide(g_ui.savePngReplaceRetryDelayMsLabel.c_str(), IniReadClampedI(L"Settings", L"SavePngReplaceRetryDelayMs", 75, 0, 5000));
     std::wstring singleInstanceLine = FormatWide(g_ui.singleInstanceFailureActionLabel.c_str(), ErrorActionName(CurrentSingleInstanceFailureAction()));
-    addTo(advancedMenu, ID_ADV_POLL_INTERVAL, pollLine);
-    addTo(advancedMenu, ID_ADV_CONFIRM_MS, confirmLine);
-    addTo(advancedMenu, ID_ADV_DEBOUNCE_MIN_MS, debounceLine);
-    addTo(advancedMenu, ID_ADV_POLL_INITIAL_BYPASS_MS, pollInitialBypassLine);
-    addTo(advancedMenu, ID_ADV_INI_CACHE_REFRESH_MS, iniCacheRefreshLine);
-    addTo(advancedMenu, ID_ADV_WALLPAPER_DETECTION_LOG_REPEAT_MS, wallpaperDetectionLogRepeatLine);
-    addTo(advancedMenu, ID_ADV_NOTIFICATION_TIMEOUT_MS, notificationTimeoutLine);
-    addTo(advancedMenu, ID_ADV_SHUTDOWN_INITIAL_MS, shutdownInitialLine);
-    addTo(advancedMenu, ID_ADV_SHUTDOWN_REPEAT_MS, shutdownRepeatLine);
-    addTo(advancedMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_RETRIES, signalRetriesLine);
-    addTo(advancedMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_DELAY_MS, signalDelayLine);
-    addTo(advancedMenu, ID_ADV_COM_REGISTRATION_TIMEOUT_MS, comRegistrationTimeoutLine);
-    addTo(advancedMenu, ID_ADV_COM_REGISTRATION_CANCEL_WAIT_MS, comRegistrationCancelWaitLine);
-    addTo(advancedMenu, ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS, trayHideDelayLine);
-    addTo(advancedMenu, ID_ADV_LOG_BUFFER_LINES, logBufferLine);
-    addTo(advancedMenu, ID_ADV_LOG_APPEND_LOCK_WAIT_MS, logAppendLockWaitLine);
-    addTo(advancedMenu, ID_ADV_POWER_SHELL_EXE, powerShellExeLine);
-    addTo(advancedMenu, ID_ADV_POWER_SHELL_POLL_MS, powerShellPollLine);
-    addTo(advancedMenu, ID_ADV_POWER_SHELL_TIMEOUT_MS, powerShellTimeoutLine);
-    addTo(advancedMenu, ID_ADV_POWER_SHELL_TERMINATE_WAIT_MS, powerShellTerminateWaitLine);
-    addTo(advancedMenu, ID_ADV_POWER_SHELL_OUTPUT_LIMIT, powerShellOutputLimitLine);
-    addTo(advancedMenu, ID_ADV_REGISTRATION_UNRESOLVED_BLOCK_MS, registrationUnresolvedBlockLine);
-    addTo(advancedMenu, ID_ADV_SAVE_PNG_REPLACE_RETRIES, savePngReplaceRetriesLine);
-    addTo(advancedMenu, ID_ADV_SAVE_PNG_REPLACE_RETRY_DELAY_MS, savePngReplaceRetryDelayLine);
-    addTo(advancedMenu, ID_ADV_SINGLE_INSTANCE_FAILURE_ACTION, singleInstanceLine);
+    HMENU advancedTimingMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced timing)");
+    addTo(advancedTimingMenu, ID_ADV_POLL_INTERVAL, pollLine);
+    addTo(advancedTimingMenu, ID_ADV_CONFIRM_MS, confirmLine);
+    addTo(advancedTimingMenu, ID_ADV_DEBOUNCE_MIN_MS, debounceLine);
+    addTo(advancedTimingMenu, ID_ADV_POLL_INITIAL_BYPASS_MS, pollInitialBypassLine);
+    addTo(advancedTimingMenu, ID_ADV_INI_CACHE_REFRESH_MS, iniCacheRefreshLine);
+    addTo(advancedTimingMenu, ID_ADV_WALLPAPER_DETECTION_LOG_REPEAT_MS, wallpaperDetectionLogRepeatLine);
+    addTo(advancedTimingMenu, ID_ADV_NOTIFICATION_TIMEOUT_MS, notificationTimeoutLine);
+    endNestedMenu(advancedMenu, advancedTimingMenu, g_ui.advancedTimingTitle);
+
+    HMENU advancedShutdownMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced shutdown)");
+    addTo(advancedShutdownMenu, ID_ADV_SHUTDOWN_INITIAL_MS, shutdownInitialLine);
+    addTo(advancedShutdownMenu, ID_ADV_SHUTDOWN_REPEAT_MS, shutdownRepeatLine);
+    addTo(advancedShutdownMenu, ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS, trayHideDelayLine);
+    endNestedMenu(advancedMenu, advancedShutdownMenu, g_ui.advancedShutdownTitle);
+
+    HMENU advancedRegistrationMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced registration)");
+    addTo(advancedRegistrationMenu, ID_ADV_COM_REGISTRATION_TIMEOUT_MS, comRegistrationTimeoutLine);
+    addTo(advancedRegistrationMenu, ID_ADV_COM_REGISTRATION_CANCEL_WAIT_MS, comRegistrationCancelWaitLine);
+    addTo(advancedRegistrationMenu, ID_ADV_REGISTRATION_UNRESOLVED_BLOCK_MS, registrationUnresolvedBlockLine);
+    endNestedMenu(advancedMenu, advancedRegistrationMenu, g_ui.advancedRegistrationTitle);
+
+    HMENU advancedPowerShellMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced PowerShell)");
+    addTo(advancedPowerShellMenu, ID_ADV_POWER_SHELL_EXE, powerShellExeLine);
+    addTo(advancedPowerShellMenu, ID_ADV_POWER_SHELL_POLL_MS, powerShellPollLine);
+    addTo(advancedPowerShellMenu, ID_ADV_POWER_SHELL_TIMEOUT_MS, powerShellTimeoutLine);
+    addTo(advancedPowerShellMenu, ID_ADV_POWER_SHELL_TERMINATE_WAIT_MS, powerShellTerminateWaitLine);
+    addTo(advancedPowerShellMenu, ID_ADV_POWER_SHELL_OUTPUT_LIMIT, powerShellOutputLimitLine);
+    endNestedMenu(advancedMenu, advancedPowerShellMenu, g_ui.advancedPowerShellTitle);
+
+    HMENU advancedLoggingMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced logging)");
+    addTo(advancedLoggingMenu, ID_ADV_LOG_BUFFER_LINES, logBufferLine);
+    addTo(advancedLoggingMenu, ID_ADV_LOG_APPEND_LOCK_WAIT_MS, logAppendLockWaitLine);
+    endNestedMenu(advancedMenu, advancedLoggingMenu, g_ui.advancedLoggingTitle);
+
+    HMENU advancedPngSaveMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced PNG saving)");
+    addTo(advancedPngSaveMenu, ID_ADV_SAVE_PNG_REPLACE_RETRIES, savePngReplaceRetriesLine);
+    addTo(advancedPngSaveMenu, ID_ADV_SAVE_PNG_REPLACE_RETRY_DELAY_MS, savePngReplaceRetryDelayLine);
+    endNestedMenu(advancedMenu, advancedPngSaveMenu, g_ui.advancedPngSaveTitle);
+
+    HMENU advancedSingleInstanceMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced single instance)");
+    addTo(advancedSingleInstanceMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_RETRIES, signalRetriesLine);
+    addTo(advancedSingleInstanceMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_DELAY_MS, signalDelayLine);
+    addTo(advancedSingleInstanceMenu, ID_ADV_SINGLE_INSTANCE_FAILURE_ACTION, singleInstanceLine);
+    endNestedMenu(advancedMenu, advancedSingleInstanceMenu, g_ui.advancedSingleInstanceTitle);
     endSection(advancedMenu, g_ui.advancedTitle);
 
     if (showMenuAsDropdown)
