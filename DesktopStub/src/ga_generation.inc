@@ -1574,6 +1574,8 @@ static void RunGeneratedAssetPrecache(const std::wstring& currentWallpaper)
 
         RenderWallpaperToGeneratedAssetCache(exeDir, manifestInfo, scales, liveTileUpdateMode, candidate);
     }
+
+    TrimIdleWorkingSetIfConfigured();
 }
 
 static void GeneratedAssetPrecacheThread()
@@ -2365,6 +2367,8 @@ static void GenerationWorkerThread()
         MarkGenerationActive(false);
         if (ok && !GenerationWorkPending())
             QueueGeneratedAssetPrecache(wallpaper);
+        if (!GenerationWorkPending())
+            TrimIdleWorkingSetIfConfigured();
         MaybeCompleteRequestedShutdown();
     }
 }

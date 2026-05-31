@@ -150,6 +150,8 @@ struct UiStrings
     std::wstring notifyOnSingleInstanceFailure;
     std::wstring showConsole;
     std::wstring generateNow;
+    std::wstring trimWorkingSetOnIdle;
+    std::wstring trimWorkingSetOperation;
 
     std::wstring loggingEnable;
     std::wstring changePath;
@@ -342,6 +344,7 @@ struct UiStrings
     std::wstring trayIconSummary;
     std::wstring consoleSummary;
     std::wstring loggingSummary;
+    std::wstring trimWorkingSetOnIdleSummary;
     std::wstring generateOnStartupSummary;
     std::wstring generateOnStartupOnlyWhenChangedSummary;
     std::wstring hideDisabledEntriesSummary;
