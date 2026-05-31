@@ -384,6 +384,7 @@ static class RepoTools
         string head = Option(args, "--sha", Environment.GetEnvironmentVariable("GITHUB_SHA") ?? "");
         bool forceAll = false;
         var changed = new List<string>();
+        var releaseSelected = new List<Project>();
         List<Project> selected;
 
         if (eventName == "workflow_dispatch")
@@ -392,12 +393,14 @@ static class RepoTools
             {
                 forceAll = true;
                 selected = projects.ToList();
+                releaseSelected = selected.ToList();
             }
             else
             {
                 selected = projects.Where(p => p.key == manualProject).ToList();
                 if (selected.Count != 1)
                     throw new InvalidOperationException("Unknown workflow_dispatch project: " + manualProject);
+                releaseSelected = selected.ToList();
             }
         }
         else
@@ -424,6 +427,7 @@ static class RepoTools
             else
             {
                 changed = diff.Output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+                releaseSelected = ProjectsNeedingRelease(root, head, projects, changed);
             }
 
             if (!forceAll)
@@ -476,10 +480,12 @@ static class RepoTools
             skip.Clear();
 
         string projectList = String.Join(", ", selected.Select(p => p.label));
+        string releaseProjectList = String.Join(", ", releaseSelected.Select(p => p.label));
         string releaseBase = selected.Count == 1 && !forceAll ? selected[0].key : "All";
         outputs.Add("build_all=" + forceAll.ToString().ToLowerInvariant());
         outputs.Add("skip_args=" + String.Join(" ", skip));
         outputs.Add("project_list=" + projectList);
+        outputs.Add("release_project_list=" + releaseProjectList);
         outputs.Add("release_base=" + releaseBase);
         AppendOutput(outputs);
 
@@ -491,7 +497,7 @@ static class RepoTools
             "",
             "Projects: " + projectList,
             "",
-            "Release families: " + String.Join(", ", selected.Select(p => "`" + p.key + "-vN`"))
+            "Release families: " + (releaseSelected.Count == 0 ? "none" : String.Join(", ", releaseSelected.Select(p => "`" + p.key + "-vN`")))
         };
         if (changed.Count > 0)
         {
@@ -502,6 +508,42 @@ static class RepoTools
         AppendSummary(summary);
         Console.WriteLine("Selected projects: " + projectList);
         return 0;
+    }
+
+    static List<Project> ProjectsTouchedBy(List<string> changed, List<Project> projects)
+    {
+        return projects.Where(p =>
+        {
+            string prefix = p.folder.Replace('\\', '/') + "/";
+            return changed.Any(c => c.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }).ToList();
+    }
+
+    static List<Project> ProjectsNeedingRelease(string root, string head, List<Project> projects, List<string> currentChanged)
+    {
+        var currentTouched = new HashSet<string>(ProjectsTouchedBy(currentChanged, projects).Select(p => p.key), StringComparer.OrdinalIgnoreCase);
+        var selected = new List<Project>();
+        foreach (var p in projects)
+        {
+            string latestTag = RunCapture("git", "tag --list " + QuoteArg(p.key + "-v*") + " --sort=-v:refname", root, 120000)
+                .Output
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
+            if (latestTag == null)
+            {
+                if (currentTouched.Contains(p.key))
+                    selected.Add(p);
+                continue;
+            }
+
+            string files = RunCapture("git", "diff --name-only " + QuoteArg(latestTag) + " " + QuoteArg(head), root, 120000).Output;
+            string prefix = p.folder.Replace('\\', '/') + "/";
+            bool touchedSinceLatestRelease = files.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Any(c => c.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+            if (touchedSinceLatestRelease)
+                selected.Add(p);
+        }
+        return selected;
     }
 
     static int ChecksumSummary(string[] args)
@@ -672,8 +714,14 @@ static class RepoTools
         string fullSha = Option(args, "--full-sha", Environment.GetEnvironmentVariable("FULL_SHA") ?? "");
         string repository = Option(args, "--repository", Environment.GetEnvironmentVariable("REPO") ?? "");
         string projectList = Option(args, "--project-list", Environment.GetEnvironmentVariable("PROJECT_LIST") ?? "");
+        string releaseProjectList = Option(args, "--release-project-list", Environment.GetEnvironmentVariable("RELEASE_PROJECT_LIST") ?? projectList);
         if (String.IsNullOrWhiteSpace(fullSha)) throw new InvalidOperationException("FullSha was not provided and FULL_SHA is empty.");
         if (String.IsNullOrWhiteSpace(repository)) throw new InvalidOperationException("Repository was not provided and REPO is empty.");
+        if (String.IsNullOrWhiteSpace(releaseProjectList))
+        {
+            Console.WriteLine("No project releases selected for this run.");
+            return 0;
+        }
 
         if (!Path.IsPathRooted(artifactsRoot))
             artifactsRoot = Path.Combine(root, artifactsRoot);
@@ -682,9 +730,24 @@ static class RepoTools
 
         RunRequired("git", "fetch --force --tags", root);
         var projects = LoadProjectMap(root);
+        var releaseLabels = releaseProjectList.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0)
+            .ToList();
+        var releaseKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string label in releaseLabels)
+        {
+            Project p = projects.FirstOrDefault(x => x.label.Equals(label, StringComparison.OrdinalIgnoreCase) ||
+                x.key.Equals(label, StringComparison.OrdinalIgnoreCase));
+            if (p == null)
+                throw new InvalidOperationException("Unknown release project: " + label);
+            releaseKeys.Add(p.key);
+        }
         var entries = new List<Tuple<Project, string, List<string>, string>>();
         foreach (var p in projects)
         {
+            if (!releaseKeys.Contains(p.key))
+                continue;
             var entry = ResolveDownloadedProjectArtifact(p, artifactsRoot);
             if (entry != null)
             {
