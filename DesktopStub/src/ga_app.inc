@@ -1478,10 +1478,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     auto iniDone = steady_clock::now();
     LoadRuntimeSettingsFromIni(true);
 
-    // GDI+
-    GdiplusStartupInput in; ULONG_PTR tk;
-    if (GdiplusStartup(&tk,&in,nullptr)!=Ok){ MessageBoxW(nullptr, g_ui.gdiPlusStartupFailedMessage.c_str(), g_ui.gdiPlusStartupFailedTitle.c_str(), 0); return 1; }
-    auto gdiDone = steady_clock::now();
+    // GDI+ is intentionally started lazily only when bitmap work is needed.
+    auto gdiDone = iniDone;
     std::wstring previousForceShutdownCleanupWarning;
     if (ConsumePreviousForceShutdownCleanupWarning(previousForceShutdownCleanupWarning))
         QueueStartupWarning(previousForceShutdownCleanupWarning);
@@ -1536,6 +1534,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.notificationsSummary.c_str(), StateEnabled(g_notificationsEnabled), StateOn(g_notifyOnStart), StateOn(g_notifyOnSuccess), StateOn(g_notifyOnFailure), StateOn(g_notifyOnBusy), StateOn(g_notifyOnAlreadyRunning), StateOn(g_notifyOnSingleInstanceFailure));
     Log(g_ui.trayIconSummary.c_str(), StateEnabled(g_tray));
     Log(g_ui.trimWorkingSetOnIdleSummary.c_str(), StateEnabled(g_trimWorkingSetOnIdle));
+    Log(g_ui.compactCrtHeapOnIdleSummary.c_str(), StateEnabled(g_compactCrtHeapOnIdle));
+    Log(g_ui.keepGdiPlusLoadedSummary.c_str(), StateEnabled(g_keepGdiPlusLoaded));
     Log(g_ui.powerShellRegistrationSummary.c_str(), UsePowerShell() ? g_ui.powerShellEnabledMode.c_str() : g_ui.comPreferredMode.c_str());
     Log(g_ui.liveTileUpdateSummary.c_str(), LiveTileUpdateModeSummaryText().c_str());
     Log(g_ui.manifestTargetSummary.c_str(), ManifestCompatibilityTargetSummaryText().c_str());
@@ -1579,7 +1579,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
     if (CommandLineShouldRegenerateManifest() && !CommandLineShouldGenerateNow())
     {
-        GdiplusShutdown(tk);
+        ShutdownGdiPlusForExit();
         ReleaseSingleInstanceMutex();
         return startupManifestReady ? 0 : 1;
     }
@@ -1589,14 +1589,14 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     if (!RegisterClassW(&wc))
     {
         LogWin32Failure(L"RegisterClassW");
-        GdiplusShutdown(tk);
+        ShutdownGdiPlusForExit();
         return 1;
     }
     g_hwnd = CreateWindowExW(0, WINDOW_CLASS_NAME, g_instanceWindowTitle.c_str(), 0, 0, 0, 0, 0, nullptr, nullptr, hi, nullptr);
     if (!g_hwnd)
     {
         LogWin32Failure(L"CreateWindowExW");
-        GdiplusShutdown(tk);
+        ShutdownGdiPlusForExit();
         return 1;
     }
     g_shutdownWindow = g_hwnd;
@@ -1637,7 +1637,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         if (exitCode != 0)
         {
             TrayRemove();
-            GdiplusShutdown(tk);
+            ShutdownGdiPlusForExit();
             return exitCode;
         }
     }
@@ -1664,7 +1664,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
         JoinGeneratedAssetPrecache();
         TrayRemove();
-        GdiplusShutdown(tk);
+        ShutdownGdiPlusForExit();
         ReleaseSingleInstanceMutex();
         return ok ? 0 : 1;
     }
@@ -1739,7 +1739,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     MaybeClearLiveTileOnShutdown();
 
     TrayRemove();
-    GdiplusShutdown(tk);
+    ShutdownGdiPlusForExit();
     ReleaseSingleInstanceMutex();
     ExecutePendingRelaunchAfterExit();
     return 0;

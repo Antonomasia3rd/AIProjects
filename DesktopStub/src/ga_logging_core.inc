@@ -153,6 +153,9 @@ void LogWin32Failure(const wchar_t* what, DWORD err = GetLastError())
 
 static void TrimIdleWorkingSetIfConfigured()
 {
+    if (g_compactCrtHeapOnIdle.load())
+        _heapmin();
+
     if (!g_trimWorkingSetOnIdle.load())
         return;
 
@@ -318,6 +321,8 @@ static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
     g_logBufferLines = IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000);
     g_logAppendLockWaitMs = IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000);
     g_trimWorkingSetOnIdle = IniReadI(L"Settings", L"TrimWorkingSetOnIdle", 1) != 0;
+    g_compactCrtHeapOnIdle = IniReadI(L"Settings", L"CompactCrtHeapOnIdle", 1) != 0;
+    g_keepGdiPlusLoaded = IniReadI(L"Settings", L"KeepGdiPlusLoaded", 0) != 0;
     g_pollInitialDebounceBypassMs = IniReadClampedI(L"Settings", L"PollInitialDebounceBypassMs", 5000, 0, 60000);
     g_wallpaperDetectionLogRepeatMs = IniReadClampedI(L"Settings", L"WallpaperDetectionLogRepeatMs", 60000, 0, 3600000);
     g_powerShellOutputMessageBoxChars = IniReadClampedI(L"Settings", L"PowerShellOutputMessageBoxChars", 6000, 0, 60000);

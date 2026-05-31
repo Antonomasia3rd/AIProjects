@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string>
 #include <cwctype>
+#include <cstring>
 #include <vector>
 #include <mutex>
 #include <condition_variable>
@@ -20,6 +21,7 @@
 #include <climits>
 #include <cerrno>
 #include <cstdlib>
+#include <malloc.h>
 #include <algorithm>
 #include <initializer_list>
 #include <utility>
