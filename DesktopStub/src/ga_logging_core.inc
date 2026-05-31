@@ -151,6 +151,22 @@ void LogWin32Failure(const wchar_t* what, DWORD err = GetLastError())
     LogWin32FailureText(what, err);
 }
 
+static void TrimIdleWorkingSetIfConfigured()
+{
+    if (!g_trimWorkingSetOnIdle.load())
+        return;
+
+    // This trims the resident working set that Task Manager shows as "Memory".
+    // It does not discard program state; pages are faulted back only if needed.
+    SetLastError(ERROR_SUCCESS);
+    if (!SetProcessWorkingSetSize(GetCurrentProcess(), static_cast<SIZE_T>(-1), static_cast<SIZE_T>(-1)))
+    {
+        DWORD err = GetLastError();
+        if (err != ERROR_SUCCESS)
+            LogWin32FailureText(g_ui.trimWorkingSetOperation.c_str(), err);
+    }
+}
+
 static void ApplyConsoleSetting(bool enable, bool writeIni, bool logState)
 {
     std::lock_guard<std::mutex> applyLock(g_consoleApplyMutex);
@@ -301,6 +317,7 @@ static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
     g_trayIconHiddenDelayMs = IniReadClampedI(L"Settings", L"TrayIconHiddenDelayMs", 750, 0, 10000);
     g_logBufferLines = IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000);
     g_logAppendLockWaitMs = IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000);
+    g_trimWorkingSetOnIdle = IniReadI(L"Settings", L"TrimWorkingSetOnIdle", 1) != 0;
     g_pollInitialDebounceBypassMs = IniReadClampedI(L"Settings", L"PollInitialDebounceBypassMs", 5000, 0, 60000);
     g_wallpaperDetectionLogRepeatMs = IniReadClampedI(L"Settings", L"WallpaperDetectionLogRepeatMs", 60000, 0, 3600000);
     g_powerShellOutputMessageBoxChars = IniReadClampedI(L"Settings", L"PowerShellOutputMessageBoxChars", 6000, 0, 60000);

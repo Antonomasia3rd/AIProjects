@@ -786,6 +786,17 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (IEquals(arg, L"--trim-working-set-on-idle") || IEquals(arg, L"--low-idle-memory"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"TrimWorkingSetOnIdle", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-trim-working-set-on-idle") || IEquals(arg, L"--no-low-idle-memory"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"TrimWorkingSetOnIdle", false);
+            continue;
+        }
+
         if (IEquals(arg, L"--live-wallpaper-capture"))
         {
             AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCapture", true);
@@ -1349,6 +1360,8 @@ static std::wstring CommandLineUsageText()
         L"  --console | --no-console            Set and save console visibility.\r\n"
         L"  --logging | --no-logging            Set and save file logging.\r\n"
         L"  --notifications | --no-notifications Set and save tray notifications.\r\n"
+        L"  --trim-working-set-on-idle | --no-trim-working-set-on-idle\r\n"
+        L"                                      Lower idle Task Manager memory by trimming the working set.\r\n"
         L"  --powershell | --com-registration    Set and save registration command mode.\r\n"
         L"  --com-helper | --no-com-helper      Enable/disable COM isolation helper.\r\n"
         L"  --live-tile | --no-live-tile         Set and save Live Tile update mode.\r\n"

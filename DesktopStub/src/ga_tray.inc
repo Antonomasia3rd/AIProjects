@@ -108,6 +108,7 @@ enum {
     ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS,
     ID_ADV_LOG_BUFFER_LINES,
     ID_ADV_LOG_APPEND_LOCK_WAIT_MS,
+    ID_ADV_TRIM_WORKING_SET_ON_IDLE,
     ID_ADV_POWER_SHELL_EXE,
     ID_ADV_POWER_SHELL_POLL_MS,
     ID_ADV_POWER_SHELL_TIMEOUT_MS,
@@ -1016,6 +1017,7 @@ void Menu(HWND h)
     addTo(advancedShutdownMenu, ID_ADV_SHUTDOWN_INITIAL_MS, shutdownInitialLine);
     addTo(advancedShutdownMenu, ID_ADV_SHUTDOWN_REPEAT_MS, shutdownRepeatLine);
     addTo(advancedShutdownMenu, ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS, trayHideDelayLine);
+    addTo(advancedShutdownMenu, ID_ADV_TRIM_WORKING_SET_ON_IDLE, g_ui.trimWorkingSetOnIdle.c_str(), g_trimWorkingSetOnIdle);
     endNestedMenu(advancedMenu, advancedShutdownMenu, g_ui.advancedShutdownTitle);
 
     HMENU advancedRegistrationMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced registration)");
@@ -1585,6 +1587,16 @@ void Menu(HWND h)
     case ID_ADV_LOG_APPEND_LOCK_WAIT_MS:
         CycleSettingIntPreset(L"LogAppendLockWaitMs", 1000, 0, 60000, { 0, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000 });
         break;
+
+    case ID_ADV_TRIM_WORKING_SET_ON_IDLE:
+    {
+        g_trimWorkingSetOnIdle = !g_trimWorkingSetOnIdle;
+        IniWrite(L"Settings", L"TrimWorkingSetOnIdle", g_trimWorkingSetOnIdle ? L"1" : L"0");
+        Log(g_ui.trimWorkingSetOnIdleSummary.c_str(), StateEnabled(g_trimWorkingSetOnIdle));
+        if (g_trimWorkingSetOnIdle)
+            TrimIdleWorkingSetIfConfigured();
+    }
+    break;
 
     case ID_ADV_POWER_SHELL_EXE:
         ChoosePowerShellExe(h);

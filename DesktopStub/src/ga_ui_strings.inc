@@ -257,6 +257,8 @@ void LoadUiStrings()
     g_ui.notifyOnSingleInstanceFailure = IniReadS(L"Strings", L"NotifyOnSingleInstanceFailure", L"Notify when single-instance protection fails");
     g_ui.showConsole = IniReadS(L"Strings", L"ShowConsole", L"Show Console");
     g_ui.generateNow = IniReadS(L"Strings", L"GenerateNow", L"Generate now");
+    g_ui.trimWorkingSetOnIdle = IniReadS(L"Strings", L"TrimWorkingSetOnIdle", L"Trim working set when idle");
+    g_ui.trimWorkingSetOperation = IniReadS(L"Strings", L"TrimWorkingSetOperation", L"SetProcessWorkingSetSize(trim idle working set)");
 
     g_ui.loggingEnable = IniReadS(L"Strings", L"LoggingEnable", L"Enable");
     g_ui.changePath = IniReadS(L"Strings", L"ChangePath", L"Change path...");
@@ -462,6 +464,7 @@ void LoadUiStrings()
     g_ui.trayIconSummary = IniReadS(L"Strings", L"TrayIconSummary", L"[i] Tray icon: %s");
     g_ui.consoleSummary = IniReadS(L"Strings", L"ConsoleSummary", L"[i] Console %s.");
     g_ui.loggingSummary = IniReadS(L"Strings", L"LoggingSummary", L"[i] Logging %s.");
+    g_ui.trimWorkingSetOnIdleSummary = IniReadS(L"Strings", L"TrimWorkingSetOnIdleSummary", L"[i] Idle working-set trimming: %s");
     g_ui.generateOnStartupSummary = IniReadS(L"Strings", L"GenerateOnStartupSummary", L"[i] Generate on Startup: %s");
     g_ui.generateOnStartupOnlyWhenChangedSummary = IniReadS(L"Strings", L"GenerateOnStartupOnlyWhenChangedSummary", L"[i] Startup generation only when changed: %s");
     g_ui.hideDisabledEntriesSummary = IniReadS(L"Strings", L"HideDisabledEntriesSummary", L"[i] Hide disabled entries: %s");
@@ -710,6 +713,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.trayIconSummary, L"TrayIconSummary", { L"%s" });
     RequireFormat(g_ui.consoleSummary, L"ConsoleSummary", { L"%s" });
     RequireFormat(g_ui.loggingSummary, L"LoggingSummary", { L"%s" });
+    RequireFormat(g_ui.trimWorkingSetOnIdleSummary, L"TrimWorkingSetOnIdleSummary", { L"%s" });
     RequireFormat(g_ui.generateOnStartupSummary, L"GenerateOnStartupSummary", { L"%s" });
     RequireFormat(g_ui.generateOnStartupOnlyWhenChangedSummary, L"GenerateOnStartupOnlyWhenChangedSummary", { L"%s" });
     RequireFormat(g_ui.hideDisabledEntriesSummary, L"HideDisabledEntriesSummary", { L"%s" });
