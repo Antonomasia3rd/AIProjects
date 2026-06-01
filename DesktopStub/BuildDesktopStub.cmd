@@ -80,10 +80,32 @@ if errorlevel 1 (
     popd
     exit /b %STATUS%
 )
+if exist "%BROKER_EXE%.manifest" (
+    echo Embedding packaged Live Tile broker manifest...
+    mt /nologo -manifest "%BROKER_EXE%.manifest" -outputresource:"%BROKER_EXE%;#1"
+    if errorlevel 1 (
+        set "STATUS=%ERRORLEVEL%"
+        popd
+        exit /b %STATUS%
+    )
+)
 
 echo Building main DesktopStub host...
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
+    popd
+    exit /b %STATUS%
+)
+if exist "%OUT_EXE%.manifest" (
+    echo Embedding main DesktopStub host manifest...
+    mt /nologo -manifest "%OUT_EXE%.manifest" -outputresource:"%OUT_EXE%;#1"
+    if errorlevel 1 (
+        set "STATUS=%ERRORLEVEL%"
+        popd
+        exit /b %STATUS%
+    )
+)
 popd
 
 exit /b %STATUS%

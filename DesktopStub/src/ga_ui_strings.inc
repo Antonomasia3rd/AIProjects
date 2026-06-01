@@ -208,6 +208,18 @@ void LoadUiStrings()
     g_ui.tileTextMarginYInputTitle = IniReadS(L"Strings", L"TileTextMarginYInputTitle", L"Edit tile text vertical margin");
     g_ui.tileTextLineGapInputTitle = IniReadS(L"Strings", L"TileTextLineGapInputTitle", L"Edit tile text line gap");
     g_ui.tileTextMaxSecondaryLinesInputTitle = IniReadS(L"Strings", L"TileTextMaxSecondaryLinesInputTitle", L"Edit max secondary tile text lines");
+    g_ui.tileTextInputPrompt = IniReadS(L"Strings", L"TileTextInputPrompt", L"Enter the primary text to render on generated tile assets.");
+    g_ui.tileTextSecondaryInputPrompt = IniReadS(L"Strings", L"TileTextSecondaryInputPrompt", L"Enter the secondary text to render with the primary tile text.");
+    g_ui.tileTextBadgeInputPrompt = IniReadS(L"Strings", L"TileTextBadgeInputPrompt", L"Enter the badge text to render on generated tile assets.");
+    g_ui.tileTextFontInputPrompt = IniReadS(L"Strings", L"TileTextFontInputPrompt", L"Enter the font family used for tile text.");
+    g_ui.tileTextColorInputPrompt = IniReadS(L"Strings", L"TileTextColorInputPrompt", L"Enter the primary tile text color as #AARRGGBB or #RRGGBB.");
+    g_ui.tileTextSecondaryColorInputPrompt = IniReadS(L"Strings", L"TileTextSecondaryColorInputPrompt", L"Enter the secondary tile text color as #AARRGGBB or #RRGGBB.");
+    g_ui.tileTextBadgeColorInputPrompt = IniReadS(L"Strings", L"TileTextBadgeColorInputPrompt", L"Enter the badge text color as #AARRGGBB or #RRGGBB.");
+    g_ui.tileTextShadowColorInputPrompt = IniReadS(L"Strings", L"TileTextShadowColorInputPrompt", L"Enter the tile text shadow color as #AARRGGBB or #RRGGBB.");
+    g_ui.tileTextMarginXInputPrompt = IniReadS(L"Strings", L"TileTextMarginXInputPrompt", L"Enter the horizontal text margin in pixels.");
+    g_ui.tileTextMarginYInputPrompt = IniReadS(L"Strings", L"TileTextMarginYInputPrompt", L"Enter the vertical text margin in pixels.");
+    g_ui.tileTextLineGapInputPrompt = IniReadS(L"Strings", L"TileTextLineGapInputPrompt", L"Enter the gap between tile text lines in pixels.");
+    g_ui.tileTextMaxSecondaryLinesInputPrompt = IniReadS(L"Strings", L"TileTextMaxSecondaryLinesInputPrompt", L"Enter the maximum number of secondary text lines.");
 
     g_ui.listenWallpaper = IniReadS(L"Strings", L"ListenWallpaper", L"Listen Wallpaper");
     g_ui.trayIcon = IniReadS(L"Strings", L"TrayIcon", L"Tray Icon (this session)");
@@ -319,6 +331,7 @@ void LoadUiStrings()
     g_ui.previousForceShutdownCleanupWarning = IniReadS(L"Strings", L"PreviousForceShutdownCleanupWarning", L"Previous run used Force shutdown while work was pending (%s). Skipped cleanup: %s. Downside: %s");
 
     g_ui.renameDialogTitle = IniReadS(L"Strings", L"RenameDialogTitle", L"Rename Log Path");
+    g_ui.renameDialogPrompt = IniReadS(L"Strings", L"RenameDialogPrompt", L"Enter the new log file path.");
     g_ui.okText = IniReadS(L"Strings", L"OKText", L"OK");
     g_ui.cancelText = IniReadS(L"Strings", L"CancelText", L"Cancel");
     g_ui.errorTitle = IniReadS(L"Strings", L"ErrorTitle", L"Error");

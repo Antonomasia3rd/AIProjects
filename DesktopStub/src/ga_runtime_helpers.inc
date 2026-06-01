@@ -341,17 +341,26 @@ static DLGITEMTEMPLATE* AlignDialogItem(WORD*& p)
     return item;
 }
 
-INT_PTR ShowTextInputDialog(HWND parent, const std::wstring& title, std::wstring& value, bool allowEmpty)
+static constexpr int TEXT_INPUT_EDIT_ID = 1001;
+static constexpr int TEXT_INPUT_PROMPT_ID = 1002;
+
+INT_PTR ShowTextInputDialog(
+    HWND parent,
+    const std::wstring& title,
+    const std::wstring& prompt,
+    std::wstring& value,
+    bool allowEmpty)
 {
     std::wstring dialogTitle = title.empty() ? g_ui.renameDialogTitle : title;
+    std::wstring dialogPrompt = prompt.empty() ? dialogTitle : prompt;
     size_t stringBytes =
-        (dialogTitle.size() + g_ui.okText.size() + g_ui.cancelText.size() + 64) * sizeof(wchar_t);
+        (dialogTitle.size() + dialogPrompt.size() + g_ui.okText.size() + g_ui.cancelText.size() + 64) * sizeof(wchar_t);
     std::vector<BYTE> tmpl(4096 + stringBytes);
     DLGTEMPLATE* dlg = (DLGTEMPLATE*)tmpl.data();
 
-    dlg->style = WS_POPUP | WS_BORDER | WS_SYSMENU | DS_MODALFRAME | WS_CAPTION | DS_SETFONT | DS_CENTER;
-    dlg->cdit = 3;
-    dlg->x = 10; dlg->y = 10; dlg->cx = 320; dlg->cy = 72;
+    dlg->style = WS_POPUP | WS_SYSMENU | DS_MODALFRAME | WS_CAPTION | DS_SETFONT | DS_CENTER;
+    dlg->cdit = 4;
+    dlg->x = 10; dlg->y = 10; dlg->cx = 205; dlg->cy = 65;
 
     WORD* p = (WORD*)(dlg + 1);
 
@@ -361,22 +370,23 @@ INT_PTR ShowTextInputDialog(HWND parent, const std::wstring& title, std::wstring
     AppendDialogTemplateString(p, dialogTitle);
     *p++ = 9; // font size
     AppendDialogTemplateString(p, L"Segoe UI");
-    // ---- Edit box ----
+
+    // ---- Prompt ----
     DLGITEMTEMPLATE* item = AlignDialogItem(p);
-    item->x = 6; item->y = 6; item->cx = 308; item->cy = 14;
-    item->id = 1001;
-    item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL;
+    item->x = 6; item->y = 5; item->cx = 137; item->cy = 39;
+    item->id = TEXT_INPUT_PROMPT_ID;
+    item->style = WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX;
 
     p = (WORD*)(item + 1);
-    *p++ = 0xFFFF; *p++ = 0x0081; // EDIT class
-    *p++ = 0; // no text
+    *p++ = 0xFFFF; *p++ = 0x0082; // STATIC class
+    AppendDialogTemplateString(p, dialogPrompt);
     *p++ = 0; // no extra data
 
     // ---- OK button ----
     item = AlignDialogItem(p);
-    item->x = 188; item->y = 32; item->cx = 58; item->cy = 16;
+    item->x = 156; item->y = 5; item->cx = 43; item->cy = 12;
     item->id = IDOK;
-    item->style = WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON;
+    item->style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON;
 
     p = (WORD*)(item + 1);
     *p++ = 0xFFFF; *p++ = 0x0080; // BUTTON
@@ -385,14 +395,25 @@ INT_PTR ShowTextInputDialog(HWND parent, const std::wstring& title, std::wstring
 
     // ---- Cancel button ----
     item = AlignDialogItem(p);
-    item->x = 256; item->y = 32; item->cx = 58; item->cy = 16;
+    item->x = 156; item->y = 20; item->cx = 43; item->cy = 12;
     item->id = IDCANCEL;
-    item->style = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON;
+    item->style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON;
 
     p = (WORD*)(item + 1);
     *p++ = 0xFFFF; *p++ = 0x0080;
     AppendDialogTemplateString(p, g_ui.cancelText);
     *p++ = 0;
+
+    // ---- Edit box ----
+    item = AlignDialogItem(p);
+    item->x = 6; item->y = 47; item->cx = 193; item->cy = 12;
+    item->id = TEXT_INPUT_EDIT_ID;
+    item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL;
+
+    p = (WORD*)(item + 1);
+    *p++ = 0xFFFF; *p++ = 0x0081; // EDIT class
+    *p++ = 0; // no text
+    *p++ = 0; // no extra data
 
     struct TextInputDialogState
     {
@@ -411,6 +432,6 @@ INT_PTR ShowTextInputDialog(HWND parent, const std::wstring& title, std::wstring
 
 INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
 {
-    return ShowTextInputDialog(parent, g_ui.renameDialogTitle, path, false);
+    return ShowTextInputDialog(parent, g_ui.renameDialogTitle, g_ui.renameDialogPrompt, path, false);
 }
 
