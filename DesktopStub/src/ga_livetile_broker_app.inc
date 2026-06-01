@@ -36,14 +36,61 @@ static std::wstring ModuleDir()
     return path.substr(0, pos);
 }
 
+static std::wstring ModuleBaseName()
+{
+    std::wstring path = ModulePath();
+    size_t slash = path.find_last_of(L"\\/");
+    if (slash != std::wstring::npos)
+        path.erase(0, slash + 1);
+    size_t dot = path.find_last_of(L'.');
+    if (dot != std::wstring::npos)
+        path.erase(dot);
+    return path.empty() ? L"DesktopStub" : path;
+}
+
+static bool EndsWithNoCase(const std::wstring& text, const std::wstring& suffix)
+{
+    if (suffix.empty() || text.size() < suffix.size())
+        return false;
+
+    size_t offset = text.size() - suffix.size();
+    for (size_t i = 0; i < suffix.size(); ++i)
+    {
+        if (towlower(text[offset + i]) != towlower(suffix[i]))
+            return false;
+    }
+    return true;
+}
+
+static std::wstring ProductRuntimeBaseName()
+{
+    std::wstring base = ModuleBaseName();
+    const std::wstring suffix = L"LiveTileBroker";
+    if (EndsWithNoCase(base, suffix) && base.size() > suffix.size())
+        base.resize(base.size() - suffix.size());
+    return base.empty() ? L"DesktopStub" : base;
+}
+
+static std::wstring ProductRuntimeFileName(const wchar_t* suffix)
+{
+    std::wstring name = ProductRuntimeBaseName();
+    name += suffix ? suffix : L"";
+    return name;
+}
+
+static std::wstring ProductRuntimeFilePath(const wchar_t* suffix)
+{
+    return ModuleDir() + L"\\" + ProductRuntimeFileName(suffix);
+}
+
 static std::wstring PendingXmlPath()
 {
-    return ModuleDir() + L"\\DesktopStub.livetile.pending.xml";
+    return ProductRuntimeFilePath(L".livetile.pending.xml");
 }
 
 static std::wstring ActivationLogPath()
 {
-    return ModuleDir() + L"\\DesktopStub.appxactivation.log";
+    return ProductRuntimeFilePath(L".appxactivation.log");
 }
 
 static std::wstring LocalStateDir()
@@ -68,22 +115,22 @@ static std::wstring LocalStatePath(const wchar_t* fileName)
 
 static std::wstring LocalStateActivationLogPath()
 {
-    return LocalStatePath(L"DesktopStub.appxactivation.log");
+    return LocalStatePath(ProductRuntimeFileName(L".appxactivation.log").c_str());
 }
 
 static std::wstring LocalStatePendingXmlPath()
 {
-    return LocalStatePath(L"DesktopStub.livetile.pending.xml");
+    return LocalStatePath(ProductRuntimeFileName(L".livetile.pending.xml").c_str());
 }
 
 static std::wstring PendingClearPath()
 {
-    return ModuleDir() + L"\\DesktopStub.livetile.clear";
+    return ProductRuntimeFilePath(L".livetile.clear");
 }
 
 static std::wstring LocalStatePendingClearPath()
 {
-    return LocalStatePath(L"DesktopStub.livetile.clear");
+    return LocalStatePath(ProductRuntimeFileName(L".livetile.clear").c_str());
 }
 
 static std::wstring TrimCopy(const std::wstring& s)

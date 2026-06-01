@@ -1,4 +1,4 @@
-std::wstring GetExeDir()
+﻿std::wstring GetExeDir()
 {
     size_t pos = g_exePath.find_last_of(L"\\/");
     if (pos == std::wstring::npos) return L".";
@@ -107,6 +107,30 @@ static std::wstring PortableHostBaseName()
     return base.empty() ? L"DesktopStub" : base;
 }
 
+static std::wstring ProductRuntimeBaseName()
+{
+    // Runtime sidecar files are scoped to the portable host name rather than
+    // hard-coded to DesktopStub. This keeps copied/renamed baseline projects
+    // from sharing Live Tile pending XML, clear flags, activation traces, and
+    // similar coordination files.
+    return PortableHostBaseName();
+}
+
+static std::wstring ProductRuntimeFileName(const wchar_t* suffix)
+{
+    std::wstring name = ProductRuntimeBaseName();
+    name += suffix ? suffix : L"";
+    return name;
+}
+
+static std::wstring ProductRuntimeFilePath(const wchar_t* suffix)
+{
+    return GetExeDir() + L"\\" + ProductRuntimeFileName(suffix);
+}
+
+static std::wstring PackageProductRuntimeFilePath(const std::wstring& packageFamilyName, const wchar_t* suffix);
+static std::wstring ExpandManifestSettingTokens(std::wstring value);
+
 static std::wstring DefaultLogPath()
 {
     return GetExeDir() + L"\\" + ExeBaseName() + L".log";
@@ -124,11 +148,11 @@ static std::wstring ManifestSetting(const wchar_t* key, const wchar_t* fallback,
     {
         std::wstring value = TrimCopy(IniReadS(L"Settings", legacySettingsKey, L""));
         if (!value.empty())
-            return value;
+            return ExpandManifestSettingTokens(value);
     }
 
     (void)key;
-    return fallback ? fallback : L"";
+    return ExpandManifestSettingTokens(fallback ? fallback : L"");
 }
 
 static bool TryParseIntStrict(const std::wstring& value, int& parsed)
@@ -287,7 +311,7 @@ static std::wstring ManifestSettingValidated(
     std::wstring value = ManifestSetting(key, fallback, legacySettingsKey);
     if (!validator || validator(value))
         return value;
-    return fallback ? fallback : L"";
+    return ExpandManifestSettingTokens(fallback ? fallback : L"");
 }
 
 static std::wstring TrimNonAlnumEnds(std::wstring value)
@@ -359,6 +383,32 @@ static std::wstring SanitizeManifestToken(const std::wstring& raw, const wchar_t
     return out;
 }
 
+static void ReplaceAllInPlace(std::wstring& value, const wchar_t* from, const std::wstring& to)
+{
+    if (!from || !*from)
+        return;
+
+    size_t fromLen = wcslen(from);
+    size_t pos = 0;
+    while ((pos = value.find(from, pos)) != std::wstring::npos)
+    {
+        value.replace(pos, fromLen, to);
+        pos += to.size();
+    }
+}
+
+static std::wstring ProductManifestToken()
+{
+    return SanitizeManifestToken(ProductRuntimeBaseName(), L"DesktopStub");
+}
+
+static std::wstring ExpandManifestSettingTokens(std::wstring value)
+{
+    ReplaceAllInPlace(value, L"{ProductRuntimeBaseName}", ProductRuntimeBaseName());
+    ReplaceAllInPlace(value, L"{ProductManifestToken}", ProductManifestToken());
+    return value;
+}
+
 static bool IsManifestVersion(const std::wstring& version)
 {
     size_t pos = 0;
@@ -396,7 +446,7 @@ static std::wstring EffectiveManifestIdentityName()
 
 static std::wstring EffectiveManifestPublisher()
 {
-    std::wstring publisher = ManifestSettingValidated(L"Publisher", L"CN=DesktopStub", L"ManifestPublisher", IsManifestPublisherValue);
+    std::wstring publisher = ManifestSettingValidated(L"Publisher", L"CN={ProductRuntimeBaseName}", L"ManifestPublisher", IsManifestPublisherValue);
     if (ToLowerCopy(publisher).rfind(L"cn=", 0) != 0)
         publisher = L"CN=" + publisher;
     return publisher;
@@ -416,7 +466,7 @@ static std::wstring EffectiveManifestDisplayName()
 
 static std::wstring EffectiveManifestPublisherDisplayName()
 {
-    return ManifestSetting(L"PublisherDisplayName", L"DesktopStub", L"ManifestPublisherDisplayName");
+    return ManifestSetting(L"PublisherDisplayName", L"{ProductRuntimeBaseName}", L"ManifestPublisherDisplayName");
 }
 
 static std::wstring EffectiveManifestDescription()
@@ -438,7 +488,7 @@ static std::wstring ManifestLiveTileBrokerExecutableName()
 {
     return ManifestSettingValidated(
         L"LiveTileBrokerExecutable",
-        L"DesktopStubLiveTileBroker.exe",
+        L"{ProductRuntimeBaseName}LiveTileBroker.exe",
         L"ManifestLiveTileBrokerExecutable",
         IsManifestExecutableValue);
 }
@@ -447,7 +497,7 @@ static std::wstring ManifestLiveTileBrokerEntryPoint()
 {
     return ManifestSettingValidated(
         L"LiveTileBrokerEntryPoint",
-        L"DesktopStub.LiveTileBroker.App",
+        L"{ProductManifestToken}.LiveTileBroker.App",
         L"ManifestLiveTileBrokerEntryPoint",
         IsManifestNonEmptyDottedToken);
 }
@@ -464,7 +514,7 @@ static std::wstring ManifestLiveTileOopServerName()
 {
     return ManifestSettingValidated(
         L"LiveTileOopServerName",
-        L"DesktopStubLiveTileServer",
+        L"{ProductManifestToken}LiveTileServer",
         L"ManifestLiveTileOopServerName",
         IsManifestNonEmptyDottedToken);
 }
@@ -473,7 +523,7 @@ static std::wstring ManifestLiveTileOopRuntimeClassId()
 {
     return ManifestSettingValidated(
         L"LiveTileOopRuntimeClassId",
-        L"DesktopStub.LiveTileUpdateServer",
+        L"{ProductManifestToken}.LiveTileUpdateServer",
         L"ManifestLiveTileOopRuntimeClassId",
         IsManifestNonEmptyDottedToken);
 }
@@ -483,7 +533,7 @@ static std::wstring ManifestLiveTileBackgroundTaskDllName()
 {
     return ManifestSettingValidated(
         L"LiveTileBackgroundTaskDll",
-        L"DesktopStubLiveTileTask.dll",
+        L"{ProductRuntimeBaseName}LiveTileTask.dll",
         L"ManifestLiveTileBackgroundTaskDll",
         IsManifestSafeRelativePath);
 }
@@ -492,7 +542,7 @@ static std::wstring ManifestLiveTileBackgroundTaskClassId()
 {
     return ManifestSettingValidated(
         L"LiveTileBackgroundTaskClassId",
-        L"DesktopStub.LiveTileBackgroundTask",
+        L"{ProductManifestToken}.LiveTileBackgroundTask",
         L"ManifestLiveTileBackgroundTaskClassId",
         IsManifestNonEmptyDottedToken);
 }
@@ -501,7 +551,7 @@ static std::wstring ManifestLiveTileBackgroundTaskName()
 {
     return ManifestSettingValidated(
         L"LiveTileBackgroundTaskName",
-        L"DesktopStubLiveTileUpdate",
+        L"{ProductManifestToken}LiveTileUpdate",
         L"ManifestLiveTileBackgroundTaskName",
         IsManifestNonEmptyDottedToken);
 }

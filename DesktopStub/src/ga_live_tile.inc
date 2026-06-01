@@ -256,12 +256,12 @@ static std::wstring BuildLiveTileXml(
 
 static std::wstring PendingLiveTileXmlPath()
 {
-    return GetExeDir() + L"\\DesktopStub.livetile.pending.xml";
+    return ProductRuntimeFilePath(L".livetile.pending.xml");
 }
 
 static std::wstring PendingLiveTileClearPath()
 {
-    return GetExeDir() + L"\\DesktopStub.livetile.clear";
+    return ProductRuntimeFilePath(L".livetile.clear");
 }
 
 static bool WritePendingLiveTileClearRequest()
@@ -418,7 +418,7 @@ static std::wstring PowerShellSingleQuotedString(const std::wstring& value)
 
 static std::wstring LiveTileActivationTraceLogPath()
 {
-    return GetExeDir() + L"\\DesktopStub.appxactivation.log";
+    return ProductRuntimeFilePath(L".appxactivation.log");
 }
 
 static std::wstring LocalAppDataPath()
@@ -459,19 +459,24 @@ static std::wstring PackageLocalStatePath(const std::wstring& packageFamilyName,
     return dir + L"\\" + fileName;
 }
 
+static std::wstring PackageProductRuntimeFilePath(const std::wstring& packageFamilyName, const wchar_t* suffix)
+{
+    return PackageLocalStatePath(packageFamilyName, ProductRuntimeFileName(suffix));
+}
+
 static std::wstring PackageLiveTileActivationTraceLogPath(const std::wstring& packageFamilyName)
 {
-    return PackageLocalStatePath(packageFamilyName, L"DesktopStub.appxactivation.log");
+    return PackageProductRuntimeFilePath(packageFamilyName, L".appxactivation.log");
 }
 
 static std::wstring PackagePendingLiveTileXmlPath(const std::wstring& packageFamilyName)
 {
-    return PackageLocalStatePath(packageFamilyName, L"DesktopStub.livetile.pending.xml");
+    return PackageProductRuntimeFilePath(packageFamilyName, L".livetile.pending.xml");
 }
 
 static std::wstring PackagePendingLiveTileClearPath(const std::wstring& packageFamilyName)
 {
-    return PackageLocalStatePath(packageFamilyName, L"DesktopStub.livetile.clear");
+    return PackageProductRuntimeFilePath(packageFamilyName, L".livetile.clear");
 }
 
 static bool TryGetFileSize64(const std::wstring& path, unsigned long long& sizeOut)

@@ -150,12 +150,14 @@ static void MaybeClearLiveTileOnShutdown()
     }
 }
 
-static std::wstring ModeSwitchRelaunchArguments(bool forceGenerate, bool waitForThisProcessToExit)
+static std::wstring ModeSwitchRelaunchArguments(bool forceGenerate, bool waitForThisProcessToExit, bool generateOnce)
 {
     std::wstring args = L"--launched-from-mode-switch";
     if (waitForThisProcessToExit)
         args += L" " + std::wstring(WAIT_FOR_PID_ARG) + L" " + std::to_wstring(GetCurrentProcessId());
-    if (forceGenerate)
+    if (generateOnce)
+        args += L" --once";
+    else if (forceGenerate)
         args += L" --generate";
     if (g_commandLine.customIniPath)
         args += L" --ini " + QuoteCommandLineArg(g_iniPath);
@@ -312,7 +314,7 @@ static bool StartUnpackagedRelaunchDirect(const std::wstring& arguments)
 
 static bool StartUnpackagedRelaunchAfterExit()
 {
-    std::wstring arguments = ModeSwitchRelaunchArguments(false, true);
+    std::wstring arguments = ModeSwitchRelaunchArguments(false, true, CommandLineShouldGenerateOnce());
 
     // Use an unpackaged system broker instead of ShellExecute'ing the registered
     // EXE directly from the packaged process. Direct relaunch can preserve the
@@ -340,7 +342,7 @@ static bool StartPackagedRelaunchAfterExit()
 {
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
     std::wstring failure;
-    std::wstring arguments = ModeSwitchRelaunchArguments(true, false);
+    std::wstring arguments = ModeSwitchRelaunchArguments(true, false, CommandLineShouldGenerateOnce());
     if (ActivateRegisteredPackageApplication(manifestInfo, arguments.c_str(), failure))
     {
         LogText(L"[i] Relaunched packaged app instance after Live Tile mode switch.");
@@ -477,10 +479,11 @@ static void ConfigureSingleInstanceIdentity(const std::wstring& exeDir, const st
     uint64_t hash = 14695981039346656037ull;
     HashWide(hash, scope);
     std::wstring suffix = Hex64(hash);
+    std::wstring productBase = SanitizeManifestToken(ProductRuntimeBaseName(), L"DesktopStub");
 
-    g_singleInstanceMutexName = std::wstring(SINGLE_INSTANCE_MUTEX_BASE) + L"." + suffix;
-    g_singleInstanceMessageName = std::wstring(SINGLE_INSTANCE_MESSAGE_BASE) + L"." + suffix;
-    g_instanceWindowTitle = std::wstring(WINDOW_CLASS_NAME) + L"." + suffix;
+    g_singleInstanceMutexName = L"Local\\" + productBase + L"." + suffix;
+    g_singleInstanceMessageName = productBase + L".RestoreRunningInstance." + suffix;
+    g_instanceWindowTitle = std::wstring(WINDOW_CLASS_NAME) + L"." + productBase + L"." + suffix;
 }
 
 static HWND FindExistingInstanceWindow()
@@ -1630,8 +1633,16 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     if (!SetTimer(g_hwnd, APPX_ACTIVATION_REQUEST_TIMER_ID, 750, nullptr))
         LogWin32Failure(L"SetTimer(APPX_ACTIVATION_REQUEST_TIMER_ID)");
 
-    // Tray
-    if (g_tray){
+    // Tray. One-shot command-line generation should not touch Explorer's
+    // notification area; in practice Shell_NotifyIcon can block for several
+    // seconds while Explorer is busy, which makes --once look hung even though
+    // all useful work is logged to file.
+    if (CommandLineShouldGenerateOnce())
+    {
+        g_tray = false;
+    }
+    else if (g_tray)
+    {
         DWORD err = 0;
         if (!EnsureTrayIcon(&err))
         {
