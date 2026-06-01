@@ -1,3 +1,5 @@
+#include "DesktopStubHostResourceDefines.rc.inc"
+
 #ifndef DESKTOPSTUB_FILE_DESCRIPTION
 #define DESKTOPSTUB_FILE_DESCRIPTION DESKTOPSTUB_PRODUCT_NAME " tray wallpaper tile utility"
 #endif

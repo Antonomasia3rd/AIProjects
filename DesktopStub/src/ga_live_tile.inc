@@ -284,14 +284,13 @@ static bool Appx_Update_LiveTileXmlBare(const std::wstring& tileXml, std::wstrin
     if (!CurrentProcessPackageFullName(packageFullName))
     {
         DWORD err = GetLastError();
-        failureMessage = L"Live Tile update requires package identity (GetCurrentPackageFullName failed, error=" +
-            std::to_wstring(err) + L").";
+        failureMessage = FormatWide(g_ui.liveTileUpdateRequiresIdentityDetails.c_str(), static_cast<unsigned long>(err));
         return false;
     }
 
     if (TrimCopy(tileXml).empty())
     {
-        failureMessage = L"Live Tile XML is empty.";
+        failureMessage = g_ui.liveTileXmlEmpty;
         return false;
     }
 
@@ -313,20 +312,20 @@ static bool Appx_Update_LiveTileXmlBare(const std::wstring& tileXml, std::wstrin
     }
     catch (const winrt::hresult_error& e)
     {
-        failureMessage = L"Live Tile update failed, hresult=0x" + Hex64(static_cast<uint32_t>(e.code().value));
+        failureMessage = FormatWide(g_ui.liveTileUpdateFailedHresult.c_str(), Hex64(static_cast<uint32_t>(e.code().value)).c_str());
         std::wstring msg = e.message().c_str();
         if (!msg.empty())
-            failureMessage += L", message=" + msg;
+            failureMessage += FormatWide(g_ui.liveTileErrorMessageSuffix.c_str(), msg.c_str());
         return false;
     }
     catch (const std::exception& ex)
     {
-        failureMessage = L"Live Tile update failed: " + ExceptionTextToWide(ex);
+        failureMessage = FormatWide(g_ui.liveTileUpdateFailedException.c_str(), ExceptionTextToWide(ex).c_str());
         return false;
     }
     catch (...)
     {
-        failureMessage = L"Live Tile update failed: " + UnknownExceptionText();
+        failureMessage = FormatWide(g_ui.liveTileUpdateFailedException.c_str(), UnknownExceptionText().c_str());
         return false;
     }
 }
@@ -339,8 +338,7 @@ static bool Appx_Clear_LiveTileBare(std::wstring& failureMessage)
     if (!CurrentProcessPackageFullName(packageFullName))
     {
         DWORD err = GetLastError();
-        failureMessage = L"Live Tile clear requires package identity (GetCurrentPackageFullName failed, error=" +
-            std::to_wstring(err) + L").";
+        failureMessage = FormatWide(g_ui.liveTileClearRequiresIdentityDetails.c_str(), static_cast<unsigned long>(err));
         return false;
     }
 
@@ -356,20 +354,20 @@ static bool Appx_Clear_LiveTileBare(std::wstring& failureMessage)
     }
     catch (const winrt::hresult_error& e)
     {
-        failureMessage = L"Live Tile clear failed, hresult=0x" + Hex64(static_cast<uint32_t>(e.code().value));
+        failureMessage = FormatWide(g_ui.liveTileClearFailedHresult.c_str(), Hex64(static_cast<uint32_t>(e.code().value)).c_str());
         std::wstring msg = e.message().c_str();
         if (!msg.empty())
-            failureMessage += L", message=" + msg;
+            failureMessage += FormatWide(g_ui.liveTileErrorMessageSuffix.c_str(), msg.c_str());
         return false;
     }
     catch (const std::exception& ex)
     {
-        failureMessage = L"Live Tile clear failed: " + ExceptionTextToWide(ex);
+        failureMessage = FormatWide(g_ui.liveTileClearFailedException.c_str(), ExceptionTextToWide(ex).c_str());
         return false;
     }
     catch (...)
     {
-        failureMessage = L"Live Tile clear failed: " + UnknownExceptionText();
+        failureMessage = FormatWide(g_ui.liveTileClearFailedException.c_str(), UnknownExceptionText().c_str());
         return false;
     }
 }
@@ -394,9 +392,9 @@ static bool Appx_Update_LiveTileFromPendingXmlForActivationStub(std::wstring& fa
     tileXml = BuildLiveTileXml(GetExeDir(), manifestInfo, fallbackAssets);
     if (tileXml.empty())
     {
-        failureMessage = L"No pending Live Tile XML and no usable stable live-tile assets were found.";
-        return false;
-    }
+    failureMessage = g_ui.liveTileNoPendingXmlOrAssets;
+    return false;
+}
 
     return Appx_Update_LiveTileXmlBare(tileXml, failureMessage);
 }
@@ -618,11 +616,11 @@ static bool TryReadRegisteredPackageViaPowerShell(
     if (!PS_Run(command))
     {
         std::lock_guard<std::mutex> lk(g_psMutex);
-        failureMessage = L"PowerShell package lookup failed";
+        failureMessage = g_ui.powerShellPackageLookupFailed;
         if (!TrimCopy(g_psMsg).empty())
-            failureMessage += L": " + TrimCopy(g_psMsg);
+            failureMessage += FormatWide(g_ui.liveTilePowerShellFailureDetailsSuffix.c_str(), TrimCopy(g_psMsg).c_str());
         if (!TrimCopy(g_psOut).empty())
-            failureMessage += L"; output=" + TrimCopy(g_psOut);
+            failureMessage += FormatWide(g_ui.liveTilePowerShellOutputDetailsSuffix.c_str(), TrimCopy(g_psOut).c_str());
         return false;
     }
 
@@ -652,9 +650,9 @@ static bool TryReadRegisteredPackageViaPowerShell(
     size_t sep = selectedLine.find(L"|@|");
     if (sep == std::wstring::npos)
     {
-        failureMessage = L"PowerShell package lookup returned no package for identity name " + manifestInfo.identityName + L".";
+        failureMessage = FormatWide(g_ui.powerShellPackageLookupNoPackage.c_str(), manifestInfo.identityName.c_str());
         if (!out.empty())
-            failureMessage += L" Output=" + out;
+            failureMessage += FormatWide(g_ui.liveTilePowerShellOutputDetailsSuffix.c_str(), out.c_str());
         return false;
     }
 
@@ -662,11 +660,11 @@ static bool TryReadRegisteredPackageViaPowerShell(
     packageFullName = TrimCopy(selectedLine.substr(sep + 3));
     if (packageFamilyName.empty() || packageFullName.empty())
     {
-        failureMessage = L"PowerShell package lookup returned incomplete package identity: " + selectedLine;
+        failureMessage = FormatWide(g_ui.powerShellPackageLookupIncomplete.c_str(), selectedLine.c_str());
         return false;
     }
 
-    Log(L"[i] PowerShell package lookup found Live Tile helper package: %s", packageFullName.c_str());
+    Log(g_ui.powerShellPackageLookupFound.c_str(), packageFullName.c_str());
     return true;
 }
 
@@ -696,7 +694,7 @@ static bool FindRegisteredPackageFamilyNameForManifest(
             packageFullName = id.FullName().c_str();
             if (packageFamilyName.empty())
                 return false;
-            Log(L"[i] %s package lookup found Live Tile helper package: %s", source, packageFullName.c_str());
+            Log(g_ui.liveTilePackageLookupFound.c_str(), source, packageFullName.c_str());
             return true;
         };
 
@@ -745,27 +743,27 @@ static bool FindRegisteredPackageFamilyNameForManifest(
                 return true;
         }
 
-        apiFailure = L"WinRT package lookup returned no package for identity name " + manifestInfo.identityName + L".";
+        apiFailure = FormatWide(g_ui.liveTileWinRtPackageLookupNoPackage.c_str(), manifestInfo.identityName.c_str());
     }
     catch (const winrt::hresult_error& e)
     {
-        apiFailure = L"WinRT package lookup failed, hresult=0x" + Hex64(static_cast<uint32_t>(e.code().value));
+        apiFailure = FormatWide(g_ui.liveTileWinRtPackageLookupFailedHresult.c_str(), Hex64(static_cast<uint32_t>(e.code().value)).c_str());
         std::wstring msg = e.message().c_str();
         if (!msg.empty())
-            apiFailure += L", message=" + msg;
+            apiFailure += FormatWide(g_ui.liveTileErrorMessageSuffix.c_str(), msg.c_str());
     }
     catch (...)
     {
-        apiFailure = L"WinRT package lookup failed: " + UnknownExceptionText();
+        apiFailure = FormatWide(g_ui.liveTileWinRtPackageLookupFailedException.c_str(), UnknownExceptionText().c_str());
     }
 
-    Log(L"[i] %s", apiFailure.c_str());
+    LogText(apiFailure);
 
     std::wstring psFailure;
     if (TryReadRegisteredPackageViaPowerShell(manifestInfo, packageFamilyName, packageFullName, psFailure))
         return true;
 
-    failureMessage = apiFailure + L" PowerShell fallback: " + psFailure;
+    failureMessage = FormatWide(g_ui.liveTilePackageLookupFallbackFailure.c_str(), apiFailure.c_str(), psFailure.c_str());
     return false;
 }
 
@@ -801,12 +799,12 @@ static bool EnsurePackagedLiveTileUpdateStubRegistered(
     if (refreshExistingPackage)
     {
         s_refreshedWin8BrokerRegistrationThisProcess = true;
-        Log(L"[i] Win8/8.1 broker app mode is enabled; refreshing Appx registration once this process so the registered executable/manifest is current: %s",
+        Log(g_ui.liveTileExistingPackageRefresh.c_str(),
             existingPackageFullName.c_str());
     }
     else
     {
-        Log(L"[i] Registered package for Live Tile helper was not found: %s", lookupFailure.c_str());
+        Log(g_ui.liveTilePackageLookupNotFound.c_str(), lookupFailure.c_str());
     }
 
     std::wstring manifestPath;
@@ -814,8 +812,8 @@ static bool EnsurePackagedLiveTileUpdateStubRegistered(
     DWORD manifestError = ERROR_SUCCESS;
     if (!EnsureAppxManifest(manifestPath, manifestCreated, manifestError))
     {
-        failureMessage = L"Failed to prepare AppxManifest.xml for Live Tile helper registration: " +
-            manifestPath + L" (error=" + std::to_wstring(manifestError) + L").";
+        failureMessage = FormatWide(g_ui.liveTilePrepareManifestForHelperFailed.c_str(),
+            manifestPath.c_str(), static_cast<unsigned long>(manifestError));
         LogText(failureMessage);
         return false;
     }
@@ -826,8 +824,8 @@ static bool EnsurePackagedLiveTileUpdateStubRegistered(
         Log(g_ui.appxManifestExisting.c_str(), manifestPath.c_str());
 
     LogText((Win8LiveTileBrokerAppEnabled() && ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10) ?
-        L"[i] Registering AppxManifest once so the packaged WinRT Live Tile broker can be activated." :
-        L"[i] Registering AppxManifest once so the packaged Live Tile helper can be activated.");
+        g_ui.liveTileRegisteringManifestBroker :
+        g_ui.liveTileRegisteringManifestHelper);
     std::wstring registrationFailure;
     bool registrationOk = false;
     if (ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10)
@@ -857,7 +855,7 @@ static bool EnsurePackagedLiveTileUpdateStubRegistered(
             // dev package and immediately register the loose package again.
             if (refreshExistingPackage && !existingPackageFullName.empty())
             {
-                Log(L"[i] Re-registration was blocked for existing development package %s; removing it and retrying once.",
+                Log(g_ui.liveTileRegistrationBlockedRemoving.c_str(),
                     existingPackageFullName.c_str());
                 std::wstring retryPs = L"Remove-AppxPackage -Package \"" + existingPackageFullName +
                     L"\" -ErrorAction SilentlyContinue; Add-AppxPackage -Register \"" + manifestPath +
@@ -871,10 +869,10 @@ static bool EnsurePackagedLiveTileUpdateStubRegistered(
 
     if (!registrationOk)
     {
-        failureMessage = L"Live Tile helper package registration failed: " + registrationFailure;
+        failureMessage = FormatWide(g_ui.liveTileHelperRegistrationFailed.c_str(), registrationFailure.c_str());
         if (hadExistingPackage)
         {
-            Log(L"[!] %s Continuing with the already registered package: %s",
+            Log(g_ui.liveTileContinueExistingPackage.c_str(),
                 failureMessage.c_str(), existingPackageFullName.c_str());
             packageFamilyName = existingPackageFamilyName;
             packageFullName = existingPackageFullName;
@@ -884,15 +882,15 @@ static bool EnsurePackagedLiveTileUpdateStubRegistered(
         return false;
     }
 
-    LogText(L"[i] Live Tile helper package registration completed; verifying package identity.");
+    LogText(g_ui.liveTileHelperRegistrationVerifying);
     lookupFailure.clear();
     if (FindRegisteredPackageFamilyNameForManifest(manifestInfo, packageFamilyName, packageFullName, lookupFailure))
     {
-        Log(L"[i] Registered package ready for Live Tile helper: %s", packageFullName.c_str());
+        Log(g_ui.liveTileHelperPackageReady.c_str(), packageFullName.c_str());
         return true;
     }
 
-    failureMessage = L"Live Tile helper package registration completed, but the package still could not be found: " + lookupFailure;
+    failureMessage = FormatWide(g_ui.liveTileHelperPackageMissingAfterRegister.c_str(), lookupFailure.c_str());
     LogText(failureMessage);
     return false;
 }
@@ -917,8 +915,8 @@ static bool ForceRegisterWin8HelperManifestForBackgroundTask(
     DWORD manifestError = ERROR_SUCCESS;
     if (!EnsureAppxManifest(manifestPath, manifestCreated, manifestError))
     {
-        failureMessage = L"Failed to prepare AppxManifest.xml for background task registration: " +
-            manifestPath + L" (error=" + std::to_wstring(manifestError) + L").";
+        failureMessage = FormatWide(g_ui.liveTilePrepareManifestForBackgroundTaskFailed.c_str(),
+            manifestPath.c_str(), static_cast<unsigned long>(manifestError));
         return false;
     }
 
@@ -930,27 +928,27 @@ static bool ForceRegisterWin8HelperManifestForBackgroundTask(
     static bool refreshedThisProcess = false;
     if (!refreshedThisProcess)
     {
-        LogText(L"[i] Registering AppxManifest for experimental Win8/8.1 background task helper.");
+        LogText(g_ui.liveTileRegisteringBackgroundTaskManifest);
         std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
         if (!PS_Run(ps))
         {
             std::lock_guard<std::mutex> lk(g_psMutex);
-            failureMessage = L"Background task helper package registration failed";
+            failureMessage = g_ui.liveTileBackgroundTaskRegistrationFailed;
             if (!TrimCopy(g_psMsg).empty())
-                failureMessage += L": " + TrimCopy(g_psMsg);
+                failureMessage += FormatWide(g_ui.liveTilePowerShellFailureDetailsSuffix.c_str(), TrimCopy(g_psMsg).c_str());
             if (!TrimCopy(g_psOut).empty())
-                failureMessage += L" Output=" + TrimCopy(g_psOut);
+                failureMessage += FormatWide(g_ui.liveTilePowerShellOutputDetailsSuffix.c_str(), TrimCopy(g_psOut).c_str());
             return false;
         }
         refreshedThisProcess = true;
-        LogText(L"[i] Background task helper package registration completed; verifying package identity.");
+        LogText(g_ui.liveTileBackgroundTaskRegistrationVerifying);
     }
 
     std::wstring lookupFailure;
     if (FindRegisteredPackageFamilyNameForManifest(manifestInfo, packageFamilyName, packageFullName, lookupFailure))
         return true;
 
-    failureMessage = L"Background task helper package registration completed, but the package could not be found: " + lookupFailure;
+    failureMessage = FormatWide(g_ui.liveTileBackgroundTaskPackageMissingAfterRegister.c_str(), lookupFailure.c_str());
     return false;
 }
 
@@ -991,7 +989,7 @@ static bool TriggerPackagedLiveTileBackgroundTask(
         using namespace winrt::Windows::ApplicationModel::Background;
 
         BackgroundAccessStatus access = BackgroundExecutionManager::RequestAccessAsync().get();
-        Log(L"[i] BackgroundExecutionManager::RequestAccessAsync returned %s (%d).",
+        Log(g_ui.liveTileBackgroundAccessRequestReturned.c_str(),
             BackgroundAccessStatusText(access).c_str(), static_cast<int>(access));
 
         const std::wstring taskName = ManifestLiveTileBackgroundTaskName();
@@ -1002,7 +1000,7 @@ static bool TriggerPackagedLiveTileBackgroundTask(
             auto registration = item.Value();
             if (IEquals(std::wstring(registration.Name().c_str()), taskName))
             {
-                Log(L"[i] Removing previous background task registration: %s", taskName.c_str());
+                Log(g_ui.liveTileBackgroundTaskRemovingPrevious.c_str(), taskName.c_str());
                 registration.Unregister(true);
             }
         }
@@ -1013,47 +1011,46 @@ static bool TriggerPackagedLiveTileBackgroundTask(
         builder.TaskEntryPoint(winrt::hstring(entryPoint));
         builder.SetTrigger(trigger);
         auto registration = builder.Register();
-        Log(L"[i] Registered experimental Live Tile background task: %s -> %s",
+        Log(g_ui.liveTileBackgroundTaskRegistered.c_str(),
             std::wstring(registration.Name().c_str()).c_str(), entryPoint.c_str());
 
         ApplicationTriggerResult result = trigger.RequestAsync().get();
-        Log(L"[i] ApplicationTrigger.RequestAsync returned %s (%d).",
+        Log(g_ui.liveTileBackgroundTaskRequestReturned.c_str(),
             ApplicationTriggerResultName(result), static_cast<int>(result));
 
         if (result != ApplicationTriggerResult::Allowed && result != ApplicationTriggerResult::CurrentlyRunning)
         {
-            failureMessage = L"ApplicationTrigger.RequestAsync returned " +
-                std::wstring(ApplicationTriggerResultName(result)) + L".";
+            failureMessage = FormatWide(g_ui.liveTileBackgroundTaskRequestFailed.c_str(),
+                ApplicationTriggerResultName(result));
             return false;
         }
 
         if (WaitForPackagedLiveTileHelperSuccess(activationLogSizeBefore, 10000))
         {
-            LogText(L"[i] Packaged Live Tile background task reported success.");
+            LogText(g_ui.liveTileBackgroundTaskReportedSuccess);
             return true;
         }
 
-        failureMessage = L"ApplicationTrigger returned " + std::wstring(ApplicationTriggerResultName(result)) +
-            L", but the background task did not report Live Tile success.";
+        failureMessage = FormatWide(g_ui.liveTileBackgroundTaskNoSuccess.c_str(), ApplicationTriggerResultName(result));
         return false;
     }
     catch (const winrt::hresult_error& e)
     {
-        failureMessage = L"Experimental Live Tile background task path failed, hresult=0x" +
-            Hex64(static_cast<uint32_t>(e.code().value));
+        failureMessage = FormatWide(g_ui.liveTileBackgroundTaskFailedHresult.c_str(),
+            Hex64(static_cast<uint32_t>(e.code().value)).c_str());
         std::wstring msg = e.message().c_str();
         if (!msg.empty())
-            failureMessage += L", message=" + msg;
+            failureMessage += FormatWide(g_ui.liveTileErrorMessageSuffix.c_str(), msg.c_str());
         return false;
     }
     catch (const std::exception& ex)
     {
-        failureMessage = L"Experimental Live Tile background task path failed: " + ExceptionTextToWide(ex);
+        failureMessage = FormatWide(g_ui.liveTileBackgroundTaskFailedException.c_str(), ExceptionTextToWide(ex).c_str());
         return false;
     }
     catch (...)
     {
-        failureMessage = L"Experimental Live Tile background task path failed: " + UnknownExceptionText();
+        failureMessage = FormatWide(g_ui.liveTileBackgroundTaskFailedException.c_str(), UnknownExceptionText().c_str());
         return false;
     }
 }
@@ -1075,8 +1072,8 @@ static bool ActivatePackagedLiveTileUpdateOopServer(
     bool shouldUninit = SUCCEEDED(hrInit);
     if (FAILED(hrInit) && hrInit != RPC_E_CHANGED_MODE)
     {
-        failureMessage = L"RoInitialize failed before activating Live Tile OOP server, hresult=0x" +
-            Hex64(static_cast<uint32_t>(hrInit));
+        failureMessage = FormatWide(g_ui.liveTileOopRoInitializeFailed.c_str(),
+            Hex64(static_cast<uint32_t>(hrInit)).c_str());
         return false;
     }
 
@@ -1103,21 +1100,21 @@ static bool ActivatePackagedLiveTileUpdateOopServer(
 
     if (FAILED(hr))
     {
-        failureMessage = L"RoActivateInstance(" + classId + L") failed, hresult=0x" +
-            Hex64(static_cast<uint32_t>(hr));
+        failureMessage = FormatWide(g_ui.liveTileOopActivateFailed.c_str(),
+            classId.c_str(), Hex64(static_cast<uint32_t>(hr)).c_str());
         return false;
     }
 
-    Log(L"[i] Packaged Live Tile OOP server activated: %s (package=%s)",
+    Log(g_ui.liveTileOopActivated.c_str(),
         classId.c_str(), packageFullName.c_str());
 
     if (WaitForPackagedLiveTileHelperSuccess(activationLogSizeBefore, 5000))
     {
-        LogText(L"[i] Packaged Live Tile OOP server reported success.");
+        LogText(g_ui.liveTileOopReportedSuccess);
         return true;
     }
 
-    failureMessage = L"RoActivateInstance(" + classId + L") returned success, but the helper did not report Live Tile success.";
+    failureMessage = FormatWide(g_ui.liveTileOopNoSuccess.c_str(), classId.c_str());
     return false;
 }
 
@@ -1138,7 +1135,8 @@ static bool ActivateRegisteredPackageApplication(
     bool shouldUninit = SUCCEEDED(hrInit);
     if (FAILED(hrInit) && hrInit != RPC_E_CHANGED_MODE)
     {
-        failureMessage = L"CoInitializeEx failed, hresult=0x" + Hex64(static_cast<uint32_t>(hrInit));
+        failureMessage = FormatWide(g_ui.liveTileActivationCoInitializeFailed.c_str(),
+            Hex64(static_cast<uint32_t>(hrInit)).c_str());
         return false;
     }
 
@@ -1152,8 +1150,8 @@ static bool ActivateRegisteredPackageApplication(
     {
         if (shouldUninit)
             CoUninitialize();
-        failureMessage = L"CoCreateInstance(IApplicationActivationManager) failed, hresult=0x" +
-            Hex64(static_cast<uint32_t>(hr));
+        failureMessage = FormatWide(g_ui.liveTileActivationManagerCreateFailed.c_str(),
+            Hex64(static_cast<uint32_t>(hr)).c_str());
         return false;
     }
 
@@ -1165,12 +1163,12 @@ static bool ActivateRegisteredPackageApplication(
 
     if (FAILED(hr))
     {
-        failureMessage = L"ActivateApplication(" + appUserModelId + L") failed, hresult=0x" +
-            Hex64(static_cast<uint32_t>(hr));
+        failureMessage = FormatWide(g_ui.liveTileActivateApplicationFailed.c_str(),
+            appUserModelId.c_str(), Hex64(static_cast<uint32_t>(hr)).c_str());
         return false;
     }
 
-    Log(L"[i] Activated registered package application: %s (package=%s, pid=%lu)",
+    Log(g_ui.liveTileRegisteredPackageActivated.c_str(),
         appUserModelId.c_str(), packageFullName.c_str(), static_cast<unsigned long>(pid));
     return true;
 }
@@ -1191,7 +1189,8 @@ static bool ActivatePackagedLiveTileUpdateStub(
     bool shouldUninit = SUCCEEDED(hrInit);
     if (FAILED(hrInit) && hrInit != RPC_E_CHANGED_MODE)
     {
-        failureMessage = L"CoInitializeEx failed, hresult=0x" + Hex64(static_cast<uint32_t>(hrInit));
+        failureMessage = FormatWide(g_ui.liveTileActivationCoInitializeFailed.c_str(),
+            Hex64(static_cast<uint32_t>(hrInit)).c_str());
         return false;
     }
 
@@ -1205,8 +1204,8 @@ static bool ActivatePackagedLiveTileUpdateStub(
     {
         if (shouldUninit)
             CoUninitialize();
-        failureMessage = L"CoCreateInstance(IApplicationActivationManager) failed, hresult=0x" +
-            Hex64(static_cast<uint32_t>(hr));
+        failureMessage = FormatWide(g_ui.liveTileActivationManagerCreateFailed.c_str(),
+            Hex64(static_cast<uint32_t>(hr)).c_str());
         return false;
     }
 
@@ -1236,9 +1235,9 @@ static bool ActivatePackagedLiveTileUpdateStub(
         if (ReadTextFile(PendingLiveTileXmlPath(), pendingXmlText) && !pendingXmlText.empty())
         {
             if (WriteUtf8BomTextFile(packagePendingXml, pendingXmlText))
-                Log(L"[i] Mirrored pending Live Tile XML to package LocalState: %s", packagePendingXml.c_str());
+                Log(g_ui.liveTilePendingXmlMirrored.c_str(), packagePendingXml.c_str());
             else
-                Log(L"[!] Failed to mirror pending Live Tile XML to package LocalState: %s (error=%lu)", packagePendingXml.c_str(), GetLastError());
+                Log(g_ui.liveTilePendingXmlMirrorFailed.c_str(), packagePendingXml.c_str(), static_cast<unsigned long>(GetLastError()));
         }
     }
 
@@ -1258,19 +1257,19 @@ static bool ActivatePackagedLiveTileUpdateStub(
         // line to the activation trace after this request was made.
         if (WaitForPackagedLiveTileHelperSuccess(successWatches, 5000))
         {
-            Log(L"[i] ActivateApplication(%s) returned hresult=0x%s, but the packaged helper reported Live Tile success; treating as success.",
+            Log(g_ui.liveTileActivateReturnedSuccessWithHelperSuccess.c_str(),
                 appUserModelId.c_str(), Hex64(static_cast<uint32_t>(hr)).c_str());
             return true;
         }
 
-        failureMessage = L"ActivateApplication(" + appUserModelId + L") failed, hresult=0x" +
-            Hex64(static_cast<uint32_t>(hr));
+        failureMessage = FormatWide(g_ui.liveTileActivateApplicationFailed.c_str(),
+            appUserModelId.c_str(), Hex64(static_cast<uint32_t>(hr)).c_str());
         return false;
     }
 
     Log((Win8LiveTileBrokerAppEnabled() && ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10) ?
-        L"[i] Packaged WinRT Live Tile broker activated: %s (package=%s, pid=%lu)" :
-        L"[i] Packaged Live Tile activation helper activated: %s (package=%s, pid=%lu)",
+        g_ui.liveTilePackagedBrokerActivated.c_str() :
+        g_ui.liveTilePackagedHelperActivated.c_str(),
         appUserModelId.c_str(), packageFullName.c_str(), static_cast<unsigned long>(pid));
 
     if (WaitForPackagedLiveTileHelperSuccess(successWatches, 5000))
@@ -1310,40 +1309,48 @@ static bool Appx_Request_LiveTileUpdateViaPackagedActivation(
         DWORD err = GetLastError();
         if (err == ERROR_SUCCESS)
             err = ERROR_WRITE_FAULT;
-        failureMessage = L"Failed to write pending Live Tile XML: " + PendingLiveTileXmlPath() +
-            L" (error=" + std::to_wstring(err) + L").";
+        failureMessage = FormatWide(g_ui.liveTilePendingXmlWriteFailed.c_str(),
+            PendingLiveTileXmlPath().c_str(), static_cast<unsigned long>(err));
         LogText(failureMessage);
         return false;
     }
 
-    Log(L"[i] Pending Live Tile XML written for packaged Live Tile helper: %s", PendingLiveTileXmlPath().c_str());
+    Log(g_ui.liveTilePendingXmlWritten.c_str(), PendingLiveTileXmlPath().c_str());
 
     if (ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10)
     {
         if (Win8LiveTileBrokerAppEnabled())
-            LogText(L"[i] Win8/8.1 Live Tile helper mode: packaged WinRT broker app.");
+            LogText(g_ui.liveTileHelperModeBroker);
         else
-            LogText(L"[i] Win8/8.1 Live Tile helper mode: legacy activation stub.");
+            LogText(g_ui.liveTileHelperModeLegacy);
     }
 
     std::wstring backgroundFailure;
-    if (Win8LiveTileBackgroundTaskEnabled())
+    if (Win8LiveTileBackgroundTaskConfigured())
     {
-        std::wstring currentPackageFullName;
-        if (!CurrentProcessPackageFullName(currentPackageFullName))
+        std::wstring backgroundTaskDllPath;
+        if (!Win8LiveTileBackgroundTaskDllPresent(&backgroundTaskDllPath))
         {
-            backgroundFailure = L"ApplicationTrigger background task path skipped: current process has no package identity.";
-            LogText(L"[i] Experimental Win8/8.1 background task Live Tile helper enabled, but skipped because the normal host is unpackaged. ApplicationTrigger requires package identity.");
+            backgroundFailure = FormatWide(g_ui.win8LiveTileBackgroundTaskMissingDll.c_str(), backgroundTaskDllPath.c_str());
+            LogText(backgroundFailure);
         }
-        else if (TriggerPackagedLiveTileBackgroundTask(manifestInfo, backgroundFailure))
+        else
         {
-            return true;
-        }
+            std::wstring currentPackageFullName;
+            if (!CurrentProcessPackageFullName(currentPackageFullName))
+            {
+                backgroundFailure = g_ui.liveTileBackgroundTaskSkippedUnpackaged;
+                LogText(g_ui.liveTileBackgroundTaskSkippedUnpackaged);
+            }
+            else if (TriggerPackagedLiveTileBackgroundTask(manifestInfo, backgroundFailure))
+            {
+                return true;
+            }
 
-        if (!backgroundFailure.empty())
-        {
-            Log(L"[!] Experimental Win8/8.1 background task Live Tile helper unavailable; falling back: %s",
-                backgroundFailure.c_str());
+            if (!backgroundFailure.empty())
+            {
+                Log(g_ui.liveTileBackgroundTaskUnavailable.c_str(), backgroundFailure.c_str());
+            }
         }
     }
     else
@@ -1358,7 +1365,7 @@ static bool Appx_Request_LiveTileUpdateViaPackagedActivation(
         if (ActivatePackagedLiveTileUpdateOopServer(manifestInfo, oopFailure))
             return true;
 
-        Log(L"[!] Packaged Live Tile OOP server activation failed; falling back to packaged broker/helper activation: %s",
+        Log(g_ui.liveTileOopActivationFailedFallback.c_str(),
             oopFailure.c_str());
     }
     else
@@ -1370,9 +1377,8 @@ static bool Appx_Request_LiveTileUpdateViaPackagedActivation(
     if (ActivatePackagedLiveTileUpdateStub(manifestInfo, foregroundFailure))
         return true;
 
-    failureMessage = L"background task activation failed: " + backgroundFailure +
-        L"; OOP server activation failed: " + oopFailure +
-        L"; packaged broker/helper activation failed: " + foregroundFailure;
+    failureMessage = FormatWide(g_ui.liveTileActivationFailureSummary.c_str(),
+        backgroundFailure.c_str(), oopFailure.c_str(), foregroundFailure.c_str());
     return false;
 }
 
@@ -1487,7 +1493,7 @@ static bool Appx_Update_Or_Request_LiveTile(
     ManifestCompatibilityTarget target = ConfiguredManifestCompatibilityTarget();
     if (target == ManifestCompatibilityTarget::Windows81 || target == ManifestCompatibilityTarget::Windows8)
     {
-        LogText(L"[i] Current process is unpackaged; requesting Live Tile update through the Win8/8.1 packaged activation stub.");
+        LogText(g_ui.liveTileRequestThroughActivationStub);
         return Appx_Request_LiveTileUpdateViaPackagedActivation(exeDir, manifestInfo, liveTileAssets, failureMessage);
     }
 

@@ -7,7 +7,17 @@ set "VCVARS="
 if not defined DESKTOPSTUB_PRODUCT_NAME set "DESKTOPSTUB_PRODUCT_NAME=DesktopStub"
 if not defined DESKTOPSTUB_HOST_EXE_NAME set "DESKTOPSTUB_HOST_EXE_NAME=%DESKTOPSTUB_PRODUCT_NAME%.exe"
 if not defined DESKTOPSTUB_BROKER_EXE_NAME set "DESKTOPSTUB_BROKER_EXE_NAME=%DESKTOPSTUB_PRODUCT_NAME%LiveTileBroker.exe"
-if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX set "DESKTOPSTUB_RELEASE_TAG_PREFIX=%DESKTOPSTUB_PRODUCT_NAME%-v"
+if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX set "DESKTOPSTUB_RELEASE_TAG_PRODUCT=!DESKTOPSTUB_PRODUCT_NAME: =!"
+if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX if not defined DESKTOPSTUB_RELEASE_TAG_PRODUCT set "DESKTOPSTUB_RELEASE_TAG_PRODUCT=DesktopStub"
+if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX set "DESKTOPSTUB_RELEASE_TAG_PREFIX=!DESKTOPSTUB_RELEASE_TAG_PRODUCT!-v"
+call :ValidateBuildValue "DESKTOPSTUB_PRODUCT_NAME"
+if errorlevel 1 exit /b 1
+call :ValidateBuildValue "DESKTOPSTUB_HOST_EXE_NAME"
+if errorlevel 1 exit /b 1
+call :ValidateBuildValue "DESKTOPSTUB_BROKER_EXE_NAME"
+if errorlevel 1 exit /b 1
+call :ValidateBuildValue "DESKTOPSTUB_RELEASE_TAG_PREFIX"
+if errorlevel 1 exit /b 1
 call :StringLength "%DESKTOPSTUB_RELEASE_TAG_PREFIX%" DESKTOPSTUB_RELEASE_TAG_PREFIX_LEN
 for %%F in ("%DESKTOPSTUB_HOST_EXE_NAME%") do set "DESKTOPSTUB_HOST_BASE=%%~nF"
 for %%F in ("%DESKTOPSTUB_BROKER_EXE_NAME%") do set "DESKTOPSTUB_BROKER_BASE=%%~nF"
@@ -62,11 +72,23 @@ if errorlevel 1 (
     popd
     exit /b %STATUS%
 )
-set "VERSION_DEFINES=/DDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /DDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /DDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /DDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION% /DDESKTOPSTUB_RELEASE_TAG=\"%DESKTOPSTUB_RELEASE_TAG%\""
-set "RC_VERSION_DEFINES=/d DESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /d DESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /d DESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /d DESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
-set "RC_PRODUCT_DEFINES=/d DESKTOPSTUB_PRODUCT_NAME=\"%DESKTOPSTUB_PRODUCT_NAME%\" /d DESKTOPSTUB_COMPANY_NAME=\"%DESKTOPSTUB_PRODUCT_NAME%\""
-set "RC_HOST_NAME_DEFINES=%RC_PRODUCT_DEFINES% /d DESKTOPSTUB_INTERNAL_NAME=\"%DESKTOPSTUB_HOST_EXE_NAME%\" /d DESKTOPSTUB_ORIGINAL_FILENAME=\"%DESKTOPSTUB_HOST_EXE_NAME%\""
-set "RC_BROKER_NAME_DEFINES=%RC_PRODUCT_DEFINES% /d DESKTOPSTUB_INTERNAL_NAME=\"%DESKTOPSTUB_BROKER_EXE_NAME%\" /d DESKTOPSTUB_ORIGINAL_FILENAME=\"%DESKTOPSTUB_BROKER_EXE_NAME%\""
+set "VERSION_DEFINES=/DDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /DDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /DDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /DDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION% /D\"DESKTOPSTUB_RELEASE_TAG=\\\"%DESKTOPSTUB_RELEASE_TAG%\\\"\""
+set "RC_VERSION_DEFINES=/dDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /dDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /dDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /dDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
+set "RC_HOST_DEFINES_FILE=build\obj\DesktopStubHostResourceDefines.rc.inc"
+set "RC_BROKER_DEFINES_FILE=build\obj\DesktopStubBrokerResourceDefines.rc.inc"
+call :WriteRcDefines "%RC_HOST_DEFINES_FILE%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_HOST_EXE_NAME%" "%DESKTOPSTUB_HOST_EXE_NAME%"
+if errorlevel 1 (
+    set "STATUS=%ERRORLEVEL%"
+    popd
+    exit /b %STATUS%
+)
+call :WriteRcDefines "%RC_BROKER_DEFINES_FILE%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_BROKER_EXE_NAME%" "%DESKTOPSTUB_BROKER_EXE_NAME%"
+if errorlevel 1 (
+    set "STATUS=%ERRORLEVEL%"
+    popd
+    exit /b %STATUS%
+)
+set "RC_INCLUDE_DEFINES=/ibuild\obj"
 echo %DESKTOPSTUB_PRODUCT_NAME% version: %DESKTOPSTUB_RELEASE_TAG% (%DESKTOPSTUB_VERSION%)
 
 rem ---------------------------------------------------------------------------
@@ -97,7 +119,7 @@ set "BROKER_OBJ=build\obj\%DESKTOPSTUB_BROKER_BASE%.obj"
 set "BROKER_RES=build\obj\LiveTileBroker.res"
 
 echo Building packaged Live Tile broker...
-rc /nologo %RC_VERSION_DEFINES% %RC_BROKER_NAME_DEFINES% /fo"%BROKER_RES%" LiveTileBroker.rc
+rc /nologo %RC_VERSION_DEFINES% %RC_INCLUDE_DEFINES% /fo"%BROKER_RES%" LiveTileBroker.rc
 if errorlevel 1 (
     set "STATUS=%ERRORLEVEL%"
     popd
@@ -120,7 +142,7 @@ if exist "%BROKER_EXE%.manifest" (
 )
 
 echo Building main DesktopStub host...
-rc /nologo %RC_VERSION_DEFINES% %RC_HOST_NAME_DEFINES% /fo"%RES_FILE%" DesktopStub.rc
+rc /nologo %RC_VERSION_DEFINES% %RC_INCLUDE_DEFINES% /fo"%RES_FILE%" DesktopStub.rc
 if errorlevel 1 (
     set "STATUS=%ERRORLEVEL%"
     popd
@@ -144,6 +166,24 @@ if exist "%OUT_EXE%.manifest" (
 popd
 
 exit /b %STATUS%
+
+:ValidateBuildValue
+setlocal DisableDelayedExpansion
+set "BUILD_VALUE_NAME=%~1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$n=$env:BUILD_VALUE_NAME; $v=[Environment]::GetEnvironmentVariable($n, 'Process'); if ([string]::IsNullOrEmpty($v)) { Write-Host ('ERROR: {0} cannot be empty.' -f $n); [Environment]::Exit(1) }; $bad=$false; foreach ($c in @(37,38,124,60,62,94,33,34)) { if ($v.Contains([char]$c)) { $bad=$true } }; if ($bad) { Write-Host ('ERROR: {0} contains command-shell metacharacters or quotes that are not supported: {1}' -f $n, $v); [Environment]::Exit(1) }; if ($n -eq 'DESKTOPSTUB_RELEASE_TAG_PREFIX') { foreach ($c in @(9,10,13,32)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} cannot contain whitespace because it is embedded in compiler defines: {1}' -f $n, $v); [Environment]::Exit(1) } } }; [Environment]::Exit(0)"
+set "STATUS=%ERRORLEVEL%"
+endlocal & exit /b %STATUS%
+
+:WriteRcDefines
+> "%~1" echo #define DESKTOPSTUB_PRODUCT_NAME "%~2"
+if errorlevel 1 exit /b %ERRORLEVEL%
+>> "%~1" echo #define DESKTOPSTUB_COMPANY_NAME "%~3"
+if errorlevel 1 exit /b %ERRORLEVEL%
+>> "%~1" echo #define DESKTOPSTUB_INTERNAL_NAME "%~4"
+if errorlevel 1 exit /b %ERRORLEVEL%
+>> "%~1" echo #define DESKTOPSTUB_ORIGINAL_FILENAME "%~5"
+if errorlevel 1 exit /b %ERRORLEVEL%
+exit /b 0
 
 :ResolveDesktopStubVersion
 set "DESKTOPSTUB_VERSION_MAJOR="

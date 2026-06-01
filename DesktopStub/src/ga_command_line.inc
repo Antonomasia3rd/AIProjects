@@ -1726,39 +1726,7 @@ static void AppendCommandLineForwardedOptions(std::wstring& cmdline)
         cmdline += L" --ini " + QuoteCommandLineArg(g_commandLine.iniPath);
 }
 
-static void LogCommandLineSummary()
-{
-    if (g_commandLine.customIniPath)
-        Log(L"[i] Command-line INI path: %s", g_commandLine.iniPath.c_str());
-    if (g_commandLine.generateOnce)
-        Log(L"[i] Command-line mode: generate once, then exit.");
-    if (g_commandLine.exitRequested)
-        Log(L"[i] Command-line mode: exit running instance.");
-    if (g_commandLine.forceGenerateOnStartup && !g_commandLine.generateOnce)
-        Log(L"[i] Command-line mode: force startup generation.");
-    if (g_commandLine.regenerateManifest)
-        Log(L"[i] Command-line mode: regenerate AppxManifest.xml once.");
-    if (g_commandLine.noMonitor && !g_commandLine.generateOnce)
-        Log(L"[i] Command-line mode: monitoring disabled.");
-    if (g_commandLine.wallpaperSpecified)
-        Log(L"[i] Command-line wallpaper: %s", g_commandLine.wallpaperPath.c_str());
-    if (g_commandLine.appxActivationServer)
-    {
-        if (!g_commandLine.appxActivationServerName.empty())
-            Log(L"[i] AppX activation server argument ignored: %s", g_commandLine.appxActivationServerName.c_str());
-        else
-            Log(L"[i] AppX activation argument ignored.");
-    }
-    if (g_commandLine.launchedFromAppxStub)
-        Log(L"[i] Command-line launch source: AppX activation stub.");
-    if (g_commandLine.launchedFromModeSwitch)
-        Log(L"[i] Command-line launch source: Live Tile runtime mismatch relaunch.");
-    if (g_commandLine.waitForPid != 0)
-        Log(L"[i] Command-line parent wait pid: %lu", static_cast<unsigned long>(g_commandLine.waitForPid));
-
-    for (const auto& entry : g_commandLine.settings)
-        Log(L"[i] Command-line setting: [%s] %s = %s", entry.section.c_str(), entry.key.c_str(), entry.value.c_str());
-}
+static void LogCommandLineSummary();
 
 static bool CommandLineSettingChangesLiveTileMode(const CommandLineIniSetting& entry)
 {

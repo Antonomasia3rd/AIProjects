@@ -322,7 +322,7 @@ int main(int argc, char** argv)
         checks.push_back({"Build script ignores legacy target arguments", "BuildDesktopStub.cmd", buildScript, R"rx(Build policy:.*ignores every argument.*%DESKTOPSTUB_BROKER_EXE_NAME%.*if not "%~1"=="".*One or more arguments were supplied and ignored)rx", "BuildDesktopStub.cmd must accept but ignore old target arguments so every invocation builds the same outputs", false});
         checks.push_back({"Build script always builds host and broker", "BuildDesktopStub.cmd", buildScript, R"rx(echo Building packaged Live Tile broker\.\.\..*LiveTileBroker\.cpp.*echo Building main DesktopStub host\.\.\..*DesktopStub\.cpp)rx", "BuildDesktopStub.cmd must always build both DesktopStub.exe and DesktopStubLiveTileBroker.exe", false});
         checks.push_back({"Build script derives DesktopStub version from configurable CI release tags", "BuildDesktopStub.cmd", buildScript, R"rx(ResolveDesktopStubVersion.*DESKTOPSTUB_VERSION.*DESKTOPSTUB_RELEASE_TAG_PREFIX.*git tag --points-at HEAD --list "%DESKTOPSTUB_RELEASE_TAG_PREFIX%\*".*git tag --list "%DESKTOPSTUB_RELEASE_TAG_PREFIX%\*".*%DESKTOPSTUB_RELEASE_TAG_PREFIX%%NEXT_DESKTOPSTUB_TAG_NUMBER%)rx", "BuildDesktopStub.cmd must derive the default DesktopStub version from a configurable vN release tag family while allowing explicit overrides", false});
-        checks.push_back({"Build script embeds DesktopStub version resources", "BuildDesktopStub.cmd", buildScript, R"rx(RC_BROKER_NAME_DEFINES.*LiveTileBroker\.rc.*LiveTileBroker\.cpp.*RC_HOST_NAME_DEFINES.*DesktopStub\.rc.*DesktopStub\.cpp)rx", "DesktopStub executables must compile version resources while allowing output filenames to be parameterized", false});
+        checks.push_back({"Build script embeds DesktopStub version resources", "BuildDesktopStub.cmd", buildScript, R"rx(RC_INCLUDE_DEFINES.*LiveTileBroker\.rc.*LiveTileBroker\.cpp.*RC_INCLUDE_DEFINES.*DesktopStub\.rc.*DesktopStub\.cpp)rx", "DesktopStub executables must compile version resources while allowing output filenames to be parameterized", false});
         checks.push_back({"CI build checkout fetches release tags for DesktopStub versioning", "..\\.github\\workflows\\build-windows.yml", buildWorkflow, R"rx(build-windows:.*Check out repository.*actions/checkout@.*fetch-depth:\s*0)rx", "the CI build job must fetch tags so DesktopStub can embed the same DesktopStub-vN version that release publishing will use", false});
         checks.push_back({"DesktopStub version constants are shared by runtime and manifest", "version/runtime sources", desktopStub + "\n" + version + "\n" + manifest, R"rx(ga_version\.inc.*DesktopStubPackageVersion.*DESKTOPSTUB_VERSION_TEXT_W.*DesktopStubVersionDisplayText.*EffectiveManifestPackageVersion.*DesktopStubPackageVersion)rx", "runtime diagnostics and generated AppxManifest.xml must use the same build version constants", false});
         checks.push_back({"Win32 version resources carry the DesktopStub build version", "resource scripts", versionResource + "\n" + desktopStubResource + "\n" + brokerResource, R"rx(VERSIONINFO.*FILEVERSION DESKTOPSTUB_VERSION_COMMA.*PRODUCTVERSION DESKTOPSTUB_VERSION_COMMA.*FileVersion.*DESKTOPSTUB_VERSION_TEXT.*ProductVersion.*DESKTOPSTUB_VERSION_TEXT.*DesktopStub\.exe.*DesktopStubLiveTileBroker\.exe)rx", "DesktopStub.exe and DesktopStubLiveTileBroker.exe must have FileVersion/ProductVersion resources", false});
@@ -441,7 +441,7 @@ int main(int argc, char** argv)
         AssertContainsAll(
             "Runtime sidecar file names are product-scoped",
             "Live Tile runtime sources",
-            manifest + "\n" + liveTile + "\n" + brokerApp + "\n" + backgroundTask,
+            manifest + "\n" + liveTile + "\n" + brokerApp + "\n" + backgroundTask + "\n" + wallpaper,
             {
                 "ProductRuntimeBaseName()",
                 "ProductRuntimeFileName(const wchar_t* suffix)",
@@ -449,16 +449,28 @@ int main(int argc, char** argv)
                 "ProductRuntimeFilePath(L\".livetile.pending.xml\")",
                 "ProductRuntimeFilePath(L\".livetile.clear\")",
                 "ProductRuntimeFilePath(L\".appxactivation.log\")",
+                "GetLiveWallpaperSnapshotDirectory()",
+                "std::wstring productBase = g_exePath;",
                 "const std::wstring suffix = L\"LiveTileBroker\"",
                 "const std::wstring suffix = L\"LiveTileTask\""
             },
-            "Live Tile pending XML, clear flags, and activation traces must be derived from the product/runtime base name instead of hard-coded DesktopStub file names");
+            "Live Tile pending XML, clear flags, activation traces, and temp wallpaper snapshots must be derived from the product/runtime base name instead of hard-coded DesktopStub file names");
         AssertNotContainsAny(
             "Runtime sidecar files do not hard-code DesktopStub",
             "Live Tile runtime sources",
             liveTile + "\n" + brokerApp + "\n" + backgroundTask,
             {"DesktopStub.livetile", "DesktopStub.appxactivation"},
             "Live Tile runtime sidecar file names must not be hard-coded to DesktopStub");
+        AssertContainsAll(
+            "Generated manifest identity strips generic AppxStub suffix",
+            "src\\ga_manifest.inc",
+            manifest,
+            {
+                "constexpr const wchar_t* appxStubSuffix = L\"AppxStub\";",
+                "IEquals(base.substr(base.size() - appxStubSuffixLen), appxStubSuffix)",
+                "base.resize(base.size() - appxStubSuffixLen);"
+            },
+            "generated manifest identity detection must strip any copied project AppxStub suffix, not only DesktopStubAppxStub");
         AssertContainsAll(
             "Manifest defaults support product tokens",
             "manifest/default sources",
@@ -494,12 +506,52 @@ int main(int argc, char** argv)
                 "/fo\"%RES_FILE%\""
             },
             "BuildDesktopStub.cmd must quote cl/rc outputs so parameterized output names cannot break the command line");
+        AssertContainsAll(
+            "Build script validates configurable product names",
+            "BuildDesktopStub.cmd",
+            buildScript,
+            {
+                "call :ValidateBuildValue \"DESKTOPSTUB_PRODUCT_NAME\"",
+                "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command",
+                "foreach ($c in @(37,38,124,60,62,94,33,34))",
+                "DESKTOPSTUB_RELEASE_TAG_PRODUCT=!DESKTOPSTUB_PRODUCT_NAME: =!",
+                "cannot contain whitespace",
+                "contains command-shell metacharacters or quotes"
+            },
+            "BuildDesktopStub.cmd must reject command-shell metacharacters in configurable product/output names while allowing ordinary spaces");
+        AssertContainsAll(
+            "Build script writes resource string define includes",
+            "Build/resource scripts",
+            buildScript + "\n" + desktopStubResource + "\n" + brokerResource,
+            {
+                "/D\\\"DESKTOPSTUB_RELEASE_TAG=\\\\\\\"%DESKTOPSTUB_RELEASE_TAG%\\\\\\\"\\\"",
+                "call :WriteRcDefines \"%RC_HOST_DEFINES_FILE%\"",
+                "DesktopStubHostResourceDefines.rc.inc",
+                "DesktopStubBrokerResourceDefines.rc.inc",
+                "#define DESKTOPSTUB_PRODUCT_NAME",
+                "#include \"DesktopStubHostResourceDefines.rc.inc\"",
+                "#include \"DesktopStubBrokerResourceDefines.rc.inc\""
+            },
+            "BuildDesktopStub.cmd must pass resource string values through generated include files so product names with spaces do not break rc.exe parsing");
         AssertNotContainsAny(
             "Build script avoids RC defines with spaces",
             "BuildDesktopStub.cmd",
             buildScript,
             {"DESKTOPSTUB_FILE_DESCRIPTION=\\\"%DESKTOPSTUB_PRODUCT_NAME% tray", "DESKTOPSTUB_FILE_DESCRIPTION=\\\"%DESKTOPSTUB_PRODUCT_NAME% Live Tile"},
             "BuildDesktopStub.cmd must not pass resource string macros containing spaces through rc.exe /d arguments");
+        AssertContainsAll(
+            "Experimental background task manifest is gated by the built DLL",
+            "background task sources",
+            manifest + "\n" + liveTile + "\n" + backgroundTask,
+            {
+                "Win8LiveTileBackgroundTaskConfigured()",
+                "Win8LiveTileBackgroundTaskDllPresent",
+                "Win8LiveTileBackgroundTaskEnabled()",
+                "return Win8LiveTileBackgroundTaskConfigured() && Win8LiveTileBackgroundTaskDllPresent();",
+                "BackgroundTaskClassId()",
+                "return ProductManifestToken() + L\".LiveTileBackgroundTask\";"
+            },
+            "experimental background task manifest entries must only be advertised when the setting is enabled and the DLL exists, and its fallback class id must be product-scoped");
         AssertContainsAll(
             "--once survives Live Tile runtime relaunch",
             "src\\ga_app.inc",

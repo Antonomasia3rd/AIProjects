@@ -1,3 +1,5 @@
+#include "DesktopStubBrokerResourceDefines.rc.inc"
+
 #ifndef DESKTOPSTUB_FILE_DESCRIPTION
 #define DESKTOPSTUB_FILE_DESCRIPTION DESKTOPSTUB_PRODUCT_NAME " Live Tile broker"
 #endif
