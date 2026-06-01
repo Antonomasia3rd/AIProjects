@@ -379,11 +379,6 @@ static std::unique_ptr<Bitmap> TryLoadWicBitmapForRender(
     if (wicBytes == 0 || wicBytes > static_cast<size_t>(INT_MAX))
         return nullptr;
 
-    std::vector<BYTE> pixels(wicBytes);
-    hr = converter->CopyPixels(nullptr, wicStride, static_cast<UINT>(pixels.size()), pixels.data());
-    if (FAILED(hr))
-        return nullptr;
-
     std::unique_ptr<Bitmap> bitmap(new Bitmap(static_cast<INT>(dstW), static_cast<INT>(dstH), PixelFormat32bppARGB));
     if (!BitmapOk(bitmap.get(), L"create WIC decoded wallpaper bitmap"))
         return nullptr;
@@ -402,14 +397,36 @@ static std::unique_ptr<Bitmap> TryLoadWicBitmapForRender(
         {
             copied = false;
         }
+        else if (data.Stride > 0)
+        {
+            size_t copyBytes = static_cast<size_t>(absStride) * static_cast<size_t>(dstH);
+            if (copyBytes == 0 || copyBytes > static_cast<size_t>(UINT_MAX))
+            {
+                copied = false;
+            }
+            else
+            {
+                hr = converter->CopyPixels(nullptr, static_cast<UINT>(absStride), static_cast<UINT>(copyBytes), base);
+                copied = SUCCEEDED(hr);
+            }
+        }
         else
         {
             for (UINT y = 0; y < dstH; ++y)
             {
-                BYTE* dstRow = data.Stride >= 0
-                    ? base + static_cast<size_t>(y) * static_cast<size_t>(data.Stride)
-                    : base + static_cast<size_t>(dstH - 1u - y) * static_cast<size_t>(absStride);
-                memcpy(dstRow, pixels.data() + static_cast<size_t>(y) * static_cast<size_t>(wicStride), wicStride);
+                WICRect rowRect{};
+                rowRect.X = 0;
+                rowRect.Y = static_cast<INT>(y);
+                rowRect.Width = static_cast<INT>(dstW);
+                rowRect.Height = 1;
+
+                BYTE* dstRow = base + static_cast<size_t>(dstH - 1u - y) * static_cast<size_t>(absStride);
+                hr = converter->CopyPixels(&rowRect, static_cast<UINT>(absStride), static_cast<UINT>(absStride), dstRow);
+                if (FAILED(hr))
+                {
+                    copied = false;
+                    break;
+                }
             }
         }
     }

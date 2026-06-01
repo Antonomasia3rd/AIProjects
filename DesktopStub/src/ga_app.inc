@@ -1545,7 +1545,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.generatedAssetPrecacheSummary.c_str(),
         StateEnabled(GeneratedAssetPrecacheEnabled()),
         GeneratedAssetPrecacheMaxFiles());
-    if (IniReadI(L"Settings", L"GeneratedAssetPrecache", 1) != 0 && !GeneratedAssetPrecacheEnabled())
+    if (IniReadI(L"Settings", L"GeneratedAssetPrecache", 0) != 0 && !GeneratedAssetPrecacheEnabled())
         LogText(g_ui.generatedAssetPrecacheInactive);
     std::wstring tileTextSummary = TileTextPrimaryText();
     std::wstring tileTextSecondarySummary = TileTextSecondaryText();
@@ -1562,7 +1562,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     int liveWallpaperCaptureRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
     std::wstring liveWallpaperCaptureRefreshText = LiveWallpaperRefreshDisplayText(liveWallpaperCaptureRefreshMs);
     Log(g_ui.liveWallpaperCaptureSummary.c_str(),
-        StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0),
+        StateEnabled(IniReadI(L"Settings", L"LiveWallpaperCapture", 0) != 0),
         IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
         liveWallpaperCaptureRefreshText.c_str());
     int liveWallpaperCaptureStartupRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", 1000, 0, 3600000);

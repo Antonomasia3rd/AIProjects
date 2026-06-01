@@ -258,13 +258,13 @@ static bool GeneratedAssetCacheEnabled()
 
 static int GeneratedAssetCacheMaxEntries()
 {
-    return IniReadClampedI(L"Settings", L"GeneratedAssetCacheMaxEntries", 64, 0, 4096);
+    return IniReadClampedI(L"Settings", L"GeneratedAssetCacheMaxEntries", 32, 0, 4096);
 }
 
 static bool GeneratedAssetPrecacheEnabled()
 {
     return GeneratedAssetCacheEnabled() &&
-        IniReadI(L"Settings", L"GeneratedAssetPrecache", 1) != 0 &&
+        IniReadI(L"Settings", L"GeneratedAssetPrecache", 0) != 0 &&
         GeneratedAssetCacheMaxEntries() > 0;
 }
 
@@ -2757,6 +2757,7 @@ void PollThread()
     bool emptyWallpaperAlreadyReported = false;
     bool pendingPollGeneration = false;
     unsigned long long pendingPollGenerationId = 0;
+    auto lastIdleTrim = steady_clock::now();
     std::wstring pendingWallpaper;
     FitMode pendingFit = FitMode::Fill;
     int pendingDpiScale = 100;
@@ -2790,6 +2791,24 @@ void PollThread()
                 pendingPollGeneration = false;
                 pendingPollGenerationId = 0;
                 pendingWallpaper.clear();
+            }
+        }
+
+        if (!pendingPollGeneration && !GenerationWorkPending())
+        {
+            int idleTrimIntervalMs = IniReadClampedI(L"Settings", L"IdleTrimIntervalMs", 60000, 0, 3600000);
+            if (idleTrimIntervalMs > 0)
+            {
+                auto now = steady_clock::now();
+                if (duration_cast<milliseconds>(now - lastIdleTrim).count() >= idleTrimIntervalMs)
+                {
+                    TrimIdleWorkingSetIfConfigured();
+                    lastIdleTrim = steady_clock::now();
+                }
+            }
+            else
+            {
+                lastIdleTrim = steady_clock::now();
             }
         }
 
