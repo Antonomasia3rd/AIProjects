@@ -122,6 +122,7 @@ enum {
     ID_ADV_LOG_BUFFER_LINES,
     ID_ADV_LOG_APPEND_LOCK_WAIT_MS,
     ID_ADV_TRIM_WORKING_SET_ON_IDLE,
+    ID_ADV_IDLE_TRIM_INTERVAL_MS,
     ID_ADV_COMPACT_CRT_HEAP_ON_IDLE,
     ID_ADV_KEEP_GDIPLUS_LOADED,
     ID_ADV_POWER_SHELL_EXE,
@@ -719,7 +720,7 @@ void Menu(HWND h)
 
     HMENU liveWallpaperMenu = beginNestedMenu(wallpaperMenu, L"CreatePopupMenu(Live Wallpaper Detection)");
     {
-        bool liveWallpaperCapture = IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0;
+        bool liveWallpaperCapture = IniReadI(L"Settings", L"LiveWallpaperCapture", 0) != 0;
         bool liveWallpaperCaptureScreenFallback = IniReadI(L"Settings", L"LiveWallpaperCaptureScreenFallback", 0) != 0;
         int liveWallpaperCaptureDelayMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000);
         int liveWallpaperCaptureRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
@@ -923,7 +924,7 @@ void Menu(HWND h)
     HMENU cachingMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Caching)");
     bool cacheEnabled = GeneratedAssetCacheEnabled();
     bool cacheCanStore = cacheEnabled && GeneratedAssetCacheMaxEntries() > 0;
-    bool precacheConfigured = IniReadI(L"Settings", L"GeneratedAssetPrecache", 1) != 0;
+    bool precacheConfigured = IniReadI(L"Settings", L"GeneratedAssetPrecache", 0) != 0;
     addTo(cachingMenu, ID_GENERATED_ASSET_CACHE, g_ui.generatedAssetCache.c_str(), cacheEnabled);
     addTo(cachingMenu, ID_GENERATED_ASSET_PRECACHE, g_ui.generatedAssetPrecache.c_str(), precacheConfigured, cacheCanStore);
     std::wstring cacheMaxEntriesLine = FormatWide(g_ui.generatedAssetCacheMaxEntriesLabel.c_str(), GeneratedAssetCacheMaxEntries());
@@ -1080,7 +1081,8 @@ void Menu(HWND h)
     std::wstring comRegistrationTimeoutLine = FormatWide(g_ui.comRegistrationTimeoutMsLabel.c_str(), comRegistrationTimeoutText.c_str());
     std::wstring comRegistrationCancelWaitLine = FormatWide(g_ui.comRegistrationCancelWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"ComRegistrationCancelWaitMs", 5000, 0, 60000));
     std::wstring trayHideDelayLine = FormatWide(g_ui.trayIconHiddenDelayMsLabel.c_str(), IniReadClampedI(L"Settings", L"TrayIconHiddenDelayMs", 750, 0, 10000));
-    std::wstring logBufferLine = FormatWide(g_ui.logBufferLinesLabel.c_str(), IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000));
+    std::wstring logBufferLine = FormatWide(g_ui.logBufferLinesLabel.c_str(), IniReadClampedI(L"Settings", L"LogBufferLines", 128, 1, 100000));
+    std::wstring idleTrimIntervalLine = FormatWide(g_ui.idleTrimIntervalMsLabel.c_str(), LiveWallpaperOffDisplayText(IniReadClampedI(L"Settings", L"IdleTrimIntervalMs", 60000, 0, 3600000)).c_str());
     std::wstring logAppendLockWaitLine = FormatWide(g_ui.logAppendLockWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000));
     std::wstring powerShellExeLine = FormatWide(g_ui.powerShellExeLabel.c_str(), ReadPowerShellExe().c_str());
     std::wstring powerShellPollLine = FormatWide(g_ui.powerShellPollMsLabel.c_str(), IniReadClampedI(L"Settings", L"PowerShellPollMs", 50, 10, 1000));
@@ -1106,6 +1108,7 @@ void Menu(HWND h)
     addTo(advancedShutdownMenu, ID_ADV_SHUTDOWN_REPEAT_MS, shutdownRepeatLine);
     addTo(advancedShutdownMenu, ID_ADV_TRAY_ICON_HIDDEN_DELAY_MS, trayHideDelayLine);
     addTo(advancedShutdownMenu, ID_ADV_TRIM_WORKING_SET_ON_IDLE, g_ui.trimWorkingSetOnIdle.c_str(), g_trimWorkingSetOnIdle);
+    addTo(advancedShutdownMenu, ID_ADV_IDLE_TRIM_INTERVAL_MS, idleTrimIntervalLine, false, g_trimWorkingSetOnIdle);
     addTo(advancedShutdownMenu, ID_ADV_COMPACT_CRT_HEAP_ON_IDLE, g_ui.compactCrtHeapOnIdle.c_str(), g_compactCrtHeapOnIdle);
     endNestedMenu(advancedMenu, advancedShutdownMenu, g_ui.advancedShutdownTitle);
 
@@ -1647,14 +1650,14 @@ void Menu(HWND h)
         if (!GeneratedAssetCacheEnabled() || GeneratedAssetCacheMaxEntries() <= 0)
             break;
 
-        bool value = IniReadI(L"Settings", L"GeneratedAssetPrecache", 1) == 0;
+        bool value = IniReadI(L"Settings", L"GeneratedAssetPrecache", 0) == 0;
         IniWrite(L"Settings", L"GeneratedAssetPrecache", value ? L"1" : L"0");
         Log(g_ui.generatedAssetPrecacheSummary.c_str(), StateEnabled(value), GeneratedAssetPrecacheMaxFiles());
     }
     break;
 
     case ID_GENERATED_ASSET_CACHE_MAX_ENTRIES:
-        CycleSettingIntPreset(L"GeneratedAssetCacheMaxEntries", 64, 0, 4096, { 0, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096 });
+        CycleSettingIntPreset(L"GeneratedAssetCacheMaxEntries", 32, 0, 4096, { 0, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096 });
         break;
 
     case ID_GENERATED_ASSET_PRECACHE_MAX_FILES:
@@ -1723,7 +1726,7 @@ void Menu(HWND h)
         break;
 
     case ID_ADV_LOG_BUFFER_LINES:
-        CycleSettingIntPreset(L"LogBufferLines", 1024, 1, 100000, { 1, 100, 500, 1024, 2500, 5000, 10000, 50000, 100000 });
+        CycleSettingIntPreset(L"LogBufferLines", 128, 1, 100000, { 1, 100, 128, 500, 1024, 2500, 5000, 10000, 50000, 100000 });
         break;
 
     case ID_ADV_LOG_APPEND_LOCK_WAIT_MS:
@@ -1736,6 +1739,16 @@ void Menu(HWND h)
         IniWrite(L"Settings", L"TrimWorkingSetOnIdle", g_trimWorkingSetOnIdle ? L"1" : L"0");
         Log(g_ui.trimWorkingSetOnIdleSummary.c_str(), StateEnabled(g_trimWorkingSetOnIdle));
         if (g_trimWorkingSetOnIdle)
+            TrimIdleWorkingSetIfConfigured();
+    }
+    break;
+
+    case ID_ADV_IDLE_TRIM_INTERVAL_MS:
+    {
+        CycleSettingIntPreset(L"IdleTrimIntervalMs", 60000, 0, 3600000, { 0, 30000, 60000, 120000, 300000, 600000, 1800000, 3600000 });
+        int intervalMs = IniReadClampedI(L"Settings", L"IdleTrimIntervalMs", 60000, 0, 3600000);
+        Log(g_ui.idleTrimIntervalMsSummary.c_str(), LiveWallpaperOffDisplayText(intervalMs).c_str());
+        if (intervalMs > 0)
             TrimIdleWorkingSetIfConfigured();
     }
     break;
@@ -1934,7 +1947,7 @@ void Menu(HWND h)
 
     case ID_LIVE_WALLPAPER_CAPTURE:
     {
-        bool value = IniReadI(L"Settings", L"LiveWallpaperCapture", 1) == 0;
+        bool value = IniReadI(L"Settings", L"LiveWallpaperCapture", 0) == 0;
         IniWrite(L"Settings", L"LiveWallpaperCapture", value ? L"1" : L"0");
         Log(g_ui.liveWallpaperCaptureSummary.c_str(),
             StateEnabled(value),

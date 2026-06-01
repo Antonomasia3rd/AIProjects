@@ -581,7 +581,7 @@ static void InitializeComRegistrationHelperRuntime()
 
     g_logging = IniReadI(L"Settings", L"Logging", 1) != 0;
     SetLogPathCopy(EffectiveConfiguredLogPath());
-    g_logBufferLines = IniReadClampedI(L"Settings", L"LogBufferLines", 1024, 1, 100000);
+    g_logBufferLines = IniReadClampedI(L"Settings", L"LogBufferLines", 128, 1, 100000);
     g_logAppendLockWaitMs = IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000);
     g_iniCacheRefreshMs = IniReadClampedI(L"Settings", L"IniCacheRefreshMs", 250, 0, 60000);
     FlushStartupWarnings();

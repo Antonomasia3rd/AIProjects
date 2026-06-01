@@ -818,6 +818,11 @@ static bool ParseCommandLineOptions()
             AddCommandLineBoolSetting(L"Settings", L"TrimWorkingSetOnIdle", true);
             AddCommandLineBoolSetting(L"Settings", L"CompactCrtHeapOnIdle", true);
             AddCommandLineBoolSetting(L"Settings", L"KeepGdiPlusLoaded", false);
+            AddCommandLineIntSetting(L"Settings", L"IdleTrimIntervalMs", 60000);
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCapture", false);
+            AddCommandLineBoolSetting(L"Settings", L"GeneratedAssetPrecache", false);
+            AddCommandLineIntSetting(L"Settings", L"GeneratedAssetCacheMaxEntries", 32);
+            AddCommandLineIntSetting(L"Settings", L"LogBufferLines", 128);
             continue;
         }
         if (IEquals(arg, L"--no-low-idle-memory"))
@@ -825,8 +830,30 @@ static bool ParseCommandLineOptions()
             AddCommandLineBoolSetting(L"Settings", L"TrimWorkingSetOnIdle", false);
             AddCommandLineBoolSetting(L"Settings", L"CompactCrtHeapOnIdle", false);
             AddCommandLineBoolSetting(L"Settings", L"KeepGdiPlusLoaded", true);
+            AddCommandLineIntSetting(L"Settings", L"IdleTrimIntervalMs", 0);
+            AddCommandLineBoolSetting(L"Settings", L"LiveWallpaperCapture", true);
+            AddCommandLineBoolSetting(L"Settings", L"GeneratedAssetPrecache", true);
+            AddCommandLineIntSetting(L"Settings", L"GeneratedAssetCacheMaxEntries", 64);
+            AddCommandLineIntSetting(L"Settings", L"LogBufferLines", 1024);
             continue;
         }
+
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--idle-trim-interval", value, error, matched))
+            return fail(error);
+        if (!matched && !CommandLineTryGetOptionValue(argc, argv, i, L"--idle-working-set-trim-interval", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            int parsed = 0;
+            std::wstring trimValue = ToLowerCopy(TrimCopy(value));
+            if (trimValue == L"none" || trimValue == L"off")
+                parsed = 0;
+            else if (!ParseCommandLineClampedInt(value, L"--idle-trim-interval", 0, 3600000, parsed, error))
+                return fail(error);
+            AddCommandLineIntSetting(L"Settings", L"IdleTrimIntervalMs", parsed);
+            continue;
+        }
+
         if (IEquals(arg, L"--compact-crt-heap-on-idle"))
         {
             AddCommandLineBoolSetting(L"Settings", L"CompactCrtHeapOnIdle", true);
@@ -1499,6 +1526,7 @@ static std::wstring CommandLineUsageText()
         L"                                      Keep/release GDI+ after image work for speed vs lower private bytes.\r\n"
         L"  --low-idle-memory | --no-low-idle-memory\r\n"
         L"                                      Convenience profile for lower idle memory vs warmer image runtime.\r\n"
+        L"  --idle-trim-interval <ms|off>      Periodically trim idle working set; off=0.\r\n"
         L"  --powershell | --com-registration    Set and save registration command mode.\r\n"
         L"  --com-helper | --no-com-helper      Enable/disable COM isolation helper.\r\n"
         L"  --live-tile | --no-live-tile         Set and save Live Tile update mode.\r\n"

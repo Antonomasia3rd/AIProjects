@@ -298,6 +298,7 @@ void LoadUiStrings()
     g_ui.generateNow = IniReadS(L"Strings", L"GenerateNow", L"Generate now");
     g_ui.trimWorkingSetOnIdle = IniReadS(L"Strings", L"TrimWorkingSetOnIdle", L"Trim working set when idle");
     g_ui.trimWorkingSetOperation = IniReadS(L"Strings", L"TrimWorkingSetOperation", L"SetProcessWorkingSetSize(trim idle working set)");
+    g_ui.idleTrimIntervalMsLabel = IniReadS(L"Strings", L"IdleTrimIntervalMsLabel", L"Idle trim interval: %s");
     g_ui.compactCrtHeapOnIdle = IniReadS(L"Strings", L"CompactCrtHeapOnIdle", L"Compact CRT heap when idle");
     g_ui.keepGdiPlusLoaded = IniReadS(L"Strings", L"KeepGdiPlusLoaded", L"Keep GDI+ loaded after image work");
 
@@ -516,6 +517,7 @@ void LoadUiStrings()
     g_ui.consoleSummary = IniReadS(L"Strings", L"ConsoleSummary", L"[i] Console %s.");
     g_ui.loggingSummary = IniReadS(L"Strings", L"LoggingSummary", L"[i] Logging %s.");
     g_ui.trimWorkingSetOnIdleSummary = IniReadS(L"Strings", L"TrimWorkingSetOnIdleSummary", L"[i] Idle working-set trimming: %s");
+    g_ui.idleTrimIntervalMsSummary = IniReadS(L"Strings", L"IdleTrimIntervalMsSummary", L"[i] Idle trim interval: %s");
     g_ui.compactCrtHeapOnIdleSummary = IniReadS(L"Strings", L"CompactCrtHeapOnIdleSummary", L"[i] Idle CRT heap compaction: %s");
     g_ui.keepGdiPlusLoadedSummary = IniReadS(L"Strings", L"KeepGdiPlusLoadedSummary", L"[i] Keep GDI+ loaded after image work: %s");
     g_ui.generateOnStartupSummary = IniReadS(L"Strings", L"GenerateOnStartupSummary", L"[i] Generate on Startup: %s");
@@ -768,6 +770,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.consoleSummary, L"ConsoleSummary", { L"%s" });
     RequireFormat(g_ui.loggingSummary, L"LoggingSummary", { L"%s" });
     RequireFormat(g_ui.trimWorkingSetOnIdleSummary, L"TrimWorkingSetOnIdleSummary", { L"%s" });
+    RequireFormat(g_ui.idleTrimIntervalMsSummary, L"IdleTrimIntervalMsSummary", { L"%s" });
     RequireFormat(g_ui.compactCrtHeapOnIdleSummary, L"CompactCrtHeapOnIdleSummary", { L"%s" });
     RequireFormat(g_ui.keepGdiPlusLoadedSummary, L"KeepGdiPlusLoadedSummary", { L"%s" });
     RequireFormat(g_ui.generateOnStartupSummary, L"GenerateOnStartupSummary", { L"%s" });
@@ -778,6 +781,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.generateScaleAutoSummary, L"GenerateScaleAutoSummary", { L"%s" });
     RequireFormat(g_ui.generateScaleSummary, L"GenerateScaleSummary", { L"%d", L"%s" });
     RequireFormat(g_ui.currentDpiScaleLabel, L"CurrentDpiScaleLabel", { L"%d", L"%d" });
+    RequireFormat(g_ui.idleTrimIntervalMsLabel, L"IdleTrimIntervalMsLabel", { L"%s" });
     RequireFormat(g_ui.showMenuAsDropdownSummary, L"ShowMenuAsDropdownSummary", { L"%s" });
     RequireFormat(g_ui.tileTextCurrent, L"TileTextCurrent", { L"%s" });
     RequireFormat(g_ui.tileTextSecondaryCurrent, L"TileTextSecondaryCurrent", { L"%s" });

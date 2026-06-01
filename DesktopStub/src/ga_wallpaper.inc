@@ -181,7 +181,7 @@ static bool IsUsableWallpaperPath(const std::wstring& path)
 
 static bool LiveWallpaperCaptureEnabled()
 {
-    return IniReadI(L"Settings", L"LiveWallpaperCapture", 1) != 0;
+    return IniReadI(L"Settings", L"LiveWallpaperCapture", 0) != 0;
 }
 
 
@@ -361,65 +361,49 @@ static std::wstring GetLiveWallpaperSnapshotPath(LiveWallpaperProvider provider,
     return dir + L"\\" + fileName;
 }
 
-static bool ReadBitmapPixels32(HBITMAP hBitmap, int width, int height, std::vector<BYTE>& pixels, BITMAPINFOHEADER& bih)
+static bool SurfaceLooksBlankOrBlack(HDC dc, int width, int height)
 {
-    pixels.clear();
-    ZeroMemory(&bih, sizeof(bih));
-    if (!hBitmap || width <= 0 || height <= 0)
-        return false;
-
-    bih.biSize = sizeof(bih);
-    bih.biWidth = width;
-    bih.biHeight = height;
-    bih.biPlanes = 1;
-    bih.biBitCount = 32;
-    bih.biCompression = BI_RGB;
-
-    size_t imageSize = static_cast<size_t>(width) * static_cast<size_t>(height) * 4u;
-    if (imageSize == 0 || imageSize > 512u * 1024u * 1024u)
-        return false;
-
-    pixels.resize(imageSize);
-
-    HDC hdc = GetDC(nullptr);
-    if (!hdc)
-        return false;
-
-    int scanLines = GetDIBits(hdc, hBitmap, 0, static_cast<UINT>(height), pixels.data(), reinterpret_cast<BITMAPINFO*>(&bih), DIB_RGB_COLORS);
-    ReleaseDC(nullptr, hdc);
-    if (scanLines != height)
-    {
-        pixels.clear();
-        return false;
-    }
-
-    return true;
-}
-
-static bool PixelsLookBlankOrBlack(const std::vector<BYTE>& pixels)
-{
-    if (pixels.size() < 4)
+    if (!dc || width <= 0 || height <= 0)
         return true;
 
-    const size_t pixelCount = pixels.size() / 4;
-    const size_t step = std::max<size_t>(1, pixelCount / 32768);
+    const unsigned long long pixelCount = static_cast<unsigned long long>(width) * static_cast<unsigned long long>(height);
+    if (pixelCount == 0)
+        return true;
+
+    const unsigned long long step = std::max<unsigned long long>(1, pixelCount / 32768ull);
     size_t samples = 0;
     size_t nearBlack = 0;
     size_t sameAsFirst = 0;
-
-    BYTE firstB = pixels[0];
-    BYTE firstG = pixels[1];
-    BYTE firstR = pixels[2];
+    bool haveFirst = false;
+    BYTE firstR = 0;
+    BYTE firstG = 0;
+    BYTE firstB = 0;
 
     unsigned long long sum = 0;
     unsigned long long sumSq = 0;
 
-    for (size_t i = 0; i < pixelCount; i += step)
+    for (unsigned long long i = 0; i < pixelCount; i += step)
     {
-        size_t p = i * 4;
-        BYTE b = pixels[p + 0];
-        BYTE g = pixels[p + 1];
-        BYTE r = pixels[p + 2];
+        int x = static_cast<int>(i % static_cast<unsigned long long>(width));
+        int y = static_cast<int>(i / static_cast<unsigned long long>(width));
+        if (y >= height)
+            y = height - 1;
+
+        COLORREF color = GetPixel(dc, x, y);
+        if (color == CLR_INVALID)
+            continue;
+
+        BYTE r = GetRValue(color);
+        BYTE g = GetGValue(color);
+        BYTE b = GetBValue(color);
+        if (!haveFirst)
+        {
+            firstR = r;
+            firstG = g;
+            firstB = b;
+            haveFirst = true;
+        }
+
         unsigned int brightness = (static_cast<unsigned int>(r) + static_cast<unsigned int>(g) + static_cast<unsigned int>(b)) / 3u;
 
         if (r <= 4 && g <= 4 && b <= 4)
@@ -435,9 +419,6 @@ static bool PixelsLookBlankOrBlack(const std::vector<BYTE>& pixels)
     if (samples == 0)
         return true;
 
-    // Reject fully black/blank PrintWindow frames from GPU/WebView/DirectX
-    // surfaces. Also reject almost-solid frames, because they are
-    // usually a helper/blank surface rather than the animated wallpaper.
     if (nearBlack * 1000 >= samples * 995)
         return true;
     if (sameAsFirst * 1000 >= samples * 998)
@@ -473,26 +454,102 @@ static bool LiveWallpaperCaptureRectLooksLargeEnough(int width, int height, int&
     return width >= minWidth && height >= minHeight;
 }
 
-static bool SaveBitmapPixelsAsBmpFile(const std::vector<BYTE>& pixels, const BITMAPINFOHEADER& bih, const std::wstring& path)
+static bool WriteFileExact(HANDLE file, const void* data, DWORD bytes)
 {
-    if (pixels.empty() || bih.biWidth <= 0 || bih.biHeight <= 0 || path.empty())
+    const BYTE* cursor = static_cast<const BYTE*>(data);
+    DWORD remaining = bytes;
+    while (remaining > 0)
+    {
+        DWORD written = 0;
+        if (!WriteFile(file, cursor, remaining, &written, nullptr) || written == 0)
+            return false;
+        cursor += written;
+        remaining -= written;
+    }
+    return true;
+}
+
+static bool SaveHBitmapAsBmpFile(HBITMAP hBitmap, int width, int height, const std::wstring& path)
+{
+    if (!hBitmap || width <= 0 || height <= 0 || path.empty())
         return false;
+
+    const size_t stride = static_cast<size_t>(width) * 4u;
+    if (stride / 4u != static_cast<size_t>(width))
+        return false;
+    if (static_cast<size_t>(height) > static_cast<size_t>(-1) / stride)
+        return false;
+
+    size_t imageSize = stride * static_cast<size_t>(height);
+    if (imageSize == 0 || imageSize > 512u * 1024u * 1024u || imageSize > static_cast<size_t>(DWORD_MAX))
+        return false;
+
+    BITMAPINFOHEADER bih{};
+    bih.biSize = sizeof(bih);
+    bih.biWidth = width;
+    bih.biHeight = height;
+    bih.biPlanes = 1;
+    bih.biBitCount = 32;
+    bih.biCompression = BI_RGB;
+    bih.biSizeImage = static_cast<DWORD>(imageSize);
 
     HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
         return false;
 
     BITMAPFILEHEADER bfh{};
-    DWORD pixelBytes = static_cast<DWORD>(pixels.size());
     bfh.bfType = 0x4D42;
     bfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
-    bfh.bfSize = bfh.bfOffBits + pixelBytes;
+    bfh.bfSize = bfh.bfOffBits + static_cast<DWORD>(imageSize);
 
-    DWORD written = 0;
-    bool ok = WriteFile(file, &bfh, sizeof(bfh), &written, nullptr) != FALSE && written == sizeof(bfh);
-    ok = ok && (WriteFile(file, &bih, sizeof(bih), &written, nullptr) != FALSE && written == sizeof(bih));
-    ok = ok && (WriteFile(file, pixels.data(), pixelBytes, &written, nullptr) != FALSE && written == pixelBytes);
+    bool ok = WriteFileExact(file, &bfh, static_cast<DWORD>(sizeof(bfh))) &&
+        WriteFileExact(file, &bih, static_cast<DWORD>(sizeof(bih)));
+
+    HDC hdc = nullptr;
+    if (ok)
+    {
+        hdc = GetDC(nullptr);
+        if (!hdc)
+            ok = false;
+    }
+
+    const size_t maxChunkBytes = 4u * 1024u * 1024u;
+    int rowsPerChunk = 1;
+    if (stride > 0)
+        rowsPerChunk = static_cast<int>(std::max<size_t>(1, std::min<size_t>(static_cast<size_t>(height), maxChunkBytes / stride)));
+
+    std::vector<BYTE> chunk;
+    if (ok)
+    {
+        try
+        {
+            chunk.resize(stride * static_cast<size_t>(rowsPerChunk));
+        }
+        catch (...)
+        {
+            ok = false;
+        }
+    }
+
+    for (int start = 0; ok && start < height; start += rowsPerChunk)
+    {
+        int rows = std::min(rowsPerChunk, height - start);
+        size_t chunkBytes = stride * static_cast<size_t>(rows);
+        int scanLines = GetDIBits(hdc, hBitmap, static_cast<UINT>(start), static_cast<UINT>(rows),
+            chunk.data(), reinterpret_cast<BITMAPINFO*>(&bih), DIB_RGB_COLORS);
+        if (scanLines != rows || chunkBytes > static_cast<size_t>(DWORD_MAX))
+        {
+            ok = false;
+            break;
+        }
+        ok = WriteFileExact(file, chunk.data(), static_cast<DWORD>(chunkBytes));
+    }
+
+    if (hdc)
+        ReleaseDC(nullptr, hdc);
     CloseHandle(file);
+    if (!ok)
+        DeleteFileW(path.c_str());
     return ok;
 }
 
@@ -553,10 +610,8 @@ static bool CaptureWindowToBmpFile(
     HGDIOBJ oldObj = SelectObject(memDc, bitmap);
     BOOL captured = PrintWindow(hwnd, memDc, 2);
 
-    std::vector<BYTE> pixels;
-    BITMAPINFOHEADER bih{};
-    bool havePixels = captured && ReadBitmapPixels32(bitmap, width, height, pixels, bih);
-    bool blank = !havePixels || PixelsLookBlankOrBlack(pixels);
+    bool haveSurface = captured != FALSE;
+    bool blank = !haveSurface || SurfaceLooksBlankOrBlack(memDc, width, height);
 
     if (blank && LiveWallpaperCaptureScreenFallbackEnabled())
     {
@@ -568,20 +623,25 @@ static bool CaptureWindowToBmpFile(
         // Live Tile with a desktop screenshot.
         if (BitBlt(memDc, 0, 0, width, height, screenDc, rc.left, rc.top, SRCCOPY))
         {
-            pixels.clear();
-            ZeroMemory(&bih, sizeof(bih));
-            havePixels = ReadBitmapPixels32(bitmap, width, height, pixels, bih);
-            blank = !havePixels || PixelsLookBlankOrBlack(pixels);
+            haveSurface = true;
+            blank = SurfaceLooksBlankOrBlack(memDc, width, height);
         }
     }
 
+    if (oldObj && oldObj != HGDI_ERROR)
+    {
+        SelectObject(memDc, oldObj);
+        oldObj = nullptr;
+    }
+
     bool ok = false;
-    if (havePixels && !blank)
-        ok = SaveBitmapPixelsAsBmpFile(pixels, bih, path);
+    if (haveSurface && !blank)
+        ok = SaveHBitmapAsBmpFile(bitmap, width, height, path);
     else
         rejectedBlank = true;
 
-    SelectObject(memDc, oldObj);
+    if (oldObj && oldObj != HGDI_ERROR)
+        SelectObject(memDc, oldObj);
     DeleteObject(bitmap);
     DeleteDC(memDc);
     ReleaseDC(nullptr, screenDc);

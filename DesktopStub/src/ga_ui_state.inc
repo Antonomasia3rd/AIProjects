@@ -189,6 +189,7 @@ struct UiStrings
     std::wstring generateNow;
     std::wstring trimWorkingSetOnIdle;
     std::wstring trimWorkingSetOperation;
+    std::wstring idleTrimIntervalMsLabel;
     std::wstring compactCrtHeapOnIdle;
     std::wstring keepGdiPlusLoaded;
 
@@ -393,6 +394,7 @@ struct UiStrings
     std::wstring consoleSummary;
     std::wstring loggingSummary;
     std::wstring trimWorkingSetOnIdleSummary;
+    std::wstring idleTrimIntervalMsSummary;
     std::wstring compactCrtHeapOnIdleSummary;
     std::wstring keepGdiPlusLoadedSummary;
     std::wstring generateOnStartupSummary;
