@@ -1396,6 +1396,29 @@ static bool RegenerateAppxManifestFromConfigAndLog()
     return false;
 }
 
+static std::wstring ManifestDefaultIdentityForExecutable(const std::wstring& executable)
+{
+    const wchar_t* fileName = PathFindFileNameW(executable.c_str());
+    std::wstring base = fileName && *fileName ? fileName : executable;
+    size_t dot = base.find_last_of(L'.');
+    if (dot != std::wstring::npos)
+        base.erase(dot);
+    if (IEquals(base, L"DesktopStubAppxStub"))
+        base = L"DesktopStub";
+    return SanitizeManifestIdentityName(L"dev.local." + base);
+}
+
+static bool ExistingManifestIdentityLooksGeneratedDefault(
+    const std::wstring& identityName,
+    const std::wstring& existingExecutable)
+{
+    if (identityName.empty())
+        return false;
+    if (!existingExecutable.empty() && IEquals(identityName, ManifestDefaultIdentityForExecutable(existingExecutable)))
+        return true;
+    return IEquals(identityName, EffectiveManifestIdentityName());
+}
+
 static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD& error)
 {
     manifestPath = GetExeDir() + L"\\AppxManifest.xml";
@@ -1422,7 +1445,8 @@ static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD&
             bool identityNameMismatch =
                 readExistingXml &&
                 ExtractXmlAttributeFromTag(xml, L"<Identity ", L"Name", existingIdentityName) &&
-                !IEquals(existingIdentityName, expectedIdentityName);
+                !IEquals(existingIdentityName, expectedIdentityName) &&
+                ExistingManifestIdentityLooksGeneratedDefault(existingIdentityName, existingExecutable);
 
             if (!EnsureAppxActivationStubExecutable(error))
                 return false;
@@ -1430,7 +1454,19 @@ static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD&
             if (executableMismatch || identityNameMismatch)
             {
                 Log(L"[i] Existing AppxManifest.xml no longer matches the current EXE name or manifest defaults. Regenerating manifest.");
-                if (WriteUtf8BomTextFile(manifestPath, BuildDefaultAppxManifest()))
+                std::wstring rebuiltManifest = BuildDefaultAppxManifest();
+                if (executableMismatch &&
+                    !existingIdentityName.empty() &&
+                    !ExistingManifestIdentityLooksGeneratedDefault(existingIdentityName, existingExecutable))
+                {
+                    std::wstring generatedIdentity = L"Name=\"" + XmlEscape(expectedIdentityName) + L"\"";
+                    std::wstring preservedIdentity = L"Name=\"" + XmlEscape(existingIdentityName) + L"\"";
+                    size_t identityPos = rebuiltManifest.find(generatedIdentity);
+                    if (identityPos != std::wstring::npos)
+                        rebuiltManifest.replace(identityPos, generatedIdentity.size(), preservedIdentity);
+                }
+
+                if (WriteUtf8BomTextFile(manifestPath, rebuiltManifest))
                 {
                     created = true;
                     return true;

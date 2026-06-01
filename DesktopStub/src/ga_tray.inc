@@ -80,10 +80,23 @@ enum {
     ID_TILE_TEXT_V_ALIGN,
     ID_TILE_TEXT_BADGE_H_ALIGN,
     ID_TILE_TEXT_BADGE_V_ALIGN,
+    ID_TILE_TEXT_FONT,
     ID_TILE_TEXT_FONT_SIZE,
     ID_TILE_TEXT_SECONDARY_FONT_SIZE,
     ID_TILE_TEXT_BADGE_FONT_SIZE,
+    ID_TILE_TEXT_BOLD,
+    ID_TILE_TEXT_SECONDARY_BOLD,
+    ID_TILE_TEXT_BADGE_BOLD,
+    ID_TILE_TEXT_ITALIC,
+    ID_TILE_TEXT_COLOR,
+    ID_TILE_TEXT_SECONDARY_COLOR,
+    ID_TILE_TEXT_BADGE_COLOR,
     ID_TILE_TEXT_SHADOW,
+    ID_TILE_TEXT_SHADOW_COLOR,
+    ID_TILE_TEXT_MARGIN_X,
+    ID_TILE_TEXT_MARGIN_Y,
+    ID_TILE_TEXT_LINE_GAP,
+    ID_TILE_TEXT_MAX_SECONDARY_LINES,
     ID_TILE_TEXT_APPLY_MEDIUM,
     ID_TILE_TEXT_APPLY_WIDE,
     ID_TILE_TEXT_APPLY_LARGE,
@@ -274,6 +287,42 @@ static void CycleTileTextFontSize(const wchar_t* key, int fallback, const std::w
     next = ClampInt(next, 6, 256);
     IniWrite(L"TileText", key, std::to_wstring(next).c_str());
     Log(logFormat.c_str(), next);
+}
+
+static void PromptTileTextStringSetting(HWND owner, const wchar_t* key, const std::wstring& title, const wchar_t* fallback = L"")
+{
+    std::wstring value = IniReadS(L"TileText", key, fallback ? fallback : L"");
+    if (ShowTextInputDialog(owner, title, value, true) == IDOK)
+    {
+        IniWrite(L"TileText", key, value.c_str());
+        Log(g_ui.tileTextSettingChanged.c_str(), key ? key : L"", value.c_str());
+    }
+}
+
+static void PromptTileTextIntSetting(
+    HWND owner,
+    const wchar_t* key,
+    int fallback,
+    int minValue,
+    int maxValue,
+    const std::wstring& title,
+    const std::wstring& logFormat)
+{
+    int current = IniReadClampedI(L"TileText", key, fallback, minValue, maxValue);
+    std::wstring text = std::to_wstring(current);
+    if (ShowTextInputDialog(owner, title, text, false) != IDOK)
+        return;
+
+    int parsed = 0;
+    if (!TryParseIntStrict(text, parsed) || parsed < minValue || parsed > maxValue)
+    {
+        std::wstring message = FormatWide(g_ui.tileTextIntInputInvalid.c_str(), minValue, maxValue);
+        MessageBoxW(owner, message.c_str(), g_ui.errorTitle.c_str(), MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    IniWrite(L"TileText", key, std::to_wstring(parsed).c_str());
+    Log(logFormat.c_str(), parsed);
 }
 
 static const wchar_t* NextSingleInstanceFailureActionName(ErrorAction current)
@@ -778,9 +827,18 @@ void Menu(HWND h)
         std::wstring vLine = FormatWide(g_ui.tileTextVerticalAlign.c_str(), NormalizedTileTextVerticalAlign());
         std::wstring badgeHLine = FormatWide(g_ui.tileTextBadgeHorizontalAlign.c_str(), NormalizedTileTextBadgeHorizontalAlign());
         std::wstring badgeVLine = FormatWide(g_ui.tileTextBadgeVerticalAlign.c_str(), NormalizedTileTextBadgeVerticalAlign());
+        std::wstring fontLine = FormatWide(g_ui.tileTextFont.c_str(), IniReadS(L"TileText", L"Font", L"Segoe UI").c_str());
         std::wstring fontSizeLine = FormatWide(g_ui.tileTextFontSize.c_str(), IniReadClampedI(L"TileText", L"FontSize", 18, 6, 256));
         std::wstring secondaryFontSizeLine = FormatWide(g_ui.tileTextSecondaryFontSize.c_str(), IniReadClampedI(L"TileText", L"SecondaryFontSize", 12, 6, 256));
         std::wstring badgeFontSizeLine = FormatWide(g_ui.tileTextBadgeFontSize.c_str(), IniReadClampedI(L"TileText", L"BadgeFontSize", 40, 6, 256));
+        std::wstring colorLine = FormatWide(g_ui.tileTextColor.c_str(), IniReadS(L"TileText", L"Color", L"#FFFFFFFF").c_str());
+        std::wstring secondaryColorLine = FormatWide(g_ui.tileTextSecondaryColor.c_str(), IniReadS(L"TileText", L"SecondaryColor", L"#CCFFFFFF").c_str());
+        std::wstring badgeColorLine = FormatWide(g_ui.tileTextBadgeColor.c_str(), IniReadS(L"TileText", L"BadgeColor", L"#FFFFFFFF").c_str());
+        std::wstring shadowColorLine = FormatWide(g_ui.tileTextShadowColor.c_str(), IniReadS(L"TileText", L"ShadowColor", L"#AA000000").c_str());
+        std::wstring marginXLine = FormatWide(g_ui.tileTextMarginX.c_str(), IniReadClampedI(L"TileText", L"MarginX", 8, 0, 512));
+        std::wstring marginYLine = FormatWide(g_ui.tileTextMarginY.c_str(), IniReadClampedI(L"TileText", L"MarginY", 10, 0, 512));
+        std::wstring lineGapLine = FormatWide(g_ui.tileTextLineGap.c_str(), IniReadClampedI(L"TileText", L"LineGap", 2, 0, 128));
+        std::wstring maxSecondaryLinesLine = FormatWide(g_ui.tileTextMaxSecondaryLines.c_str(), IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 0, 32));
 
         addTo(textMenu, ID_TILE_TEXT_ENABLED, g_ui.tileTextEnabled.c_str(), tileTextEnabled);
         addTo(textMenu, ID_TILE_TEXT_EDIT, g_ui.tileTextEdit.c_str());
@@ -796,10 +854,23 @@ void Menu(HWND h)
         addTo(textMenu, ID_TILE_TEXT_V_ALIGN, vLine);
         addTo(textMenu, ID_TILE_TEXT_BADGE_H_ALIGN, badgeHLine);
         addTo(textMenu, ID_TILE_TEXT_BADGE_V_ALIGN, badgeVLine);
+        addTo(textMenu, ID_TILE_TEXT_FONT, fontLine);
         addTo(textMenu, ID_TILE_TEXT_FONT_SIZE, fontSizeLine);
         addTo(textMenu, ID_TILE_TEXT_SECONDARY_FONT_SIZE, secondaryFontSizeLine);
         addTo(textMenu, ID_TILE_TEXT_BADGE_FONT_SIZE, badgeFontSizeLine);
+        addTo(textMenu, ID_TILE_TEXT_BOLD, g_ui.tileTextBold.c_str(), IniReadI(L"TileText", L"Bold", 0) != 0);
+        addTo(textMenu, ID_TILE_TEXT_SECONDARY_BOLD, g_ui.tileTextSecondaryBold.c_str(), IniReadI(L"TileText", L"SecondaryBold", 0) != 0);
+        addTo(textMenu, ID_TILE_TEXT_BADGE_BOLD, g_ui.tileTextBadgeBold.c_str(), IniReadI(L"TileText", L"BadgeBold", 0) != 0);
+        addTo(textMenu, ID_TILE_TEXT_ITALIC, g_ui.tileTextItalic.c_str(), IniReadI(L"TileText", L"Italic", 0) != 0);
+        addTo(textMenu, ID_TILE_TEXT_COLOR, colorLine);
+        addTo(textMenu, ID_TILE_TEXT_SECONDARY_COLOR, secondaryColorLine);
+        addTo(textMenu, ID_TILE_TEXT_BADGE_COLOR, badgeColorLine);
         addTo(textMenu, ID_TILE_TEXT_SHADOW, g_ui.tileTextShadow.c_str(), IniReadI(L"TileText", L"Shadow", 1) != 0);
+        addTo(textMenu, ID_TILE_TEXT_SHADOW_COLOR, shadowColorLine);
+        addTo(textMenu, ID_TILE_TEXT_MARGIN_X, marginXLine);
+        addTo(textMenu, ID_TILE_TEXT_MARGIN_Y, marginYLine);
+        addTo(textMenu, ID_TILE_TEXT_LINE_GAP, lineGapLine);
+        addTo(textMenu, ID_TILE_TEXT_MAX_SECONDARY_LINES, maxSecondaryLinesLine);
         addTo(textMenu, ID_TILE_TEXT_APPLY_MEDIUM, g_ui.tileTextApplyMedium.c_str(), IniReadI(L"TileText", L"ApplyToMediumTile", 1) != 0);
         addTo(textMenu, ID_TILE_TEXT_APPLY_WIDE, g_ui.tileTextApplyWide.c_str(), IniReadI(L"TileText", L"ApplyToWideTile", 1) != 0);
         addTo(textMenu, ID_TILE_TEXT_APPLY_LARGE, g_ui.tileTextApplyLarge.c_str(), IniReadI(L"TileText", L"ApplyToLargeTile", 1) != 0);
@@ -1452,6 +1523,10 @@ void Menu(HWND h)
     }
     break;
 
+    case ID_TILE_TEXT_FONT:
+        PromptTileTextStringSetting(h, L"Font", g_ui.tileTextFontInputTitle, L"Segoe UI");
+        break;
+
     case ID_TILE_TEXT_FONT_SIZE:
         CycleTileTextFontSize(L"FontSize", 18, g_ui.tileTextFontSize);
         break;
@@ -1464,8 +1539,56 @@ void Menu(HWND h)
         CycleTileTextFontSize(L"BadgeFontSize", 40, g_ui.tileTextBadgeFontSize);
         break;
 
+    case ID_TILE_TEXT_BOLD:
+        ToggleTileTextBool(L"Bold", 0);
+        break;
+
+    case ID_TILE_TEXT_SECONDARY_BOLD:
+        ToggleTileTextBool(L"SecondaryBold", 0);
+        break;
+
+    case ID_TILE_TEXT_BADGE_BOLD:
+        ToggleTileTextBool(L"BadgeBold", 0);
+        break;
+
+    case ID_TILE_TEXT_ITALIC:
+        ToggleTileTextBool(L"Italic", 0);
+        break;
+
+    case ID_TILE_TEXT_COLOR:
+        PromptTileTextStringSetting(h, L"Color", g_ui.tileTextColorInputTitle, L"#FFFFFFFF");
+        break;
+
+    case ID_TILE_TEXT_SECONDARY_COLOR:
+        PromptTileTextStringSetting(h, L"SecondaryColor", g_ui.tileTextSecondaryColorInputTitle, L"#CCFFFFFF");
+        break;
+
+    case ID_TILE_TEXT_BADGE_COLOR:
+        PromptTileTextStringSetting(h, L"BadgeColor", g_ui.tileTextBadgeColorInputTitle, L"#FFFFFFFF");
+        break;
+
     case ID_TILE_TEXT_SHADOW:
         ToggleTileTextBool(L"Shadow", 1);
+        break;
+
+    case ID_TILE_TEXT_SHADOW_COLOR:
+        PromptTileTextStringSetting(h, L"ShadowColor", g_ui.tileTextShadowColorInputTitle, L"#AA000000");
+        break;
+
+    case ID_TILE_TEXT_MARGIN_X:
+        PromptTileTextIntSetting(h, L"MarginX", 8, 0, 512, g_ui.tileTextMarginXInputTitle, g_ui.tileTextMarginX);
+        break;
+
+    case ID_TILE_TEXT_MARGIN_Y:
+        PromptTileTextIntSetting(h, L"MarginY", 10, 0, 512, g_ui.tileTextMarginYInputTitle, g_ui.tileTextMarginY);
+        break;
+
+    case ID_TILE_TEXT_LINE_GAP:
+        PromptTileTextIntSetting(h, L"LineGap", 2, 0, 128, g_ui.tileTextLineGapInputTitle, g_ui.tileTextLineGap);
+        break;
+
+    case ID_TILE_TEXT_MAX_SECONDARY_LINES:
+        PromptTileTextIntSetting(h, L"MaxSecondaryLines", 2, 0, 32, g_ui.tileTextMaxSecondaryLinesInputTitle, g_ui.tileTextMaxSecondaryLines);
         break;
 
     case ID_TILE_TEXT_APPLY_MEDIUM:

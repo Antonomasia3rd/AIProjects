@@ -109,18 +109,21 @@ void EnsureIniDefaults()
     }
 
     std::vector<IniEntry> powerShellErrorEntries;
-    if (!ReadIniSectionFromDoc(doc, POWERSHELL_ERROR_MESSAGES_SECTION, powerShellErrorEntries))
+    bool havePowerShellErrorSection = ReadIniSectionFromDoc(doc, POWERSHELL_ERROR_MESSAGES_SECTION, powerShellErrorEntries);
+    for (const auto& d : g_powerShellErrorMessageDefaults)
     {
-        for (const auto& d : g_powerShellErrorMessageDefaults)
+        std::wstring existing;
+        if (havePowerShellErrorSection && ReadIniValueFromDoc(doc, d.section, d.key, existing))
+            continue;
+
+        if (!WriteIniValueToText(iniText, d.section, d.key, d.value))
         {
-            if (!WriteIniValueToText(iniText, d.section, d.key, d.value))
-            {
-                QueueStartupWarning(L"[!] Failed to update INI PowerShell error default: [" + std::wstring(d.section ? d.section : L"") + L"] " + std::wstring(d.key ? d.key : L""));
-                return;
-            }
-            changed = true;
-            doc = ParseIniDocument(iniText);
+            QueueStartupWarning(L"[!] Failed to update INI PowerShell error default: [" + std::wstring(d.section ? d.section : L"") + L"] " + std::wstring(d.key ? d.key : L""));
+            return;
         }
+        changed = true;
+        doc = ParseIniDocument(iniText);
+        havePowerShellErrorSection = true;
     }
 
     if (changed && !WriteUtf8BomTextFile(g_iniPath, iniText))
@@ -152,6 +155,7 @@ void LoadUiStrings()
     g_ui.liveTileTitle = IniReadS(L"Strings", L"LiveTileTitle", L"Live Tile:");
     g_ui.tileAppearanceTitle = IniReadS(L"Strings", L"TileAppearanceTitle", L"Tile appearance:");
     g_ui.tileTextTitle = IniReadS(L"Strings", L"TileTextTitle", L"Text overlay");
+    g_ui.tileTextFont = IniReadS(L"Strings", L"TileTextFont", L"Font: %s");
     g_ui.tileTextEnabled = IniReadS(L"Strings", L"TileTextEnabled", L"Enable text overlay");
     g_ui.tileTextEdit = IniReadS(L"Strings", L"TileTextEdit", L"Edit text...");
     g_ui.tileTextClear = IniReadS(L"Strings", L"TileTextClear", L"Clear text");
@@ -169,7 +173,19 @@ void LoadUiStrings()
     g_ui.tileTextFontSize = IniReadS(L"Strings", L"TileTextFontSize", L"Primary font size: %d px");
     g_ui.tileTextSecondaryFontSize = IniReadS(L"Strings", L"TileTextSecondaryFontSize", L"Secondary font size: %d px");
     g_ui.tileTextBadgeFontSize = IniReadS(L"Strings", L"TileTextBadgeFontSize", L"Badge font size: %d px");
+    g_ui.tileTextBold = IniReadS(L"Strings", L"TileTextBold", L"Primary bold");
+    g_ui.tileTextSecondaryBold = IniReadS(L"Strings", L"TileTextSecondaryBold", L"Secondary bold");
+    g_ui.tileTextBadgeBold = IniReadS(L"Strings", L"TileTextBadgeBold", L"Badge bold");
+    g_ui.tileTextItalic = IniReadS(L"Strings", L"TileTextItalic", L"Italic");
+    g_ui.tileTextColor = IniReadS(L"Strings", L"TileTextColor", L"Primary color: %s");
+    g_ui.tileTextSecondaryColor = IniReadS(L"Strings", L"TileTextSecondaryColor", L"Secondary color: %s");
+    g_ui.tileTextBadgeColor = IniReadS(L"Strings", L"TileTextBadgeColor", L"Badge color: %s");
     g_ui.tileTextShadow = IniReadS(L"Strings", L"TileTextShadow", L"Shadow");
+    g_ui.tileTextShadowColor = IniReadS(L"Strings", L"TileTextShadowColor", L"Shadow color: %s");
+    g_ui.tileTextMarginX = IniReadS(L"Strings", L"TileTextMarginX", L"Margin X: %d px");
+    g_ui.tileTextMarginY = IniReadS(L"Strings", L"TileTextMarginY", L"Margin Y: %d px");
+    g_ui.tileTextLineGap = IniReadS(L"Strings", L"TileTextLineGap", L"Line gap: %d px");
+    g_ui.tileTextMaxSecondaryLines = IniReadS(L"Strings", L"TileTextMaxSecondaryLines", L"Max secondary lines: %d");
     g_ui.tileTextApplyMedium = IniReadS(L"Strings", L"TileTextApplyMedium", L"Apply to Medium tile");
     g_ui.tileTextApplyWide = IniReadS(L"Strings", L"TileTextApplyWide", L"Apply to Wide tile");
     g_ui.tileTextApplyLarge = IniReadS(L"Strings", L"TileTextApplyLarge", L"Apply to Large tile");
@@ -177,10 +193,21 @@ void LoadUiStrings()
     g_ui.tileTextApplyLogos = IniReadS(L"Strings", L"TileTextApplyLogos", L"Apply to logos");
     g_ui.tileTextEdited = IniReadS(L"Strings", L"TileTextEdited", L"[i] Tile text changed: %s");
     g_ui.tileTextCleared = IniReadS(L"Strings", L"TileTextCleared", L"[i] Tile text cleared.");
+    g_ui.tileTextSettingChanged = IniReadS(L"Strings", L"TileTextSettingChanged", L"[i] Tile text setting changed: %s = %s");
+    g_ui.tileTextIntInputInvalid = IniReadS(L"Strings", L"TileTextIntInputInvalid", L"Value must be an integer from %d to %d.");
     g_ui.tileTextSummary = IniReadS(L"Strings", L"TileTextSummary", L"[i] Tile text overlay: %s (%s)");
     g_ui.tileTextInputTitle = IniReadS(L"Strings", L"TileTextInputTitle", L"Edit tile text");
     g_ui.tileTextSecondaryInputTitle = IniReadS(L"Strings", L"TileTextSecondaryInputTitle", L"Edit secondary tile text");
     g_ui.tileTextBadgeInputTitle = IniReadS(L"Strings", L"TileTextBadgeInputTitle", L"Edit tile badge text");
+    g_ui.tileTextFontInputTitle = IniReadS(L"Strings", L"TileTextFontInputTitle", L"Edit tile text font");
+    g_ui.tileTextColorInputTitle = IniReadS(L"Strings", L"TileTextColorInputTitle", L"Edit primary tile text color");
+    g_ui.tileTextSecondaryColorInputTitle = IniReadS(L"Strings", L"TileTextSecondaryColorInputTitle", L"Edit secondary tile text color");
+    g_ui.tileTextBadgeColorInputTitle = IniReadS(L"Strings", L"TileTextBadgeColorInputTitle", L"Edit tile badge color");
+    g_ui.tileTextShadowColorInputTitle = IniReadS(L"Strings", L"TileTextShadowColorInputTitle", L"Edit tile text shadow color");
+    g_ui.tileTextMarginXInputTitle = IniReadS(L"Strings", L"TileTextMarginXInputTitle", L"Edit tile text horizontal margin");
+    g_ui.tileTextMarginYInputTitle = IniReadS(L"Strings", L"TileTextMarginYInputTitle", L"Edit tile text vertical margin");
+    g_ui.tileTextLineGapInputTitle = IniReadS(L"Strings", L"TileTextLineGapInputTitle", L"Edit tile text line gap");
+    g_ui.tileTextMaxSecondaryLinesInputTitle = IniReadS(L"Strings", L"TileTextMaxSecondaryLinesInputTitle", L"Edit max secondary tile text lines");
 
     g_ui.listenWallpaper = IniReadS(L"Strings", L"ListenWallpaper", L"Listen Wallpaper");
     g_ui.trayIcon = IniReadS(L"Strings", L"TrayIcon", L"Tray Icon (this session)");
@@ -324,7 +351,8 @@ void LoadUiStrings()
     g_ui.startingWallpaperGeneration = IniReadS(L"Strings", L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s.");
     g_ui.wallpaperSource = IniReadS(L"Strings", L"WallpaperSource", L"Wallpaper source: %s");
     g_ui.wallpaperImageLoaded = IniReadS(L"Strings", L"WallpaperImageLoaded", L"[i] Wallpaper image loaded (%d x %d).");
-    g_ui.wallpaperImageLoadedWic = IniReadS(L"Strings", L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with WIC: %lu x %lu.");
+    g_ui.wallpaperImageLoadedWic = IniReadS(L"Strings", L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu (max long edge=%d).");
+    g_ui.wallpaperImageLoadedGdiWicFallback = IniReadS(L"Strings", L"WallpaperImageLoadedGdiWicFallback", L"[i] Wallpaper image loaded with GDI+ after low-memory WIC decode fallback: %d x %d (requested max long edge=%d).");
     g_ui.wallpaperImageLoadedWicDownscaled = IniReadS(L"Strings", L"WallpaperImageLoadedWicDownscaled", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu -> %lu x %lu (max long edge=%d).");
     g_ui.wallpaperImageLoadedWicMemoryConstrained = IniReadS(L"Strings", L"WallpaperImageLoadedWicMemoryConstrained", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu -> %lu x %lu (requested %lu x %lu; memory-limited from max long edge=%d).");
     g_ui.renderModeSummary = IniReadS(L"Strings", L"RenderModeSummary", L"[i] Render fit mode: %s");
@@ -342,6 +370,7 @@ void LoadUiStrings()
     g_ui.generatedAssetCacheSummary = IniReadS(L"Strings", L"GeneratedAssetCacheSummary", L"[i] Generated asset cache: %s (max entries=%d)");
     g_ui.generatedAssetPrecacheSaved = IniReadS(L"Strings", L"GeneratedAssetPrecacheSaved", L"[i] Precached generated assets: %s");
     g_ui.generatedAssetPrecacheSummary = IniReadS(L"Strings", L"GeneratedAssetPrecacheSummary", L"[i] Generated asset pre-cache: %s (max files=%d)");
+    g_ui.generatedAssetPrecacheInactive = IniReadS(L"Strings", L"GeneratedAssetPrecacheInactive", L"[i] Generated asset pre-cache is configured on but inactive because generated asset cache is disabled or max entries is 0.");
     g_ui.failedSaveAsset = IniReadS(L"Strings", L"FailedSaveAsset", L"Failed to save %s");
     g_ui.failedSaveScaledAsset = IniReadS(L"Strings", L"FailedSaveScaledAsset", L"Failed to save %s (scale %d%%)");
     g_ui.savePngInvalidInput = IniReadS(L"Strings", L"SavePngInvalidInput", L"[!] SavePNG skipped for %s: invalid bitmap, path, or PNG encoder.");
@@ -463,6 +492,7 @@ void LoadUiStrings()
     g_ui.liveWallpaperCaptureStartupRefreshDurationState = IniReadS(L"Strings", L"LiveWallpaperCaptureStartupRefreshDurationState", L"[i] LiveWallpaperCaptureStartupRefreshDurationMs = %d");
     g_ui.liveWallpaperCaptureScreenFallbackState = IniReadS(L"Strings", L"LiveWallpaperCaptureScreenFallbackState", L"[i] LiveWallpaperCaptureScreenFallback = %d");
     g_ui.liveWallpaperCaptureStartupRefreshSummary = IniReadS(L"Strings", L"LiveWallpaperCaptureStartupRefreshSummary", L"[i] Live wallpaper startup recapture: every %s for %s");
+    g_ui.liveWallpaperCaptureStartupRefreshOffSummary = IniReadS(L"Strings", L"LiveWallpaperCaptureStartupRefreshOffSummary", L"[i] Live wallpaper startup recapture: off");
     g_ui.liveWallpaperCaptureNoWindow = IniReadS(L"Strings", L"LiveWallpaperCaptureNoWindow", L"[!] Live wallpaper capture could not find a source window for %s.");
     g_ui.liveWallpaperCaptureSnapshotPathFailed = IniReadS(L"Strings", L"LiveWallpaperCaptureSnapshotPathFailed", L"[!] Live wallpaper capture could not create a snapshot path for %s.");
     g_ui.liveWallpaperCaptureSnapshotFailed = IniReadS(L"Strings", L"LiveWallpaperCaptureSnapshotFailed", L"[!] Live wallpaper snapshot capture failed for %s.");
@@ -707,6 +737,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.win8LiveTileOopHelperState, L"Win8LiveTileOopHelperState", { L"%d" });
     RequireFormat(g_ui.win8LiveTileBackgroundTaskState, L"Win8LiveTileBackgroundTaskState", { L"%d" });
     RequireFormat(g_ui.win8LiveTileBrokerAppState, L"Win8LiveTileBrokerAppState", { L"%d" });
+    RequireFormat(g_ui.liveTileClearOnShutdownSkipped, L"LiveTileClearOnShutdownSkipped", { L"%s" });
     RequireFormat(g_ui.liveWallpaperCaptureSummary, L"LiveWallpaperCaptureSummary", { L"%s", L"%d", L"%s" });
     RequireFormat(g_ui.liveWallpaperCaptureDelayState, L"LiveWallpaperCaptureDelayState", { L"%d" });
     RequireFormat(g_ui.liveWallpaperCaptureRefreshState, L"LiveWallpaperCaptureRefreshState", { L"%d" });
@@ -724,6 +755,8 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.consoleSummary, L"ConsoleSummary", { L"%s" });
     RequireFormat(g_ui.loggingSummary, L"LoggingSummary", { L"%s" });
     RequireFormat(g_ui.trimWorkingSetOnIdleSummary, L"TrimWorkingSetOnIdleSummary", { L"%s" });
+    RequireFormat(g_ui.compactCrtHeapOnIdleSummary, L"CompactCrtHeapOnIdleSummary", { L"%s" });
+    RequireFormat(g_ui.keepGdiPlusLoadedSummary, L"KeepGdiPlusLoadedSummary", { L"%s" });
     RequireFormat(g_ui.generateOnStartupSummary, L"GenerateOnStartupSummary", { L"%s" });
     RequireFormat(g_ui.generateOnStartupOnlyWhenChangedSummary, L"GenerateOnStartupOnlyWhenChangedSummary", { L"%s" });
     RequireFormat(g_ui.hideDisabledEntriesSummary, L"HideDisabledEntriesSummary", { L"%s" });
@@ -736,6 +769,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.tileTextCurrent, L"TileTextCurrent", { L"%s" });
     RequireFormat(g_ui.tileTextSecondaryCurrent, L"TileTextSecondaryCurrent", { L"%s" });
     RequireFormat(g_ui.tileTextBadgeCurrent, L"TileTextBadgeCurrent", { L"%s" });
+    RequireFormat(g_ui.tileTextFont, L"TileTextFont", { L"%s" });
     RequireFormat(g_ui.tileTextHorizontalAlign, L"TileTextHorizontalAlign", { L"%s" });
     RequireFormat(g_ui.tileTextVerticalAlign, L"TileTextVerticalAlign", { L"%s" });
     RequireFormat(g_ui.tileTextBadgeHorizontalAlign, L"TileTextBadgeHorizontalAlign", { L"%s" });
@@ -743,7 +777,17 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.tileTextFontSize, L"TileTextFontSize", { L"%d" });
     RequireFormat(g_ui.tileTextSecondaryFontSize, L"TileTextSecondaryFontSize", { L"%d" });
     RequireFormat(g_ui.tileTextBadgeFontSize, L"TileTextBadgeFontSize", { L"%d" });
+    RequireFormat(g_ui.tileTextColor, L"TileTextColor", { L"%s" });
+    RequireFormat(g_ui.tileTextSecondaryColor, L"TileTextSecondaryColor", { L"%s" });
+    RequireFormat(g_ui.tileTextBadgeColor, L"TileTextBadgeColor", { L"%s" });
+    RequireFormat(g_ui.tileTextShadowColor, L"TileTextShadowColor", { L"%s" });
+    RequireFormat(g_ui.tileTextMarginX, L"TileTextMarginX", { L"%d" });
+    RequireFormat(g_ui.tileTextMarginY, L"TileTextMarginY", { L"%d" });
+    RequireFormat(g_ui.tileTextLineGap, L"TileTextLineGap", { L"%d" });
+    RequireFormat(g_ui.tileTextMaxSecondaryLines, L"TileTextMaxSecondaryLines", { L"%d" });
     RequireFormat(g_ui.tileTextEdited, L"TileTextEdited", { L"%s" });
+    RequireFormat(g_ui.tileTextSettingChanged, L"TileTextSettingChanged", { L"%s", L"%s" });
+    RequireFormat(g_ui.tileTextIntInputInvalid, L"TileTextIntInputInvalid", { L"%d", L"%d" });
     RequireFormat(g_ui.tileTextSummary, L"TileTextSummary", { L"%s", L"%s" });
     RequireFormat(g_ui.notificationsSummary, L"NotificationsSummary", { L"%s", L"%s", L"%s", L"%s", L"%s", L"%s", L"%s" });
     RequireFormat(g_ui.listenWallpaperState, L"ListenWallpaperState", { L"%d" });
@@ -845,7 +889,8 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.startingWallpaperGeneration, L"StartingWallpaperGeneration", { L"%s" });
     RequireFormat(g_ui.wallpaperSource, L"WallpaperSource", { L"%s" });
     RequireFormat(g_ui.wallpaperImageLoaded, L"WallpaperImageLoaded", { L"%d", L"%d" });
-    RequireFormat(g_ui.wallpaperImageLoadedWic, L"WallpaperImageLoadedWic", { L"%lu", L"%lu" });
+    RequireFormat(g_ui.wallpaperImageLoadedWic, L"WallpaperImageLoadedWic", { L"%lu", L"%lu", L"%d" });
+    RequireFormat(g_ui.wallpaperImageLoadedGdiWicFallback, L"WallpaperImageLoadedGdiWicFallback", { L"%d", L"%d", L"%d" });
     RequireFormat(g_ui.wallpaperImageLoadedWicDownscaled, L"WallpaperImageLoadedWicDownscaled", { L"%lu", L"%lu", L"%lu", L"%lu", L"%d" });
     RequireFormat(g_ui.wallpaperImageLoadedWicMemoryConstrained, L"WallpaperImageLoadedWicMemoryConstrained", { L"%lu", L"%lu", L"%lu", L"%lu", L"%lu", L"%lu", L"%d" });
     RequireFormat(g_ui.renderModeSummary, L"RenderModeSummary", { L"%s" });

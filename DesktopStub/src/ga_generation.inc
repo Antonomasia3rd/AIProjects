@@ -1524,7 +1524,14 @@ static void LogWallpaperBitmapLoad(const WallpaperBitmapLoadInfo& info, Bitmap* 
     {
         Log(g_ui.wallpaperImageLoadedWic.c_str(),
             static_cast<unsigned long>(info.loadedWidth),
-            static_cast<unsigned long>(info.loadedHeight));
+            static_cast<unsigned long>(info.loadedHeight),
+            info.maxLongEdge);
+        return;
+    }
+
+    if (info.attemptedWic)
+    {
+        Log(g_ui.wallpaperImageLoadedGdiWicFallback.c_str(), bitmapWidth, bitmapHeight, info.maxLongEdge);
         return;
     }
 

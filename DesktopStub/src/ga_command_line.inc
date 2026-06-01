@@ -328,6 +328,23 @@ static bool ParseCommandLineClampedInt(
     return true;
 }
 
+static bool AddCommandLineClampedIntSetting(
+    const wchar_t* section,
+    const wchar_t* key,
+    const wchar_t* optionName,
+    const std::wstring& rawValue,
+    int minValue,
+    int maxValue,
+    std::wstring& error)
+{
+    int parsed = 0;
+    if (!ParseCommandLineClampedInt(rawValue, optionName, minValue, maxValue, parsed, error))
+        return false;
+
+    AddCommandLineIntSetting(section, key, parsed);
+    return true;
+}
+
 static bool TryParseCommandLineBoolValue(const std::wstring& rawValue, bool& value)
 {
     std::wstring v = ToLowerCopy(TrimCopy(rawValue));
@@ -1218,34 +1235,35 @@ static bool ParseCommandLineOptions()
             AddCommandLineIniSetting(L"TileText", L"BadgeVerticalAlign", v == L"top" ? L"Top" : (v == L"bottom" ? L"Bottom" : L"Center"));
             continue;
         }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-font", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            AddCommandLineIniSetting(L"TileText", L"Font", value);
+            continue;
+        }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-font-size", value, error, matched))
             return fail(error);
         if (matched)
         {
-            int parsed = 0;
-            if (!TryParseIntStrict(value, parsed) || parsed < 6 || parsed > 256)
-                return fail(L"Invalid --tile-text-font-size value: " + value + L". Expected 6-256.");
-            AddCommandLineIntSetting(L"TileText", L"FontSize", parsed);
+            if (!AddCommandLineClampedIntSetting(L"TileText", L"FontSize", L"--tile-text-font-size", value, 6, 256, error))
+                return fail(error);
             continue;
         }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-secondary-font-size", value, error, matched))
             return fail(error);
         if (matched)
         {
-            int parsed = 0;
-            if (!TryParseIntStrict(value, parsed) || parsed < 6 || parsed > 256)
-                return fail(L"Invalid --tile-text-secondary-font-size value: " + value + L". Expected 6-256.");
-            AddCommandLineIntSetting(L"TileText", L"SecondaryFontSize", parsed);
+            if (!AddCommandLineClampedIntSetting(L"TileText", L"SecondaryFontSize", L"--tile-text-secondary-font-size", value, 6, 256, error))
+                return fail(error);
             continue;
         }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-badge-font-size", value, error, matched))
             return fail(error);
         if (matched)
         {
-            int parsed = 0;
-            if (!TryParseIntStrict(value, parsed) || parsed < 6 || parsed > 256)
-                return fail(L"Invalid --tile-text-badge-font-size value: " + value + L". Expected 6-256.");
-            AddCommandLineIntSetting(L"TileText", L"BadgeFontSize", parsed);
+            if (!AddCommandLineClampedIntSetting(L"TileText", L"BadgeFontSize", L"--tile-text-badge-font-size", value, 6, 256, error))
+                return fail(error);
             continue;
         }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-color", value, error, matched))
@@ -1267,6 +1285,85 @@ static bool ParseCommandLineOptions()
         if (matched)
         {
             AddCommandLineIniSetting(L"TileText", L"BadgeColor", value);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-shadow-color", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            AddCommandLineIniSetting(L"TileText", L"ShadowColor", value);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-margin-x", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            if (!AddCommandLineClampedIntSetting(L"TileText", L"MarginX", L"--tile-text-margin-x", value, 0, 512, error))
+                return fail(error);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-margin-y", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            if (!AddCommandLineClampedIntSetting(L"TileText", L"MarginY", L"--tile-text-margin-y", value, 0, 512, error))
+                return fail(error);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-line-gap", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            if (!AddCommandLineClampedIntSetting(L"TileText", L"LineGap", L"--tile-text-line-gap", value, 0, 128, error))
+                return fail(error);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-max-secondary-lines", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            if (!AddCommandLineClampedIntSetting(L"TileText", L"MaxSecondaryLines", L"--tile-text-max-secondary-lines", value, 0, 32, error))
+                return fail(error);
+            continue;
+        }
+        if (IEquals(arg, L"--tile-text-bold"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"Bold", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-tile-text-bold"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"Bold", false);
+            continue;
+        }
+        if (IEquals(arg, L"--tile-text-secondary-bold"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"SecondaryBold", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-tile-text-secondary-bold"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"SecondaryBold", false);
+            continue;
+        }
+        if (IEquals(arg, L"--tile-text-badge-bold"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"BadgeBold", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-tile-text-badge-bold"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"BadgeBold", false);
+            continue;
+        }
+        if (IEquals(arg, L"--tile-text-italic"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"Italic", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-tile-text-italic"))
+        {
+            AddCommandLineBoolSetting(L"TileText", L"Italic", false);
             continue;
         }
         if (IEquals(arg, L"--tile-text-shadow"))
@@ -1409,18 +1506,46 @@ static std::wstring CommandLineUsageText()
         L"  --live-tile-mode <mode>              Set mode: Auto, Registration, or LiveTile.\r\n"
         L"  --live-tile-relaunch-on-mismatch | --no-live-tile-relaunch-on-mismatch\r\n"
         L"                                      Relaunch when process package state does not match mode.\r\n"
-        L"  --tile-text <text>                  Set tile text overlay text and enable it if non-empty.\r\n"
+        L"  --tile-text <text>                  Set primary tile text and enable it if non-empty.\r\n"
+        L"  --tile-text-secondary <text> | --tile-subtext <text>\r\n"
+        L"                                      Set secondary tile text and enable it if non-empty.\r\n"
+        L"  --tile-text-badge <text> | --tile-badge <text>\r\n"
+        L"                                      Set badge tile text and enable it if non-empty.\r\n"
         L"  --tile-text-enable | --tile-text-disable\r\n"
         L"                                      Enable/disable tile text overlay.\r\n"
-        L"  --tile-text-clear                  Clear tile text overlay text.\r\n"
+        L"  --tile-text-clear | --tile-text-secondary-clear | --tile-text-badge-clear\r\n"
+        L"                                      Clear primary, secondary, or badge tile text.\r\n"
         L"  --tile-text-align <left|center|right>\r\n"
         L"                                      Set horizontal text alignment.\r\n"
         L"  --tile-text-valign <top|center|bottom>\r\n"
         L"                                      Set vertical text alignment.\r\n"
-        L"  --tile-text-font-size <px>          Set text size, 6-256 px.\r\n"
-        L"  --tile-text-color <#AARRGGBB>       Set static/baked text color.\r\n"
+        L"  --tile-text-badge-align <left|center|right>\r\n"
+        L"                                      Set badge horizontal alignment.\r\n"
+        L"  --tile-text-badge-valign <top|center|bottom>\r\n"
+        L"                                      Set badge vertical alignment.\r\n"
+        L"  --tile-text-font <name>             Set baked text font family.\r\n"
+        L"  --tile-text-font-size <px>          Set primary text size, 6-256 px.\r\n"
+        L"  --tile-text-secondary-font-size <px> Set secondary text size, 6-256 px.\r\n"
+        L"  --tile-text-badge-font-size <px>    Set badge text size, 6-256 px.\r\n"
+        L"  --tile-text-bold | --no-tile-text-bold\r\n"
+        L"                                      Enable/disable primary bold baked text.\r\n"
+        L"  --tile-text-secondary-bold | --no-tile-text-secondary-bold\r\n"
+        L"                                      Enable/disable secondary bold baked text.\r\n"
+        L"  --tile-text-badge-bold | --no-tile-text-badge-bold\r\n"
+        L"                                      Enable/disable badge bold baked text.\r\n"
+        L"  --tile-text-italic | --no-tile-text-italic\r\n"
+        L"                                      Enable/disable italic baked text.\r\n"
+        L"  --tile-text-color <#AARRGGBB>       Set primary static/baked text color.\r\n"
+        L"  --tile-text-secondary-color <#AARRGGBB>\r\n"
+        L"                                      Set secondary static/baked text color.\r\n"
+        L"  --tile-text-badge-color <#AARRGGBB> Set badge static/baked text color.\r\n"
         L"  --tile-text-shadow | --no-tile-text-shadow\r\n"
         L"                                      Enable/disable baked text shadow.\r\n"
+        L"  --tile-text-shadow-color <#AARRGGBB> Set baked text shadow color.\r\n"
+        L"  --tile-text-margin-x <px> | --tile-text-margin-y <px>\r\n"
+        L"                                      Set baked text margins, 0-512 px.\r\n"
+        L"  --tile-text-line-gap <px>           Set baked text line gap, 0-128 px.\r\n"
+        L"  --tile-text-max-secondary-lines <n> Set baked secondary line limit, 0-32.\r\n"
         L"  --manifest-target <target>            Set and regenerate manifest: Windows10, Windows81, or Windows8.\r\n"
         L"  --manifest-win10|--manifest-win81|--manifest-win8\r\n"
         L"                                      Shortcuts for --manifest-target.\r\n"
