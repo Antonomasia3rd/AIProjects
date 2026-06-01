@@ -4,6 +4,7 @@
 #include <regex>
 #include <stdexcept>
 #include <string>
+#include <algorithm>
 #include <vector>
 
 struct Check
@@ -108,6 +109,11 @@ static void AssertCheck(const Check& check)
 
 static std::string UiPropertyName(const std::string& key)
 {
+    if (key.rfind("OK", 0) == 0)
+        return "ok" + key.substr(2);
+    if (key.rfind("PS", 0) == 0)
+        return "ps" + key.substr(2);
+
     std::string property = key;
     if (!property.empty())
         property[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(property[0])));
@@ -186,6 +192,27 @@ static void AssertUiStringWired(const std::string& key, const std::string& defau
     }
 }
 
+static std::vector<std::string> ExtractUiStringDefaultKeys(const std::string& defaults)
+{
+    std::string slice = SliceSource(
+        defaults,
+        "static const StringDefault g_stringDefaults[]",
+        "};");
+    if (slice.empty())
+        throw std::runtime_error("DesktopStub source regression: g_stringDefaults block not found");
+
+    std::vector<std::string> keys;
+    std::regex re(R"rx(\{L"([^"]+)",\s*L")rx");
+    for (std::sregex_iterator it(slice.begin(), slice.end(), re), end; it != end; ++it)
+        keys.push_back((*it)[1].str());
+
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    if (keys.empty())
+        throw std::runtime_error("DesktopStub source regression: no UI string defaults found");
+    return keys;
+}
+
 int main(int argc, char** argv)
 {
     bool listChecks = false;
@@ -246,6 +273,7 @@ int main(int argc, char** argv)
         checks.push_back({"Manifest executable fallback uses Win10 host and Win8 broker", "src\\ga_manifest.inc", manifest, R"rx(EffectiveManifestExecutable.*ConfiguredManifestCompatibilityTarget\(\).*ManifestHostExecutableName\(\).*target\s*!=\s*ManifestCompatibilityTarget::Windows10.*Win8LiveTileBrokerAppEnabled\(\).*ManifestLiveTileBrokerExecutableName\(\).*ManifestAppxActivationStubExecutableName\(\).*ManifestSettingValidated\(L"Executable",\s*fallback\.c_str\(\))rx", "manifest executable fallback must keep Windows 10 on the current host EXE while Windows 8/8.1 targets default to the packaged broker helper", false});
         checks.push_back({"Manifest host executable follows renamed EXE", "src\\ga_manifest.inc", manifest, R"rx(PortableHostBaseName.*AppxStub.*ManifestHostExecutableName\(\).*PortableHostBaseName\(\) \+ L"\.exe".*ManifestAppxActivationStubExecutableName\(\).*PortableHostBaseName\(\) \+ L"AppxStub\.exe")rx", "renaming DesktopStub.exe to GenerateAssets.exe or DeskStub.exe must make the manifest point at the current host EXE and matching AppxStub copy", false});
         checks.push_back({"Existing manifest is regenerated after EXE rename", "src\\ga_manifest.inc", manifest, R"rx(EnsureAppxManifest.*existingExecutable.*expectedExecutable = EffectiveManifestExecutable\(\).*executableMismatch.*BuildDefaultAppxManifest\(\))rx", "renaming the EXE must repair an existing AppxManifest.xml that still points at the old executable name", false});
+        checks.push_back({"Custom manifest identity is preserved", "src\\ga_manifest.inc", manifest, R"rx(ExistingManifestIdentityLooksGeneratedDefault.*identityNameMismatch.*ExistingManifestIdentityLooksGeneratedDefault\(existingIdentityName,\s*existingExecutable\).*preservedIdentity.*rebuiltManifest\.replace)rx", "manual AppxManifest.xml package identity edits must not be overwritten by normal startup regeneration", false});
         checks.push_back({"Manifest generation ignores redundant INI manifest editor", "src\\ga_manifest.inc", manifest, R"rx(Manifest generation intentionally uses built-in defaults.*legacySettingsKey.*return fallback)rx", "generated AppxManifest.xml must use built-in defaults instead of a redundant INI manifest editor", false});
         checks.push_back({"Obsolete manifest INI editor is removed and blocked", "command-line/config sources", commandLine + "\n" + defaults, R"rx(CommandLineSettingTargetsManifestEditor.*IEquals\(entry\.section,\s*L"Manifest"\).*RemoveObsoleteManifestIniSettings.*IEquals\(sectionName,\s*L"Manifest"\).*IsLegacyManifestSettingKey)rx", "the redundant [Manifest] INI editor must be removed from existing INIs and blocked from command-line writes", false});
         checks.push_back({"Manifest executable path rejects traversal segments", "src\\ga_manifest.inc", manifest, R"rx(IsManifestSafeRelativePath.*segment == L"\.".*segment == L"\.\.".*IsManifestExecutableValue.*IsManifestSafeRelativePath)rx", "manifest executable validation must reject . and .. relative path segments", false});
@@ -273,6 +301,9 @@ int main(int argc, char** argv)
         checks.push_back({"Generated asset cache command-line bounds match runtime clamps", "src\\ga_command_line.inc", commandLine, R"rx(--generated-asset-cache-max.*0,\s*4096.*--generated-asset-precache-max.*0,\s*256)rx", "cache max command-line bounds must match runtime clamps", false});
         checks.push_back({"Generated asset cache tray presets match runtime clamps", "src\\ga_tray.inc", tray, R"rx(CycleSettingIntPreset\(L"GeneratedAssetCacheMaxEntries",\s*64,\s*0,\s*4096.*CycleSettingIntPreset\(L"GeneratedAssetPrecacheMaxFiles",\s*16,\s*0,\s*256)rx", "cache max tray presets must match runtime clamps", false});
         checks.push_back({"DesktopStub smoke runs from a temporary build directory", "..\\.github\\tools\\RepoTools.cs", repoTools, R"rx(DesktopStubSmoke-.*string exe = Path\.Combine\(tempRoot,\s*Path\.GetFileName\(sourceExe\)\).*File\.Copy\(sourceExe,\s*exe,\s*true\).*DesktopStubLiveTileBroker\.exe.*DesktopStubAppxStub\.exe.*Path\.Combine\(Path\.GetDirectoryName\(exe\),\s*"AppxManifest\.xml"\))rx", "DesktopStub smoke tests must run a copied EXE from a temp directory so they cannot mutate build\\Assets, build\\AssetCache, or build\\AppxManifest.xml", false});
+        checks.push_back({"DesktopStub smoke uses unique manifest identity", "..\\.github\\tools\\RepoTools.cs", repoTools, R"rx(dev\.local\.desktopstubsmoke.*SetDesktopStubManifestIdentity.*did not preserve the custom AppxManifest\.xml package identity.*UnregisterDesktopStubSmokePackage.*Remove-AppxPackage)rx", "DesktopStub smoke tests must avoid colliding with a running local DesktopStub package identity, verify custom manifest identity preservation, and clean up the temporary package", false});
+        checks.push_back({"TileText style settings are exposed in tray", "src\\ga_tray.inc", tray, R"rx(ID_TILE_TEXT_FONT.*ID_TILE_TEXT_BOLD.*ID_TILE_TEXT_COLOR.*ID_TILE_TEXT_MARGIN_X.*PromptTileTextStringSetting.*PromptTileTextIntSetting)rx", "TileText style settings must be configurable through the tray menu, not only by editing the INI", false});
+        checks.push_back({"TileText style settings are exposed in CLI", "src\\ga_command_line.inc", commandLine, R"rx(--tile-text-font.*--tile-text-bold.*--tile-text-margin-x.*--tile-text-max-secondary-lines)rx", "TileText style settings must be configurable through command-line options, not only by editing the INI", false});
         checks.push_back({"Live Tile mode writes dedicated notification assets", "src\\ga_generation.inc", generation, R"rx(g_liveTileAssets.*Assets\\\\LiveMediumTile\.png.*Assets\\\\LiveWideTile\.png.*Assets\\\\LiveLargeTile\.png.*NewLiveTileAssetToken.*VersionedLiveTileAssetPath.*if \(liveTileUpdateMode\).*VersionedLiveTileAssetPath\(t,\s*liveTileToken\).*liveTileUpdateAssets\.push_back)rx", "Live Tile mode must write dedicated versioned Live*.png notification assets instead of relying on manifest logo assets or overwriting the displayed tile image in place", false});
         checks.push_back({"Manifest target can generate Windows 10, 8.1, and 8 manifests", "manifest/command-line sources", manifest + "\n" + commandLine + "\n" + tray, R"rx(appx/2010/manifest.*xmlns:m2=.*2013/manifest.*AppxManifestTarget.*--manifest-target.*ID_MANIFEST_TARGET_WINDOWS10.*ID_MANIFEST_TARGET_WINDOWS81.*ID_MANIFEST_TARGET_WINDOWS8)rx", "manifest target selection must cover Windows 10, Windows 8.1, and Windows 8 from command line and tray", false});
         checks.push_back({"Windows 8 broker helper is the default stabilized Live Tile path", "manifest/live-tile/config sources", defaults + "\n" + manifest + "\n" + liveTile, R"rx(\{L"Settings",\s*L"Win8LiveTileOopHelper",\s*L"0"\}.*\{L"Settings",\s*L"Win8LiveTileBackgroundTask",\s*L"0"\}.*\{L"Settings",\s*L"Win8LiveTileBrokerApp",\s*L"1"\}.*Win8LiveTileBrokerApp.*IniReadI\(L"Settings",\s*L"Win8LiveTileBrokerApp",\s*1\).*Packaged WinRT Live Tile broker reported success)rx", "Windows 8/8.1 compatibility mode should default to the packaged WinRT broker while leaving background/OOP experiments disabled", false});
@@ -318,79 +349,7 @@ int main(int argc, char** argv)
         checks.push_back({"Provider-specific live wallpaper settings were removed", "source tree", JoinSource({"src\\ga_config_defaults.inc","src\\ga_command_line.inc","src\\ga_tray.inc","src\\ga_ui_strings.inc","src\\ga_ui_state.inc"}), R"rx(LiveWallpaperCaptureLively|LiveWallpaperCaptureWallpaperEngine|live-wallpaper-lively|live-wallpaper-wallpaper-engine|LiveWallpaperProviderLively|LiveWallpaperProviderWallpaperEngine)rx", "legacy provider-specific live wallpaper settings/strings/command-line switches should stay removed", true});
         checks.push_back({"Legacy named live wallpaper UI was removed", "source tree", JoinSource({"README.md","src\\ga_config_defaults.inc","src\\ga_command_line.inc","src\\ga_tray.inc","src\\ga_ui_strings.inc","src\\ga_ui_state.inc","src\\ga_wallpaper.inc"}), R"rx(Capture generic WorkerW live wallpaper|Generic live wallpaper|Generic=|LiveWallpaperSnapshot_Generic|LiveWallpaperCaptureGeneric|LiveWallpaperProviderGeneric|live-wallpaper-generic)rx", "after provider-specific live wallpaper capture was removed, the remaining WorkerW detector should be presented as the normal live wallpaper detector", true});
 
-        const std::vector<std::string> uiStringKeys = {
-            "ComRegistrationAsyncError",
-            "ComRegistrationDeploymentError",
-            "ComRegistrationDeploymentMessage",
-            "LiveTileUpdateSummary",
-            "LiveTileModeAuto",
-            "LiveTileModeRegistration",
-            "LiveTileModeLiveTile",
-            "LiveTileUpdateException",
-            "LiveTileUpdateMessage",
-            "LiveTilePackageIdentity",
-            "CachingTitle",
-            "GeneratedAssetCache",
-            "GeneratedAssetPrecache",
-            "GeneratedAssetCacheMaxEntriesLabel",
-            "GeneratedAssetPrecacheMaxFilesLabel",
-            "GeneratedAssetCacheHit",
-            "GeneratedAssetCacheSaved",
-            "GeneratedAssetCacheSummary",
-            "GeneratedAssetPrecacheSaved",
-            "GeneratedAssetPrecacheSummary",
-            "ManifestTargetSummary",
-            "AppxManifestTarget",
-            "AppxManifestTargetWindows10",
-            "AppxManifestTargetWindows81",
-            "AppxManifestTargetWindows8",
-            "Win8LiveTileOopHelper",
-            "Win8LiveTileBackgroundTask",
-            "Win8LiveTileBrokerApp",
-            "Win8LiveTileOopHelperState",
-            "Win8LiveTileBackgroundTaskState",
-            "Win8LiveTileBrokerAppState",
-            "ManifestTargetLabel",
-            "ManifestSquare30x30LogoLabel",
-            "ManifestSplashScreenImageLabel",
-            "ManifestRegenerateNow",
-            "GenerateScaleAutoPreservesManualToggles",
-            "StartupGenerationReason",
-            "CommandLineGenerationRequestReason",
-            "CommandLineOnceReason",
-            "CommandLineWallpaperReason",
-            "CommandLineForceGenerateReason",
-            "ManifestRegenerateReason",
-            "CommandLineWallpaperPathInvalid",
-            "CommandLineManifestSettingIgnored",
-            "AppxManifestRegenerated",
-            "AppxManifestRegenerateFailed",
-            "LiveWallpaperCaptureTitle",
-            "LiveWallpaperCapture",
-            "LiveWallpaperCaptureScreenFallback",
-            "LiveWallpaperCaptureDelayMsLabel",
-            "LiveWallpaperCaptureRefreshMsLabel",
-            "LiveWallpaperCaptureStartupRefreshMsLabel",
-            "LiveWallpaperCaptureStartupRefreshDurationMsLabel",
-            "LiveWallpaperCaptureRefreshOnce",
-            "LiveWallpaperCaptureOff",
-            "LiveWallpaperCaptureMsText",
-            "LiveWallpaperProviderNone",
-            "LiveWallpaperProviderLive",
-            "LiveWallpaperCaptureSummary",
-            "LiveWallpaperCaptureDelayState",
-            "LiveWallpaperCaptureRefreshState",
-            "LiveWallpaperCaptureStartupRefreshState",
-            "LiveWallpaperCaptureStartupRefreshDurationState",
-            "LiveWallpaperCaptureScreenFallbackState",
-            "LiveWallpaperCaptureStartupRefreshSummary",
-            "LiveWallpaperCaptureNoWindow",
-            "LiveWallpaperCaptureSnapshotPathFailed",
-            "LiveWallpaperCaptureSnapshotFailed",
-            "LiveWallpaperCaptureSnapshotRejectedBlank",
-            "LiveWallpaperCaptureSnapshotRejectedTooSmall",
-            "LiveWallpaperCaptureSnapshotCaptured"
-        };
+        const std::vector<std::string> uiStringKeys = ExtractUiStringDefaultKeys(defaults);
 
         if (listChecks)
         {

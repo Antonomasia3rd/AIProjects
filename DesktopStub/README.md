@@ -110,7 +110,7 @@ Supported options:
 
 - `--help`, `-h`, `/?`: show command-line help.
 - `--ini <path>`: use an alternate INI file; alternate INI instances have separate single-instance scope.
-- `--set Section.Key=Value`: set and save an INI value used by the app. Manifest fields are intentionally not controlled by the INI; edit `AppxManifest.xml` directly or regenerate the built-in default manifest.
+- `--set Section.Key=Value`: set and save an INI value used by the app. Manifest fields are intentionally not controlled by the INI; edit `AppxManifest.xml` directly, and DesktopStub will preserve custom package identity edits during normal startup. Use explicit manifest regeneration to restore the built-in default manifest.
 - `--exit` / `--quit`: ask the running instance to exit gracefully.
 - `--once`: generate once and exit.
 - `--regenerate-manifest`: rewrite `AppxManifest.xml` once from the built-in default manifest template.
@@ -129,7 +129,7 @@ Supported options:
 - `--tile-text <text>`, `--tile-text-secondary <text>` / `--tile-subtext <text>`, and `--tile-text-badge <text>` / `--tile-badge <text>`: configure optional primary, secondary, and badge text overlays.
 - `--tile-text-enable`, `--tile-text-disable`, `--tile-text-clear`, `--tile-text-secondary-clear`, and `--tile-text-badge-clear`: enable/disable or clear overlay parts.
 - `--tile-text-align left|center|right`, `--tile-text-valign top|center|bottom`, `--tile-text-badge-align left|center|right`, `--tile-text-badge-valign top|center|bottom`: configure text/badge placement.
-- `--tile-text-font-size <px>`, `--tile-text-secondary-font-size <px>`, `--tile-text-badge-font-size <px>`, `--tile-text-color <#AARRGGBB>`, `--tile-text-secondary-color <#AARRGGBB>`, `--tile-text-badge-color <#AARRGGBB>`, `--tile-text-shadow`, `--no-tile-text-shadow`: configure text style.
+- `--tile-text-font <name>`, `--tile-text-font-size <px>`, `--tile-text-secondary-font-size <px>`, `--tile-text-badge-font-size <px>`, `--tile-text-bold`, `--no-tile-text-bold`, `--tile-text-secondary-bold`, `--no-tile-text-secondary-bold`, `--tile-text-badge-bold`, `--no-tile-text-badge-bold`, `--tile-text-italic`, `--no-tile-text-italic`, `--tile-text-color <#AARRGGBB>`, `--tile-text-secondary-color <#AARRGGBB>`, `--tile-text-badge-color <#AARRGGBB>`, `--tile-text-shadow`, `--no-tile-text-shadow`, `--tile-text-shadow-color <#AARRGGBB>`, `--tile-text-margin-x <px>`, `--tile-text-margin-y <px>`, `--tile-text-line-gap <px>`, `--tile-text-max-secondary-lines <n>`: configure text style and layout.
 - `--manifest-target Windows10|Windows81|Windows8`: set the generated AppX manifest dialect and regenerate `AppxManifest.xml`. Windows 10 remains the default.
 - `--manifest-win10`, `--manifest-win81` / `--manifest-win8.1`, `--manifest-win8` / `--manifest-win8.0`: shortcuts for `--manifest-target`.
 - `--win8-broker` / `--no-win8-broker`: set and save `Win8LiveTileBrokerApp`.
@@ -248,17 +248,29 @@ Default configuration:
 [TileText]
 Enabled=0
 Text=
+SecondaryText=
+BadgeText=
 Font=Segoe UI
 FontSize=18
+SecondaryFontSize=12
+BadgeFontSize=40
 Bold=0
+SecondaryBold=0
+BadgeBold=0
 Italic=0
 Color=#FFFFFFFF
+SecondaryColor=#CCFFFFFF
+BadgeColor=#FFFFFFFF
 Shadow=1
 ShadowColor=#AA000000
 HorizontalAlign=Center
-VerticalAlign=Bottom
+VerticalAlign=Top
+BadgeHorizontalAlign=Right
+BadgeVerticalAlign=Top
 MarginX=8
 MarginY=10
+LineGap=2
+MaxSecondaryLines=2
 ApplyToMediumTile=1
 ApplyToWideTile=1
 ApplyToLargeTile=1

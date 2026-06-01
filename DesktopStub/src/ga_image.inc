@@ -165,6 +165,7 @@ struct WallpaperBitmapLoadInfo
     UINT requestedHeight = 0;
     int maxLongEdge = 0;
     bool usedWic = false;
+    bool attemptedWic = false;
     bool downscaled = false;
     bool memoryConstrained = false;
 };
@@ -431,10 +432,12 @@ static std::unique_ptr<Bitmap> LoadWallpaperBitmapForRender(
     WallpaperBitmapLoadInfo info{};
     int configuredMaxLongEdge = IniReadClampedI(L"Settings", L"WallpaperDecodeMaxLongEdge", 0, 0, 32768);
     int maxLongEdge = configuredMaxLongEdge > 0 ? configuredMaxLongEdge : autoMaxLongEdge;
+    info.maxLongEdge = maxLongEdge;
 
     if (IniReadI(L"Settings", L"WallpaperDecodeLowMemory", 1) != 0 && maxLongEdge > 0)
     {
         std::unique_ptr<Bitmap> wicBitmap = TryLoadWicBitmapForRender(path, maxLongEdge, info);
+        info.attemptedWic = true;
         if (wicBitmap)
         {
             if (loadInfo)

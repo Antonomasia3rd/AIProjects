@@ -32,6 +32,7 @@ struct UiStrings
     std::wstring liveTileTitle;
     std::wstring tileAppearanceTitle;
     std::wstring tileTextTitle;
+    std::wstring tileTextFont;
     std::wstring tileTextEnabled;
     std::wstring tileTextEdit;
     std::wstring tileTextClear;
@@ -49,7 +50,19 @@ struct UiStrings
     std::wstring tileTextFontSize;
     std::wstring tileTextSecondaryFontSize;
     std::wstring tileTextBadgeFontSize;
+    std::wstring tileTextBold;
+    std::wstring tileTextSecondaryBold;
+    std::wstring tileTextBadgeBold;
+    std::wstring tileTextItalic;
+    std::wstring tileTextColor;
+    std::wstring tileTextSecondaryColor;
+    std::wstring tileTextBadgeColor;
     std::wstring tileTextShadow;
+    std::wstring tileTextShadowColor;
+    std::wstring tileTextMarginX;
+    std::wstring tileTextMarginY;
+    std::wstring tileTextLineGap;
+    std::wstring tileTextMaxSecondaryLines;
     std::wstring tileTextApplyMedium;
     std::wstring tileTextApplyWide;
     std::wstring tileTextApplyLarge;
@@ -57,10 +70,21 @@ struct UiStrings
     std::wstring tileTextApplyLogos;
     std::wstring tileTextEdited;
     std::wstring tileTextCleared;
+    std::wstring tileTextSettingChanged;
+    std::wstring tileTextIntInputInvalid;
     std::wstring tileTextSummary;
     std::wstring tileTextInputTitle;
     std::wstring tileTextSecondaryInputTitle;
     std::wstring tileTextBadgeInputTitle;
+    std::wstring tileTextFontInputTitle;
+    std::wstring tileTextColorInputTitle;
+    std::wstring tileTextSecondaryColorInputTitle;
+    std::wstring tileTextBadgeColorInputTitle;
+    std::wstring tileTextShadowColorInputTitle;
+    std::wstring tileTextMarginXInputTitle;
+    std::wstring tileTextMarginYInputTitle;
+    std::wstring tileTextLineGapInputTitle;
+    std::wstring tileTextMaxSecondaryLinesInputTitle;
 
     std::wstring listenWallpaper;
     std::wstring trayIcon;
@@ -121,6 +145,7 @@ struct UiStrings
     std::wstring liveWallpaperCaptureStartupRefreshDurationState;
     std::wstring liveWallpaperCaptureScreenFallbackState;
     std::wstring liveWallpaperCaptureStartupRefreshSummary;
+    std::wstring liveWallpaperCaptureStartupRefreshOffSummary;
     std::wstring liveWallpaperCaptureNoWindow;
     std::wstring liveWallpaperCaptureSnapshotPathFailed;
     std::wstring liveWallpaperCaptureSnapshotFailed;
@@ -218,6 +243,7 @@ struct UiStrings
     std::wstring wallpaperSource;
     std::wstring wallpaperImageLoaded;
     std::wstring wallpaperImageLoadedWic;
+    std::wstring wallpaperImageLoadedGdiWicFallback;
     std::wstring wallpaperImageLoadedWicDownscaled;
     std::wstring wallpaperImageLoadedWicMemoryConstrained;
     std::wstring renderModeSummary;
@@ -235,6 +261,7 @@ struct UiStrings
     std::wstring generatedAssetCacheSummary;
     std::wstring generatedAssetPrecacheSaved;
     std::wstring generatedAssetPrecacheSummary;
+    std::wstring generatedAssetPrecacheInactive;
     std::wstring failedSaveAsset;
     std::wstring failedSaveScaledAsset;
     std::wstring savePngInvalidInput;

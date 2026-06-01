@@ -1545,6 +1545,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.generatedAssetPrecacheSummary.c_str(),
         StateEnabled(GeneratedAssetPrecacheEnabled()),
         GeneratedAssetPrecacheMaxFiles());
+    if (IniReadI(L"Settings", L"GeneratedAssetPrecache", 1) != 0 && !GeneratedAssetPrecacheEnabled())
+        LogText(g_ui.generatedAssetPrecacheInactive);
     std::wstring tileTextSummary = TileTextPrimaryText();
     std::wstring tileTextSecondarySummary = TileTextSecondaryText();
     std::wstring tileTextBadgeSummary = TileTextBadgeText();
@@ -1565,9 +1567,16 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         liveWallpaperCaptureRefreshText.c_str());
     int liveWallpaperCaptureStartupRefreshMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", 1000, 0, 3600000);
     int liveWallpaperCaptureStartupRefreshDurationMs = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", 0, 0, 3600000);
-    Log(g_ui.liveWallpaperCaptureStartupRefreshSummary.c_str(),
-        LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshMs).c_str(),
-        LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshDurationMs).c_str());
+    if (liveWallpaperCaptureStartupRefreshMs <= 0 || liveWallpaperCaptureStartupRefreshDurationMs <= 0)
+    {
+        LogText(g_ui.liveWallpaperCaptureStartupRefreshOffSummary);
+    }
+    else
+    {
+        Log(g_ui.liveWallpaperCaptureStartupRefreshSummary.c_str(),
+            LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshMs).c_str(),
+            LiveWallpaperOffDisplayText(liveWallpaperCaptureStartupRefreshDurationMs).c_str());
+    }
     Log(g_ui.liveWallpaperCaptureScreenFallbackState.c_str(),
         IniReadI(L"Settings", L"LiveWallpaperCaptureScreenFallback", 0) != 0 ? 1 : 0);
     if (singleInstanceMessageError != ERROR_SUCCESS)

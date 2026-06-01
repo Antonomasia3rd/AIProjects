@@ -208,6 +208,7 @@ static const IniDefault g_defaults[] = {
 static const IniDefault g_powerShellErrorMessageDefaults[] = {
     {POWERSHELL_ERROR_MESSAGES_SECTION, L"0x80073CFF", L"PowerShell error: Enable sideloading first!"},
     {POWERSHELL_ERROR_MESSAGES_SECTION, L"0x80073CF9", L"PowerShell error: AppX install failed. If output also shows 0x80070002, a file referenced by AppxManifest.xml is missing or the manifest/assets path cannot be found."},
+    {POWERSHELL_ERROR_MESSAGES_SECTION, L"0x80073D02", L"PowerShell error: AppX registration failed because the package is currently in use. Close the running DesktopStub package and retry."},
     {POWERSHELL_ERROR_MESSAGES_SECTION, L"0x80070002", L"PowerShell error: file not found during AppX registration. Check that AppxManifest.xml and every referenced asset file exist."},
 };
 
@@ -246,6 +247,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveWallpaperCaptureStartupRefreshDurationState", L"[i] LiveWallpaperCaptureStartupRefreshDurationMs = %d"},
     {L"LiveWallpaperCaptureScreenFallbackState", L"[i] LiveWallpaperCaptureScreenFallback = %d"},
     {L"LiveWallpaperCaptureStartupRefreshSummary", L"[i] Live wallpaper startup recapture: every %s for %s"},
+    {L"LiveWallpaperCaptureStartupRefreshOffSummary", L"[i] Live wallpaper startup recapture: off"},
     {L"LiveWallpaperCaptureNoWindow", L"[!] Live wallpaper capture could not find a source window for %s."},
     {L"LiveWallpaperCaptureSnapshotPathFailed", L"[!] Live wallpaper capture could not create a snapshot path for %s."},
     {L"LiveWallpaperCaptureSnapshotFailed", L"[!] Live wallpaper snapshot capture failed for %s."},
@@ -432,6 +434,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"GeneratedAssetPrecache", L"Pre-cache slideshow wallpapers"},
     {L"GeneratedAssetCacheMaxEntriesLabel", L"Cache max entries: %d"},
     {L"GeneratedAssetPrecacheMaxFilesLabel", L"Pre-cache max files: %d"},
+    {L"GeneratedAssetPrecacheInactive", L"[i] Generated asset pre-cache is configured on but inactive because generated asset cache is disabled or max entries is 0."},
     {L"ListenWallpaper", L"Listen Wallpaper"},
     {L"TrayIcon", L"Tray Icon (this session)"},
     {L"UsePowerShell", L"PowerShell only"},
@@ -461,6 +464,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileClearOnShutdownSuccess", L"[i] Live Tile cleared on shutdown."},
     {L"TileAppearanceTitle", L"Tile appearance:"},
     {L"TileTextTitle", L"Text overlay"},
+    {L"TileTextFont", L"Font: %s"},
     {L"TileTextEnabled", L"Enable text overlay"},
     {L"TileTextEdit", L"Edit text..."},
     {L"TileTextClear", L"Clear text"},
@@ -478,7 +482,19 @@ static const StringDefault g_stringDefaults[] = {
     {L"TileTextFontSize", L"Primary font size: %d px"},
     {L"TileTextSecondaryFontSize", L"Secondary font size: %d px"},
     {L"TileTextBadgeFontSize", L"Badge font size: %d px"},
+    {L"TileTextBold", L"Primary bold"},
+    {L"TileTextSecondaryBold", L"Secondary bold"},
+    {L"TileTextBadgeBold", L"Badge bold"},
+    {L"TileTextItalic", L"Italic"},
+    {L"TileTextColor", L"Primary color: %s"},
+    {L"TileTextSecondaryColor", L"Secondary color: %s"},
+    {L"TileTextBadgeColor", L"Badge color: %s"},
     {L"TileTextShadow", L"Shadow"},
+    {L"TileTextShadowColor", L"Shadow color: %s"},
+    {L"TileTextMarginX", L"Margin X: %d px"},
+    {L"TileTextMarginY", L"Margin Y: %d px"},
+    {L"TileTextLineGap", L"Line gap: %d px"},
+    {L"TileTextMaxSecondaryLines", L"Max secondary lines: %d"},
     {L"TileTextApplyMedium", L"Apply to Medium tile"},
     {L"TileTextApplyWide", L"Apply to Wide tile"},
     {L"TileTextApplyLarge", L"Apply to Large tile"},
@@ -486,10 +502,21 @@ static const StringDefault g_stringDefaults[] = {
     {L"TileTextApplyLogos", L"Apply to logos"},
     {L"TileTextEdited", L"[i] Tile text changed: %s"},
     {L"TileTextCleared", L"[i] Tile text cleared."},
+    {L"TileTextSettingChanged", L"[i] Tile text setting changed: %s = %s"},
+    {L"TileTextIntInputInvalid", L"Value must be an integer from %d to %d."},
     {L"TileTextSummary", L"[i] Tile text overlay: %s (%s)"},
     {L"TileTextInputTitle", L"Edit tile text"},
     {L"TileTextSecondaryInputTitle", L"Edit secondary tile text"},
     {L"TileTextBadgeInputTitle", L"Edit tile badge text"},
+    {L"TileTextFontInputTitle", L"Edit tile text font"},
+    {L"TileTextColorInputTitle", L"Edit primary tile text color"},
+    {L"TileTextSecondaryColorInputTitle", L"Edit secondary tile text color"},
+    {L"TileTextBadgeColorInputTitle", L"Edit tile badge color"},
+    {L"TileTextShadowColorInputTitle", L"Edit tile text shadow color"},
+    {L"TileTextMarginXInputTitle", L"Edit tile text horizontal margin"},
+    {L"TileTextMarginYInputTitle", L"Edit tile text vertical margin"},
+    {L"TileTextLineGapInputTitle", L"Edit tile text line gap"},
+    {L"TileTextMaxSecondaryLinesInputTitle", L"Edit max secondary tile text lines"},
     {L"GenerateOnStartup", L"Generate on Startup"},
     {L"GenerateOnStartupOnlyWhenChanged", L"Generate on Startup only when changed"},
     {L"HideDisabledEntries", L"Hide disabled entries"},
@@ -569,7 +596,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"StartingWallpaperGeneration", L"Starting wallpaper generation: %s"},
     {L"WallpaperSource", L"Wallpaper source: %s"},
     {L"WallpaperImageLoaded", L"[i] Wallpaper image loaded (%d x %d)."},
-    {L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with WIC: %lu x %lu."},
+    {L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu (max long edge=%d)."},
+    {L"WallpaperImageLoadedGdiWicFallback", L"[i] Wallpaper image loaded with GDI+ after low-memory WIC decode fallback: %d x %d (requested max long edge=%d)."},
     {L"WallpaperImageLoadedWicDownscaled", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu -> %lu x %lu (max long edge=%d)."},
     {L"WallpaperImageLoadedWicMemoryConstrained", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu -> %lu x %lu (requested %lu x %lu; memory-limited from max long edge=%d)."},
     {L"RenderModeSummary", L"[i] Render fit mode: %s"},
@@ -1010,6 +1038,7 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from configured defaults: %s", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s");
     UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from INI if missing", L"generated from built-in defaults if missing");
     UpgradeStringDefaultIfUnmodified(L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from config", L"Regenerate AppxManifest.xml from built-in defaults");
+    UpgradeStringDefaultIfUnmodified(L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with WIC: %lu x %lu.", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu (max long edge=%d).");
     UpgradeTileTextDefaultAlignment();
     RemoveObsoleteManifestIniSettings();
 }

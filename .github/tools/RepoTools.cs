@@ -594,6 +594,7 @@ static class RepoTools
                 string tempRoot = Path.Combine(tempBase, "DesktopStubSmoke-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(tempRoot);
                 bool deleteTemp = false;
+                string smokeIdentity = null;
                 try
                 {
                     string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
@@ -612,15 +613,24 @@ static class RepoTools
 
                     SmokeProcess(exe, new[] { "--help" }, new[] { 0 }, 30, "DesktopStub help");
                     SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--scales", "auto", "--asset", "MediumTile=1", "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
+                    string manifestPath = Path.Combine(Path.GetDirectoryName(exe), "AppxManifest.xml");
+                    smokeIdentity = "dev.local.desktopstubsmoke." + Guid.NewGuid().ToString("N").Substring(0, 16);
+                    SetDesktopStubManifestIdentity(manifestPath, smokeIdentity);
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", wallpaper, "--once", "--no-tray", "--no-monitor" }, new[] { 0 }, 30, "DesktopStub one-shot generation");
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", Path.Combine(tempRoot, "missing.png"), "--no-tray" }, new[] { 2 }, 30, "DesktopStub invalid wallpaper guard");
 
-                    if (!File.Exists(Path.Combine(Path.GetDirectoryName(exe), "AppxManifest.xml")))
+                    if (!File.Exists(manifestPath))
                         throw new InvalidOperationException("DesktopStub smoke test did not create AppxManifest.xml.");
+                    string manifestAfterSmoke = File.ReadAllText(manifestPath, Encoding.UTF8);
+                    if (!Regex.IsMatch(manifestAfterSmoke, @"<\s*Identity\b[^>]*\bName\s*=\s*[""']" + Regex.Escape(smokeIdentity) + @"[""']", RegexOptions.IgnoreCase))
+                        throw new InvalidOperationException("DesktopStub smoke test did not preserve the custom AppxManifest.xml package identity.");
                     deleteTemp = true;
                 }
                 finally
                 {
+                    if (!String.IsNullOrWhiteSpace(smokeIdentity))
+                        UnregisterDesktopStubSmokePackage(smokeIdentity, tempRoot);
+
                     if (deleteTemp)
                     {
                         try { Directory.Delete(tempRoot, true); } catch { }
@@ -651,6 +661,38 @@ static class RepoTools
 
         Console.WriteLine("Windows build smoke tests completed.");
         return 0;
+    }
+
+    static void SetDesktopStubManifestIdentity(string manifestPath, string identityName)
+    {
+        if (!File.Exists(manifestPath))
+            throw new InvalidOperationException("DesktopStub smoke test did not create AppxManifest.xml.");
+
+        string xml = File.ReadAllText(manifestPath, Encoding.UTF8);
+        string updated = Regex.Replace(
+            xml,
+            @"(<\s*Identity\b[^>]*\bName\s*=\s*)[""'][^""']*[""']",
+            "$1\"" + identityName + "\"",
+            RegexOptions.IgnoreCase,
+            TimeSpan.FromSeconds(5));
+        if (String.Equals(xml, updated, StringComparison.Ordinal))
+            throw new InvalidOperationException("DesktopStub smoke test could not update AppxManifest.xml identity.");
+        File.WriteAllText(manifestPath, updated, new UTF8Encoding(true));
+    }
+
+    static void UnregisterDesktopStubSmokePackage(string identityName, string workingDirectory)
+    {
+        string escaped = identityName.Replace("'", "''");
+        string script =
+            "$pkg = Get-AppxPackage -Name '" + escaped + "' -ErrorAction SilentlyContinue; " +
+            "if ($pkg) { Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction Stop }";
+        var result = RunCapture(
+            "powershell.exe",
+            "-NoProfile -ExecutionPolicy Bypass -Command " + QuoteArg(script),
+            workingDirectory,
+            120000);
+        if (result.ExitCode != 0)
+            Warn("DesktopStub smoke package cleanup failed for " + identityName + ": " + result.Error + result.Output);
     }
 
     static void SmokeProcess(string file, string[] args, int[] allowedExitCodes, int timeoutSeconds, string name)
