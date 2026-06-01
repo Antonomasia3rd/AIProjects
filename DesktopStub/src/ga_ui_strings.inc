@@ -347,6 +347,7 @@ void LoadUiStrings()
     g_ui.currentWallpaperNotFound = IniReadS(L"Strings", L"CurrentWallpaperNotFound", L"Could not detect current wallpaper.");
 
     g_ui.programStarting = IniReadS(L"Strings", L"ProgramStarting", L"Program starting...");
+    g_ui.desktopStubVersionSummary = IniReadS(L"Strings", L"DesktopStubVersionSummary", L"[i] DesktopStub version: %s");
     g_ui.notificationTitle = IniReadS(L"Strings", L"NotificationTitle", L"DesktopStub");
     g_ui.notificationGenerationStarted = IniReadS(L"Strings", L"NotificationGenerationStarted", L"Wallpaper generation started.");
     g_ui.notificationGenerationSuccess = IniReadS(L"Strings", L"NotificationGenerationSuccess", L"Wallpaper generation completed successfully.");
@@ -401,6 +402,7 @@ void LoadUiStrings()
     g_ui.appxManifestCreated = IniReadS(L"Strings", L"AppxManifestCreated", L"[i] Created AppxManifest.xml: %s");
     g_ui.appxManifestExisting = IniReadS(L"Strings", L"AppxManifestExisting", L"[i] Using existing AppxManifest.xml: %s");
     g_ui.appxManifestRegenerated = IniReadS(L"Strings", L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s");
+    g_ui.appxManifestVersionUpdated = IniReadS(L"Strings", L"AppxManifestVersionUpdated", L"[i] Updated AppxManifest.xml package version to match DesktopStub: %s");
     g_ui.appxManifestCreateFailed = IniReadS(L"Strings", L"AppxManifestCreateFailed", L"[!] Failed to create AppxManifest.xml: %s");
     g_ui.appxManifestRegenerateFailed = IniReadS(L"Strings", L"AppxManifestRegenerateFailed", L"[!] Failed to regenerate AppxManifest.xml: %s");
     g_ui.manifestPath = IniReadS(L"Strings", L"ManifestPath", L"Manifest path: %s");
@@ -483,6 +485,7 @@ void LoadUiStrings()
     g_ui.offText = IniReadS(L"Strings", L"OffText", L"off");
 
     g_ui.trayTip = IniReadS(L"Strings", L"TrayTip", L"DesktopStub");
+    g_ui.versionLabel = IniReadS(L"Strings", L"VersionLabel", L"Version: %s");
     g_ui.exeLabel = IniReadS(L"Strings", L"ExeLabel", L"[i] EXE: %s");
     g_ui.iniLabel = IniReadS(L"Strings", L"IniLabel", L"[i] INI: %s");
     g_ui.logFileLabel = IniReadS(L"Strings", L"LogFileLabel", L"[i] Log file: %s");
@@ -741,6 +744,8 @@ static void RequireFormat(std::wstring& text, const wchar_t* key, std::initializ
 
 static void ValidateFormatStrings()
 {
+    RequireFormat(g_ui.versionLabel, L"VersionLabel", { L"%s" });
+    RequireFormat(g_ui.desktopStubVersionSummary, L"DesktopStubVersionSummary", { L"%s" });
     RequireFormat(g_ui.exeLabel, L"ExeLabel", { L"%s" });
     RequireFormat(g_ui.iniLabel, L"IniLabel", { L"%s" });
     RequireFormat(g_ui.logFileLabel, L"LogFileLabel", { L"%s" });
@@ -885,6 +890,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.manifestRestrictedCapabilityLabel, L"ManifestRestrictedCapabilityLabel", { L"%s" });
     RequireFormat(g_ui.manifestSplashScreenImageLabel, L"ManifestSplashScreenImageLabel", { L"%s" });
     RequireFormat(g_ui.manifestSourceLabel, L"ManifestSourceLabel", { L"%s" });
+    RequireFormat(g_ui.appxManifestVersionUpdated, L"AppxManifestVersionUpdated", { L"%s" });
     RequireFormat(g_ui.liveWallpaperCaptureDelayMsLabel, L"LiveWallpaperCaptureDelayMsLabel", { L"%d" });
     RequireFormat(g_ui.liveWallpaperCaptureRefreshMsLabel, L"LiveWallpaperCaptureRefreshMsLabel", { L"%s" });
     RequireFormat(g_ui.liveWallpaperCaptureStartupRefreshMsLabel, L"LiveWallpaperCaptureStartupRefreshMsLabel", { L"%s" });

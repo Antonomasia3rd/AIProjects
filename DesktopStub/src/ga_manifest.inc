@@ -401,8 +401,9 @@ static std::wstring EffectiveManifestPublisher()
 
 static std::wstring EffectiveManifestPackageVersion()
 {
-    std::wstring version = ManifestSetting(L"PackageVersion", L"1.0.0.0", L"ManifestPackageVersion");
-    return IsManifestVersion(version) ? version : L"1.0.0.0";
+    std::wstring fallback = DesktopStubPackageVersion();
+    std::wstring version = ManifestSetting(L"PackageVersion", fallback.c_str(), L"ManifestPackageVersion");
+    return IsManifestVersion(version) ? version : fallback;
 }
 
 static std::wstring EffectiveManifestDisplayName()
@@ -843,6 +844,84 @@ static bool ExtractXmlAttributeFromTag(const std::wstring& xml, const wchar_t* t
         }
     }
     return false;
+}
+
+static bool ReplaceXmlAttributeInFirstTagByLocalName(
+    std::wstring& xml,
+    const wchar_t* tagLocalName,
+    const wchar_t* attributeName,
+    const std::wstring& value)
+{
+    size_t tag = 0;
+    size_t nameEnd = 0;
+    size_t tagEnd = 0;
+    if (!FindXmlStartTagByLocalName(xml, XmlLocalName(tagLocalName ? tagLocalName : L""), 0, tag, nameEnd, tagEnd))
+        return false;
+
+    std::wstring wantedAttribute = XmlLocalName(attributeName ? attributeName : L"");
+    size_t pos = nameEnd;
+    while (pos < tagEnd)
+    {
+        while (pos < tagEnd && iswspace(xml[pos]) != 0)
+            ++pos;
+        if (pos >= tagEnd || xml[pos] == L'/')
+            break;
+
+        size_t attrStart = pos;
+        while (pos < tagEnd && IsXmlNameChar(xml[pos]))
+            ++pos;
+        if (pos == attrStart)
+        {
+            ++pos;
+            continue;
+        }
+
+        std::wstring attrLocalName = XmlLocalName(xml.substr(attrStart, pos - attrStart));
+        while (pos < tagEnd && iswspace(xml[pos]) != 0)
+            ++pos;
+        if (pos >= tagEnd || xml[pos] != L'=')
+            continue;
+        ++pos;
+        while (pos < tagEnd && iswspace(xml[pos]) != 0)
+            ++pos;
+        if (pos >= tagEnd)
+            break;
+
+        wchar_t quote = xml[pos];
+        size_t valueStart = pos;
+        size_t valueEnd = pos;
+        if (quote == L'\'' || quote == L'"')
+        {
+            valueStart = pos + 1;
+            valueEnd = xml.find(quote, valueStart);
+            if (valueEnd == std::wstring::npos || valueEnd > tagEnd)
+                return false;
+            pos = valueEnd + 1;
+        }
+        else
+        {
+            while (valueEnd < tagEnd && iswspace(xml[valueEnd]) == 0)
+                ++valueEnd;
+            pos = valueEnd;
+        }
+
+        if (IEquals(attrLocalName, wantedAttribute))
+        {
+            xml.replace(valueStart, valueEnd - valueStart, XmlEscape(value));
+            return true;
+        }
+    }
+
+    size_t insertAt = tagEnd;
+    if (insertAt > tag && xml[insertAt - 1] == L'/')
+        --insertAt;
+    std::wstring inserted = L" ";
+    inserted += attributeName ? attributeName : L"";
+    inserted += L"=\"";
+    inserted += XmlEscape(value);
+    inserted += L"\"";
+    xml.insert(insertAt, inserted);
+    return true;
 }
 
 static bool ExtractXmlElementText(const std::wstring& xml, const wchar_t* elementName, std::wstring& out)
@@ -1448,6 +1527,13 @@ static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD&
                 !IEquals(existingIdentityName, expectedIdentityName) &&
                 ExistingManifestIdentityLooksGeneratedDefault(existingIdentityName, existingExecutable);
 
+            std::wstring existingPackageVersion;
+            std::wstring expectedPackageVersion = EffectiveManifestPackageVersion();
+            bool packageVersionMismatch =
+                readExistingXml &&
+                ExtractXmlAttributeFromTag(xml, L"<Identity ", L"Version", existingPackageVersion) &&
+                !IEquals(existingPackageVersion, expectedPackageVersion);
+
             if (!EnsureAppxActivationStubExecutable(error))
                 return false;
 
@@ -1469,6 +1555,28 @@ static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD&
                 if (WriteUtf8BomTextFile(manifestPath, rebuiltManifest))
                 {
                     created = true;
+                    return true;
+                }
+
+                error = GetLastError();
+                if (error == ERROR_SUCCESS)
+                    error = ERROR_WRITE_FAULT;
+                return false;
+            }
+
+            if (packageVersionMismatch)
+            {
+                std::wstring updatedXml = xml;
+                if (!ReplaceXmlAttributeInFirstTagByLocalName(updatedXml, L"Identity", L"Version", expectedPackageVersion))
+                {
+                    error = ERROR_INVALID_DATA;
+                    SetLastError(error);
+                    return false;
+                }
+
+                if (WriteUtf8BomTextFile(manifestPath, updatedXml))
+                {
+                    Log(g_ui.appxManifestVersionUpdated.c_str(), expectedPackageVersion.c_str());
                     return true;
                 }
 

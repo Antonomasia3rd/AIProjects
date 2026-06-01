@@ -1,0 +1,5 @@
+#define DESKTOPSTUB_FILE_DESCRIPTION "DesktopStub tray wallpaper tile utility"
+#define DESKTOPSTUB_INTERNAL_NAME "DesktopStub.exe"
+#define DESKTOPSTUB_ORIGINAL_FILENAME "DesktopStub.exe"
+#include "src\\DesktopStubVersionResource.rc.inc"
+

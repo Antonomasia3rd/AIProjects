@@ -1325,6 +1325,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         ShowCommandLineMessage(CommandLineUsageText(), false);
         return 0;
     }
+    if (CommandLineShouldShowVersion())
+    {
+        ShowCommandLineMessage(CommandLineVersionText(), false);
+        return 0;
+    }
 
     std::wstring comHelperManifestPath;
     if (CommandLineComRegistrationHelper(comHelperManifestPath))
@@ -1485,6 +1490,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         QueueStartupWarning(previousForceShutdownCleanupWarning);
 
     LogText(g_ui.programStarting);
+    Log(g_ui.desktopStubVersionSummary.c_str(), DesktopStubVersionDisplayText().c_str());
     Log(g_ui.timingLog.c_str(), g_ui.timingPreLogInitialization.c_str(), ElapsedMs(appStart, gdiDone));
     Log(g_ui.timingLog.c_str(), g_ui.timingIniDefaultStringLoading.c_str(), ElapsedMs(iniStart, iniDone));
     Log(g_ui.timingLog.c_str(), g_ui.timingGdiStartup.c_str(), ElapsedMs(iniDone, gdiDone));
@@ -1534,6 +1540,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.notificationsSummary.c_str(), StateEnabled(g_notificationsEnabled), StateOn(g_notifyOnStart), StateOn(g_notifyOnSuccess), StateOn(g_notifyOnFailure), StateOn(g_notifyOnBusy), StateOn(g_notifyOnAlreadyRunning), StateOn(g_notifyOnSingleInstanceFailure));
     Log(g_ui.trayIconSummary.c_str(), StateEnabled(g_tray));
     Log(g_ui.trimWorkingSetOnIdleSummary.c_str(), StateEnabled(g_trimWorkingSetOnIdle));
+    Log(g_ui.idleTrimIntervalMsSummary.c_str(),
+        LiveWallpaperOffDisplayText(IniReadClampedI(L"Settings", L"IdleTrimIntervalMs", 60000, 0, 3600000)).c_str());
     Log(g_ui.compactCrtHeapOnIdleSummary.c_str(), StateEnabled(g_compactCrtHeapOnIdle));
     Log(g_ui.keepGdiPlusLoadedSummary.c_str(), StateEnabled(g_keepGdiPlusLoaded));
     Log(g_ui.powerShellRegistrationSummary.c_str(), UsePowerShell() ? g_ui.powerShellEnabledMode.c_str() : g_ui.comPreferredMode.c_str());

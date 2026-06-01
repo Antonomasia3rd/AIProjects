@@ -27,6 +27,8 @@ DesktopStub\build\DesktopStubLiveTileBroker.exe
 
 This avoids the old split where a Windows 8/8.1 manifest could be selected at runtime while the broker helper was missing because the build was run without the right argument.
 
+The build embeds one version into both EXEs, the generated AppX manifest, startup diagnostics, the tray menu, and `--version`. By default the script reads the `DesktopStub-vN` Git tag family and builds the next package version as `N.0.0.0`; for example, after `DesktopStub-v17`, an untagged local/CI build reports `DesktopStub-v18 (18.0.0.0)`. Set `DESKTOPSTUB_VERSION=18.0.0.0` or `DESKTOPSTUB_RELEASE_TAG=DesktopStub-v18` before running the script to override this for a custom build.
+
 The experimental background-task DLL remains in the source tree for research, but it is intentionally not part of the normal one-command build.
 
 If `build\DesktopStub.exe` or `build\DesktopStubLiveTileBroker.exe` is running, close it before rebuilding so the compiler can overwrite the output.
@@ -109,6 +111,7 @@ DesktopStub.exe --exit
 Supported options:
 
 - `--help`, `-h`, `/?`: show command-line help.
+- `--version`, `-v`: show the embedded release tag and AppX/Win32 package version.
 - `--ini <path>`: use an alternate INI file; alternate INI instances have separate single-instance scope.
 - `--set Section.Key=Value`: set and save an INI value used by the app. Manifest fields are intentionally not controlled by the INI; edit `AppxManifest.xml` directly, and DesktopStub will preserve custom package identity edits during normal startup. Use explicit manifest regeneration to restore the built-in default manifest.
 - `--exit` / `--quit`: ask the running instance to exit gracefully.
@@ -283,7 +286,7 @@ When Live Tile mode disables static manifest assets, DesktopStub does not bake t
 
 ## Release
 
-Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available.
+Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available. The DesktopStub Windows file/product version and default `AppxManifest.xml` package version are derived from the same `DesktopStub-vN` family used by CI release publishing, so the binary and manifest versions match the release tag.
 
 ## Notes for fix28
 

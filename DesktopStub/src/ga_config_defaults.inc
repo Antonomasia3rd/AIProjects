@@ -225,6 +225,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"OffText", L"off"},
 
     {L"TrayTip", L"DesktopStub"},
+    {L"VersionLabel", L"Version: %s"},
     {L"ExeLabel", L"[i] EXE: %s"},
     {L"IniLabel", L"[i] INI: %s"},
     {L"LogFileLabel", L"[i] Log file: %s"},
@@ -236,6 +237,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"TimingAppRegistration", L"app registration"},
     {L"TimingLiveTileUpdate", L"Live Tile update"},
     {L"TimingGenerationTotal", L"generation total"},
+    {L"DesktopStubVersionSummary", L"[i] DesktopStub version: %s"},
     {L"PowerShellRegistrationSummary", L"[i] PowerShell registration: %s"},
     {L"UsePowerShellSummary", L"[i] UsePowerShell = %d (%s)"},
     {L"LiveTileUpdateSummary", L"[i] Live Tile update mode: %s"},
@@ -645,6 +647,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"AppxManifestCreated", L"[i] Created AppxManifest.xml: %s"},
     {L"AppxManifestExisting", L"[i] Using existing AppxManifest.xml: %s"},
     {L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s"},
+    {L"AppxManifestVersionUpdated", L"[i] Updated AppxManifest.xml package version to match DesktopStub: %s"},
     {L"AppxManifestCreateFailed", L"[!] Failed to create AppxManifest.xml: %s"},
     {L"AppxManifestRegenerateFailed", L"[!] Failed to regenerate AppxManifest.xml: %s"},
     {L"ManifestPath", L"Manifest path: %s"},

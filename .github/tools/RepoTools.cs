@@ -588,6 +588,7 @@ static class RepoTools
             string sourceExe = Path.Combine(root, smokePath.Replace('/', Path.DirectorySeparatorChar));
             if (File.Exists(sourceExe))
             {
+                string desktopStubVersion = VerifyDesktopStubBinaryVersion(sourceExe, "DesktopStub");
                 string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
                 if (String.IsNullOrWhiteSpace(tempBase))
                     tempBase = Path.GetTempPath();
@@ -604,13 +605,22 @@ static class RepoTools
                     {
                         string sourceHelper = Path.Combine(sourceBuildDir, helper);
                         if (File.Exists(sourceHelper))
+                        {
+                            if (helper == "DesktopStubLiveTileBroker.exe")
+                            {
+                                string helperVersion = VerifyDesktopStubBinaryVersion(sourceHelper, helper);
+                                if (!String.Equals(helperVersion, desktopStubVersion, StringComparison.Ordinal))
+                                    throw new InvalidOperationException("DesktopStub helper version does not match DesktopStub.exe: " + helperVersion + " != " + desktopStubVersion);
+                            }
                             File.Copy(sourceHelper, Path.Combine(tempRoot, helper), true);
+                        }
                     }
 
                     string ini = Path.Combine(tempRoot, "DesktopStub.ini");
                     string wallpaper = Path.Combine(tempRoot, "wallpaper.bmp");
                     WriteTestBmp(wallpaper);
 
+                    SmokeProcess(exe, new[] { "--version" }, new[] { 0 }, 30, "DesktopStub version");
                     SmokeProcess(exe, new[] { "--help" }, new[] { 0 }, 30, "DesktopStub help");
                     SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--scales", "auto", "--asset", "MediumTile=1", "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
                     string manifestPath = Path.Combine(Path.GetDirectoryName(exe), "AppxManifest.xml");
@@ -622,6 +632,7 @@ static class RepoTools
                     if (!File.Exists(manifestPath))
                         throw new InvalidOperationException("DesktopStub smoke test did not create AppxManifest.xml.");
                     string manifestAfterSmoke = File.ReadAllText(manifestPath, Encoding.UTF8);
+                    VerifyDesktopStubManifestVersion(manifestAfterSmoke, desktopStubVersion);
                     if (!Regex.IsMatch(manifestAfterSmoke, @"<\s*Identity\b[^>]*\bName\s*=\s*[""']" + Regex.Escape(smokeIdentity) + @"[""']", RegexOptions.IgnoreCase))
                         throw new InvalidOperationException("DesktopStub smoke test did not preserve the custom AppxManifest.xml package identity.");
                     deleteTemp = true;
@@ -661,6 +672,37 @@ static class RepoTools
 
         Console.WriteLine("Windows build smoke tests completed.");
         return 0;
+    }
+
+    static string VerifyDesktopStubBinaryVersion(string file, string label)
+    {
+        var info = FileVersionInfo.GetVersionInfo(file);
+        string fileVersion = NormalizeFourPartVersion(info.FileVersion);
+        string productVersion = NormalizeFourPartVersion(info.ProductVersion);
+        if (fileVersion == null)
+            throw new InvalidOperationException(label + " has no valid four-part FileVersion resource: " + file);
+        if (productVersion == null)
+            throw new InvalidOperationException(label + " has no valid four-part ProductVersion resource: " + file);
+        if (!String.Equals(fileVersion, productVersion, StringComparison.Ordinal))
+            throw new InvalidOperationException(label + " FileVersion and ProductVersion differ: " + fileVersion + " != " + productVersion);
+        return fileVersion;
+    }
+
+    static string NormalizeFourPartVersion(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return null;
+        var match = Regex.Match(value, @"\b(?<version>\d+\.\d+\.\d+\.\d+)\b");
+        return match.Success ? match.Groups["version"].Value : null;
+    }
+
+    static void VerifyDesktopStubManifestVersion(string manifestXml, string expectedVersion)
+    {
+        if (!Regex.IsMatch(
+            manifestXml,
+            @"<\s*Identity\b[^>]*\bVersion\s*=\s*[""']" + Regex.Escape(expectedVersion) + @"[""']",
+            RegexOptions.IgnoreCase))
+            throw new InvalidOperationException("DesktopStub smoke test AppxManifest.xml version does not match the binary version: " + expectedVersion);
     }
 
     static void SetDesktopStubManifestIdentity(string manifestPath, string identityName)
