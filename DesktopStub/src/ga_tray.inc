@@ -559,6 +559,19 @@ static bool AppendMenuChecked(HMENU menu, UINT flags, UINT_PTR id, const wchar_t
     return true;
 }
 
+static void AfterTrayPopupClosed(HWND h)
+{
+    // Standard tray-popup cleanup: lets the owner window regain normal message
+    // flow after TrackPopupMenu, and immediately releases menu-construction
+    // heap/pages when low-idle-memory trimming is enabled. This should not be
+    // used to judge GDI leaks; stable one-time menu/theme caches are normal.
+    if (h)
+        PostMessageW(h, WM_NULL, 0, 0);
+
+    if (!GenerationWorkPending())
+        TrimIdleWorkingSetIfConfigured();
+}
+
 void Menu(HWND h)
 {
     ReloadRuntimeSettingsFromIni();
@@ -601,6 +614,7 @@ void Menu(HWND h)
         SetForegroundWindow(h);
         UINT cmd = static_cast<UINT>(TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, h, nullptr));
         DestroyMenu(m);
+        AfterTrayPopupClosed(h);
 
         if (cmd == ID_CANCEL_SHUTDOWN)
             CancelRequestedShutdown(h);
@@ -1151,6 +1165,7 @@ void Menu(HWND h)
     SetForegroundWindow(h);
     UINT cmd = static_cast<UINT>(TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,h,nullptr));
     DestroyMenu(m);
+    AfterTrayPopupClosed(h);
 
     switch(cmd)
     {
