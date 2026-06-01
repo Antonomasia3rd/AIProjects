@@ -28,6 +28,14 @@
 #define DESKTOPSTUB_ORIGINAL_FILENAME "DesktopStub.exe"
 #endif
 
+#ifndef DESKTOPSTUB_COMPANY_NAME
+#define DESKTOPSTUB_COMPANY_NAME "DesktopStub"
+#endif
+
+#ifndef DESKTOPSTUB_PRODUCT_NAME
+#define DESKTOPSTUB_PRODUCT_NAME "DesktopStub"
+#endif
+
 #define DESKTOPSTUB_VERSION_COMMA DESKTOPSTUB_VERSION_MAJOR,DESKTOPSTUB_VERSION_MINOR,DESKTOPSTUB_VERSION_BUILD,DESKTOPSTUB_VERSION_REVISION
 #define DESKTOPSTUB_RC_STRINGIZE2(x) #x
 #define DESKTOPSTUB_RC_STRINGIZE(x) DESKTOPSTUB_RC_STRINGIZE2(x)
@@ -50,12 +58,12 @@ BEGIN
     BEGIN
         BLOCK "040904B0"
         BEGIN
-            VALUE "CompanyName", "DesktopStub\0"
+            VALUE "CompanyName", DESKTOPSTUB_COMPANY_NAME "\0"
             VALUE "FileDescription", DESKTOPSTUB_FILE_DESCRIPTION "\0"
             VALUE "FileVersion", DESKTOPSTUB_VERSION_TEXT "\0"
             VALUE "InternalName", DESKTOPSTUB_INTERNAL_NAME "\0"
             VALUE "OriginalFilename", DESKTOPSTUB_ORIGINAL_FILENAME "\0"
-            VALUE "ProductName", "DesktopStub\0"
+            VALUE "ProductName", DESKTOPSTUB_PRODUCT_NAME "\0"
             VALUE "ProductVersion", DESKTOPSTUB_VERSION_TEXT "\0"
         END
     END
@@ -64,4 +72,3 @@ BEGIN
         VALUE "Translation", 0x0409, 1200
     END
 END
-

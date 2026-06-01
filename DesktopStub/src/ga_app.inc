@@ -37,6 +37,11 @@ static void ApplySettingsChangedByCommandLine(bool applyTrayIcon)
     LiveTileUpdateMode liveTileBefore = ConfiguredLiveTileUpdateMode();
     ManifestCompatibilityTarget manifestTargetBefore = ConfiguredManifestCompatibilityTarget();
     ReloadRuntimeSettingsFromIni();
+    EnsureIniStringDefaults();
+    UpgradeRenamedStringDefaults();
+    LoadUiStrings();
+    ValidateFormatStrings();
+    NormalizeSeparatorStrings();
     if (applyTrayIcon)
         ApplyTrayIconSettingFromIni();
 
@@ -1322,6 +1327,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
     if (g_commandLine.helpRequested)
     {
+        EnsureIniReadyForCommandLineSettings();
         ShowCommandLineMessage(CommandLineUsageText(), false);
         return 0;
     }
@@ -1419,7 +1425,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         {
             if ((singleInstanceRequest & SINGLE_INSTANCE_REQUEST_MASK) != SINGLE_INSTANCE_REQUEST_SHOW)
             {
-                ShowCommandLineMessage(L"Failed to signal the running DesktopStub instance.", true);
+                ShowCommandLineMessage(
+                    StartupString(L"CommandLineSignalExistingFailed", L"Failed to signal the running DesktopStub instance."),
+                    true);
                 CloseHandle(g_singleInstanceMutex);
                 g_singleInstanceMutex = nullptr;
                 return 2;

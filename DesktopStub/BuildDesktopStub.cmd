@@ -4,6 +4,14 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "ROOT=%~dp0"
 set "VCVARS="
 
+if not defined DESKTOPSTUB_PRODUCT_NAME set "DESKTOPSTUB_PRODUCT_NAME=DesktopStub"
+if not defined DESKTOPSTUB_HOST_EXE_NAME set "DESKTOPSTUB_HOST_EXE_NAME=%DESKTOPSTUB_PRODUCT_NAME%.exe"
+if not defined DESKTOPSTUB_BROKER_EXE_NAME set "DESKTOPSTUB_BROKER_EXE_NAME=%DESKTOPSTUB_PRODUCT_NAME%LiveTileBroker.exe"
+if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX set "DESKTOPSTUB_RELEASE_TAG_PREFIX=%DESKTOPSTUB_PRODUCT_NAME%-v"
+call :StringLength "%DESKTOPSTUB_RELEASE_TAG_PREFIX%" DESKTOPSTUB_RELEASE_TAG_PREFIX_LEN
+for %%F in ("%DESKTOPSTUB_HOST_EXE_NAME%") do set "DESKTOPSTUB_HOST_BASE=%%~nF"
+for %%F in ("%DESKTOPSTUB_BROKER_EXE_NAME%") do set "DESKTOPSTUB_BROKER_BASE=%%~nF"
+
 if defined VCINSTALLDIR if exist "%VCINSTALLDIR%\Auxiliary\Build\vcvars64.bat" set "VCVARS=%VCINSTALLDIR%\Auxiliary\Build\vcvars64.bat"
 if not defined VCVARS if defined VSINSTALLDIR if exist "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
 
@@ -56,7 +64,9 @@ if errorlevel 1 (
 )
 set "VERSION_DEFINES=/DDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /DDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /DDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /DDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION% /DDESKTOPSTUB_RELEASE_TAG=\"%DESKTOPSTUB_RELEASE_TAG%\""
 set "RC_VERSION_DEFINES=/d DESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /d DESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /d DESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /d DESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
-echo DesktopStub version: %DESKTOPSTUB_RELEASE_TAG% (%DESKTOPSTUB_VERSION%)
+set "RC_HOST_NAME_DEFINES=/d DESKTOPSTUB_INTERNAL_NAME=\"%DESKTOPSTUB_HOST_EXE_NAME%\" /d DESKTOPSTUB_ORIGINAL_FILENAME=\"%DESKTOPSTUB_HOST_EXE_NAME%\""
+set "RC_BROKER_NAME_DEFINES=/d DESKTOPSTUB_INTERNAL_NAME=\"%DESKTOPSTUB_BROKER_EXE_NAME%\" /d DESKTOPSTUB_ORIGINAL_FILENAME=\"%DESKTOPSTUB_BROKER_EXE_NAME%\""
+echo %DESKTOPSTUB_PRODUCT_NAME% version: %DESKTOPSTUB_RELEASE_TAG% (%DESKTOPSTUB_VERSION%)
 
 rem ---------------------------------------------------------------------------
 rem Build policy:
@@ -67,8 +77,8 @@ rem   runtime while the packaged broker helper had not been built.
 rem
 rem   The script now deliberately ignores every argument and always builds the
 rem   same stable target set:
-rem     - DesktopStub.exe
-rem     - DesktopStubLiveTileBroker.exe
+rem     - %DESKTOPSTUB_HOST_EXE_NAME%
+rem     - %DESKTOPSTUB_BROKER_EXE_NAME%
 rem
 rem   The experimental background-task DLL remains in the source tree for
 rem   research, but it is not part of the normal one-command build.
@@ -78,15 +88,15 @@ if not "%~1"=="" (
     echo [i] One or more arguments were supplied and ignored.
 )
 
-set "OUT_EXE=build\DesktopStub.exe"
-set "OBJ_FILE=build\obj\DesktopStub.obj"
+set "OUT_EXE=build\%DESKTOPSTUB_HOST_EXE_NAME%"
+set "OBJ_FILE=build\obj\%DESKTOPSTUB_HOST_BASE%.obj"
 set "RES_FILE=build\obj\DesktopStub.res"
-set "BROKER_EXE=build\DesktopStubLiveTileBroker.exe"
-set "BROKER_OBJ=build\obj\LiveTileBroker.obj"
+set "BROKER_EXE=build\%DESKTOPSTUB_BROKER_EXE_NAME%"
+set "BROKER_OBJ=build\obj\%DESKTOPSTUB_BROKER_BASE%.obj"
 set "BROKER_RES=build\obj\LiveTileBroker.res"
 
 echo Building packaged Live Tile broker...
-rc /nologo %RC_VERSION_DEFINES% /fo "%BROKER_RES%" LiveTileBroker.rc
+rc /nologo %RC_VERSION_DEFINES% %RC_BROKER_NAME_DEFINES% /fo "%BROKER_RES%" LiveTileBroker.rc
 if errorlevel 1 (
     set "STATUS=%ERRORLEVEL%"
     popd
@@ -109,7 +119,7 @@ if exist "%BROKER_EXE%.manifest" (
 )
 
 echo Building main DesktopStub host...
-rc /nologo %RC_VERSION_DEFINES% /fo "%RES_FILE%" DesktopStub.rc
+rc /nologo %RC_VERSION_DEFINES% %RC_HOST_NAME_DEFINES% /fo "%RES_FILE%" DesktopStub.rc
 if errorlevel 1 (
     set "STATUS=%ERRORLEVEL%"
     popd
@@ -142,7 +152,7 @@ set "DESKTOPSTUB_VERSION_REVISION="
 if defined DESKTOPSTUB_VERSION (
     call :ParseDesktopStubVersion "%DESKTOPSTUB_VERSION%"
     if errorlevel 1 exit /b %ERRORLEVEL%
-    if not defined DESKTOPSTUB_RELEASE_TAG set "DESKTOPSTUB_RELEASE_TAG=DesktopStub-v%DESKTOPSTUB_VERSION_MAJOR%"
+    if not defined DESKTOPSTUB_RELEASE_TAG set "DESKTOPSTUB_RELEASE_TAG=%DESKTOPSTUB_RELEASE_TAG_PREFIX%%DESKTOPSTUB_VERSION_MAJOR%"
     exit /b 0
 )
 
@@ -154,7 +164,7 @@ if defined DESKTOPSTUB_RELEASE_TAG (
 
 set "LATEST_DESKTOPSTUB_TAG="
 set "LATEST_DESKTOPSTUB_TAG_NUMBER=0"
-for /f "delims=" %%T in ('git tag --points-at HEAD --list DesktopStub-v* --sort=-v:refname 2^>nul') do (
+for /f "delims=" %%T in ('git tag --points-at HEAD --list "%DESKTOPSTUB_RELEASE_TAG_PREFIX%*" --sort=-v:refname 2^>nul') do (
     call :DesktopStubReleaseTagNumber "%%T"
     if "!DESKTOPSTUB_TAG_NUMBER_VALID!"=="1" if not defined LATEST_DESKTOPSTUB_TAG (
         set "LATEST_DESKTOPSTUB_TAG=%%T"
@@ -173,7 +183,7 @@ if defined LATEST_DESKTOPSTUB_TAG (
 )
 
 set "MAX_DESKTOPSTUB_TAG_NUMBER=0"
-for /f "delims=" %%T in ('git tag --list DesktopStub-v* --sort=-v:refname 2^>nul') do (
+for /f "delims=" %%T in ('git tag --list "%DESKTOPSTUB_RELEASE_TAG_PREFIX%*" --sort=-v:refname 2^>nul') do (
     call :DesktopStubReleaseTagNumber "%%T"
     if "!DESKTOPSTUB_TAG_NUMBER_VALID!"=="1" if !DESKTOPSTUB_TAG_NUMBER! GTR !MAX_DESKTOPSTUB_TAG_NUMBER! (
         set "MAX_DESKTOPSTUB_TAG_NUMBER=!DESKTOPSTUB_TAG_NUMBER!"
@@ -186,7 +196,7 @@ if %NEXT_DESKTOPSTUB_TAG_NUMBER% GTR 65535 (
     echo ERROR: DesktopStub release version exceeds the AppX/Win32 version limit: %NEXT_DESKTOPSTUB_TAG_NUMBER%
     exit /b 1
 )
-set "DESKTOPSTUB_RELEASE_TAG=DesktopStub-v%NEXT_DESKTOPSTUB_TAG_NUMBER%"
+set "DESKTOPSTUB_RELEASE_TAG=%DESKTOPSTUB_RELEASE_TAG_PREFIX%%NEXT_DESKTOPSTUB_TAG_NUMBER%"
 set "DESKTOPSTUB_VERSION_MAJOR=%NEXT_DESKTOPSTUB_TAG_NUMBER%"
 set "DESKTOPSTUB_VERSION_MINOR=0"
 set "DESKTOPSTUB_VERSION_BUILD=0"
@@ -197,7 +207,7 @@ exit /b 0
 :VersionFromDesktopStubReleaseTag
 call :DesktopStubReleaseTagNumber "%~1"
 if not "%DESKTOPSTUB_TAG_NUMBER_VALID%"=="1" (
-    echo ERROR: DESKTOPSTUB_RELEASE_TAG must look like DesktopStub-vN: "%~1"
+    echo ERROR: DESKTOPSTUB_RELEASE_TAG must look like %DESKTOPSTUB_RELEASE_TAG_PREFIX%N: "%~1"
     exit /b 1
 )
 set "DESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_TAG_NUMBER%"
@@ -211,8 +221,8 @@ exit /b 0
 set "DESKTOPSTUB_TAG_NUMBER_VALID=0"
 set "DESKTOPSTUB_TAG_NUMBER=0"
 set "TAG_VALUE=%~1"
-if /i not "!TAG_VALUE:~0,13!"=="DesktopStub-v" exit /b 0
-set "TAG_NUMBER=!TAG_VALUE:~13!"
+if /i not "!TAG_VALUE:~0,%DESKTOPSTUB_RELEASE_TAG_PREFIX_LEN%!"=="%DESKTOPSTUB_RELEASE_TAG_PREFIX%" exit /b 0
+set "TAG_NUMBER=!TAG_VALUE:~%DESKTOPSTUB_RELEASE_TAG_PREFIX_LEN%!"
 if "!TAG_NUMBER!"=="" exit /b 0
 echo(!TAG_NUMBER!| findstr /r "^[0-9][0-9]*$" >nul
 if errorlevel 1 exit /b 0
@@ -222,6 +232,19 @@ if !PARSED_TAG_NUMBER! LSS 1 exit /b 0
 if !PARSED_TAG_NUMBER! GTR 65535 exit /b 0
 set "DESKTOPSTUB_TAG_NUMBER_VALID=1"
 set "DESKTOPSTUB_TAG_NUMBER=!PARSED_TAG_NUMBER!"
+exit /b 0
+
+:StringLength
+setlocal EnableDelayedExpansion
+set "STRING_LENGTH_VALUE=%~1"
+set "STRING_LENGTH_COUNT=0"
+:StringLengthLoop
+if defined STRING_LENGTH_VALUE (
+    set "STRING_LENGTH_VALUE=!STRING_LENGTH_VALUE:~1!"
+    set /a STRING_LENGTH_COUNT+=1
+    goto StringLengthLoop
+)
+endlocal & set "%~2=%STRING_LENGTH_COUNT%"
 exit /b 0
 
 :ParseDesktopStubVersion

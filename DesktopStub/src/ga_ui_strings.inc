@@ -126,6 +126,24 @@ void EnsureIniDefaults()
         havePowerShellErrorSection = true;
     }
 
+    std::vector<IniEntry> commandLineHelpEntries;
+    bool haveCommandLineHelpSection = ReadIniSectionFromDoc(doc, COMMAND_LINE_HELP_SECTION, commandLineHelpEntries);
+    for (const auto& d : g_commandLineHelpDefaults)
+    {
+        std::wstring existing;
+        if (haveCommandLineHelpSection && ReadIniValueFromDoc(doc, d.section, d.key, existing))
+            continue;
+
+        if (!WriteIniValueToText(iniText, d.section, d.key, d.value))
+        {
+            QueueStartupWarning(L"[!] Failed to update INI command-line help default: [" + std::wstring(d.section ? d.section : L"") + L"] " + std::wstring(d.key ? d.key : L""));
+            return;
+        }
+        changed = true;
+        doc = ParseIniDocument(iniText);
+        haveCommandLineHelpSection = true;
+    }
+
     if (changed && !WriteUtf8BomTextFile(g_iniPath, iniText))
     {
         QueueStartupWarning(L"[!] Failed to write INI setting defaults (error " + std::to_wstring(GetLastError()) + L").");
@@ -401,7 +419,7 @@ void LoadUiStrings()
     g_ui.liveTileModeReregistrationComplete = IniReadS(L"Strings", L"LiveTileModeReregistrationComplete", L"[i] Live Tile mode change re-registration completed.");
     g_ui.appxManifestCreated = IniReadS(L"Strings", L"AppxManifestCreated", L"[i] Created AppxManifest.xml: %s");
     g_ui.appxManifestExisting = IniReadS(L"Strings", L"AppxManifestExisting", L"[i] Using existing AppxManifest.xml: %s");
-    g_ui.appxManifestRegenerated = IniReadS(L"Strings", L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s");
+    g_ui.appxManifestRegenerated = IniReadS(L"Strings", L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from configured defaults: %s");
     g_ui.appxManifestVersionUpdated = IniReadS(L"Strings", L"AppxManifestVersionUpdated", L"[i] Updated AppxManifest.xml package version to match DesktopStub: %s");
     g_ui.appxManifestCreateFailed = IniReadS(L"Strings", L"AppxManifestCreateFailed", L"[!] Failed to create AppxManifest.xml: %s");
     g_ui.appxManifestRegenerateFailed = IniReadS(L"Strings", L"AppxManifestRegenerateFailed", L"[!] Failed to regenerate AppxManifest.xml: %s");
@@ -428,6 +446,7 @@ void LoadUiStrings()
     g_ui.launchingPowerShellRegistration = IniReadS(L"Strings", L"LaunchingPowerShellRegistration", L"Launching PowerShell registration...");
     g_ui.powerShellCommand = IniReadS(L"Strings", L"PowerShellCommand", L"Command: %s");
     g_ui.powerShellLaunchDetails = IniReadS(L"Strings", L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%s, poll=%d ms, terminate wait=%d ms)");
+    g_ui.powerShellExeInvalidPath = IniReadS(L"Strings", L"PowerShellExeInvalidPath", L"PowerShellExe must be a local absolute path; using default: %s");
     g_ui.powerShellProcessStarted = IniReadS(L"Strings", L"PowerShellProcessStarted", L"[i] PowerShell process started (pid=%lu).");
     g_ui.powerShellTerminateRequested = IniReadS(L"Strings", L"PowerShellTerminateRequested", L"[!] Terminating timed-out PowerShell process (pid=%lu).");
     g_ui.powerShellTerminateFailed = IniReadS(L"Strings", L"PowerShellTerminateFailed", L"[!] Failed to terminate timed-out PowerShell process (pid=%lu).");
@@ -547,7 +566,10 @@ void LoadUiStrings()
     g_ui.commandLineForceGenerateReason = IniReadS(L"Strings", L"CommandLineForceGenerateReason", L"command-line --generate");
     g_ui.manifestRegenerateReason = IniReadS(L"Strings", L"ManifestRegenerateReason", L"manifest regeneration");
     g_ui.commandLineWallpaperPathInvalid = IniReadS(L"Strings", L"CommandLineWallpaperPathInvalid", L"Wallpaper path does not exist or is not a file: %s");
-    g_ui.commandLineManifestSettingIgnored = IniReadS(L"Strings", L"CommandLineManifestSettingIgnored", L"Manifest INI setting is no longer supported: %s. Edit AppxManifest.xml directly or use --regenerate-manifest to restore the built-in default manifest.");
+    g_ui.commandLineTitle = IniReadS(L"Strings", L"CommandLineTitle", L"DesktopStub");
+    g_ui.commandLineErrorTitle = IniReadS(L"Strings", L"CommandLineErrorTitle", L"DesktopStub command line");
+    g_ui.commandLineSignalExistingFailed = IniReadS(L"Strings", L"CommandLineSignalExistingFailed", L"Failed to signal the running DesktopStub instance.");
+    g_ui.commandLineManifestSectionIgnored = IniReadS(L"Strings", L"CommandLineManifestSectionIgnored", L"Manifest INI section is no longer supported: %s. Use Settings.Manifest* keys or edit AppxManifest.xml directly.");
     g_ui.manualGenerationRequested = IniReadS(L"Strings", L"ManualGenerationRequested", L"[i] Manual generation requested from the tray menu.");
     g_ui.generationRequestBusy = IniReadS(L"Strings", L"GenerationRequestBusy", L"[!] Generation request ignored: another operation is already running.");
     g_ui.emptyWallpaper = IniReadS(L"Strings", L"EmptyWallpaper", L"[!] Empty wallpaper.");
@@ -653,8 +675,19 @@ void LoadUiStrings()
     g_ui.manifestSplashScreenImageLabel = IniReadS(L"Strings", L"ManifestSplashScreenImageLabel", L"Manifest splash screen image: %s");
     g_ui.manifestSourceLabel = IniReadS(L"Strings", L"ManifestSourceLabel", L"Manifest source: %s");
     g_ui.manifestSourceExisting = IniReadS(L"Strings", L"ManifestSourceExisting", L"existing AppxManifest.xml");
-    g_ui.manifestSourceGenerated = IniReadS(L"Strings", L"ManifestSourceGenerated", L"generated from built-in defaults if missing");
-    g_ui.manifestRegenerateNow = IniReadS(L"Strings", L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from built-in defaults");
+    g_ui.manifestSourceGenerated = IniReadS(L"Strings", L"ManifestSourceGenerated", L"generated from configured defaults if missing");
+    g_ui.manifestRegenerateNow = IniReadS(L"Strings", L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from config");
+    g_ui.manifestSettingChanged = IniReadS(L"Strings", L"ManifestSettingChanged", L"[i] Manifest setting changed: Settings.%s = %s");
+    g_ui.manifestSettingInputTitle = IniReadS(L"Strings", L"ManifestSettingInputTitle", L"Edit manifest setting");
+    g_ui.manifestSettingInputPrompt = IniReadS(L"Strings", L"ManifestSettingInputPrompt", L"Edit Settings.%s. Leave empty to use the computed default.");
+    g_ui.manifestExistingDefaultsChanged = IniReadS(L"Strings", L"ManifestExistingDefaultsChanged", L"[i] Existing AppxManifest.xml no longer matches the current EXE name or manifest defaults. Regenerating manifest.");
+    g_ui.manifestLiveTileBrokerExecutableLabel = IniReadS(L"Strings", L"ManifestLiveTileBrokerExecutableLabel", L"Manifest broker executable: %s");
+    g_ui.manifestLiveTileBrokerEntryPointLabel = IniReadS(L"Strings", L"ManifestLiveTileBrokerEntryPointLabel", L"Manifest broker entry point: %s");
+    g_ui.manifestLiveTileOopServerNameLabel = IniReadS(L"Strings", L"ManifestLiveTileOopServerNameLabel", L"Manifest OOP server name: %s");
+    g_ui.manifestLiveTileOopRuntimeClassIdLabel = IniReadS(L"Strings", L"ManifestLiveTileOopRuntimeClassIdLabel", L"Manifest OOP runtime class: %s");
+    g_ui.manifestLiveTileBackgroundTaskDllLabel = IniReadS(L"Strings", L"ManifestLiveTileBackgroundTaskDllLabel", L"Manifest background task DLL: %s");
+    g_ui.manifestLiveTileBackgroundTaskClassIdLabel = IniReadS(L"Strings", L"ManifestLiveTileBackgroundTaskClassIdLabel", L"Manifest background task class: %s");
+    g_ui.manifestLiveTileBackgroundTaskNameLabel = IniReadS(L"Strings", L"ManifestLiveTileBackgroundTaskNameLabel", L"Manifest background task name: %s");
     g_ui.wallpaperDetectionMethodLabel = IniReadS(L"Strings", L"WallpaperDetectionMethodLabel", L"Wallpaper detection method: %s");
     g_ui.singleInstanceFailureActionLabel = IniReadS(L"Strings", L"SingleInstanceFailureActionLabel", L"Single-instance failure action: %s");
     g_ui.singleInstanceActionIgnore = IniReadS(L"Strings", L"SingleInstanceActionIgnore", L"Ignore");
@@ -890,6 +923,15 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.manifestRestrictedCapabilityLabel, L"ManifestRestrictedCapabilityLabel", { L"%s" });
     RequireFormat(g_ui.manifestSplashScreenImageLabel, L"ManifestSplashScreenImageLabel", { L"%s" });
     RequireFormat(g_ui.manifestSourceLabel, L"ManifestSourceLabel", { L"%s" });
+    RequireFormat(g_ui.manifestSettingChanged, L"ManifestSettingChanged", { L"%s", L"%s" });
+    RequireFormat(g_ui.manifestSettingInputPrompt, L"ManifestSettingInputPrompt", { L"%s" });
+    RequireFormat(g_ui.manifestLiveTileBrokerExecutableLabel, L"ManifestLiveTileBrokerExecutableLabel", { L"%s" });
+    RequireFormat(g_ui.manifestLiveTileBrokerEntryPointLabel, L"ManifestLiveTileBrokerEntryPointLabel", { L"%s" });
+    RequireFormat(g_ui.manifestLiveTileOopServerNameLabel, L"ManifestLiveTileOopServerNameLabel", { L"%s" });
+    RequireFormat(g_ui.manifestLiveTileOopRuntimeClassIdLabel, L"ManifestLiveTileOopRuntimeClassIdLabel", { L"%s" });
+    RequireFormat(g_ui.manifestLiveTileBackgroundTaskDllLabel, L"ManifestLiveTileBackgroundTaskDllLabel", { L"%s" });
+    RequireFormat(g_ui.manifestLiveTileBackgroundTaskClassIdLabel, L"ManifestLiveTileBackgroundTaskClassIdLabel", { L"%s" });
+    RequireFormat(g_ui.manifestLiveTileBackgroundTaskNameLabel, L"ManifestLiveTileBackgroundTaskNameLabel", { L"%s" });
     RequireFormat(g_ui.appxManifestVersionUpdated, L"AppxManifestVersionUpdated", { L"%s" });
     RequireFormat(g_ui.liveWallpaperCaptureDelayMsLabel, L"LiveWallpaperCaptureDelayMsLabel", { L"%d" });
     RequireFormat(g_ui.liveWallpaperCaptureRefreshMsLabel, L"LiveWallpaperCaptureRefreshMsLabel", { L"%s" });
@@ -907,7 +949,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.previousForceShutdownCleanupWarning, L"PreviousForceShutdownCleanupWarning", { L"%s", L"%s", L"%s" });
 
     RequireFormat(g_ui.commandLineWallpaperPathInvalid, L"CommandLineWallpaperPathInvalid", { L"%s" });
-    RequireFormat(g_ui.commandLineManifestSettingIgnored, L"CommandLineManifestSettingIgnored", { L"%s" });
+    RequireFormat(g_ui.commandLineManifestSectionIgnored, L"CommandLineManifestSectionIgnored", { L"%s" });
     RequireFormat(g_ui.manifestTargetSummary, L"ManifestTargetSummary", { L"%s" });
     RequireFormat(g_ui.startingWallpaperGeneration, L"StartingWallpaperGeneration", { L"%s" });
     RequireFormat(g_ui.wallpaperSource, L"WallpaperSource", { L"%s" });
@@ -956,6 +998,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.comExceptionMessage, L"ComExceptionMessage", { L"%s" });
     RequireFormat(g_ui.powerShellCommand, L"PowerShellCommand", { L"%s" });
     RequireFormat(g_ui.powerShellLaunchDetails, L"PowerShellLaunchDetails", { L"%s", L"%s", L"%d", L"%d" });
+    RequireFormat(g_ui.powerShellExeInvalidPath, L"PowerShellExeInvalidPath", { L"%s" });
     RequireFormat(g_ui.powerShellProcessStarted, L"PowerShellProcessStarted", { L"%lu" });
     RequireFormat(g_ui.powerShellTerminateRequested, L"PowerShellTerminateRequested", { L"%lu" });
     RequireFormat(g_ui.powerShellTerminateFailed, L"PowerShellTerminateFailed", { L"%lu" });

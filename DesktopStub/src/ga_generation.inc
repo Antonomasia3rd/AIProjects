@@ -1227,7 +1227,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     state += L"tileTextMarginX=" + IntToWString(IniReadClampedI(L"TileText", L"MarginX", 8, 0, 1000)) + L";";
     state += L"tileTextMarginY=" + IntToWString(IniReadClampedI(L"TileText", L"MarginY", 10, 0, 1000)) + L";";
     state += L"tileTextLineGap=" + IntToWString(IniReadClampedI(L"TileText", L"LineGap", 2, 0, 1000)) + L";";
-    state += L"tileTextMaxSecondaryLines=" + IntToWString(IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 1, 20)) + L";";
+    state += L"tileTextMaxSecondaryLines=" + IntToWString(IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 0, 32)) + L";";
     state += L"tileTextApplyMedium=" + IntToWString(IniReadI(L"TileText", L"ApplyToMediumTile", 1) ? 1 : 0) + L";";
     state += L"tileTextApplyWide=" + IntToWString(IniReadI(L"TileText", L"ApplyToWideTile", 1) ? 1 : 0) + L";";
     state += L"tileTextApplyLarge=" + IntToWString(IniReadI(L"TileText", L"ApplyToLargeTile", 1) ? 1 : 0) + L";";
