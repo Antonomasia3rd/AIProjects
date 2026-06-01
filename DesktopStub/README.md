@@ -29,7 +29,7 @@ This avoids the old split where a Windows 8/8.1 manifest could be selected at ru
 
 The build embeds one version into both EXEs, the generated AppX manifest, startup diagnostics, the tray menu, and `--version`. By default the script reads the `DesktopStub-vN` Git tag family and builds the next package version as `N.0.0.0`; for example, after `DesktopStub-v17`, an untagged local/CI build reports `DesktopStub-v18 (18.0.0.0)`. Set `DESKTOPSTUB_VERSION=18.0.0.0` or `DESKTOPSTUB_RELEASE_TAG=DesktopStub-v18` before running the script to override this for a custom build.
 
-For template reuse, the build names are parameterized without changing the default outputs. Set `DESKTOPSTUB_PRODUCT_NAME`, `DESKTOPSTUB_HOST_EXE_NAME`, `DESKTOPSTUB_BROKER_EXE_NAME`, or `DESKTOPSTUB_RELEASE_TAG_PREFIX` before running the script to reuse the baseline for another project while keeping the same source layout.
+For template reuse, the build names are parameterized without changing the default outputs. Set `DESKTOPSTUB_PRODUCT_NAME`, `DESKTOPSTUB_HOST_EXE_NAME`, `DESKTOPSTUB_BROKER_EXE_NAME`, or `DESKTOPSTUB_RELEASE_TAG_PREFIX` before running the script to reuse the baseline for another project while keeping the same source layout. Ordinary spaces are supported in the product/output names; the default release tag prefix removes spaces from `DESKTOPSTUB_PRODUCT_NAME`, and an explicitly supplied `DESKTOPSTUB_RELEASE_TAG_PREFIX` must not contain whitespace. Command-shell metacharacters, `%`, `!`, and quotes are rejected so the generated compiler/resource commands stay deterministic.
 
 The experimental background-task DLL remains in the source tree for research, but it is intentionally not part of the normal one-command build.
 
@@ -91,7 +91,7 @@ Live wallpaper capture is configurable from the tray menu, from command-line fla
 
 When enabled, `DesktopStub.exe` scans the desktop WorkerW live-wallpaper host tree. If a live-wallpaper host window is actually present, it captures a still frame from that host and uses the temporary BMP snapshot as the wallpaper source for asset generation. This is intentionally different from older external AHK bridge scripts: the built-in implementation does **not** call `SystemParametersInfo` or `IDesktopWallpaper::SetWallpaper`, so it does not replace or restore the user's actual wallpaper.
 
-Live wallpaper capture is off by default to keep the resident tray process lean. When `LiveWallpaperCapture=1`, `LiveWallpaperCaptureRefreshMs=10000` means an active live-wallpaper host is recaptured about every 10 seconds. Set it to `0`/`once` if you only want one capture per host lifetime. The startup recapture duration defaults to `0`/`off`; set `LiveWallpaperCaptureStartupRefreshDurationMs` to a positive value only if you want DesktopStub to collect warm-up snapshots briefly while a provider starts. Warm-up snapshots are not published one by one; the latest valid snapshot is published after the startup settle window ends.
+Live wallpaper capture is off by default to keep the resident tray process lean. When `LiveWallpaperCapture=1`, `LiveWallpaperCaptureRefreshMs=10000` means an active live-wallpaper host is recaptured about every 10 seconds. Set it to `0`/`once` if you only want one capture per host lifetime. The startup recapture duration defaults to `0`/`off`; set `LiveWallpaperCaptureStartupRefreshDurationMs` to a positive value only if you want DesktopStub to collect warm-up snapshots briefly while a provider starts. Warm-up snapshots are not published one by one; the latest valid snapshot is published after the startup settle window ends. Snapshot BMPs are written below `%TEMP%\<current-exe-base>\`, so copied projects and renamed EXEs do not overwrite each other's live-wallpaper temp files.
 
 Large static wallpapers are decoded through WIC's scaler by default before being handed to GDI+. This avoids decoding an 8K/very large wallpaper into a full native-size 32bpp GDI+ bitmap when the generated tile assets only need desktop/asset-sized pixels. Configure this from `DesktopStub.ini`, the tray menu under **Methods**, or command-line flags. Set `[Settings] WallpaperDecodeLowMemory=0` or pass `--no-wallpaper-decode-low-memory` to force the old full-size GDI+ decode path. Leave `[Settings] WallpaperDecodeMaxLongEdge=0` / `--wallpaper-decode-max-long-edge auto` for automatic monitor/asset-based sizing, or set a positive pixel value to force a specific maximum long edge. Automatic low-memory decode keeps the old full-size path for Center/Tile wallpaper modes unless `WallpaperDecodeMaxLongEdge` is explicitly set.
 
@@ -198,16 +198,17 @@ Supported options:
 
 ## Generated Files
 
-Generated/runtime files live under `DesktopStub\build` and are ignored by git:
+Generated/runtime files live under `DesktopStub\build` and are ignored by git. The default file names below use `DesktopStub`; when the host EXE or build product name changes, runtime sidecars are derived from the current product/runtime base name instead:
 
-- `DesktopStub.exe`
-- `DesktopStubLiveTileBroker.exe`
-- `DesktopStubAppxStub.exe` when legacy fallback mode is selected
-- `DesktopStubLiveTileTask.dll` only if manually built for the disabled background-task experiment
-- `DesktopStub.ini`
-- `DesktopStub.log`
-- `DesktopStub.appxactivation.log`
-- `DesktopStub.livetile.pending.xml`
+- `{ProductRuntimeBaseName}.exe` (`DesktopStub.exe` by default)
+- `{ProductRuntimeBaseName}LiveTileBroker.exe` (`DesktopStubLiveTileBroker.exe` by default)
+- `{ProductRuntimeBaseName}AppxStub.exe` when legacy fallback mode is selected
+- `{ProductRuntimeBaseName}LiveTileTask.dll` only if manually built for the disabled background-task experiment
+- `{ProductRuntimeBaseName}.ini`
+- `{ProductRuntimeBaseName}.log`
+- `{ProductRuntimeBaseName}.appxactivation.log`
+- `{ProductRuntimeBaseName}.livetile.pending.xml`
+- `{ProductRuntimeBaseName}.livetile.clear`
 - `AppxManifest.xml`
 - `Assets\*`
 - compiler object files under `obj\`
@@ -223,13 +224,13 @@ For Start Screen / Live Tile simulator experiments, the generator can instead em
 
 For Windows 8/8.1 targets, the default compatibility helper is now `DesktopStubLiveTileBroker.exe`, a tiny CoreApplication-based WinRT broker app. The normal `DesktopStub.exe` remains the unpackaged tray/wallpaper monitor; the broker only exists so the registered package can update the Live Tile under package identity. The standard build script always builds this broker, regardless of arguments, before `--manifest-win8` or `--manifest-win81` are used. Set `[Settings] ManifestLiveTileBrokerExecutable` when reusing the baseline under a different broker filename. Set `[Settings] Win8LiveTileBrokerApp=0` and regenerate the manifest to fall back to the older `DesktopStubAppxStub.exe` behavior.
 
-Experimental helper paths remain in the source for later testing, but they are disabled by default: `[Settings] Win8LiveTileBackgroundTask=0` and `[Settings] Win8LiveTileOopHelper=0`. The background-task path currently requires package identity for the caller; the OOP-server path did not register reliably with the loose Windows 8-style package.
+Experimental helper paths remain in the source for later testing, but they are disabled by default: `[Settings] Win8LiveTileBackgroundTask=0` and `[Settings] Win8LiveTileOopHelper=0`. The background-task extension is only emitted into a generated manifest when `Win8LiveTileBackgroundTask=1` and the matching `{ProductRuntimeBaseName}LiveTileTask.dll` exists next to the host. Its default runtime class ID is derived from the product manifest token, so copied projects do not inherit `DesktopStub.LiveTileBackgroundTask`. The background-task path currently requires package identity for the caller; the OOP-server path did not register reliably with the loose Windows 8-style package.
 
 ## Live Tile Update
 
 `ExperimentalLiveTileUpdate=Auto` is the default Live Tile update mode in `DesktopStub.ini`.
 
-In `Auto`, Windows 10 Desktop Bridge mode updates the tile directly when `DesktopStub.exe` is running with package identity. In Windows 8/8.1 compatibility mode, the normal unpackaged host writes `DesktopStub.livetile.pending.xml`, mirrors it into the package `LocalState` folder, then activates the packaged WinRT broker (`DesktopStubLiveTileBroker.exe`) so the broker can apply the Live Tile update under package identity.
+In `Auto`, Windows 10 Desktop Bridge mode updates the tile directly when `DesktopStub.exe` is running with package identity. In Windows 8/8.1 compatibility mode, the normal unpackaged host writes `{ProductRuntimeBaseName}.livetile.pending.xml`, mirrors it into the package `LocalState` folder, then activates the packaged WinRT broker (`DesktopStubLiveTileBroker.exe` by default) so the broker can apply the Live Tile update under package identity.
 
 The mode is user-configurable from the tray menu, command line, or INI:
 
@@ -289,7 +290,7 @@ When Live Tile mode disables static manifest assets, DesktopStub does not bake t
 
 ## Release
 
-Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available. The DesktopStub Windows file/product version and default `AppxManifest.xml` package version are derived from the same `DesktopStub-vN` family used by CI release publishing, so the binary and manifest versions match the release tag. Reused projects can override the local build tag family with `DESKTOPSTUB_RELEASE_TAG_PREFIX`.
+Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available. The DesktopStub Windows file/product version and default `AppxManifest.xml` package version are derived from the same `DesktopStub-vN` family used by CI release publishing, so the binary and manifest versions match the release tag. Reused projects can override the local build tag family with `DESKTOPSTUB_RELEASE_TAG_PREFIX`. The repository workflow still publishes the default `DesktopStub` artifact paths; a copied baseline project that changes output names should update `.github/project-map.json`, `.github/workflows/build-windows.yml`, and `.github/scripts/build-windows.cmd` together so CI artifacts and release assets follow the new product names.
 
 ## Notes for fix28
 

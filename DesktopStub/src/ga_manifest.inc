@@ -556,15 +556,27 @@ static std::wstring ManifestLiveTileBackgroundTaskName()
         IsManifestNonEmptyDottedToken);
 }
 
+static bool Win8LiveTileBackgroundTaskConfigured()
+{
+    return IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0;
+}
+
+static bool Win8LiveTileBackgroundTaskDllPresent(std::wstring* pathOut = nullptr)
+{
+    std::wstring path = GetExeDir() + L"\\" + ManifestLiveTileBackgroundTaskDllName();
+    if (pathOut)
+        *pathOut = path;
+    DWORD attrs = GetFileAttributesW(path.c_str());
+    return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
 static bool Win8LiveTileBackgroundTaskEnabled()
 {
     // Experimental. This declares a WinRT background task and tries
     // ApplicationTrigger before falling back to the foreground package-identity
-    // helper. In practice, ApplicationTrigger calls from the normal
-    // DesktopStub.exe host fail because the host is deliberately unpackaged
-    // (0x80073D57: no application identity). Keep this disabled by default;
-    // set [Settings] Win8LiveTileBackgroundTask=1 only for targeted research.
-    return IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0;
+    // helper. Keep it disabled unless the matching manually-built DLL exists;
+    // otherwise manifest regeneration would advertise a missing in-process server.
+    return Win8LiveTileBackgroundTaskConfigured() && Win8LiveTileBackgroundTaskDllPresent();
 }
 
 static bool Win8LiveTileOopHelperEnabled()
@@ -1577,8 +1589,13 @@ static std::wstring ManifestDefaultIdentityForExecutable(const std::wstring& exe
     size_t dot = base.find_last_of(L'.');
     if (dot != std::wstring::npos)
         base.erase(dot);
-    if (IEquals(base, L"DesktopStubAppxStub"))
-        base = L"DesktopStub";
+    constexpr const wchar_t* appxStubSuffix = L"AppxStub";
+    constexpr size_t appxStubSuffixLen = 8;
+    if (base.size() > appxStubSuffixLen &&
+        IEquals(base.substr(base.size() - appxStubSuffixLen), appxStubSuffix))
+    {
+        base.resize(base.size() - appxStubSuffixLen);
+    }
     return SanitizeManifestIdentityName(L"dev.local." + base);
 }
 

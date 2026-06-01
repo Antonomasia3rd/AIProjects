@@ -17,11 +17,6 @@
 #include <winrt/Windows.UI.Notifications.h>
 
 static HMODULE g_module = nullptr;
-#ifndef DESKTOPSTUB_BACKGROUND_TASK_CLASS_ID
-#define DESKTOPSTUB_BACKGROUND_TASK_CLASS_ID L"DesktopStub.LiveTileBackgroundTask"
-#endif
-
-static constexpr const wchar_t* BACKGROUND_TASK_CLASS_ID = DESKTOPSTUB_BACKGROUND_TASK_CLASS_ID;
 
 static std::wstring ModulePath()
 {
@@ -74,6 +69,56 @@ static std::wstring ProductRuntimeBaseName()
     if (EndsWithNoCase(base, suffix) && base.size() > suffix.size())
         base.resize(base.size() - suffix.size());
     return base.empty() ? L"DesktopStub" : base;
+}
+
+static bool IsAsciiAlpha(wchar_t ch)
+{
+    return (ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z');
+}
+
+static bool IsAsciiDigit(wchar_t ch)
+{
+    return ch >= L'0' && ch <= L'9';
+}
+
+static bool IsAsciiAlnum(wchar_t ch)
+{
+    return IsAsciiAlpha(ch) || IsAsciiDigit(ch);
+}
+
+static std::wstring TrimNonAlnumEnds(std::wstring value)
+{
+    while (!value.empty() && !IsAsciiAlnum(value.front()))
+        value.erase(value.begin());
+    while (!value.empty() && !IsAsciiAlnum(value.back()))
+        value.pop_back();
+    return value;
+}
+
+static std::wstring ProductManifestToken()
+{
+    std::wstring out;
+    for (wchar_t ch : ProductRuntimeBaseName())
+    {
+        if (IsAsciiAlnum(ch) || ch == L'.' || ch == L'_' || ch == L'-')
+            out.push_back(ch);
+    }
+
+    out = TrimNonAlnumEnds(out);
+    if (out.empty())
+        out = L"DesktopStub";
+    if (!IsAsciiAlpha(out.front()))
+        out = L"App" + out;
+    return out;
+}
+
+static std::wstring BackgroundTaskClassId()
+{
+#ifdef DESKTOPSTUB_BACKGROUND_TASK_CLASS_ID
+    return DESKTOPSTUB_BACKGROUND_TASK_CLASS_ID;
+#else
+    return ProductManifestToken() + L".LiveTileBackgroundTask";
+#endif
 }
 
 static std::wstring ProductRuntimeFilePath(const wchar_t* suffix)
@@ -271,7 +316,8 @@ extern "C" HRESULT __stdcall DllGetActivationFactory(HSTRING classId, void** fac
     UINT32 len = 0;
     const wchar_t* raw = WindowsGetStringRawBuffer(classId, &len);
     std::wstring requested = raw ? std::wstring(raw, len) : std::wstring();
-    if (_wcsicmp(requested.c_str(), BACKGROUND_TASK_CLASS_ID) != 0)
+    std::wstring expected = BackgroundTaskClassId();
+    if (_wcsicmp(requested.c_str(), expected.c_str()) != 0)
         return CLASS_E_CLASSNOTAVAILABLE;
 
     try

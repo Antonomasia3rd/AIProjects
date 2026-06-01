@@ -1861,12 +1861,12 @@ static void GeneratedAssetPrecacheThread()
         catch (const std::exception& ex)
         {
             // Pre-caching is opportunistic; foreground generation remains authoritative.
-            Log(L"[w] Generated asset pre-cache failed: %s", ExceptionTextToWide(ex).c_str());
+            Log(g_ui.generatedAssetPrecacheFailed.c_str(), ExceptionTextToWide(ex).c_str());
         }
         catch (...)
         {
             // Pre-caching is opportunistic; foreground generation remains authoritative.
-            Log(L"[w] Generated asset pre-cache failed: %s", UnknownExceptionText().c_str());
+            Log(g_ui.generatedAssetPrecacheFailed.c_str(), UnknownExceptionText().c_str());
         }
     }
 }
@@ -2338,7 +2338,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
 
                 if (deferLiveTileUpdateUntilPackagedRelaunch)
                 {
-                    LogText(L"[i] Live Tile update deferred until the packaged relaunch starts with package identity.");
+                    LogText(g_ui.liveTileDeferredUntilPackagedRelaunch);
                 }
                 else
                 {
@@ -2805,7 +2805,7 @@ void PollThread()
                 emptyWallpaperAlreadyReported = false;
 
                 if (!generationSucceeded)
-                    LogText(L"[i] Poll baseline updated after failed generation attempt to avoid retrying the same wallpaper change endlessly.");
+                    LogText(g_ui.pollBaselineUpdatedAfterFailedGeneration);
 
                 pendingPollGeneration = false;
                 pendingPollGenerationId = 0;

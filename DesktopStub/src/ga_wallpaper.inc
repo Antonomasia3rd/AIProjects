@@ -331,7 +331,17 @@ static std::wstring GetLiveWallpaperSnapshotDirectory()
     while (!base.empty() && (base.back() == L'\\' || base.back() == L'/'))
         base.pop_back();
 
-    std::wstring dir = base + L"\\DesktopStub";
+    std::wstring productBase = g_exePath;
+    size_t slash = productBase.find_last_of(L"\\/");
+    if (slash != std::wstring::npos)
+        productBase.erase(0, slash + 1);
+    size_t dot = productBase.find_last_of(L'.');
+    if (dot != std::wstring::npos)
+        productBase.erase(dot);
+    if (productBase.empty())
+        productBase = L"DesktopStub";
+
+    std::wstring dir = base + L"\\" + productBase;
     if (!EnsureDirectoryExistsSimple(dir))
         return L"";
     return dir;

@@ -196,7 +196,7 @@ static bool QueueLiveTileRuntimeConditionRelaunch(HWND h)
             SetLiveTileModeReregistrationPending(true);
             g_relaunchAfterExit = 2;
             LogText(g_ui.liveTileModeReregistrationQueued);
-            LogText(L"[i] Live Tile static icon refresh is pending; relaunching as unpackaged desktop app first.");
+            LogText(g_ui.liveTileStaticIconRefreshPending);
             RequestGracefulShutdown(h);
             return true;
         }
@@ -324,14 +324,14 @@ static bool StartUnpackagedRelaunchAfterExit()
     DWORD brokerError = ERROR_SUCCESS;
     if (StartUnpackagedRelaunchViaCmdBroker(arguments, &brokerError))
     {
-        LogText(L"[i] Relaunched unpackaged desktop instance after Live Tile mode switch.");
+        LogText(g_ui.liveTileRelaunchedUnpackaged);
         return true;
     }
 
     LogWin32Failure(L"CreateProcessW(cmd.exe unpackaged relaunch broker)", brokerError);
     if (StartUnpackagedRelaunchDirect(arguments))
     {
-        LogText(L"[i] Relaunched desktop instance after Live Tile mode switch using direct fallback.");
+        LogText(g_ui.liveTileRelaunchedUnpackagedDirectFallback);
         return true;
     }
 
@@ -345,7 +345,7 @@ static bool StartPackagedRelaunchAfterExit()
     std::wstring arguments = ModeSwitchRelaunchArguments(true, false, CommandLineShouldGenerateOnce());
     if (ActivateRegisteredPackageApplication(manifestInfo, arguments.c_str(), failure))
     {
-        LogText(L"[i] Relaunched packaged app instance after Live Tile mode switch.");
+        LogText(g_ui.liveTileRelaunchedPackaged);
         return true;
     }
 
@@ -360,7 +360,7 @@ static void ExecutePendingRelaunchAfterExit()
     {
         if (LiveTileModeReregistrationPending())
         {
-            LogText(L"[!] Packaged relaunch skipped because Live Tile mode re-registration is still pending.");
+            LogText(g_ui.liveTilePackagedRelaunchSkippedPending);
             return;
         }
         StartPackagedRelaunchAfterExit();
@@ -581,7 +581,7 @@ static bool ConsumeAppxActivationRequestFile()
         return false;
 
     DeleteFileW(path.c_str());
-    Log(L"[i] AppX activation request received: %s", TrimCopy(text).c_str());
+    Log(g_ui.appxActivationRequestReceived.c_str(), TrimCopy(text).c_str());
     HandleExistingInstanceMessageBoxRequest();
     return true;
 }
