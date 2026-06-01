@@ -904,10 +904,11 @@ static class RepoTools
             if (releaseAssets.Count == 0)
                 throw new InvalidOperationException("No release assets were prepared for " + p.label + ".");
 
+            string gitLogFormat = QuoteArg("--format=%h %s");
             string logArgs = previousTag != null
-                ? "log --format=%h %s " + QuoteArg(previousTag + ".." + fullSha)
-                : "log --format=%h %s -n 10 " + QuoteArg(fullSha);
-            string commitText = RunCapture("git", logArgs, root, 120000).Output;
+                ? "log " + gitLogFormat + " " + QuoteArg(previousTag + ".." + fullSha)
+                : "log " + gitLogFormat + " -n 10 " + QuoteArg(fullSha);
+            string commitText = RunCaptureRequired("git", logArgs, root);
             var commitSubjects = commitText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
             if (commitSubjects.Count == 0)
                 commitSubjects.Add(fullSha);
