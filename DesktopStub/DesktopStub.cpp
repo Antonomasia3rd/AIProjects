@@ -45,6 +45,8 @@
 #include <winrt/Windows.Management.Deployment.h>
 #include <winrt/Windows.UI.Notifications.h>
 
+#pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+
 INT_PTR CALLBACK RenameDlgProc(HWND, UINT, WPARAM, LPARAM) noexcept;
 static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) noexcept;
 

@@ -289,10 +289,15 @@ static void CycleTileTextFontSize(const wchar_t* key, int fallback, const std::w
     Log(logFormat.c_str(), next);
 }
 
-static void PromptTileTextStringSetting(HWND owner, const wchar_t* key, const std::wstring& title, const wchar_t* fallback = L"")
+static void PromptTileTextStringSetting(
+    HWND owner,
+    const wchar_t* key,
+    const std::wstring& title,
+    const std::wstring& prompt,
+    const wchar_t* fallback = L"")
 {
     std::wstring value = IniReadS(L"TileText", key, fallback ? fallback : L"");
-    if (ShowTextInputDialog(owner, title, value, true) == IDOK)
+    if (ShowTextInputDialog(owner, title, prompt, value, true) == IDOK)
     {
         IniWrite(L"TileText", key, value.c_str());
         Log(g_ui.tileTextSettingChanged.c_str(), key ? key : L"", value.c_str());
@@ -306,11 +311,12 @@ static void PromptTileTextIntSetting(
     int minValue,
     int maxValue,
     const std::wstring& title,
+    const std::wstring& prompt,
     const std::wstring& logFormat)
 {
     int current = IniReadClampedI(L"TileText", key, fallback, minValue, maxValue);
     std::wstring text = std::to_wstring(current);
-    if (ShowTextInputDialog(owner, title, text, false) != IDOK)
+    if (ShowTextInputDialog(owner, title, prompt, text, false) != IDOK)
         return;
 
     int parsed = 0;
@@ -486,7 +492,16 @@ INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
     {
         state = reinterpret_cast<TextInputDialogState*>(lParam);
         if (state && state->value)
-            SetDlgItemTextW(hDlg, 1001, state->value->c_str()); // edit box
+            SetDlgItemTextW(hDlg, TEXT_INPUT_EDIT_ID, state->value->c_str());
+
+        HWND edit = GetDlgItem(hDlg, TEXT_INPUT_EDIT_ID);
+        if (edit)
+        {
+            SetFocus(edit);
+            SendMessageW(edit, EM_SETSEL, 0, 0);
+            SendMessageW(edit, EM_SCROLLCARET, 0, 0);
+            return FALSE;
+        }
         return TRUE;
     }
 
@@ -495,7 +510,7 @@ INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
         {
         case IDOK:
         {
-            HWND edit = GetDlgItem(hDlg, 1001);
+            HWND edit = GetDlgItem(hDlg, TEXT_INPUT_EDIT_ID);
             int len = GetWindowTextLengthW(edit);
             std::vector<wchar_t> buf((size_t)len + 1);
             GetWindowTextW(edit, buf.data(), (int)buf.size());
@@ -1440,7 +1455,7 @@ void Menu(HWND h)
     case ID_TILE_TEXT_EDIT:
     {
         std::wstring text = IniReadS(L"TileText", L"Text", L"");
-        if (ShowTextInputDialog(h, g_ui.tileTextInputTitle, text, true) == IDOK)
+        if (ShowTextInputDialog(h, g_ui.tileTextInputTitle, g_ui.tileTextInputPrompt, text, true) == IDOK)
         {
             IniWrite(L"TileText", L"Text", text.c_str());
             if (!TrimCopy(text).empty())
@@ -1458,7 +1473,7 @@ void Menu(HWND h)
     case ID_TILE_TEXT_SECONDARY_EDIT:
     {
         std::wstring text = IniReadS(L"TileText", L"SecondaryText", L"");
-        if (ShowTextInputDialog(h, g_ui.tileTextSecondaryInputTitle, text, true) == IDOK)
+        if (ShowTextInputDialog(h, g_ui.tileTextSecondaryInputTitle, g_ui.tileTextSecondaryInputPrompt, text, true) == IDOK)
         {
             IniWrite(L"TileText", L"SecondaryText", text.c_str());
             if (!TrimCopy(text).empty())
@@ -1476,7 +1491,7 @@ void Menu(HWND h)
     case ID_TILE_TEXT_BADGE_EDIT:
     {
         std::wstring text = IniReadS(L"TileText", L"BadgeText", L"");
-        if (ShowTextInputDialog(h, g_ui.tileTextBadgeInputTitle, text, true) == IDOK)
+        if (ShowTextInputDialog(h, g_ui.tileTextBadgeInputTitle, g_ui.tileTextBadgeInputPrompt, text, true) == IDOK)
         {
             IniWrite(L"TileText", L"BadgeText", text.c_str());
             if (!TrimCopy(text).empty())
@@ -1524,7 +1539,7 @@ void Menu(HWND h)
     break;
 
     case ID_TILE_TEXT_FONT:
-        PromptTileTextStringSetting(h, L"Font", g_ui.tileTextFontInputTitle, L"Segoe UI");
+        PromptTileTextStringSetting(h, L"Font", g_ui.tileTextFontInputTitle, g_ui.tileTextFontInputPrompt, L"Segoe UI");
         break;
 
     case ID_TILE_TEXT_FONT_SIZE:
@@ -1556,15 +1571,15 @@ void Menu(HWND h)
         break;
 
     case ID_TILE_TEXT_COLOR:
-        PromptTileTextStringSetting(h, L"Color", g_ui.tileTextColorInputTitle, L"#FFFFFFFF");
+        PromptTileTextStringSetting(h, L"Color", g_ui.tileTextColorInputTitle, g_ui.tileTextColorInputPrompt, L"#FFFFFFFF");
         break;
 
     case ID_TILE_TEXT_SECONDARY_COLOR:
-        PromptTileTextStringSetting(h, L"SecondaryColor", g_ui.tileTextSecondaryColorInputTitle, L"#CCFFFFFF");
+        PromptTileTextStringSetting(h, L"SecondaryColor", g_ui.tileTextSecondaryColorInputTitle, g_ui.tileTextSecondaryColorInputPrompt, L"#CCFFFFFF");
         break;
 
     case ID_TILE_TEXT_BADGE_COLOR:
-        PromptTileTextStringSetting(h, L"BadgeColor", g_ui.tileTextBadgeColorInputTitle, L"#FFFFFFFF");
+        PromptTileTextStringSetting(h, L"BadgeColor", g_ui.tileTextBadgeColorInputTitle, g_ui.tileTextBadgeColorInputPrompt, L"#FFFFFFFF");
         break;
 
     case ID_TILE_TEXT_SHADOW:
@@ -1572,23 +1587,23 @@ void Menu(HWND h)
         break;
 
     case ID_TILE_TEXT_SHADOW_COLOR:
-        PromptTileTextStringSetting(h, L"ShadowColor", g_ui.tileTextShadowColorInputTitle, L"#AA000000");
+        PromptTileTextStringSetting(h, L"ShadowColor", g_ui.tileTextShadowColorInputTitle, g_ui.tileTextShadowColorInputPrompt, L"#AA000000");
         break;
 
     case ID_TILE_TEXT_MARGIN_X:
-        PromptTileTextIntSetting(h, L"MarginX", 8, 0, 512, g_ui.tileTextMarginXInputTitle, g_ui.tileTextMarginX);
+        PromptTileTextIntSetting(h, L"MarginX", 8, 0, 512, g_ui.tileTextMarginXInputTitle, g_ui.tileTextMarginXInputPrompt, g_ui.tileTextMarginX);
         break;
 
     case ID_TILE_TEXT_MARGIN_Y:
-        PromptTileTextIntSetting(h, L"MarginY", 10, 0, 512, g_ui.tileTextMarginYInputTitle, g_ui.tileTextMarginY);
+        PromptTileTextIntSetting(h, L"MarginY", 10, 0, 512, g_ui.tileTextMarginYInputTitle, g_ui.tileTextMarginYInputPrompt, g_ui.tileTextMarginY);
         break;
 
     case ID_TILE_TEXT_LINE_GAP:
-        PromptTileTextIntSetting(h, L"LineGap", 2, 0, 128, g_ui.tileTextLineGapInputTitle, g_ui.tileTextLineGap);
+        PromptTileTextIntSetting(h, L"LineGap", 2, 0, 128, g_ui.tileTextLineGapInputTitle, g_ui.tileTextLineGapInputPrompt, g_ui.tileTextLineGap);
         break;
 
     case ID_TILE_TEXT_MAX_SECONDARY_LINES:
-        PromptTileTextIntSetting(h, L"MaxSecondaryLines", 2, 0, 32, g_ui.tileTextMaxSecondaryLinesInputTitle, g_ui.tileTextMaxSecondaryLines);
+        PromptTileTextIntSetting(h, L"MaxSecondaryLines", 2, 0, 32, g_ui.tileTextMaxSecondaryLinesInputTitle, g_ui.tileTextMaxSecondaryLinesInputPrompt, g_ui.tileTextMaxSecondaryLines);
         break;
 
     case ID_TILE_TEXT_APPLY_MEDIUM:

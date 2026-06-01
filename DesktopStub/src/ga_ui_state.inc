@@ -85,6 +85,18 @@ struct UiStrings
     std::wstring tileTextMarginYInputTitle;
     std::wstring tileTextLineGapInputTitle;
     std::wstring tileTextMaxSecondaryLinesInputTitle;
+    std::wstring tileTextInputPrompt;
+    std::wstring tileTextSecondaryInputPrompt;
+    std::wstring tileTextBadgeInputPrompt;
+    std::wstring tileTextFontInputPrompt;
+    std::wstring tileTextColorInputPrompt;
+    std::wstring tileTextSecondaryColorInputPrompt;
+    std::wstring tileTextBadgeColorInputPrompt;
+    std::wstring tileTextShadowColorInputPrompt;
+    std::wstring tileTextMarginXInputPrompt;
+    std::wstring tileTextMarginYInputPrompt;
+    std::wstring tileTextLineGapInputPrompt;
+    std::wstring tileTextMaxSecondaryLinesInputPrompt;
 
     std::wstring listenWallpaper;
     std::wstring trayIcon;
@@ -210,6 +222,7 @@ struct UiStrings
     std::wstring previousForceShutdownCleanupWarning;
 
     std::wstring renameDialogTitle;
+    std::wstring renameDialogPrompt;
     std::wstring okText;
     std::wstring cancelText;
     std::wstring errorTitle;
