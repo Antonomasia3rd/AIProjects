@@ -10,3 +10,21 @@
 *.yaml text eol=lf
 *.json text eol=lf
 *.gitignore text eol=lf
+
+# Keep source archives free of local/runtime/build artifacts.
+.gitignore export-ignore
+.github/build/ export-ignore
+**/build/ export-ignore
+**/references/ export-ignore
+**/*.log export-ignore
+**/*.ini export-ignore
+**/*.tmp export-ignore
+**/*.bak export-ignore
+**/*.obj export-ignore
+**/*.exe export-ignore
+**/*.pdb export-ignore
+**/*.ilk export-ignore
+**/*.res export-ignore
+**/*.sha256 export-ignore
+**/*.zip export-ignore
+LOCAL_TOOL_INVENTORY.md export-ignore

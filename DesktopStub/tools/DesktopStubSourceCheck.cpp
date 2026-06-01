@@ -107,6 +107,55 @@ static void AssertCheck(const Check& check)
     std::cout << "ok - " << check.name << "\n";
 }
 
+
+static void ReportManualCheckFailure(
+    const std::string& name,
+    const std::string& sourceName,
+    const std::string& failure,
+    const std::string& detail)
+{
+    std::cerr << "DesktopStub source regression: " << failure
+        << " [" << name << " in " << sourceName << "]";
+    if (!detail.empty())
+        std::cerr << " missing/forbidden: " << detail;
+    std::cerr << "\n";
+    throw std::runtime_error("source regression");
+}
+
+static void AssertContainsAll(
+    const std::string& name,
+    const std::string& sourceName,
+    const std::string& sourceText,
+    const std::vector<std::string>& needles,
+    const std::string& failure)
+{
+    ++g_checkCount;
+    for (const auto& needle : needles)
+    {
+        if (sourceText.find(needle) == std::string::npos)
+            ReportManualCheckFailure(name, sourceName, failure, needle);
+    }
+
+    std::cout << "ok - " << name << "\n";
+}
+
+static void AssertNotContainsAny(
+    const std::string& name,
+    const std::string& sourceName,
+    const std::string& sourceText,
+    const std::vector<std::string>& needles,
+    const std::string& failure)
+{
+    ++g_checkCount;
+    for (const auto& needle : needles)
+    {
+        if (sourceText.find(needle) != std::string::npos)
+            ReportManualCheckFailure(name, sourceName, failure, needle);
+    }
+
+    std::cout << "ok - " << name << "\n";
+}
+
 static std::string UiPropertyName(const std::string& key)
 {
     if (key.rfind("OK", 0) == 0)
@@ -249,6 +298,10 @@ int main(int argc, char** argv)
         const std::string defaults = ReadSource("src\\ga_config_defaults.inc");
         const std::string wallpaper = ReadSource("src\\ga_wallpaper.inc");
         const std::string loggingCore = ReadSource("src\\ga_logging_core.inc");
+        const std::string brokerApp = ReadSource("src\\ga_livetile_broker_app.inc");
+        const std::string backgroundTask = ReadSource("src\\ga_livetile_background_task_dll.inc");
+        const std::string gitAttributes = ReadSource("..\\.gitattributes");
+        const std::string exportSourceOnly = ReadSource("..\\tools\\ExportSourceOnly.cmd");
         const std::string repoTools = ReadSource("..\\.github\\tools\\RepoTools.cs");
         const std::string buildWorkflow = ReadSource("..\\.github\\workflows\\build-windows.yml");
         const std::string liveTileUpdateBare = SliceSource(
@@ -384,6 +437,96 @@ int main(int argc, char** argv)
 
         for (const auto& check : checks)
             AssertCheck(check);
+
+        AssertContainsAll(
+            "Runtime sidecar file names are product-scoped",
+            "Live Tile runtime sources",
+            manifest + "\n" + liveTile + "\n" + brokerApp + "\n" + backgroundTask,
+            {
+                "ProductRuntimeBaseName()",
+                "ProductRuntimeFileName(const wchar_t* suffix)",
+                "ProductRuntimeFilePath(const wchar_t* suffix)",
+                "ProductRuntimeFilePath(L\".livetile.pending.xml\")",
+                "ProductRuntimeFilePath(L\".livetile.clear\")",
+                "ProductRuntimeFilePath(L\".appxactivation.log\")",
+                "const std::wstring suffix = L\"LiveTileBroker\"",
+                "const std::wstring suffix = L\"LiveTileTask\""
+            },
+            "Live Tile pending XML, clear flags, and activation traces must be derived from the product/runtime base name instead of hard-coded DesktopStub file names");
+        AssertNotContainsAny(
+            "Runtime sidecar files do not hard-code DesktopStub",
+            "Live Tile runtime sources",
+            liveTile + "\n" + brokerApp + "\n" + backgroundTask,
+            {"DesktopStub.livetile", "DesktopStub.appxactivation"},
+            "Live Tile runtime sidecar file names must not be hard-coded to DesktopStub");
+        AssertContainsAll(
+            "Manifest defaults support product tokens",
+            "manifest/default sources",
+            manifest + "\n" + defaults,
+            {
+                "ExpandManifestSettingTokens",
+                "L\"{ProductRuntimeBaseName}\"",
+                "L\"{ProductManifestToken}\"",
+                "L\"ManifestLiveTileBrokerExecutable\"",
+                "L\"{ProductRuntimeBaseName}LiveTileBroker.exe\"",
+                "L\"ManifestLiveTileBrokerEntryPoint\"",
+                "L\"{ProductManifestToken}.LiveTileBroker.App\""
+            },
+            "manifest defaults should use product tokens so copied baseline projects do not inherit DesktopStub package helper identities");
+        AssertContainsAll(
+            "Single-instance identity is product-scoped",
+            "src\\ga_app.inc",
+            app,
+            {
+                "std::wstring productBase = SanitizeManifestToken(ProductRuntimeBaseName(), L\"DesktopStub\");",
+                "g_singleInstanceMutexName = L\"Local\\\\\" + productBase + L\".\" + suffix;",
+                "g_singleInstanceMessageName = productBase + L\".RestoreRunningInstance.\" + suffix;"
+            },
+            "single-instance mutex/message names should include the product base so copied baseline projects do not share identity prefixes");
+        AssertContainsAll(
+            "Build script quotes configurable output paths",
+            "BuildDesktopStub.cmd",
+            buildScript,
+            {
+                "/Fe\"%BROKER_EXE%\" /Fo\"%BROKER_OBJ%\"",
+                "/Fe\"%OUT_EXE%\" /Fo\"%OBJ_FILE%\"",
+                "/fo\"%BROKER_RES%\"",
+                "/fo\"%RES_FILE%\""
+            },
+            "BuildDesktopStub.cmd must quote cl/rc outputs so parameterized output names cannot break the command line");
+        AssertNotContainsAny(
+            "Build script avoids RC defines with spaces",
+            "BuildDesktopStub.cmd",
+            buildScript,
+            {"DESKTOPSTUB_FILE_DESCRIPTION=\\\"%DESKTOPSTUB_PRODUCT_NAME% tray", "DESKTOPSTUB_FILE_DESCRIPTION=\\\"%DESKTOPSTUB_PRODUCT_NAME% Live Tile"},
+            "BuildDesktopStub.cmd must not pass resource string macros containing spaces through rc.exe /d arguments");
+        AssertContainsAll(
+            "--once survives Live Tile runtime relaunch",
+            "src\\ga_app.inc",
+            app,
+            {
+                "ModeSwitchRelaunchArguments(bool forceGenerate, bool waitForThisProcessToExit, bool generateOnce)",
+                "if (generateOnce)",
+                "args += L\" --once\";",
+                "ModeSwitchRelaunchArguments(true, false, CommandLineShouldGenerateOnce())"
+            },
+            "A one-shot --once run that must bounce between unpackaged/packaged Live Tile runtimes must relaunch with --once, not --generate, so it exits after updating.");
+        AssertContainsAll(
+            "--once skips tray icon initialization",
+            "src\\ga_app.inc",
+            app,
+            {
+                "if (CommandLineShouldGenerateOnce())",
+                "g_tray = false;",
+                "else if (g_tray)"
+            },
+            "One-shot --once generation must not call Shell_NotifyIcon before exiting; Explorer can timeout and make the command look hung.");
+        AssertContainsAll(
+            "Source-only export excludes local artifacts",
+            "source export guardrails",
+            gitAttributes + "\n" + exportSourceOnly,
+            {"build/ export-ignore", "**/*.ini export-ignore", "**/*.exe export-ignore", "git archive --format=zip"},
+            "source archives should be created with git archive and export-ignore build/runtime artifacts");
         for (const auto& key : uiStringKeys)
             AssertUiStringWired(key, defaults, uiSources);
 

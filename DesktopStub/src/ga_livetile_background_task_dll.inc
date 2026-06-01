@@ -1,6 +1,6 @@
-// Experimental Win8/8.1-style Live Tile background task helper.
+﻿// Experimental Win8/8.1-style Live Tile background task helper.
 // Built as a small WinRT component DLL and declared in AppxManifest.xml.
-// The task reads DesktopStub.livetile.pending.xml next to the DLL, updates
+// The task reads the product-scoped .livetile.pending.xml sidecar next to the DLL, updates
 // the app tile under package identity, logs the result, and exits.
 #define NOMINMAX
 #include <windows.h>
@@ -17,7 +17,11 @@
 #include <winrt/Windows.UI.Notifications.h>
 
 static HMODULE g_module = nullptr;
-static constexpr const wchar_t* BACKGROUND_TASK_CLASS_ID = L"DesktopStub.LiveTileBackgroundTask";
+#ifndef DESKTOPSTUB_BACKGROUND_TASK_CLASS_ID
+#define DESKTOPSTUB_BACKGROUND_TASK_CLASS_ID L"DesktopStub.LiveTileBackgroundTask"
+#endif
+
+static constexpr const wchar_t* BACKGROUND_TASK_CLASS_ID = DESKTOPSTUB_BACKGROUND_TASK_CLASS_ID;
 
 static std::wstring ModulePath()
 {
@@ -37,14 +41,56 @@ static std::wstring ModuleDir()
     return path.substr(0, pos);
 }
 
+static std::wstring ModuleBaseName()
+{
+    std::wstring path = ModulePath();
+    size_t slash = path.find_last_of(L"\\/");
+    if (slash != std::wstring::npos)
+        path.erase(0, slash + 1);
+    size_t dot = path.find_last_of(L'.');
+    if (dot != std::wstring::npos)
+        path.erase(dot);
+    return path.empty() ? L"DesktopStub" : path;
+}
+
+static bool EndsWithNoCase(const std::wstring& text, const std::wstring& suffix)
+{
+    if (suffix.empty() || text.size() < suffix.size())
+        return false;
+
+    size_t offset = text.size() - suffix.size();
+    for (size_t i = 0; i < suffix.size(); ++i)
+    {
+        if (towlower(text[offset + i]) != towlower(suffix[i]))
+            return false;
+    }
+    return true;
+}
+
+static std::wstring ProductRuntimeBaseName()
+{
+    std::wstring base = ModuleBaseName();
+    const std::wstring suffix = L"LiveTileTask";
+    if (EndsWithNoCase(base, suffix) && base.size() > suffix.size())
+        base.resize(base.size() - suffix.size());
+    return base.empty() ? L"DesktopStub" : base;
+}
+
+static std::wstring ProductRuntimeFilePath(const wchar_t* suffix)
+{
+    std::wstring name = ProductRuntimeBaseName();
+    name += suffix ? suffix : L"";
+    return ModuleDir() + L"\\" + name;
+}
+
 static std::wstring PendingXmlPath()
 {
-    return ModuleDir() + L"\\DesktopStub.livetile.pending.xml";
+    return ProductRuntimeFilePath(L".livetile.pending.xml");
 }
 
 static std::wstring ActivationLogPath()
 {
-    return ModuleDir() + L"\\DesktopStub.appxactivation.log";
+    return ProductRuntimeFilePath(L".appxactivation.log");
 }
 
 static std::wstring TrimCopy(const std::wstring& s)

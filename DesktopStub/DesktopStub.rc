@@ -1,5 +1,5 @@
 #ifndef DESKTOPSTUB_FILE_DESCRIPTION
-#define DESKTOPSTUB_FILE_DESCRIPTION "DesktopStub tray wallpaper tile utility"
+#define DESKTOPSTUB_FILE_DESCRIPTION DESKTOPSTUB_PRODUCT_NAME " tray wallpaper tile utility"
 #endif
 
 #ifndef DESKTOPSTUB_INTERNAL_NAME

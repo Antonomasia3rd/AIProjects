@@ -44,6 +44,16 @@ struct GenerationCompletionRecord
     bool success = false;
 };
 
+enum class GenerationQueuePolicy
+{
+    // DesktopStub intentionally keeps only the newest pending generation request.
+    // Wallpaper/live-tile generation is state replacement, not an audit log; future
+    // baseline projects that need every task to run should implement FIFO instead.
+    ReplacePending
+};
+
+static constexpr GenerationQueuePolicy GENERATION_QUEUE_POLICY = GenerationQueuePolicy::ReplacePending;
+
 static std::atomic<unsigned long long> g_generationNextRequestId(1);
 static std::mutex g_generationCompletionMutex;
 static std::vector<GenerationCompletionRecord> g_generationCompletions;
@@ -1848,9 +1858,15 @@ static void GeneratedAssetPrecacheThread()
         {
             RunGeneratedAssetPrecache(wallpaper);
         }
+        catch (const std::exception& ex)
+        {
+            // Pre-caching is opportunistic; foreground generation remains authoritative.
+            Log(L"[w] Generated asset pre-cache failed: %s", ExceptionTextToWide(ex).c_str());
+        }
         catch (...)
         {
             // Pre-caching is opportunistic; foreground generation remains authoritative.
+            Log(L"[w] Generated asset pre-cache failed: %s", UnknownExceptionText().c_str());
         }
     }
 }
@@ -2643,6 +2659,9 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
     unsigned long long requestId = g_generationNextRequestId.fetch_add(1, std::memory_order_relaxed);
     if (requestId == 0)
         requestId = g_generationNextRequestId.fetch_add(1, std::memory_order_relaxed);
+    static_assert(GENERATION_QUEUE_POLICY == GenerationQueuePolicy::ReplacePending,
+        "QueueGenerate currently implements only the DesktopStub replace-pending policy.");
+
     unsigned long long droppedRequestId = 0;
     {
         std::lock_guard<std::mutex> lk(g_generationQueueMutex);

@@ -105,8 +105,6 @@ static constexpr const wchar_t* COM_REGISTRATION_HELPER_ARG = L"--ds-com-registe
 static constexpr const wchar_t* COM_REGISTRATION_HELPER_ARG_LEGACY = L"--ga-com-register";
 static constexpr const wchar_t* WAIT_FOR_PID_ARG = L"--ds-wait-for-pid";
 static constexpr const wchar_t* WAIT_FOR_PID_ARG_LEGACY = L"--ga-wait-for-pid";
-static constexpr const wchar_t* SINGLE_INSTANCE_MUTEX_BASE = L"Local\\DesktopStub";
-static constexpr const wchar_t* SINGLE_INSTANCE_MESSAGE_BASE = L"DesktopStub.RestoreRunningInstance";
 static std::wstring g_singleInstanceMutexName;
 static std::wstring g_singleInstanceMessageName;
 static std::wstring g_instanceWindowTitle;
