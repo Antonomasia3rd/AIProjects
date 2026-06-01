@@ -1,0 +1,5 @@
+#define DESKTOPSTUB_FILE_DESCRIPTION "DesktopStub Live Tile broker"
+#define DESKTOPSTUB_INTERNAL_NAME "DesktopStubLiveTileBroker.exe"
+#define DESKTOPSTUB_ORIGINAL_FILENAME "DesktopStubLiveTileBroker.exe"
+#include "src\\DesktopStubVersionResource.rc.inc"
+

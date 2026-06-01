@@ -115,6 +115,7 @@ static UINT g_taskbarCreatedMessage = 0;
 static HANDLE g_singleInstanceMutex = nullptr;
 
 #include "src/ga_core.inc"
+#include "src/ga_version.inc"
 #include "src/ga_config_defaults.inc"
 #include "src/ga_command_line.inc"
 #include "src/ga_ui_logging.inc"

@@ -238,6 +238,7 @@ struct UiStrings
     std::wstring currentWallpaperNotFound;
 
     std::wstring programStarting;
+    std::wstring desktopStubVersionSummary;
     std::wstring notificationTitle;
     std::wstring notificationGenerationStarted;
     std::wstring notificationGenerationSuccess;
@@ -291,6 +292,7 @@ struct UiStrings
     std::wstring appxManifestCreated;
     std::wstring appxManifestExisting;
     std::wstring appxManifestRegenerated;
+    std::wstring appxManifestVersionUpdated;
     std::wstring appxManifestCreateFailed;
     std::wstring appxManifestRegenerateFailed;
     std::wstring manifestPath;
@@ -374,6 +376,7 @@ struct UiStrings
     std::wstring offText;
 
     std::wstring trayTip;
+    std::wstring versionLabel;
     std::wstring exeLabel;
     std::wstring iniLabel;
     std::wstring logFileLabel;

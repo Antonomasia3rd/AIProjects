@@ -11,6 +11,7 @@ struct CommandLineIniSetting
 struct CommandLineOptions
 {
     bool helpRequested = false;
+    bool versionRequested = false;
     bool parseFailed = false;
     bool exitRequested = false;
     bool generateOnce = false;
@@ -671,6 +672,11 @@ static bool ParseCommandLineOptions()
         if (IEquals(arg, L"--help") || IEquals(arg, L"-h") || IEquals(arg, L"/?") || IEquals(arg, L"/help"))
         {
             g_commandLine.helpRequested = true;
+            continue;
+        }
+        if (IEquals(arg, L"--version") || IEquals(arg, L"-v") || IEquals(arg, L"/version"))
+        {
+            g_commandLine.versionRequested = true;
             continue;
         }
         if (IEquals(arg, L"--exit") || IEquals(arg, L"--quit"))
@@ -1506,6 +1512,7 @@ static std::wstring CommandLineUsageText()
         L"\r\n"
         L"Options:\r\n"
         L"  --help, -h, /?                      Show this help.\r\n"
+        L"  --version, -v                       Show build and package version.\r\n"
         L"  --ini <path>                        Use an alternate INI file.\r\n"
         L"  --set Section.Key=Value             Set and save any INI value.\r\n"
         L"  --exit, --quit                      Ask the running instance to exit.\r\n"
@@ -1619,40 +1626,49 @@ static std::wstring CommandLineUsageText()
     return text;
 }
 
-static bool WriteCommandLineTextToConsole(const std::wstring& text, bool errorOutput)
+static std::wstring CommandLineVersionText()
 {
-    bool attached = AttachConsole(ATTACH_PARENT_PROCESS) != FALSE;
-    if (!attached && GetLastError() != ERROR_ACCESS_DENIED)
+    return DesktopStubVersionDisplayText();
+}
+
+static bool WriteCommandLineTextToHandle(HANDLE h, const std::wstring& output)
+{
+    if (h == INVALID_HANDLE_VALUE || h == nullptr)
         return false;
 
-    HANDLE h = GetStdHandle(errorOutput ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
-    if (h == INVALID_HANDLE_VALUE || h == nullptr)
+    DWORD mode = 0;
+    if (GetConsoleMode(h, &mode))
     {
-        if (attached)
-            FreeConsole();
-        return false;
+        DWORD written = 0;
+        return WriteConsoleW(h, output.c_str(), static_cast<DWORD>(output.size()), &written, nullptr) != FALSE;
     }
 
+    std::vector<BYTE> bytes = EncodeUtf8Text(output, false);
+    if (!bytes.empty() || output.empty())
+    {
+        DWORD written = 0;
+        return WriteFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) != FALSE;
+    }
+
+    return false;
+}
+
+static bool WriteCommandLineTextToConsole(const std::wstring& text, bool errorOutput)
+{
     std::wstring output = text;
     if (output.empty() || (output.back() != L'\n' && output.back() != L'\r'))
         output += L"\r\n";
 
-    DWORD mode = 0;
-    bool ok = false;
-    if (GetConsoleMode(h, &mode))
-    {
-        DWORD written = 0;
-        ok = WriteConsoleW(h, output.c_str(), static_cast<DWORD>(output.size()), &written, nullptr) != FALSE;
-    }
-    else
-    {
-        std::vector<BYTE> bytes = EncodeUtf8Text(output, false);
-        if (!bytes.empty() || output.empty())
-        {
-            DWORD written = 0;
-            ok = WriteFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) != FALSE;
-        }
-    }
+    HANDLE h = GetStdHandle(errorOutput ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+    if (WriteCommandLineTextToHandle(h, output))
+        return true;
+
+    bool attached = AttachConsole(ATTACH_PARENT_PROCESS) != FALSE;
+    if (!attached && GetLastError() != ERROR_ACCESS_DENIED)
+        return false;
+
+    h = GetStdHandle(errorOutput ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+    bool ok = WriteCommandLineTextToHandle(h, output);
 
     if (attached)
         FreeConsole();
@@ -1679,6 +1695,11 @@ static bool CommandLineHasPersistentSettings()
 static bool CommandLineShouldExit()
 {
     return g_commandLine.exitRequested;
+}
+
+static bool CommandLineShouldShowVersion()
+{
+    return g_commandLine.versionRequested;
 }
 
 static bool CommandLineShouldGenerateNow()

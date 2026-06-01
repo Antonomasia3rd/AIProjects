@@ -97,6 +97,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Ensure MinGW-w64 for deskband build
         if: needs.detect-projects.outputs.build_all == 'true' || needs.detect-projects.outputs.build_real_time_notes_deskband == 'true'

@@ -685,6 +685,8 @@ void Menu(HWND h)
 
     addTo(m, ID_SHOW_MENU_DROPDOWN, g_ui.showMenuAsDropdown.c_str(), showMenuAsDropdown);
     addTo(m, ID_GENERATE_NOW, g_ui.generateNow.c_str());
+    std::wstring versionLine = FormatWide(g_ui.versionLabel.c_str(), DesktopStubVersionDisplayText().c_str());
+    AppendMenuChecked(m, MF_STRING | MF_DISABLED, 0, versionLine.c_str());
     AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
 
     HMENU generalMenu = beginSection(g_ui.generalTitle);
