@@ -721,7 +721,8 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
     int marginX = IniReadClampedI(L"TileText", L"MarginX", 8, 0, 1000);
     int marginY = IniReadClampedI(L"TileText", L"MarginY", 10, 0, 1000);
     int lineGap = IniReadClampedI(L"TileText", L"LineGap", 2, 0, 1000);
-    int maxSecondaryLines = IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 1, 20);
+    int maxSecondaryLines = IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 0, 32);
+    bool drawSecondaryText = !secondaryText.empty() && maxSecondaryLines > 0;
 
     double scale = 1.0;
     if (logicalWidth > 0 && logicalHeight > 0)
@@ -770,13 +771,13 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
 
     REAL primaryLineHeight = scaledPrimaryFontSize * 1.25f;
     REAL secondaryLineHeight = scaledSecondaryFontSize * 1.20f;
-    REAL secondaryBlockHeight = secondaryText.empty() ? 0.0f : secondaryLineHeight * static_cast<REAL>(maxSecondaryLines);
+    REAL secondaryBlockHeight = drawSecondaryText ? secondaryLineHeight * static_cast<REAL>(maxSecondaryLines) : 0.0f;
     REAL blockHeight = 0.0f;
     if (!primaryText.empty())
         blockHeight += primaryLineHeight;
-    if (!primaryText.empty() && !secondaryText.empty())
+    if (!primaryText.empty() && drawSecondaryText)
         blockHeight += scaledLineGap;
-    if (!secondaryText.empty())
+    if (drawSecondaryText)
         blockHeight += secondaryBlockHeight;
     if (blockHeight <= 0.0f)
         blockHeight = primaryLineHeight;
@@ -788,7 +789,7 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
         textY = content.Y + std::max(0.0f, content.Height - blockHeight);
 
     REAL badgeReserve = 0.0f;
-    if (!badgeText.empty() && (badgeHAlign == L"right" || badgeHAlign == L"left") && (!primaryText.empty() || !secondaryText.empty()))
+    if (!badgeText.empty() && (badgeHAlign == L"right" || badgeHAlign == L"left") && (!primaryText.empty() || drawSecondaryText))
         badgeReserve = std::min(content.Width * 0.42f, std::max(scaledBadgeFontSize * 1.35f, content.Width * 0.24f));
 
     RectF textContent = content;
@@ -821,9 +822,9 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
         textY += primaryLineHeight + scaledLineGap;
     }
 
-    if (!secondaryText.empty())
+    if (drawSecondaryText)
     {
-        RectF secondaryRect(textContent.X, textY, textContent.Width, std::max(1.0f, content.Y + content.Height - textY));
+        RectF secondaryRect(textContent.X, textY, textContent.Width, std::max(1.0f, secondaryBlockHeight));
         if (!DrawTileTextString(graphics, secondaryText, secondaryFont, secondaryRect, textFormat, secondaryBrush, scale, L"draw secondary tile text"))
             return false;
     }
@@ -852,6 +853,8 @@ static std::wstring TileTextXmlText()
 static std::wstring TileTextXmlSecondaryText()
 {
     if (!TileTextOverlayEnabled())
+        return L"";
+    if (IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 0, 32) <= 0)
         return L"";
     return TileTextSecondaryText();
 }

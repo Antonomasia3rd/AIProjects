@@ -1498,6 +1498,46 @@ static std::wstring CommandLineProgramName()
     return name.empty() ? L"DesktopStub.exe" : name;
 }
 
+static void ReplaceAllInPlace(std::wstring& text, const std::wstring& from, const std::wstring& to)
+{
+    if (from.empty())
+        return;
+
+    size_t pos = 0;
+    while ((pos = text.find(from, pos)) != std::wstring::npos)
+    {
+        text.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
+static std::wstring DecodeCommandLineHelpEscapes(const std::wstring& value)
+{
+    std::wstring out;
+    out.reserve(value.size());
+    for (size_t i = 0; i < value.size(); ++i)
+    {
+        wchar_t ch = value[i];
+        if (ch != L'\\' || i + 1 >= value.size())
+        {
+            out.push_back(ch);
+            continue;
+        }
+
+        wchar_t next = value[++i];
+        if (next == L'r') out.push_back(L'\r');
+        else if (next == L'n') out.push_back(L'\n');
+        else if (next == L't') out.push_back(L'\t');
+        else if (next == L'\\') out.push_back(L'\\');
+        else
+        {
+            out.push_back(L'\\');
+            out.push_back(next);
+        }
+    }
+    return out;
+}
+
 static std::wstring CommandLineUsageText()
 {
     std::wstring exe = CommandLineProgramName();
@@ -1508,121 +1548,12 @@ static std::wstring CommandLineUsageText()
     if (iniExampleName.empty())
         iniExampleName = L"DesktopStub";
 
-    std::wstring text = exe + L" [options] [wallpaper-path]\r\n"
-        L"\r\n"
-        L"Options:\r\n"
-        L"  --help, -h, /?                      Show this help.\r\n"
-        L"  --version, -v                       Show build and package version.\r\n"
-        L"  --ini <path>                        Use an alternate INI file.\r\n"
-        L"  --set Section.Key=Value             Set and save any INI value.\r\n"
-        L"  --exit, --quit                      Ask the running instance to exit.\r\n"
-        L"  --once                              Generate once, then exit.\r\n"
-        L"  --regenerate-manifest               Rewrite AppxManifest.xml once from built-in defaults.\r\n"
-        L"  --generate, --generate-now           Force startup generation and keep running.\r\n"
-        L"  --wallpaper <path>                  Generate from a specific image path.\r\n"
-        L"  --no-monitor                        Do not start wallpaper/fit/DPI monitoring.\r\n"
-        L"  --tray | --no-tray                  Set and save tray icon startup visibility.\r\n"
-        L"  --console | --no-console            Set and save console visibility.\r\n"
-        L"  --logging | --no-logging            Set and save file logging.\r\n"
-        L"  --notifications | --no-notifications Set and save tray notifications.\r\n"
-        L"  --trim-working-set-on-idle | --no-trim-working-set-on-idle\r\n"
-        L"                                      Lower idle Task Manager memory by trimming the working set.\r\n"
-        L"  --compact-crt-heap-on-idle | --no-compact-crt-heap-on-idle\r\n"
-        L"                                      Release free CRT heap pages after idle work.\r\n"
-        L"  --keep-gdiplus-loaded | --no-keep-gdiplus-loaded\r\n"
-        L"                                      Keep/release GDI+ after image work for speed vs lower private bytes.\r\n"
-        L"  --low-idle-memory | --no-low-idle-memory\r\n"
-        L"                                      Convenience profile for lower idle memory vs warmer image runtime.\r\n"
-        L"  --idle-trim-interval <ms|off>      Periodically trim idle working set; off=0.\r\n"
-        L"  --powershell | --com-registration    Set and save registration command mode.\r\n"
-        L"  --com-helper | --no-com-helper      Enable/disable COM isolation helper.\r\n"
-        L"  --live-tile | --no-live-tile         Set and save Live Tile update mode.\r\n"
-        L"  --live-tile-auto                     Set and save automatic Live Tile update mode.\r\n"
-        L"  --live-tile-mode <mode>              Set mode: Auto, Registration, or LiveTile.\r\n"
-        L"  --live-tile-relaunch-on-mismatch | --no-live-tile-relaunch-on-mismatch\r\n"
-        L"                                      Relaunch when process package state does not match mode.\r\n"
-        L"  --tile-text <text>                  Set primary tile text and enable it if non-empty.\r\n"
-        L"  --tile-text-secondary <text> | --tile-subtext <text>\r\n"
-        L"                                      Set secondary tile text and enable it if non-empty.\r\n"
-        L"  --tile-text-badge <text> | --tile-badge <text>\r\n"
-        L"                                      Set badge tile text and enable it if non-empty.\r\n"
-        L"  --tile-text-enable | --tile-text-disable\r\n"
-        L"                                      Enable/disable tile text overlay.\r\n"
-        L"  --tile-text-clear | --tile-text-secondary-clear | --tile-text-badge-clear\r\n"
-        L"                                      Clear primary, secondary, or badge tile text.\r\n"
-        L"  --tile-text-align <left|center|right>\r\n"
-        L"                                      Set horizontal text alignment.\r\n"
-        L"  --tile-text-valign <top|center|bottom>\r\n"
-        L"                                      Set vertical text alignment.\r\n"
-        L"  --tile-text-badge-align <left|center|right>\r\n"
-        L"                                      Set badge horizontal alignment.\r\n"
-        L"  --tile-text-badge-valign <top|center|bottom>\r\n"
-        L"                                      Set badge vertical alignment.\r\n"
-        L"  --tile-text-font <name>             Set baked text font family.\r\n"
-        L"  --tile-text-font-size <px>          Set primary text size, 6-256 px.\r\n"
-        L"  --tile-text-secondary-font-size <px> Set secondary text size, 6-256 px.\r\n"
-        L"  --tile-text-badge-font-size <px>    Set badge text size, 6-256 px.\r\n"
-        L"  --tile-text-bold | --no-tile-text-bold\r\n"
-        L"                                      Enable/disable primary bold baked text.\r\n"
-        L"  --tile-text-secondary-bold | --no-tile-text-secondary-bold\r\n"
-        L"                                      Enable/disable secondary bold baked text.\r\n"
-        L"  --tile-text-badge-bold | --no-tile-text-badge-bold\r\n"
-        L"                                      Enable/disable badge bold baked text.\r\n"
-        L"  --tile-text-italic | --no-tile-text-italic\r\n"
-        L"                                      Enable/disable italic baked text.\r\n"
-        L"  --tile-text-color <#AARRGGBB>       Set primary static/baked text color.\r\n"
-        L"  --tile-text-secondary-color <#AARRGGBB>\r\n"
-        L"                                      Set secondary static/baked text color.\r\n"
-        L"  --tile-text-badge-color <#AARRGGBB> Set badge static/baked text color.\r\n"
-        L"  --tile-text-shadow | --no-tile-text-shadow\r\n"
-        L"                                      Enable/disable baked text shadow.\r\n"
-        L"  --tile-text-shadow-color <#AARRGGBB> Set baked text shadow color.\r\n"
-        L"  --tile-text-margin-x <px> | --tile-text-margin-y <px>\r\n"
-        L"                                      Set baked text margins, 0-512 px.\r\n"
-        L"  --tile-text-line-gap <px>           Set baked text line gap, 0-128 px.\r\n"
-        L"  --tile-text-max-secondary-lines <n> Set baked secondary line limit, 0-32.\r\n"
-        L"  --manifest-target <target>            Set and regenerate manifest: Windows10, Windows81, or Windows8.\r\n"
-        L"  --manifest-win10|--manifest-win81|--manifest-win8\r\n"
-        L"                                      Shortcuts for --manifest-target.\r\n"
-        L"  --win8-broker | --no-win8-broker    Enable/disable Win8/8.1 broker helper.\r\n"
-        L"  --win8-background-task | --no-win8-background-task\r\n"
-        L"                                      Enable/disable experimental background task helper.\r\n"
-        L"  --win8-oop-helper | --no-win8-oop-helper\r\n"
-        L"                                      Enable/disable experimental OOP helper.\r\n"
-        L"  --detect <method>                   Set and save wallpaper detection method.\r\n"
-        L"  --live-wallpaper-capture | --no-live-wallpaper-capture\r\n"
-        L"                                      Enable/disable live wallpaper snapshots.\r\n"
-        L"  --wallpaper-decode-low-memory | --no-wallpaper-decode-low-memory\r\n"
-        L"                                      Enable/disable low-memory static wallpaper decode.\r\n"
-        L"  --wallpaper-decode-max-long-edge <px|auto>\r\n"
-        L"                                      Set decode cap, 0-32768; auto=0.\r\n"
-        L"  --live-wallpaper-screen-fallback | --no-live-wallpaper-screen-fallback\r\n"
-        L"                                      Enable/disable unsafe screen-copy fallback.\r\n"
-        L"  --live-wallpaper-delay <ms>          Set snapshot startup delay, 0-30000.\r\n"
-        L"  --live-wallpaper-refresh <ms|once>   Set snapshot refresh, 0-3600000; once=0.\r\n"
-        L"  --live-wallpaper-startup-refresh <ms|off>\r\n"
-        L"                                      Recapture during live wallpaper startup; off=0.\r\n"
-        L"  --live-wallpaper-startup-refresh-duration <ms|off>\r\n"
-        L"                                      Startup recapture window duration; off=0.\r\n"
-        L"  --scales auto|all|100,125,150,200,400\r\n"
-        L"                                      Set and save generated DPI scales.\r\n"
-        L"  --asset Name=0|1                    Set and save an asset toggle.\r\n"
-        L"                                      Names: StoreLogo, MediumTile, Square44x44Logo,\r\n"
-        L"                                      Square30x30Logo, SmallTile, WideTile, LargeTile, SplashScreen.\r\n"
-        L"  --generated-asset-cache | --no-generated-asset-cache\r\n"
-        L"                                      Enable/disable generated asset cache.\r\n"
-        L"  --generated-asset-precache | --no-generated-asset-precache\r\n"
-        L"                                      Enable/disable slideshow pre-cache.\r\n"
-        L"  --generated-asset-cache-max <n>      Set cache max entries, 0-4096.\r\n"
-        L"  --generated-asset-precache-max <n>   Set pre-cache max files, 0-256.\r\n"
-        L"  --set Settings.Key=Value            Set any other INI-backed setting directly.\r\n"
-        L"\r\n"
-        L"Examples:\r\n";
-    text += L"  " + exe + L" --once\r\n";
-    text += L"  " + exe + L" --no-tray --console\r\n";
-    text += L"  " + exe + L" --ini D:\\Temp\\" + iniExampleName + L".ini --set Settings.PollIntervalMs=5000\r\n";
-    text += L"  " + exe + L" --wallpaper D:\\Pictures\\wallpaper.jpg --scales 100,200\r\n";
-    text += L"  " + exe + L" --exit\r\n";
+    std::wstring text = DecodeCommandLineHelpEscapes(IniReadS(
+        COMMAND_LINE_HELP_SECTION,
+        COMMAND_LINE_HELP_TEMPLATE_KEY,
+        g_commandLineHelpDefaults[0].value));
+    ReplaceAllInPlace(text, L"{exe}", exe);
+    ReplaceAllInPlace(text, L"{iniExampleName}", iniExampleName);
     return text;
 }
 
@@ -1680,10 +1611,13 @@ static void ShowCommandLineMessage(const std::wstring& text, bool error)
     if (WriteCommandLineTextToConsole(text, error))
         return;
 
+    std::wstring title = error
+        ? IniReadS(L"Strings", L"CommandLineErrorTitle", L"DesktopStub command line")
+        : IniReadS(L"Strings", L"CommandLineTitle", L"DesktopStub");
     MessageBoxW(
         nullptr,
         text.c_str(),
-        error ? L"DesktopStub command line" : L"DesktopStub",
+        title.c_str(),
         MB_OK | (error ? MB_ICONERROR : MB_ICONINFORMATION));
 }
 
@@ -1843,9 +1777,15 @@ static bool CommandLineSettingChangesTrayIcon(const CommandLineIniSetting& entry
     return IEquals(entry.section, L"Settings") && IEquals(entry.key, L"TrayIcon");
 }
 
-static bool CommandLineSettingChangesManifestTarget(const CommandLineIniSetting& entry)
+static bool CommandLineSettingChangesManifest(const CommandLineIniSetting& entry)
 {
-    if (!IEquals(entry.section, L"Settings") || !IEquals(entry.key, L"AppxManifestTarget"))
+    if (!IEquals(entry.section, L"Settings"))
+        return false;
+
+    if (ToLowerCopy(TrimCopy(entry.key)).rfind(L"manifest", 0) == 0)
+        return true;
+
+    if (!IEquals(entry.key, L"AppxManifestTarget"))
         return false;
 
     ManifestCompatibilityTarget before = ParseManifestCompatibilityTargetValue(
@@ -1855,15 +1795,9 @@ static bool CommandLineSettingChangesManifestTarget(const CommandLineIniSetting&
     return before != after;
 }
 
-static bool CommandLineSettingTargetsManifestEditor(const CommandLineIniSetting& entry)
+static bool CommandLineSettingTargetsObsoleteManifestSection(const CommandLineIniSetting& entry)
 {
-    if (IEquals(entry.section, L"Manifest"))
-        return true;
-
-    if (IEquals(entry.section, L"Settings"))
-        return ToLowerCopy(TrimCopy(entry.key)).rfind(L"manifest", 0) == 0;
-
-    return false;
+    return IEquals(entry.section, L"Manifest");
 }
 
 static bool ApplyCommandLinePersistentSettings()
@@ -1874,12 +1808,12 @@ static bool ApplyCommandLinePersistentSettings()
 
     for (const auto& entry : g_commandLine.settings)
     {
-        if (CommandLineSettingTargetsManifestEditor(entry))
+        if (CommandLineSettingTargetsObsoleteManifestSection(entry))
         {
             std::wstring settingName = entry.section + L"." + entry.key;
             CommandLineStringFormat1(
-                L"CommandLineManifestSettingIgnored",
-                L"Manifest INI setting is no longer supported: %s. Edit AppxManifest.xml directly or use --regenerate-manifest to restore the built-in default manifest.",
+                L"CommandLineManifestSectionIgnored",
+                L"Manifest INI section is no longer supported: %s. Use Settings.Manifest* keys or edit AppxManifest.xml directly.",
                 settingName,
                 g_commandLine.applyError);
             return false;
@@ -1887,7 +1821,7 @@ static bool ApplyCommandLinePersistentSettings()
 
         bool changesLiveTileMode = CommandLineSettingChangesLiveTileMode(entry);
         bool changesTrayIcon = CommandLineSettingChangesTrayIcon(entry);
-        bool changesManifestTarget = CommandLineSettingChangesManifestTarget(entry);
+        bool changesManifest = CommandLineSettingChangesManifest(entry);
         if (!WriteIniValue(entry.section.c_str(), entry.key.c_str(), entry.value.c_str()))
         {
             DWORD err = GetLastError();
@@ -1903,7 +1837,7 @@ static bool ApplyCommandLinePersistentSettings()
             g_commandLine.liveTileModeChanged = true;
         if (changesTrayIcon)
             g_commandLine.trayIconChanged = true;
-        if (changesManifestTarget)
+        if (changesManifest)
             g_commandLine.regenerateManifest = true;
     }
 

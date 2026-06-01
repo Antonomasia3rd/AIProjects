@@ -120,11 +120,14 @@ static std::wstring EffectiveConfiguredLogPath()
 
 static std::wstring ManifestSetting(const wchar_t* key, const wchar_t* fallback, const wchar_t* legacySettingsKey = nullptr)
 {
-    // Manifest generation intentionally uses built-in defaults. The old [Manifest]
-    // INI section and legacy [Settings] Manifest* keys are ignored so the INI
-    // does not become a second manifest editor next to AppxManifest.xml itself.
+    if (legacySettingsKey && *legacySettingsKey)
+    {
+        std::wstring value = TrimCopy(IniReadS(L"Settings", legacySettingsKey, L""));
+        if (!value.empty())
+            return value;
+    }
+
     (void)key;
-    (void)legacySettingsKey;
     return fallback ? fallback : L"";
 }
 
@@ -433,12 +436,20 @@ static std::wstring ManifestAppxActivationStubExecutableName()
 
 static std::wstring ManifestLiveTileBrokerExecutableName()
 {
-    return L"DesktopStubLiveTileBroker.exe";
+    return ManifestSettingValidated(
+        L"LiveTileBrokerExecutable",
+        L"DesktopStubLiveTileBroker.exe",
+        L"ManifestLiveTileBrokerExecutable",
+        IsManifestExecutableValue);
 }
 
 static std::wstring ManifestLiveTileBrokerEntryPoint()
 {
-    return L"DesktopStub.LiveTileBroker.App";
+    return ManifestSettingValidated(
+        L"LiveTileBrokerEntryPoint",
+        L"DesktopStub.LiveTileBroker.App",
+        L"ManifestLiveTileBrokerEntryPoint",
+        IsManifestNonEmptyDottedToken);
 }
 
 static bool Win8LiveTileBrokerAppEnabled()
@@ -451,28 +462,48 @@ static bool Win8LiveTileBrokerAppEnabled()
 
 static std::wstring ManifestLiveTileOopServerName()
 {
-    return L"DesktopStubLiveTileServer";
+    return ManifestSettingValidated(
+        L"LiveTileOopServerName",
+        L"DesktopStubLiveTileServer",
+        L"ManifestLiveTileOopServerName",
+        IsManifestNonEmptyDottedToken);
 }
 
 static std::wstring ManifestLiveTileOopRuntimeClassId()
 {
-    return L"DesktopStub.LiveTileUpdateServer";
+    return ManifestSettingValidated(
+        L"LiveTileOopRuntimeClassId",
+        L"DesktopStub.LiveTileUpdateServer",
+        L"ManifestLiveTileOopRuntimeClassId",
+        IsManifestNonEmptyDottedToken);
 }
 
 
 static std::wstring ManifestLiveTileBackgroundTaskDllName()
 {
-    return L"DesktopStubLiveTileTask.dll";
+    return ManifestSettingValidated(
+        L"LiveTileBackgroundTaskDll",
+        L"DesktopStubLiveTileTask.dll",
+        L"ManifestLiveTileBackgroundTaskDll",
+        IsManifestSafeRelativePath);
 }
 
 static std::wstring ManifestLiveTileBackgroundTaskClassId()
 {
-    return L"DesktopStub.LiveTileBackgroundTask";
+    return ManifestSettingValidated(
+        L"LiveTileBackgroundTaskClassId",
+        L"DesktopStub.LiveTileBackgroundTask",
+        L"ManifestLiveTileBackgroundTaskClassId",
+        IsManifestNonEmptyDottedToken);
 }
 
 static std::wstring ManifestLiveTileBackgroundTaskName()
 {
-    return L"DesktopStubLiveTileUpdate";
+    return ManifestSettingValidated(
+        L"LiveTileBackgroundTaskName",
+        L"DesktopStubLiveTileUpdate",
+        L"ManifestLiveTileBackgroundTaskName",
+        IsManifestNonEmptyDottedToken);
 }
 
 static bool Win8LiveTileBackgroundTaskEnabled()
@@ -1092,6 +1123,13 @@ struct ManifestDisplayInfo
     std::wstring entryPoint;
     std::wstring restrictedCapability;
     std::wstring splashScreenImage;
+    std::wstring liveTileBrokerExecutable;
+    std::wstring liveTileBrokerEntryPoint;
+    std::wstring liveTileOopServerName;
+    std::wstring liveTileOopRuntimeClassId;
+    std::wstring liveTileBackgroundTaskDll;
+    std::wstring liveTileBackgroundTaskClassId;
+    std::wstring liveTileBackgroundTaskName;
 };
 #pragma warning(pop)
 
@@ -1123,6 +1161,13 @@ static ManifestDisplayInfo CurrentManifestDisplayInfo()
     info.entryPoint = EffectiveManifestEntryPoint();
     info.restrictedCapability = EffectiveManifestRestrictedCapability();
     info.splashScreenImage = EffectiveManifestSplashScreenImage();
+    info.liveTileBrokerExecutable = ManifestLiveTileBrokerExecutableName();
+    info.liveTileBrokerEntryPoint = ManifestLiveTileBrokerEntryPoint();
+    info.liveTileOopServerName = ManifestLiveTileOopServerName();
+    info.liveTileOopRuntimeClassId = ManifestLiveTileOopRuntimeClassId();
+    info.liveTileBackgroundTaskDll = ManifestLiveTileBackgroundTaskDllName();
+    info.liveTileBackgroundTaskClassId = ManifestLiveTileBackgroundTaskClassId();
+    info.liveTileBackgroundTaskName = ManifestLiveTileBackgroundTaskName();
 
     std::wstring manifestPath = GetExeDir() + L"\\AppxManifest.xml";
     DWORD attrs = GetFileAttributesW(manifestPath.c_str());
@@ -1539,7 +1584,7 @@ static bool EnsureAppxManifest(std::wstring& manifestPath, bool& created, DWORD&
 
             if (executableMismatch || identityNameMismatch)
             {
-                Log(L"[i] Existing AppxManifest.xml no longer matches the current EXE name or manifest defaults. Regenerating manifest.");
+                LogText(g_ui.manifestExistingDefaultsChanged);
                 std::wstring rebuiltManifest = BuildDefaultAppxManifest();
                 if (executableMismatch &&
                     !existingIdentityName.empty() &&

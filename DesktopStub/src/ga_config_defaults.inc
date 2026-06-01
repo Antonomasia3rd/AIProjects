@@ -123,6 +123,37 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"LiveTileRelaunchOnSwitch", L"1"},
     {L"Settings", L"ClearLiveTileOnShutdown", L"1"},
     {L"Settings", L"AppxManifestTarget", L"Windows10"},
+    {L"Settings", L"ManifestIdentityName", L""},
+    {L"Settings", L"ManifestPublisher", L"CN=DesktopStub"},
+    {L"Settings", L"ManifestPackageVersion", L""},
+    {L"Settings", L"ManifestDisplayName", L"Desktop"},
+    {L"Settings", L"ManifestPublisherDisplayName", L"DesktopStub"},
+    {L"Settings", L"ManifestDescription", L"Desktop"},
+    {L"Settings", L"ManifestExecutable", L""},
+    {L"Settings", L"ManifestApplicationId", L"App"},
+    {L"Settings", L"ManifestTargetDeviceFamilyName", L"Windows.Desktop"},
+    {L"Settings", L"ManifestMinVersion", L"10.0.15063.0"},
+    {L"Settings", L"ManifestMaxVersionTested", L"10.0.15063.0"},
+    {L"Settings", L"ManifestResourceLanguage", L"en-us"},
+    {L"Settings", L"ManifestPropertiesLogo", L"Assets\\StoreLogo.png"},
+    {L"Settings", L"ManifestSquare150x150Logo", L"Assets\\MediumTile.png"},
+    {L"Settings", L"ManifestSquare44x44Logo", L"Assets\\Square44x44Logo.png"},
+    {L"Settings", L"ManifestSquare30x30Logo", L"Assets\\Square30x30Logo.png"},
+    {L"Settings", L"ManifestSquare71x71Logo", L"Assets\\SmallTile.png"},
+    {L"Settings", L"ManifestWide310x150Logo", L"Assets\\WideTile.png"},
+    {L"Settings", L"ManifestSquare310x310Logo", L"Assets\\LargeTile.png"},
+    {L"Settings", L"ManifestBackgroundColor", L"transparent"},
+    {L"Settings", L"ManifestShowNameOnTiles", L"square150x150Logo,wide310x150Logo,square310x310Logo"},
+    {L"Settings", L"ManifestEntryPoint", L"Windows.FullTrustApplication"},
+    {L"Settings", L"ManifestRestrictedCapability", L"runFullTrust"},
+    {L"Settings", L"ManifestSplashScreenImage", L"Assets\\SplashScreen.png"},
+    {L"Settings", L"ManifestLiveTileBrokerExecutable", L"DesktopStubLiveTileBroker.exe"},
+    {L"Settings", L"ManifestLiveTileBrokerEntryPoint", L"DesktopStub.LiveTileBroker.App"},
+    {L"Settings", L"ManifestLiveTileOopServerName", L"DesktopStubLiveTileServer"},
+    {L"Settings", L"ManifestLiveTileOopRuntimeClassId", L"DesktopStub.LiveTileUpdateServer"},
+    {L"Settings", L"ManifestLiveTileBackgroundTaskDll", L"DesktopStubLiveTileTask.dll"},
+    {L"Settings", L"ManifestLiveTileBackgroundTaskClassId", L"DesktopStub.LiveTileBackgroundTask"},
+    {L"Settings", L"ManifestLiveTileBackgroundTaskName", L"DesktopStubLiveTileUpdate"},
     {L"Settings", L"Win8LiveTileOopHelper", L"0"},
     {L"Settings", L"Win8LiveTileBackgroundTask", L"0"},
     {L"Settings", L"Win8LiveTileBrokerApp", L"1"},
@@ -152,7 +183,7 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"ComRegistrationTimeoutMs", L"120000"},
     {L"Settings", L"ComRegistrationCancelWaitMs", L"5000"},
     {L"Settings", L"ComRegistrationUseHelper", L"0"},
-    {L"Settings", L"PowerShellExe", L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"},
+    {L"Settings", L"PowerShellExe", L""},
     {L"Settings", L"PowerShellPollMs", L"50"},
     {L"Settings", L"PowerShellTimeoutMs", L"120000"},
     {L"Settings", L"PowerShellTerminateWaitMs", L"5000"},
@@ -211,6 +242,130 @@ static const IniDefault g_powerShellErrorMessageDefaults[] = {
     {POWERSHELL_ERROR_MESSAGES_SECTION, L"0x80073CF9", L"PowerShell error: AppX install failed. If output also shows 0x80070002, a file referenced by AppxManifest.xml is missing or the manifest/assets path cannot be found."},
     {POWERSHELL_ERROR_MESSAGES_SECTION, L"0x80073D02", L"PowerShell error: AppX registration failed because the package is currently in use. Close the running DesktopStub package and retry."},
     {POWERSHELL_ERROR_MESSAGES_SECTION, L"0x80070002", L"PowerShell error: file not found during AppX registration. Check that AppxManifest.xml and every referenced asset file exist."},
+};
+
+static constexpr const wchar_t* COMMAND_LINE_HELP_SECTION = L"CommandLineHelp";
+static constexpr const wchar_t* COMMAND_LINE_HELP_TEMPLATE_KEY = L"Template";
+
+static const IniDefault g_commandLineHelpDefaults[] = {
+    {COMMAND_LINE_HELP_SECTION, COMMAND_LINE_HELP_TEMPLATE_KEY,
+        L"{exe} [options] [wallpaper-path]\\r\\n"
+        L"\\r\\n"
+        L"Options:\\r\\n"
+        L"  --help, -h, /?                      Show this help.\\r\\n"
+        L"  --version, -v                       Show build and package version.\\r\\n"
+        L"  --ini <path>                        Use an alternate INI file.\\r\\n"
+        L"  --set Section.Key=Value             Set and save any INI value.\\r\\n"
+        L"  --exit, --quit                      Ask the running instance to exit.\\r\\n"
+        L"  --once                              Generate once, then exit.\\r\\n"
+        L"  --regenerate-manifest               Rewrite AppxManifest.xml once from Settings.Manifest* values.\\r\\n"
+        L"  --generate, --generate-now           Force startup generation and keep running.\\r\\n"
+        L"  --wallpaper <path>                  Generate from a specific image path.\\r\\n"
+        L"  --no-monitor                        Do not start wallpaper/fit/DPI monitoring.\\r\\n"
+        L"  --tray | --no-tray                  Set and save tray icon startup visibility.\\r\\n"
+        L"  --console | --no-console            Set and save console visibility.\\r\\n"
+        L"  --logging | --no-logging            Set and save file logging.\\r\\n"
+        L"  --notifications | --no-notifications Set and save tray notifications.\\r\\n"
+        L"  --trim-working-set-on-idle | --no-trim-working-set-on-idle\\r\\n"
+        L"                                      Lower idle Task Manager memory by trimming the working set.\\r\\n"
+        L"  --compact-crt-heap-on-idle | --no-compact-crt-heap-on-idle\\r\\n"
+        L"                                      Release free CRT heap pages after idle work.\\r\\n"
+        L"  --keep-gdiplus-loaded | --no-keep-gdiplus-loaded\\r\\n"
+        L"                                      Keep/release GDI+ after image work for speed vs lower private bytes.\\r\\n"
+        L"  --low-idle-memory | --no-low-idle-memory\\r\\n"
+        L"                                      Convenience profile for lower idle memory vs warmer image runtime.\\r\\n"
+        L"  --idle-trim-interval <ms|off>      Periodically trim idle working set; off=0.\\r\\n"
+        L"  --powershell | --com-registration    Set and save registration command mode.\\r\\n"
+        L"  --com-helper | --no-com-helper      Enable/disable COM isolation helper.\\r\\n"
+        L"  --live-tile | --no-live-tile         Set and save Live Tile update mode.\\r\\n"
+        L"  --live-tile-auto                     Set and save automatic Live Tile update mode.\\r\\n"
+        L"  --live-tile-mode <mode>              Set mode: Auto, Registration, or LiveTile.\\r\\n"
+        L"  --live-tile-relaunch-on-mismatch | --no-live-tile-relaunch-on-mismatch\\r\\n"
+        L"                                      Relaunch when process package state does not match mode.\\r\\n"
+        L"  --tile-text <text>                  Set primary tile text and enable it if non-empty.\\r\\n"
+        L"  --tile-text-secondary <text> | --tile-subtext <text>\\r\\n"
+        L"                                      Set secondary tile text and enable it if non-empty.\\r\\n"
+        L"  --tile-text-badge <text> | --tile-badge <text>\\r\\n"
+        L"                                      Set badge tile text and enable it if non-empty.\\r\\n"
+        L"  --tile-text-enable | --tile-text-disable\\r\\n"
+        L"                                      Enable/disable tile text overlay.\\r\\n"
+        L"  --tile-text-clear | --tile-text-secondary-clear | --tile-text-badge-clear\\r\\n"
+        L"                                      Clear primary, secondary, or badge tile text.\\r\\n"
+        L"  --tile-text-align <left|center|right>\\r\\n"
+        L"                                      Set horizontal text alignment.\\r\\n"
+        L"  --tile-text-valign <top|center|bottom>\\r\\n"
+        L"                                      Set vertical text alignment.\\r\\n"
+        L"  --tile-text-badge-align <left|center|right>\\r\\n"
+        L"                                      Set badge horizontal alignment.\\r\\n"
+        L"  --tile-text-badge-valign <top|center|bottom>\\r\\n"
+        L"                                      Set badge vertical alignment.\\r\\n"
+        L"  --tile-text-font <name>             Set baked text font family.\\r\\n"
+        L"  --tile-text-font-size <px>          Set primary text size, 6-256 px.\\r\\n"
+        L"  --tile-text-secondary-font-size <px> Set secondary text size, 6-256 px.\\r\\n"
+        L"  --tile-text-badge-font-size <px>    Set badge text size, 6-256 px.\\r\\n"
+        L"  --tile-text-bold | --no-tile-text-bold\\r\\n"
+        L"                                      Enable/disable primary bold baked text.\\r\\n"
+        L"  --tile-text-secondary-bold | --no-tile-text-secondary-bold\\r\\n"
+        L"                                      Enable/disable secondary bold baked text.\\r\\n"
+        L"  --tile-text-badge-bold | --no-tile-text-badge-bold\\r\\n"
+        L"                                      Enable/disable badge bold baked text.\\r\\n"
+        L"  --tile-text-italic | --no-tile-text-italic\\r\\n"
+        L"                                      Enable/disable italic baked text.\\r\\n"
+        L"  --tile-text-color <#AARRGGBB>       Set primary static/baked text color.\\r\\n"
+        L"  --tile-text-secondary-color <#AARRGGBB>\\r\\n"
+        L"                                      Set secondary static/baked text color.\\r\\n"
+        L"  --tile-text-badge-color <#AARRGGBB> Set badge static/baked text color.\\r\\n"
+        L"  --tile-text-shadow | --no-tile-text-shadow\\r\\n"
+        L"                                      Enable/disable baked text shadow.\\r\\n"
+        L"  --tile-text-shadow-color <#AARRGGBB> Set baked text shadow color.\\r\\n"
+        L"  --tile-text-margin-x <px> | --tile-text-margin-y <px>\\r\\n"
+        L"                                      Set baked text margins, 0-512 px.\\r\\n"
+        L"  --tile-text-line-gap <px>           Set baked text line gap, 0-128 px.\\r\\n"
+        L"  --tile-text-max-secondary-lines <n> Set baked secondary line limit, 0-32.\\r\\n"
+        L"  --manifest-target <target>          Set and regenerate manifest: Windows10, Windows81, or Windows8.\\r\\n"
+        L"  --manifest-win10|--manifest-win81|--manifest-win8\\r\\n"
+        L"                                      Shortcuts for --manifest-target.\\r\\n"
+        L"  --set Settings.ManifestDisplayName=Name\\r\\n"
+        L"                                      Set manifest fields and regenerate the manifest.\\r\\n"
+        L"  --win8-broker | --no-win8-broker    Enable/disable Win8/8.1 broker helper.\\r\\n"
+        L"  --win8-background-task | --no-win8-background-task\\r\\n"
+        L"                                      Enable/disable experimental background task helper.\\r\\n"
+        L"  --win8-oop-helper | --no-win8-oop-helper\\r\\n"
+        L"                                      Enable/disable experimental OOP helper.\\r\\n"
+        L"  --detect <method>                   Set and save wallpaper detection method.\\r\\n"
+        L"  --live-wallpaper-capture | --no-live-wallpaper-capture\\r\\n"
+        L"                                      Enable/disable live wallpaper snapshots.\\r\\n"
+        L"  --wallpaper-decode-low-memory | --no-wallpaper-decode-low-memory\\r\\n"
+        L"                                      Enable/disable low-memory static wallpaper decode.\\r\\n"
+        L"  --wallpaper-decode-max-long-edge <px|auto>\\r\\n"
+        L"                                      Set decode cap, 0-32768; auto=0.\\r\\n"
+        L"  --live-wallpaper-screen-fallback | --no-live-wallpaper-screen-fallback\\r\\n"
+        L"                                      Enable/disable unsafe screen-copy fallback.\\r\\n"
+        L"  --live-wallpaper-delay <ms>          Set snapshot startup delay, 0-30000.\\r\\n"
+        L"  --live-wallpaper-refresh <ms|once>   Set snapshot refresh, 0-3600000; once=0.\\r\\n"
+        L"  --live-wallpaper-startup-refresh <ms|off>\\r\\n"
+        L"                                      Recapture during live wallpaper startup; off=0.\\r\\n"
+        L"  --live-wallpaper-startup-refresh-duration <ms|off>\\r\\n"
+        L"                                      Startup recapture window duration; off=0.\\r\\n"
+        L"  --scales auto|all|100,125,150,200,400\\r\\n"
+        L"                                      Set and save generated DPI scales.\\r\\n"
+        L"  --asset Name=0|1                    Set and save an asset toggle.\\r\\n"
+        L"                                      Names: StoreLogo, MediumTile, Square44x44Logo,\\r\\n"
+        L"                                      Square30x30Logo, SmallTile, WideTile, LargeTile, SplashScreen.\\r\\n"
+        L"  --generated-asset-cache | --no-generated-asset-cache\\r\\n"
+        L"                                      Enable/disable generated asset cache.\\r\\n"
+        L"  --generated-asset-precache | --no-generated-asset-precache\\r\\n"
+        L"                                      Enable/disable slideshow pre-cache.\\r\\n"
+        L"  --generated-asset-cache-max <n>      Set cache max entries, 0-4096.\\r\\n"
+        L"  --generated-asset-precache-max <n>   Set pre-cache max files, 0-256.\\r\\n"
+        L"  --set Settings.Key=Value            Set any other INI-backed setting directly.\\r\\n"
+        L"\\r\\n"
+        L"Examples:\\r\\n"
+        L"  {exe} --once\\r\\n"
+        L"  {exe} --no-tray --console\\r\\n"
+        L"  {exe} --ini D:\\\\Temp\\\\{iniExampleName}.ini --set Settings.PollIntervalMs=5000\\r\\n"
+        L"  {exe} --wallpaper D:\\\\Pictures\\\\wallpaper.jpg --scales 100,200\\r\\n"
+        L"  {exe} --exit\\r\\n"},
 };
 
 struct StringDefault {
@@ -289,7 +444,10 @@ static const StringDefault g_stringDefaults[] = {
     {L"CommandLineForceGenerateReason", L"command-line --generate"},
     {L"ManifestRegenerateReason", L"manifest regeneration"},
     {L"CommandLineWallpaperPathInvalid", L"Wallpaper path does not exist or is not a file: %s"},
-    {L"CommandLineManifestSettingIgnored", L"Manifest INI setting is no longer supported: %s. Edit AppxManifest.xml directly or use --regenerate-manifest to restore the built-in default manifest."},
+    {L"CommandLineTitle", L"DesktopStub"},
+    {L"CommandLineErrorTitle", L"DesktopStub command line"},
+    {L"CommandLineSignalExistingFailed", L"Failed to signal the running DesktopStub instance."},
+    {L"CommandLineManifestSectionIgnored", L"Manifest INI section is no longer supported: %s. Use Settings.Manifest* keys or edit AppxManifest.xml directly."},
     {L"StartupGenerationSkippedUnchanged", L"[i] Startup generation skipped: wallpaper/config unchanged."},
     {L"StartupGenerationSkippedNoWallpaper", L"[!] Startup generation skipped: no wallpaper detected."},
     {L"ManualGenerationRequested", L"[i] Manual generation requested from the tray menu."},
@@ -396,8 +554,19 @@ static const StringDefault g_stringDefaults[] = {
     {L"ManifestSplashScreenImageLabel", L"Manifest splash screen image: %s"},
     {L"ManifestSourceLabel", L"Manifest source: %s"},
     {L"ManifestSourceExisting", L"existing AppxManifest.xml"},
-    {L"ManifestSourceGenerated", L"generated from built-in defaults if missing"},
-    {L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from built-in defaults"},
+    {L"ManifestSourceGenerated", L"generated from configured defaults if missing"},
+    {L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from config"},
+    {L"ManifestSettingChanged", L"[i] Manifest setting changed: Settings.%s = %s"},
+    {L"ManifestSettingInputTitle", L"Edit manifest setting"},
+    {L"ManifestSettingInputPrompt", L"Edit Settings.%s. Leave empty to use the computed default."},
+    {L"ManifestExistingDefaultsChanged", L"[i] Existing AppxManifest.xml no longer matches the current EXE name or manifest defaults. Regenerating manifest."},
+    {L"ManifestLiveTileBrokerExecutableLabel", L"Manifest broker executable: %s"},
+    {L"ManifestLiveTileBrokerEntryPointLabel", L"Manifest broker entry point: %s"},
+    {L"ManifestLiveTileOopServerNameLabel", L"Manifest OOP server name: %s"},
+    {L"ManifestLiveTileOopRuntimeClassIdLabel", L"Manifest OOP runtime class: %s"},
+    {L"ManifestLiveTileBackgroundTaskDllLabel", L"Manifest background task DLL: %s"},
+    {L"ManifestLiveTileBackgroundTaskClassIdLabel", L"Manifest background task class: %s"},
+    {L"ManifestLiveTileBackgroundTaskNameLabel", L"Manifest background task name: %s"},
     {L"WallpaperDetectionMethodLabel", L"Wallpaper detection method: %s"},
     {L"WallpaperDetectionFallback", L"Fallback when selected path is invalid"},
     {L"WallpaperDecodeLowMemory", L"Low-memory wallpaper decode"},
@@ -646,7 +815,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileModeReregistrationComplete", L"[i] Live Tile mode change re-registration completed."},
     {L"AppxManifestCreated", L"[i] Created AppxManifest.xml: %s"},
     {L"AppxManifestExisting", L"[i] Using existing AppxManifest.xml: %s"},
-    {L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s"},
+    {L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from configured defaults: %s"},
     {L"AppxManifestVersionUpdated", L"[i] Updated AppxManifest.xml package version to match DesktopStub: %s"},
     {L"AppxManifestCreateFailed", L"[!] Failed to create AppxManifest.xml: %s"},
     {L"AppxManifestRegenerateFailed", L"[!] Failed to regenerate AppxManifest.xml: %s"},
@@ -673,6 +842,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LaunchingPowerShellRegistration", L"Launching PowerShell registration..."},
     {L"PowerShellCommand", L"Command: %s"},
     {L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%s, poll=%d ms, terminate wait=%d ms)"},
+    {L"PowerShellExeInvalidPath", L"PowerShellExe must be a local absolute path; using default: %s"},
     {L"PowerShellProcessStarted", L"[i] PowerShell process started (pid=%lu)."},
     {L"PowerShellTerminateRequested", L"[!] Terminating timed-out PowerShell process (pid=%lu)."},
     {L"PowerShellTerminateFailed", L"[!] Failed to terminate timed-out PowerShell process (pid=%lu)."},
@@ -798,6 +968,12 @@ static std::wstring BuildInitialIniTemplate()
     lines.push_back(L"; Add lines like \"0x80070002\" = \"Readable reason\".");
     lines.push_back(L"; Delete an entry, or set its value empty, to stop using that special case.");
     for (const auto& d : g_powerShellErrorMessageDefaults)
+        lines.push_back(FormatIniAssignment(d.key, d.value));
+    lines.push_back(L"");
+    lines.push_back(L"[CommandLineHelp]");
+    lines.push_back(L"; Template for --help output. Use \\r\\n for line breaks.");
+    lines.push_back(L"; Supported placeholders: {exe}, {iniExampleName}.");
+    for (const auto& d : g_commandLineHelpDefaults)
         lines.push_back(FormatIniAssignment(d.key, d.value));
     lines.push_back(L"");
     lines.push_back(L"[Assets]");
@@ -944,11 +1120,6 @@ static void RepairBrokenPowerShellOutputTruncatedDefault()
 }
 
 
-static bool IsLegacyManifestSettingKey(const std::wstring& key)
-{
-    return ToLowerCopy(TrimCopy(key)).rfind(L"manifest", 0) == 0;
-}
-
 static void RemoveObsoleteManifestIniSettings()
 {
     std::lock_guard<std::mutex> writeLock(g_iniWriteMutex);
@@ -964,7 +1135,6 @@ static void RemoveObsoleteManifestIniSettings()
     std::vector<std::wstring> kept;
     kept.reserve(lines.size());
     bool inManifest = false;
-    bool inSettings = false;
     bool changed = false;
 
     for (const std::wstring& line : lines)
@@ -973,7 +1143,6 @@ static void RemoveObsoleteManifestIniSettings()
         if (TryParseIniSectionHeader(line, sectionName))
         {
             inManifest = IEquals(sectionName, L"Manifest");
-            inSettings = IEquals(sectionName, L"Settings");
             if (inManifest)
             {
                 changed = true;
@@ -985,24 +1154,6 @@ static void RemoveObsoleteManifestIniSettings()
         {
             changed = true;
             continue;
-        }
-
-        if (inSettings)
-        {
-            std::wstring trimmed = TrimCopy(line);
-            if (!trimmed.empty() && trimmed.front() != L';' && trimmed.front() != L'#')
-            {
-                size_t eq = line.find(L'=');
-                if (eq != std::wstring::npos)
-                {
-                    std::wstring key = ParseIniName(line.substr(0, eq));
-                    if (IsLegacyManifestSettingKey(key))
-                    {
-                        changed = true;
-                        continue;
-                    }
-                }
-            }
         }
 
         kept.push_back(line);
@@ -1034,6 +1185,14 @@ static void UpgradeTileTextDefaultAlignment()
     IniWrite(L"State", L"TileTextVerticalAlignDefaultMigrated", L"1");
 }
 
+static void UpgradePowerShellExeDefault()
+{
+    const wchar_t* legacyDefault = L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+    std::wstring current = TrimCopy(IniReadS(L"Settings", L"PowerShellExe", L""));
+    if (IEquals(current, legacyDefault))
+        IniWrite(L"Settings", L"PowerShellExe", L"");
+}
+
 static void UpgradeRenamedStringDefaults()
 {
     RepairBrokenPowerShellOutputTruncatedDefault();
@@ -1054,10 +1213,12 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%d ms, cancel wait=%d ms", L"[i] COM registration timeout=%s, cancel wait=%d ms");
     UpgradeStringDefaultIfUnmodified(L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%d ms, poll=%d ms, terminate wait=%d ms)", L"[i] PowerShell executable: %s (timeout=%s, poll=%d ms, terminate wait=%d ms)");
     UpgradeStringDefaultIfUnmodified(L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s.", L"Starting wallpaper generation: %s");
-    UpgradeStringDefaultIfUnmodified(L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from configured defaults: %s", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s");
-    UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from INI if missing", L"generated from built-in defaults if missing");
-    UpgradeStringDefaultIfUnmodified(L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from config", L"Regenerate AppxManifest.xml from built-in defaults");
+    UpgradeStringDefaultIfUnmodified(L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s", L"[i] Regenerated AppxManifest.xml from configured defaults: %s");
+    UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from INI if missing", L"generated from configured defaults if missing");
+    UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from built-in defaults if missing", L"generated from configured defaults if missing");
+    UpgradeStringDefaultIfUnmodified(L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from built-in defaults", L"Regenerate AppxManifest.xml from config");
     UpgradeStringDefaultIfUnmodified(L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with WIC: %lu x %lu.", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu (max long edge=%d).");
+    UpgradePowerShellExeDefault();
     UpgradeTileTextDefaultAlignment();
     RemoveObsoleteManifestIniSettings();
 }

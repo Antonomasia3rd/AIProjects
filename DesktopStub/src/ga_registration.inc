@@ -64,13 +64,13 @@ static bool IsLocalAbsoluteFilePath(const std::wstring& path)
 static std::wstring ReadPowerShellExe()
 {
     std::wstring fallback = DefaultPowerShellExe();
-    std::wstring configured = TrimCopy(IniReadS(L"Settings", L"PowerShellExe", fallback.c_str()));
+    std::wstring configured = TrimCopy(IniReadS(L"Settings", L"PowerShellExe", L""));
     if (configured.empty())
         return fallback;
 
     if (!IsLocalAbsoluteFilePath(configured))
     {
-        Log(L"PowerShellExe must be a local absolute path; using default: %s", fallback.c_str());
+        Log(g_ui.powerShellExeInvalidPath.c_str(), fallback.c_str());
         return fallback;
     }
 

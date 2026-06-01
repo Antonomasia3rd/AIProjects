@@ -29,6 +29,8 @@ This avoids the old split where a Windows 8/8.1 manifest could be selected at ru
 
 The build embeds one version into both EXEs, the generated AppX manifest, startup diagnostics, the tray menu, and `--version`. By default the script reads the `DesktopStub-vN` Git tag family and builds the next package version as `N.0.0.0`; for example, after `DesktopStub-v17`, an untagged local/CI build reports `DesktopStub-v18 (18.0.0.0)`. Set `DESKTOPSTUB_VERSION=18.0.0.0` or `DESKTOPSTUB_RELEASE_TAG=DesktopStub-v18` before running the script to override this for a custom build.
 
+For template reuse, the build names are parameterized without changing the default outputs. Set `DESKTOPSTUB_PRODUCT_NAME`, `DESKTOPSTUB_HOST_EXE_NAME`, `DESKTOPSTUB_BROKER_EXE_NAME`, or `DESKTOPSTUB_RELEASE_TAG_PREFIX` before running the script to reuse the baseline for another project while keeping the same source layout.
+
 The experimental background-task DLL remains in the source tree for research, but it is intentionally not part of the normal one-command build.
 
 If `build\DesktopStub.exe` or `build\DesktopStubLiveTileBroker.exe` is running, close it before rebuilding so the compiler can overwrite the output.
@@ -110,13 +112,14 @@ DesktopStub.exe --exit
 
 Supported options:
 
+- The `--help` output is configurable through `[CommandLineHelp] Template` in `DesktopStub.ini`; use `\r\n` for line breaks and `{exe}` / `{iniExampleName}` placeholders where needed.
 - `--help`, `-h`, `/?`: show command-line help.
 - `--version`, `-v`: show the embedded release tag and AppX/Win32 package version.
 - `--ini <path>`: use an alternate INI file; alternate INI instances have separate single-instance scope.
-- `--set Section.Key=Value`: set and save an INI value used by the app. Manifest fields are intentionally not controlled by the INI; edit `AppxManifest.xml` directly, and DesktopStub will preserve custom package identity edits during normal startup. Use explicit manifest regeneration to restore the built-in default manifest.
+- `--set Section.Key=Value`: set and save an INI value used by the app. Manifest fields are controlled through `[Settings] Manifest*` keys; changing them by command line regenerates `AppxManifest.xml`.
 - `--exit` / `--quit`: ask the running instance to exit gracefully.
 - `--once`: generate once and exit.
-- `--regenerate-manifest`: rewrite `AppxManifest.xml` once from the built-in default manifest template.
+- `--regenerate-manifest`: rewrite `AppxManifest.xml` once from the configured manifest defaults.
 - `--generate` / `--generate-now`: force startup generation and keep running.
 - `--wallpaper <path>` or a bare wallpaper path: generate from that image.
 - `--no-monitor`: skip wallpaper/fit/DPI monitoring.
@@ -165,7 +168,7 @@ Supported options:
 - Can automatically use Live Tile notification updates when launched with package identity, with manual registration/Live Tile overrides.
 - Supports optional tile text overlays. In Windows 10 Live Tile mode the text is emitted into the Live Tile XML; in registration/static-image modes it is baked into generated tile PNGs to simulate the same appearance.
 - Uses low-memory wallpaper decode, generated asset caching, lazy GDI+, and idle working-set trimming to keep large-wallpaper generation from permanently inflating resident memory.
-- Can dynamically create or regenerate `AppxManifest.xml` from built-in manifest defaults.
+- Can dynamically create or regenerate `AppxManifest.xml` from `[Settings] Manifest*` defaults.
 - Supports quoted INI values and inline comments.
 - Keeps detailed logs and exposes registration output from the tray.
 - Records forced-shutdown cleanup state and warns on the next startup.
@@ -218,7 +221,7 @@ For Start Screen / Live Tile simulator experiments, the generator can instead em
 - `Windows81`: uses the Windows 8.1-era base namespace plus `m2` 2013 extensions, `<Prerequisites>`, `m2:VisualElements`, `Square150x150Logo`, `Square30x30Logo`, `m2:DefaultTile`, 70/150/310 tile names, splash screen, and Live Tile XML with `TileSquare150x150Image`, `TileWide310x150Image`, and `TileSquare310x310Image`.
 - `Windows8`: uses the Windows 8 base namespace, `<Prerequisites>`, unprefixed `VisualElements`, `Logo`, `SmallLogo`, `DefaultTile WideLogo`, and Live Tile XML with the older `TileSquareImage` / `TileWideImage` templates. There is no 310x310 large-tile notification binding for this target.
 
-For Windows 8/8.1 targets, the default compatibility helper is now `DesktopStubLiveTileBroker.exe`, a tiny CoreApplication-based WinRT broker app. The normal `DesktopStub.exe` remains the unpackaged tray/wallpaper monitor; the broker only exists so the registered package can update the Live Tile under package identity. The standard build script always builds this broker, regardless of arguments, before `--manifest-win8` or `--manifest-win81` are used. Set `[Settings] Win8LiveTileBrokerApp=0` and regenerate the manifest to fall back to the older `DesktopStubAppxStub.exe` behavior.
+For Windows 8/8.1 targets, the default compatibility helper is now `DesktopStubLiveTileBroker.exe`, a tiny CoreApplication-based WinRT broker app. The normal `DesktopStub.exe` remains the unpackaged tray/wallpaper monitor; the broker only exists so the registered package can update the Live Tile under package identity. The standard build script always builds this broker, regardless of arguments, before `--manifest-win8` or `--manifest-win81` are used. Set `[Settings] ManifestLiveTileBrokerExecutable` when reusing the baseline under a different broker filename. Set `[Settings] Win8LiveTileBrokerApp=0` and regenerate the manifest to fall back to the older `DesktopStubAppxStub.exe` behavior.
 
 Experimental helper paths remain in the source for later testing, but they are disabled by default: `[Settings] Win8LiveTileBackgroundTask=0` and `[Settings] Win8LiveTileOopHelper=0`. The background-task path currently requires package identity for the caller; the OOP-server path did not register reliably with the loose Windows 8-style package.
 
@@ -234,7 +237,7 @@ The mode is user-configurable from the tray menu, command line, or INI:
 - `LiveTile` or `1`: always try the Live Tile path. On Windows 8/8.1 targets this means broker activation from the normal unpackaged host.
 - `Registration` or `0`: refresh by re-registering `AppxManifest.xml` instead of using the Live Tile notification path.
 
-For Windows 8/8.1 targets, generated manifests point at `DesktopStubLiveTileBroker.exe` by default, not the resident tray app. This avoids the earlier fake-RT activation/MoAppHang behavior. Existing `AppxManifest.xml` files are kept unless you explicitly use `--regenerate-manifest`, `--manifest-win8`, `--manifest-win81`, or the tray regeneration action.
+For Windows 8/8.1 targets, generated manifests point at `[Settings] ManifestLiveTileBrokerExecutable` by default, not the resident tray app. This avoids the earlier fake-RT activation/MoAppHang behavior. Existing `AppxManifest.xml` files are kept unless you explicitly use `--regenerate-manifest`, `--manifest-win8`, `--manifest-win81`, change a `Settings.Manifest*` value, or use the tray regeneration/editing actions.
 
 When Live Tile update is active, static manifest logo assets are treated as disabled so stale registered assets are not refreshed with wallpaper images. If **Generate Desktop Icon for disabled entries** is enabled, those static assets become desktop-icon placeholders; otherwise they are deleted. The Live Tile notification itself uses separate generated files under `Assets\Live*.png`.
 
@@ -286,7 +289,7 @@ When Live Tile mode disables static manifest assets, DesktopStub does not bake t
 
 ## Release
 
-Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available. The DesktopStub Windows file/product version and default `AppxManifest.xml` package version are derived from the same `DesktopStub-vN` family used by CI release publishing, so the binary and manifest versions match the release tag.
+Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available. The DesktopStub Windows file/product version and default `AppxManifest.xml` package version are derived from the same `DesktopStub-vN` family used by CI release publishing, so the binary and manifest versions match the release tag. Reused projects can override the local build tag family with `DESKTOPSTUB_RELEASE_TAG_PREFIX`.
 
 ## Notes for fix28
 

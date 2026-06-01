@@ -318,6 +318,7 @@ struct UiStrings
     std::wstring launchingPowerShellRegistration;
     std::wstring powerShellCommand;
     std::wstring powerShellLaunchDetails;
+    std::wstring powerShellExeInvalidPath;
     std::wstring powerShellProcessStarted;
     std::wstring powerShellTerminateRequested;
     std::wstring powerShellTerminateFailed;
@@ -424,7 +425,10 @@ struct UiStrings
     std::wstring commandLineForceGenerateReason;
     std::wstring manifestRegenerateReason;
     std::wstring commandLineWallpaperPathInvalid;
-    std::wstring commandLineManifestSettingIgnored;
+    std::wstring commandLineTitle;
+    std::wstring commandLineErrorTitle;
+    std::wstring commandLineSignalExistingFailed;
+    std::wstring commandLineManifestSectionIgnored;
     std::wstring manualGenerationRequested;
     std::wstring generationRequestBusy;
     std::wstring emptyWallpaper;
@@ -533,6 +537,17 @@ struct UiStrings
     std::wstring manifestSourceExisting;
     std::wstring manifestSourceGenerated;
     std::wstring manifestRegenerateNow;
+    std::wstring manifestSettingChanged;
+    std::wstring manifestSettingInputTitle;
+    std::wstring manifestSettingInputPrompt;
+    std::wstring manifestExistingDefaultsChanged;
+    std::wstring manifestLiveTileBrokerExecutableLabel;
+    std::wstring manifestLiveTileBrokerEntryPointLabel;
+    std::wstring manifestLiveTileOopServerNameLabel;
+    std::wstring manifestLiveTileOopRuntimeClassIdLabel;
+    std::wstring manifestLiveTileBackgroundTaskDllLabel;
+    std::wstring manifestLiveTileBackgroundTaskClassIdLabel;
+    std::wstring manifestLiveTileBackgroundTaskNameLabel;
     std::wstring wallpaperDetectionMethodLabel;
     std::wstring singleInstanceFailureActionLabel;
     std::wstring singleInstanceActionIgnore;

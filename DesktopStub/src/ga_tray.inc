@@ -69,6 +69,37 @@ enum {
     ID_GENERATED_ASSET_CACHE_MAX_ENTRIES,
     ID_GENERATED_ASSET_PRECACHE_MAX_FILES,
     ID_MANIFEST_REGENERATE,
+    ID_MANIFEST_EDIT_IDENTITY_NAME,
+    ID_MANIFEST_EDIT_PUBLISHER,
+    ID_MANIFEST_EDIT_PACKAGE_VERSION,
+    ID_MANIFEST_EDIT_DISPLAY_NAME,
+    ID_MANIFEST_EDIT_PUBLISHER_DISPLAY_NAME,
+    ID_MANIFEST_EDIT_DESCRIPTION,
+    ID_MANIFEST_EDIT_EXECUTABLE,
+    ID_MANIFEST_EDIT_APPLICATION_ID,
+    ID_MANIFEST_EDIT_TARGET_DEVICE_FAMILY_NAME,
+    ID_MANIFEST_EDIT_MIN_VERSION,
+    ID_MANIFEST_EDIT_MAX_VERSION_TESTED,
+    ID_MANIFEST_EDIT_RESOURCE_LANGUAGE,
+    ID_MANIFEST_EDIT_PROPERTIES_LOGO,
+    ID_MANIFEST_EDIT_SQUARE150_LOGO,
+    ID_MANIFEST_EDIT_SQUARE44_LOGO,
+    ID_MANIFEST_EDIT_SQUARE30_LOGO,
+    ID_MANIFEST_EDIT_SQUARE71_LOGO,
+    ID_MANIFEST_EDIT_WIDE310_LOGO,
+    ID_MANIFEST_EDIT_SQUARE310_LOGO,
+    ID_MANIFEST_EDIT_BACKGROUND_COLOR,
+    ID_MANIFEST_EDIT_SHOW_NAME_ON_TILES,
+    ID_MANIFEST_EDIT_ENTRY_POINT,
+    ID_MANIFEST_EDIT_RESTRICTED_CAPABILITY,
+    ID_MANIFEST_EDIT_SPLASH_SCREEN_IMAGE,
+    ID_MANIFEST_EDIT_LIVE_TILE_BROKER_EXECUTABLE,
+    ID_MANIFEST_EDIT_LIVE_TILE_BROKER_ENTRY_POINT,
+    ID_MANIFEST_EDIT_LIVE_TILE_OOP_SERVER_NAME,
+    ID_MANIFEST_EDIT_LIVE_TILE_OOP_RUNTIME_CLASS_ID,
+    ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_DLL,
+    ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_CLASS_ID,
+    ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_NAME,
     ID_TILE_TEXT_ENABLED,
     ID_TILE_TEXT_EDIT,
     ID_TILE_TEXT_CLEAR,
@@ -330,6 +361,43 @@ static void PromptTileTextIntSetting(
 
     IniWrite(L"TileText", key, std::to_wstring(parsed).c_str());
     Log(logFormat.c_str(), parsed);
+}
+
+static void RegenerateManifestAndQueueGeneration(HWND owner)
+{
+    if (!RegenerateAppxManifestFromConfigAndLog())
+        return;
+
+    std::wstring wp = GetWallpaper();
+    if (wp.empty())
+    {
+        MessageBoxW(owner,
+            g_ui.currentWallpaperNotFound.c_str(),
+            g_ui.generateNowTitle.c_str(),
+            MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    SetLiveTileModeReregistrationPending(true);
+    QueueGenerate(wp, g_ui.manifestRegenerateReason);
+}
+
+static void PromptManifestStringSetting(
+    HWND owner,
+    const wchar_t* key,
+    const std::wstring& currentValue)
+{
+    std::wstring value = IniReadS(L"Settings", key, currentValue.c_str());
+    if (value.empty())
+        value = currentValue;
+
+    std::wstring prompt = FormatWide(g_ui.manifestSettingInputPrompt.c_str(), key ? key : L"");
+    if (ShowTextInputDialog(owner, g_ui.manifestSettingInputTitle, prompt, value, true) != IDOK)
+        return;
+
+    IniWrite(L"Settings", key, value.c_str());
+    Log(g_ui.manifestSettingChanged.c_str(), key ? key : L"", value.c_str());
+    RegenerateManifestAndQueueGeneration(owner);
 }
 
 static const wchar_t* NextSingleInstanceFailureActionName(ErrorAction current)
@@ -977,6 +1045,13 @@ void Menu(HWND h)
     std::wstring manifestEntryPointLine = FormatWide(g_ui.manifestEntryPointLabel.c_str(), manifestInfo.entryPoint.c_str());
     std::wstring manifestRestrictedCapabilityLine = FormatWide(g_ui.manifestRestrictedCapabilityLabel.c_str(), manifestInfo.restrictedCapability.c_str());
     std::wstring manifestSplashScreenImageLine = FormatWide(g_ui.manifestSplashScreenImageLabel.c_str(), manifestInfo.splashScreenImage.c_str());
+    std::wstring manifestLiveTileBrokerExecutableLine = FormatWide(g_ui.manifestLiveTileBrokerExecutableLabel.c_str(), manifestInfo.liveTileBrokerExecutable.c_str());
+    std::wstring manifestLiveTileBrokerEntryPointLine = FormatWide(g_ui.manifestLiveTileBrokerEntryPointLabel.c_str(), manifestInfo.liveTileBrokerEntryPoint.c_str());
+    std::wstring manifestLiveTileOopServerNameLine = FormatWide(g_ui.manifestLiveTileOopServerNameLabel.c_str(), manifestInfo.liveTileOopServerName.c_str());
+    std::wstring manifestLiveTileOopRuntimeClassIdLine = FormatWide(g_ui.manifestLiveTileOopRuntimeClassIdLabel.c_str(), manifestInfo.liveTileOopRuntimeClassId.c_str());
+    std::wstring manifestLiveTileBackgroundTaskDllLine = FormatWide(g_ui.manifestLiveTileBackgroundTaskDllLabel.c_str(), manifestInfo.liveTileBackgroundTaskDll.c_str());
+    std::wstring manifestLiveTileBackgroundTaskClassIdLine = FormatWide(g_ui.manifestLiveTileBackgroundTaskClassIdLabel.c_str(), manifestInfo.liveTileBackgroundTaskClassId.c_str());
+    std::wstring manifestLiveTileBackgroundTaskNameLine = FormatWide(g_ui.manifestLiveTileBackgroundTaskNameLabel.c_str(), manifestInfo.liveTileBackgroundTaskName.c_str());
     addTo(manifestMenu, ID_MANIFEST_REGENERATE, g_ui.manifestRegenerateNow.c_str());
     {
         ManifestCompatibilityTarget manifestTarget = ConfiguredManifestCompatibilityTarget();
@@ -993,30 +1068,37 @@ void Menu(HWND h)
     }
     AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSourceLine.c_str());
     AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestTargetLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestIdentityLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestPackageVersionLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestDisplayNameLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestPublisherDisplayNameLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestDescriptionLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestExecutableLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestApplicationIdLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestTargetDeviceFamilyNameLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestMinVersionLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestMaxVersionTestedLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestResourceLanguageLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestPropertiesLogoLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSquare150x150LogoLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSquare44x44LogoLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSquare30x30LogoLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSquare71x71LogoLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestWide310x150LogoLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSquare310x310LogoLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestBackgroundColorLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestShowNameOnTilesLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestEntryPointLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestRestrictedCapabilityLine.c_str());
-    AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSplashScreenImageLine.c_str());
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_IDENTITY_NAME, manifestIdentityLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_PUBLISHER, manifestPublisherLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_PACKAGE_VERSION, manifestPackageVersionLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_DISPLAY_NAME, manifestDisplayNameLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_PUBLISHER_DISPLAY_NAME, manifestPublisherDisplayNameLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_DESCRIPTION, manifestDescriptionLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_EXECUTABLE, manifestExecutableLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_APPLICATION_ID, manifestApplicationIdLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_TARGET_DEVICE_FAMILY_NAME, manifestTargetDeviceFamilyNameLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_MIN_VERSION, manifestMinVersionLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_MAX_VERSION_TESTED, manifestMaxVersionTestedLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_RESOURCE_LANGUAGE, manifestResourceLanguageLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_PROPERTIES_LOGO, manifestPropertiesLogoLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SQUARE150_LOGO, manifestSquare150x150LogoLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SQUARE44_LOGO, manifestSquare44x44LogoLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SQUARE30_LOGO, manifestSquare30x30LogoLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SQUARE71_LOGO, manifestSquare71x71LogoLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_WIDE310_LOGO, manifestWide310x150LogoLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SQUARE310_LOGO, manifestSquare310x310LogoLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_BACKGROUND_COLOR, manifestBackgroundColorLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SHOW_NAME_ON_TILES, manifestShowNameOnTilesLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_ENTRY_POINT, manifestEntryPointLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_RESTRICTED_CAPABILITY, manifestRestrictedCapabilityLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SPLASH_SCREEN_IMAGE, manifestSplashScreenImageLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_BROKER_EXECUTABLE, manifestLiveTileBrokerExecutableLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_BROKER_ENTRY_POINT, manifestLiveTileBrokerEntryPointLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_OOP_SERVER_NAME, manifestLiveTileOopServerNameLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_OOP_RUNTIME_CLASS_ID, manifestLiveTileOopRuntimeClassIdLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_DLL, manifestLiveTileBackgroundTaskDllLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_CLASS_ID, manifestLiveTileBackgroundTaskClassIdLine);
+    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_NAME, manifestLiveTileBackgroundTaskNameLine);
     if (manifestDetailsMenu != manifestMenu)
     {
         if (!AppendMenuChecked(manifestMenu, MF_POPUP, (UINT_PTR)manifestDetailsMenu, g_ui.manifestDetailsTitle.c_str()))
@@ -1285,21 +1367,7 @@ void Menu(HWND h)
 
     case ID_MANIFEST_REGENERATE:
     {
-        if (!RegenerateAppxManifestFromConfigAndLog())
-            break;
-
-        std::wstring wp = GetWallpaper();
-        if (wp.empty())
-        {
-            MessageBoxW(h,
-                g_ui.currentWallpaperNotFound.c_str(),
-                g_ui.generateNowTitle.c_str(),
-                MB_OK | MB_ICONWARNING);
-            break;
-        }
-
-        SetLiveTileModeReregistrationPending(true);
-        QueueGenerate(wp, g_ui.manifestRegenerateReason);
+        RegenerateManifestAndQueueGeneration(h);
     }
     break;
 
@@ -1376,23 +1444,103 @@ void Menu(HWND h)
         g_manifestCompatibilityTarget = static_cast<int>(newTarget);
         IniWrite(L"Settings", L"AppxManifestTarget", ManifestCompatibilityTargetIniValue(newTarget).c_str());
         Log(g_ui.manifestTargetSummary.c_str(), ManifestCompatibilityTargetSummaryText().c_str());
-        if (!RegenerateAppxManifestFromConfigAndLog())
-            break;
-
-        std::wstring wp = GetWallpaper();
-        if (wp.empty())
-        {
-            MessageBoxW(h,
-                g_ui.currentWallpaperNotFound.c_str(),
-                g_ui.generateNowTitle.c_str(),
-                MB_OK | MB_ICONWARNING);
-            break;
-        }
-
-        SetLiveTileModeReregistrationPending(true);
-        QueueGenerate(wp, g_ui.manifestRegenerateReason);
+        RegenerateManifestAndQueueGeneration(h);
     }
     break;
+
+    case ID_MANIFEST_EDIT_IDENTITY_NAME:
+        PromptManifestStringSetting(h, L"ManifestIdentityName", manifestInfo.identityName);
+        break;
+    case ID_MANIFEST_EDIT_PUBLISHER:
+        PromptManifestStringSetting(h, L"ManifestPublisher", manifestInfo.publisher);
+        break;
+    case ID_MANIFEST_EDIT_PACKAGE_VERSION:
+        PromptManifestStringSetting(h, L"ManifestPackageVersion", manifestInfo.packageVersion);
+        break;
+    case ID_MANIFEST_EDIT_DISPLAY_NAME:
+        PromptManifestStringSetting(h, L"ManifestDisplayName", manifestInfo.displayName);
+        break;
+    case ID_MANIFEST_EDIT_PUBLISHER_DISPLAY_NAME:
+        PromptManifestStringSetting(h, L"ManifestPublisherDisplayName", manifestInfo.publisherDisplayName);
+        break;
+    case ID_MANIFEST_EDIT_DESCRIPTION:
+        PromptManifestStringSetting(h, L"ManifestDescription", manifestInfo.description);
+        break;
+    case ID_MANIFEST_EDIT_EXECUTABLE:
+        PromptManifestStringSetting(h, L"ManifestExecutable", manifestInfo.executable);
+        break;
+    case ID_MANIFEST_EDIT_APPLICATION_ID:
+        PromptManifestStringSetting(h, L"ManifestApplicationId", manifestInfo.applicationId);
+        break;
+    case ID_MANIFEST_EDIT_TARGET_DEVICE_FAMILY_NAME:
+        PromptManifestStringSetting(h, L"ManifestTargetDeviceFamilyName", manifestInfo.targetDeviceFamilyName);
+        break;
+    case ID_MANIFEST_EDIT_MIN_VERSION:
+        PromptManifestStringSetting(h, L"ManifestMinVersion", manifestInfo.minVersion);
+        break;
+    case ID_MANIFEST_EDIT_MAX_VERSION_TESTED:
+        PromptManifestStringSetting(h, L"ManifestMaxVersionTested", manifestInfo.maxVersionTested);
+        break;
+    case ID_MANIFEST_EDIT_RESOURCE_LANGUAGE:
+        PromptManifestStringSetting(h, L"ManifestResourceLanguage", manifestInfo.resourceLanguage);
+        break;
+    case ID_MANIFEST_EDIT_PROPERTIES_LOGO:
+        PromptManifestStringSetting(h, L"ManifestPropertiesLogo", manifestInfo.propertiesLogo);
+        break;
+    case ID_MANIFEST_EDIT_SQUARE150_LOGO:
+        PromptManifestStringSetting(h, L"ManifestSquare150x150Logo", manifestInfo.square150x150Logo);
+        break;
+    case ID_MANIFEST_EDIT_SQUARE44_LOGO:
+        PromptManifestStringSetting(h, L"ManifestSquare44x44Logo", manifestInfo.square44x44Logo);
+        break;
+    case ID_MANIFEST_EDIT_SQUARE30_LOGO:
+        PromptManifestStringSetting(h, L"ManifestSquare30x30Logo", manifestInfo.square30x30Logo);
+        break;
+    case ID_MANIFEST_EDIT_SQUARE71_LOGO:
+        PromptManifestStringSetting(h, L"ManifestSquare71x71Logo", manifestInfo.square71x71Logo);
+        break;
+    case ID_MANIFEST_EDIT_WIDE310_LOGO:
+        PromptManifestStringSetting(h, L"ManifestWide310x150Logo", manifestInfo.wide310x150Logo);
+        break;
+    case ID_MANIFEST_EDIT_SQUARE310_LOGO:
+        PromptManifestStringSetting(h, L"ManifestSquare310x310Logo", manifestInfo.square310x310Logo);
+        break;
+    case ID_MANIFEST_EDIT_BACKGROUND_COLOR:
+        PromptManifestStringSetting(h, L"ManifestBackgroundColor", manifestInfo.backgroundColor);
+        break;
+    case ID_MANIFEST_EDIT_SHOW_NAME_ON_TILES:
+        PromptManifestStringSetting(h, L"ManifestShowNameOnTiles", manifestInfo.showNameOnTiles);
+        break;
+    case ID_MANIFEST_EDIT_ENTRY_POINT:
+        PromptManifestStringSetting(h, L"ManifestEntryPoint", manifestInfo.entryPoint);
+        break;
+    case ID_MANIFEST_EDIT_RESTRICTED_CAPABILITY:
+        PromptManifestStringSetting(h, L"ManifestRestrictedCapability", manifestInfo.restrictedCapability);
+        break;
+    case ID_MANIFEST_EDIT_SPLASH_SCREEN_IMAGE:
+        PromptManifestStringSetting(h, L"ManifestSplashScreenImage", manifestInfo.splashScreenImage);
+        break;
+    case ID_MANIFEST_EDIT_LIVE_TILE_BROKER_EXECUTABLE:
+        PromptManifestStringSetting(h, L"ManifestLiveTileBrokerExecutable", manifestInfo.liveTileBrokerExecutable);
+        break;
+    case ID_MANIFEST_EDIT_LIVE_TILE_BROKER_ENTRY_POINT:
+        PromptManifestStringSetting(h, L"ManifestLiveTileBrokerEntryPoint", manifestInfo.liveTileBrokerEntryPoint);
+        break;
+    case ID_MANIFEST_EDIT_LIVE_TILE_OOP_SERVER_NAME:
+        PromptManifestStringSetting(h, L"ManifestLiveTileOopServerName", manifestInfo.liveTileOopServerName);
+        break;
+    case ID_MANIFEST_EDIT_LIVE_TILE_OOP_RUNTIME_CLASS_ID:
+        PromptManifestStringSetting(h, L"ManifestLiveTileOopRuntimeClassId", manifestInfo.liveTileOopRuntimeClassId);
+        break;
+    case ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_DLL:
+        PromptManifestStringSetting(h, L"ManifestLiveTileBackgroundTaskDll", manifestInfo.liveTileBackgroundTaskDll);
+        break;
+    case ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_CLASS_ID:
+        PromptManifestStringSetting(h, L"ManifestLiveTileBackgroundTaskClassId", manifestInfo.liveTileBackgroundTaskClassId);
+        break;
+    case ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_NAME:
+        PromptManifestStringSetting(h, L"ManifestLiveTileBackgroundTaskName", manifestInfo.liveTileBackgroundTaskName);
+        break;
 
     case ID_GENERATE_STARTUP:
     {
