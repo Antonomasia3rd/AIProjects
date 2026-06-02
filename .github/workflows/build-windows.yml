@@ -19,10 +19,13 @@ on:
           - capsblink
           - YourPhoneHideBanner
           - DiscordRPC
+          - DNSAutoUpdate
           - NowPlayingTile
+          - PhotoCollage
           - DesktopStub
           - CharmTray
           - SecureDesktopLauncher
+          - TaskSchedulerMigration
           - RealTimeNotesDeskband
 
 concurrency:
@@ -47,10 +50,13 @@ jobs:
       build_capsblink: ${{ steps.detect.outputs.build_capsblink }}
       build_your_phone_hide_banner: ${{ steps.detect.outputs.build_your_phone_hide_banner }}
       build_discord_rpc: ${{ steps.detect.outputs.build_discord_rpc }}
+      build_dns_auto_update: ${{ steps.detect.outputs.build_dns_auto_update }}
       build_now_playing_tile: ${{ steps.detect.outputs.build_now_playing_tile }}
+      build_photo_collage: ${{ steps.detect.outputs.build_photo_collage }}
       build_desktop_stub: ${{ steps.detect.outputs.build_desktop_stub }}
       build_charm_tray: ${{ steps.detect.outputs.build_charm_tray }}
       build_secure_desktop_launcher: ${{ steps.detect.outputs.build_secure_desktop_launcher }}
+      build_task_scheduler_migration: ${{ steps.detect.outputs.build_task_scheduler_migration }}
       build_real_time_notes_deskband: ${{ steps.detect.outputs.build_real_time_notes_deskband }}
 
     steps:
@@ -122,7 +128,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: AllowContentAboveLock
-          path: AllowContentAboveLock/build/AllowContentAboveLock.exe
+          path: legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe
           if-no-files-found: error
 
       - name: Upload asusblink artifact
@@ -130,7 +136,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: asusblink
-          path: asusblink/build/asusblink.exe
+          path: legacy/asusblink/build/asusblink.exe
           if-no-files-found: error
 
       - name: Upload capsblink artifact
@@ -138,7 +144,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: capsblink
-          path: capsblink/build/capsblink.exe
+          path: legacy/capsblink/build/capsblink.exe
           if-no-files-found: error
 
       - name: Upload YourPhoneHideBanner artifact
@@ -146,7 +152,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: YourPhoneHideBanner
-          path: YourPhoneHideBanner/build/YourPhoneHideBanner.exe
+          path: legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe
           if-no-files-found: error
 
       - name: Upload DiscordRPC artifact
@@ -157,15 +163,31 @@ jobs:
           path: DiscordRPC/build/DiscordRPC.exe
           if-no-files-found: error
 
+      - name: Upload DNSAutoUpdate artifact
+        if: needs.detect-projects.outputs.build_dns_auto_update == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: DNSAutoUpdate
+          path: legacy/DNSAutoUpdate/build/DNSAutoUpdate.exe
+          if-no-files-found: error
+
       - name: Upload NowPlayingTile artifact
         if: needs.detect-projects.outputs.build_now_playing_tile == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: NowPlayingTile
           path: |
-            NowPlayingTile/build/NowPlayingTile.exe
-            NowPlayingTile/README.md
-            NowPlayingTile/package/**
+            legacy/NowPlayingTile/build/NowPlayingTile.exe
+            legacy/NowPlayingTile/README.md
+            legacy/NowPlayingTile/package/**
+          if-no-files-found: error
+
+      - name: Upload PhotoCollage artifact
+        if: needs.detect-projects.outputs.build_photo_collage == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: PhotoCollage
+          path: legacy/PhotoCollage/build/PhotoCollage.exe
           if-no-files-found: error
 
       - name: Upload DesktopStub artifact
@@ -183,7 +205,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: CharmTray
-          path: CharmTray/build/CharmTray.exe
+          path: legacy/CharmTray/build/CharmTray.exe
           if-no-files-found: error
 
       - name: Upload SecureDesktopLauncher artifact
@@ -192,9 +214,17 @@ jobs:
         with:
           name: SecureDesktopLauncher
           path: |
-            SecureDesktopLauncher/build/SecureDesktopLauncher.exe
-            SecureDesktopLauncher/build/SecureDesktopPasswordLauncher.exe
-            SecureDesktopLauncher/README.md
+            legacy/SecureDesktopLauncher/build/SecureDesktopLauncher.exe
+            legacy/SecureDesktopLauncher/build/SecureDesktopPasswordLauncher.exe
+            legacy/SecureDesktopLauncher/README.md
+          if-no-files-found: error
+
+      - name: Upload TaskSchedulerMigration artifact
+        if: needs.detect-projects.outputs.build_task_scheduler_migration == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: TaskSchedulerMigration
+          path: legacy/TaskSchedulerMigration/build/TaskSchedulerMigration.exe
           if-no-files-found: error
 
       - name: Upload RealTimeNotesDeskband artifact
@@ -203,11 +233,11 @@ jobs:
         with:
           name: RealTimeNotesDeskband
           path: |
-            RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll
-            RealTimeNotesDeskband/README.md
-            RealTimeNotesDeskband/RegisterDeskband.cmd
-            RealTimeNotesDeskband/UnregisterDeskband.cmd
-            RealTimeNotesDeskband/ConfigureDeskband.cmd
+            legacy/RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll
+            legacy/RealTimeNotesDeskband/README.md
+            legacy/RealTimeNotesDeskband/RegisterDeskband.cmd
+            legacy/RealTimeNotesDeskband/UnregisterDeskband.cmd
+            legacy/RealTimeNotesDeskband/ConfigureDeskband.cmd
           if-no-files-found: error
 
   attest-build-provenance:

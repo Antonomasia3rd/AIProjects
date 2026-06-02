@@ -12,6 +12,16 @@ Older releases are intentionally kept when practical so users can compare behavi
 
 ## Unreleased
 
+### Repository layout
+
+- Added shared C++ baseline includes under `dependencies/`.
+- Moved projects that have not adopted the shared baseline under `legacy/` while preserving their project keys and release families.
+
+### DiscordRPC
+
+- Restored Discord Gateway transport in the C++ implementation.
+- Added DPAPI migration for plaintext `[general] token` values into `[general] token_protected`.
+
 ### WindhawkMods
 
 - Added source-only Windhawk mod sources for Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix.

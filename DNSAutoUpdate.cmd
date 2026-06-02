@@ -1,4 +1,4 @@
 @echo off
 setlocal EnableExtensions
-call "%~dp0DNSAutoUpdate\DNSAutoUpdate.cmd" %*
+call "%~dp0legacy\DNSAutoUpdate\DNSAutoUpdate.cmd" %*
 exit /b %ERRORLEVEL%

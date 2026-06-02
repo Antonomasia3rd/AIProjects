@@ -3,6 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..") do set "REPO=%%~fI"
+set "LEGACY=%REPO%\legacy"
 set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 set "ARTIFACTS=%TEMP%\AIProjects-artifacts-%RANDOM%%RANDOM%.txt"
 set "SKIP_LIST=,"
@@ -40,10 +41,13 @@ call :BuildAsusBlink || goto Fail
 call :BuildCapsBlink || goto Fail
 call :BuildYourPhoneHideBanner || goto Fail
 call :BuildDiscordRPC || goto Fail
+call :BuildDNSAutoUpdate || goto Fail
 call :BuildNowPlayingTile || goto Fail
+call :BuildPhotoCollage || goto Fail
 call :BuildDesktopStub || goto Fail
 call :BuildCharmTray || goto Fail
 call :BuildSecureDesktopLauncher || goto Fail
+call :BuildTaskSchedulerMigration || goto Fail
 call :BuildRealTimeNotesDeskband || goto Fail
 call :WriteChecksums || goto Fail
 
@@ -62,40 +66,40 @@ exit /b 0
 call :IsSkipped AllowContentAboveLock
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build AllowContentAboveLock"
-if not exist "%REPO%\AllowContentAboveLock\build" mkdir "%REPO%\AllowContentAboveLock\build"
-call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%REPO%\AllowContentAboveLock\build\AllowContentAboveLock.exe" "%REPO%\AllowContentAboveLock\AllowContentAboveLock.cs"
+if not exist "%LEGACY%\AllowContentAboveLock\build" mkdir "%LEGACY%\AllowContentAboveLock\build"
+call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\AllowContentAboveLock\build\AllowContentAboveLock.exe" "%LEGACY%\AllowContentAboveLock\AllowContentAboveLock.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%REPO%\AllowContentAboveLock\build\AllowContentAboveLock.exe"
+call :RecordArtifact "%LEGACY%\AllowContentAboveLock\build\AllowContentAboveLock.exe"
 exit /b %ERRORLEVEL%
 
 :BuildAsusBlink
 call :IsSkipped asusblink
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build asusblink"
-if not exist "%REPO%\asusblink\build" mkdir "%REPO%\asusblink\build"
-call :Run "%CSC%" /nologo /optimize+ /target:winexe /r:System.Core.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.Runtime.Serialization.dll /out:"%REPO%\asusblink\build\asusblink.exe" "%REPO%\asusblink\asusblink.cs"
+if not exist "%LEGACY%\asusblink\build" mkdir "%LEGACY%\asusblink\build"
+call :Run "%CSC%" /nologo /optimize+ /target:winexe /r:System.Core.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.Runtime.Serialization.dll /out:"%LEGACY%\asusblink\build\asusblink.exe" "%LEGACY%\asusblink\asusblink.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%REPO%\asusblink\build\asusblink.exe"
+call :RecordArtifact "%LEGACY%\asusblink\build\asusblink.exe"
 exit /b %ERRORLEVEL%
 
 :BuildCapsBlink
 call :IsSkipped capsblink
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build capsblink"
-if not exist "%REPO%\capsblink\build" mkdir "%REPO%\capsblink\build"
-call :Run "%CSC%" /nologo /optimize+ /target:exe /out:"%REPO%\capsblink\build\capsblink.exe" "%REPO%\capsblink\capsblink.cs"
+if not exist "%LEGACY%\capsblink\build" mkdir "%LEGACY%\capsblink\build"
+call :Run "%CSC%" /nologo /optimize+ /target:exe /out:"%LEGACY%\capsblink\build\capsblink.exe" "%LEGACY%\capsblink\capsblink.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%REPO%\capsblink\build\capsblink.exe"
+call :RecordArtifact "%LEGACY%\capsblink\build\capsblink.exe"
 exit /b %ERRORLEVEL%
 
 :BuildYourPhoneHideBanner
 call :IsSkipped YourPhoneHideBanner
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build YourPhoneHideBanner"
-if not exist "%REPO%\YourPhoneHideBanner\build" mkdir "%REPO%\YourPhoneHideBanner\build"
-call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%REPO%\YourPhoneHideBanner\build\YourPhoneHideBanner.exe" "%REPO%\YourPhoneHideBanner\YourPhoneHideBanner.cs"
+if not exist "%LEGACY%\YourPhoneHideBanner\build" mkdir "%LEGACY%\YourPhoneHideBanner\build"
+call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\YourPhoneHideBanner\build\YourPhoneHideBanner.exe" "%LEGACY%\YourPhoneHideBanner\YourPhoneHideBanner.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%REPO%\YourPhoneHideBanner\build\YourPhoneHideBanner.exe"
+call :RecordArtifact "%LEGACY%\YourPhoneHideBanner\build\YourPhoneHideBanner.exe"
 exit /b %ERRORLEVEL%
 
 :BuildDiscordRPC
@@ -110,20 +114,44 @@ if not "%STATUS%"=="0" exit /b %STATUS%
 call :RecordArtifact "%REPO%\DiscordRPC\build\DiscordRPC.exe"
 exit /b %ERRORLEVEL%
 
+:BuildDNSAutoUpdate
+call :IsSkipped DNSAutoUpdate
+if "!SKIP_RESULT!"=="1" exit /b 0
+call :Section "Build DNSAutoUpdate"
+pushd "%LEGACY%\DNSAutoUpdate" || exit /b 1
+call :Run cmd.exe /d /c BuildDNSAutoUpdate.cmd
+set "STATUS=%ERRORLEVEL%"
+popd
+if not "%STATUS%"=="0" exit /b %STATUS%
+call :RecordArtifact "%LEGACY%\DNSAutoUpdate\build\DNSAutoUpdate.exe"
+exit /b %ERRORLEVEL%
+
 :BuildNowPlayingTile
 call :IsSkipped NowPlayingTile
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build NowPlayingTile"
-pushd "%REPO%\NowPlayingTile" || exit /b 1
+pushd "%LEGACY%\NowPlayingTile" || exit /b 1
 call :Run cmd.exe /d /c BuildNowPlayingTile.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%REPO%\NowPlayingTile\build\NowPlayingTile.exe"
+call :RecordArtifact "%LEGACY%\NowPlayingTile\build\NowPlayingTile.exe"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%REPO%\NowPlayingTile\README.md"
+call :RecordArtifact "%LEGACY%\NowPlayingTile\README.md"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifactsUnderDir "%REPO%\NowPlayingTile\package"
+call :RecordArtifactsUnderDir "%LEGACY%\NowPlayingTile\package"
+exit /b %ERRORLEVEL%
+
+:BuildPhotoCollage
+call :IsSkipped PhotoCollage
+if "!SKIP_RESULT!"=="1" exit /b 0
+call :Section "Build PhotoCollage"
+pushd "%LEGACY%\PhotoCollage" || exit /b 1
+call :Run cmd.exe /d /c BuildPhotoCollage.cmd
+set "STATUS=%ERRORLEVEL%"
+popd
+if not "%STATUS%"=="0" exit /b %STATUS%
+call :RecordArtifact "%LEGACY%\PhotoCollage\build\PhotoCollage.exe"
 exit /b %ERRORLEVEL%
 
 :BuildDesktopStub
@@ -150,19 +178,19 @@ exit /b %ERRORLEVEL%
 call :IsSkipped CharmTray
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build CharmTray"
-pushd "%REPO%\CharmTray" || exit /b 1
+pushd "%LEGACY%\CharmTray" || exit /b 1
 call :Run cmd.exe /d /c BuildCharmTray.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%REPO%\CharmTray\build\CharmTray.exe"
+call :RecordArtifact "%LEGACY%\CharmTray\build\CharmTray.exe"
 exit /b %ERRORLEVEL%
 
 :BuildSecureDesktopLauncher
 call :IsSkipped SecureDesktopLauncher
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build SecureDesktopLauncher"
-pushd "%REPO%\SecureDesktopLauncher" || exit /b 1
+pushd "%LEGACY%\SecureDesktopLauncher" || exit /b 1
 call :Run cmd.exe /d /c TestSecureDesktopLauncherSource.cmd
 if errorlevel 1 (
   set "STATUS=%ERRORLEVEL%"
@@ -177,11 +205,23 @@ if "%STATUS%"=="0" (
 )
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%REPO%\SecureDesktopLauncher\build\SecureDesktopLauncher.exe"
+call :RecordArtifact "%LEGACY%\SecureDesktopLauncher\build\SecureDesktopLauncher.exe"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%REPO%\SecureDesktopLauncher\build\SecureDesktopPasswordLauncher.exe"
+call :RecordArtifact "%LEGACY%\SecureDesktopLauncher\build\SecureDesktopPasswordLauncher.exe"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%REPO%\SecureDesktopLauncher\README.md"
+call :RecordArtifact "%LEGACY%\SecureDesktopLauncher\README.md"
+exit /b %ERRORLEVEL%
+
+:BuildTaskSchedulerMigration
+call :IsSkipped TaskSchedulerMigration
+if "!SKIP_RESULT!"=="1" exit /b 0
+call :Section "Build TaskSchedulerMigration"
+pushd "%LEGACY%\TaskSchedulerMigration" || exit /b 1
+call :Run cmd.exe /d /c BuildTaskSchedulerMigration.cmd
+set "STATUS=%ERRORLEVEL%"
+popd
+if not "%STATUS%"=="0" exit /b %STATUS%
+call :RecordArtifact "%LEGACY%\TaskSchedulerMigration\build\TaskSchedulerMigration.exe"
 exit /b %ERRORLEVEL%
 
 :BuildRealTimeNotesDeskband
@@ -193,17 +233,17 @@ if errorlevel 1 (
   echo ERROR: g++.exe is required for RealTimeNotesDeskband.
   exit /b 1
 )
-pushd "%REPO%\RealTimeNotesDeskband" || exit /b 1
+pushd "%LEGACY%\RealTimeNotesDeskband" || exit /b 1
 call :Run cmd.exe /d /c BuildDeskband.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%REPO%\RealTimeNotesDeskband\build\RealTimeNotesDeskband.dll"
+call :RecordArtifact "%LEGACY%\RealTimeNotesDeskband\build\RealTimeNotesDeskband.dll"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%REPO%\RealTimeNotesDeskband\README.md"
+call :RecordArtifact "%LEGACY%\RealTimeNotesDeskband\README.md"
 if errorlevel 1 exit /b %ERRORLEVEL%
 for %%F in (RegisterDeskband.cmd UnregisterDeskband.cmd ConfigureDeskband.cmd) do (
-  call :RecordArtifactIfExists "%REPO%\RealTimeNotesDeskband\%%F" || exit /b !ERRORLEVEL!
+  call :RecordArtifactIfExists "%LEGACY%\RealTimeNotesDeskband\%%F" || exit /b !ERRORLEVEL!
 )
 exit /b %ERRORLEVEL%
 

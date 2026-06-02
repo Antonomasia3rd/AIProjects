@@ -1,25 +1,25 @@
 # AIProjects
 
-Small Windows utility projects and experiments. Most folders are standalone and contain the source, build scripts, and a project-level `README.md`.
+Small Windows utility projects and experiments. Active baseline projects live at the repository root and share reusable C++ include fragments from `dependencies/`. Older projects that have not moved onto that shared baseline live under `legacy/` but keep their original project/release names.
 
 ## Projects
 
 | Folder | Runtime | Purpose |
 | --- | --- | --- |
-| `AllowContentAboveLock` | C# Windows service | Keeps notification `AllowContentAboveLock` registry values enabled for loaded users. |
-| `asusblink` | C# tray/console app | ASUS ACPI LED controller for mic LED, keyboard backlight states, and HDD-activity keyboard patterns. |
-| `capsblink` | C# console app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
-| `CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
+| `legacy/AllowContentAboveLock` | C# Windows service | Keeps notification `AllowContentAboveLock` registry values enabled for loaded users. |
+| `legacy/asusblink` | C# tray/console app | ASUS ACPI LED controller for mic LED, keyboard backlight states, and HDD-activity keyboard patterns. |
+| `legacy/capsblink` | C# console app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
+| `legacy/CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
 | `DesktopStub` | C++ Win32 tray app | Builds `DesktopStub.exe`, a desktop wallpaper tile-asset generator and loose Appx registrar. |
-| `DiscordRPC` | C# tray/console app | Discord Rich Presence app with IPC, optional Gateway mode, dynamic placeholders, and a tray config UI. |
-| `DNSAutoUpdate` | C# DNS updater | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
-| `NowPlayingTile` | C# app plus Appx helpers | SMTC-based Windows Start live tile updater with optional widget mode. |
-| `PhotoCollage` | C# console app | Creates a simple JPEG grid/collage from images in a folder. |
-| `RealTimeNotesDeskband` | C++ Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes resources. |
-| `SecureDesktopLauncher` | C++ service/tools | Launches trusted configured programs on secure desktops, with an optional password-gated launcher. |
-| `TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
-| `WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
-| `YourPhoneHideBanner` | C# Windows service | Suppresses Phone Link notification banners and sounds for loaded users. |
+| `DiscordRPC` | C++ Win32 tray/console app | Discord Rich Presence app with Discord IPC, Gateway transport, DPAPI token storage, dynamic placeholders, and a tray config UI. |
+| `legacy/DNSAutoUpdate` | C# DNS updater | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
+| `legacy/NowPlayingTile` | C++ app plus Appx helpers | SMTC-based Windows Start live tile updater with optional widget mode. |
+| `legacy/PhotoCollage` | C# console app | Creates a simple JPEG grid/collage from images in a folder. |
+| `legacy/RealTimeNotesDeskband` | C++ Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes resources. |
+| `legacy/SecureDesktopLauncher` | C++ service/tools | Launches trusted configured programs on secure desktops, with an optional password-gated launcher. |
+| `legacy/TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
+| `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
+| `legacy/YourPhoneHideBanner` | C# Windows service | Suppresses Phone Link notification banners and sounds for loaded users. |
 
 ## Prebuilt Releases
 
@@ -44,11 +44,11 @@ Published binaries are unsigned. Windows SmartScreen or antivirus tools may warn
 Common prerequisites:
 
 - Windows 10/11 for most projects.
-- Windows 8 or 8.1 for `CharmTray`.
+- Windows 8 or 8.1 for `legacy/CharmTray`.
 - .NET Framework compiler at `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` for C# projects.
 - Visual Studio Build Tools with the C++ workload for MSVC projects.
-- MinGW-w64 `g++` for `RealTimeNotesDeskband`.
-- `dnscmd.exe` for `DNSAutoUpdate` on Windows DNS Server systems.
+- MinGW-w64 `g++` for `legacy/RealTimeNotesDeskband`.
+- `dnscmd.exe` for `legacy/DNSAutoUpdate` on Windows DNS Server systems.
 
 Build all Windows binary artifacts:
 
@@ -56,7 +56,7 @@ Build all Windows binary artifacts:
 .github\scripts\build-windows.cmd
 ```
 
-`WindhawkMods` contains source-only `.wh.cpp` files that are imported, compiled,
+`legacy/WindhawkMods` contains source-only `.wh.cpp` files that are imported, compiled,
 and loaded by Windhawk. They are not built by the repository Windows workflow.
 
 Useful build options:
@@ -88,9 +88,9 @@ Each project README also lists direct build commands for that project. Generated
 Several tools intentionally modify system state:
 
 - services write user-hive notification settings and local `.log` files beside their executables;
-- `DNSAutoUpdate` adds and removes exact DNS A records in its managed allowlist;
-- `SecureDesktopLauncher` can launch processes as `LocalSystem` on secure desktops;
-- `TaskSchedulerMigration` re-registers matching scheduled tasks;
+- `legacy/DNSAutoUpdate` adds and removes exact DNS A records in its managed allowlist;
+- `legacy/SecureDesktopLauncher` can launch processes as `LocalSystem` on secure desktops;
+- `legacy/TaskSchedulerMigration` re-registers matching scheduled tasks;
 - Appx helpers register or unregister loose development packages.
 
 Read the project README before running a tool, use an elevated shell where documented, and use `-WhatIf` or `--what-if` for tools that support preview mode.

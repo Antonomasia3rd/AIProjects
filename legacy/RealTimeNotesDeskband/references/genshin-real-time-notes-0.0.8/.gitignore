@@ -1,0 +1,11 @@
+/*.json
+/resin
+/*.exe
+/*.dll
+/curl.sh
+/stamina
+*.log
+/login
+*.zip
+/*.sh
+/.direnv

@@ -2,37 +2,37 @@
   {
     "key": "AllowContentAboveLock",
     "label": "AllowContentAboveLock",
-    "folder": "AllowContentAboveLock",
+    "folder": "legacy/AllowContentAboveLock",
     "buildOutput": "build_allow_content_above_lock",
     "artifactName": "AllowContentAboveLock",
-    "artifactPath": "AllowContentAboveLock/build/AllowContentAboveLock.exe",
+    "artifactPath": "legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe",
     "skipKey": "AllowContentAboveLock"
   },
   {
     "key": "asusblink",
     "label": "asusblink",
-    "folder": "asusblink",
+    "folder": "legacy/asusblink",
     "buildOutput": "build_asusblink",
     "artifactName": "asusblink",
-    "artifactPath": "asusblink/build/asusblink.exe",
+    "artifactPath": "legacy/asusblink/build/asusblink.exe",
     "skipKey": "asusblink"
   },
   {
     "key": "capsblink",
     "label": "capsblink",
-    "folder": "capsblink",
+    "folder": "legacy/capsblink",
     "buildOutput": "build_capsblink",
     "artifactName": "capsblink",
-    "artifactPath": "capsblink/build/capsblink.exe",
+    "artifactPath": "legacy/capsblink/build/capsblink.exe",
     "skipKey": "capsblink"
   },
   {
     "key": "YourPhoneHideBanner",
     "label": "YourPhoneHideBanner",
-    "folder": "YourPhoneHideBanner",
+    "folder": "legacy/YourPhoneHideBanner",
     "buildOutput": "build_your_phone_hide_banner",
     "artifactName": "YourPhoneHideBanner",
-    "artifactPath": "YourPhoneHideBanner/build/YourPhoneHideBanner.exe",
+    "artifactPath": "legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe",
     "skipKey": "YourPhoneHideBanner"
   },
   {
@@ -45,13 +45,31 @@
     "skipKey": "DiscordRPC"
   },
   {
+    "key": "DNSAutoUpdate",
+    "label": "DNSAutoUpdate",
+    "folder": "legacy/DNSAutoUpdate",
+    "buildOutput": "build_dns_auto_update",
+    "artifactName": "DNSAutoUpdate",
+    "artifactPath": "legacy/DNSAutoUpdate/build/DNSAutoUpdate.exe",
+    "skipKey": "DNSAutoUpdate"
+  },
+  {
     "key": "NowPlayingTile",
     "label": "NowPlayingTile",
-    "folder": "NowPlayingTile",
+    "folder": "legacy/NowPlayingTile",
     "buildOutput": "build_now_playing_tile",
     "artifactName": "NowPlayingTile",
-    "artifactPath": "NowPlayingTile/build/NowPlayingTile.exe",
+    "artifactPath": "legacy/NowPlayingTile/build/NowPlayingTile.exe",
     "skipKey": "NowPlayingTile"
+  },
+  {
+    "key": "PhotoCollage",
+    "label": "PhotoCollage",
+    "folder": "legacy/PhotoCollage",
+    "buildOutput": "build_photo_collage",
+    "artifactName": "PhotoCollage",
+    "artifactPath": "legacy/PhotoCollage/build/PhotoCollage.exe",
+    "skipKey": "PhotoCollage"
   },
   {
     "key": "DesktopStub",
@@ -66,28 +84,37 @@
   {
     "key": "CharmTray",
     "label": "CharmTray",
-    "folder": "CharmTray",
+    "folder": "legacy/CharmTray",
     "buildOutput": "build_charm_tray",
     "artifactName": "CharmTray",
-    "artifactPath": "CharmTray/build/CharmTray.exe",
+    "artifactPath": "legacy/CharmTray/build/CharmTray.exe",
     "skipKey": "CharmTray"
   },
   {
     "key": "SecureDesktopLauncher",
     "label": "SecureDesktopLauncher",
-    "folder": "SecureDesktopLauncher",
+    "folder": "legacy/SecureDesktopLauncher",
     "buildOutput": "build_secure_desktop_launcher",
     "artifactName": "SecureDesktopLauncher",
-    "artifactPath": "SecureDesktopLauncher/build/SecureDesktopLauncher.exe",
+    "artifactPath": "legacy/SecureDesktopLauncher/build/SecureDesktopLauncher.exe",
     "skipKey": "SecureDesktopLauncher"
+  },
+  {
+    "key": "TaskSchedulerMigration",
+    "label": "TaskSchedulerMigration",
+    "folder": "legacy/TaskSchedulerMigration",
+    "buildOutput": "build_task_scheduler_migration",
+    "artifactName": "TaskSchedulerMigration",
+    "artifactPath": "legacy/TaskSchedulerMigration/build/TaskSchedulerMigration.exe",
+    "skipKey": "TaskSchedulerMigration"
   },
   {
     "key": "RealTimeNotesDeskband",
     "label": "RealTimeNotesDeskband",
-    "folder": "RealTimeNotesDeskband",
+    "folder": "legacy/RealTimeNotesDeskband",
     "buildOutput": "build_real_time_notes_deskband",
     "artifactName": "RealTimeNotesDeskband",
-    "artifactPath": "RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll",
+    "artifactPath": "legacy/RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll",
     "skipKey": "RealTimeNotesDeskband"
   }
 ]
