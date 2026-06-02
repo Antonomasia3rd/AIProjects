@@ -433,6 +433,7 @@ static class RepoTools
             if (!forceAll)
             {
                 bool sharedChange = changed.Any(p => p.StartsWith(".github/", StringComparison.OrdinalIgnoreCase) ||
+                    p.StartsWith("dependencies/", StringComparison.OrdinalIgnoreCase) ||
                     p == ".gitattributes" ||
                     p == "README.md");
                 if (sharedChange)
@@ -650,6 +651,31 @@ static class RepoTools
                     {
                         Warn("DesktopStub smoke temp directory preserved for diagnostics: " + tempRoot);
                     }
+                }
+            }
+        }
+
+        Project discordRpc = projects.FirstOrDefault(p => p.key == "DiscordRPC");
+        if (discordRpc != null)
+        {
+            string sourceExe = Path.Combine(root, discordRpc.artifactPath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(sourceExe))
+            {
+                string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
+                if (String.IsNullOrWhiteSpace(tempBase))
+                    tempBase = Path.GetTempPath();
+                string tempRoot = Path.Combine(tempBase, "DiscordRPCSmoke-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempRoot);
+                try
+                {
+                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
+                    File.Copy(sourceExe, exe, true);
+                    SmokeProcess(exe, new[] { "--help" }, new[] { 0 }, 30, "DiscordRPC help");
+                    SmokeProcess(exe, new[] { "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dry-run");
+                }
+                finally
+                {
+                    try { Directory.Delete(tempRoot, true); } catch { }
                 }
             }
         }

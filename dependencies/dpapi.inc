@@ -1,0 +1,61 @@
+#ifndef AIP_DEPENDENCIES_DPAPI_INC
+#define AIP_DEPENDENCIES_DPAPI_INC
+
+namespace aip
+{
+inline constexpr const wchar_t* kDpapiPrefix = L"dpapi:";
+
+inline bool IsDpapiProtectedValue(const std::wstring& value)
+{
+    return StartsWithI(Trim(value), kDpapiPrefix);
+}
+
+inline std::wstring ProtectSecretForCurrentUser(const std::wstring& secret)
+{
+    std::string utf8 = WideToUtf8(secret);
+    DATA_BLOB plain = {};
+    plain.pbData = reinterpret_cast<BYTE*>(utf8.data());
+    plain.cbData = static_cast<DWORD>(utf8.size());
+
+    DATA_BLOB cipher = {};
+    if (!CryptProtectData(&plain, nullptr, nullptr, nullptr, nullptr, 0, &cipher))
+    {
+        throw std::runtime_error(WideToUtf8(L"DPAPI protect failed: " + GetLastErrorText(GetLastError())));
+    }
+
+    std::vector<BYTE> bytes(cipher.pbData, cipher.pbData + cipher.cbData);
+    LocalFree(cipher.pbData);
+    return std::wstring(kDpapiPrefix) + BytesToHex(bytes);
+}
+
+inline std::wstring UnprotectSecretForCurrentUser(const std::wstring& protectedValue)
+{
+    std::wstring text = Trim(protectedValue);
+    if (!IsDpapiProtectedValue(text))
+    {
+        throw std::runtime_error("Protected value must start with dpapi:.");
+    }
+
+    std::vector<BYTE> cipherBytes;
+    if (!HexToBytes(text.substr(wcslen(kDpapiPrefix)), cipherBytes))
+    {
+        throw std::runtime_error("Protected value contains invalid hex.");
+    }
+
+    DATA_BLOB cipher = {};
+    cipher.pbData = cipherBytes.empty() ? nullptr : cipherBytes.data();
+    cipher.cbData = static_cast<DWORD>(cipherBytes.size());
+
+    DATA_BLOB plain = {};
+    if (!CryptUnprotectData(&cipher, nullptr, nullptr, nullptr, nullptr, 0, &plain))
+    {
+        throw std::runtime_error(WideToUtf8(L"DPAPI unprotect failed: " + GetLastErrorText(GetLastError())));
+    }
+
+    std::string utf8(reinterpret_cast<char*>(plain.pbData), reinterpret_cast<char*>(plain.pbData) + plain.cbData);
+    LocalFree(plain.pbData);
+    return Utf8ToWide(utf8);
+}
+}
+
+#endif

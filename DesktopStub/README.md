@@ -175,7 +175,7 @@ Supported options:
 
 ## Source Layout
 
-`DesktopStub.cpp` is the main host translation-unit entry point. Most implementation code is split into ordered fragments under `DesktopStub\src`:
+`DesktopStub.cpp` is the main host translation-unit entry point. Shared baseline helpers come from the repository-level `dependencies\*.inc` files, and DesktopStub-specific implementation code is split into ordered fragments under `DesktopStub\src`:
 
 - `ga_core.inc`: low-level file, text, INI, and process-output helpers.
 - `ga_config_defaults.inc`: runtime globals and generated INI/string defaults.
