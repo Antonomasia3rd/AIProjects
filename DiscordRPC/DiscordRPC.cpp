@@ -133,12 +133,25 @@ int wmain()
     {
         return 1;
     }
+    if (!options.settings.empty())
+    {
+        options.reloadExistingInstance = true;
+    }
     bool plaintextTokenPresent = !Trim(IniReadS(L"general", L"token", L"")).empty();
     if ((options.protectToken || plaintextTokenPresent) && !ProtectDiscordTokenInConfig(plaintextTokenPresent))
     {
         return 1;
     }
+    if (options.protectToken || plaintextTokenPresent)
+    {
+        options.reloadExistingInstance = true;
+    }
     ConfigureRuntimeFromConfig(options);
+
+    if ((options.dryRun || options.dryRunFull || options.once) && ShouldReloadExistingInstance(options))
+    {
+        SignalExistingInstance(DRPC_INSTANCE_RELOAD);
+    }
 
     if (options.dryRun || options.dryRunFull)
     {

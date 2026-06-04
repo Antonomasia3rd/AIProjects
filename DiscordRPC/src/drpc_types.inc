@@ -26,6 +26,7 @@ struct AppOptions
     bool forceHideConsole = false;
     bool requestExit = false;
     bool protectToken = false;
+    bool reloadExistingInstance = false;
     std::wstring configPath;
     std::vector<CommandLineSetting> settings;
 };
