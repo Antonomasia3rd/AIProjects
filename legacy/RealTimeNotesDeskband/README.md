@@ -99,7 +99,7 @@ The deskband asks Explorer to resize when status text changes, so the toolbar wi
 - HTTP responses are capped at 1 MiB before parsing so Explorer does not retain an unexpectedly large API body.
 - Settings are copied under a lock before refresh workers use them, so changing config/asset directories from the menu cannot race with a background refresh.
 - If no icon resource is found, the deskband draws a built-in fallback marker.
-- HoYoLAB request signing, headers, and response fields intentionally mirror the original Real-Time Notes reference copy under `references\genshin-real-time-notes-0.0.8`. Treat changes there as compatibility updates, not generic API refactors.
+- HoYoLAB request signing, headers, and response fields intentionally mirror the original Real-Time Notes upstream behavior. Local upstream/reference copies may be kept in an ignored `references\` folder for research, but those copies are not part of the publishable source package. Treat compatibility changes here as HoYoLAB compatibility updates, not generic API refactors.
 
 ## Settings
 
@@ -133,7 +133,7 @@ Legacy registry settings under `HKCU\Software\RealTimeNotesDeskband` are migrate
 ```text
 RealTimeNotesDeskband\
   build\                         generated DLLs, ignored
-  references\                    local upstream/reference source, ignored
+  references\                    optional local upstream/reference source, ignored and not vendored
   BuildDeskband.cmd
   ConfigureDeskband.cmd
   RegisterDeskband.cmd
@@ -141,7 +141,7 @@ RealTimeNotesDeskband\
   RealTimeNotesDeskband.cpp
 ```
 
-The `references\` folder may contain local copies of ExplorerPatcher and the original Real-Time Notes tray app. Those copies are reference material, not part of the publishable project.
+The optional `references\` folder may contain local copies of ExplorerPatcher and the original Real-Time Notes tray app while developing. It is ignored intentionally so large or license-sensitive reference material is not accidentally shipped in this repository.
 
 ## Uninstall
 

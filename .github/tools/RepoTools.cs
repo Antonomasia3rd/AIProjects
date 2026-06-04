@@ -683,11 +683,13 @@ static class RepoTools
                     }
 
                     string ini = Path.Combine(tempRoot, "DesktopStub.ini");
+                    string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
                     string wallpaper = Path.Combine(tempRoot, "wallpaper.bmp");
                     WriteTestBmp(wallpaper);
 
                     SmokeProcess(exe, new[] { "--version" }, new[] { 0 }, 30, "DesktopStub version");
-                    SmokeProcess(exe, new[] { "--help" }, new[] { 0 }, 30, "DesktopStub help");
+                    SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--set", "Settings.TrayIcon=0" }, new[] { 0 }, 30, "DesktopStub help");
+                    AssertFileDoesNotExist(helpIni, "DesktopStub --help must be side-effect-free");
                     SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--scales", "auto", "--asset", "MediumTile=1", "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
                     string manifestPath = Path.Combine(Path.GetDirectoryName(exe), "AppxManifest.xml");
                     smokeIdentity = "dev.local.desktopstubsmoke." + Guid.NewGuid().ToString("N").Substring(0, 16);
@@ -945,6 +947,7 @@ static class RepoTools
             releaseKeys.Add(p.key);
         }
         var entries = new List<Tuple<Project, string, List<string>, string>>();
+        var missingArtifacts = new List<Project>();
         foreach (var p in projects)
         {
             if (!releaseKeys.Contains(p.key))
@@ -955,6 +958,19 @@ static class RepoTools
                 Console.WriteLine("Found release artifact payload for " + p.label + ": " + entry.Item3);
                 entries.Add(Tuple.Create(p, entry.Item1, entry.Item2, entry.Item3));
             }
+            else
+            {
+                missingArtifacts.Add(p);
+            }
+        }
+
+        if (missingArtifacts.Count > 0)
+        {
+            Console.WriteLine("Downloaded artifact tree:");
+            foreach (string line in ArtifactTreeSummary(artifactsRoot, 160))
+                Console.WriteLine("  " + line);
+            throw new InvalidOperationException("Missing downloaded release artifact payload for selected project(s): " +
+                String.Join(", ", missingArtifacts.Select(p => p.label + " [" + p.artifactName + "]")));
         }
 
         if (entries.Count == 0)

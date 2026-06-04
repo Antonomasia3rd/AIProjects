@@ -1,169 +1,66 @@
 static std::wstring Trim(const std::wstring& value)
 {
-    size_t first = 0;
-    while (first < value.size() && iswspace(value[first]))
-    {
-        ++first;
-    }
-
-    size_t last = value.size();
-    while (last > first && iswspace(value[last - 1]))
-    {
-        --last;
-    }
-
-    return value.substr(first, last - first);
+    return aip::Trim(value);
 }
 
 static std::wstring ToLower(std::wstring value)
 {
-    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t ch) {
-        return static_cast<wchar_t>(towlower(ch));
-    });
-    return value;
+    return aip::ToLower(std::move(value));
 }
 
 static bool EqualsI(const std::wstring& left, const wchar_t* right)
 {
-    return _wcsicmp(left.c_str(), right ? right : L"") == 0;
+    return aip::EqualsI(left, right);
 }
 
 static bool StartsWithI(const std::wstring& value, const wchar_t* prefix)
 {
-    size_t len = wcslen(prefix);
-    return value.size() >= len && _wcsnicmp(value.c_str(), prefix, len) == 0;
+    return aip::StartsWithI(value, prefix);
 }
 
 static std::wstring GetLastErrorText(DWORD error)
 {
-    if (error == 0)
-    {
-        return L"";
-    }
-
-    wchar_t* buffer = nullptr;
-    DWORD count = FormatMessageW(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-        nullptr,
-        error,
-        0,
-        reinterpret_cast<LPWSTR>(&buffer),
-        0,
-        nullptr);
-
-    std::wstring text;
-    if (count != 0 && buffer != nullptr)
-    {
-        text.assign(buffer, count);
-        while (!text.empty() && (text.back() == L'\r' || text.back() == L'\n' || text.back() == L' ' || text.back() == L'\t'))
-        {
-            text.pop_back();
-        }
-        LocalFree(buffer);
-    }
-    else
-    {
-        wchar_t fallback[64] = {};
-        swprintf_s(fallback, L"Win32 error %lu", error);
-        text = fallback;
-    }
-
-    return text;
+    return aip::GetLastErrorText(error);
 }
 
 static std::wstring GetDirectoryName(const std::wstring& path)
 {
-    size_t slash = path.find_last_of(L"\\/");
-    if (slash == std::wstring::npos)
-    {
-        return L".";
-    }
-    if (slash == 2 && path.size() > 2 && path[1] == L':')
-    {
-        return path.substr(0, 3);
-    }
-    return path.substr(0, slash);
+    return aip::GetDirectoryName(path);
 }
 
 static std::wstring GetFileBaseName(const std::wstring& path)
 {
-    size_t slash = path.find_last_of(L"\\/");
-    size_t start = slash == std::wstring::npos ? 0 : slash + 1;
-    size_t dot = path.find_last_of(L'.');
-    if (dot == std::wstring::npos || dot < start)
-    {
-        dot = path.size();
-    }
-    return path.substr(start, dot - start);
+    return aip::GetFileBaseName(path);
 }
 
 static std::wstring PathJoin(const std::wstring& left, const std::wstring& right)
 {
-    if (left.empty())
-    {
-        return right;
-    }
-    if (right.empty())
-    {
-        return left;
-    }
-
-    std::wstring result = left;
-    if (result.back() != L'\\' && result.back() != L'/')
-    {
-        result.push_back(L'\\');
-    }
-    result += right;
-    return result;
+    return aip::PathJoin(left, right);
 }
 
 static void EnsureDirectory(const std::wstring& path)
 {
-    if (path.empty() || path == L".")
-    {
-        return;
-    }
-
-    std::wstring current;
-    current.reserve(path.size());
-    for (size_t i = 0; i < path.size(); ++i)
-    {
-        wchar_t ch = path[i];
-        current.push_back(ch);
-        if ((ch == L'\\' || ch == L'/') && current.size() > 3)
-        {
-            CreateDirectoryW(current.c_str(), nullptr);
-        }
-    }
-    CreateDirectoryW(path.c_str(), nullptr);
+    aip::EnsureDirectory(path);
 }
 
 static bool FileExists(const std::wstring& path)
 {
-    DWORD attributes = GetFileAttributesW(path.c_str());
-    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    return aip::FileExists(path);
+}
+
+static std::string WideToUtf8(const std::wstring& value)
+{
+    return aip::WideToUtf8(value);
+}
+
+static std::wstring Utf8ToWide(const std::string& value)
+{
+    return aip::Utf8ToWide(value);
 }
 
 static std::wstring MakeAbsolutePath(const std::wstring& path)
 {
-    if (path.empty())
-    {
-        return path;
-    }
-
-    DWORD needed = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
-    if (needed == 0)
-    {
-        return path;
-    }
-
-    std::vector<wchar_t> buffer(needed + 1);
-    DWORD written = GetFullPathNameW(path.c_str(), static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
-    if (written == 0 || written >= buffer.size())
-    {
-        return path;
-    }
-    return buffer.data();
+    return aip::MakeAbsolutePath(path);
 }
 
 static void InitPaths()
@@ -664,7 +561,7 @@ static std::wstring ResolveDiscordToken()
     return token;
 }
 
-static bool ProtectDiscordTokenInConfig()
+static bool ProtectDiscordTokenInConfig(bool replaceProtectedToken = false)
 {
     std::wstring token = Trim(IniReadS(L"general", L"token", L""));
     if (token.empty() || IsTokenEnvironmentReference(token))
@@ -673,12 +570,14 @@ static bool ProtectDiscordTokenInConfig()
     }
 
     std::wstring protectedToken = Trim(IniReadS(L"general", L"token_protected", L""));
-    if (protectedToken.empty())
+    if (protectedToken.empty() || replaceProtectedToken)
     {
         try
         {
             IniWriteRaw(L"general", L"token_protected", aip::ProtectSecretForCurrentUser(token));
-            LogInfo(L"Migrating [general] token to DPAPI-protected [general] token_protected.");
+            LogInfo(protectedToken.empty()
+                ? L"Migrating [general] token to DPAPI-protected [general] token_protected."
+                : L"Replacing DPAPI-protected [general] token_protected from an explicit plaintext token update.");
         }
         catch (const std::exception& ex)
         {

@@ -13,7 +13,8 @@ struct IniSetting
 
 inline bool IsOptionOrInlineValue(const std::wstring& arg, const wchar_t* option)
 {
-    return EqualsI(arg, option) || StartsWithI(arg, (std::wstring(option) + L"=").c_str());
+    std::wstring inlinePrefix = std::wstring(option) + L"=";
+    return EqualsI(arg, option) || StartsWithI(arg, inlinePrefix.c_str());
 }
 
 inline bool IsLikelySensitiveSettingName(const std::wstring& key)

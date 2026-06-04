@@ -1538,7 +1538,7 @@ static std::wstring DecodeCommandLineHelpEscapes(const std::wstring& value)
     return out;
 }
 
-static std::wstring CommandLineUsageText()
+static std::wstring FormatCommandLineHelpTemplate(const wchar_t* rawTemplate)
 {
     std::wstring exe = CommandLineProgramName();
     std::wstring iniExampleName = exe;
@@ -1548,14 +1548,26 @@ static std::wstring CommandLineUsageText()
     if (iniExampleName.empty())
         iniExampleName = L"DesktopStub";
 
-    std::wstring text = DecodeCommandLineHelpEscapes(IniReadS(
-        COMMAND_LINE_HELP_SECTION,
-        COMMAND_LINE_HELP_TEMPLATE_KEY,
-        g_commandLineHelpDefaults[0].value));
+    std::wstring text = DecodeCommandLineHelpEscapes(rawTemplate ? rawTemplate : g_commandLineHelpDefaults[0].value);
     ReplaceAllInPlace(text, L"{exe}", exe);
     ReplaceAllInPlace(text, L"{iniExampleName}", iniExampleName);
     return text;
 }
+
+static std::wstring CommandLineDefaultUsageText()
+{
+    return FormatCommandLineHelpTemplate(g_commandLineHelpDefaults[0].value);
+}
+
+static std::wstring CommandLineUsageText()
+{
+    std::wstring iniTemplate = IniReadS(
+        COMMAND_LINE_HELP_SECTION,
+        COMMAND_LINE_HELP_TEMPLATE_KEY,
+        g_commandLineHelpDefaults[0].value);
+    return FormatCommandLineHelpTemplate(iniTemplate.c_str());
+}
+
 
 static std::wstring CommandLineVersionText()
 {

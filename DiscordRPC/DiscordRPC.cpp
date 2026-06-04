@@ -115,7 +115,8 @@ int wmain()
 
     EnsureDefaultConfigFile();
     ApplyCommandLineSettings(options);
-    if ((options.protectToken || !Trim(IniReadS(L"general", L"token", L"")).empty()) && !ProtectDiscordTokenInConfig())
+    bool plaintextTokenPresent = !Trim(IniReadS(L"general", L"token", L"")).empty();
+    if ((options.protectToken || plaintextTokenPresent) && !ProtectDiscordTokenInConfig(plaintextTokenPresent))
     {
         return 1;
     }
