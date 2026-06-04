@@ -498,6 +498,10 @@ static class RepoTools
             selected = projects.ToList();
 
         var selectedKeys = new HashSet<string>(selected.Select(p => p.key), StringComparer.OrdinalIgnoreCase);
+        releaseSelected = releaseSelected
+            .Where(p => selectedKeys.Contains(p.key))
+            .ToList();
+
         var skip = new List<string>();
         var outputs = new List<string>();
         foreach (var p in projects)
