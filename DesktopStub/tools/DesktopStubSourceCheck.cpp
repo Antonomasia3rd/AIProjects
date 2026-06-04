@@ -520,11 +520,14 @@ int main(int argc, char** argv)
             },
             "BuildDesktopStub.cmd must reject command-shell metacharacters in configurable product/output names while allowing ordinary spaces");
         AssertContainsAll(
-            "Build script writes resource string define includes",
+            "Build script writes generated string define includes",
             "Build/resource scripts",
-            buildScript + "\n" + desktopStubResource + "\n" + brokerResource,
+            buildScript + "\n" + desktopStub + "\n" + desktopStubResource + "\n" + brokerResource,
             {
-                "/D\\\"DESKTOPSTUB_RELEASE_TAG=\\\\\\\"%DESKTOPSTUB_RELEASE_TAG%\\\\\\\"\\\"",
+                "call :WriteCppVersionDefines \"%CPP_VERSION_DEFINES_FILE%\" \"%DESKTOPSTUB_RELEASE_TAG%\"",
+                "DesktopStubVersionDefines.inc",
+                "#define DESKTOPSTUB_RELEASE_TAG",
+                "#include \"DesktopStubVersionDefines.inc\"",
                 "call :WriteRcDefines \"%RC_HOST_DEFINES_FILE%\"",
                 "DesktopStubHostResourceDefines.rc.inc",
                 "DesktopStubBrokerResourceDefines.rc.inc",
@@ -537,7 +540,11 @@ int main(int argc, char** argv)
             "Build script avoids RC defines with spaces",
             "BuildDesktopStub.cmd",
             buildScript,
-            {"DESKTOPSTUB_FILE_DESCRIPTION=\\\"%DESKTOPSTUB_PRODUCT_NAME% tray", "DESKTOPSTUB_FILE_DESCRIPTION=\\\"%DESKTOPSTUB_PRODUCT_NAME% Live Tile"},
+            {
+                "/D\\\"DESKTOPSTUB_RELEASE_TAG=\\\\\\\"%DESKTOPSTUB_RELEASE_TAG%\\\\\\\"\\\"",
+                "DESKTOPSTUB_FILE_DESCRIPTION=\\\"%DESKTOPSTUB_PRODUCT_NAME% tray",
+                "DESKTOPSTUB_FILE_DESCRIPTION=\\\"%DESKTOPSTUB_PRODUCT_NAME% Live Tile"
+            },
             "BuildDesktopStub.cmd must not pass resource string macros containing spaces through rc.exe /d arguments");
         AssertContainsAll(
             "Experimental background task manifest is gated by the built DLL",
