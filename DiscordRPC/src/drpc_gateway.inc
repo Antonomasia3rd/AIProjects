@@ -1,35 +1,26 @@
 static int JsonExtractInt(const std::string& json, const char* key, int fallback = -1)
 {
-    std::string needle = std::string("\"") + key + "\"";
-    size_t pos = json.find(needle);
-    if (pos == std::string::npos)
+    size_t keyPos = 0;
+    size_t valueStart = 0;
+    size_t valueEnd = 0;
+    if (!FindJsonFieldValue(json, key, keyPos, valueStart, valueEnd))
     {
         return fallback;
-    }
-    pos = json.find(':', pos + needle.size());
-    if (pos == std::string::npos)
-    {
-        return fallback;
-    }
-    ++pos;
-    while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
-    {
-        ++pos;
     }
 
-    size_t end = pos;
-    while (end < json.size() && (isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-'))
+    size_t end = valueStart;
+    while (end < valueEnd && (isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-'))
     {
         ++end;
     }
-    if (end == pos)
+    if (end == valueStart)
     {
         return fallback;
     }
 
     try
     {
-        return std::stoi(json.substr(pos, end - pos));
+        return std::stoi(json.substr(valueStart, end - valueStart));
     }
     catch (const std::exception&)
     {
@@ -48,166 +39,64 @@ static bool JsonExtractOptionalInt(const std::string& json, const char* key, int
     return true;
 }
 
-static size_t JsonStringEnd(const std::string& json, size_t quote)
-{
-    if (quote >= json.size() || json[quote] != '"')
-    {
-        return std::string::npos;
-    }
-
-    bool escaped = false;
-    for (size_t i = quote + 1; i < json.size(); ++i)
-    {
-        char ch = json[i];
-        if (escaped)
-        {
-            escaped = false;
-        }
-        else if (ch == '\\')
-        {
-            escaped = true;
-        }
-        else if (ch == '"')
-        {
-            return i + 1;
-        }
-    }
-    return std::string::npos;
-}
-
-static size_t JsonValueEnd(const std::string& json, size_t start)
-{
-    if (start >= json.size())
-    {
-        return std::string::npos;
-    }
-
-    if (json[start] == '"')
-    {
-        return JsonStringEnd(json, start);
-    }
-
-    if (json[start] == '{' || json[start] == '[')
-    {
-        char open = json[start];
-        char close = open == '{' ? '}' : ']';
-        int depth = 0;
-        bool inString = false;
-        bool escaped = false;
-        for (size_t i = start; i < json.size(); ++i)
-        {
-            char ch = json[i];
-            if (inString)
-            {
-                if (escaped)
-                {
-                    escaped = false;
-                }
-                else if (ch == '\\')
-                {
-                    escaped = true;
-                }
-                else if (ch == '"')
-                {
-                    inString = false;
-                }
-                continue;
-            }
-
-            if (ch == '"')
-            {
-                inString = true;
-            }
-            else if (ch == open)
-            {
-                ++depth;
-            }
-            else if (ch == close)
-            {
-                --depth;
-                if (depth == 0)
-                {
-                    return i + 1;
-                }
-            }
-        }
-        return std::string::npos;
-    }
-
-    size_t end = start;
-    while (end < json.size() && json[end] != ',' && json[end] != '}' && json[end] != ']')
-    {
-        ++end;
-    }
-    return end;
-}
-
-static bool FindJsonFieldValue(const std::string& json, const char* key, size_t& keyPos, size_t& valueStart, size_t& valueEnd)
-{
-    std::string needle = std::string("\"") + key + "\"";
-    keyPos = json.find(needle);
-    if (keyPos == std::string::npos)
-    {
-        return false;
-    }
-
-    size_t colon = json.find(':', keyPos + needle.size());
-    if (colon == std::string::npos)
-    {
-        return false;
-    }
-
-    valueStart = colon + 1;
-    while (valueStart < json.size() && isspace(static_cast<unsigned char>(json[valueStart])))
-    {
-        ++valueStart;
-    }
-    valueEnd = JsonValueEnd(json, valueStart);
-    return valueEnd != std::string::npos && valueEnd >= valueStart;
-}
-
 static void RemoveGatewayUnsupportedInstanceField(std::string& activity)
 {
-    size_t pos = activity.find(",\"instance\":true");
-    if (pos != std::string::npos)
+    size_t keyPos = 0;
+    size_t valueStart = 0;
+    size_t valueEnd = 0;
+    if (!FindJsonFieldValue(activity, "instance", keyPos, valueStart, valueEnd))
     {
-        activity.erase(pos, strlen(",\"instance\":true"));
         return;
     }
 
-    pos = activity.find("\"instance\":true,");
-    if (pos != std::string::npos)
+    size_t rawEnd = valueEnd;
+    while (rawEnd > valueStart && isspace(static_cast<unsigned char>(activity[rawEnd - 1])))
     {
-        activity.erase(pos, strlen("\"instance\":true,"));
+        --rawEnd;
+    }
+    if (activity.compare(valueStart, rawEnd - valueStart, "true") == 0)
+    {
+        RemoveJsonObjectMember(activity, keyPos, valueEnd);
     }
 }
 
 static void NormalizeGatewayTimestampUnits(std::string& activity)
 {
-    const std::string needle = "\"timestamps\":{\"start\":";
-    size_t pos = activity.find(needle);
-    if (pos == std::string::npos)
+    size_t keyPos = 0;
+    size_t timestampsStart = 0;
+    size_t timestampsEnd = 0;
+    if (!FindJsonFieldValue(activity, "timestamps", keyPos, timestampsStart, timestampsEnd) ||
+        timestampsStart >= activity.size() ||
+        activity[timestampsStart] != '{')
     {
         return;
     }
 
-    size_t valueStart = pos + needle.size();
-    size_t valueEnd = valueStart;
-    while (valueEnd < activity.size() && isdigit(static_cast<unsigned char>(activity[valueEnd])))
+    std::string timestamps = activity.substr(timestampsStart, timestampsEnd - timestampsStart);
+    size_t startKeyPos = 0;
+    size_t valueStart = 0;
+    size_t valueEnd = 0;
+    if (!FindJsonFieldValue(timestamps, "start", startKeyPos, valueStart, valueEnd))
     {
-        ++valueEnd;
+        return;
     }
-    if (valueEnd == valueStart)
+
+    size_t numericEnd = valueStart;
+    while (numericEnd < valueEnd && isdigit(static_cast<unsigned char>(timestamps[numericEnd])))
+    {
+        ++numericEnd;
+    }
+    if (numericEnd == valueStart)
     {
         return;
     }
 
     try
     {
-        long long value = std::stoll(activity.substr(valueStart, valueEnd - valueStart));
+        long long value = std::stoll(timestamps.substr(valueStart, numericEnd - valueStart));
         if (value > 0 && value < 100000000000LL)
         {
-            activity.replace(valueStart, valueEnd - valueStart, std::to_string(value * 1000LL));
+            activity.replace(timestampsStart + valueStart, numericEnd - valueStart, std::to_string(value * 1000LL));
         }
     }
     catch (const std::exception&)
@@ -700,7 +589,10 @@ private:
         ConvertGatewayButtons(activity);
         ResolveGatewayAssets(activity);
 
-        if (activity.find("\"application_id\"") == std::string::npos)
+        size_t keyPos = 0;
+        size_t valueStart = 0;
+        size_t valueEnd = 0;
+        if (!FindJsonFieldValue(activity, "application_id", keyPos, valueStart, valueEnd))
         {
             activity.insert(1, "\"application_id\":" + JsonEscape(clientId_) + ",");
         }
@@ -1043,25 +935,25 @@ private:
             size_t search = 0;
             for (;;)
             {
-                size_t objStart = response.find('{', search);
+                size_t objStart = FindJsonObjectStart(response, search);
                 if (objStart == std::string::npos)
                 {
                     break;
                 }
-                size_t objEnd = response.find('}', objStart);
+                size_t objEnd = JsonValueEnd(response, objStart);
                 if (objEnd == std::string::npos)
                 {
                     break;
                 }
 
-                std::string entry = response.substr(objStart, objEnd - objStart + 1);
+                std::string entry = response.substr(objStart, objEnd - objStart);
                 std::wstring assetId = ExtractJsonStringValue(entry, "id");
                 std::wstring assetName = ExtractJsonStringValue(entry, "name");
                 if (!assetId.empty() && !assetName.empty())
                 {
                     assetIdCache_[assetName] = assetId;
                 }
-                search = objEnd + 1;
+                search = objEnd;
             }
 
             cachedAssetApplicationId_ = applicationId;
