@@ -508,7 +508,7 @@ inline std::wstring ParseIniValue(std::wstring text)
     wchar_t quote = s.front();
     if (quote != L'\"' && quote != L'\'')
     {
-        return UnquoteIniString(StripIniInlineComment(std::move(text), false));
+        return UnquoteIniString(StripIniInlineComment(std::move(text)));
     }
 
     std::wstring out;
