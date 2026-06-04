@@ -20,6 +20,89 @@ inline bool IniEquals(const std::wstring& left, const std::wstring& right)
     return _wcsicmp(left.c_str(), right.c_str()) == 0;
 }
 
+inline std::wstring IniMutexHash(const std::wstring& value)
+{
+    unsigned long long hash = 1469598103934665603ull;
+    for (wchar_t ch : value)
+    {
+        hash ^= static_cast<unsigned long long>(towlower(ch));
+        hash *= 1099511628211ull;
+    }
+
+    wchar_t buffer[32] = {};
+    swprintf_s(buffer, L"%016llx", hash);
+    return buffer;
+}
+
+class IniWriteMutexGuard
+{
+public:
+    explicit IniWriteMutexGuard(const std::wstring& path)
+    {
+        std::wstring name = L"Local\\AIP.ConfigIni." + IniMutexHash(MakeAbsolutePath(path));
+        handle_ = CreateMutexW(nullptr, FALSE, name.c_str());
+        if (handle_ == nullptr)
+        {
+            error_ = GetLastError();
+            if (error_ == ERROR_ACCESS_DENIED)
+            {
+                handle_ = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE, name.c_str());
+                if (handle_ == nullptr)
+                {
+                    error_ = GetLastError();
+                    return;
+                }
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        DWORD wait = WaitForSingleObject(handle_, INFINITE);
+        if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED)
+        {
+            acquired_ = true;
+            error_ = ERROR_SUCCESS;
+            return;
+        }
+
+        error_ = wait == WAIT_FAILED ? GetLastError() : ERROR_SEM_TIMEOUT;
+        CloseHandle(handle_);
+        handle_ = nullptr;
+    }
+
+    ~IniWriteMutexGuard()
+    {
+        if (handle_ != nullptr)
+        {
+            if (acquired_)
+            {
+                ReleaseMutex(handle_);
+            }
+            CloseHandle(handle_);
+        }
+    }
+
+    IniWriteMutexGuard(const IniWriteMutexGuard&) = delete;
+    IniWriteMutexGuard& operator=(const IniWriteMutexGuard&) = delete;
+
+    bool IsLocked() const
+    {
+        return acquired_;
+    }
+
+    DWORD Error() const
+    {
+        return error_ == ERROR_SUCCESS ? ERROR_ACCESS_DENIED : error_;
+    }
+
+private:
+    HANDLE handle_ = nullptr;
+    bool acquired_ = false;
+    DWORD error_ = ERROR_SUCCESS;
+};
+
 inline bool ReadWholeFileBytes(const std::wstring& path, std::vector<BYTE>& bytes)
 {
     bytes.clear();
@@ -763,6 +846,13 @@ inline bool WriteIniValueToText(std::wstring& text, const wchar_t* section, cons
 
 inline bool IniWriteRaw(const std::wstring& path, const wchar_t* section, const wchar_t* key, const std::wstring& value, const std::wstring& header = L"")
 {
+    IniWriteMutexGuard guard(path);
+    if (!guard.IsLocked())
+    {
+        SetLastError(guard.Error());
+        return false;
+    }
+
     std::wstring text;
     if (!LoadIniText(path, text))
     {
@@ -788,6 +878,13 @@ struct IniDefaultValue
 
 inline bool IniEnsureDefaultsRaw(const std::wstring& path, const IniDefaultValue* defaults, size_t defaultCount, const std::wstring& header = L"")
 {
+    IniWriteMutexGuard guard(path);
+    if (!guard.IsLocked())
+    {
+        SetLastError(guard.Error());
+        return false;
+    }
+
     std::wstring text;
     if (!LoadIniText(path, text))
     {
