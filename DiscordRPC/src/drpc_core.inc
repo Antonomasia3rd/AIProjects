@@ -421,33 +421,243 @@ static void JsonFieldBool(std::string& object, bool& first, const char* key, boo
     JsonFieldRaw(object, first, key, value ? "true" : "false");
 }
 
-static std::wstring ExtractJsonStringValue(const std::string& json, const char* key)
+static size_t JsonStringEnd(const std::string& json, size_t quote)
 {
-    std::string needle = std::string("\"") + key + "\"";
-    size_t pos = json.find(needle);
-    if (pos == std::string::npos)
+    if (quote >= json.size() || json[quote] != '"')
     {
-        return L"";
+        return std::string::npos;
     }
-    pos = json.find(':', pos + needle.size());
-    if (pos == std::string::npos)
+
+    bool escaped = false;
+    for (size_t i = quote + 1; i < json.size(); ++i)
     {
-        return L"";
+        char ch = json[i];
+        if (escaped)
+        {
+            escaped = false;
+        }
+        else if (ch == '\\')
+        {
+            escaped = true;
+        }
+        else if (ch == '"')
+        {
+            return i + 1;
+        }
     }
-    ++pos;
-    while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
+    return std::string::npos;
+}
+
+static size_t JsonValueEnd(const std::string& json, size_t start)
+{
+    if (start >= json.size())
     {
+        return std::string::npos;
+    }
+
+    if (json[start] == '"')
+    {
+        return JsonStringEnd(json, start);
+    }
+
+    if (json[start] == '{' || json[start] == '[')
+    {
+        std::vector<char> stack;
+        stack.reserve(8);
+        bool inString = false;
+        bool escaped = false;
+        for (size_t i = start; i < json.size(); ++i)
+        {
+            char ch = json[i];
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (ch == '\\')
+                {
+                    escaped = true;
+                }
+                else if (ch == '"')
+                {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                inString = true;
+            }
+            else if (ch == '{')
+            {
+                stack.push_back('}');
+            }
+            else if (ch == '[')
+            {
+                stack.push_back(']');
+            }
+            else if (ch == '}' || ch == ']')
+            {
+                if (stack.empty() || stack.back() != ch)
+                {
+                    return std::string::npos;
+                }
+                stack.pop_back();
+                if (stack.empty())
+                {
+                    return i + 1;
+                }
+            }
+        }
+        return std::string::npos;
+    }
+
+    size_t end = start;
+    while (end < json.size() && json[end] != ',' && json[end] != '}' && json[end] != ']')
+    {
+        ++end;
+    }
+    return end;
+}
+
+static bool FindJsonFieldValue(const std::string& json, const char* key, size_t& keyPos, size_t& valueStart, size_t& valueEnd)
+{
+    keyPos = std::string::npos;
+    valueStart = std::string::npos;
+    valueEnd = std::string::npos;
+
+    if (key == nullptr || *key == '\0')
+    {
+        return false;
+    }
+
+    const size_t keyLength = strlen(key);
+    size_t pos = 0;
+    while (pos < json.size())
+    {
+        if (json[pos] != '"')
+        {
+            ++pos;
+            continue;
+        }
+
+        size_t stringEnd = JsonStringEnd(json, pos);
+        if (stringEnd == std::string::npos)
+        {
+            return false;
+        }
+
+        size_t colon = stringEnd;
+        while (colon < json.size() && isspace(static_cast<unsigned char>(json[colon])))
+        {
+            ++colon;
+        }
+        if (colon < json.size() &&
+            json[colon] == ':' &&
+            stringEnd == pos + keyLength + 2 &&
+            json.compare(pos + 1, keyLength, key) == 0)
+        {
+            valueStart = colon + 1;
+            while (valueStart < json.size() && isspace(static_cast<unsigned char>(json[valueStart])))
+            {
+                ++valueStart;
+            }
+            valueEnd = JsonValueEnd(json, valueStart);
+            if (valueEnd == std::string::npos || valueEnd < valueStart)
+            {
+                return false;
+            }
+            keyPos = pos;
+            return true;
+        }
+
+        pos = stringEnd;
+    }
+    return false;
+}
+
+static void RemoveJsonObjectMember(std::string& objectJson, size_t keyPos, size_t valueEnd)
+{
+    if (keyPos >= objectJson.size() || valueEnd > objectJson.size() || valueEnd < keyPos)
+    {
+        return;
+    }
+
+    size_t removeStart = keyPos;
+    while (removeStart > 0 && isspace(static_cast<unsigned char>(objectJson[removeStart - 1])))
+    {
+        --removeStart;
+    }
+
+    size_t removeEnd = valueEnd;
+    while (removeEnd < objectJson.size() && isspace(static_cast<unsigned char>(objectJson[removeEnd])))
+    {
+        ++removeEnd;
+    }
+
+    if (removeEnd < objectJson.size() && objectJson[removeEnd] == ',')
+    {
+        ++removeEnd;
+        while (removeEnd < objectJson.size() && isspace(static_cast<unsigned char>(objectJson[removeEnd])))
+        {
+            ++removeEnd;
+        }
+    }
+    else if (removeStart > 0 && objectJson[removeStart - 1] == ',')
+    {
+        --removeStart;
+        while (removeStart > 0 && isspace(static_cast<unsigned char>(objectJson[removeStart - 1])))
+        {
+            --removeStart;
+        }
+    }
+
+    objectJson.erase(removeStart, removeEnd - removeStart);
+}
+
+static size_t FindJsonObjectStart(const std::string& json, size_t search)
+{
+    size_t pos = search;
+    while (pos < json.size())
+    {
+        if (json[pos] == '"')
+        {
+            size_t end = JsonStringEnd(json, pos);
+            if (end == std::string::npos)
+            {
+                return std::string::npos;
+            }
+            pos = end;
+            continue;
+        }
+        if (json[pos] == '{')
+        {
+            return pos;
+        }
         ++pos;
     }
-    if (pos >= json.size() || json[pos] != '"')
+    return std::string::npos;
+}
+
+static std::wstring ExtractJsonStringValue(const std::string& json, const char* key)
+{
+    size_t keyPos = 0;
+    size_t valueStart = 0;
+    size_t valueEnd = 0;
+    if (!FindJsonFieldValue(json, key, keyPos, valueStart, valueEnd) ||
+        valueStart >= json.size() ||
+        valueEnd <= valueStart + 1 ||
+        json[valueStart] != '"' ||
+        json[valueEnd - 1] != '"')
     {
         return L"";
     }
-    ++pos;
 
     std::string out;
     bool escaped = false;
-    for (; pos < json.size(); ++pos)
+    for (size_t pos = valueStart + 1; pos + 1 < valueEnd; ++pos)
     {
         char ch = json[pos];
         if (escaped)
@@ -469,10 +679,6 @@ static std::wstring ExtractJsonStringValue(const std::string& json, const char* 
         else if (ch == '\\')
         {
             escaped = true;
-        }
-        else if (ch == '"')
-        {
-            break;
         }
         else
         {
