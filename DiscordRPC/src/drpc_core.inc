@@ -111,8 +111,13 @@ static std::wstring DecodeEscapes(const std::wstring& value)
             {
                 out.push_back(L'\t');
             }
+            else if (next == L'\\')
+            {
+                out.push_back(L'\\');
+            }
             else
             {
+                out.push_back(L'\\');
                 out.push_back(next);
             }
         }
@@ -141,10 +146,6 @@ static std::wstring EncodeEscapes(const std::wstring& value)
         else if (ch == L'\t')
         {
             out += L"\\t";
-        }
-        else if (ch == L'\\')
-        {
-            out += L"\\\\";
         }
         else
         {

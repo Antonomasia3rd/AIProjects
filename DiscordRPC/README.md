@@ -75,7 +75,7 @@ Useful command-line paths:
 ## Source Layout
 
 - `DiscordRPC.cpp`: small translation-unit shell and global app state.
-- `..\dependencies\*.inc`: shared baseline helpers for common C++ app code, including UTF-8/BOM-aware INI persistence.
+- `..\dependencies\*.inc`: shared baseline helpers for common C++ app code, including UTF-8/BOM-aware INI persistence that follows DesktopStub's quoted assignment style (`"Name" = "Value"`).
 - `src/drpc_core.inc`: DiscordRPC path wrappers, logging, console, JSON helpers, and config access glue.
 - `src/drpc_config_defaults.inc`: default INI values and configurable strings.
 - `src/drpc_command_line.inc`: command-line parsing and persisted `--set` writes.
