@@ -72,10 +72,18 @@ if errorlevel 1 (
     popd
     exit /b %STATUS%
 )
-set "VERSION_DEFINES=/DDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /DDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /DDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /DDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION% /D\"DESKTOPSTUB_RELEASE_TAG=\\\"%DESKTOPSTUB_RELEASE_TAG%\\\"\""
+set "VERSION_DEFINES=/DDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /DDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /DDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /DDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
 set "RC_VERSION_DEFINES=/dDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /dDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /dDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /dDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
+set "CPP_INCLUDE_DEFINES=/Ibuild\obj"
+set "CPP_VERSION_DEFINES_FILE=build\obj\DesktopStubVersionDefines.inc"
 set "RC_HOST_DEFINES_FILE=build\obj\DesktopStubHostResourceDefines.rc.inc"
 set "RC_BROKER_DEFINES_FILE=build\obj\DesktopStubBrokerResourceDefines.rc.inc"
+call :WriteCppVersionDefines "%CPP_VERSION_DEFINES_FILE%" "%DESKTOPSTUB_RELEASE_TAG%"
+if errorlevel 1 (
+    set "STATUS=%ERRORLEVEL%"
+    popd
+    exit /b %STATUS%
+)
 call :WriteRcDefines "%RC_HOST_DEFINES_FILE%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_HOST_EXE_NAME%" "%DESKTOPSTUB_HOST_EXE_NAME%"
 if errorlevel 1 (
     set "STATUS=%ERRORLEVEL%"
@@ -125,7 +133,7 @@ if errorlevel 1 (
     popd
     exit /b %STATUS%
 )
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% LiveTileBroker.cpp "%BROKER_RES%" /Fe"%BROKER_EXE%" /Fo"%BROKER_OBJ%" /link windowsapp.lib runtimeobject.lib ole32.lib /SUBSYSTEM:WINDOWS
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% LiveTileBroker.cpp "%BROKER_RES%" /Fe"%BROKER_EXE%" /Fo"%BROKER_OBJ%" /link windowsapp.lib runtimeobject.lib ole32.lib /SUBSYSTEM:WINDOWS
 if errorlevel 1 (
     set "STATUS=%ERRORLEVEL%"
     popd
@@ -148,7 +156,7 @@ if errorlevel 1 (
     popd
     exit /b %STATUS%
 )
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% DesktopStub.cpp "%RES_FILE%" /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 if not "%STATUS%"=="0" (
     popd
@@ -182,6 +190,11 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 >> "%~1" echo #define DESKTOPSTUB_INTERNAL_NAME "%~4"
 if errorlevel 1 exit /b %ERRORLEVEL%
 >> "%~1" echo #define DESKTOPSTUB_ORIGINAL_FILENAME "%~5"
+if errorlevel 1 exit /b %ERRORLEVEL%
+exit /b 0
+
+:WriteCppVersionDefines
+> "%~1" echo #define DESKTOPSTUB_RELEASE_TAG "%~2"
 if errorlevel 1 exit /b %ERRORLEVEL%
 exit /b 0
 

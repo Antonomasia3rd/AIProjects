@@ -712,7 +712,10 @@ static class RepoTools
                     string wallpaper = Path.Combine(tempRoot, "wallpaper.bmp");
                     WriteTestBmp(wallpaper);
 
-                    SmokeProcess(exe, new[] { "--version" }, new[] { 0 }, 30, "DesktopStub version");
+                    ProcessResult versionResult = SmokeProcess(exe, new[] { "--version" }, new[] { 0 }, 30, "DesktopStub version");
+                    string expectedTag = "DesktopStub-v" + desktopStubVersion.Split('.')[0];
+                    if (versionResult.Output.IndexOf(expectedTag + " (" + desktopStubVersion + ")", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("DesktopStub --version did not report the expected release tag/version: " + expectedTag + " (" + desktopStubVersion + ")");
                     SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--set", "Settings.TrayIcon=0" }, new[] { 0 }, 30, "DesktopStub help");
                     AssertFileDoesNotExist(helpIni, "DesktopStub --help must be side-effect-free");
                     SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--scales", "auto", "--asset", "MediumTile=1", "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
@@ -895,18 +898,19 @@ static class RepoTools
             throw new InvalidOperationException(reason + ": " + file);
     }
 
-    static void SmokeProcess(string file, string[] args, int[] allowedExitCodes, int timeoutSeconds, string name)
+    static ProcessResult SmokeProcess(string file, string[] args, int[] allowedExitCodes, int timeoutSeconds, string name)
     {
         if (!File.Exists(file))
         {
             Console.WriteLine("skip - " + name + " not built: " + file);
-            return;
+            return new ProcessResult { ExitCode = 0 };
         }
 
         var result = RunCapture(file, JoinArgs(args), Path.GetDirectoryName(file), timeoutSeconds * 1000);
         if (!allowedExitCodes.Contains(result.ExitCode))
             throw new InvalidOperationException("Smoke test failed: " + name + " " + String.Join(" ", args) + " exited " + result.ExitCode + Environment.NewLine + "STDOUT:" + Environment.NewLine + result.Output + Environment.NewLine + "STDERR:" + Environment.NewLine + result.Error);
         Console.WriteLine("ok - " + name + " " + String.Join(" ", args));
+        return result;
     }
 
     static void WriteTestBmp(string path)

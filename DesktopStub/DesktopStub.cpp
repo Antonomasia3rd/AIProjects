@@ -116,6 +116,9 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "..\dependencies\command_line.inc"
 #include "..\dependencies\tray.inc"
 #include "src/ga_core.inc"
+#if __has_include("DesktopStubVersionDefines.inc")
+#include "DesktopStubVersionDefines.inc"
+#endif
 #include "src/ga_version.inc"
 #include "src/ga_config_defaults.inc"
 #include "src/ga_command_line.inc"
