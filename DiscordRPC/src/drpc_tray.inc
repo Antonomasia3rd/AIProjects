@@ -146,16 +146,29 @@ static void ShowTrayMenu(RuntimeContext* ctx)
 static void ToggleBoolSetting(const wchar_t* section, const wchar_t* key, bool fallback)
 {
     bool next = !IniReadB(section, key, fallback);
-    IniWrite(section, key, next ? L"true" : L"false");
+    if (!IniWrite(section, key, next ? L"true" : L"false"))
+    {
+        ReportConfigWriteFailure(L"Writing tray setting [" + std::wstring(section) + L"] " + key);
+        return;
+    }
+    g_reloadRequested = true;
+    g_refreshRequested = true;
+}
+
+static void SetTraySetting(const wchar_t* section, const wchar_t* key, const std::wstring& value)
+{
+    if (!IniWrite(section, key, value))
+    {
+        ReportConfigWriteFailure(L"Writing tray setting [" + std::wstring(section) + L"] " + key);
+        return;
+    }
     g_reloadRequested = true;
     g_refreshRequested = true;
 }
 
 static void SetIntervalSetting(int seconds)
 {
-    IniWrite(L"general", L"update_interval", std::to_wstring(seconds));
-    g_reloadRequested = true;
-    g_refreshRequested = true;
+    SetTraySetting(L"general", L"update_interval", std::to_wstring(seconds));
 }
 
 static void OpenConfigFile()
@@ -274,19 +287,13 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             ToggleBoolSetting(L"app", L"show_console", false);
             return 0;
         case ID_TRANSPORT_IPC:
-            IniWrite(L"general", L"transport_mode", L"ipc");
-            g_reloadRequested = true;
-            g_refreshRequested = true;
+            SetTraySetting(L"general", L"transport_mode", L"ipc");
             return 0;
         case ID_TRANSPORT_GATEWAY:
-            IniWrite(L"general", L"transport_mode", L"gateway");
-            g_reloadRequested = true;
-            g_refreshRequested = true;
+            SetTraySetting(L"general", L"transport_mode", L"gateway");
             return 0;
         case ID_TRANSPORT_AUTO:
-            IniWrite(L"general", L"transport_mode", L"auto");
-            g_reloadRequested = true;
-            g_refreshRequested = true;
+            SetTraySetting(L"general", L"transport_mode", L"auto");
             return 0;
         case ID_INTERVAL_5:
             SetIntervalSetting(5);

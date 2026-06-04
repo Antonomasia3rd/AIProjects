@@ -141,8 +141,19 @@ inline bool ReadTextFileUtf8BomAware(const std::wstring& path, std::wstring& tex
 inline bool WriteTextFileUtf8Bom(const std::wstring& path, const std::wstring& text)
 {
     EnsureDirectory(GetDirectoryName(path));
-    std::wstring temp = path + L".tmp";
-    HANDLE file = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+
+    static volatile LONG tempCounter = 0;
+    wchar_t suffix[128] = {};
+    swprintf_s(suffix,
+        L".tmp.%lu.%lu.%llu.%ld.ini",
+        GetCurrentProcessId(),
+        GetCurrentThreadId(),
+        static_cast<unsigned long long>(GetTickCount64()),
+        InterlockedIncrement(&tempCounter));
+    std::wstring temp = path + suffix;
+
+    DeleteFileW(temp.c_str());
+    HANDLE file = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
     {
         return false;
@@ -150,23 +161,42 @@ inline bool WriteTextFileUtf8Bom(const std::wstring& path, const std::wstring& t
 
     static const unsigned char bom[] = { 0xef, 0xbb, 0xbf };
     DWORD written = 0;
-    bool ok = WriteFile(file, bom, static_cast<DWORD>(sizeof(bom)), &written, nullptr) != FALSE;
+    bool ok = WriteFile(file, bom, static_cast<DWORD>(sizeof(bom)), &written, nullptr) != FALSE &&
+        written == static_cast<DWORD>(sizeof(bom));
     std::string utf8 = WideToUtf8(text);
+    if (ok && !text.empty() && utf8.empty())
+    {
+        SetLastError(ERROR_NO_UNICODE_TRANSLATION);
+        ok = false;
+    }
     if (ok && !utf8.empty())
     {
-        ok = WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr) != FALSE;
+        ok = WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr) != FALSE &&
+            written == static_cast<DWORD>(utf8.size());
     }
-    CloseHandle(file);
+    if (ok && !FlushFileBuffers(file))
+    {
+        ok = false;
+    }
+    DWORD err = ok ? ERROR_SUCCESS : GetLastError();
+    if (!CloseHandle(file) && ok)
+    {
+        err = GetLastError();
+        ok = false;
+    }
 
     if (!ok)
     {
         DeleteFileW(temp.c_str());
+        SetLastError(err == ERROR_SUCCESS ? ERROR_WRITE_FAULT : err);
         return false;
     }
 
     if (!MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH))
     {
+        err = GetLastError();
         DeleteFileW(temp.c_str());
+        SetLastError(err);
         return false;
     }
     return true;
@@ -632,6 +662,7 @@ inline bool WriteIniValueToText(std::wstring& text, const wchar_t* section, cons
     std::wstring keyName = key ? key : L"";
     if (sectionName.empty() || keyName.empty())
     {
+        SetLastError(ERROR_INVALID_PARAMETER);
         return false;
     }
 
@@ -739,6 +770,10 @@ inline bool IniWriteRaw(const std::wstring& path, const wchar_t* section, const 
     }
     if (!WriteIniValueToText(text, section, key, value, header))
     {
+        if (GetLastError() == ERROR_SUCCESS)
+        {
+            SetLastError(ERROR_INVALID_PARAMETER);
+        }
         return false;
     }
     return WriteTextFileUtf8Bom(path, text);
@@ -770,6 +805,10 @@ inline bool IniEnsureDefaultsRaw(const std::wstring& path, const IniDefaultValue
         }
         if (!WriteIniValueToText(text, entry.section, entry.key, entry.value ? entry.value : L"", header))
         {
+            if (GetLastError() == ERROR_SUCCESS)
+            {
+                SetLastError(ERROR_INVALID_PARAMETER);
+            }
             return false;
         }
         doc = ParseIniDocument(text);

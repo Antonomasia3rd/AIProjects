@@ -194,12 +194,17 @@ static const IniDefault kDefaults[] =
     { L"strings", L"dry_run_redacted_note", L"Sensitive local tokens are redacted. Use --dry-run-full to show raw values." }
 };
 
-static void EnsureDefaultConfigFile()
+static bool EnsureDefaultConfigFile()
 {
     static_assert(sizeof(IniDefault) == sizeof(aip::IniDefaultValue), "IniDefault must stay layout-compatible with aip::IniDefaultValue.");
-    aip::IniEnsureDefaultsRaw(
+    if (!aip::IniEnsureDefaultsRaw(
         g_iniPath,
         reinterpret_cast<const aip::IniDefaultValue*>(kDefaults),
         ARRAYSIZE(kDefaults),
-        DefaultConfigHeader());
+        DefaultConfigHeader()))
+    {
+        ReportConfigWriteFailure(L"Creating or updating default DiscordRPC config");
+        return false;
+    }
+    return true;
 }

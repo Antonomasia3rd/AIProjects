@@ -189,7 +189,8 @@ static bool IniReadB(const wchar_t* section, const wchar_t* key, bool fallback)
     {
         return fallback;
     }
-    return raw == L"1" || raw == L"true" || raw == L"yes" || raw == L"on";
+    bool parsed = false;
+    return aip::ParseBoolValue(raw, parsed) ? parsed : fallback;
 }
 
 static bool IniHasKey(const wchar_t* section, const wchar_t* key)
@@ -296,6 +297,28 @@ static void LogDebug(const std::wstring& message)
     {
         WriteLogLine(L"debug", message);
     }
+}
+
+static std::wstring FormatConfigWriteFailure(const std::wstring& action)
+{
+    DWORD error = GetLastError();
+    std::wstring message = action + L" failed for " + MakeAbsolutePath(g_iniPath);
+    if (error != ERROR_SUCCESS)
+    {
+        message += L" (error " + std::to_wstring(error) + L": " + GetLastErrorText(error) + L")";
+    }
+    else
+    {
+        message += L" (unknown error)";
+    }
+    return message;
+}
+
+static void ReportConfigWriteFailure(const std::wstring& action)
+{
+    std::wstring message = FormatConfigWriteFailure(action);
+    LogError(message);
+    PrintLine(L"ERROR: " + message, true);
 }
 
 static std::wstring RecentLogText()
@@ -539,7 +562,11 @@ static bool ProtectDiscordTokenInConfig(bool replaceProtectedToken = false)
     {
         try
         {
-            IniWriteRaw(L"general", L"token_protected", aip::ProtectSecretForCurrentUser(token));
+            if (!IniWriteRaw(L"general", L"token_protected", aip::ProtectSecretForCurrentUser(token)))
+            {
+                ReportConfigWriteFailure(L"Writing DPAPI-protected Discord token");
+                return false;
+            }
             LogInfo(protectedToken.empty()
                 ? L"Migrating [general] token to DPAPI-protected [general] token_protected."
                 : L"Replacing DPAPI-protected [general] token_protected from an explicit plaintext token update.");
@@ -555,7 +582,11 @@ static bool ProtectDiscordTokenInConfig(bool replaceProtectedToken = false)
         LogInfo(L"Clearing legacy plaintext [general] token because token_protected is already configured.");
     }
 
-    IniWriteRaw(L"general", L"token", L"");
+    if (!IniWriteRaw(L"general", L"token", L""))
+    {
+        ReportConfigWriteFailure(L"Clearing legacy plaintext Discord token");
+        return false;
+    }
     return true;
 }
 

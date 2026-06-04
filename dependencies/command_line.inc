@@ -47,36 +47,41 @@ inline bool TakeCommandLineValue(int argc, wchar_t** argv, int& i, const std::ws
 
 inline bool ParseIniSetSpec(const std::wstring& spec, IniSetting& setting, std::wstring& error)
 {
-    size_t equals = spec.find(L'=');
+    std::wstring trimmed = Trim(spec);
+    size_t equals = trimmed.find(L'=');
     if (equals == std::wstring::npos)
     {
         error = L"--set expects Section.Key=Value.";
         return false;
     }
 
-    std::wstring name = spec.substr(0, equals);
-    size_t dot = name.find(L'.');
-    if (dot == std::wstring::npos || dot == 0 || dot + 1 >= name.size())
+    size_t dot = trimmed.rfind(L'.', equals);
+    if (dot == std::wstring::npos || dot == 0 || dot + 1 >= equals)
     {
         error = L"--set expects Section.Key=Value.";
         return false;
     }
 
-    setting.section = name.substr(0, dot);
-    setting.key = name.substr(dot + 1);
-    setting.value = spec.substr(equals + 1);
+    setting.section = Trim(trimmed.substr(0, dot));
+    setting.key = Trim(trimmed.substr(dot + 1, equals - dot - 1));
+    setting.value = trimmed.substr(equals + 1);
+    if (setting.section.empty() || setting.key.empty())
+    {
+        error = L"--set expects Section.Key=Value.";
+        return false;
+    }
     return true;
 }
 
 inline bool ParseBoolValue(const std::wstring& raw, bool& value)
 {
     std::wstring v = ToLower(Trim(raw));
-    if (v == L"1" || v == L"true" || v == L"yes" || v == L"on")
+    if (v == L"1" || v == L"true" || v == L"yes" || v == L"on" || v == L"enable" || v == L"enabled")
     {
         value = true;
         return true;
     }
-    if (v == L"0" || v == L"false" || v == L"no" || v == L"off")
+    if (v == L"0" || v == L"false" || v == L"no" || v == L"off" || v == L"disable" || v == L"disabled")
     {
         value = false;
         return true;

@@ -766,6 +766,7 @@ static class RepoTools
                     string versionIni = Path.Combine(tempRoot, "VersionSideEffect.ini");
                     string redactIni = Path.Combine(tempRoot, "Redact.ini");
                     string redactLog = Path.Combine(tempRoot, "Redact.log");
+                    string dottedIni = Path.Combine(tempRoot, "DottedSet.ini");
 
                     SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC help");
                     AssertFileDoesNotExist(helpIni, "DiscordRPC --help must be side-effect-free");
@@ -774,6 +775,10 @@ static class RepoTools
                     SmokeProcess(exe, new[] { "--tokenXYZ", "abc" }, new[] { 2 }, 30, "DiscordRPC strict option parsing");
                     SmokeProcess(exe, new[] { "--ini", redactIni, "--client-id", "123456789012345678", "--token", "super-secret-smoke-token", "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC token redaction");
                     AssertFileDoesNotContain(redactLog, "super-secret-smoke-token", "DiscordRPC command-line token must not be written to the log");
+                    SmokeProcess(exe, new[] { "--ini", tempRoot, "--set", "general.client_id=123456789012345678", "--dry-run", "--no-tray" }, new[] { 1 }, 30, "DiscordRPC config write failure");
+                    SmokeProcess(exe, new[] { "--ini", dottedIni, "--set", "section.with.dot.key=value", "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dotted --set parsing");
+                    AssertFileContains(dottedIni, "[section.with.dot]", "DiscordRPC --set must split Section.Key at the last dot before '='");
+                    AssertFileContains(dottedIni, "\"key\" = \"value\"", "DiscordRPC --set must preserve dotted section names");
                     SmokeProcess(exe, new[] { "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dry-run");
                 }
                 finally
@@ -878,6 +883,15 @@ static class RepoTools
             return;
         string text = File.ReadAllText(file, Encoding.UTF8);
         if (text.IndexOf(needle, StringComparison.Ordinal) >= 0)
+            throw new InvalidOperationException(reason + ": " + file);
+    }
+
+    static void AssertFileContains(string file, string needle, string reason)
+    {
+        if (!File.Exists(file))
+            throw new InvalidOperationException(reason + ": missing " + file);
+        string text = File.ReadAllText(file, Encoding.UTF8);
+        if (text.IndexOf(needle, StringComparison.Ordinal) < 0)
             throw new InvalidOperationException(reason + ": " + file);
     }
 

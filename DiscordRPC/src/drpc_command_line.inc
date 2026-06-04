@@ -287,7 +287,7 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
     return true;
 }
 
-static void ApplyCommandLineSettings(const AppOptions& options)
+static bool ApplyCommandLineSettings(const AppOptions& options)
 {
     for (const auto& setting : options.settings)
     {
@@ -295,7 +295,12 @@ static void ApplyCommandLineSettings(const AppOptions& options)
         {
             continue;
         }
-        IniWrite(setting.section.c_str(), setting.key.c_str(), setting.value);
+        if (!IniWrite(setting.section.c_str(), setting.key.c_str(), setting.value))
+        {
+            ReportConfigWriteFailure(L"Writing command-line setting [" + setting.section + L"] " + setting.key);
+            return false;
+        }
         LogInfo(L"Command-line setting: [" + setting.section + L"] " + setting.key + L" = " + RedactCommandLineSettingValue(setting));
     }
+    return true;
 }
