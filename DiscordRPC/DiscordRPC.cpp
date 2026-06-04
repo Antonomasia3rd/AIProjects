@@ -114,6 +114,15 @@ int wmain()
         g_defaultLogPath = PathJoin(GetDirectoryName(g_iniPath), GetFileBaseName(g_iniPath) + L".log");
     }
 
+    if (options.requestExit)
+    {
+        // Keep --exit lightweight and side-effect-free for the target INI.
+        // It only needs the resolved INI path to derive the existing instance's
+        // broadcast message name.
+        SignalExistingInstanceToExit();
+        return 0;
+    }
+
     EnsureDefaultConfigFile();
     ConfigureRuntimeFromConfig(options);
     ApplyRuntimeLoggingOverridesFromCommandLine(options);

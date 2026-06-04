@@ -196,16 +196,10 @@ static const IniDefault kDefaults[] =
 
 static void EnsureDefaultConfigFile()
 {
-    if (!FileExists(g_iniPath))
-    {
-        aip::WriteTextFileUtf8Bom(g_iniPath, DefaultConfigHeader());
-    }
-
-    for (const auto& entry : kDefaults)
-    {
-        if (!IniHasKey(entry.section, entry.key))
-        {
-            IniWriteRaw(entry.section, entry.key, entry.value ? entry.value : L"");
-        }
-    }
+    static_assert(sizeof(IniDefault) == sizeof(aip::IniDefaultValue), "IniDefault must stay layout-compatible with aip::IniDefaultValue.");
+    aip::IniEnsureDefaultsRaw(
+        g_iniPath,
+        reinterpret_cast<const aip::IniDefaultValue*>(kDefaults),
+        ARRAYSIZE(kDefaults),
+        DefaultConfigHeader());
 }
