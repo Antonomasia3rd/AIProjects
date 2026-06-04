@@ -181,10 +181,26 @@ static class RepoTools
                 !buildScript.Contains("call :IsSkipped " + p.skipKey))
                 throw new InvalidOperationException("Build script does not appear to handle skip key: " + p.skipKey);
 
+            if (!workflow.Contains("needs.detect-projects.outputs." + p.buildOutput))
+                throw new InvalidOperationException("Workflow upload condition does not mention build output for " + p.key + ": " + p.buildOutput);
+
+            if (!workflow.Contains("name: " + p.artifactName))
+                throw new InvalidOperationException("Workflow upload step does not mention artifact name for " + p.key + ": " + p.artifactName);
+
             foreach (string artifactSpec in ProjectArtifactPathSpecs(p))
             {
-                if (!workflow.Contains(artifactSpec.Replace('\\', '/')))
+                string normalizedArtifactSpec = artifactSpec.Replace('\\', '/');
+                if (!workflow.Contains(normalizedArtifactSpec))
                     throw new InvalidOperationException("Workflow upload paths do not mention declared artifact path for " + p.key + ": " + artifactSpec);
+
+                string buildScriptArtifactSpec = normalizedArtifactSpec.Replace('/', '\\');
+                string buildScriptLegacySpec = normalizedArtifactSpec.StartsWith("legacy/", StringComparison.OrdinalIgnoreCase)
+                    ? normalizedArtifactSpec.Substring("legacy/".Length).Replace('/', '\\')
+                    : buildScriptArtifactSpec;
+                if (!buildScript.Contains(buildScriptArtifactSpec) &&
+                    !buildScript.Contains(normalizedArtifactSpec) &&
+                    !buildScript.Contains(buildScriptLegacySpec))
+                    throw new InvalidOperationException("Build script artifact recording does not mention declared artifact path for " + p.key + ": " + artifactSpec);
             }
 
             if (!readme.Contains("`" + p.folder + "`"))

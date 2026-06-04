@@ -179,7 +179,6 @@ jobs:
           path: |
             legacy/NowPlayingTile/build/NowPlayingTile.exe
             legacy/NowPlayingTile/README.md
-            legacy/NowPlayingTile/package/**
           if-no-files-found: error
 
       - name: Upload PhotoCollage artifact

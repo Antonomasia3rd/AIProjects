@@ -79,7 +79,7 @@ Run repository validation and smoke checks:
 .github\scripts\Smoke-WindowsBuild.cmd
 ```
 
-The Windows workflow project metadata lives in `.github/project-map.json`. Keep that map, `.github/workflows/build-windows.yml`, `.github/scripts/build-windows.cmd`, and this README in sync when adding or removing projects that produce Windows artifacts. The workflow validates the project map before building.
+The Windows workflow project metadata lives in `.github/project-map.json`. Keep that map, `.github/workflows/build-windows.yml`, `.github/scripts/build-windows.cmd`, and this README in sync when adding or removing projects that produce Windows artifacts. Validation checks selector options, upload conditions, artifact names, declared artifact payload paths, and build-script artifact recording before building.
 
 Each project README also lists direct build commands for that project. Generated outputs belong in project `build` folders and are ignored by git. If a compiler cannot overwrite a running EXE, close that program and rerun the build.
 
@@ -110,7 +110,7 @@ If a non-INI configuration format is unavoidable, it must still default to the s
 
 Do not change file or directory ACLs from these tools, installers, build scripts, or migration helpers. Past ACL-hardening attempts caused Windows integration failures in specific placements, including Start Menu related cases. Security checks may detect and warn about risky writable locations, but they must not modify ACLs, ownership, inheritance, integrity labels, or other access-control state.
 
-Use `DesktopStub` / `DesktopStub.exe` as the reference pattern for new fixes: create and normalize the INI next to the executable, preserve user-edited values, write the log next to the executable by default, expose path changes through the INI/UI when needed, and report write failures clearly. When changing another program, follow that implementation style for local config/log handling unless the maintainer explicitly approves a different pattern.
+Use `DesktopStub` / `DesktopStub.exe` as the reference behavior pattern for new fixes: create and normalize the INI next to the executable, preserve user-edited values, write the log next to the executable by default, expose path changes through the INI/UI when needed, and report write failures clearly. Shared helpers in `dependencies/` should be preferred for new projects so DesktopStub-specific code does not get copied as a second framework. When changing another program, follow that implementation style for local config/log handling unless the maintainer explicitly approves a different pattern.
 
 Stop for maintainer input before making a decision that changes storage location, config/log format, migration behavior, compatibility guarantees, ACL/security enforcement, or OS integration behavior. When changing an existing program that already has registry/profile-based state, preserve or migrate existing user values where practical and do not choose a compatibility-breaking migration without maintainer approval.
 

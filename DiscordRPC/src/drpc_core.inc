@@ -156,14 +156,7 @@ static std::wstring EncodeEscapes(const std::wstring& value)
 
 static std::wstring IniReadRaw(const wchar_t* section, const wchar_t* key, const wchar_t* fallback)
 {
-    std::vector<wchar_t> buffer(8192);
-    DWORD count = GetPrivateProfileStringW(section, key, fallback ? fallback : L"", buffer.data(), static_cast<DWORD>(buffer.size()), g_iniPath.c_str());
-    if (count + 1 >= buffer.size())
-    {
-        buffer.resize(65536);
-        count = GetPrivateProfileStringW(section, key, fallback ? fallback : L"", buffer.data(), static_cast<DWORD>(buffer.size()), g_iniPath.c_str());
-    }
-    return std::wstring(buffer.data(), count);
+    return aip::IniReadRaw(g_iniPath, section, key, fallback);
 }
 
 static std::wstring IniReadS(const wchar_t* section, const wchar_t* key, const wchar_t* fallback)
@@ -200,14 +193,20 @@ static bool IniReadB(const wchar_t* section, const wchar_t* key, bool fallback)
 
 static bool IniHasKey(const wchar_t* section, const wchar_t* key)
 {
-    constexpr const wchar_t* sentinel = L"\x1e__discordrpc_missing__";
-    return IniReadRaw(section, key, sentinel) != sentinel;
+    return aip::IniHasKey(g_iniPath, section, key);
+}
+
+static std::wstring DefaultConfigHeader()
+{
+    return
+        L"; DiscordRPC - Configuration\r\n"
+        L"; Generated values are safe defaults for the C++ Discord IPC/Gateway build.\r\n"
+        L"; User-facing strings live in [strings]. Use \\n for line breaks.\r\n\r\n";
 }
 
 static bool IniWriteRaw(const wchar_t* section, const wchar_t* key, const std::wstring& value)
 {
-    EnsureDirectory(GetDirectoryName(g_iniPath));
-    return WritePrivateProfileStringW(section, key, value.c_str(), g_iniPath.c_str()) != FALSE;
+    return aip::IniWriteRaw(g_iniPath, section, key, value, DefaultConfigHeader());
 }
 
 static bool IniWrite(const wchar_t* section, const wchar_t* key, const std::wstring& value)
@@ -599,6 +598,31 @@ static GatewayOptions LoadGatewayOptions()
     options.assetFetchTimeoutMs = ClampInt(IniReadI(L"gateway", L"asset_fetch_timeout_ms", 10000), 1000, 120000);
     options.assetFetchUserAgent = NonEmptyConfig(L"gateway", L"asset_fetch_user_agent", L"DiscordBot (https://github.com, 1)");
     return options;
+}
+
+static void ApplyRuntimeLoggingOverridesFromCommandLine(const AppOptions& options)
+{
+    for (const auto& setting : options.settings)
+    {
+        if (!EqualsI(setting.section, L"app"))
+        {
+            continue;
+        }
+
+        bool parsed = false;
+        if (EqualsI(setting.key, L"logging_enabled") && aip::ParseBoolValue(setting.value, parsed))
+        {
+            g_loggingEnabled = parsed;
+        }
+        else if (EqualsI(setting.key, L"file_logging_enabled") && aip::ParseBoolValue(setting.value, parsed))
+        {
+            g_fileLoggingEnabled = parsed;
+        }
+        else if (EqualsI(setting.key, L"verbose_logging") && aip::ParseBoolValue(setting.value, parsed))
+        {
+            g_verboseLogging = options.verbose || parsed;
+        }
+    }
 }
 
 static void ConfigureRuntimeFromConfig(const AppOptions& options)

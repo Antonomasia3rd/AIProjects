@@ -131,9 +131,7 @@ static const IniDefault kDefaults[] =
     { L"app", L"logging_enabled", L"true" },
     { L"app", L"file_logging_enabled", L"true" },
     { L"app", L"log_path", L"" },
-    { L"app", L"backup_config_on_save", L"false" },
     { L"app", L"verbose_logging", L"false" },
-    { L"app", L"verbose_redact_sensitive", L"true" },
     { L"app", L"dry_run_redact_sensitive", L"true" },
 
     { L"ipc", L"connect_timeout_ms", L"250" },
@@ -155,7 +153,6 @@ static const IniDefault kDefaults[] =
     { L"gateway", L"asset_fetch_timeout_ms", L"10000" },
     { L"gateway", L"asset_fetch_user_agent", L"DiscordBot (https://github.com, 1)" },
 
-    { L"strings", L"help_text", L"Usage:\\n  DiscordRPC.exe [config.ini] [options]\\n\\nUse --help after editing [strings] help_text to customize this text.\\n" },
     { L"strings", L"tray_tip", L"DiscordRPC" },
     { L"strings", L"menu_refresh", L"Refresh now" },
     { L"strings", L"menu_reload", L"Reload configuration" },
@@ -199,38 +196,16 @@ static const IniDefault kDefaults[] =
 
 static void EnsureDefaultConfigFile()
 {
-    bool created = false;
     if (!FileExists(g_iniPath))
     {
-        EnsureDirectory(GetDirectoryName(g_iniPath));
-        HANDLE file = CreateFileW(g_iniPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file != INVALID_HANDLE_VALUE)
-        {
-            std::string header =
-                "; DiscordRPC - Configuration\r\n"
-                "; Generated values are safe defaults for the C++ Discord IPC build.\r\n"
-                "; User-facing strings live in [strings]. Use \\n for line breaks.\r\n\r\n";
-            DWORD written = 0;
-            WriteFile(file, header.data(), static_cast<DWORD>(header.size()), &written, nullptr);
-            CloseHandle(file);
-            created = true;
-        }
+        aip::WriteTextFileUtf8Bom(g_iniPath, DefaultConfigHeader());
     }
 
-    int added = 0;
     for (const auto& entry : kDefaults)
     {
         if (!IniHasKey(entry.section, entry.key))
         {
-            if (IniWriteRaw(entry.section, entry.key, entry.value ? entry.value : L""))
-            {
-                ++added;
-            }
+            IniWriteRaw(entry.section, entry.key, entry.value ? entry.value : L"");
         }
-    }
-
-    if (created || added > 0)
-    {
-        LogInfo(L"Added missing DiscordRPC config defaults.");
     }
 }
