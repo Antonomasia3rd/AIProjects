@@ -244,7 +244,7 @@ static void SignalExistingInstanceToExit()
 
 static bool ShouldReloadExistingInstance(const AppOptions& options)
 {
-    return !options.settings.empty() || options.protectToken;
+    return options.reloadExistingInstance || !options.settings.empty() || options.protectToken;
 }
 
 static int RunWithTray(const AppOptions& options)
