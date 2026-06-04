@@ -47,24 +47,24 @@ inline bool TakeCommandLineValue(int argc, wchar_t** argv, int& i, const std::ws
 
 inline bool ParseIniSetSpec(const std::wstring& spec, IniSetting& setting, std::wstring& error)
 {
-    std::wstring trimmed = Trim(spec);
-    size_t equals = trimmed.find(L'=');
+    size_t equals = spec.find(L'=');
     if (equals == std::wstring::npos)
     {
         error = L"--set expects Section.Key=Value.";
         return false;
     }
 
-    size_t dot = trimmed.rfind(L'.', equals);
-    if (dot == std::wstring::npos || dot == 0 || dot + 1 >= equals)
+    std::wstring name = Trim(spec.substr(0, equals));
+    size_t dot = name.rfind(L'.');
+    if (dot == std::wstring::npos || dot == 0 || dot + 1 >= name.size())
     {
         error = L"--set expects Section.Key=Value.";
         return false;
     }
 
-    setting.section = Trim(trimmed.substr(0, dot));
-    setting.key = Trim(trimmed.substr(dot + 1, equals - dot - 1));
-    setting.value = trimmed.substr(equals + 1);
+    setting.section = Trim(name.substr(0, dot));
+    setting.key = Trim(name.substr(dot + 1));
+    setting.value = spec.substr(equals + 1);
     if (setting.section.empty() || setting.key.empty())
     {
         error = L"--set expects Section.Key=Value.";
