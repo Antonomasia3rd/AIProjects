@@ -306,6 +306,7 @@ public:
 
     bool IsConnected() const
     {
+        std::lock_guard<std::mutex> lock(sendMutex_);
         return connected_.load() && websocket_ != nullptr;
     }
 
@@ -536,7 +537,7 @@ private:
     std::wstring clientId_;
     bool verbose_ = false;
     GatewayOptions options_;
-    std::mutex sendMutex_;
+    mutable std::mutex sendMutex_;
     std::mutex errorMutex_;
     std::thread reader_;
     std::thread heartbeat_;
@@ -723,7 +724,7 @@ private:
     void SendText(const std::string& json)
     {
         std::lock_guard<std::mutex> lock(sendMutex_);
-        if (!IsConnected())
+        if (!connected_.load() || websocket_ == nullptr)
         {
             throw std::runtime_error("Gateway WebSocket is not connected.");
         }
@@ -805,7 +806,7 @@ private:
         try
         {
             std::vector<char> buffer(65536);
-            while (connected_.load() && websocket_ != nullptr)
+            while (connected_.load())
             {
                 std::string message;
                 for (;;)

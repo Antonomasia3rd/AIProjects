@@ -160,7 +160,7 @@ static void SetIntervalSetting(int seconds)
 
 static void OpenConfigFile()
 {
-    ShellExecuteW(nullptr, L"open", L"notepad.exe", g_iniPath.c_str(), g_exeDir.c_str(), SW_SHOWNORMAL);
+    ShellExecuteW(nullptr, L"open", g_iniPath.c_str(), nullptr, g_exeDir.c_str(), SW_SHOWNORMAL);
 }
 
 static void OpenLogFolder()
