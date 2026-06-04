@@ -188,6 +188,7 @@ static const IniDefault kDefaults[] =
     { L"strings", L"notification_gateway_missing_token", L"Gateway mode needs token_protected, token, or token_env." },
     { L"strings", L"notification_gateway_auth_failed", L"Discord Gateway authentication failed. Check your token." },
     { L"strings", L"already_running", L"DiscordRPC is already running for this config." },
+    { L"strings", L"reload_requested", L"DiscordRPC configuration reload requested." },
     { L"strings", L"missing_client_id", L"Missing [general] client_id. Create a Discord application and paste its Application ID into the INI." },
     { L"strings", L"dry_run_header", L"=== Discord activity JSON ===" },
     { L"strings", L"dry_run_tokens", L"=== Available template tokens ===" },

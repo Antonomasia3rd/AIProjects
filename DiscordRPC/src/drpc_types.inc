@@ -30,6 +30,13 @@ struct AppOptions
     std::vector<CommandLineSetting> settings;
 };
 
+enum SingleInstanceRequest : WPARAM
+{
+    DRPC_INSTANCE_SHOW = 0,
+    DRPC_INSTANCE_EXIT = 1,
+    DRPC_INSTANCE_RELOAD = 2
+};
+
 struct IpcOptions
 {
     int connectTimeoutMs = 250;
