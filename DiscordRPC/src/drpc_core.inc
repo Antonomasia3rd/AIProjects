@@ -535,14 +535,35 @@ static bool FindJsonFieldValue(const std::string& json, const char* key, size_t&
 
     const size_t keyLength = strlen(key);
     size_t pos = 0;
+    while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
+    {
+        ++pos;
+    }
+    if (pos >= json.size() || json[pos] != '{')
+    {
+        return false;
+    }
+    ++pos;
+
     while (pos < json.size())
     {
-        if (json[pos] != '"')
+        while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
+        {
+            ++pos;
+        }
+        if (pos >= json.size() || json[pos] == '}')
+        {
+            return false;
+        }
+        if (json[pos] == ',')
         {
             ++pos;
             continue;
         }
-
+        if (json[pos] != '"')
+        {
+            return false;
+        }
         size_t stringEnd = JsonStringEnd(json, pos);
         if (stringEnd == std::string::npos)
         {
@@ -554,26 +575,44 @@ static bool FindJsonFieldValue(const std::string& json, const char* key, size_t&
         {
             ++colon;
         }
-        if (colon < json.size() &&
-            json[colon] == ':' &&
-            stringEnd == pos + keyLength + 2 &&
-            json.compare(pos + 1, keyLength, key) == 0)
+        if (colon >= json.size() || json[colon] != ':')
         {
-            valueStart = colon + 1;
-            while (valueStart < json.size() && isspace(static_cast<unsigned char>(json[valueStart])))
-            {
-                ++valueStart;
-            }
-            valueEnd = JsonValueEnd(json, valueStart);
-            if (valueEnd == std::string::npos || valueEnd < valueStart)
-            {
-                return false;
-            }
+            return false;
+        }
+
+        size_t currentValueStart = colon + 1;
+        while (currentValueStart < json.size() && isspace(static_cast<unsigned char>(json[currentValueStart])))
+        {
+            ++currentValueStart;
+        }
+
+        size_t currentValueEnd = JsonValueEnd(json, currentValueStart);
+        if (currentValueEnd == std::string::npos || currentValueEnd < currentValueStart)
+        {
+            return false;
+        }
+
+        if (stringEnd == pos + keyLength + 2 && json.compare(pos + 1, keyLength, key) == 0)
+        {
             keyPos = pos;
+            valueStart = currentValueStart;
+            valueEnd = currentValueEnd;
             return true;
         }
 
-        pos = stringEnd;
+        pos = currentValueEnd;
+        while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
+        {
+            ++pos;
+        }
+        if (pos < json.size() && json[pos] == ',')
+        {
+            ++pos;
+        }
+        else if (pos < json.size() && json[pos] != '}')
+        {
+            return false;
+        }
     }
     return false;
 }

@@ -351,15 +351,27 @@ private:
         {
             return message;
         }
+
+        size_t keyPos = 0;
+        size_t valueStart = 0;
+        size_t valueEnd = 0;
+        if (FindJsonFieldValue(json, "data", keyPos, valueStart, valueEnd) &&
+            valueStart < json.size() &&
+            json[valueStart] == '{')
+        {
+            message = ExtractJsonStringValue(json.substr(valueStart, valueEnd - valueStart), "message");
+            if (!message.empty())
+            {
+                return message;
+            }
+        }
+
         return SummarizeRpcPayload(json);
     }
 
     static void ThrowIfError(const std::string& response)
     {
-        if (response.find("\"evt\":\"ERROR\"") != std::string::npos ||
-            (response.find("\"code\"") != std::string::npos &&
-                response.find("\"message\"") != std::string::npos &&
-                response.find("\"evt\"") != std::string::npos))
+        if (ExtractJsonStringValue(response, "evt") == L"ERROR")
         {
             throw std::runtime_error("Discord IPC error: " + WideToUtf8(SummarizeJson(response)));
         }
