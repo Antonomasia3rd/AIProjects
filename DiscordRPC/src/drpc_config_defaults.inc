@@ -38,7 +38,7 @@ static std::wstring DefaultHelpText()
         L"first and falls back to Gateway.\n";
 }
 
-static const IniDefault kDefaults[] =
+static const aip::IniDefaultValue kDefaults[] =
 {
     { L"general", L"transport_mode", L"ipc" },
     { L"general", L"client_id", L"" },
@@ -197,10 +197,9 @@ static const IniDefault kDefaults[] =
 
 static bool EnsureDefaultConfigFile()
 {
-    static_assert(sizeof(IniDefault) == sizeof(aip::IniDefaultValue), "IniDefault must stay layout-compatible with aip::IniDefaultValue.");
     if (!aip::IniEnsureDefaultsRaw(
         g_iniPath,
-        reinterpret_cast<const aip::IniDefaultValue*>(kDefaults),
+        kDefaults,
         ARRAYSIZE(kDefaults),
         DefaultConfigHeader()))
     {
