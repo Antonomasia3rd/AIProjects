@@ -70,13 +70,13 @@ Useful command-line paths:
 - `[censor_map]` supports `full_replace`, `word_replace`, and `pattern_replace` rules for the foreground title token.
 - `[ipc] connect_timeout_ms` and `response_timeout_ms` tune Discord IPC waits.
 - `[gateway]` controls websocket identity metadata, connect/HELLO/READY/send/close timeouts, and public asset-name lookup.
-- Most tray/menu/notification/help labels are configurable in `[strings]`.
+- Most tray/menu/notification labels are configurable in `[strings]`. `--help` uses built-in text so it stays side-effect-free and never creates or repairs the INI.
 
 ## Source Layout
 
 - `DiscordRPC.cpp`: small translation-unit shell and global app state.
-- `..\dependencies\*.inc`: shared baseline helpers for common C++ app code.
-- `src/drpc_core.inc`: paths, INI access, logging, console, JSON helpers.
+- `..\dependencies\*.inc`: shared baseline helpers for common C++ app code, including UTF-8/BOM-aware INI persistence.
+- `src/drpc_core.inc`: DiscordRPC path wrappers, logging, console, JSON helpers, and config access glue.
 - `src/drpc_config_defaults.inc`: default INI values and configurable strings.
 - `src/drpc_command_line.inc`: command-line parsing and persisted `--set` writes.
 - `src/drpc_presence.inc`: template tokens and activity JSON generation.

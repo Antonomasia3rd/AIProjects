@@ -139,8 +139,7 @@ call :RecordArtifact "%LEGACY%\NowPlayingTile\build\NowPlayingTile.exe"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\NowPlayingTile\README.md"
 if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifactsUnderDir "%LEGACY%\NowPlayingTile\package"
-exit /b %ERRORLEVEL%
+exit /b 0
 
 :BuildPhotoCollage
 call :IsSkipped PhotoCollage

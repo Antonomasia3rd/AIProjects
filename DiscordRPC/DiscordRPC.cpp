@@ -67,6 +67,7 @@ static std::mutex g_logMutex;
 static std::deque<std::wstring> g_recentLog;
 
 #include "..\dependencies\core.inc"
+#include "..\dependencies\config_ini.inc"
 #include "..\dependencies\command_line.inc"
 #include "..\dependencies\dpapi.inc"
 #include "..\dependencies\tray.inc"
@@ -114,6 +115,8 @@ int wmain()
     }
 
     EnsureDefaultConfigFile();
+    ConfigureRuntimeFromConfig(options);
+    ApplyRuntimeLoggingOverridesFromCommandLine(options);
     ApplyCommandLineSettings(options);
     bool plaintextTokenPresent = !Trim(IniReadS(L"general", L"token", L"")).empty();
     if ((options.protectToken || plaintextTokenPresent) && !ProtectDiscordTokenInConfig(plaintextTokenPresent))

@@ -81,8 +81,7 @@
     "skipKey": "NowPlayingTile",
     "artifactPaths": [
       "legacy/NowPlayingTile/build/NowPlayingTile.exe",
-      "legacy/NowPlayingTile/README.md",
-      "legacy/NowPlayingTile/package/**"
+      "legacy/NowPlayingTile/README.md"
     ]
   },
   {
