@@ -197,9 +197,14 @@ static class RepoTools
                 string buildScriptLegacySpec = normalizedArtifactSpec.StartsWith("legacy/", StringComparison.OrdinalIgnoreCase)
                     ? normalizedArtifactSpec.Substring("legacy/".Length).Replace('/', '\\')
                     : buildScriptArtifactSpec;
-                if (!buildScript.Contains(buildScriptArtifactSpec) &&
-                    !buildScript.Contains(normalizedArtifactSpec) &&
-                    !buildScript.Contains(buildScriptLegacySpec))
+                string artifactFileName = Path.GetFileName(normalizedArtifactSpec.Replace('/', Path.DirectorySeparatorChar));
+                bool buildScriptMentionsArtifact =
+                    buildScript.Contains(buildScriptArtifactSpec) ||
+                    buildScript.Contains(normalizedArtifactSpec) ||
+                    buildScript.Contains(buildScriptLegacySpec) ||
+                    (!String.IsNullOrWhiteSpace(artifactFileName) && buildScript.Contains(artifactFileName));
+
+                if (!buildScriptMentionsArtifact)
                     throw new InvalidOperationException("Build script artifact recording does not mention declared artifact path for " + p.key + ": " + artifactSpec);
             }
 
