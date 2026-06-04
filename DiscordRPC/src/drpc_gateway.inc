@@ -215,6 +215,24 @@ static void NormalizeGatewayTimestampUnits(std::string& activity)
     }
 }
 
+static bool ExtractJsonEscapedStringField(const std::string& objectJson, const char* key, std::string& value)
+{
+    size_t keyPos = 0;
+    size_t valueStart = 0;
+    size_t valueEnd = 0;
+    if (!FindJsonFieldValue(objectJson, key, keyPos, valueStart, valueEnd) ||
+        valueStart >= objectJson.size() ||
+        valueEnd <= valueStart + 1 ||
+        objectJson[valueStart] != '"' ||
+        objectJson[valueEnd - 1] != '"')
+    {
+        return false;
+    }
+
+    value = objectJson.substr(valueStart + 1, valueEnd - valueStart - 2);
+    return true;
+}
+
 static void ConvertGatewayButtons(std::string& activity)
 {
     size_t keyPos = 0;
@@ -226,13 +244,41 @@ static void ConvertGatewayButtons(std::string& activity)
     }
 
     std::string arrayText = activity.substr(valueStart, valueEnd - valueStart);
-    std::regex buttonRegex(R"rx(\{"label":"((?:\\.|[^"\\])*)","url":"((?:\\.|[^"\\])*)"\})rx");
     std::vector<std::string> labels;
     std::vector<std::string> urls;
-    for (std::sregex_iterator it(arrayText.begin(), arrayText.end(), buttonRegex), end; it != end && labels.size() < 2; ++it)
+    size_t pos = 1;
+    while (pos < arrayText.size() && labels.size() < 2)
     {
-        labels.push_back((*it)[1].str());
-        urls.push_back((*it)[2].str());
+        while (pos < arrayText.size() && (isspace(static_cast<unsigned char>(arrayText[pos])) || arrayText[pos] == ','))
+        {
+            ++pos;
+        }
+        if (pos >= arrayText.size() || arrayText[pos] == ']')
+        {
+            break;
+        }
+        if (arrayText[pos] != '{')
+        {
+            ++pos;
+            continue;
+        }
+
+        size_t objectEnd = JsonValueEnd(arrayText, pos);
+        if (objectEnd == std::string::npos)
+        {
+            break;
+        }
+
+        std::string objectJson = arrayText.substr(pos, objectEnd - pos);
+        std::string label;
+        std::string url;
+        if (ExtractJsonEscapedStringField(objectJson, "label", label) &&
+            ExtractJsonEscapedStringField(objectJson, "url", url))
+        {
+            labels.push_back(label);
+            urls.push_back(url);
+        }
+        pos = objectEnd;
     }
 
     if (labels.empty())
