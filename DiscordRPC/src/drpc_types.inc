@@ -1,10 +1,3 @@
-struct IniDefault
-{
-    const wchar_t* section;
-    const wchar_t* key;
-    const wchar_t* value;
-};
-
 struct CommandLineSetting
 {
     std::wstring section;
