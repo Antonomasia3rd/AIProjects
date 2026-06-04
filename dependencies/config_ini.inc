@@ -112,25 +112,54 @@ inline bool ReadWholeFileBytes(const std::wstring& path, std::vector<BYTE>& byte
         return false;
     }
 
-    LARGE_INTEGER size = {};
-    if (!GetFileSizeEx(file, &size) || size.QuadPart < 0 || size.QuadPart > 32ll * 1024ll * 1024ll)
+    auto fail = [&](DWORD err) -> bool
     {
         CloseHandle(file);
-        SetLastError(ERROR_FILE_TOO_LARGE);
+        SetLastError(err == ERROR_SUCCESS ? ERROR_READ_FAULT : err);
+        bytes.clear();
         return false;
+    };
+
+    LARGE_INTEGER size = {};
+    if (!GetFileSizeEx(file, &size))
+    {
+        return fail(GetLastError());
+    }
+    if (size.QuadPart < 0)
+    {
+        return fail(ERROR_INVALID_DATA);
+    }
+    if (size.QuadPart > 32ll * 1024ll * 1024ll)
+    {
+        return fail(ERROR_FILE_TOO_LARGE);
     }
 
     bytes.resize(static_cast<size_t>(size.QuadPart));
-    DWORD read = 0;
-    bool ok = bytes.empty() || ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr) != FALSE;
-    DWORD err = ok ? ERROR_SUCCESS : GetLastError();
-    CloseHandle(file);
-    if (!ok)
+    BYTE* cursor = bytes.empty() ? nullptr : bytes.data();
+    size_t remaining = bytes.size();
+    while (remaining > 0)
     {
+        DWORD chunk = static_cast<DWORD>(std::min<size_t>(remaining, 1024 * 1024));
+        DWORD read = 0;
+        if (!ReadFile(file, cursor, chunk, &read, nullptr))
+        {
+            return fail(GetLastError());
+        }
+        if (read == 0)
+        {
+            return fail(ERROR_HANDLE_EOF);
+        }
+        cursor += read;
+        remaining -= read;
+    }
+
+    if (!CloseHandle(file))
+    {
+        DWORD err = GetLastError();
+        bytes.clear();
         SetLastError(err);
         return false;
     }
-    bytes.resize(read);
     return true;
 }
 
@@ -508,7 +537,7 @@ inline std::wstring ParseIniValue(std::wstring text)
     wchar_t quote = s.front();
     if (quote != L'\"' && quote != L'\'')
     {
-        return UnquoteIniString(StripIniInlineComment(std::move(text)));
+        return UnquoteIniString(StripIniInlineComment(std::move(text), false));
     }
 
     std::wstring out;
