@@ -221,14 +221,30 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
     return exitCode;
 }
 
-static void SignalExistingInstanceToExit()
+static UINT RegisterSingleInstanceMessageForCurrentConfig()
 {
     std::wstring identity = MakeAbsolutePath(g_iniPath) + L"|" + g_exeBaseName;
-    UINT msg = RegisterWindowMessageW((L"DiscordRPC.Stop." + StableHash(identity)).c_str());
+    return RegisterWindowMessageW((L"DiscordRPC.Stop." + StableHash(identity)).c_str());
+}
+
+static bool SignalExistingInstance(WPARAM request)
+{
+    UINT msg = RegisterSingleInstanceMessageForCurrentConfig();
     if (msg != 0)
     {
-        PostMessageW(HWND_BROADCAST, msg, 1, 0);
+        return PostMessageW(HWND_BROADCAST, msg, request, 0) != FALSE;
     }
+    return false;
+}
+
+static void SignalExistingInstanceToExit()
+{
+    SignalExistingInstance(DRPC_INSTANCE_EXIT);
+}
+
+static bool ShouldReloadExistingInstance(const AppOptions& options)
+{
+    return !options.settings.empty() || options.protectToken;
 }
 
 static int RunWithTray(const AppOptions& options)
@@ -283,10 +299,21 @@ static int RunApplication(const AppOptions& options)
 
     if (!options.once && !AcquireSingleInstance())
     {
+        if (ShouldReloadExistingInstance(options))
+        {
+            if (SignalExistingInstance(DRPC_INSTANCE_RELOAD))
+            {
+                PrintLine(GetUiString(L"reload_requested", L"DiscordRPC configuration reload requested."));
+                ReleaseSingleInstance();
+                return 0;
+            }
+        }
+
         if (g_singleInstanceMessage != 0)
         {
-            PostMessageW(HWND_BROADCAST, g_singleInstanceMessage, 0, 0);
+            PostMessageW(HWND_BROADCAST, g_singleInstanceMessage, DRPC_INSTANCE_SHOW, 0);
         }
+
         PrintLine(GetUiString(L"already_running", L"DiscordRPC is already running for this config."), true);
         ReleaseSingleInstance();
         return 1;

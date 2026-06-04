@@ -200,9 +200,16 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     {
         if (ctx != nullptr)
         {
-            if (wParam == 1)
+            if (wParam == DRPC_INSTANCE_EXIT)
             {
                 DestroyWindow(hwnd);
+                return 0;
+            }
+            if (wParam == DRPC_INSTANCE_RELOAD)
+            {
+                g_reloadRequested = true;
+                g_refreshRequested = true;
+                ShowTrayBalloon(ctx, GetUiString(L"notification_title", APP_DISPLAY_NAME), GetUiString(L"reload_requested", L"DiscordRPC configuration reload requested."), NIIF_INFO);
                 return 0;
             }
             ShowTrayBalloon(ctx, GetUiString(L"notification_title", APP_DISPLAY_NAME), GetUiString(L"already_running", L"DiscordRPC is already running for this config."), NIIF_INFO);
