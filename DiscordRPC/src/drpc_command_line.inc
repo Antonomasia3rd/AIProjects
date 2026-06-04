@@ -7,62 +7,29 @@ static void AddSetting(AppOptions& options, const std::wstring& section, const s
     options.settings.push_back(setting);
 }
 
-static bool TakeCommandLineValue(int argc, wchar_t** argv, int& i, const std::wstring& option, std::wstring& value, std::wstring& error)
-{
-    size_t eq = option.find(L'=');
-    if (eq != std::wstring::npos)
-    {
-        value = option.substr(eq + 1);
-        return true;
-    }
-
-    if (i + 1 >= argc)
-    {
-        error = L"Missing value after " + option + L".";
-        return false;
-    }
-
-    value = argv[++i];
-    return true;
-}
-
 static bool ParseSetSpec(const std::wstring& spec, CommandLineSetting& setting, std::wstring& error)
 {
-    size_t equals = spec.find(L'=');
-    if (equals == std::wstring::npos)
+    aip::IniSetting parsed;
+    if (!aip::ParseIniSetSpec(spec, parsed, error))
     {
-        error = L"--set expects Section.Key=Value.";
         return false;
     }
 
-    std::wstring name = spec.substr(0, equals);
-    size_t dot = name.find(L'.');
-    if (dot == std::wstring::npos || dot == 0 || dot + 1 >= name.size())
-    {
-        error = L"--set expects Section.Key=Value.";
-        return false;
-    }
-
-    setting.section = name.substr(0, dot);
-    setting.key = name.substr(dot + 1);
-    setting.value = spec.substr(equals + 1);
+    setting.section = parsed.section;
+    setting.key = parsed.key;
+    setting.value = parsed.value;
     return true;
 }
 
-static bool ParseBoolValue(const std::wstring& raw, bool& value)
+static bool IsSensitiveCommandLineSetting(const std::wstring& section, const std::wstring& key)
 {
-    std::wstring v = ToLower(Trim(raw));
-    if (v == L"1" || v == L"true" || v == L"yes" || v == L"on")
-    {
-        value = true;
-        return true;
-    }
-    if (v == L"0" || v == L"false" || v == L"no" || v == L"off")
-    {
-        value = false;
-        return true;
-    }
-    return false;
+    (void)section;
+    return aip::IsLikelySensitiveSettingName(key);
+}
+
+static std::wstring RedactCommandLineSettingValue(const CommandLineSetting& setting)
+{
+    return IsSensitiveCommandLineSetting(setting.section, setting.key) ? L"<redacted>" : setting.value;
 }
 
 static bool ParseCommandLine(AppOptions& options, std::wstring& error)
@@ -193,17 +160,17 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
         {
             AddSetting(options, L"app", L"show_console", L"false");
         }
-        else if (StartsWithI(arg, L"--ini"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--ini"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
             options.configPath = value;
         }
-        else if (StartsWithI(arg, L"--set"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--set"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
@@ -214,26 +181,26 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             }
             options.settings.push_back(setting);
         }
-        else if (StartsWithI(arg, L"--client-id"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--client-id"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
             AddSetting(options, L"general", L"client_id", value);
         }
-        else if (StartsWithI(arg, L"--token-env"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--token-env"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
             AddSetting(options, L"general", L"token_env", value);
             AddSetting(options, L"general", L"token", L"");
         }
-        else if (StartsWithI(arg, L"--token"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--token"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
@@ -241,49 +208,49 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             AddSetting(options, L"general", L"token_env", L"");
             options.protectToken = true;
         }
-        else if (StartsWithI(arg, L"--status"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--status"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
             AddSetting(options, L"general", L"status", NormalizeStatus(value));
         }
-        else if (StartsWithI(arg, L"--update-interval"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--update-interval"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
             AddSetting(options, L"general", L"update_interval", value);
         }
-        else if (StartsWithI(arg, L"--details-template"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--details-template"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
             AddSetting(options, L"general", L"details_template", value);
         }
-        else if (StartsWithI(arg, L"--state-template"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--state-template"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
             AddSetting(options, L"general", L"state_template", value);
         }
-        else if (StartsWithI(arg, L"--transport"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--transport"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
             AddSetting(options, L"general", L"transport_mode", NormalizeTransportMode(value));
         }
-        else if (StartsWithI(arg, L"--bool"))
+        else if (aip::IsOptionOrInlineValue(arg, L"--bool"))
         {
-            if (!TakeCommandLineValue(argc, argv, i, arg, value, error))
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
             {
                 return false;
             }
@@ -293,7 +260,7 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
                 return false;
             }
             bool parsed = false;
-            if (!ParseBoolValue(setting.value, parsed))
+            if (!aip::ParseBoolValue(setting.value, parsed))
             {
                 error = L"--bool expects a true/false value.";
                 return false;
@@ -329,6 +296,6 @@ static void ApplyCommandLineSettings(const AppOptions& options)
             continue;
         }
         IniWrite(setting.section.c_str(), setting.key.c_str(), setting.value);
-        LogInfo(L"Command-line setting: [" + setting.section + L"] " + setting.key + L" = " + setting.value);
+        LogInfo(L"Command-line setting: [" + setting.section + L"] " + setting.key + L" = " + RedactCommandLineSettingValue(setting));
     }
 }

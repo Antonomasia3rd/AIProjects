@@ -6,7 +6,10 @@
     "buildOutput": "build_allow_content_above_lock",
     "artifactName": "AllowContentAboveLock",
     "artifactPath": "legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe",
-    "skipKey": "AllowContentAboveLock"
+    "skipKey": "AllowContentAboveLock",
+    "artifactPaths": [
+      "legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe"
+    ]
   },
   {
     "key": "asusblink",
@@ -15,7 +18,10 @@
     "buildOutput": "build_asusblink",
     "artifactName": "asusblink",
     "artifactPath": "legacy/asusblink/build/asusblink.exe",
-    "skipKey": "asusblink"
+    "skipKey": "asusblink",
+    "artifactPaths": [
+      "legacy/asusblink/build/asusblink.exe"
+    ]
   },
   {
     "key": "capsblink",
@@ -24,7 +30,10 @@
     "buildOutput": "build_capsblink",
     "artifactName": "capsblink",
     "artifactPath": "legacy/capsblink/build/capsblink.exe",
-    "skipKey": "capsblink"
+    "skipKey": "capsblink",
+    "artifactPaths": [
+      "legacy/capsblink/build/capsblink.exe"
+    ]
   },
   {
     "key": "YourPhoneHideBanner",
@@ -33,7 +42,10 @@
     "buildOutput": "build_your_phone_hide_banner",
     "artifactName": "YourPhoneHideBanner",
     "artifactPath": "legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe",
-    "skipKey": "YourPhoneHideBanner"
+    "skipKey": "YourPhoneHideBanner",
+    "artifactPaths": [
+      "legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe"
+    ]
   },
   {
     "key": "DiscordRPC",
@@ -42,7 +54,10 @@
     "buildOutput": "build_discord_rpc",
     "artifactName": "DiscordRPC",
     "artifactPath": "DiscordRPC/build/DiscordRPC.exe",
-    "skipKey": "DiscordRPC"
+    "skipKey": "DiscordRPC",
+    "artifactPaths": [
+      "DiscordRPC/build/DiscordRPC.exe"
+    ]
   },
   {
     "key": "DNSAutoUpdate",
@@ -51,7 +66,10 @@
     "buildOutput": "build_dns_auto_update",
     "artifactName": "DNSAutoUpdate",
     "artifactPath": "legacy/DNSAutoUpdate/build/DNSAutoUpdate.exe",
-    "skipKey": "DNSAutoUpdate"
+    "skipKey": "DNSAutoUpdate",
+    "artifactPaths": [
+      "legacy/DNSAutoUpdate/build/DNSAutoUpdate.exe"
+    ]
   },
   {
     "key": "NowPlayingTile",
@@ -60,7 +78,12 @@
     "buildOutput": "build_now_playing_tile",
     "artifactName": "NowPlayingTile",
     "artifactPath": "legacy/NowPlayingTile/build/NowPlayingTile.exe",
-    "skipKey": "NowPlayingTile"
+    "skipKey": "NowPlayingTile",
+    "artifactPaths": [
+      "legacy/NowPlayingTile/build/NowPlayingTile.exe",
+      "legacy/NowPlayingTile/README.md",
+      "legacy/NowPlayingTile/package/**"
+    ]
   },
   {
     "key": "PhotoCollage",
@@ -69,7 +92,10 @@
     "buildOutput": "build_photo_collage",
     "artifactName": "PhotoCollage",
     "artifactPath": "legacy/PhotoCollage/build/PhotoCollage.exe",
-    "skipKey": "PhotoCollage"
+    "skipKey": "PhotoCollage",
+    "artifactPaths": [
+      "legacy/PhotoCollage/build/PhotoCollage.exe"
+    ]
   },
   {
     "key": "DesktopStub",
@@ -79,7 +105,11 @@
     "artifactName": "DesktopStub",
     "artifactPath": "DesktopStub/build/DesktopStub.exe",
     "smokePath": "DesktopStub/build/DesktopStub.exe",
-    "skipKey": "DesktopStub"
+    "skipKey": "DesktopStub",
+    "artifactPaths": [
+      "DesktopStub/build/DesktopStub.exe",
+      "DesktopStub/build/DesktopStubLiveTileBroker.exe"
+    ]
   },
   {
     "key": "CharmTray",
@@ -88,7 +118,10 @@
     "buildOutput": "build_charm_tray",
     "artifactName": "CharmTray",
     "artifactPath": "legacy/CharmTray/build/CharmTray.exe",
-    "skipKey": "CharmTray"
+    "skipKey": "CharmTray",
+    "artifactPaths": [
+      "legacy/CharmTray/build/CharmTray.exe"
+    ]
   },
   {
     "key": "SecureDesktopLauncher",
@@ -97,7 +130,12 @@
     "buildOutput": "build_secure_desktop_launcher",
     "artifactName": "SecureDesktopLauncher",
     "artifactPath": "legacy/SecureDesktopLauncher/build/SecureDesktopLauncher.exe",
-    "skipKey": "SecureDesktopLauncher"
+    "skipKey": "SecureDesktopLauncher",
+    "artifactPaths": [
+      "legacy/SecureDesktopLauncher/build/SecureDesktopLauncher.exe",
+      "legacy/SecureDesktopLauncher/build/SecureDesktopPasswordLauncher.exe",
+      "legacy/SecureDesktopLauncher/README.md"
+    ]
   },
   {
     "key": "TaskSchedulerMigration",
@@ -106,7 +144,10 @@
     "buildOutput": "build_task_scheduler_migration",
     "artifactName": "TaskSchedulerMigration",
     "artifactPath": "legacy/TaskSchedulerMigration/build/TaskSchedulerMigration.exe",
-    "skipKey": "TaskSchedulerMigration"
+    "skipKey": "TaskSchedulerMigration",
+    "artifactPaths": [
+      "legacy/TaskSchedulerMigration/build/TaskSchedulerMigration.exe"
+    ]
   },
   {
     "key": "RealTimeNotesDeskband",
@@ -115,6 +156,13 @@
     "buildOutput": "build_real_time_notes_deskband",
     "artifactName": "RealTimeNotesDeskband",
     "artifactPath": "legacy/RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll",
-    "skipKey": "RealTimeNotesDeskband"
+    "skipKey": "RealTimeNotesDeskband",
+    "artifactPaths": [
+      "legacy/RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll",
+      "legacy/RealTimeNotesDeskband/README.md",
+      "legacy/RealTimeNotesDeskband/RegisterDeskband.cmd",
+      "legacy/RealTimeNotesDeskband/UnregisterDeskband.cmd",
+      "legacy/RealTimeNotesDeskband/ConfigureDeskband.cmd"
+    ]
   }
 ]
