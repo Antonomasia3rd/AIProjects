@@ -26,10 +26,6 @@ shift
 goto ParseArgs
 
 :Main
-if not exist "%CSC%" (
-  echo ERROR: C# compiler not found at "%CSC%".
-  goto Fail
-)
 where certutil.exe >nul 2>nul
 if errorlevel 1 (
   echo ERROR: certutil.exe is required to create SHA256 files.
@@ -66,6 +62,8 @@ exit /b 0
 call :IsSkipped AllowContentAboveLock
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build AllowContentAboveLock"
+call :RequireCsc
+if errorlevel 1 exit /b %ERRORLEVEL%
 if not exist "%LEGACY%\AllowContentAboveLock\build" mkdir "%LEGACY%\AllowContentAboveLock\build"
 call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\AllowContentAboveLock\build\AllowContentAboveLock.exe" "%LEGACY%\AllowContentAboveLock\AllowContentAboveLock.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -76,6 +74,8 @@ exit /b %ERRORLEVEL%
 call :IsSkipped asusblink
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build asusblink"
+call :RequireCsc
+if errorlevel 1 exit /b %ERRORLEVEL%
 if not exist "%LEGACY%\asusblink\build" mkdir "%LEGACY%\asusblink\build"
 call :Run "%CSC%" /nologo /optimize+ /target:winexe /r:System.Core.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.Runtime.Serialization.dll /out:"%LEGACY%\asusblink\build\asusblink.exe" "%LEGACY%\asusblink\asusblink.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -86,6 +86,8 @@ exit /b %ERRORLEVEL%
 call :IsSkipped capsblink
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build capsblink"
+call :RequireCsc
+if errorlevel 1 exit /b %ERRORLEVEL%
 if not exist "%LEGACY%\capsblink\build" mkdir "%LEGACY%\capsblink\build"
 call :Run "%CSC%" /nologo /optimize+ /target:exe /out:"%LEGACY%\capsblink\build\capsblink.exe" "%LEGACY%\capsblink\capsblink.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -96,6 +98,8 @@ exit /b %ERRORLEVEL%
 call :IsSkipped YourPhoneHideBanner
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build YourPhoneHideBanner"
+call :RequireCsc
+if errorlevel 1 exit /b %ERRORLEVEL%
 if not exist "%LEGACY%\YourPhoneHideBanner\build" mkdir "%LEGACY%\YourPhoneHideBanner\build"
 call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\YourPhoneHideBanner\build\YourPhoneHideBanner.exe" "%LEGACY%\YourPhoneHideBanner\YourPhoneHideBanner.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
@@ -299,6 +303,13 @@ exit /b 0
 echo ^> %*
 %*
 exit /b %ERRORLEVEL%
+
+:RequireCsc
+if not exist "%CSC%" (
+  echo ERROR: C# compiler not found at "%CSC%".
+  exit /b 1
+)
+exit /b 0
 
 :Fail
 set "STATUS=%ERRORLEVEL%"

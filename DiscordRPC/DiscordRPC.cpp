@@ -123,10 +123,16 @@ int wmain()
         return 0;
     }
 
-    EnsureDefaultConfigFile();
+    if (!EnsureDefaultConfigFile())
+    {
+        return 1;
+    }
     ConfigureRuntimeFromConfig(options);
     ApplyRuntimeLoggingOverridesFromCommandLine(options);
-    ApplyCommandLineSettings(options);
+    if (!ApplyCommandLineSettings(options))
+    {
+        return 1;
+    }
     bool plaintextTokenPresent = !Trim(IniReadS(L"general", L"token", L"")).empty();
     if ((options.protectToken || plaintextTokenPresent) && !ProtectDiscordTokenInConfig(plaintextTokenPresent))
     {

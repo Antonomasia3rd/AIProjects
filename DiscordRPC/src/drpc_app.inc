@@ -142,7 +142,10 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
         {
             if (g_reloadRequested.exchange(false))
             {
-                ProtectDiscordTokenInConfig(!Trim(IniReadS(L"general", L"token", L"")).empty());
+                if (!ProtectDiscordTokenInConfig(!Trim(IniReadS(L"general", L"token", L"")).empty()))
+                {
+                    LogError(L"Configuration reload could not complete Discord token protection.");
+                }
                 ConfigureRuntimeFromConfig(AppOptions{});
                 verbose = g_verboseLogging.load();
                 updateIntervalSeconds = ClampInt(IniReadI(L"general", L"update_interval", 5), 1, 86400);
