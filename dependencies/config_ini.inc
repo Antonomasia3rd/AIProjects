@@ -129,7 +129,7 @@ inline bool ReadWholeFileBytes(const std::wstring& path, std::vector<BYTE>& byte
     {
         return fail(ERROR_INVALID_DATA);
     }
-    if (size.QuadPart > 32ll * 1024ll * 1024ll)
+    if (size.QuadPart > 0x7fffffffll)
     {
         return fail(ERROR_FILE_TOO_LARGE);
     }
