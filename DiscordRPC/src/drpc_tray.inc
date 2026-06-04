@@ -70,6 +70,16 @@ static void AppendChecked(HMENU menu, UINT id, const std::wstring& text, bool ch
     aip::AppendCheckedMenuItem(menu, id, text, checked);
 }
 
+static std::wstring TrayMenuTitle(const std::wstring& text)
+{
+    std::wstring title = Trim(text);
+    while (!title.empty() && (title.back() == L':' || iswspace(title.back())))
+    {
+        title.pop_back();
+    }
+    return title.empty() ? text : title;
+}
+
 static void AppendInterval(HMENU menu, UINT id, int seconds, int current)
 {
     std::wstring text = std::to_wstring(seconds) + L" seconds";
@@ -84,56 +94,97 @@ static void ShowTrayMenu(RuntimeContext* ctx)
     }
 
     HMENU menu = CreatePopupMenu();
-    HMENU presence = CreatePopupMenu();
-    HMENU logging = CreatePopupMenu();
-    HMENU interval = CreatePopupMenu();
-    HMENU transport = CreatePopupMenu();
-    if (menu == nullptr || presence == nullptr || logging == nullptr || interval == nullptr || transport == nullptr)
+    if (menu == nullptr)
     {
-        if (menu) DestroyMenu(menu);
-        if (presence) DestroyMenu(presence);
-        if (logging) DestroyMenu(logging);
-        if (interval) DestroyMenu(interval);
-        if (transport) DestroyMenu(transport);
         return;
     }
 
+    auto addTo = [](HMENU target, UINT id, const std::wstring& text, bool checked = false, bool enabled = true) {
+        UINT flags = MF_STRING;
+        if (checked)
+        {
+            flags |= MF_CHECKED;
+        }
+        if (!enabled)
+        {
+            flags |= MF_DISABLED;
+        }
+        AppendMenuW(target, flags, id, text.c_str());
+    };
+
+    auto appendSeparator = [](HMENU target) {
+        AppendMenuW(target, MF_SEPARATOR, 0, nullptr);
+    };
+
+    auto beginNestedMenu = [](HMENU fallback) -> HMENU {
+        HMENU submenu = CreatePopupMenu();
+        return submenu != nullptr ? submenu : fallback;
+    };
+
+    auto endNestedMenu = [](HMENU parent, HMENU child, const std::wstring& title) {
+        if (parent == nullptr || child == nullptr)
+        {
+            return;
+        }
+        if (child == parent)
+        {
+            AppendMenuW(parent, MF_SEPARATOR, 0, nullptr);
+            return;
+        }
+        std::wstring popupTitle = TrayMenuTitle(title);
+        if (!AppendMenuW(parent, MF_POPUP, reinterpret_cast<UINT_PTR>(child), popupTitle.c_str()))
+        {
+            DestroyMenu(child);
+        }
+    };
+
+    addTo(menu, ID_TRAY_REFRESH, GetUiString(L"menu_refresh", L"Refresh now"));
+    addTo(menu, 0, GetUiString(L"menu_status", APP_DISPLAY_NAME), false, false);
+    appendSeparator(menu);
+
+    HMENU general = beginNestedMenu(menu);
+    addTo(general, ID_TRAY_RELOAD, GetUiString(L"menu_reload", L"Reload configuration"));
+
+    HMENU interval = beginNestedMenu(general);
+    int currentInterval = IniReadI(L"general", L"update_interval", 5);
+    AppendInterval(interval, ID_INTERVAL_5, 5, currentInterval);
+    AppendInterval(interval, ID_INTERVAL_15, 15, currentInterval);
+    AppendInterval(interval, ID_INTERVAL_30, 30, currentInterval);
+    AppendInterval(interval, ID_INTERVAL_60, 60, currentInterval);
+    endNestedMenu(general, interval, GetUiString(L"menu_update_interval", L"Update interval"));
+
+    HMENU transport = beginNestedMenu(general);
+    std::wstring currentTransport = NormalizeTransportMode(IniReadS(L"general", L"transport_mode", L"ipc"));
+    AppendChecked(transport, ID_TRANSPORT_IPC, GetUiString(L"menu_transport_ipc", L"Discord IPC"), currentTransport == L"ipc");
+    AppendChecked(transport, ID_TRANSPORT_GATEWAY, GetUiString(L"menu_transport_gateway", L"Gateway"), currentTransport == L"gateway");
+    AppendChecked(transport, ID_TRANSPORT_AUTO, GetUiString(L"menu_transport_auto", L"Auto: IPC then Gateway"), currentTransport == L"auto");
+    endNestedMenu(general, transport, GetUiString(L"menu_transport", L"Transport"));
+    endNestedMenu(menu, general, GetUiString(L"menu_general", L"General"));
+
+    HMENU presence = beginNestedMenu(menu);
     AppendChecked(presence, ID_TOGGLE_WINDOW_DETECTION, GetUiString(L"window_detection", L"Window detection"), IniReadB(L"general", L"window_title_detection_enabled", true));
     AppendChecked(presence, ID_TOGGLE_DETAILS, GetUiString(L"details_field", L"Details field"), IniReadB(L"layout", L"details_field", true));
     AppendChecked(presence, ID_TOGGLE_STATE, GetUiString(L"state_field", L"State field"), IniReadB(L"layout", L"state_field", true));
     AppendChecked(presence, ID_TOGGLE_LARGE, GetUiString(L"large_image", L"Large image"), IniReadB(L"layout", L"show_large_image", false));
     AppendChecked(presence, ID_TOGGLE_SMALL, GetUiString(L"small_image", L"Small image"), IniReadB(L"layout", L"show_small_image", false));
     AppendChecked(presence, ID_TOGGLE_BUTTONS, GetUiString(L"buttons", L"Buttons"), IniReadB(L"layout", L"show_buttons", false));
+    endNestedMenu(menu, presence, GetUiString(L"menu_presence", L"Presence"));
 
+    HMENU diagnostics = beginNestedMenu(menu);
+    HMENU logging = beginNestedMenu(diagnostics);
     AppendChecked(logging, ID_TOGGLE_LOGGING, GetUiString(L"logging_enabled", L"Logging enabled"), IniReadB(L"app", L"logging_enabled", true));
     AppendChecked(logging, ID_TOGGLE_FILE_LOGGING, GetUiString(L"file_logging", L"File logging"), IniReadB(L"app", L"file_logging_enabled", true));
     AppendChecked(logging, ID_TOGGLE_VERBOSE, GetUiString(L"verbose_logging", L"Verbose logging"), IniReadB(L"app", L"verbose_logging", false));
     AppendChecked(logging, ID_TOGGLE_CONSOLE, GetUiString(L"show_console", L"Show console"), IniReadB(L"app", L"show_console", false));
+    endNestedMenu(diagnostics, logging, GetUiString(L"menu_logging", L"Logging"));
+    appendSeparator(diagnostics);
+    addTo(diagnostics, ID_TRAY_OPEN_CONFIG, GetUiString(L"menu_open_config", L"Open config"));
+    addTo(diagnostics, ID_TRAY_OPEN_LOG_FOLDER, GetUiString(L"menu_open_log_folder", L"Open log folder"));
+    addTo(diagnostics, ID_TRAY_RECENT_LOG, GetUiString(L"menu_recent_log", L"Recent log"));
+    endNestedMenu(menu, diagnostics, GetUiString(L"menu_diagnostics", L"Diagnostics"));
 
-    int currentInterval = IniReadI(L"general", L"update_interval", 5);
-    AppendInterval(interval, ID_INTERVAL_5, 5, currentInterval);
-    AppendInterval(interval, ID_INTERVAL_15, 15, currentInterval);
-    AppendInterval(interval, ID_INTERVAL_30, 30, currentInterval);
-    AppendInterval(interval, ID_INTERVAL_60, 60, currentInterval);
-
-    std::wstring currentTransport = NormalizeTransportMode(IniReadS(L"general", L"transport_mode", L"ipc"));
-    AppendChecked(transport, ID_TRANSPORT_IPC, GetUiString(L"menu_transport_ipc", L"Discord IPC"), currentTransport == L"ipc");
-    AppendChecked(transport, ID_TRANSPORT_GATEWAY, GetUiString(L"menu_transport_gateway", L"Gateway"), currentTransport == L"gateway");
-    AppendChecked(transport, ID_TRANSPORT_AUTO, GetUiString(L"menu_transport_auto", L"Auto: IPC then Gateway"), currentTransport == L"auto");
-
-    AppendMenuW(menu, MF_STRING, ID_TRAY_REFRESH, GetUiString(L"menu_refresh", L"Refresh now").c_str());
-    AppendMenuW(menu, MF_STRING, ID_TRAY_RELOAD, GetUiString(L"menu_reload", L"Reload configuration").c_str());
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(presence), GetUiString(L"menu_presence", L"Presence").c_str());
-    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(interval), GetUiString(L"menu_update_interval", L"Update interval").c_str());
-    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(transport), GetUiString(L"menu_transport", L"Transport").c_str());
-    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(logging), GetUiString(L"menu_logging", L"Logging").c_str());
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, ID_TRAY_OPEN_CONFIG, GetUiString(L"menu_open_config", L"Open config").c_str());
-    AppendMenuW(menu, MF_STRING, ID_TRAY_OPEN_LOG_FOLDER, GetUiString(L"menu_open_log_folder", L"Open log folder").c_str());
-    AppendMenuW(menu, MF_STRING, ID_TRAY_RECENT_LOG, GetUiString(L"menu_recent_log", L"Recent log").c_str());
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, GetUiString(L"menu_exit", L"Exit").c_str());
+    appendSeparator(menu);
+    addTo(menu, ID_TRAY_EXIT, GetUiString(L"menu_exit", L"Exit"));
 
     POINT pt = {};
     GetCursorPos(&pt);
