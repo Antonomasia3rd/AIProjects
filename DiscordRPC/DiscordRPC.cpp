@@ -93,6 +93,20 @@ int wmain()
         return 2;
     }
 
+    if (options.showHelp)
+    {
+        // Keep --help side-effect-free: do not create, read, or normalize the INI.
+        PrintLine(DefaultHelpText());
+        return 0;
+    }
+
+    if (options.showVersion)
+    {
+        // Keep --version side-effect-free as well.
+        PrintLine(L"DiscordRPC C++");
+        return 0;
+    }
+
     if (!options.configPath.empty())
     {
         g_iniPath = MakeAbsolutePath(options.configPath);
@@ -106,23 +120,6 @@ int wmain()
         return 1;
     }
     ConfigureRuntimeFromConfig(options);
-
-    if (options.showHelp)
-    {
-        std::wstring help = GetUiString(L"help_text", DefaultHelpText());
-        if (help.find(L"Use --help after editing") != std::wstring::npos)
-        {
-            help = DefaultHelpText();
-        }
-        PrintLine(help);
-        return 0;
-    }
-
-    if (options.showVersion)
-    {
-        PrintLine(L"DiscordRPC C++");
-        return 0;
-    }
 
     if (options.dryRun || options.dryRunFull)
     {

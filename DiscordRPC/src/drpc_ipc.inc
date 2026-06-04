@@ -144,6 +144,12 @@ private:
         if (wait == WAIT_TIMEOUT)
         {
             CancelIoEx(handle, &overlapped);
+
+            // The OVERLAPPED object and event are stack-local in callers.
+            // After cancellation, wait for the I/O completion to be delivered before
+            // returning so Windows cannot complete against invalid stack memory.
+            DWORD cancelledTransferred = 0;
+            GetOverlappedResult(handle, &overlapped, &cancelledTransferred, TRUE);
             throw std::runtime_error(std::string(action) + " timed out.");
         }
         if (wait != WAIT_OBJECT_0)

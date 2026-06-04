@@ -479,12 +479,35 @@ public:
         heartbeatIntervalMs_ = 0;
         heartbeatAcked_ = true;
 
-        HINTERNET oldWebsocket = websocket_;
-        websocket_ = nullptr;
-        if (oldWebsocket != nullptr)
+        // Do not close the WebSocket handle before the worker threads exit.
+        // The reader thread may be blocked inside WinHttpWebSocketReceive and
+        // SendText may be using the same handle under sendMutex_. Close the
+        // WebSocket protocol first to wake the reader, join the threads, then
+        // release the handle lifetime.
         {
-            WinHttpWebSocketClose(oldWebsocket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);
-            WinHttpCloseHandle(oldWebsocket);
+            std::lock_guard<std::mutex> lock(sendMutex_);
+            if (websocket_ != nullptr)
+            {
+                WinHttpWebSocketClose(websocket_, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);
+            }
+        }
+
+        if (reader_.joinable() && reader_.get_id() != std::this_thread::get_id())
+        {
+            reader_.join();
+        }
+        if (heartbeat_.joinable() && heartbeat_.get_id() != std::this_thread::get_id())
+        {
+            heartbeat_.join();
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(sendMutex_);
+            if (websocket_ != nullptr)
+            {
+                WinHttpCloseHandle(websocket_);
+                websocket_ = nullptr;
+            }
         }
 
         if (request_ != nullptr)
@@ -501,15 +524,6 @@ public:
         {
             WinHttpCloseHandle(session_);
             session_ = nullptr;
-        }
-
-        if (reader_.joinable() && reader_.get_id() != std::this_thread::get_id())
-        {
-            reader_.join();
-        }
-        if (heartbeat_.joinable() && heartbeat_.get_id() != std::this_thread::get_id())
-        {
-            heartbeat_.join();
         }
     }
 

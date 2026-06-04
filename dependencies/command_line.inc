@@ -10,6 +10,21 @@ struct IniSetting
     std::wstring value;
 };
 
+
+inline bool IsOptionOrInlineValue(const std::wstring& arg, const wchar_t* option)
+{
+    return EqualsI(arg, option) || StartsWithI(arg, (std::wstring(option) + L"=").c_str());
+}
+
+inline bool IsLikelySensitiveSettingName(const std::wstring& key)
+{
+    std::wstring lowered = ToLower(key);
+    return lowered.find(L"token") != std::wstring::npos ||
+        lowered.find(L"secret") != std::wstring::npos ||
+        lowered.find(L"password") != std::wstring::npos ||
+        lowered.find(L"cookie") != std::wstring::npos;
+}
+
 inline bool TakeCommandLineValue(int argc, wchar_t** argv, int& i, const std::wstring& option, std::wstring& value, std::wstring& error)
 {
     size_t eq = option.find(L'=');

@@ -9,53 +9,20 @@
 *.pdb
 *.sha256
 
-# Build products for projects that keep source outside build/
-**/build/*.exe
-**/build/**/*.exe
-**/build/*.obj
-**/build/**/*.obj
-**/build/*.pdb
-**/build/**/*.pdb
-**/build/*.ilk
-**/build/**/*.ilk
-**/build/*.idb
-**/build/*.exp
-**/build/*.lib
-**/build/*.zip
-**/build/*.sha256
-**/build/*.map
-**/build/**/*.map
-**/build/*.nativecodeanalysis.xml
-**/build/*.manifest
-**/build/**/*.manifest
-**/build/*.log
-**/build/*.ini
-**/build/*.bak
+# Build products: ignore every build directory, regardless of project/location.
+# Examples: DesktopStub/build/, DiscordRPC/build/, legacy/*/build/, .github/build/.
+**/build/
 
-# DesktopStub runtime outputs
-DesktopStub/build/AppxManifest.xml
-DesktopStub/build/AssetCache/
-DesktopStub/build/Assets/
-DesktopStub/build/microsoft.system.package.metadata
-DesktopStub/build/obj/
-DesktopStub/references/
-
-# NowPlayingTile generated package/build output
-NowPlayingTile/build/
-
-# Runtime-only build folder in this project
-DNSAutoUpdate/build/
-
-# TaskSchedulerMigration safety backups
-TaskSchedulerMigration/TaskSchedulerMigrationBackup/
+# Local/reference/vendor scratch folders; keep only source files in git unless explicitly vendored.
+**/references/
+**/bin/
+**/obj/
 
 # Local inventories and private runtime configuration
 LOCAL_TOOL_INVENTORY.md
-SecureDesktopLauncher/SecureDesktopLauncher.ini
-SecureDesktopLauncher/SecureDesktopPasswordLauncher.ini
 
-# RealTimeNotesDeskband local-only references, secrets, and outputs
-RealTimeNotesDeskband/references/
-RealTimeNotesDeskband/build/
-RealTimeNotesDeskband/*.dll
-RealTimeNotesDeskband/*_cookie.json
+# Project-specific local/runtime files outside build/
+legacy/TaskSchedulerMigration/TaskSchedulerMigrationBackup/
+legacy/SecureDesktopLauncher/*.ini
+legacy/RealTimeNotesDeskband/*.dll
+legacy/RealTimeNotesDeskband/*_cookie.json

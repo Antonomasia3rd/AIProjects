@@ -17,6 +17,7 @@ sealed class Project
     public string buildOutput { get; set; }
     public string artifactName { get; set; }
     public string artifactPath { get; set; }
+    public string[] artifactPaths { get; set; }
     public string smokePath { get; set; }
     public string skipKey { get; set; }
 }
@@ -152,6 +153,7 @@ static class RepoTools
         string root = RepositoryRoot(args);
         var projects = LoadProjectMap(root);
         string buildScript = ReadAll(Path.Combine(root, ".github", "scripts", "build-windows.cmd"));
+        string workflow = ReadAll(Path.Combine(root, ".github", "workflows", "build-windows.yml"));
         string readme = ReadAll(Path.Combine(root, "README.md"));
         string[] required = { "key", "label", "folder", "buildOutput", "artifactName", "artifactPath", "skipKey" };
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -178,6 +180,12 @@ static class RepoTools
             if (!buildScript.Contains(":Build" + p.skipKey) &&
                 !buildScript.Contains("call :IsSkipped " + p.skipKey))
                 throw new InvalidOperationException("Build script does not appear to handle skip key: " + p.skipKey);
+
+            foreach (string artifactSpec in ProjectArtifactPathSpecs(p))
+            {
+                if (!workflow.Contains(artifactSpec.Replace('\\', '/')))
+                    throw new InvalidOperationException("Workflow upload paths do not mention declared artifact path for " + p.key + ": " + artifactSpec);
+            }
 
             if (!readme.Contains("`" + p.folder + "`"))
                 throw new InvalidOperationException("README project table does not appear to mention folder: " + p.folder);
@@ -318,6 +326,8 @@ static class RepoTools
             }
         }
 
+        warnings.AddRange(TrackedGeneratedFileWarnings(root));
+
         if (warnings.Count == 0)
         {
             Console.WriteLine("Policy warning scan found no suspicious patterns.");
@@ -349,6 +359,24 @@ static class RepoTools
                 return true;
         }
         return false;
+    }
+
+    static IEnumerable<string> TrackedGeneratedFileWarnings(string root)
+    {
+        var result = RunCapture("git", "ls-files", root, 120000);
+        if (result.ExitCode != 0)
+            yield break;
+
+        foreach (string raw in result.Output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string rel = raw.Replace('\\', '/');
+            bool generatedDir = rel.IndexOf("/build/", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                rel.StartsWith("build/", StringComparison.OrdinalIgnoreCase) ||
+                rel.IndexOf("/references/", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                rel.StartsWith("references/", StringComparison.OrdinalIgnoreCase);
+            if (generatedDir)
+                yield return "Tracked generated/reference file should be removed from Git: " + rel;
+        }
     }
 
     static void Warn(string text)
@@ -383,6 +411,7 @@ static class RepoTools
         string manualProject = Option(args, "--manual-project", "");
         string head = Option(args, "--sha", Environment.GetEnvironmentVariable("GITHUB_SHA") ?? "");
         bool forceAll = false;
+        bool sharedChange = false;
         var changed = new List<string>();
         var releaseSelected = new List<Project>();
         List<Project> selected;
@@ -432,7 +461,7 @@ static class RepoTools
 
             if (!forceAll)
             {
-                bool sharedChange = changed.Any(p => p.StartsWith(".github/", StringComparison.OrdinalIgnoreCase) ||
+                sharedChange = changed.Any(p => p.StartsWith(".github/", StringComparison.OrdinalIgnoreCase) ||
                     p.StartsWith("dependencies/", StringComparison.OrdinalIgnoreCase) ||
                     p == ".gitattributes" ||
                     p == "README.md");
@@ -440,6 +469,7 @@ static class RepoTools
                 {
                     Console.WriteLine("Shared workflow/repository files changed; using a full build.");
                     forceAll = true;
+                    releaseSelected = projects.ToList();
                 }
             }
 
@@ -547,6 +577,39 @@ static class RepoTools
         return selected;
     }
 
+    static IEnumerable<string> ProjectArtifactPathSpecs(Project p)
+    {
+        if (p.artifactPaths != null && p.artifactPaths.Length > 0)
+            return p.artifactPaths;
+        if (!String.IsNullOrWhiteSpace(p.artifactPath))
+            return new[] { p.artifactPath };
+        return Enumerable.Empty<string>();
+    }
+
+    static IEnumerable<string> ExpandProjectArtifactPaths(string root, Project p)
+    {
+        foreach (string spec in ProjectArtifactPathSpecs(p))
+        {
+            if (String.IsNullOrWhiteSpace(spec))
+                continue;
+            string normalized = spec.Replace('\\', '/');
+            if (normalized.EndsWith("/**", StringComparison.Ordinal))
+            {
+                string dirRel = normalized.Substring(0, normalized.Length - 3);
+                string dir = Path.Combine(root, dirRel.Replace('/', Path.DirectorySeparatorChar));
+                if (Directory.Exists(dir))
+                {
+                    foreach (string file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                        yield return file;
+                }
+            }
+            else
+            {
+                yield return Path.Combine(root, normalized.Replace('/', Path.DirectorySeparatorChar));
+            }
+        }
+    }
+
     static int ChecksumSummary(string[] args)
     {
         string root = RepositoryRoot(args);
@@ -555,7 +618,7 @@ static class RepoTools
         {
             "## Windows build outputs",
             "",
-            "GitHub Actions downloads workflow artifacts as ZIP archives. The hashes below are for the primary payload files inside those artifacts.",
+            "GitHub Actions downloads workflow artifacts as ZIP archives. The hashes below are for each declared payload file inside those artifacts.",
             "",
             "| Project | File | SHA256 |",
             "| --- | --- | --- |"
@@ -563,11 +626,13 @@ static class RepoTools
         int count = 0;
         foreach (var p in projects)
         {
-            string path = Path.Combine(root, p.artifactPath.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(path))
-                continue;
-            lines.Add("| " + p.label + " | `" + Path.GetFileName(path) + "` | `" + Sha256File(path).ToLowerInvariant() + "` |");
-            ++count;
+            foreach (string path in ExpandProjectArtifactPaths(root, p))
+            {
+                if (!File.Exists(path) || path.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                lines.Add("| " + p.label + " | `" + Rel(root, path).Replace('\\', '/') + "` | `" + Sha256File(path).ToLowerInvariant() + "` |");
+                ++count;
+            }
         }
         if (count == 0)
             throw new InvalidOperationException("No build outputs were found.");
@@ -670,7 +735,18 @@ static class RepoTools
                 {
                     string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
                     File.Copy(sourceExe, exe, true);
-                    SmokeProcess(exe, new[] { "--help" }, new[] { 0 }, 30, "DiscordRPC help");
+                    string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
+                    string versionIni = Path.Combine(tempRoot, "VersionSideEffect.ini");
+                    string redactIni = Path.Combine(tempRoot, "Redact.ini");
+                    string redactLog = Path.Combine(tempRoot, "Redact.log");
+
+                    SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC help");
+                    AssertFileDoesNotExist(helpIni, "DiscordRPC --help must be side-effect-free");
+                    SmokeProcess(exe, new[] { "--version", "--ini", versionIni, "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC version");
+                    AssertFileDoesNotExist(versionIni, "DiscordRPC --version must be side-effect-free");
+                    SmokeProcess(exe, new[] { "--tokenXYZ", "abc" }, new[] { 2 }, 30, "DiscordRPC strict option parsing");
+                    SmokeProcess(exe, new[] { "--ini", redactIni, "--client-id", "123456789012345678", "--token", "super-secret-smoke-token", "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC token redaction");
+                    AssertFileDoesNotContain(redactLog, "super-secret-smoke-token", "DiscordRPC command-line token must not be written to the log");
                     SmokeProcess(exe, new[] { "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dry-run");
                 }
                 finally
@@ -761,6 +837,21 @@ static class RepoTools
             120000);
         if (result.ExitCode != 0)
             Warn("DesktopStub smoke package cleanup failed for " + identityName + ": " + result.Error + result.Output);
+    }
+
+    static void AssertFileDoesNotExist(string file, string reason)
+    {
+        if (File.Exists(file))
+            throw new InvalidOperationException(reason + ": " + file);
+    }
+
+    static void AssertFileDoesNotContain(string file, string needle, string reason)
+    {
+        if (!File.Exists(file))
+            return;
+        string text = File.ReadAllText(file, Encoding.UTF8);
+        if (text.IndexOf(needle, StringComparison.Ordinal) >= 0)
+            throw new InvalidOperationException(reason + ": " + file);
     }
 
     static void SmokeProcess(string file, string[] args, int[] allowedExitCodes, int timeoutSeconds, string name)
