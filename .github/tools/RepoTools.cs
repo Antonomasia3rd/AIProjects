@@ -710,6 +710,7 @@ static class RepoTools
                     string ini = Path.Combine(tempRoot, "DesktopStub.ini");
                     string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
                     string wallpaper = Path.Combine(tempRoot, "wallpaper.bmp");
+                    string trailingSpaces = new string(' ', 2);
                     WriteTestBmp(wallpaper);
 
                     ProcessResult versionResult = SmokeProcess(exe, new[] { "--version" }, new[] { 0 }, 30, "DesktopStub version");
@@ -718,7 +719,8 @@ static class RepoTools
                         throw new InvalidOperationException("DesktopStub --version did not report the expected release tag/version: " + expectedTag + " (" + desktopStubVersion + ")");
                     SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--set", "Settings.TrayIcon=0" }, new[] { 0 }, 30, "DesktopStub help");
                     AssertFileDoesNotExist(helpIni, "DesktopStub --help must be side-effect-free");
-                    SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--scales", "auto", "--asset", "MediumTile=1", "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
+                    SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--scales", "auto", "--asset", "MediumTile=1", "--set", "Strings.TrayTip=DesktopStub" + trailingSpaces, "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
+                    AssertFileContains(ini, "\"TrayTip\" = \"DesktopStub" + trailingSpaces + "\"", "DesktopStub --set must preserve trailing value spaces");
                     string manifestPath = Path.Combine(Path.GetDirectoryName(exe), "AppxManifest.xml");
                     smokeIdentity = "dev.local.desktopstubsmoke." + Guid.NewGuid().ToString("N").Substring(0, 16);
                     SetDesktopStubManifestIdentity(manifestPath, smokeIdentity);
@@ -770,6 +772,7 @@ static class RepoTools
                     string redactIni = Path.Combine(tempRoot, "Redact.ini");
                     string redactLog = Path.Combine(tempRoot, "Redact.log");
                     string dottedIni = Path.Combine(tempRoot, "DottedSet.ini");
+                    string trailingSpaces = new string(' ', 2);
 
                     SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC help");
                     AssertFileDoesNotExist(helpIni, "DiscordRPC --help must be side-effect-free");
@@ -779,9 +782,9 @@ static class RepoTools
                     SmokeProcess(exe, new[] { "--ini", redactIni, "--client-id", "123456789012345678", "--token", "super-secret-smoke-token", "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC token redaction");
                     AssertFileDoesNotContain(redactLog, "super-secret-smoke-token", "DiscordRPC command-line token must not be written to the log");
                     SmokeProcess(exe, new[] { "--ini", tempRoot, "--set", "general.client_id=123456789012345678", "--dry-run", "--no-tray" }, new[] { 1 }, 30, "DiscordRPC config write failure");
-                    SmokeProcess(exe, new[] { "--ini", dottedIni, "--set", "section.with.dot.key=value", "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dotted --set parsing");
+                    SmokeProcess(exe, new[] { "--ini", dottedIni, "--set", "section.with.dot.key=value" + trailingSpaces, "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dotted --set parsing");
                     AssertFileContains(dottedIni, "[section.with.dot]", "DiscordRPC --set must split Section.Key at the last dot before '='");
-                    AssertFileContains(dottedIni, "\"key\" = \"value\"", "DiscordRPC --set must preserve dotted section names");
+                    AssertFileContains(dottedIni, "\"key\" = \"value" + trailingSpaces + "\"", "DiscordRPC --set must preserve dotted section names and trailing value spaces");
                     SmokeProcess(exe, new[] { "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dry-run");
                 }
                 finally

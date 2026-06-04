@@ -369,24 +369,24 @@ static bool TryParseCommandLineOverrideSpec(
     std::wstring& value,
     std::wstring& error)
 {
-    std::wstring trimmed = TrimCopy(spec);
-    size_t eq = trimmed.find(L'=');
+    size_t eq = spec.find(L'=');
     if (eq == std::wstring::npos)
     {
         error = L"Expected Section.Key=Value: " + spec;
         return false;
     }
 
-    size_t dot = trimmed.rfind(L'.', eq);
-    if (dot == std::wstring::npos || dot == 0 || dot + 1 >= eq)
+    std::wstring name = TrimCopy(spec.substr(0, eq));
+    size_t dot = name.rfind(L'.');
+    if (dot == std::wstring::npos || dot == 0 || dot + 1 >= name.size())
     {
         error = L"Expected Section.Key=Value: " + spec;
         return false;
     }
 
-    section = TrimCopy(trimmed.substr(0, dot));
-    key = TrimCopy(trimmed.substr(dot + 1, eq - dot - 1));
-    value = trimmed.substr(eq + 1);
+    section = TrimCopy(name.substr(0, dot));
+    key = TrimCopy(name.substr(dot + 1));
+    value = spec.substr(eq + 1);
     if (section.empty() || key.empty())
     {
         error = L"Section and key cannot be empty: " + spec;
@@ -402,16 +402,15 @@ static bool TryParseCommandLineKeyValue(
     std::wstring& value,
     std::wstring& error)
 {
-    std::wstring trimmed = TrimCopy(spec);
-    size_t eq = trimmed.find(L'=');
+    size_t eq = spec.find(L'=');
     if (eq == std::wstring::npos)
     {
         error = L"Expected Name=Value: " + spec;
         return false;
     }
 
-    key = TrimCopy(trimmed.substr(0, eq));
-    value = trimmed.substr(eq + 1);
+    key = TrimCopy(spec.substr(0, eq));
+    value = spec.substr(eq + 1);
     if (key.empty())
     {
         error = L"Name cannot be empty: " + spec;
