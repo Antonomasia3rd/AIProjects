@@ -388,6 +388,19 @@ public:
         {
             ThrowWinHttp("WinHttpWebSocketCompleteUpgrade");
         }
+        DWORD closeTimeoutMs = static_cast<DWORD>(options_.closeTimeoutMs);
+        if (!WinHttpSetOption(
+                websocket_,
+                WINHTTP_OPTION_WEB_SOCKET_CLOSE_TIMEOUT,
+                &closeTimeoutMs,
+                sizeof(closeTimeoutMs)))
+        {
+            DWORD error = GetLastError();
+            WinHttpCloseHandle(websocket_);
+            websocket_ = nullptr;
+            SetLastError(error);
+            ThrowWinHttp("WINHTTP_OPTION_WEB_SOCKET_CLOSE_TIMEOUT");
+        }
         WinHttpCloseHandle(request_);
         request_ = nullptr;
 
