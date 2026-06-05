@@ -43,11 +43,6 @@ static void EnsureDirectory(const std::wstring& path)
     aip::EnsureDirectory(path);
 }
 
-static bool FileExists(const std::wstring& path)
-{
-    return aip::FileExists(path);
-}
-
 static std::string WideToUtf8(const std::wstring& value)
 {
     return aip::WideToUtf8(value);
@@ -191,11 +186,6 @@ static bool IniReadB(const wchar_t* section, const wchar_t* key, bool fallback)
     }
     bool parsed = false;
     return aip::ParseBoolValue(raw, parsed) ? parsed : fallback;
-}
-
-static bool IniHasKey(const wchar_t* section, const wchar_t* key)
-{
-    return aip::IniHasKey(g_iniPath, section, key);
 }
 
 static std::wstring DefaultConfigHeader()
@@ -358,264 +348,15 @@ static void SetConsoleVisible(bool visible, bool safeOnly)
     ShowWindow(console, visible ? SW_SHOW : SW_HIDE);
 }
 
-static std::string JsonEscape(const std::wstring& value)
-{
-    std::string utf8 = WideToUtf8(value);
-    std::string out;
-    out.reserve(utf8.size() + 2);
-    out.push_back('"');
-    for (unsigned char ch : utf8)
-    {
-        switch (ch)
-        {
-        case '\"': out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\b': out += "\\b"; break;
-        case '\f': out += "\\f"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default:
-            if (ch < 0x20)
-            {
-                char escaped[8] = {};
-                sprintf_s(escaped, "\\u%04x", ch);
-                out += escaped;
-            }
-            else
-            {
-                out.push_back(static_cast<char>(ch));
-            }
-            break;
-        }
-    }
-    out.push_back('"');
-    return out;
-}
-
-static void JsonFieldRaw(std::string& object, bool& first, const char* key, const std::string& rawValue)
-{
-    if (!first)
-    {
-        object.push_back(',');
-    }
-    first = false;
-    object.push_back('"');
-    object += key;
-    object += "\":";
-    object += rawValue;
-}
-
-static void JsonFieldString(std::string& object, bool& first, const char* key, const std::wstring& value)
-{
-    JsonFieldRaw(object, first, key, JsonEscape(value));
-}
-
-static void JsonFieldNumber(std::string& object, bool& first, const char* key, long long value)
-{
-    JsonFieldRaw(object, first, key, std::to_string(value));
-}
-
-static void JsonFieldBool(std::string& object, bool& first, const char* key, bool value)
-{
-    JsonFieldRaw(object, first, key, value ? "true" : "false");
-}
-
-static size_t JsonStringEnd(const std::string& json, size_t quote)
-{
-    if (quote >= json.size() || json[quote] != '"')
-    {
-        return std::string::npos;
-    }
-
-    bool escaped = false;
-    for (size_t i = quote + 1; i < json.size(); ++i)
-    {
-        char ch = json[i];
-        if (escaped)
-        {
-            escaped = false;
-        }
-        else if (ch == '\\')
-        {
-            escaped = true;
-        }
-        else if (ch == '"')
-        {
-            return i + 1;
-        }
-    }
-    return std::string::npos;
-}
-
-static size_t JsonValueEnd(const std::string& json, size_t start)
-{
-    if (start >= json.size())
-    {
-        return std::string::npos;
-    }
-
-    if (json[start] == '"')
-    {
-        return JsonStringEnd(json, start);
-    }
-
-    if (json[start] == '{' || json[start] == '[')
-    {
-        std::vector<char> stack;
-        stack.reserve(8);
-        bool inString = false;
-        bool escaped = false;
-        for (size_t i = start; i < json.size(); ++i)
-        {
-            char ch = json[i];
-            if (inString)
-            {
-                if (escaped)
-                {
-                    escaped = false;
-                }
-                else if (ch == '\\')
-                {
-                    escaped = true;
-                }
-                else if (ch == '"')
-                {
-                    inString = false;
-                }
-                continue;
-            }
-
-            if (ch == '"')
-            {
-                inString = true;
-            }
-            else if (ch == '{')
-            {
-                stack.push_back('}');
-            }
-            else if (ch == '[')
-            {
-                stack.push_back(']');
-            }
-            else if (ch == '}' || ch == ']')
-            {
-                if (stack.empty() || stack.back() != ch)
-                {
-                    return std::string::npos;
-                }
-                stack.pop_back();
-                if (stack.empty())
-                {
-                    return i + 1;
-                }
-            }
-        }
-        return std::string::npos;
-    }
-
-    size_t end = start;
-    while (end < json.size() && json[end] != ',' && json[end] != '}' && json[end] != ']')
-    {
-        ++end;
-    }
-    return end;
-}
-
-static bool FindJsonFieldValue(const std::string& json, const char* key, size_t& keyPos, size_t& valueStart, size_t& valueEnd)
-{
-    keyPos = std::string::npos;
-    valueStart = std::string::npos;
-    valueEnd = std::string::npos;
-
-    if (key == nullptr || *key == '\0')
-    {
-        return false;
-    }
-
-    const size_t keyLength = strlen(key);
-    size_t pos = 0;
-    while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
-    {
-        ++pos;
-    }
-    if (pos >= json.size() || json[pos] != '{')
-    {
-        return false;
-    }
-    ++pos;
-
-    while (pos < json.size())
-    {
-        while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
-        {
-            ++pos;
-        }
-        if (pos >= json.size() || json[pos] == '}')
-        {
-            return false;
-        }
-        if (json[pos] == ',')
-        {
-            ++pos;
-            continue;
-        }
-        if (json[pos] != '"')
-        {
-            return false;
-        }
-        size_t stringEnd = JsonStringEnd(json, pos);
-        if (stringEnd == std::string::npos)
-        {
-            return false;
-        }
-
-        size_t colon = stringEnd;
-        while (colon < json.size() && isspace(static_cast<unsigned char>(json[colon])))
-        {
-            ++colon;
-        }
-        if (colon >= json.size() || json[colon] != ':')
-        {
-            return false;
-        }
-
-        size_t currentValueStart = colon + 1;
-        while (currentValueStart < json.size() && isspace(static_cast<unsigned char>(json[currentValueStart])))
-        {
-            ++currentValueStart;
-        }
-
-        size_t currentValueEnd = JsonValueEnd(json, currentValueStart);
-        if (currentValueEnd == std::string::npos || currentValueEnd < currentValueStart)
-        {
-            return false;
-        }
-
-        if (stringEnd == pos + keyLength + 2 && json.compare(pos + 1, keyLength, key) == 0)
-        {
-            keyPos = pos;
-            valueStart = currentValueStart;
-            valueEnd = currentValueEnd;
-            return true;
-        }
-
-        pos = currentValueEnd;
-        while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
-        {
-            ++pos;
-        }
-        if (pos < json.size() && json[pos] == ',')
-        {
-            ++pos;
-        }
-        else if (pos < json.size() && json[pos] != '}')
-        {
-            return false;
-        }
-    }
-    return false;
-}
+using aip::ExtractJsonStringValue;
+using aip::FindJsonFieldValue;
+using aip::JsonEscape;
+using aip::JsonFieldBool;
+using aip::JsonFieldNumber;
+using aip::JsonFieldRaw;
+using aip::JsonFieldString;
+using aip::JsonStringEnd;
+using aip::JsonValueEnd;
 
 static void RemoveJsonObjectMember(std::string& objectJson, size_t keyPos, size_t valueEnd)
 {
@@ -678,11 +419,6 @@ static size_t FindJsonObjectStart(const std::string& json, size_t search)
         ++pos;
     }
     return std::string::npos;
-}
-
-static std::wstring ExtractJsonStringValue(const std::string& json, const char* key)
-{
-    return aip::ExtractJsonStringValue(json, key);
 }
 
 static std::wstring NormalizeTransportMode(const std::wstring& raw)
