@@ -72,6 +72,7 @@ Useful build options:
 Run repository validation and smoke checks:
 
 ```cmd
+tools\TestSharedBaseline.cmd
 .github\scripts\Validate-ProjectMap.cmd
 .github\scripts\Test-WorkflowProjectSelection.cmd
 .github\scripts\Invoke-PolicyWarnings.cmd

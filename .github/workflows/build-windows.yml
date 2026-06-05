@@ -111,6 +111,10 @@ jobs:
         shell: cmd
         run: .github\scripts\Ensure-Mingw.cmd
 
+      - name: Test shared C++ baseline
+        shell: cmd
+        run: tools\TestSharedBaseline.cmd
+
       - name: Build
         shell: cmd
         run: .github\scripts\build-windows.cmd ${{ needs.detect-projects.outputs.skip_args }}
