@@ -694,33 +694,19 @@ void Menu(HWND h)
         return;
     }
 
+    aip::TraySectionLayout sectionLayout(m, showMenuAsDropdown);
     auto beginSection = [&](const std::wstring& title) -> HMENU {
-        if (showMenuAsDropdown)
-        {
-            HMENU submenu = aip::BeginTrayNestedMenu(m);
-            if (submenu == m)
-            {
-                LogWin32Failure(L"CreatePopupMenu(section)");
-                return m;
-            }
-            return submenu;
-        }
-        AppendMenuChecked(m, MF_STRING | MF_DISABLED, 0, title.c_str());
-        return m;
+        bool created = false;
+        HMENU section = sectionLayout.Begin(title, &created);
+        if (!created)
+            LogWin32Failure(showMenuAsDropdown ? L"CreatePopupMenu(section)" : L"AppendMenuW(section)");
+        return section;
     };
 
     auto endSection = [&](HMENU target, const std::wstring& title) {
-        if (showMenuAsDropdown)
-        {
-            if (!target || target == m)
-                return;
-            if (!aip::EndTrayNestedMenu(m, target, title))
-                LogWin32Failure(L"AppendMenuW");
-        }
-        else
-        {
-            AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
-        }
+        if (!sectionLayout.End(target, title) &&
+            (!showMenuAsDropdown || (target != nullptr && target != m)))
+            LogWin32Failure(L"AppendMenuW(section)");
     };
 
     auto beginNestedMenu = [&](HMENU parent, const wchar_t* logName) -> HMENU {

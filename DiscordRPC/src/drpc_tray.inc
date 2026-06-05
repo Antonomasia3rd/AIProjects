@@ -136,26 +136,12 @@ static void ShowTrayMenu(RuntimeContext* ctx)
     aip::AppendMenuSeparator(menu);
 
     bool showMenuAsDropdown = IniReadB(L"app", L"show_menu_as_dropdown", true);
+    aip::TraySectionLayout sectionLayout(menu, showMenuAsDropdown);
     auto beginSection = [&](const std::wstring& title) -> HMENU {
-        if (showMenuAsDropdown)
-        {
-            return aip::BeginTrayNestedMenu(menu);
-        }
-        aip::AppendTrayMenuItem(menu, 0, title, false, false);
-        return menu;
+        return sectionLayout.Begin(title);
     };
     auto endSection = [&](HMENU section, const std::wstring& title) {
-        if (showMenuAsDropdown)
-        {
-            if (section != nullptr && section != menu)
-            {
-                aip::EndTrayNestedMenu(menu, section, title);
-            }
-        }
-        else
-        {
-            aip::AppendMenuSeparator(menu);
-        }
+        sectionLayout.End(section, title);
     };
 
     HMENU general = beginSection(GetUiString(L"menu_general", L"General"));
@@ -200,10 +186,7 @@ static void ShowTrayMenu(RuntimeContext* ctx)
     aip::AppendTrayMenuItem(diagnostics, ID_TRAY_RECENT_LOG, GetUiString(L"menu_recent_log", L"Recent log"));
     endSection(diagnostics, GetUiString(L"menu_diagnostics", L"Diagnostics"));
 
-    if (showMenuAsDropdown)
-    {
-        aip::AppendMenuSeparator(menu);
-    }
+    sectionLayout.AppendFinalSeparator();
     aip::AppendTrayMenuItem(menu, ID_TRAY_EXIT, GetUiString(L"menu_exit", L"Exit"));
 
     POINT pt = {};

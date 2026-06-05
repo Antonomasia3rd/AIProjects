@@ -481,39 +481,28 @@ static void ConfigureSingleInstanceIdentity(const std::wstring& exeDir, const st
     std::wstring suffix = Hex64(hash);
     std::wstring productBase = SanitizeManifestToken(ProductRuntimeBaseName(), L"DesktopStub");
 
-    g_singleInstanceMutexName = L"Local\\" + productBase + L"." + suffix;
-    g_singleInstanceMessageName = productBase + L".RestoreRunningInstance." + suffix;
-    g_instanceWindowTitle = std::wstring(WINDOW_CLASS_NAME) + L"." + productBase + L"." + suffix;
-}
-
-static HWND FindExistingInstanceWindow()
-{
-    int retries = IniReadClampedI(L"Settings", L"SingleInstanceSignalRetries", 50, 0, 200);
-    int delayMs = IniReadClampedI(L"Settings", L"SingleInstanceSignalDelayMs", 100, 0, 5000);
-    for (int i = 0; i <= retries; ++i)
-    {
-        const wchar_t* title = g_instanceWindowTitle.empty() ? nullptr : g_instanceWindowTitle.c_str();
-        HWND existing = FindWindowW(WINDOW_CLASS_NAME, title);
-        if (!existing)
-            existing = FindWindowExW(HWND_MESSAGE, nullptr, WINDOW_CLASS_NAME, title);
-        if (existing)
-            return existing;
-        if (i < retries && delayMs > 0)
-            Sleep(static_cast<DWORD>(delayMs));
-    }
-    return nullptr;
+    aip::InstanceIdentity identity = aip::BuildInstanceIdentity(
+        productBase,
+        productBase + L".RestoreRunningInstance",
+        WINDOW_CLASS_NAME,
+        productBase,
+        suffix);
+    g_singleInstanceMutexName = std::move(identity.mutexName);
+    g_singleInstanceMessageName = std::move(identity.messageName);
+    g_instanceWindowTitle = std::move(identity.windowTitle);
 }
 
 static bool SignalExistingInstance(WPARAM request = SINGLE_INSTANCE_REQUEST_SHOW)
 {
-    if (!g_singleInstanceMessage)
-        return false;
-
-    HWND existing = FindExistingInstanceWindow();
-    if (!existing)
-        return false;
-
-    return PostMessageW(existing, g_singleInstanceMessage, request, 0) != FALSE;
+    int retries = IniReadClampedI(L"Settings", L"SingleInstanceSignalRetries", 50, 0, 200);
+    int delayMs = IniReadClampedI(L"Settings", L"SingleInstanceSignalDelayMs", 100, 0, 5000);
+    return aip::SignalInstanceWindow(
+        WINDOW_CLASS_NAME,
+        g_instanceWindowTitle.empty() ? nullptr : g_instanceWindowTitle.c_str(),
+        g_singleInstanceMessage,
+        request,
+        retries,
+        delayMs);
 }
 
 static std::wstring AppxActivationTraceLogPath()
@@ -1355,7 +1344,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         singleInstanceMessageError = ERROR_INVALID_DATA;
 
     SetLastError(ERROR_SUCCESS);
-    g_taskbarCreatedMessage = RegisterWindowMessageW(L"TaskbarCreated");
+    g_taskbarCreatedMessage = aip::RegisterTaskbarCreatedMessage();
     DWORD taskbarCreatedMessageError = g_taskbarCreatedMessage ? ERROR_SUCCESS : GetLastError();
     if (!g_taskbarCreatedMessage && taskbarCreatedMessageError == ERROR_SUCCESS)
         taskbarCreatedMessageError = ERROR_INVALID_DATA;

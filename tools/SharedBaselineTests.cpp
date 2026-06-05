@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "..\dependencies\baseline_app.h"
 #include "..\dependencies\core.inc"
 #include "..\dependencies\config_ini.inc"
 #include "..\dependencies\command_line.inc"
@@ -69,8 +70,9 @@ static void TestIniBehavior()
         ? std::wstring(tempDirectory) + L"AIP-SharedBaseline-" + std::to_wstring(GetCurrentProcessId()) + L".ini"
         : L"AIP-SharedBaseline.ini";
     DeleteFileW(path.c_str());
-    bool wrote = aip::IniWriteRaw(path, L"General", L"Name", L"Value", L"; Shared baseline\r\n");
-    std::wstring persisted = aip::IniReadRaw(path, L"General", L"Name", L"");
+    aip::IniConfigStore store(path, L"; Shared baseline\r\n");
+    bool wrote = store.WriteRaw(L"General", L"Name", L"Value");
+    std::wstring persisted = store.ReadRaw(L"General", L"Name", L"");
     Check(wrote && persisted == L"Value", "INI file write/read round trip");
     DeleteFileW(path.c_str());
 }
@@ -181,12 +183,78 @@ static void TestTrayBehavior()
     DestroyMenu(menu);
 }
 
+static void TestApplicationBaseline()
+{
+    aip::InstanceIdentity identity = aip::BuildInstanceIdentity(
+        L"DesktopStub",
+        L"DesktopStub.RestoreRunningInstance",
+        L"DesktopStubTrayWnd",
+        L"DesktopStub",
+        L"0123456789abcdef");
+    Check(
+        identity.mutexName == L"Local\\DesktopStub.0123456789abcdef" &&
+            identity.messageName == L"DesktopStub.RestoreRunningInstance.0123456789abcdef" &&
+            identity.windowTitle == L"DesktopStubTrayWnd.DesktopStub.0123456789abcdef",
+        "single-instance identity preserves baseline naming");
+
+    aip::InstanceIdentity discordIdentity = aip::BuildInstanceIdentity(
+        L"DiscordRPC",
+        L"DiscordRPC.Stop",
+        L"DiscordRPCTrayWnd",
+        L"",
+        L"fedcba9876543210");
+    Check(
+        discordIdentity.mutexName == L"Local\\DiscordRPC.fedcba9876543210" &&
+            discordIdentity.messageName == L"DiscordRPC.Stop.fedcba9876543210" &&
+            discordIdentity.windowTitle == L"DiscordRPCTrayWnd.fedcba9876543210",
+        "single-instance identity supports product-specific window naming");
+
+    std::wstring formatted = aip::FormatTextTemplate(
+        L"Run {exe}\\nConfig: {ini}",
+        {
+            { L"{exe}", L"DesktopStub.exe" },
+            { L"{ini}", L"DesktopStub.ini" }
+        });
+    Check(
+        formatted == L"Run DesktopStub.exe\nConfig: DesktopStub.ini",
+        "help template decoding and token replacement");
+
+    HMENU flatMenu = CreatePopupMenu();
+    aip::TraySectionLayout flat(flatMenu, false);
+    HMENU flatSection = flat.Begin(L" General: ");
+    bool flatEnded = flat.End(flatSection, L" General: ");
+    Check(
+        flatSection == flatMenu &&
+            flatEnded &&
+            GetMenuItemCount(flatMenu) == 2 &&
+            (GetMenuState(flatMenu, 0, MF_BYPOSITION) & MF_DISABLED) != 0 &&
+            (GetMenuState(flatMenu, 1, MF_BYPOSITION) & MF_SEPARATOR) != 0,
+        "flat tray section layout");
+    DestroyMenu(flatMenu);
+
+    HMENU dropdownMenu = CreatePopupMenu();
+    aip::TraySectionLayout dropdown(dropdownMenu, true);
+    HMENU dropdownSection = dropdown.Begin(L" General: ");
+    bool dropdownEnded = dropdown.End(dropdownSection, L" General: ");
+    wchar_t title[32] = {};
+    int titleLength = GetMenuStringW(dropdownMenu, 0, title, ARRAYSIZE(title), MF_BYPOSITION);
+    Check(
+        dropdownSection != dropdownMenu &&
+            dropdownEnded &&
+            GetSubMenu(dropdownMenu, 0) == dropdownSection &&
+            titleLength > 0 &&
+            std::wstring(title) == L"General",
+        "dropdown tray section layout");
+    DestroyMenu(dropdownMenu);
+}
+
 int wmain()
 {
     TestIniBehavior();
     TestCommandLineBehavior();
     TestJsonBehavior();
     TestTrayBehavior();
+    TestApplicationBaseline();
 
     if (g_failures != 0)
     {

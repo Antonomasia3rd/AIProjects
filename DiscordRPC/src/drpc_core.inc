@@ -85,45 +85,6 @@ static void InitPaths()
 }
 
 
-static std::wstring DecodeEscapes(const std::wstring& value)
-{
-    std::wstring out;
-    out.reserve(value.size());
-    for (size_t i = 0; i < value.size(); ++i)
-    {
-        if (value[i] == L'\\' && i + 1 < value.size())
-        {
-            wchar_t next = value[++i];
-            if (next == L'n')
-            {
-                out.push_back(L'\n');
-            }
-            else if (next == L'r')
-            {
-                out.push_back(L'\r');
-            }
-            else if (next == L't')
-            {
-                out.push_back(L'\t');
-            }
-            else if (next == L'\\')
-            {
-                out.push_back(L'\\');
-            }
-            else
-            {
-                out.push_back(L'\\');
-                out.push_back(next);
-            }
-        }
-        else
-        {
-            out.push_back(value[i]);
-        }
-    }
-    return out;
-}
-
 static std::wstring EncodeEscapes(const std::wstring& value)
 {
     std::wstring out;
@@ -152,12 +113,12 @@ static std::wstring EncodeEscapes(const std::wstring& value)
 
 static std::wstring IniReadRaw(const wchar_t* section, const wchar_t* key, const wchar_t* fallback)
 {
-    return aip::IniReadRaw(g_iniPath, section, key, fallback);
+    return aip::IniConfigStore(g_iniPath).ReadRaw(section, key, fallback);
 }
 
 static std::wstring IniReadS(const wchar_t* section, const wchar_t* key, const wchar_t* fallback)
 {
-    return DecodeEscapes(IniReadRaw(section, key, fallback));
+    return aip::DecodeBackslashEscapes(IniReadRaw(section, key, fallback));
 }
 
 static int IniReadI(const wchar_t* section, const wchar_t* key, int fallback)
@@ -198,7 +159,7 @@ static std::wstring DefaultConfigHeader()
 
 static bool IniWriteRaw(const wchar_t* section, const wchar_t* key, const std::wstring& value)
 {
-    return aip::IniWriteRaw(g_iniPath, section, key, value, DefaultConfigHeader());
+    return aip::IniConfigStore(g_iniPath, DefaultConfigHeader()).WriteRaw(section, key, value);
 }
 
 static bool IniWrite(const wchar_t* section, const wchar_t* key, const std::wstring& value)
@@ -657,10 +618,17 @@ static std::wstring StableHash(const std::wstring& value)
 
 static void ConfigureSingleInstanceIdentity()
 {
-    std::wstring identity = MakeAbsolutePath(g_iniPath) + L"|" + g_exeBaseName;
-    std::wstring suffix = StableHash(identity);
-    g_singleInstanceMessageName = L"DiscordRPC.Stop." + suffix;
-    g_instanceWindowTitle = std::wstring(WINDOW_CLASS_NAME) + L"." + suffix;
+    std::wstring scope = MakeAbsolutePath(g_iniPath) + L"|" + g_exeBaseName;
+    std::wstring suffix = StableHash(scope);
+    aip::InstanceIdentity identity = aip::BuildInstanceIdentity(
+        APP_NAME,
+        L"DiscordRPC.Stop",
+        WINDOW_CLASS_NAME,
+        L"",
+        suffix);
+    g_singleInstanceMutexName = std::move(identity.mutexName);
+    g_singleInstanceMessageName = std::move(identity.messageName);
+    g_instanceWindowTitle = std::move(identity.windowTitle);
     g_singleInstanceMessage = RegisterWindowMessageW(g_singleInstanceMessageName.c_str());
 }
 
@@ -671,11 +639,9 @@ static bool AcquireSingleInstance()
         return true;
     }
 
-    std::wstring identity = MakeAbsolutePath(g_iniPath) + L"|" + g_exeBaseName;
-    std::wstring name = L"Local\\DiscordRPC." + StableHash(identity);
     ConfigureSingleInstanceIdentity();
 
-    g_singleInstanceMutex = CreateMutexW(nullptr, TRUE, name.c_str());
+    g_singleInstanceMutex = CreateMutexW(nullptr, TRUE, g_singleInstanceMutexName.c_str());
     if (g_singleInstanceMutex == nullptr)
     {
         LogError(L"Could not create single-instance mutex: " + GetLastErrorText(GetLastError()));

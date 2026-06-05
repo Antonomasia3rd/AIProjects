@@ -830,42 +830,8 @@ static bool IsMissingFileError(DWORD err)
 
 static bool ReadIniFileForMutation(std::wstring& text)
 {
-    DWORD attrs = GetFileAttributesW(g_iniPath.c_str());
-    if (attrs == INVALID_FILE_ATTRIBUTES)
-    {
-        DWORD err = GetLastError();
-        if (IsMissingFileError(err))
-        {
-            text.clear();
-            SetLastError(ERROR_SUCCESS);
-            return true;
-        }
-        SetLastError(err);
+    if (!aip::IniConfigStore(g_iniPath).ReadFreshText(text))
         return false;
-    }
-
-    if ((attrs & FILE_ATTRIBUTE_DIRECTORY) != 0)
-    {
-        SetLastError(ERROR_ACCESS_DENIED);
-        return false;
-    }
-
-    std::vector<BYTE> bytes;
-    if (!ReadWholeFileBytes(g_iniPath, bytes))
-        return false;
-
-    if (bytes.empty())
-    {
-        text.clear();
-        SetLastError(ERROR_SUCCESS);
-        return true;
-    }
-
-    if (!DecodeTextBytes(bytes, text))
-    {
-        SetLastError(ERROR_INVALID_DATA);
-        return false;
-    }
 
     {
         std::lock_guard<std::mutex> lk(g_iniCacheMutex);

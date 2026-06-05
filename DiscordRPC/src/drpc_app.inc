@@ -221,32 +221,17 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
     return exitCode;
 }
 
-static HWND FindExistingInstanceWindow()
-{
-    ConfigureSingleInstanceIdentity();
-    for (int attempt = 0; attempt <= 20; ++attempt)
-    {
-        HWND existing = FindWindowW(WINDOW_CLASS_NAME, g_instanceWindowTitle.c_str());
-        if (existing != nullptr)
-        {
-            return existing;
-        }
-        if (attempt < 20)
-        {
-            Sleep(50);
-        }
-    }
-    return nullptr;
-}
-
 static bool SignalExistingInstance(WPARAM request)
 {
-    HWND existing = FindExistingInstanceWindow();
-    if (existing != nullptr && g_singleInstanceMessage != 0)
-    {
-        return PostMessageW(existing, g_singleInstanceMessage, request, 0) != FALSE;
-    }
-    return false;
+    ConfigureSingleInstanceIdentity();
+    return aip::SignalInstanceWindow(
+        WINDOW_CLASS_NAME,
+        g_instanceWindowTitle.c_str(),
+        g_singleInstanceMessage,
+        request,
+        20,
+        50,
+        false);
 }
 
 static bool SignalExistingInstanceToExit()
@@ -263,7 +248,7 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
 {
     RuntimeContext ctx;
     ctx.trayEnabled = trayEnabled;
-    g_taskbarCreatedMessage = RegisterWindowMessageW(L"TaskbarCreated");
+    g_taskbarCreatedMessage = aip::RegisterTaskbarCreatedMessage();
     HWND hwnd = CreateRuntimeWindow(&ctx);
     if (hwnd == nullptr)
     {

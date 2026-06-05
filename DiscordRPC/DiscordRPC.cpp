@@ -52,6 +52,7 @@ static std::wstring g_exeBaseName;
 static std::wstring g_iniPath;
 static std::wstring g_defaultLogPath;
 static std::wstring g_effectiveLogPath;
+static std::wstring g_singleInstanceMutexName;
 static std::wstring g_singleInstanceMessageName;
 static std::wstring g_instanceWindowTitle;
 static UINT g_singleInstanceMessage = 0;
@@ -69,6 +70,7 @@ static std::atomic<bool> g_notificationsEnabled(true);
 static std::mutex g_logMutex;
 static std::deque<std::wstring> g_recentLog;
 
+#include "..\dependencies\baseline_app.h"
 #include "..\dependencies\core.inc"
 #include "..\dependencies\config_ini.inc"
 #include "..\dependencies\command_line.inc"
