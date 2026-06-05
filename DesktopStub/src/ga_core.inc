@@ -731,7 +731,6 @@ static std::wstring FormatPowerShellOutput(const std::wstring& text)
     return NormalizePowerShellOutputText(text);
 }
 
-static bool ReadIniFileAuto(std::wstring& text);
 static bool WriteIniValueToText(std::wstring& text, const wchar_t* s, const wchar_t* k, const wchar_t* v);
 
 static void StripLeadingBom(std::wstring& s)
@@ -824,27 +823,6 @@ static void SetIniCacheUnlocked(const std::wstring& text)
         g_iniCacheWriteTime = {};
 }
 
-static bool ReadIniFileAuto(std::wstring& text)
-{
-    std::lock_guard<std::mutex> lk(g_iniCacheMutex);
-
-    FILETIME ft{};
-    bool haveTime = GetFileWriteTime(g_iniPath, ft);
-    if (g_iniCacheLoaded && haveTime && FileTimeEquals(ft, g_iniCacheWriteTime))
-    {
-        text = g_iniCacheText;
-        return true;
-    }
-
-    std::wstring fresh;
-    if (!ReadTextFile(g_iniPath, fresh))
-        return false;
-
-    SetIniCacheUnlocked(fresh);
-    text = g_iniCacheText;
-    return true;
-}
-
 static bool IsMissingFileError(DWORD err)
 {
     return err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND || err == ERROR_INVALID_NAME;
@@ -852,9 +830,6 @@ static bool IsMissingFileError(DWORD err)
 
 static bool ReadIniFileForMutation(std::wstring& text)
 {
-    if (ReadIniFileAuto(text))
-        return true;
-
     DWORD attrs = GetFileAttributesW(g_iniPath.c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES)
     {
