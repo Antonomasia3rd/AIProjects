@@ -112,6 +112,7 @@ static UINT g_singleInstanceMessage = 0;
 static UINT g_taskbarCreatedMessage = 0;
 static HANDLE g_singleInstanceMutex = nullptr;
 
+#include "..\dependencies\baseline_app.h"
 #include "..\dependencies\core.inc"
 #include "..\dependencies\config_ini.inc"
 #include "..\dependencies\command_line.inc"

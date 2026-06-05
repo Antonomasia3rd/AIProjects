@@ -942,6 +942,50 @@ inline bool IniEnsureDefaultsRaw(const std::wstring& path, const IniDefaultValue
     }
     return WriteTextFileUtf8Bom(path, text);
 }
+
+class IniConfigStore
+{
+public:
+    explicit IniConfigStore(std::wstring path, std::wstring header = L"")
+        : path_(std::move(path)),
+          header_(std::move(header))
+    {
+    }
+
+    const std::wstring& Path() const
+    {
+        return path_;
+    }
+
+    std::wstring ReadRaw(const wchar_t* section, const wchar_t* key, const wchar_t* fallback) const
+    {
+        return IniReadRaw(path_, section, key, fallback);
+    }
+
+    bool WriteRaw(const wchar_t* section, const wchar_t* key, const std::wstring& value) const
+    {
+        return IniWriteRaw(path_, section, key, value, header_);
+    }
+
+    bool EnsureDefaults(const IniDefaultValue* defaults, size_t defaultCount) const
+    {
+        return IniEnsureDefaultsRaw(path_, defaults, defaultCount, header_);
+    }
+
+    bool ReadFreshText(std::wstring& text) const
+    {
+        return LoadIniText(path_, text);
+    }
+
+    bool WriteFreshText(const std::wstring& text) const
+    {
+        return WriteTextFileUtf8Bom(path_, text);
+    }
+
+private:
+    std::wstring path_;
+    std::wstring header_;
+};
 }
 
 #endif

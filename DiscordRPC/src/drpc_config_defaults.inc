@@ -35,21 +35,15 @@ static constexpr const wchar_t* DEFAULT_HELP_TEMPLATE =
     L"user token stored via token_env or DPAPI token_protected; auto tries IPC\\n"
     L"first and falls back to Gateway.\\n";
 
-static void ReplaceHelpToken(std::wstring& text, const std::wstring& token, const std::wstring& value)
-{
-    size_t pos = 0;
-    while ((pos = text.find(token, pos)) != std::wstring::npos)
-    {
-        text.replace(pos, token.size(), value);
-        pos += value.size();
-    }
-}
-
 static std::wstring DefaultHelpText()
 {
-    std::wstring help = IniReadS(L"CommandLineHelp", L"Template", DEFAULT_HELP_TEMPLATE);
-    ReplaceHelpToken(help, L"{exe}", g_exeBaseName + L".exe");
-    return help;
+    std::wstring rawTemplate = aip::IniConfigStore(g_iniPath).ReadRaw(
+        L"CommandLineHelp",
+        L"Template",
+        DEFAULT_HELP_TEMPLATE);
+    return aip::FormatTextTemplate(
+        rawTemplate,
+        { { L"{exe}", g_exeBaseName + L".exe" } });
 }
 
 static const aip::IniDefaultValue kDefaults[] =
@@ -218,11 +212,9 @@ static const aip::IniDefaultValue kDefaults[] =
 
 static bool EnsureDefaultConfigFile()
 {
-    if (!aip::IniEnsureDefaultsRaw(
-        g_iniPath,
+    if (!aip::IniConfigStore(g_iniPath, DefaultConfigHeader()).EnsureDefaults(
         kDefaults,
-        ARRAYSIZE(kDefaults),
-        DefaultConfigHeader()))
+        ARRAYSIZE(kDefaults)))
     {
         ReportConfigWriteFailure(L"Creating or updating default DiscordRPC config");
         return false;

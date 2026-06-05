@@ -1447,46 +1447,6 @@ static std::wstring CommandLineProgramName()
     return name.empty() ? L"DesktopStub.exe" : name;
 }
 
-static void ReplaceAllInPlace(std::wstring& text, const std::wstring& from, const std::wstring& to)
-{
-    if (from.empty())
-        return;
-
-    size_t pos = 0;
-    while ((pos = text.find(from, pos)) != std::wstring::npos)
-    {
-        text.replace(pos, from.size(), to);
-        pos += to.size();
-    }
-}
-
-static std::wstring DecodeCommandLineHelpEscapes(const std::wstring& value)
-{
-    std::wstring out;
-    out.reserve(value.size());
-    for (size_t i = 0; i < value.size(); ++i)
-    {
-        wchar_t ch = value[i];
-        if (ch != L'\\' || i + 1 >= value.size())
-        {
-            out.push_back(ch);
-            continue;
-        }
-
-        wchar_t next = value[++i];
-        if (next == L'r') out.push_back(L'\r');
-        else if (next == L'n') out.push_back(L'\n');
-        else if (next == L't') out.push_back(L'\t');
-        else if (next == L'\\') out.push_back(L'\\');
-        else
-        {
-            out.push_back(L'\\');
-            out.push_back(next);
-        }
-    }
-    return out;
-}
-
 static std::wstring FormatCommandLineHelpTemplate(const wchar_t* rawTemplate)
 {
     std::wstring exe = CommandLineProgramName();
@@ -1497,10 +1457,12 @@ static std::wstring FormatCommandLineHelpTemplate(const wchar_t* rawTemplate)
     if (iniExampleName.empty())
         iniExampleName = L"DesktopStub";
 
-    std::wstring text = DecodeCommandLineHelpEscapes(rawTemplate ? rawTemplate : g_commandLineHelpDefaults[0].value);
-    ReplaceAllInPlace(text, L"{exe}", exe);
-    ReplaceAllInPlace(text, L"{iniExampleName}", iniExampleName);
-    return text;
+    return aip::FormatTextTemplate(
+        rawTemplate ? rawTemplate : g_commandLineHelpDefaults[0].value,
+        {
+            { L"{exe}", exe },
+            { L"{iniExampleName}", iniExampleName }
+        });
 }
 
 static std::wstring CommandLineUsageText()
