@@ -638,6 +638,34 @@ static class RepoTools
         if (dependencies.Count == 0)
             return false;
 
+        var dependencyNames = new HashSet<string>(
+            dependencies.Select(Path.GetFileName).Where(name => !String.IsNullOrWhiteSpace(name)),
+            StringComparer.OrdinalIgnoreCase);
+        string dependencyRoot = Path.Combine(root, "dependencies");
+        bool expanded;
+        do
+        {
+            expanded = false;
+            foreach (string file in Directory.EnumerateFiles(dependencyRoot, "*", SearchOption.AllDirectories))
+            {
+                string ext = Path.GetExtension(file);
+                if (!new[] { ".h", ".hpp", ".inc" }.Contains(ext, StringComparer.OrdinalIgnoreCase))
+                    continue;
+
+                string fileName = Path.GetFileName(file);
+                if (dependencyNames.Contains(fileName))
+                    continue;
+
+                string text = ReadAll(file);
+                if (dependencyNames.Any(name => text.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    dependencyNames.Add(fileName);
+                    expanded = true;
+                }
+            }
+        }
+        while (expanded);
+
         string projectRoot = Path.Combine(root, project.folder.Replace('/', Path.DirectorySeparatorChar));
         if (!Directory.Exists(projectRoot))
             return false;
@@ -652,9 +680,8 @@ static class RepoTools
             if (text.IndexOf("dependencies", StringComparison.OrdinalIgnoreCase) < 0)
                 continue;
 
-            foreach (string dependency in dependencies)
+            foreach (string name in dependencyNames)
             {
-                string name = Path.GetFileName(dependency);
                 if (!String.IsNullOrWhiteSpace(name) && text.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
                     return true;
             }

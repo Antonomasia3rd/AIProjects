@@ -1,6 +1,6 @@
 # AIProjects
 
-Small Windows utility projects and experiments. Active baseline projects live at the repository root and share reusable C++ include fragments from `dependencies/`. Older projects that have not moved onto that shared baseline live under `legacy/` but keep their original project/release names.
+Small Windows utility projects and experiments. Active baseline projects live at the repository root and share the reusable C++ entry point `dependencies/desktop_app_baseline.h`. Older projects that have not moved onto that shared baseline live under `legacy/` but keep their original project/release names.
 
 ## Projects
 

@@ -74,12 +74,8 @@ static std::atomic<bool> g_notificationsEnabled(true);
 static std::mutex g_logMutex;
 static std::deque<std::wstring> g_recentLog;
 
-#include "..\dependencies\baseline_app.h"
-#include "..\dependencies\core.inc"
-#include "..\dependencies\config_ini.inc"
-#include "..\dependencies\command_line.inc"
+#include "..\dependencies\desktop_app_baseline.h"
 #include "..\dependencies\dpapi.inc"
-#include "..\dependencies\tray.inc"
 #include "src/drpc_types.inc"
 #include "src/drpc_core.inc"
 #include "src/drpc_config_defaults.inc"
