@@ -645,6 +645,15 @@ static std::wstring StableHash(const std::wstring& value)
     return buffer;
 }
 
+static void ConfigureSingleInstanceIdentity()
+{
+    std::wstring identity = MakeAbsolutePath(g_iniPath) + L"|" + g_exeBaseName;
+    std::wstring suffix = StableHash(identity);
+    g_singleInstanceMessageName = L"DiscordRPC.Stop." + suffix;
+    g_instanceWindowTitle = std::wstring(WINDOW_CLASS_NAME) + L"." + suffix;
+    g_singleInstanceMessage = RegisterWindowMessageW(g_singleInstanceMessageName.c_str());
+}
+
 static bool AcquireSingleInstance()
 {
     if (!IniReadB(L"app", L"single_instance", true))
@@ -654,8 +663,7 @@ static bool AcquireSingleInstance()
 
     std::wstring identity = MakeAbsolutePath(g_iniPath) + L"|" + g_exeBaseName;
     std::wstring name = L"Local\\DiscordRPC." + StableHash(identity);
-    g_singleInstanceMessageName = L"DiscordRPC.Stop." + StableHash(identity);
-    g_singleInstanceMessage = RegisterWindowMessageW(g_singleInstanceMessageName.c_str());
+    ConfigureSingleInstanceIdentity();
 
     g_singleInstanceMutex = CreateMutexW(nullptr, TRUE, name.c_str());
     if (g_singleInstanceMutex == nullptr)

@@ -220,7 +220,7 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     switch (msg)
     {
     case WM_CREATE:
-        if (ctx != nullptr)
+        if (ctx != nullptr && ctx->trayEnabled)
         {
             CreateTrayIcon(ctx);
             if (IniReadB(L"app", L"notify_on_start", false))
@@ -336,7 +336,7 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-static HWND CreateTrayWindow(RuntimeContext* ctx)
+static HWND CreateRuntimeWindow(RuntimeContext* ctx)
 {
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
@@ -350,7 +350,7 @@ static HWND CreateTrayWindow(RuntimeContext* ctx)
     return CreateWindowExW(
         0,
         WINDOW_CLASS_NAME,
-        APP_DISPLAY_NAME,
+        g_instanceWindowTitle.c_str(),
         WS_OVERLAPPED,
         0,
         0,

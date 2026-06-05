@@ -52,6 +52,7 @@ static std::wstring g_iniPath;
 static std::wstring g_defaultLogPath;
 static std::wstring g_effectiveLogPath;
 static std::wstring g_singleInstanceMessageName;
+static std::wstring g_instanceWindowTitle;
 static UINT g_singleInstanceMessage = 0;
 static HANDLE g_singleInstanceMutex = nullptr;
 
@@ -117,10 +118,9 @@ int wmain()
     if (options.requestExit)
     {
         // Keep --exit lightweight and side-effect-free for the target INI.
-        // It only needs the resolved INI path to derive the existing instance's
-        // broadcast message name.
-        SignalExistingInstanceToExit();
-        return 0;
+        // It only needs the resolved INI path to find the existing instance's
+        // control window.
+        return SignalExistingInstanceToExit() ? 0 : 2;
     }
 
     if (!EnsureDefaultConfigFile())
