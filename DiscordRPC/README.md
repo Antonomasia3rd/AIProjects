@@ -37,6 +37,12 @@ build\DiscordRPC.exe
 
 Normal launches start the tray icon unless `[app] show_tray = false` is set. Right-click the tray icon to refresh, reload, toggle common presence/logging settings, open the config, inspect recent logs, or exit.
 
+Exit follows the same graceful-then-force model as DesktopStub. DiscordRPC first
+stops new updates, clears the active presence when possible, and completes IPC
+or Gateway cleanup. While cleanup is pending, the tray menu shows `Force
+shutdown`; using it exits immediately and records a warning for the next start
+because presence clearing or the Gateway close handshake may have been skipped.
+
 Pass a config path:
 
 ```powershell

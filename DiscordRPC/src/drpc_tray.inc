@@ -4,6 +4,7 @@ static constexpr UINT ID_TRAY_OPEN_CONFIG = 3003;
 static constexpr UINT ID_TRAY_OPEN_LOG_FOLDER = 3004;
 static constexpr UINT ID_TRAY_RECENT_LOG = 3005;
 static constexpr UINT ID_TRAY_EXIT = 3006;
+static constexpr UINT ID_TRAY_FORCE_EXIT = 3007;
 static constexpr UINT ID_TOGGLE_WINDOW_DETECTION = 3010;
 static constexpr UINT ID_TOGGLE_DETAILS = 3011;
 static constexpr UINT ID_TOGGLE_STATE = 3012;
@@ -107,6 +108,35 @@ static void DestroyTrayIcon(RuntimeContext* ctx)
     }
 }
 
+static void RequestDiscordShutdown(RuntimeContext* ctx)
+{
+    if (ctx == nullptr)
+    {
+        g_stopRequested = true;
+        return;
+    }
+    if (!ctx->shutdown.Request())
+    {
+        return;
+    }
+
+    LogInfo(L"Shutdown requested; waiting for Discord cleanup.");
+    g_stopRequested = true;
+    ShowTrayBalloon(
+        ctx,
+        GetUiString(L"notification_title", APP_DISPLAY_NAME),
+        GetUiString(L"notification_shutdown_pending", L"Shutdown requested. Use Force shutdown from the tray if Discord cleanup does not finish."),
+        NIIF_WARNING);
+}
+
+static void ForceDiscordShutdown(RuntimeContext* ctx)
+{
+    LogError(L"Force shutdown requested; Discord cleanup will be skipped.");
+    IniWrite(L"state", L"force_shutdown_pending_cleanup", L"true");
+    DestroyTrayIcon(ctx);
+    ExitProcess(0);
+}
+
 static void AppendChecked(HMENU menu, UINT id, const std::wstring& text, bool checked)
 {
     aip::AppendCheckedMenuItem(menu, id, text, checked);
@@ -128,6 +158,26 @@ static void ShowTrayMenu(RuntimeContext* ctx)
     HMENU menu = aip::CreateTrayPopupMenu();
     if (menu == nullptr)
     {
+        return;
+    }
+
+    if (ctx->shutdown.IsRequested())
+    {
+        aip::AppendTrayMenuItem(
+            menu,
+            0,
+            GetUiString(L"menu_shutdown_pending", L"Shutdown pending: waiting for Discord cleanup"),
+            false,
+            false);
+        aip::AppendTrayMenuItem(
+            menu,
+            ID_TRAY_FORCE_EXIT,
+            GetUiString(L"menu_force_shutdown", L"Force shutdown"));
+
+        POINT pt = {};
+        GetCursorPos(&pt);
+        SetForegroundWindow(ctx->hwnd);
+        aip::TrackPostAndDestroyTrayMenu(menu, ctx->hwnd, pt, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_LEFTALIGN);
         return;
     }
 
@@ -259,7 +309,7 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         {
             if (wParam == DRPC_INSTANCE_EXIT)
             {
-                DestroyWindow(hwnd);
+                RequestDiscordShutdown(ctx);
                 return 0;
             }
             if (wParam == DRPC_INSTANCE_RELOAD)
@@ -312,6 +362,14 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         ShowPendingTrayBalloons(ctx);
         return 0;
 
+    case WM_DRPC_REQUEST_SHUTDOWN:
+        RequestDiscordShutdown(ctx);
+        return 0;
+
+    case WM_DRPC_WORKER_FINISHED:
+        DestroyWindow(hwnd);
+        return 0;
+
     case WM_COMMAND:
         switch (LOWORD(wParam))
         {
@@ -332,7 +390,10 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             MessageBoxW(hwnd, RecentLogText().c_str(), GetUiString(L"recent_log_title", L"DiscordRPC recent log").c_str(), MB_OK | MB_ICONINFORMATION);
             return 0;
         case ID_TRAY_EXIT:
-            DestroyWindow(hwnd);
+            RequestDiscordShutdown(ctx);
+            return 0;
+        case ID_TRAY_FORCE_EXIT:
+            ForceDiscordShutdown(ctx);
             return 0;
         case ID_TOGGLE_WINDOW_DETECTION:
             ToggleBoolSetting(L"general", L"window_title_detection_enabled", true);
@@ -394,6 +455,11 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         break;
 
     case WM_CLOSE:
+        if (ctx != nullptr && !ctx->shutdown.IsWorkComplete())
+        {
+            RequestDiscordShutdown(ctx);
+            return 0;
+        }
         DestroyWindow(hwnd);
         return 0;
 
@@ -408,6 +474,7 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             DestroyTrayIcon(ctx);
         }
         g_stopRequested = true;
+        g_runtimeWindow = nullptr;
         PostQuitMessage(0);
         return 0;
     }

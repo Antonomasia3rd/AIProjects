@@ -391,7 +391,7 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
 
     if (m == WM_APP_SHUTDOWN_READY)
     {
-        if (g_shutdownRequested)
+        if (g_shutdownState.IsRequested())
             PostQuitMessage(0);
         return 0;
     }
@@ -405,7 +405,7 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
 
     if (m == WM_TIMER && w == SHUTDOWN_NOTICE_TIMER_ID)
     {
-        if (!g_shutdownRequested)
+        if (!g_shutdownState.IsRequested())
         {
             KillTimer(h, SHUTDOWN_NOTICE_TIMER_ID);
             return 0;
@@ -1654,7 +1654,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         RequestGracefulShutdown(g_hwnd);
 
     bool queuedLiveTileRuntimeRelaunch = false;
-    if (!g_shutdownRequested)
+    if (!g_shutdownState.IsRequested())
         queuedLiveTileRuntimeRelaunch = QueueLiveTileRuntimeConditionRelaunch(g_hwnd);
 
     if (singleInstanceMutexFailure != ERROR_SUCCESS)
@@ -1696,14 +1696,14 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     }
 
     bool queuedPendingLiveTileModeReregistration = false;
-    if (!g_shutdownRequested && !queuedLiveTileRuntimeRelaunch && LiveTileModeReregistrationPending())
+    if (!g_shutdownState.IsRequested() && !queuedLiveTileRuntimeRelaunch && LiveTileModeReregistrationPending())
         queuedPendingLiveTileModeReregistration = QueueLiveTileModeReregistration();
 
     bool forceStartupGeneration = CommandLineShouldForceStartupGeneration();
     bool liveTileNeedsStartupRestore = StartupLiveTileClearedStateNeedsGeneration();
     std::wstring commandLineWallpaper;
     bool hasCommandLineWallpaper = CommandLineWallpaper(commandLineWallpaper);
-    if (!g_shutdownRequested && !queuedLiveTileRuntimeRelaunch && !queuedPendingLiveTileModeReregistration &&
+    if (!g_shutdownState.IsRequested() && !queuedLiveTileRuntimeRelaunch && !queuedPendingLiveTileModeReregistration &&
         (g_generateOnStartup || forceStartupGeneration || liveTileNeedsStartupRestore || hasCommandLineWallpaper))
     {
         std::wstring wp = hasCommandLineWallpaper ? commandLineWallpaper : GetWallpaper();
@@ -1733,7 +1733,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         TrimIdleWorkingSetIfConfigured();
 
     std::thread th;
-    if (!g_shutdownRequested && !CommandLineShouldSkipMonitor())
+    if (!g_shutdownState.IsRequested() && !CommandLineShouldSkipMonitor())
     {
         try
         {

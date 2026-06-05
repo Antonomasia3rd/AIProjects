@@ -667,7 +667,7 @@ void Menu(HWND h)
             LogWin32Failure(L"AppendMenuW");
     };
 
-    if (g_shutdownRequested)
+    if (g_shutdownState.IsRequested())
     {
         if (!GenerationWorkPending())
         {

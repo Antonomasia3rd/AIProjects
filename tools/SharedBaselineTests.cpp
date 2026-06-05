@@ -225,6 +225,13 @@ static void TestTrayBehavior()
 
 static void TestApplicationBaseline()
 {
+    aip::ResidentShutdownState shutdown;
+    Check(!shutdown.IsRequested() && !shutdown.IsWorkComplete(), "resident shutdown state starts idle");
+    Check(shutdown.Request() && !shutdown.Request() && shutdown.IsRequested(), "resident shutdown request is idempotent");
+    Check(shutdown.Cancel() && !shutdown.IsRequested(), "resident shutdown request can be cancelled");
+    shutdown.MarkWorkComplete();
+    Check(shutdown.IsWorkComplete(), "resident shutdown state records worker completion");
+
     aip::InstanceIdentity identity = aip::BuildInstanceIdentity(
         L"DesktopStub",
         L"DesktopStub.RestoreRunningInstance",

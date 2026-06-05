@@ -19,6 +19,7 @@
 #include <ctime>
 #include <deque>
 #include <exception>
+#include <functional>
 #include <initializer_list>
 #include <iomanip>
 #include <iostream>
@@ -44,6 +45,8 @@ static constexpr const wchar_t* APP_DISPLAY_NAME = L"DiscordRPC";
 static constexpr const wchar_t* WINDOW_CLASS_NAME = L"DiscordRPCTrayWnd";
 static constexpr UINT WM_DRPC_TRAY = WM_APP + 61;
 static constexpr UINT WM_DRPC_NOTIFY = WM_APP + 62;
+static constexpr UINT WM_DRPC_REQUEST_SHUTDOWN = WM_APP + 63;
+static constexpr UINT WM_DRPC_WORKER_FINISHED = WM_APP + 64;
 
 static HINSTANCE g_hInst = nullptr;
 static std::wstring g_exePath;
@@ -58,6 +61,7 @@ static std::wstring g_instanceWindowTitle;
 static UINT g_singleInstanceMessage = 0;
 static UINT g_taskbarCreatedMessage = 0;
 static HANDLE g_singleInstanceMutex = nullptr;
+static std::atomic<HWND> g_runtimeWindow(nullptr);
 
 static std::atomic<bool> g_stopRequested(false);
 static std::atomic<bool> g_reloadRequested(false);

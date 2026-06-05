@@ -1,8 +1,15 @@
 class DiscordIpcClient
 {
 public:
-    DiscordIpcClient(std::wstring clientId, bool verbose, IpcOptions options)
-        : clientId_(std::move(clientId)), verbose_(verbose), options_(options)
+    DiscordIpcClient(
+        std::wstring clientId,
+        bool verbose,
+        IpcOptions options,
+        std::function<bool()> cancellationRequested)
+        : clientId_(std::move(clientId)),
+          verbose_(verbose),
+          options_(options),
+          cancellationRequested_(std::move(cancellationRequested))
     {
     }
 
@@ -27,9 +34,11 @@ public:
         std::wstring lastError;
         for (int i = 0; i < 10; ++i)
         {
+            ThrowIfCancellationRequested();
             std::wstring pipeName = L"\\\\.\\pipe\\discord-ipc-" + std::to_wstring(i);
             if (!WaitNamedPipeW(pipeName.c_str(), static_cast<DWORD>(options_.connectTimeoutMs)))
             {
+                ThrowIfCancellationRequested();
                 DWORD err = GetLastError();
                 if (err != ERROR_FILE_NOT_FOUND && err != ERROR_SEM_TIMEOUT)
                 {
@@ -131,6 +140,7 @@ private:
     std::wstring clientId_;
     bool verbose_ = false;
     IpcOptions options_;
+    std::function<bool()> cancellationRequested_;
 
     static void ThrowLastError(const char* action, DWORD error)
     {
@@ -138,23 +148,59 @@ private:
         throw std::runtime_error(WideToUtf8(message));
     }
 
-    static DWORD WaitForOverlapped(HANDLE handle, OVERLAPPED& overlapped, DWORD timeoutMs, const char* action)
+    bool IsCancellationRequested() const
     {
-        DWORD wait = WaitForSingleObject(overlapped.hEvent, timeoutMs);
-        if (wait == WAIT_TIMEOUT)
-        {
-            CancelIoEx(handle, &overlapped);
+        return cancellationRequested_ && cancellationRequested_();
+    }
 
-            // The OVERLAPPED object and event are stack-local in callers.
-            // After cancellation, wait for the I/O completion to be delivered before
-            // returning so Windows cannot complete against invalid stack memory.
-            DWORD cancelledTransferred = 0;
-            GetOverlappedResult(handle, &overlapped, &cancelledTransferred, TRUE);
-            throw std::runtime_error(std::string(action) + " timed out.");
-        }
-        if (wait != WAIT_OBJECT_0)
+    void ThrowIfCancellationRequested() const
+    {
+        if (IsCancellationRequested())
         {
-            ThrowLastError(action, GetLastError());
+            throw std::runtime_error("Discord IPC operation cancelled.");
+        }
+    }
+
+    static void CancelPendingIo(HANDLE handle, OVERLAPPED& overlapped)
+    {
+        CancelIoEx(handle, &overlapped);
+
+        // The OVERLAPPED object and event are stack-local in callers. Wait for
+        // cancellation completion so Windows cannot access them after return.
+        DWORD cancelledTransferred = 0;
+        GetOverlappedResult(handle, &overlapped, &cancelledTransferred, TRUE);
+    }
+
+    DWORD WaitForOverlapped(HANDLE handle, OVERLAPPED& overlapped, DWORD timeoutMs, const char* action)
+    {
+        ULONGLONG deadline = GetTickCount64() + timeoutMs;
+        for (;;)
+        {
+            ThrowIfCancellationRequested();
+
+            ULONGLONG now = GetTickCount64();
+            DWORD remaining = now >= deadline
+                ? 0
+                : static_cast<DWORD>(std::min<ULONGLONG>(deadline - now, 50));
+            DWORD wait = WaitForSingleObject(overlapped.hEvent, remaining);
+            if (wait == WAIT_OBJECT_0)
+            {
+                break;
+            }
+            if (wait != WAIT_TIMEOUT)
+            {
+                ThrowLastError(action, GetLastError());
+            }
+            if (IsCancellationRequested())
+            {
+                CancelPendingIo(handle, overlapped);
+                throw std::runtime_error("Discord IPC operation cancelled.");
+            }
+            if (GetTickCount64() >= deadline)
+            {
+                CancelPendingIo(handle, overlapped);
+                throw std::runtime_error(std::string(action) + " timed out.");
+            }
         }
 
         DWORD transferred = 0;
