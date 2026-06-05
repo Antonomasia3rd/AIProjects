@@ -221,25 +221,37 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
     return exitCode;
 }
 
-static UINT RegisterSingleInstanceMessageForCurrentConfig()
+static HWND FindExistingInstanceWindow()
 {
-    std::wstring identity = MakeAbsolutePath(g_iniPath) + L"|" + g_exeBaseName;
-    return RegisterWindowMessageW((L"DiscordRPC.Stop." + StableHash(identity)).c_str());
+    ConfigureSingleInstanceIdentity();
+    for (int attempt = 0; attempt <= 20; ++attempt)
+    {
+        HWND existing = FindWindowW(WINDOW_CLASS_NAME, g_instanceWindowTitle.c_str());
+        if (existing != nullptr)
+        {
+            return existing;
+        }
+        if (attempt < 20)
+        {
+            Sleep(50);
+        }
+    }
+    return nullptr;
 }
 
 static bool SignalExistingInstance(WPARAM request)
 {
-    UINT msg = RegisterSingleInstanceMessageForCurrentConfig();
-    if (msg != 0)
+    HWND existing = FindExistingInstanceWindow();
+    if (existing != nullptr && g_singleInstanceMessage != 0)
     {
-        return PostMessageW(HWND_BROADCAST, msg, request, 0) != FALSE;
+        return PostMessageW(existing, g_singleInstanceMessage, request, 0) != FALSE;
     }
     return false;
 }
 
-static void SignalExistingInstanceToExit()
+static bool SignalExistingInstanceToExit()
 {
-    SignalExistingInstance(DRPC_INSTANCE_EXIT);
+    return SignalExistingInstance(DRPC_INSTANCE_EXIT);
 }
 
 static bool ShouldReloadExistingInstance(const AppOptions& options)
@@ -247,13 +259,14 @@ static bool ShouldReloadExistingInstance(const AppOptions& options)
     return options.reloadExistingInstance || !options.settings.empty() || options.protectToken;
 }
 
-static int RunWithTray(const AppOptions& options)
+static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
 {
     RuntimeContext ctx;
-    HWND hwnd = CreateTrayWindow(&ctx);
+    ctx.trayEnabled = trayEnabled;
+    HWND hwnd = CreateRuntimeWindow(&ctx);
     if (hwnd == nullptr)
     {
-        LogError(L"Could not create DiscordRPC tray window: " + GetLastErrorText(GetLastError()));
+        LogError(L"Could not create DiscordRPC control window: " + GetLastErrorText(GetLastError()));
         return static_cast<int>(RunPresenceLoop(options.once, nullptr));
     }
 
@@ -281,20 +294,11 @@ static int RunWithTray(const AppOptions& options)
     return static_cast<int>(ctx.workerExitCode);
 }
 
-static int RunWithoutTray(const AppOptions& options)
-{
-    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
-    DWORD code = RunPresenceLoop(options.once, nullptr);
-    SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
-    return static_cast<int>(code);
-}
-
 static int RunApplication(const AppOptions& options)
 {
     if (options.requestExit)
     {
-        SignalExistingInstanceToExit();
-        return 0;
+        return SignalExistingInstanceToExit() ? 0 : 2;
     }
 
     if (!options.once && !AcquireSingleInstance())
@@ -311,7 +315,7 @@ static int RunApplication(const AppOptions& options)
 
         if (g_singleInstanceMessage != 0)
         {
-            PostMessageW(HWND_BROADCAST, g_singleInstanceMessage, DRPC_INSTANCE_SHOW, 0);
+            SignalExistingInstance(DRPC_INSTANCE_SHOW);
         }
 
         PrintLine(GetUiString(L"already_running", L"DiscordRPC is already running for this config."), true);
@@ -320,7 +324,9 @@ static int RunApplication(const AppOptions& options)
     }
 
     bool trayEnabled = !options.once && !options.forceNoTray && (options.forceTray || IniReadB(L"app", L"show_tray", true));
-    int exitCode = trayEnabled ? RunWithTray(options) : RunWithoutTray(options);
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+    int exitCode = RunWithControlWindow(options, trayEnabled);
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
     ReleaseSingleInstance();
     return exitCode;
 }

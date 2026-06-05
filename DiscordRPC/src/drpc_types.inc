@@ -99,6 +99,7 @@ struct RuntimeContext
     HWND hwnd = nullptr;
     NOTIFYICONDATAW nid = {};
     bool trayCreated = false;
+    bool trayEnabled = false;
     std::thread worker;
     DWORD workerExitCode = 0;
 };
