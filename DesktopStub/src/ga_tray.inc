@@ -170,6 +170,13 @@ enum {
     ID_A1=2001, ID_A2, ID_A3, ID_A4, ID_A5, ID_A6, ID_A7, ID_A8
 };
 
+static constexpr const wchar_t* kAssetMenuKeys[] = {
+    L"StoreLogo", L"MediumTile", L"Square44x44Logo", L"Square30x30Logo",
+    L"SmallTile", L"WideTile", L"LargeTile", L"SplashScreen"
+};
+
+static void DispatchTrayCommand(HWND h, UINT cmd);
+
 static int NextPresetValue(int current, const int* values, int count)
 {
     if (!values || count <= 0)
@@ -966,12 +973,8 @@ void Menu(HWND h)
     HMENU assetsMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Assets)");
     addTo(assetsMenu, ID_GENERATE_DESKTOP_ICON_DISABLED, g_ui.generateDesktopIconForDisabledEntries.c_str(), g_generateDesktopIconForDisabledEntries);
     addTo(assetsMenu, ID_DELETE_DISABLED_ASSETS, g_ui.deleteDisabledAssets.c_str(), g_deleteDisabledAssets, !g_generateDesktopIconForDisabledEntries);
-    const wchar_t* keys[] = {
-        L"StoreLogo", L"MediumTile", L"Square44x44Logo", L"Square30x30Logo",
-        L"SmallTile", L"WideTile", L"LargeTile", L"SplashScreen"
-    };
-    for (int i = 0; i < static_cast<int>(_countof(keys)); i++)
-        addTo(assetsMenu, static_cast<UINT>(ID_A1 + i), keys[i], IniReadI(L"Assets", keys[i], 0) != 0);
+    for (int i = 0; i < static_cast<int>(_countof(kAssetMenuKeys)); i++)
+        addTo(assetsMenu, static_cast<UINT>(ID_A1 + i), kAssetMenuKeys[i], IniReadI(L"Assets", kAssetMenuKeys[i], 0) != 0);
     endNestedMenu(appearanceAssetsMenu, assetsMenu, g_ui.assetsTitle);
 
     HMENU scaleMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(DPI scales)");
@@ -1234,6 +1237,18 @@ void Menu(HWND h)
     UINT cmd = static_cast<UINT>(TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,h,nullptr));
     DestroyMenu(m);
     AfterTrayPopupClosed(h);
+
+    DispatchTrayCommand(h, cmd);
+}
+
+static void DispatchTrayCommand(HWND h, UINT cmd)
+{
+    ManifestDisplayInfo manifestInfo;
+    if (cmd >= ID_MANIFEST_EDIT_IDENTITY_NAME &&
+        cmd <= ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_NAME)
+    {
+        manifestInfo = CurrentManifestDisplayInfo();
+    }
 
     switch(cmd)
     {
@@ -2213,9 +2228,9 @@ void Menu(HWND h)
     break;
 
     default:
-        if (cmd >= ID_A1 && cmd < ID_A1 + _countof(keys)){
+        if (cmd >= ID_A1 && cmd < ID_A1 + _countof(kAssetMenuKeys)){
             int i = static_cast<int>(cmd) - ID_A1;
-            const wchar_t* k = keys[i];
+            const wchar_t* k = kAssetMenuKeys[i];
             bool nv = IniReadI(L"Assets",k,0) == 0;
             IniWrite(L"Assets",k,nv?L"1":L"0");
             Log(g_ui.assetToggleState.c_str(), k, StateOn(nv));
