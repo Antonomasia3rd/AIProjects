@@ -977,8 +977,45 @@ public:
         return LoadIniText(path_, text);
     }
 
+    template <typename Mutator>
+    bool MutateFresh(Mutator&& mutator) const
+    {
+        IniWriteMutexGuard guard(path_);
+        if (!guard.IsLocked())
+        {
+            SetLastError(guard.Error());
+            return false;
+        }
+
+        std::wstring text;
+        if (!LoadIniText(path_, text))
+        {
+            return false;
+        }
+        if (text.empty() && !header_.empty())
+        {
+            text = header_;
+        }
+        SetLastError(ERROR_SUCCESS);
+        if (!std::forward<Mutator>(mutator)(text))
+        {
+            if (GetLastError() == ERROR_SUCCESS)
+            {
+                SetLastError(ERROR_INVALID_DATA);
+            }
+            return false;
+        }
+        return WriteTextFileUtf8Bom(path_, text);
+    }
+
     bool WriteFreshText(const std::wstring& text) const
     {
+        IniWriteMutexGuard guard(path_);
+        if (!guard.IsLocked())
+        {
+            SetLastError(guard.Error());
+            return false;
+        }
         return WriteTextFileUtf8Bom(path_, text);
     }
 
