@@ -1,9 +1,4 @@
-struct CommandLineSetting
-{
-    std::wstring section;
-    std::wstring key;
-    std::wstring value;
-};
+using CommandLineSetting = aip::IniSetting;
 
 struct AppOptions
 {
