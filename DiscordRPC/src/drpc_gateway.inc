@@ -288,8 +288,17 @@ struct WinHttpHandle
 class DiscordGatewayClient
 {
 public:
-    DiscordGatewayClient(std::wstring token, std::wstring clientId, bool verbose, GatewayOptions options)
-        : token_(std::move(token)), clientId_(std::move(clientId)), verbose_(verbose), options_(std::move(options))
+    DiscordGatewayClient(
+        std::wstring token,
+        std::wstring clientId,
+        bool verbose,
+        GatewayOptions options,
+        std::function<bool()> cancellationRequested)
+        : token_(std::move(token)),
+          clientId_(std::move(clientId)),
+          verbose_(verbose),
+          options_(std::move(options)),
+          cancellationRequested_(std::move(cancellationRequested))
     {
     }
 
@@ -385,10 +394,17 @@ public:
         connected_ = true;
         reader_ = std::thread([this]() { ReadLoop(); });
 
-        if (!WaitFor([this]() { return heartbeatIntervalMs_.load() > 0 || !connected_.load(); }, options_.helloTimeoutMs))
+        if (!WaitFor([this]() {
+                return heartbeatIntervalMs_.load() > 0 || !connected_.load() || CancellationRequested();
+            }, options_.helloTimeoutMs))
         {
             Close();
             throw std::runtime_error("Did not receive Gateway HELLO before timeout.");
+        }
+        if (CancellationRequested())
+        {
+            Close();
+            throw std::runtime_error("Gateway connection cancelled.");
         }
         if (!connected_.load())
         {
@@ -399,10 +415,17 @@ public:
         heartbeat_ = std::thread([this]() { HeartbeatLoop(); });
         Identify(initialActivityJson, initialStatus);
 
-        if (!WaitFor([this]() { return identified_.load() || !GetLastConnectError().empty() || !connected_.load(); }, options_.readyTimeoutMs))
+        if (!WaitFor([this]() {
+                return identified_.load() || !GetLastConnectError().empty() || !connected_.load() || CancellationRequested();
+            }, options_.readyTimeoutMs))
         {
             Close();
             throw std::runtime_error("Did not receive Gateway READY before timeout.");
+        }
+        if (CancellationRequested())
+        {
+            Close();
+            throw std::runtime_error("Gateway connection cancelled.");
         }
 
         std::wstring authError = GetLastConnectError();
@@ -531,6 +554,7 @@ private:
     std::wstring clientId_;
     bool verbose_ = false;
     GatewayOptions options_;
+    std::function<bool()> cancellationRequested_;
     mutable std::mutex sendMutex_;
     std::mutex errorMutex_;
     std::thread reader_;
@@ -557,6 +581,11 @@ private:
             Sleep(50);
         }
         return true;
+    }
+
+    bool CancellationRequested() const
+    {
+        return cancellationRequested_ && cancellationRequested_();
     }
 
     static void ThrowWinHttp(const char* action)

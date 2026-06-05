@@ -1808,7 +1808,7 @@ static std::vector<std::wstring> EnumerateSiblingWallpaperCandidates(
 static void RunGeneratedAssetPrecache(const std::wstring& currentWallpaper)
 {
     ReloadRuntimeSettingsFromIni();
-    if (!GeneratedAssetPrecacheEnabled() || g_shutdownRequested)
+    if (!GeneratedAssetPrecacheEnabled() || g_shutdownState.IsRequested())
         return;
 
     int maxFiles = GeneratedAssetPrecacheMaxFiles();
@@ -1826,7 +1826,7 @@ static void RunGeneratedAssetPrecache(const std::wstring& currentWallpaper)
 
     for (const auto& candidate : candidates)
     {
-        if (g_shutdownRequested || GenerationWorkPending())
+        if (g_shutdownState.IsRequested() || GenerationWorkPending())
             return;
 
         RenderWallpaperToGeneratedAssetCache(exeDir, manifestInfo, scales, liveTileUpdateMode, candidate);
@@ -1873,7 +1873,7 @@ static void GeneratedAssetPrecacheThread()
 
 static void QueueGeneratedAssetPrecache(const std::wstring& wallpaper)
 {
-    if (!GeneratedAssetPrecacheEnabled() || wallpaper.empty() || g_shutdownRequested)
+    if (!GeneratedAssetPrecacheEnabled() || wallpaper.empty() || g_shutdownState.IsRequested())
         return;
 
     bool startWorker = false;
@@ -2528,7 +2528,7 @@ static void NotifyShutdownDelayed()
 
 static void MaybeCompleteRequestedShutdown()
 {
-    if (g_shutdownRequested && !GenerationWorkPending() && g_hwnd)
+    if (g_shutdownState.IsRequested() && !GenerationWorkPending() && g_hwnd)
     {
         if (!PostMessageW(g_hwnd, WM_APP_SHUTDOWN_READY, 0, 0))
             LogWin32Failure(L"PostMessageW(WM_APP_SHUTDOWN_READY)");
@@ -2560,10 +2560,10 @@ static bool SetShutdownNoticeTimer(HWND h, int delayMs, const wchar_t* operation
 
 static void RequestGracefulShutdown(HWND h)
 {
-    if (g_shutdownRequested)
+    if (g_shutdownState.IsRequested())
         return;
 
-    g_shutdownRequested = true;
+    g_shutdownState.Request();
     WakePollThread();
     LogText(g_ui.shutdownRequested);
 
@@ -2580,10 +2580,10 @@ static void RequestGracefulShutdown(HWND h)
 
 static void CancelRequestedShutdown(HWND h)
 {
-    if (!g_shutdownRequested)
+    if (!g_shutdownState.IsRequested())
         return;
 
-    g_shutdownRequested = false;
+    g_shutdownState.Cancel();
     WakePollThread();
     if (h)
         KillTimer(h, SHUTDOWN_NOTICE_TIMER_ID);
@@ -2652,7 +2652,7 @@ static void GenerationWorkerThread()
 
 static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring reason)
 {
-    if (g_shutdownRequested)
+    if (g_shutdownState.IsRequested())
         return 0;
 
     bool startWorker = false;
@@ -2665,7 +2665,7 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
     unsigned long long droppedRequestId = 0;
     {
         std::lock_guard<std::mutex> lk(g_generationQueueMutex);
-        if (g_generationWorkerStop || g_shutdownRequested)
+        if (g_generationWorkerStop || g_shutdownState.IsRequested())
             return 0;
 
         if (g_generationQueued && g_generationQueuedId != 0)
@@ -2831,7 +2831,7 @@ void PollThread()
             }
         }
 
-        if (g_shutdownRequested)
+        if (g_shutdownState.IsRequested())
         {
             PollSleepFor(milliseconds(poll));
             continue;
@@ -2876,7 +2876,7 @@ void PollThread()
             dpiScaleChanged)
         {
             PollSleepFor(milliseconds(confirm));
-            if (!g_running || g_shutdownRequested)
+            if (!g_running || g_shutdownState.IsRequested())
                 continue;
 
             std::wstring cur2 = GetWallpaper();

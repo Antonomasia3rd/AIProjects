@@ -7,8 +7,18 @@ static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType)
     case CTRL_CLOSE_EVENT:
     case CTRL_LOGOFF_EVENT:
     case CTRL_SHUTDOWN_EVENT:
-        g_stopRequested = true;
+    {
+        HWND hwnd = g_runtimeWindow.load();
+        if (hwnd != nullptr)
+        {
+            PostMessageW(hwnd, WM_DRPC_REQUEST_SHUTDOWN, ctrlType, 0);
+        }
+        else
+        {
+            g_stopRequested = true;
+        }
         return TRUE;
+    }
     default:
         return FALSE;
     }
@@ -28,6 +38,11 @@ static bool SleepInterruptible(int milliseconds)
         remaining -= slice;
     }
     return !g_stopRequested.load();
+}
+
+static bool BackendControlRequested()
+{
+    return g_stopRequested.load() || g_reloadRequested.load() || g_refreshRequested.load();
 }
 
 static void Notify(RuntimeContext* ctx, const wchar_t* stringKey, const wchar_t* fallback, DWORD icon, const wchar_t* flagKey)
@@ -62,7 +77,7 @@ static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::uniqu
         gateway.reset();
         if (!ipc)
         {
-            ipc.reset(new DiscordIpcClient(clientId, verbose, LoadIpcOptions()));
+            ipc.reset(new DiscordIpcClient(clientId, verbose, LoadIpcOptions(), BackendControlRequested));
         }
 
         if (!ipc->IsConnected())
@@ -90,7 +105,7 @@ static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::uniqu
         std::wstring status = NormalizeStatus(IniReadS(L"general", L"status", L"online"));
         if (!gateway)
         {
-            gateway.reset(new DiscordGatewayClient(token, clientId, verbose, LoadGatewayOptions()));
+            gateway.reset(new DiscordGatewayClient(token, clientId, verbose, LoadGatewayOptions(), BackendControlRequested));
         }
 
         if (!gateway->IsConnected())
@@ -135,6 +150,15 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
 
     LogInfo(L"Starting DiscordRPC C++.");
     LogInfo(L"Config: " + MakeAbsolutePath(g_iniPath));
+    if (IniReadB(L"state", L"force_shutdown_pending_cleanup", false))
+    {
+        std::wstring warning = GetUiString(
+            L"previous_force_shutdown_warning",
+            L"The previous run was force-closed while Discord cleanup was pending. Presence clearing or the Gateway close handshake may not have completed.");
+        LogError(warning);
+        Notify(ctx, L"previous_force_shutdown_warning", warning.c_str(), NIIF_WARNING, L"notify_on_failure");
+        IniWrite(L"state", L"force_shutdown_pending_cleanup", L"false");
+    }
 
     try
     {
@@ -175,6 +199,16 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
             }
             catch (const std::exception& ex)
             {
+                if (BackendControlRequested())
+                {
+                    ipc.reset();
+                    gateway.reset();
+                    if (g_stopRequested.load())
+                    {
+                        break;
+                    }
+                    continue;
+                }
                 exitCode = 1;
                 std::wstring message = Utf8ToWide(ex.what());
                 LogError(L"DiscordRPC update failed: " + message);
@@ -259,15 +293,14 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
         }
         return 1;
     }
+    g_runtimeWindow = hwnd;
 
     try
     {
         ctx.worker = std::thread([&ctx, &options]() {
             ctx.workerExitCode = RunPresenceLoop(options.once, &ctx);
-            if (options.once || g_stopRequested.load())
-            {
-                PostMessageW(ctx.hwnd, WM_CLOSE, 0, 0);
-            }
+            ctx.shutdown.MarkWorkComplete();
+            PostMessageW(ctx.hwnd, WM_DRPC_WORKER_FINISHED, 0, 0);
         });
     }
     catch (const std::exception& ex)
@@ -291,6 +324,7 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
     }
 
     g_stopRequested = true;
+    g_runtimeWindow = nullptr;
     if (ctx.worker.joinable())
     {
         ctx.worker.join();

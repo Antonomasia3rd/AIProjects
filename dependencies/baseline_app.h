@@ -10,6 +10,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <cwctype>
 #include <string>
 #include <utility>
@@ -22,6 +23,40 @@ struct InstanceIdentity
     std::wstring mutexName;
     std::wstring messageName;
     std::wstring windowTitle;
+};
+
+class ResidentShutdownState
+{
+public:
+    bool Request()
+    {
+        bool expected = false;
+        return requested_.compare_exchange_strong(expected, true);
+    }
+
+    bool Cancel()
+    {
+        return requested_.exchange(false);
+    }
+
+    bool IsRequested() const
+    {
+        return requested_.load();
+    }
+
+    void MarkWorkComplete()
+    {
+        workComplete_ = true;
+    }
+
+    bool IsWorkComplete() const
+    {
+        return workComplete_.load();
+    }
+
+private:
+    std::atomic<bool> requested_{ false };
+    std::atomic<bool> workComplete_{ false };
 };
 
 inline InstanceIdentity BuildInstanceIdentity(

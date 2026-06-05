@@ -108,6 +108,7 @@ struct RuntimeContext
     bool trayCreated = false;
     bool trayEnabled = false;
     bool acceptingNotifications = true;
+    aip::ResidentShutdownState shutdown;
     std::mutex notificationMutex;
     std::deque<TrayNotification> pendingNotifications;
     std::thread worker;

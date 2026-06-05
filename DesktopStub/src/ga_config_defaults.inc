@@ -56,7 +56,7 @@ static std::mutex g_generationQueueMutex;
 static std::condition_variable g_generationQueueCv;
 static std::thread g_generationWorker;
 static std::atomic<bool> g_generationActive(false);
-static std::atomic<bool> g_shutdownRequested(false);
+static aip::ResidentShutdownState g_shutdownState;
 static std::mutex g_generationStateMutex;
 static std::wstring g_generationActiveReason;
 static bool g_generationWorkerStarted = false;
