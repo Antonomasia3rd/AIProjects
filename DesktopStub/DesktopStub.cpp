@@ -112,11 +112,7 @@ static UINT g_singleInstanceMessage = 0;
 static UINT g_taskbarCreatedMessage = 0;
 static HANDLE g_singleInstanceMutex = nullptr;
 
-#include "..\dependencies\baseline_app.h"
-#include "..\dependencies\core.inc"
-#include "..\dependencies\config_ini.inc"
-#include "..\dependencies\command_line.inc"
-#include "..\dependencies\tray.inc"
+#include "..\dependencies\desktop_app_baseline.h"
 #include "src/ga_core.inc"
 #if __has_include("DesktopStubVersionDefines.inc")
 #include "DesktopStubVersionDefines.inc"
