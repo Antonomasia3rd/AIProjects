@@ -70,7 +70,7 @@ Useful command-line paths:
 - `[censor_map]` supports `full_replace`, `word_replace`, and `pattern_replace` rules for the foreground title token.
 - `[ipc] connect_timeout_ms` and `response_timeout_ms` tune Discord IPC waits.
 - `[gateway]` controls websocket identity metadata, connect/HELLO/READY/send/close timeouts, and public asset-name lookup.
-- Most tray/menu/notification labels are configurable in `[strings]`. `--help` uses built-in text so it stays side-effect-free and never creates or repairs the INI.
+- Most tray/menu/notification labels are configurable in `[strings]`. The tray layout follows `[app] show_menu_as_dropdown`, and `--help` reads `[CommandLineHelp] Template` from an existing INI without creating or repairing the file.
 
 ## Source Layout
 

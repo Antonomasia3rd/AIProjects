@@ -97,6 +97,12 @@ int wmain()
         return 2;
     }
 
+    if (!options.configPath.empty())
+    {
+        g_iniPath = MakeAbsolutePath(options.configPath);
+        g_defaultLogPath = PathJoin(GetDirectoryName(g_iniPath), GetFileBaseName(g_iniPath) + L".log");
+    }
+
     if (options.showHelp)
     {
         // Keep --help side-effect-free: do not create, read, or normalize the INI.
@@ -109,12 +115,6 @@ int wmain()
         // Keep --version side-effect-free as well.
         PrintLine(L"DiscordRPC C++");
         return 0;
-    }
-
-    if (!options.configPath.empty())
-    {
-        g_iniPath = MakeAbsolutePath(options.configPath);
-        g_defaultLogPath = PathJoin(GetDirectoryName(g_iniPath), GetFileBaseName(g_iniPath) + L".log");
     }
 
     if (options.requestExit)
