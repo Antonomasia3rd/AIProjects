@@ -253,16 +253,35 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
     if (hwnd == nullptr)
     {
         LogError(L"Could not create DiscordRPC control window: " + GetLastErrorText(GetLastError()));
-        return static_cast<int>(RunPresenceLoop(options.once, nullptr));
+        if (options.once)
+        {
+            return static_cast<int>(RunPresenceLoop(true, nullptr));
+        }
+        return 1;
     }
 
-    ctx.worker = std::thread([&ctx, &options]() {
-        ctx.workerExitCode = RunPresenceLoop(options.once, &ctx);
-        if (options.once || g_stopRequested.load())
-        {
-            PostMessageW(ctx.hwnd, WM_CLOSE, 0, 0);
-        }
-    });
+    try
+    {
+        ctx.worker = std::thread([&ctx, &options]() {
+            ctx.workerExitCode = RunPresenceLoop(options.once, &ctx);
+            if (options.once || g_stopRequested.load())
+            {
+                PostMessageW(ctx.hwnd, WM_CLOSE, 0, 0);
+            }
+        });
+    }
+    catch (const std::exception& ex)
+    {
+        LogError(L"Could not start DiscordRPC worker thread: " + Utf8ToWide(ex.what()));
+        DestroyWindow(hwnd);
+        return 1;
+    }
+    catch (...)
+    {
+        LogError(L"Could not start DiscordRPC worker thread.");
+        DestroyWindow(hwnd);
+        return 1;
+    }
 
     MSG msg = {};
     while (GetMessageW(&msg, nullptr, 0, 0) > 0)
