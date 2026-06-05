@@ -55,6 +55,7 @@ static std::wstring g_effectiveLogPath;
 static std::wstring g_singleInstanceMessageName;
 static std::wstring g_instanceWindowTitle;
 static UINT g_singleInstanceMessage = 0;
+static UINT g_taskbarCreatedMessage = 0;
 static HANDLE g_singleInstanceMutex = nullptr;
 
 static std::atomic<bool> g_stopRequested(false);

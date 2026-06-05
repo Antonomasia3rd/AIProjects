@@ -263,6 +263,16 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         return 0;
     }
 
+    if (g_taskbarCreatedMessage != 0 && msg == g_taskbarCreatedMessage)
+    {
+        if (ctx != nullptr && ctx->trayEnabled)
+        {
+            ctx->trayCreated = false;
+            CreateTrayIcon(ctx);
+        }
+        return 0;
+    }
+
     switch (msg)
     {
     case WM_CREATE:

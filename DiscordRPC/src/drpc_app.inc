@@ -263,6 +263,7 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
 {
     RuntimeContext ctx;
     ctx.trayEnabled = trayEnabled;
+    g_taskbarCreatedMessage = RegisterWindowMessageW(L"TaskbarCreated");
     HWND hwnd = CreateRuntimeWindow(&ctx);
     if (hwnd == nullptr)
     {
