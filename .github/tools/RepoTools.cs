@@ -234,6 +234,7 @@ static class RepoTools
         string root = RepositoryRoot(args);
         var projects = LoadProjectMap(root);
         string workflow = ReadAll(Path.Combine(root, ".github", "workflows", "build-windows.yml"));
+        string repoTools = ReadAll(Path.Combine(root, ".github", "tools", "RepoTools.cs"));
         foreach (var p in projects)
         {
             if (!Regex.IsMatch(workflow, @"(?m)^\s{10}- " + Regex.Escape(p.key) + @"\s*$"))
@@ -247,6 +248,18 @@ static class RepoTools
             if (skip.Contains("/skip:" + p.skipKey, StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Project selector would skip selected project: " + p.key);
         }
+
+        if (Regex.IsMatch(repoTools, @"Shared workflow/repository files changed; using a full build\.""\);\s*forceAll\s*=\s*true;\s*releaseSelected\s*=\s*projects\.ToList\(\);", RegexOptions.Singleline))
+            throw new InvalidOperationException("Shared changes must not force every project into the release list.");
+
+        var commandLineConsumers = ProjectsUsingChangedDependencies(root, projects, new List<string> { "dependencies/command_line.inc" })
+            .Select(p => p.key)
+            .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var expectedConsumers = new[] { "DesktopStub", "DiscordRPC" };
+        if (!commandLineConsumers.SequenceEqual(expectedConsumers.OrderBy(k => k, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Dependency consumer detection for dependencies/command_line.inc returned " + String.Join(", ", commandLineConsumers) + ".");
+
         Console.WriteLine("Workflow project selector validation passed (" + projects.Count + " projects plus All).");
         return 0;
     }
@@ -490,7 +503,6 @@ static class RepoTools
                 {
                     Console.WriteLine("Shared workflow/repository files changed; using a full build.");
                     forceAll = true;
-                    releaseSelected = projects.ToList();
                 }
             }
 
@@ -578,6 +590,7 @@ static class RepoTools
     static List<Project> ProjectsNeedingRelease(string root, string head, List<Project> projects, List<string> currentChanged)
     {
         var currentTouched = new HashSet<string>(ProjectsTouchedBy(currentChanged, projects).Select(p => p.key), StringComparer.OrdinalIgnoreCase);
+        var currentDependencyConsumers = new HashSet<string>(ProjectsUsingChangedDependencies(root, projects, currentChanged).Select(p => p.key), StringComparer.OrdinalIgnoreCase);
         var selected = new List<Project>();
         foreach (var p in projects)
         {
@@ -587,19 +600,60 @@ static class RepoTools
                 .FirstOrDefault();
             if (latestTag == null)
             {
-                if (currentTouched.Contains(p.key))
+                if (currentTouched.Contains(p.key) || currentDependencyConsumers.Contains(p.key))
                     selected.Add(p);
                 continue;
             }
 
             string files = RunCapture("git", "diff --name-only " + QuoteArg(latestTag) + " " + QuoteArg(head), root, 120000).Output;
+            var changedSinceLatestRelease = files.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
             string prefix = p.folder.Replace('\\', '/') + "/";
-            bool touchedSinceLatestRelease = files.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            bool touchedSinceLatestRelease = changedSinceLatestRelease
                 .Any(c => c.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-            if (touchedSinceLatestRelease)
+            bool dependencyTouchedSinceLatestRelease = ProjectUsesAnyChangedDependency(root, p, changedSinceLatestRelease);
+            if (touchedSinceLatestRelease || dependencyTouchedSinceLatestRelease)
                 selected.Add(p);
         }
         return selected;
+    }
+
+    static List<Project> ProjectsUsingChangedDependencies(string root, List<Project> projects, List<string> changed)
+    {
+        return projects.Where(p => ProjectUsesAnyChangedDependency(root, p, changed)).ToList();
+    }
+
+    static bool ProjectUsesAnyChangedDependency(string root, Project project, List<string> changed)
+    {
+        var dependencies = changed
+            .Select(p => p.Replace('\\', '/'))
+            .Where(p => p.StartsWith("dependencies/", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (dependencies.Count == 0)
+            return false;
+
+        string projectRoot = Path.Combine(root, project.folder.Replace('/', Path.DirectorySeparatorChar));
+        if (!Directory.Exists(projectRoot))
+            return false;
+
+        foreach (string file in Directory.EnumerateFiles(projectRoot, "*", SearchOption.AllDirectories))
+        {
+            string ext = Path.GetExtension(file);
+            if (!new[] { ".cpp", ".c", ".h", ".hpp", ".inc", ".rc" }.Contains(ext, StringComparer.OrdinalIgnoreCase))
+                continue;
+
+            string text = ReadAll(file);
+            if (text.IndexOf("dependencies", StringComparison.OrdinalIgnoreCase) < 0)
+                continue;
+
+            foreach (string dependency in dependencies)
+            {
+                string name = Path.GetFileName(dependency);
+                if (!String.IsNullOrWhiteSpace(name) && text.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+        }
+        return false;
     }
 
     static IEnumerable<string> ProjectArtifactPathSpecs(Project p)
