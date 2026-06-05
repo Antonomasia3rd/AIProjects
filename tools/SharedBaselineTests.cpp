@@ -14,6 +14,7 @@
 #include <iostream>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -99,11 +100,9 @@ static void TestIniBehavior()
         CloseHandle(attributesHandle);
     }
 
-    std::wstring mutationText;
-    bool readFresh = store.ReadFreshText(mutationText);
-    bool mutated = readFresh &&
-        aip::WriteIniValueToText(mutationText, L"General", L"ResidentMutation", L"saved");
-    bool mutationWrite = mutated && store.WriteFreshText(mutationText);
+    bool mutationWrite = store.MutateFresh([](std::wstring& mutationText) {
+        return aip::WriteIniValueToText(mutationText, L"General", L"ResidentMutation", L"saved");
+    });
     std::wstring mutationResult;
     bool reread = store.ReadFreshText(mutationResult);
     Check(
@@ -114,6 +113,33 @@ static void TestIniBehavior()
             mutationResult.find(L"\"ExternalMarker\" = \"keep\"") != std::wstring::npos &&
             mutationResult.find(L"\"ResidentMutation\" = \"saved\"") != std::wstring::npos,
         "fresh INI mutation preserves external edits with unchanged timestamps");
+
+    bool firstMutation = false;
+    bool secondMutation = false;
+    std::thread first([&]() {
+        firstMutation = store.MutateFresh([](std::wstring& mutationText) {
+            Sleep(50);
+            return aip::WriteIniValueToText(mutationText, L"Concurrent", L"First", L"1");
+        });
+    });
+    std::thread second([&]() {
+        secondMutation = store.MutateFresh([](std::wstring& mutationText) {
+            Sleep(50);
+            return aip::WriteIniValueToText(mutationText, L"Concurrent", L"Second", L"2");
+        });
+    });
+    first.join();
+    second.join();
+
+    std::wstring concurrentResult;
+    bool concurrentReread = store.ReadFreshText(concurrentResult);
+    Check(
+        firstMutation &&
+            secondMutation &&
+            concurrentReread &&
+            concurrentResult.find(L"\"First\" = \"1\"") != std::wstring::npos &&
+            concurrentResult.find(L"\"Second\" = \"2\"") != std::wstring::npos,
+        "fresh INI mutation serializes concurrent read-modify-write transactions");
     DeleteFileW(path.c_str());
 }
 
