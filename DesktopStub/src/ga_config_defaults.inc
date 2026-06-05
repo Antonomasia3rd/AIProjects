@@ -989,7 +989,12 @@ static const StringDefault g_stringDefaults[] = {
 
 static void EnsureIniStringDefaults()
 {
-    std::lock_guard<std::mutex> writeLock(g_iniWriteMutex);
+    DesktopStubIniMutationGuard writeLock;
+    if (!writeLock.IsLocked())
+    {
+        QueueStartupWarning(L"[!] Failed to lock INI while applying string defaults (error " + std::to_wstring(GetLastError()) + L").");
+        return;
+    }
 
     std::wstring iniText;
     if (!ReadIniFileForMutation(iniText))
@@ -1093,7 +1098,9 @@ static std::wstring BuildInitialIniTemplate()
 
 static bool EnsureInitialIniTemplate()
 {
-    std::lock_guard<std::mutex> writeLock(g_iniWriteMutex);
+    DesktopStubIniMutationGuard writeLock;
+    if (!writeLock.IsLocked())
+        return false;
 
     std::vector<BYTE> bytes;
     DWORD attrs = GetFileAttributesW(g_iniPath.c_str());
@@ -1140,7 +1147,9 @@ static void UpgradeStringDefaultIfUnmodified(const wchar_t* key, const wchar_t* 
 
 static void RepairBrokenPowerShellOutputTruncatedDefault()
 {
-    std::lock_guard<std::mutex> writeLock(g_iniWriteMutex);
+    DesktopStubIniMutationGuard writeLock;
+    if (!writeLock.IsLocked())
+        return;
 
     std::wstring iniText;
     if (!ReadIniFileForMutation(iniText))
@@ -1213,7 +1222,9 @@ static void RepairBrokenPowerShellOutputTruncatedDefault()
 
 static void RemoveObsoleteManifestIniSettings()
 {
-    std::lock_guard<std::mutex> writeLock(g_iniWriteMutex);
+    DesktopStubIniMutationGuard writeLock;
+    if (!writeLock.IsLocked())
+        return;
 
     std::wstring iniText;
     if (!ReadIniFileForMutation(iniText))

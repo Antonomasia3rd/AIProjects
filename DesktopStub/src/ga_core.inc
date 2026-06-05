@@ -756,6 +756,27 @@ static std::vector<IniSectionData> g_iniCacheDoc;
 static std::atomic<int> g_iniCacheRefreshMs(250);
 static steady_clock::time_point g_iniCacheLastCheck{};
 
+class DesktopStubIniMutationGuard
+{
+public:
+    DesktopStubIniMutationGuard()
+        : processLock_(g_iniWriteMutex),
+          sharedLock_(g_iniPath)
+    {
+        if (!sharedLock_.IsLocked())
+            SetLastError(sharedLock_.Error());
+    }
+
+    bool IsLocked() const
+    {
+        return sharedLock_.IsLocked();
+    }
+
+private:
+    std::unique_lock<std::mutex> processLock_;
+    aip::IniWriteMutexGuard sharedLock_;
+};
+
 static bool FileTimeEquals(const FILETIME& a, const FILETIME& b)
 {
     return a.dwLowDateTime == b.dwLowDateTime && a.dwHighDateTime == b.dwHighDateTime;
@@ -943,7 +964,9 @@ static bool WriteIniValueToText(std::wstring& text, const wchar_t* s, const wcha
 
 static bool WriteIniValue(const wchar_t* s, const wchar_t* k, const wchar_t* v)
 {
-    std::lock_guard<std::mutex> writeLock(g_iniWriteMutex);
+    DesktopStubIniMutationGuard writeLock;
+    if (!writeLock.IsLocked())
+        return false;
 
     std::wstring text;
     if (!ReadIniFileForMutation(text))
