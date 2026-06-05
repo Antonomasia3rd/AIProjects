@@ -10,6 +10,13 @@ struct IniSetting
     std::wstring value;
 };
 
+enum class IniSetSpecError
+{
+    None,
+    MissingEquals,
+    InvalidName,
+    EmptySectionOrKey
+};
 
 inline bool IsOptionOrInlineValue(const std::wstring& arg, const wchar_t* option)
 {
@@ -41,15 +48,28 @@ inline bool TakeCommandLineValue(int argc, wchar_t** argv, int& i, const std::ws
         return false;
     }
 
-    value = argv[++i];
+    value = argv[++i] ? argv[i] : L"";
     return true;
 }
 
-inline bool ParseIniSetSpec(const std::wstring& spec, IniSetting& setting, std::wstring& error)
+inline bool ParseIniSetSpec(
+    const std::wstring& spec,
+    IniSetting& setting,
+    std::wstring& error,
+    IniSetSpecError* errorKind = nullptr)
 {
+    if (errorKind)
+    {
+        *errorKind = IniSetSpecError::None;
+    }
+
     size_t equals = spec.find(L'=');
     if (equals == std::wstring::npos)
     {
+        if (errorKind)
+        {
+            *errorKind = IniSetSpecError::MissingEquals;
+        }
         error = L"--set expects Section.Key=Value.";
         return false;
     }
@@ -58,6 +78,10 @@ inline bool ParseIniSetSpec(const std::wstring& spec, IniSetting& setting, std::
     size_t dot = name.rfind(L'.');
     if (dot == std::wstring::npos || dot == 0 || dot + 1 >= name.size())
     {
+        if (errorKind)
+        {
+            *errorKind = IniSetSpecError::InvalidName;
+        }
         error = L"--set expects Section.Key=Value.";
         return false;
     }
@@ -67,6 +91,10 @@ inline bool ParseIniSetSpec(const std::wstring& spec, IniSetting& setting, std::
     setting.value = spec.substr(equals + 1);
     if (setting.section.empty() || setting.key.empty())
     {
+        if (errorKind)
+        {
+            *errorKind = IniSetSpecError::EmptySectionOrKey;
+        }
         error = L"--set expects Section.Key=Value.";
         return false;
     }

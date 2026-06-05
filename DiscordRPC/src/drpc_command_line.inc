@@ -9,16 +9,7 @@ static void AddSetting(AppOptions& options, const std::wstring& section, const s
 
 static bool ParseSetSpec(const std::wstring& spec, CommandLineSetting& setting, std::wstring& error)
 {
-    aip::IniSetting parsed;
-    if (!aip::ParseIniSetSpec(spec, parsed, error))
-    {
-        return false;
-    }
-
-    setting.section = parsed.section;
-    setting.key = parsed.key;
-    setting.value = parsed.value;
-    return true;
+    return aip::ParseIniSetSpec(spec, setting, error);
 }
 
 static bool IsSensitiveCommandLineSetting(const std::wstring& section, const std::wstring& key)

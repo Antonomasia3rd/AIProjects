@@ -1,12 +1,7 @@
 ﻿// -----------------------------------------------------------------------------
 // Command-line parsing and persisted INI setting changes
 // -----------------------------------------------------------------------------
-struct CommandLineIniSetting
-{
-    std::wstring section;
-    std::wstring key;
-    std::wstring value;
-};
+using CommandLineIniSetting = aip::IniSetting;
 
 struct CommandLineOptions
 {
@@ -209,19 +204,6 @@ static std::wstring QuoteCommandLineArg(const std::wstring& arg)
     return out;
 }
 
-static bool CommandLineOptionHasInlineValue(const std::wstring& arg, const wchar_t* name, std::wstring& value)
-{
-    std::wstring prefix = std::wstring(name ? name : L"") + L"=";
-    if (arg.size() < prefix.size())
-        return false;
-
-    if (!IEquals(arg.substr(0, prefix.size()), prefix))
-        return false;
-
-    value = arg.substr(prefix.size());
-    return true;
-}
-
 static bool CommandLineTryGetOptionValue(
     int argc,
     LPWSTR* argv,
@@ -236,24 +218,13 @@ static bool CommandLineTryGetOptionValue(
     error.clear();
 
     std::wstring arg = argv[index] ? argv[index] : L"";
-    if (CommandLineOptionHasInlineValue(arg, name, value))
-    {
-        matched = true;
-        return true;
-    }
-
-    if (!IEquals(arg, name ? name : L""))
+    const wchar_t* optionName = name ? name : L"";
+    if (!aip::IsOptionOrInlineValue(arg, optionName))
         return true;
 
     matched = true;
-    if (index + 1 >= argc)
-    {
-        error = L"Missing value after " + std::wstring(name ? name : L"option") + L".";
-        return false;
-    }
-
-    value = argv[++index] ? argv[index] : L"";
-    return true;
+    std::wstring optionArg = arg.find(L'=') == std::wstring::npos ? optionName : arg;
+    return aip::TakeCommandLineValue(argc, argv, index, optionArg, value, error);
 }
 
 static bool CommandLineMakeAbsolutePath(const std::wstring& rawPath, std::wstring& out, std::wstring& error)
@@ -348,18 +319,7 @@ static bool AddCommandLineClampedIntSetting(
 
 static bool TryParseCommandLineBoolValue(const std::wstring& rawValue, bool& value)
 {
-    std::wstring v = ToLowerCopy(TrimCopy(rawValue));
-    if (v == L"1" || v == L"true" || v == L"yes" || v == L"on" || v == L"enable" || v == L"enabled")
-    {
-        value = true;
-        return true;
-    }
-    if (v == L"0" || v == L"false" || v == L"no" || v == L"off" || v == L"disable" || v == L"disabled")
-    {
-        value = false;
-        return true;
-    }
-    return false;
+    return aip::ParseBoolValue(rawValue, value);
 }
 
 static bool TryParseCommandLineOverrideSpec(
@@ -369,30 +329,20 @@ static bool TryParseCommandLineOverrideSpec(
     std::wstring& value,
     std::wstring& error)
 {
-    size_t eq = spec.find(L'=');
-    if (eq == std::wstring::npos)
+    CommandLineIniSetting setting;
+    aip::IniSetSpecError errorKind = aip::IniSetSpecError::None;
+    std::wstring sharedError;
+    if (!aip::ParseIniSetSpec(spec, setting, sharedError, &errorKind))
     {
-        error = L"Expected Section.Key=Value: " + spec;
+        error = errorKind == aip::IniSetSpecError::EmptySectionOrKey
+            ? L"Section and key cannot be empty: " + spec
+            : L"Expected Section.Key=Value: " + spec;
         return false;
     }
 
-    std::wstring name = TrimCopy(spec.substr(0, eq));
-    size_t dot = name.rfind(L'.');
-    if (dot == std::wstring::npos || dot == 0 || dot + 1 >= name.size())
-    {
-        error = L"Expected Section.Key=Value: " + spec;
-        return false;
-    }
-
-    section = TrimCopy(name.substr(0, dot));
-    key = TrimCopy(name.substr(dot + 1));
-    value = spec.substr(eq + 1);
-    if (section.empty() || key.empty())
-    {
-        error = L"Section and key cannot be empty: " + spec;
-        return false;
-    }
-
+    section = std::move(setting.section);
+    key = std::move(setting.key);
+    value = std::move(setting.value);
     return true;
 }
 
