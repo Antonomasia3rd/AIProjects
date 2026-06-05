@@ -645,7 +645,7 @@ void Menu(HWND h)
     ReloadRuntimeSettingsFromIni();
 
     POINT pt; GetCursorPos(&pt);
-    HMENU m = CreatePopupMenu();
+    HMENU m = aip::CreateTrayPopupMenu();
     if (!m)
     {
         LogWin32Failure(L"CreatePopupMenu(root)");
@@ -656,12 +656,8 @@ void Menu(HWND h)
     auto addTo = [&](HMENU target, UINT id, const std::wstring& t, bool chk=false, bool en=true){
         if (g_hideDisabled && !en)
             return;
-        UINT flags = MF_STRING;
-        if (chk)
-            flags |= MF_CHECKED;
-        if (!en)
-            flags |= MF_DISABLED;
-        AppendMenuChecked(target, flags, id, t.c_str());
+        if (!aip::AppendTrayMenuItem(target, id, t, chk, en))
+            LogWin32Failure(L"AppendMenuW");
     };
 
     if (g_shutdownRequested)
@@ -691,18 +687,11 @@ void Menu(HWND h)
         return;
     }
 
-    auto menuTitle = [](const std::wstring& text) {
-        std::wstring title = TrimCopy(text);
-        while (!title.empty() && (title.back() == L':' || iswspace(title.back())))
-            title.pop_back();
-        return title.empty() ? text : title;
-    };
-
     auto beginSection = [&](const std::wstring& title) -> HMENU {
         if (showMenuAsDropdown)
         {
-            HMENU submenu = CreatePopupMenu();
-            if (!submenu)
+            HMENU submenu = aip::BeginTrayNestedMenu(m);
+            if (submenu == m)
             {
                 LogWin32Failure(L"CreatePopupMenu(section)");
                 return m;
@@ -718,9 +707,8 @@ void Menu(HWND h)
         {
             if (!target || target == m)
                 return;
-            std::wstring popupTitle = menuTitle(title);
-            if (!AppendMenuChecked(m, MF_POPUP, (UINT_PTR)target, popupTitle.c_str()))
-                DestroyMenu(target);
+            if (!aip::EndTrayNestedMenu(m, target, title))
+                LogWin32Failure(L"AppendMenuW");
         }
         else
         {
@@ -729,11 +717,12 @@ void Menu(HWND h)
     };
 
     auto beginNestedMenu = [&](HMENU parent, const wchar_t* logName) -> HMENU {
-        HMENU submenu = CreatePopupMenu();
-        if (!submenu)
+        HMENU fallback = parent ? parent : m;
+        HMENU submenu = aip::BeginTrayNestedMenu(fallback);
+        if (submenu == fallback)
         {
             LogWin32Failure(logName);
-            return parent ? parent : m;
+            return fallback;
         }
         return submenu;
     };
@@ -741,14 +730,9 @@ void Menu(HWND h)
     auto endNestedMenu = [&](HMENU parent, HMENU child, const std::wstring& title) {
         if (!parent || !child)
             return;
-        if (child == parent)
-        {
-            AppendMenuChecked(parent, MF_SEPARATOR, 0, nullptr);
-            return;
-        }
-        std::wstring popupTitle = menuTitle(title);
-        if (!AppendMenuChecked(parent, MF_POPUP, (UINT_PTR)child, popupTitle.c_str()))
-            DestroyMenu(child);
+        bool fallback = child == parent;
+        if (!aip::EndTrayNestedMenu(parent, child, title) && !fallback)
+            LogWin32Failure(L"AppendMenuW");
     };
 
     addTo(m, ID_SHOW_MENU_DROPDOWN, g_ui.showMenuAsDropdown.c_str(), showMenuAsDropdown);
