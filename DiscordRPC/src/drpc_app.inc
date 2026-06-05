@@ -36,7 +36,7 @@ static void Notify(RuntimeContext* ctx, const wchar_t* stringKey, const wchar_t*
     {
         return;
     }
-    ShowTrayBalloon(ctx, GetUiString(L"notification_title", APP_DISPLAY_NAME), GetUiString(stringKey, fallback), icon);
+    QueueTrayBalloon(ctx, GetUiString(L"notification_title", APP_DISPLAY_NAME), GetUiString(stringKey, fallback), icon);
 }
 
 static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::unique_ptr<DiscordGatewayClient>& gateway, bool verbose, RuntimeContext* ctx)

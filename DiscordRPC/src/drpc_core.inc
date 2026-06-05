@@ -252,14 +252,19 @@ static void WriteLogLine(const wchar_t* level, const std::wstring& message)
     std::wstring line = std::wstring(prefix) + message;
     AddRecentLogLine(line);
 
-    if (!g_fileLoggingEnabled.load() || g_effectiveLogPath.empty())
+    if (!g_fileLoggingEnabled.load())
     {
         return;
     }
 
     std::lock_guard<std::mutex> lock(g_logMutex);
-    EnsureDirectory(GetDirectoryName(g_effectiveLogPath));
-    HANDLE file = CreateFileW(g_effectiveLogPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (g_effectiveLogPath.empty())
+    {
+        return;
+    }
+    std::wstring logPath = g_effectiveLogPath;
+    EnsureDirectory(GetDirectoryName(logPath));
+    HANDLE file = CreateFileW(logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
     {
         return;
@@ -604,17 +609,22 @@ static void ConfigureRuntimeFromConfig(const AppOptions& options)
     g_notificationsEnabled = IniReadB(L"app", L"notifications_enabled", true);
 
     std::wstring configuredLog = Trim(IniReadS(L"app", L"log_path", L""));
+    std::wstring effectiveLogPath;
     if (configuredLog.empty())
     {
-        g_effectiveLogPath = g_defaultLogPath;
+        effectiveLogPath = g_defaultLogPath;
     }
     else if (PathIsRelativeW(configuredLog.c_str()))
     {
-        g_effectiveLogPath = PathJoin(g_exeDir, configuredLog);
+        effectiveLogPath = PathJoin(g_exeDir, configuredLog);
     }
     else
     {
-        g_effectiveLogPath = configuredLog;
+        effectiveLogPath = configuredLog;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_logMutex);
+        g_effectiveLogPath = std::move(effectiveLogPath);
     }
 
     if (options.forceShowConsole)
