@@ -1,41 +1,55 @@
+static constexpr const wchar_t* DEFAULT_HELP_TEMPLATE =
+    L"Usage:\\n"
+    L"  {exe} [config.ini] [options]\\n"
+    L"\\n"
+    L"Options:\\n"
+    L"  --help                         Show this help text.\\n"
+    L"  --version                      Show version information.\\n"
+    L"  --ini <path>                   Use an alternate INI file.\\n"
+    L"  --set Section.Key=Value        Set and save any INI value.\\n"
+    L"  --client-id <id>               Set [general] client_id.\\n"
+    L"  --token <token>                Set [general] token, then protect it with DPAPI.\\n"
+    L"  --token-env <name>             Set [general] token_env.\\n"
+    L"  --protect-token                Migrate plaintext [general] token to token_protected.\\n"
+    L"  --status <value>               Set [general] status: online, idle, dnd, invisible.\\n"
+    L"  --update-interval <seconds>    Set [general] update_interval.\\n"
+    L"  --details-template <template>  Set [general] details_template.\\n"
+    L"  --state-template <template>    Set [general] state_template.\\n"
+    L"  --window-detection             Enable foreground-window placeholders.\\n"
+    L"  --no-window-detection          Disable foreground-window placeholders.\\n"
+    L"  --show-large-image             Enable large activity image.\\n"
+    L"  --hide-large-image             Disable large activity image.\\n"
+    L"  --show-small-image             Enable small activity image.\\n"
+    L"  --hide-small-image             Disable small activity image.\\n"
+    L"  --buttons                      Enable activity buttons.\\n"
+    L"  --no-buttons                   Disable activity buttons.\\n"
+    L"  --dry-run                      Print generated activity JSON and tokens.\\n"
+    L"  --dry-run-full                 Print unredacted dry-run token values.\\n"
+    L"  --once                         Send one IPC update and exit.\\n"
+    L"  --verbose                      Enable verbose logging for this run.\\n"
+    L"  --tray / --no-tray             Force tray icon on or off for this run.\\n"
+    L"  --show-console / --hide-console Force console visibility.\\n"
+    L"  --transport <ipc|gateway|auto> Set [general] transport_mode.\\n"
+    L"\\n"
+    L"Transports: ipc uses the local Discord desktop pipe; gateway uses a Discord\\n"
+    L"user token stored via token_env or DPAPI token_protected; auto tries IPC\\n"
+    L"first and falls back to Gateway.\\n";
+
+static void ReplaceHelpToken(std::wstring& text, const std::wstring& token, const std::wstring& value)
+{
+    size_t pos = 0;
+    while ((pos = text.find(token, pos)) != std::wstring::npos)
+    {
+        text.replace(pos, token.size(), value);
+        pos += value.size();
+    }
+}
+
 static std::wstring DefaultHelpText()
 {
-    return
-        L"Usage:\n"
-        L"  DiscordRPC.exe [config.ini] [options]\n"
-        L"\n"
-        L"Options:\n"
-        L"  --help                         Show this help text.\n"
-        L"  --version                      Show version information.\n"
-        L"  --ini <path>                   Use an alternate INI file.\n"
-        L"  --set Section.Key=Value        Set and save any INI value.\n"
-        L"  --client-id <id>               Set [general] client_id.\n"
-        L"  --token <token>                Set [general] token, then protect it with DPAPI.\n"
-        L"  --token-env <name>             Set [general] token_env.\n"
-        L"  --protect-token                Migrate plaintext [general] token to token_protected.\n"
-        L"  --status <value>               Set [general] status: online, idle, dnd, invisible.\n"
-        L"  --update-interval <seconds>    Set [general] update_interval.\n"
-        L"  --details-template <template>  Set [general] details_template.\n"
-        L"  --state-template <template>    Set [general] state_template.\n"
-        L"  --window-detection             Enable foreground-window placeholders.\n"
-        L"  --no-window-detection          Disable foreground-window placeholders.\n"
-        L"  --show-large-image             Enable large activity image.\n"
-        L"  --hide-large-image             Disable large activity image.\n"
-        L"  --show-small-image             Enable small activity image.\n"
-        L"  --hide-small-image             Disable small activity image.\n"
-        L"  --buttons                      Enable activity buttons.\n"
-        L"  --no-buttons                   Disable activity buttons.\n"
-        L"  --dry-run                      Print generated activity JSON and tokens.\n"
-        L"  --dry-run-full                 Print unredacted dry-run token values.\n"
-        L"  --once                         Send one IPC update and exit.\n"
-        L"  --verbose                      Enable verbose logging for this run.\n"
-        L"  --tray / --no-tray             Force tray icon on or off for this run.\n"
-        L"  --show-console / --hide-console Force console visibility.\n"
-        L"  --transport <ipc|gateway|auto> Set [general] transport_mode.\n"
-        L"\n"
-        L"Transports: ipc uses the local Discord desktop pipe; gateway uses a Discord\n"
-        L"user token stored via token_env or DPAPI token_protected; auto tries IPC\n"
-        L"first and falls back to Gateway.\n";
+    std::wstring help = IniReadS(L"CommandLineHelp", L"Template", DEFAULT_HELP_TEMPLATE);
+    ReplaceHelpToken(help, L"{exe}", g_exeBaseName + L".exe");
+    return help;
 }
 
 static const aip::IniDefaultValue kDefaults[] =
@@ -121,6 +135,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"messages", L"rpc_restarted_message", L"Rich Presence has been restarted." },
 
     { L"app", L"show_tray", L"true" },
+    { L"app", L"show_menu_as_dropdown", L"true" },
     { L"app", L"single_instance", L"true" },
     { L"app", L"show_console", L"false" },
     { L"app", L"notifications_enabled", L"true" },
@@ -170,6 +185,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"strings", L"menu_transport_ipc", L"Discord IPC" },
     { L"strings", L"menu_transport_gateway", L"Gateway" },
     { L"strings", L"menu_transport_auto", L"Auto: IPC then Gateway" },
+    { L"strings", L"menu_dropdown", L"Show menu as dropdown" },
     { L"strings", L"window_detection", L"Window detection" },
     { L"strings", L"details_field", L"Details field" },
     { L"strings", L"state_field", L"State field" },
@@ -195,7 +211,9 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"strings", L"missing_client_id", L"Missing [general] client_id. Create a Discord application and paste its Application ID into the INI." },
     { L"strings", L"dry_run_header", L"=== Discord activity JSON ===" },
     { L"strings", L"dry_run_tokens", L"=== Available template tokens ===" },
-    { L"strings", L"dry_run_redacted_note", L"Sensitive local tokens are redacted. Use --dry-run-full to show raw values." }
+    { L"strings", L"dry_run_redacted_note", L"Sensitive local tokens are redacted. Use --dry-run-full to show raw values." },
+
+    { L"CommandLineHelp", L"Template", DEFAULT_HELP_TEMPLATE }
 };
 
 static bool EnsureDefaultConfigFile()

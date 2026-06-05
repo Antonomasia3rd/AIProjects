@@ -14,6 +14,7 @@ static constexpr UINT ID_TOGGLE_LOGGING = 3020;
 static constexpr UINT ID_TOGGLE_FILE_LOGGING = 3021;
 static constexpr UINT ID_TOGGLE_VERBOSE = 3022;
 static constexpr UINT ID_TOGGLE_CONSOLE = 3023;
+static constexpr UINT ID_TOGGLE_MENU_DROPDOWN = 3024;
 static constexpr UINT ID_TRANSPORT_IPC = 3030;
 static constexpr UINT ID_TRANSPORT_GATEWAY = 3031;
 static constexpr UINT ID_TRANSPORT_AUTO = 3032;
@@ -134,8 +135,32 @@ static void ShowTrayMenu(RuntimeContext* ctx)
     aip::AppendTrayMenuItem(menu, 0, GetUiString(L"menu_status", APP_DISPLAY_NAME), false, false);
     aip::AppendMenuSeparator(menu);
 
-    HMENU general = aip::BeginTrayNestedMenu(menu);
+    bool showMenuAsDropdown = IniReadB(L"app", L"show_menu_as_dropdown", true);
+    auto beginSection = [&](const std::wstring& title) -> HMENU {
+        if (showMenuAsDropdown)
+        {
+            return aip::BeginTrayNestedMenu(menu);
+        }
+        aip::AppendTrayMenuItem(menu, 0, title, false, false);
+        return menu;
+    };
+    auto endSection = [&](HMENU section, const std::wstring& title) {
+        if (showMenuAsDropdown)
+        {
+            if (section != nullptr && section != menu)
+            {
+                aip::EndTrayNestedMenu(menu, section, title);
+            }
+        }
+        else
+        {
+            aip::AppendMenuSeparator(menu);
+        }
+    };
+
+    HMENU general = beginSection(GetUiString(L"menu_general", L"General"));
     aip::AppendTrayMenuItem(general, ID_TRAY_RELOAD, GetUiString(L"menu_reload", L"Reload configuration"));
+    AppendChecked(general, ID_TOGGLE_MENU_DROPDOWN, GetUiString(L"menu_dropdown", L"Show menu as dropdown"), showMenuAsDropdown);
 
     HMENU interval = aip::BeginTrayNestedMenu(general);
     int currentInterval = IniReadI(L"general", L"update_interval", 5);
@@ -151,18 +176,18 @@ static void ShowTrayMenu(RuntimeContext* ctx)
     AppendChecked(transport, ID_TRANSPORT_GATEWAY, GetUiString(L"menu_transport_gateway", L"Gateway"), currentTransport == L"gateway");
     AppendChecked(transport, ID_TRANSPORT_AUTO, GetUiString(L"menu_transport_auto", L"Auto: IPC then Gateway"), currentTransport == L"auto");
     aip::EndTrayNestedMenu(general, transport, GetUiString(L"menu_transport", L"Transport"));
-    aip::EndTrayNestedMenu(menu, general, GetUiString(L"menu_general", L"General"));
+    endSection(general, GetUiString(L"menu_general", L"General"));
 
-    HMENU presence = aip::BeginTrayNestedMenu(menu);
+    HMENU presence = beginSection(GetUiString(L"menu_presence", L"Presence"));
     AppendChecked(presence, ID_TOGGLE_WINDOW_DETECTION, GetUiString(L"window_detection", L"Window detection"), IniReadB(L"general", L"window_title_detection_enabled", true));
     AppendChecked(presence, ID_TOGGLE_DETAILS, GetUiString(L"details_field", L"Details field"), IniReadB(L"layout", L"details_field", true));
     AppendChecked(presence, ID_TOGGLE_STATE, GetUiString(L"state_field", L"State field"), IniReadB(L"layout", L"state_field", true));
     AppendChecked(presence, ID_TOGGLE_LARGE, GetUiString(L"large_image", L"Large image"), IniReadB(L"layout", L"show_large_image", false));
     AppendChecked(presence, ID_TOGGLE_SMALL, GetUiString(L"small_image", L"Small image"), IniReadB(L"layout", L"show_small_image", false));
     AppendChecked(presence, ID_TOGGLE_BUTTONS, GetUiString(L"buttons", L"Buttons"), IniReadB(L"layout", L"show_buttons", false));
-    aip::EndTrayNestedMenu(menu, presence, GetUiString(L"menu_presence", L"Presence"));
+    endSection(presence, GetUiString(L"menu_presence", L"Presence"));
 
-    HMENU diagnostics = aip::BeginTrayNestedMenu(menu);
+    HMENU diagnostics = beginSection(GetUiString(L"menu_diagnostics", L"Diagnostics"));
     HMENU logging = aip::BeginTrayNestedMenu(diagnostics);
     AppendChecked(logging, ID_TOGGLE_LOGGING, GetUiString(L"logging_enabled", L"Logging enabled"), IniReadB(L"app", L"logging_enabled", true));
     AppendChecked(logging, ID_TOGGLE_FILE_LOGGING, GetUiString(L"file_logging", L"File logging"), IniReadB(L"app", L"file_logging_enabled", true));
@@ -173,9 +198,12 @@ static void ShowTrayMenu(RuntimeContext* ctx)
     aip::AppendTrayMenuItem(diagnostics, ID_TRAY_OPEN_CONFIG, GetUiString(L"menu_open_config", L"Open config"));
     aip::AppendTrayMenuItem(diagnostics, ID_TRAY_OPEN_LOG_FOLDER, GetUiString(L"menu_open_log_folder", L"Open log folder"));
     aip::AppendTrayMenuItem(diagnostics, ID_TRAY_RECENT_LOG, GetUiString(L"menu_recent_log", L"Recent log"));
-    aip::EndTrayNestedMenu(menu, diagnostics, GetUiString(L"menu_diagnostics", L"Diagnostics"));
+    endSection(diagnostics, GetUiString(L"menu_diagnostics", L"Diagnostics"));
 
-    aip::AppendMenuSeparator(menu);
+    if (showMenuAsDropdown)
+    {
+        aip::AppendMenuSeparator(menu);
+    }
     aip::AppendTrayMenuItem(menu, ID_TRAY_EXIT, GetUiString(L"menu_exit", L"Exit"));
 
     POINT pt = {};
@@ -352,6 +380,9 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             return 0;
         case ID_TOGGLE_CONSOLE:
             ToggleBoolSetting(L"app", L"show_console", false);
+            return 0;
+        case ID_TOGGLE_MENU_DROPDOWN:
+            ToggleBoolSetting(L"app", L"show_menu_as_dropdown", true);
             return 0;
         case ID_TRANSPORT_IPC:
             SetTraySetting(L"general", L"transport_mode", L"ipc");
