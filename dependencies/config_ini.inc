@@ -663,10 +663,6 @@ inline std::vector<IniSectionData> ParseIniDocument(const std::wstring& text)
 
         std::wstring key = ParseIniName(line.substr(0, equals));
         std::wstring value = ParseIniValue(line.substr(equals + 1));
-        if (key.empty())
-        {
-            continue;
-        }
 
         if (IniEntry* existing = findKey(*current, key))
         {
@@ -772,11 +768,6 @@ inline bool WriteIniValueToText(std::wstring& text, const wchar_t* section, cons
 {
     std::wstring sectionName = section ? section : L"";
     std::wstring keyName = key ? key : L"";
-    if (sectionName.empty() || keyName.empty())
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return false;
-    }
 
     if (text.empty() && !header.empty())
     {
