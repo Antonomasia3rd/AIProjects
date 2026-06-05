@@ -32,6 +32,47 @@ static void ShowTrayBalloon(RuntimeContext* ctx, const std::wstring& title, cons
     aip::ShowTrayBalloon(ctx->nid, title, message, icon);
 }
 
+static void QueueTrayBalloon(RuntimeContext* ctx, const std::wstring& title, const std::wstring& message, DWORD icon)
+{
+    if (ctx == nullptr || !g_notificationsEnabled.load())
+    {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(ctx->notificationMutex);
+        if (!ctx->acceptingNotifications)
+        {
+            return;
+        }
+        ctx->pendingNotifications.push_back({ title, message, icon });
+    }
+
+    if (!PostMessageW(ctx->hwnd, WM_DRPC_NOTIFY, 0, 0))
+    {
+        std::lock_guard<std::mutex> lock(ctx->notificationMutex);
+        ctx->pendingNotifications.clear();
+    }
+}
+
+static void ShowPendingTrayBalloons(RuntimeContext* ctx)
+{
+    if (ctx == nullptr)
+    {
+        return;
+    }
+
+    std::deque<TrayNotification> pending;
+    {
+        std::lock_guard<std::mutex> lock(ctx->notificationMutex);
+        pending.swap(ctx->pendingNotifications);
+    }
+    for (const auto& notification : pending)
+    {
+        ShowTrayBalloon(ctx, notification.title, notification.message, notification.icon);
+    }
+}
+
 static void CreateTrayIcon(RuntimeContext* ctx)
 {
     if (ctx == nullptr || ctx->trayCreated)
@@ -178,7 +219,12 @@ static void OpenConfigFile()
 
 static void OpenLogFolder()
 {
-    std::wstring folder = GetDirectoryName(g_effectiveLogPath.empty() ? g_defaultLogPath : g_effectiveLogPath);
+    std::wstring logPath;
+    {
+        std::lock_guard<std::mutex> lock(g_logMutex);
+        logPath = g_effectiveLogPath.empty() ? g_defaultLogPath : g_effectiveLogPath;
+    }
+    std::wstring folder = GetDirectoryName(logPath);
     ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
@@ -239,6 +285,10 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         {
             g_refreshRequested = true;
         }
+        return 0;
+
+    case WM_DRPC_NOTIFY:
+        ShowPendingTrayBalloons(ctx);
         return 0;
 
     case WM_COMMAND:
@@ -326,6 +376,11 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     case WM_DESTROY:
         if (ctx != nullptr)
         {
+            {
+                std::lock_guard<std::mutex> lock(ctx->notificationMutex);
+                ctx->acceptingNotifications = false;
+                ctx->pendingNotifications.clear();
+            }
             DestroyTrayIcon(ctx);
         }
         g_stopRequested = true;

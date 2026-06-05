@@ -94,12 +94,22 @@ struct GatewayOptions
     std::wstring assetFetchUserAgent;
 };
 
+struct TrayNotification
+{
+    std::wstring title;
+    std::wstring message;
+    DWORD icon = NIIF_INFO;
+};
+
 struct RuntimeContext
 {
     HWND hwnd = nullptr;
     NOTIFYICONDATAW nid = {};
     bool trayCreated = false;
     bool trayEnabled = false;
+    bool acceptingNotifications = true;
+    std::mutex notificationMutex;
+    std::deque<TrayNotification> pendingNotifications;
     std::thread worker;
     DWORD workerExitCode = 0;
 };

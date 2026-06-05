@@ -43,6 +43,7 @@ static constexpr const wchar_t* APP_NAME = L"DiscordRPC";
 static constexpr const wchar_t* APP_DISPLAY_NAME = L"DiscordRPC";
 static constexpr const wchar_t* WINDOW_CLASS_NAME = L"DiscordRPCTrayWnd";
 static constexpr UINT WM_DRPC_TRAY = WM_APP + 61;
+static constexpr UINT WM_DRPC_NOTIFY = WM_APP + 62;
 
 static HINSTANCE g_hInst = nullptr;
 static std::wstring g_exePath;
