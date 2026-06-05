@@ -281,6 +281,7 @@ int main(int argc, char** argv)
     {
         const std::string generation = ReadSource("src\\ga_generation.inc");
         const std::string app = ReadSource("src\\ga_app.inc");
+        const std::string core = ReadSource("src\\ga_core.inc");
         const std::string desktopStub = ReadSource("DesktopStub.cpp");
         const std::string buildScript = ReadSource("BuildDesktopStub.cmd");
         const std::string image = ReadSource("src\\ga_image.inc");
@@ -304,6 +305,7 @@ int main(int argc, char** argv)
         const std::string exportSourceOnly = ReadSource("..\\tools\\ExportSourceOnly.cmd");
         const std::string repoTools = ReadSource("..\\.github\\tools\\RepoTools.cs");
         const std::string buildWorkflow = ReadSource("..\\.github\\workflows\\build-windows.yml");
+        const std::string sharedConfig = ReadSource("..\\dependencies\\config_ini.inc");
         const std::string sharedTray = ReadSource("..\\dependencies\\tray.inc");
         const std::string discordTray = ReadSource("..\\DiscordRPC\\src\\drpc_tray.inc");
         const std::string liveTileUpdateBare = SliceSource(
@@ -330,6 +332,8 @@ int main(int argc, char** argv)
         checks.push_back({"Win32 version resources carry the DesktopStub build version", "resource scripts", versionResource + "\n" + desktopStubResource + "\n" + brokerResource, R"rx(VERSIONINFO.*FILEVERSION DESKTOPSTUB_VERSION_COMMA.*PRODUCTVERSION DESKTOPSTUB_VERSION_COMMA.*FileVersion.*DESKTOPSTUB_VERSION_TEXT.*ProductVersion.*DESKTOPSTUB_VERSION_TEXT.*DesktopStub\.exe.*DesktopStubLiveTileBroker\.exe)rx", "DesktopStub.exe and DesktopStubLiveTileBroker.exe must have FileVersion/ProductVersion resources", false});
         checks.push_back({"Existing manifests are updated to the current package version", "src\\ga_manifest.inc", manifest, R"rx(ReplaceXmlAttributeInFirstTagByLocalName.*expectedPackageVersion = EffectiveManifestPackageVersion\(\).*packageVersionMismatch.*ExtractXmlAttributeFromTag\(xml,\s*L"<Identity ",\s*L"Version".*ReplaceXmlAttributeInFirstTagByLocalName\(updatedXml,\s*L"Identity",\s*L"Version",\s*expectedPackageVersion\).*appxManifestVersionUpdated)rx", "normal startup must keep AppxManifest.xml Identity Version aligned with the DesktopStub build version without resetting custom identity names", false});
         checks.push_back({"DesktopStub version is visible in CLI, tray, and startup logs", "version UI sources", commandLine + "\n" + tray + "\n" + app + "\n" + defaults, R"rx(--version.*CommandLineVersionText.*CommandLineShouldShowVersion.*versionLabel.*DesktopStubVersionDisplayText.*desktopStubVersionSummary.*DesktopStubVersionDisplayText.*DesktopStubVersionSummary)rx", "DesktopStub version must be visible from --version, the tray menu, and startup diagnostics", false});
+        checks.push_back({"DesktopStub uses shared INI parsing primitives", "DesktopStub INI sources", desktopStub + "\n" + core, R"rx(dependencies\\config_ini\.inc.*aip::ReadWholeFileBytes.*aip::DecodeTextBytes.*aip::ParseIniDocument.*aip::WriteIniValueToText)rx", "DesktopStub must retain its cache and synchronization while consuming the shared baseline INI implementation", false});
+        checks.push_back({"Shared INI dependency provides DesktopStub primitives", "..\\dependencies\\config_ini.inc", sharedConfig, R"rx(inline bool ReadWholeFileBytes.*inline bool DecodeTextBytes.*inline std::vector<IniSectionData> ParseIniDocument.*inline bool WriteIniValueToText)rx", "dependencies/config_ini.inc must provide the byte decoding, document parsing, and text mutation primitives consumed by DesktopStub", false});
         checks.push_back({"Shared tray dependency provides baseline menu primitives", "..\\dependencies\\tray.inc", sharedTray, R"rx(AppendTrayMenuItem.*BeginTrayNestedMenu.*EndTrayNestedMenu.*TrackPostAndDestroyTrayMenu)rx", "dependencies/tray.inc must provide the common tray item, submenu, title, and popup cleanup behavior used by baseline projects", false});
         checks.push_back({"DesktopStub uses shared tray menu primitives", "src\\ga_tray.inc", tray, R"rx(aip::AppendTrayMenuItem.*aip::BeginTrayNestedMenu.*aip::EndTrayNestedMenu)rx", "DesktopStub must consume the shared tray item and submenu helpers while retaining its product-specific menu layout", false});
         checks.push_back({"DiscordRPC uses shared tray menu primitives", "..\\DiscordRPC\\src\\drpc_tray.inc", discordTray, R"rx(aip::AppendTrayMenuItem.*aip::BeginTrayNestedMenu.*aip::EndTrayNestedMenu.*aip::TrackPostAndDestroyTrayMenu)rx", "DiscordRPC must consume the shared tray item, submenu, and popup cleanup helpers instead of maintaining local copies", false});
