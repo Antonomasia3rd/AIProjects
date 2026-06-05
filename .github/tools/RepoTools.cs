@@ -252,6 +252,12 @@ static class RepoTools
         if (Regex.IsMatch(repoTools, @"Shared workflow/repository files changed; using a full build\.""\);\s*forceAll\s*=\s*true;\s*releaseSelected\s*=\s*projects\.ToList\(\);", RegexOptions.Singleline))
             throw new InvalidOperationException("Shared changes must not force every project into the release list.");
 
+        if (!Regex.IsMatch(
+                repoTools,
+                @"release edit .* --draft .*release create .* --draft .*release upload .* --clobber.*release edit .* --draft=false",
+                RegexOptions.Singleline))
+            throw new InvalidOperationException("Automatic releases must remain drafts until every asset upload succeeds.");
+
         var commandLineConsumers = ProjectsUsingChangedDependencies(root, projects, new List<string> { "dependencies/command_line.inc" })
             .Select(p => p.key)
             .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
@@ -1316,11 +1322,12 @@ static class RepoTools
             File.WriteAllText(notesPath, notes, Encoding.UTF8);
             bool releaseExists = RunCapture("gh", "release view " + QuoteArg(tag) + " --repo " + QuoteArg(repository), root, 120000).ExitCode == 0;
             if (releaseExists)
-                RunRequired("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
+                RunRequired("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
             else
-                RunRequired("gh", "release create " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --target " + QuoteArg(fullSha) + " --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
+                RunRequired("gh", "release create " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft --target " + QuoteArg(fullSha) + " --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
 
             RunRequired("gh", "release upload " + QuoteArg(tag) + " " + JoinArgs(releaseAssets.ToArray()) + " --repo " + QuoteArg(repository) + " --clobber", root);
+            RunRequired("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft=false", root);
             summary.Add("| " + p.label + " | `" + tag + "` | " + String.Join(", ", releaseAssets.Select(Path.GetFileName)) + " |");
         }
 
