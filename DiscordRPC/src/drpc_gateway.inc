@@ -1,3 +1,83 @@
+static bool JsonIntegerTokenRange(const std::string& json, size_t valueStart, size_t valueEnd, size_t& tokenStart, size_t& tokenEnd)
+{
+    tokenStart = valueStart;
+    tokenEnd = valueEnd;
+    while (tokenStart < tokenEnd && isspace(static_cast<unsigned char>(json[tokenStart])))
+    {
+        ++tokenStart;
+    }
+    while (tokenEnd > tokenStart && isspace(static_cast<unsigned char>(json[tokenEnd - 1])))
+    {
+        --tokenEnd;
+    }
+    if (tokenStart == tokenEnd)
+    {
+        return false;
+    }
+
+    size_t pos = tokenStart;
+    if (json[pos] == '-')
+    {
+        ++pos;
+        if (pos == tokenEnd)
+        {
+            return false;
+        }
+    }
+
+    if (json[pos] == '0')
+    {
+        ++pos;
+    }
+    else if (json[pos] >= '1' && json[pos] <= '9')
+    {
+        do
+        {
+            ++pos;
+        } while (pos < tokenEnd && isdigit(static_cast<unsigned char>(json[pos])));
+    }
+    else
+    {
+        return false;
+    }
+
+    return pos == tokenEnd;
+}
+
+static bool JsonTryParseIntegerToken(const std::string& json, size_t valueStart, size_t valueEnd, long long& value, size_t* tokenStartOut = nullptr, size_t* tokenEndOut = nullptr)
+{
+    size_t tokenStart = 0;
+    size_t tokenEnd = 0;
+    if (!JsonIntegerTokenRange(json, valueStart, valueEnd, tokenStart, tokenEnd))
+    {
+        return false;
+    }
+
+    try
+    {
+        size_t consumed = 0;
+        long long parsed = std::stoll(json.substr(tokenStart, tokenEnd - tokenStart), &consumed, 10);
+        if (consumed != tokenEnd - tokenStart)
+        {
+            return false;
+        }
+        value = parsed;
+        if (tokenStartOut != nullptr)
+        {
+            *tokenStartOut = tokenStart;
+        }
+        if (tokenEndOut != nullptr)
+        {
+            *tokenEndOut = tokenEnd;
+        }
+        return true;
+    }
+    catch (const std::exception&)
+    {
+        return false;
+    }
+}
+
 static int JsonExtractInt(const std::string& json, const char* key, int fallback = -1)
 {
     size_t keyPos = 0;
@@ -8,24 +88,12 @@ static int JsonExtractInt(const std::string& json, const char* key, int fallback
         return fallback;
     }
 
-    size_t end = valueStart;
-    while (end < valueEnd && (isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-'))
-    {
-        ++end;
-    }
-    if (end == valueStart)
+    long long parsed = 0;
+    if (!JsonTryParseIntegerToken(json, valueStart, valueEnd, parsed) || parsed < INT_MIN || parsed > INT_MAX)
     {
         return fallback;
     }
-
-    try
-    {
-        return std::stoi(json.substr(valueStart, end - valueStart));
-    }
-    catch (const std::exception&)
-    {
-        return fallback;
-    }
+    return static_cast<int>(parsed);
 }
 
 static bool JsonExtractOptionalInt(const std::string& json, const char* key, int& value)
@@ -81,26 +149,17 @@ static void NormalizeGatewayTimestampUnits(std::string& activity)
         return;
     }
 
-    size_t numericEnd = valueStart;
-    while (numericEnd < valueEnd && isdigit(static_cast<unsigned char>(timestamps[numericEnd])))
-    {
-        ++numericEnd;
-    }
-    if (numericEnd == valueStart)
+    long long value = 0;
+    size_t tokenStart = 0;
+    size_t tokenEnd = 0;
+    if (!JsonTryParseIntegerToken(timestamps, valueStart, valueEnd, value, &tokenStart, &tokenEnd) || value <= 0)
     {
         return;
     }
 
-    try
+    if (value < 100000000000LL)
     {
-        long long value = std::stoll(timestamps.substr(valueStart, numericEnd - valueStart));
-        if (value > 0 && value < 100000000000LL)
-        {
-            activity.replace(timestampsStart + valueStart, numericEnd - valueStart, std::to_string(value * 1000LL));
-        }
-    }
-    catch (const std::exception&)
-    {
+        activity.replace(timestampsStart + tokenStart, tokenEnd - tokenStart, std::to_string(value * 1000LL));
     }
 }
 
