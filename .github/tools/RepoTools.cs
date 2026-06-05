@@ -763,6 +763,7 @@ static class RepoTools
 
                     string ini = Path.Combine(tempRoot, "DesktopStub.ini");
                     string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
+                    string customHelpIni = Path.Combine(tempRoot, "CustomHelp.ini");
                     string concurrentIni = Path.Combine(tempRoot, "ConcurrentWrites.ini");
                     string wallpaper = Path.Combine(tempRoot, "wallpaper.bmp");
                     string trailingSpaces = new string(' ', 2);
@@ -774,6 +775,14 @@ static class RepoTools
                         throw new InvalidOperationException("DesktopStub --version did not report the expected release tag/version: " + expectedTag + " (" + desktopStubVersion + ")");
                     SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--set", "Settings.TrayIcon=0" }, new[] { 0 }, 30, "DesktopStub help");
                     AssertFileDoesNotExist(helpIni, "DesktopStub --help must be side-effect-free");
+                    string customHelpText = "[CommandLineHelp]\r\n\"Template\" = \"CUSTOM_HELP_MARKER {exe}\"\r\n";
+                    File.WriteAllText(customHelpIni, customHelpText, new UTF8Encoding(true));
+                    byte[] customHelpBefore = File.ReadAllBytes(customHelpIni);
+                    ProcessResult customHelpResult = SmokeProcess(exe, new[] { "--help", "--ini", customHelpIni, "--set", "Settings.TrayIcon=0" }, new[] { 0 }, 30, "DesktopStub custom help");
+                    if (customHelpResult.Output.IndexOf("CUSTOM_HELP_MARKER", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("DesktopStub --help did not use the configured INI template.");
+                    if (!customHelpBefore.SequenceEqual(File.ReadAllBytes(customHelpIni)))
+                        throw new InvalidOperationException("DesktopStub --help modified its configured INI.");
                     SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--scales", "auto", "--asset", "MediumTile=1", "--set", "Strings.TrayTip=DesktopStub" + trailingSpaces, "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
                     AssertFileContains(ini, "\"TrayTip\" = \"DesktopStub" + trailingSpaces + "\"", "DesktopStub --set must preserve trailing value spaces");
                     string manifestPath = Path.Combine(Path.GetDirectoryName(exe), "AppxManifest.xml");

@@ -1503,11 +1503,6 @@ static std::wstring FormatCommandLineHelpTemplate(const wchar_t* rawTemplate)
     return text;
 }
 
-static std::wstring CommandLineDefaultUsageText()
-{
-    return FormatCommandLineHelpTemplate(g_commandLineHelpDefaults[0].value);
-}
-
 static std::wstring CommandLineUsageText()
 {
     std::wstring iniTemplate = IniReadS(
