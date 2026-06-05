@@ -763,6 +763,7 @@ static class RepoTools
 
                     string ini = Path.Combine(tempRoot, "DesktopStub.ini");
                     string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
+                    string concurrentIni = Path.Combine(tempRoot, "ConcurrentWrites.ini");
                     string wallpaper = Path.Combine(tempRoot, "wallpaper.bmp");
                     string trailingSpaces = new string(' ', 2);
                     WriteTestBmp(wallpaper);
@@ -780,6 +781,7 @@ static class RepoTools
                     SetDesktopStubManifestIdentity(manifestPath, smokeIdentity);
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", wallpaper, "--once", "--no-tray", "--no-monitor" }, new[] { 0 }, 30, "DesktopStub one-shot generation");
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", Path.Combine(tempRoot, "missing.png"), "--no-tray" }, new[] { 2 }, 30, "DesktopStub invalid wallpaper guard");
+                    VerifyDesktopStubConcurrentIniWrites(exe, concurrentIni);
 
                     if (!File.Exists(manifestPath))
                         throw new InvalidOperationException("DesktopStub smoke test did not create AppxManifest.xml.");
@@ -953,6 +955,50 @@ static class RepoTools
         string text = File.ReadAllText(file, Encoding.UTF8);
         if (text.IndexOf(needle, StringComparison.Ordinal) < 0)
             throw new InvalidOperationException(reason + ": " + file);
+    }
+
+    static void VerifyDesktopStubConcurrentIniWrites(string exe, string ini)
+    {
+        const int processCount = 12;
+        var processes = new List<Process>();
+        try
+        {
+            for (int i = 1; i <= processCount; ++i)
+            {
+                var psi = new ProcessStartInfo(
+                    exe,
+                    JoinArgs(new[] { "--ini", ini, "--set", "Concurrent.Key" + i + "=Value" + i, "--exit" }))
+                {
+                    WorkingDirectory = Path.GetDirectoryName(exe),
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                var process = new Process { StartInfo = psi };
+                if (!process.Start())
+                    throw new InvalidOperationException("Failed to start DesktopStub concurrent INI writer " + i + ".");
+                processes.Add(process);
+            }
+
+            foreach (Process process in processes)
+            {
+                if (!process.WaitForExit(60000))
+                {
+                    try { process.Kill(); } catch { }
+                    throw new TimeoutException("DesktopStub concurrent INI writer timed out.");
+                }
+                if (process.ExitCode != 0 && process.ExitCode != 2)
+                    throw new InvalidOperationException("DesktopStub concurrent INI writer exited " + process.ExitCode + ".");
+            }
+
+            for (int i = 1; i <= processCount; ++i)
+                AssertFileContains(ini, "\"Key" + i + "\" = \"Value" + i + "\"", "DesktopStub concurrent INI writes must not lose settings");
+            Console.WriteLine("ok - DesktopStub concurrent INI writes");
+        }
+        finally
+        {
+            foreach (Process process in processes)
+                process.Dispose();
+        }
     }
 
     static ProcessResult SmokeProcess(string file, string[] args, int[] allowedExitCodes, int timeoutSeconds, string name)
