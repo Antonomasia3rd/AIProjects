@@ -339,33 +339,271 @@ inline void JsonFieldBool(std::string& object, bool& first, const char* key, boo
     JsonFieldRaw(object, first, key, value ? "true" : "false");
 }
 
-inline std::wstring ExtractJsonStringValue(const std::string& json, const char* key)
+inline size_t JsonStringEnd(const std::string& json, size_t quote)
 {
-    std::string needle = std::string("\"") + key + "\"";
-    size_t pos = json.find(needle);
-    if (pos == std::string::npos)
+    if (quote >= json.size() || json[quote] != '"')
     {
-        return L"";
+        return std::string::npos;
     }
-    pos = json.find(':', pos + needle.size());
-    if (pos == std::string::npos)
+
+    bool escaped = false;
+    for (size_t i = quote + 1; i < json.size(); ++i)
     {
-        return L"";
+        char ch = json[i];
+        if (escaped)
+        {
+            escaped = false;
+        }
+        else if (ch == '\\')
+        {
+            escaped = true;
+        }
+        else if (ch == '"')
+        {
+            return i + 1;
+        }
     }
-    ++pos;
+    return std::string::npos;
+}
+
+inline size_t JsonValueEnd(const std::string& json, size_t start)
+{
+    if (start >= json.size())
+    {
+        return std::string::npos;
+    }
+
+    if (json[start] == '"')
+    {
+        return JsonStringEnd(json, start);
+    }
+
+    if (json[start] == '{' || json[start] == '[')
+    {
+        std::vector<char> stack;
+        stack.reserve(8);
+        bool inString = false;
+        bool escaped = false;
+        for (size_t i = start; i < json.size(); ++i)
+        {
+            char ch = json[i];
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (ch == '\\')
+                {
+                    escaped = true;
+                }
+                else if (ch == '"')
+                {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                inString = true;
+            }
+            else if (ch == '{')
+            {
+                stack.push_back('}');
+            }
+            else if (ch == '[')
+            {
+                stack.push_back(']');
+            }
+            else if (ch == '}' || ch == ']')
+            {
+                if (stack.empty() || stack.back() != ch)
+                {
+                    return std::string::npos;
+                }
+                stack.pop_back();
+                if (stack.empty())
+                {
+                    return i + 1;
+                }
+            }
+        }
+        return std::string::npos;
+    }
+
+    size_t end = start;
+    while (end < json.size() && json[end] != ',' && json[end] != '}' && json[end] != ']')
+    {
+        ++end;
+    }
+    return end;
+}
+
+inline bool FindJsonFieldValue(const std::string& json, const char* key, size_t& keyPos, size_t& valueStart, size_t& valueEnd)
+{
+    keyPos = std::string::npos;
+    valueStart = std::string::npos;
+    valueEnd = std::string::npos;
+
+    if (key == nullptr || *key == '\0')
+    {
+        return false;
+    }
+
+    const size_t keyLength = strlen(key);
+    size_t pos = 0;
     while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
     {
         ++pos;
     }
-    if (pos >= json.size() || json[pos] != '"')
+    if (pos >= json.size() || json[pos] != '{')
     {
-        return L"";
+        return false;
     }
     ++pos;
 
+    while (pos < json.size())
+    {
+        while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
+        {
+            ++pos;
+        }
+        if (pos >= json.size() || json[pos] == '}')
+        {
+            return false;
+        }
+        if (json[pos] == ',')
+        {
+            ++pos;
+            continue;
+        }
+        if (json[pos] != '"')
+        {
+            return false;
+        }
+        size_t stringEnd = JsonStringEnd(json, pos);
+        if (stringEnd == std::string::npos)
+        {
+            return false;
+        }
+
+        size_t colon = stringEnd;
+        while (colon < json.size() && isspace(static_cast<unsigned char>(json[colon])))
+        {
+            ++colon;
+        }
+        if (colon >= json.size() || json[colon] != ':')
+        {
+            return false;
+        }
+
+        size_t currentValueStart = colon + 1;
+        while (currentValueStart < json.size() && isspace(static_cast<unsigned char>(json[currentValueStart])))
+        {
+            ++currentValueStart;
+        }
+
+        size_t currentValueEnd = JsonValueEnd(json, currentValueStart);
+        if (currentValueEnd == std::string::npos || currentValueEnd < currentValueStart)
+        {
+            return false;
+        }
+
+        if (stringEnd == pos + keyLength + 2 && json.compare(pos + 1, keyLength, key) == 0)
+        {
+            keyPos = pos;
+            valueStart = currentValueStart;
+            valueEnd = currentValueEnd;
+            return true;
+        }
+
+        pos = currentValueEnd;
+        while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
+        {
+            ++pos;
+        }
+        if (pos < json.size() && json[pos] == ',')
+        {
+            ++pos;
+        }
+        else if (pos < json.size() && json[pos] != '}')
+        {
+            return false;
+        }
+    }
+    return false;
+}
+
+inline int JsonHexValue(char ch)
+{
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+
+inline bool JsonReadHex4(const std::string& json, size_t pos, unsigned int& value)
+{
+    if (pos + 4 > json.size())
+    {
+        return false;
+    }
+
+    unsigned int result = 0;
+    for (size_t i = 0; i < 4; ++i)
+    {
+        int digit = JsonHexValue(json[pos + i]);
+        if (digit < 0)
+        {
+            return false;
+        }
+        result = (result << 4) | static_cast<unsigned int>(digit);
+    }
+    value = result;
+    return true;
+}
+
+inline void JsonAppendUtf8CodePoint(std::string& out, unsigned int codePoint)
+{
+    if (codePoint <= 0x7f)
+    {
+        out.push_back(static_cast<char>(codePoint));
+    }
+    else if (codePoint <= 0x7ff)
+    {
+        out.push_back(static_cast<char>(0xc0 | ((codePoint >> 6) & 0x1f)));
+        out.push_back(static_cast<char>(0x80 | (codePoint & 0x3f)));
+    }
+    else if (codePoint <= 0xffff)
+    {
+        out.push_back(static_cast<char>(0xe0 | ((codePoint >> 12) & 0x0f)));
+        out.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3f)));
+        out.push_back(static_cast<char>(0x80 | (codePoint & 0x3f)));
+    }
+    else if (codePoint <= 0x10ffff)
+    {
+        out.push_back(static_cast<char>(0xf0 | ((codePoint >> 18) & 0x07)));
+        out.push_back(static_cast<char>(0x80 | ((codePoint >> 12) & 0x3f)));
+        out.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3f)));
+        out.push_back(static_cast<char>(0x80 | (codePoint & 0x3f)));
+    }
+}
+
+inline bool DecodeJsonStringRange(const std::string& json, size_t valueStart, size_t valueEnd, std::wstring& value)
+{
+    value.clear();
+    if (valueStart >= json.size() ||
+        valueEnd <= valueStart + 1 ||
+        json[valueStart] != '"' ||
+        json[valueEnd - 1] != '"')
+    {
+        return false;
+    }
+
     std::string out;
     bool escaped = false;
-    for (; pos < json.size(); ++pos)
+    for (size_t pos = valueStart + 1; pos + 1 < valueEnd; ++pos)
     {
         char ch = json[pos];
         if (escaped)
@@ -380,7 +618,39 @@ inline std::wstring ExtractJsonStringValue(const std::string& json, const char* 
             case 'n': out.push_back('\n'); break;
             case 'r': out.push_back('\r'); break;
             case 't': out.push_back('\t'); break;
-            default: out.push_back(ch); break;
+            case 'u':
+            {
+                unsigned int codeUnit = 0;
+                if (!JsonReadHex4(json, pos + 1, codeUnit))
+                {
+                    return false;
+                }
+                pos += 4;
+
+                unsigned int codePoint = codeUnit;
+                if (codeUnit >= 0xd800 && codeUnit <= 0xdbff)
+                {
+                    if (pos + 6 >= valueEnd || json[pos + 1] != '\\' || json[pos + 2] != 'u')
+                    {
+                        return false;
+                    }
+                    unsigned int low = 0;
+                    if (!JsonReadHex4(json, pos + 3, low) || low < 0xdc00 || low > 0xdfff)
+                    {
+                        return false;
+                    }
+                    pos += 6;
+                    codePoint = 0x10000 + (((codeUnit - 0xd800) << 10) | (low - 0xdc00));
+                }
+                else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff)
+                {
+                    return false;
+                }
+                JsonAppendUtf8CodePoint(out, codePoint);
+                break;
+            }
+            default:
+                return false;
             }
             escaped = false;
         }
@@ -388,16 +658,35 @@ inline std::wstring ExtractJsonStringValue(const std::string& json, const char* 
         {
             escaped = true;
         }
-        else if (ch == '"')
-        {
-            break;
-        }
         else
         {
             out.push_back(ch);
         }
     }
-    return Utf8ToWide(out);
+    if (escaped)
+    {
+        return false;
+    }
+    value = Utf8ToWide(out);
+    return true;
+}
+
+inline std::wstring ExtractJsonStringValue(const std::string& json, const char* key)
+{
+    size_t keyPos = 0;
+    size_t valueStart = 0;
+    size_t valueEnd = 0;
+    if (!FindJsonFieldValue(json, key, keyPos, valueStart, valueEnd))
+    {
+        return L"";
+    }
+
+    std::wstring out;
+    if (!DecodeJsonStringRange(json, valueStart, valueEnd, out))
+    {
+        return L"";
+    }
+    return out;
 }
 }
 

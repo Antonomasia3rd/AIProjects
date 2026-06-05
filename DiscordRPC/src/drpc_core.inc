@@ -682,49 +682,7 @@ static size_t FindJsonObjectStart(const std::string& json, size_t search)
 
 static std::wstring ExtractJsonStringValue(const std::string& json, const char* key)
 {
-    size_t keyPos = 0;
-    size_t valueStart = 0;
-    size_t valueEnd = 0;
-    if (!FindJsonFieldValue(json, key, keyPos, valueStart, valueEnd) ||
-        valueStart >= json.size() ||
-        valueEnd <= valueStart + 1 ||
-        json[valueStart] != '"' ||
-        json[valueEnd - 1] != '"')
-    {
-        return L"";
-    }
-
-    std::string out;
-    bool escaped = false;
-    for (size_t pos = valueStart + 1; pos + 1 < valueEnd; ++pos)
-    {
-        char ch = json[pos];
-        if (escaped)
-        {
-            switch (ch)
-            {
-            case '"': out.push_back('"'); break;
-            case '\\': out.push_back('\\'); break;
-            case '/': out.push_back('/'); break;
-            case 'b': out.push_back('\b'); break;
-            case 'f': out.push_back('\f'); break;
-            case 'n': out.push_back('\n'); break;
-            case 'r': out.push_back('\r'); break;
-            case 't': out.push_back('\t'); break;
-            default: out.push_back(ch); break;
-            }
-            escaped = false;
-        }
-        else if (ch == '\\')
-        {
-            escaped = true;
-        }
-        else
-        {
-            out.push_back(ch);
-        }
-    }
-    return Utf8ToWide(out);
+    return aip::ExtractJsonStringValue(json, key);
 }
 
 static std::wstring NormalizeTransportMode(const std::wstring& raw)
