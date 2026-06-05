@@ -1332,7 +1332,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     {
         // Keep --help side-effect-free for baseline app behavior: do not create,
         // normalize, or repair the INI just to print command-line help.
-        ShowCommandLineMessage(CommandLineDefaultUsageText(), false);
+        ShowCommandLineMessage(CommandLineUsageText(), false);
         return 0;
     }
     if (CommandLineShouldShowVersion())
