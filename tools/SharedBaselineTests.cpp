@@ -74,6 +74,46 @@ static void TestIniBehavior()
     bool wrote = store.WriteRaw(L"General", L"Name", L"Value");
     std::wstring persisted = store.ReadRaw(L"General", L"Name", L"");
     Check(wrote && persisted == L"Value", "INI file write/read round trip");
+
+    WIN32_FILE_ATTRIBUTE_DATA originalAttributes = {};
+    bool capturedTime = GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &originalAttributes) != FALSE;
+    std::wstring externalText =
+        L"; Shared baseline\r\n"
+        L"[General]\r\n"
+        L"\"Name\" = \"Value\"\r\n"
+        L"\"ExternalMarker\" = \"keep\"\r\n";
+    bool externalWrite = aip::WriteTextFileUtf8Bom(path, externalText);
+    HANDLE attributesHandle = CreateFileW(
+        path.c_str(),
+        FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    bool restoredTime = capturedTime &&
+        attributesHandle != INVALID_HANDLE_VALUE &&
+        SetFileTime(attributesHandle, nullptr, nullptr, &originalAttributes.ftLastWriteTime) != FALSE;
+    if (attributesHandle != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(attributesHandle);
+    }
+
+    std::wstring mutationText;
+    bool readFresh = store.ReadFreshText(mutationText);
+    bool mutated = readFresh &&
+        aip::WriteIniValueToText(mutationText, L"General", L"ResidentMutation", L"saved");
+    bool mutationWrite = mutated && store.WriteFreshText(mutationText);
+    std::wstring mutationResult;
+    bool reread = store.ReadFreshText(mutationResult);
+    Check(
+        externalWrite &&
+            restoredTime &&
+            mutationWrite &&
+            reread &&
+            mutationResult.find(L"\"ExternalMarker\" = \"keep\"") != std::wstring::npos &&
+            mutationResult.find(L"\"ResidentMutation\" = \"saved\"") != std::wstring::npos,
+        "fresh INI mutation preserves external edits with unchanged timestamps");
     DeleteFileW(path.c_str());
 }
 
