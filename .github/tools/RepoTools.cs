@@ -833,6 +833,7 @@ static class RepoTools
                     string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
                     File.Copy(sourceExe, exe, true);
                     string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
+                    string customHelpIni = Path.Combine(tempRoot, "CustomHelp.ini");
                     string versionIni = Path.Combine(tempRoot, "VersionSideEffect.ini");
                     string redactIni = Path.Combine(tempRoot, "Redact.ini");
                     string redactLog = Path.Combine(tempRoot, "Redact.log");
@@ -841,6 +842,17 @@ static class RepoTools
 
                     SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC help");
                     AssertFileDoesNotExist(helpIni, "DiscordRPC --help must be side-effect-free");
+                    File.WriteAllText(
+                        customHelpIni,
+                        "[CommandLineHelp]\r\n\"Template\" = \"CUSTOM_DISCORD_HELP {exe}\\\\nSecond line\"\r\n",
+                        new UnicodeEncoding(false, true));
+                    byte[] customHelpBefore = File.ReadAllBytes(customHelpIni);
+                    ProcessResult customHelpResult = SmokeProcess(exe, new[] { "--help", "--ini", customHelpIni }, new[] { 0 }, 30, "DiscordRPC custom help");
+                    if (customHelpResult.Output.IndexOf("CUSTOM_DISCORD_HELP " + Path.GetFileName(exe), StringComparison.Ordinal) < 0 ||
+                        customHelpResult.Output.IndexOf("Second line", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("DiscordRPC --help did not use the configured INI template.");
+                    if (!customHelpBefore.SequenceEqual(File.ReadAllBytes(customHelpIni)))
+                        throw new InvalidOperationException("DiscordRPC --help modified its configured INI.");
                     SmokeProcess(exe, new[] { "--version", "--ini", versionIni, "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC version");
                     AssertFileDoesNotExist(versionIni, "DiscordRPC --version must be side-effect-free");
                     SmokeProcess(exe, new[] { "--tokenXYZ", "abc" }, new[] { 2 }, 30, "DiscordRPC strict option parsing");
@@ -851,6 +863,7 @@ static class RepoTools
                     AssertFileContains(dottedIni, "[section.with.dot]", "DiscordRPC --set must split Section.Key at the last dot before '='");
                     AssertFileContains(dottedIni, "\"key\" = \"value" + trailingSpaces + "\"", "DiscordRPC --set must preserve dotted section names and trailing value spaces");
                     SmokeProcess(exe, new[] { "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dry-run");
+                    VerifyDiscordRpcNoTrayControl(exe, tempRoot);
                 }
                 finally
                 {
@@ -1008,6 +1021,82 @@ static class RepoTools
             foreach (Process process in processes)
                 process.Dispose();
         }
+    }
+
+    static void VerifyDiscordRpcNoTrayControl(string exe, string tempRoot)
+    {
+        string ini = Path.Combine(tempRoot, "NoTrayResident.ini");
+        string log = Path.Combine(tempRoot, "NoTrayResident.log");
+        string config =
+            "[general]\r\n" +
+            "\"client_id\" = \"123456789012345678\"\r\n" +
+            "\"update_interval\" = \"60\"\r\n" +
+            "\"transport_mode\" = \"ipc\"\r\n" +
+            "[app]\r\n" +
+            "\"show_tray\" = \"false\"\r\n" +
+            "\"single_instance\" = \"true\"\r\n" +
+            "\"show_console\" = \"false\"\r\n" +
+            "\"notifications_enabled\" = \"false\"\r\n" +
+            "\"logging_enabled\" = \"true\"\r\n" +
+            "\"file_logging_enabled\" = \"true\"\r\n" +
+            "\"log_path\" = \"" + log.Replace("\\", "\\\\") + "\"\r\n";
+        File.WriteAllText(ini, config, new UTF8Encoding(true));
+
+        var psi = new ProcessStartInfo(exe, JoinArgs(new[] { "--ini", ini, "--no-tray" }))
+        {
+            WorkingDirectory = Path.GetDirectoryName(exe),
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using (var resident = new Process { StartInfo = psi })
+        {
+            if (!resident.Start())
+                throw new InvalidOperationException("Failed to start DiscordRPC no-tray resident.");
+
+            try
+            {
+                WaitForFileText(log, "Starting DiscordRPC C++.", 10000, "DiscordRPC no-tray resident startup");
+                SmokeProcess(
+                    exe,
+                    new[] { "--ini", ini, "--set", "app.verbose_logging=true" },
+                    new[] { 0 },
+                    10,
+                    "DiscordRPC no-tray reload");
+                WaitForFileText(log, "Configuration reloaded.", 10000, "DiscordRPC no-tray reload delivery");
+
+                SmokeProcess(exe, new[] { "--ini", ini, "--exit" }, new[] { 0 }, 10, "DiscordRPC no-tray exit");
+                if (!resident.WaitForExit(10000))
+                    throw new TimeoutException("DiscordRPC no-tray resident did not stop after --exit.");
+
+                SmokeProcess(exe, new[] { "--ini", ini, "--exit" }, new[] { 2 }, 10, "DiscordRPC missing resident exit");
+                Console.WriteLine("ok - DiscordRPC no-tray resident control");
+            }
+            finally
+            {
+                if (!resident.HasExited)
+                {
+                    try { resident.Kill(); } catch { }
+                    try { resident.WaitForExit(); } catch { }
+                }
+            }
+        }
+    }
+
+    static void WaitForFileText(string file, string needle, int timeoutMs, string name)
+    {
+        Stopwatch timer = Stopwatch.StartNew();
+        while (timer.ElapsedMilliseconds < timeoutMs)
+        {
+            if (File.Exists(file))
+            {
+                string text = File.ReadAllText(file, Encoding.UTF8);
+                if (text.IndexOf(needle, StringComparison.Ordinal) >= 0)
+                    return;
+            }
+            System.Threading.Thread.Sleep(100);
+        }
+        throw new TimeoutException(name + " timed out waiting for '" + needle + "'.");
     }
 
     static ProcessResult SmokeProcess(string file, string[] args, int[] allowedExitCodes, int timeoutSeconds, string name)
