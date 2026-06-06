@@ -166,6 +166,18 @@ static void TestCommandLineBehavior()
             setting.key == L"key" &&
             setting.value == L"value  ",
         "command-line INI override uses last dot and preserves value whitespace");
+    Check(
+        !aip::ParseIniSetSpec(L"section]\r\n[injected.key=value", setting, error, &errorKind) &&
+            errorKind == aip::IniSetSpecError::UnsafeCharacters,
+        "command-line INI override rejects section injection");
+    Check(
+        !aip::ParseIniSetSpec(L"section.key\r\ninjected=value", setting, error, &errorKind) &&
+            errorKind == aip::IniSetSpecError::UnsafeCharacters,
+        "command-line INI override rejects key injection");
+    Check(
+        !aip::ParseIniSetSpec(L"section.key=value\r\n[injected]", setting, error, &errorKind) &&
+            errorKind == aip::IniSetSpecError::UnsafeCharacters,
+        "command-line INI override rejects value injection");
 
     bool boolValue = false;
     Check(

@@ -15,7 +15,8 @@ enum class IniSetSpecError
     None,
     MissingEquals,
     InvalidName,
-    EmptySectionOrKey
+    EmptySectionOrKey,
+    UnsafeCharacters
 };
 
 inline bool IsOptionOrInlineValue(const std::wstring& arg, const wchar_t* option)
@@ -96,6 +97,22 @@ inline bool ParseIniSetSpec(
             *errorKind = IniSetSpecError::EmptySectionOrKey;
         }
         error = L"--set expects Section.Key=Value.";
+        return false;
+    }
+    auto hasLineBreakOrNul = [](const std::wstring& text)
+    {
+        return text.find_first_of(L"\r\n\0", 0, 3) != std::wstring::npos;
+    };
+    if (hasLineBreakOrNul(setting.section) ||
+        hasLineBreakOrNul(setting.key) ||
+        hasLineBreakOrNul(setting.value) ||
+        setting.section.find_first_of(L"[]") != std::wstring::npos)
+    {
+        if (errorKind)
+        {
+            *errorKind = IniSetSpecError::UnsafeCharacters;
+        }
+        error = L"--set section, key, and value must stay on one INI line; section names cannot contain brackets.";
         return false;
     }
     return true;
