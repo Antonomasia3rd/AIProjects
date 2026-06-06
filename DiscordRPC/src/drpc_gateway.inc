@@ -275,6 +275,13 @@ struct WinHttpHandle
         return handle;
     }
 
+    HINTERNET Release()
+    {
+        HINTERNET value = handle;
+        handle = nullptr;
+        return value;
+    }
+
     void Reset(HINTERNET value = nullptr)
     {
         if (handle != nullptr)
@@ -374,14 +381,20 @@ public:
         }
 
         LogInfo(L"Connecting to Discord Gateway...");
-        if (!WinHttpSendRequest(request_, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
-        {
-            ThrowWinHttp("WinHttpSendRequest");
-        }
-        if (!WinHttpReceiveResponse(request_, nullptr))
-        {
-            ThrowWinHttp("WinHttpReceiveResponse");
-        }
+        RunCancellableWinHttpRequest(
+            request_,
+            [this]() {
+                if (!WinHttpSendRequest(request_, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
+                {
+                    ThrowWinHttp("WinHttpSendRequest");
+                }
+                if (!WinHttpReceiveResponse(request_, nullptr))
+                {
+                    ThrowWinHttp("WinHttpReceiveResponse");
+                }
+            },
+            [this]() { request_ = nullptr; },
+            "Gateway connection cancelled.");
 
         websocket_ = WinHttpWebSocketCompleteUpgrade(request_, 0);
         if (websocket_ == nullptr)
@@ -464,6 +477,10 @@ public:
         }
 
         FetchAssetIds(clientId_);
+        if (CancellationRequested())
+        {
+            throw std::runtime_error("Gateway operation cancelled.");
+        }
         std::string data = BuildPresenceData(activityJson, status);
         if (verbose_)
         {
@@ -599,6 +616,79 @@ private:
     bool CancellationRequested() const
     {
         return cancellationRequested_ && cancellationRequested_();
+    }
+
+    template <typename Operation, typename ClearOwner>
+    void RunCancellableWinHttpRequest(
+        HINTERNET request,
+        Operation operation,
+        ClearOwner clearOwner,
+        const char* cancellationMessage)
+    {
+        HANDLE completed = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (completed == nullptr)
+        {
+            throw std::runtime_error(WideToUtf8(L"CreateEvent failed: " + GetLastErrorText(GetLastError())));
+        }
+
+        std::atomic<bool> cancelled{ false };
+        std::atomic<bool> requestClosed{ false };
+        std::thread cancellationThread;
+        try
+        {
+            cancellationThread = std::thread([&]() {
+                while (WaitForSingleObject(completed, 50) == WAIT_TIMEOUT)
+                {
+                    if (!CancellationRequested())
+                    {
+                        continue;
+                    }
+                    cancelled = true;
+                    if (!requestClosed.exchange(true))
+                    {
+                        WinHttpCloseHandle(request);
+                    }
+                    return;
+                }
+            });
+        }
+        catch (...)
+        {
+            CloseHandle(completed);
+            throw;
+        }
+
+        std::exception_ptr failure;
+        try
+        {
+            operation();
+        }
+        catch (...)
+        {
+            failure = std::current_exception();
+        }
+
+        SetEvent(completed);
+        cancellationThread.join();
+        CloseHandle(completed);
+
+        if (requestClosed.load())
+        {
+            clearOwner();
+        }
+        if (cancelled.load() || CancellationRequested())
+        {
+            if (!requestClosed.exchange(true))
+            {
+                WinHttpCloseHandle(request);
+                clearOwner();
+            }
+            throw std::runtime_error(cancellationMessage);
+        }
+        if (failure)
+        {
+            std::rethrow_exception(failure);
+        }
     }
 
     static void ThrowWinHttp(const char* action)
@@ -1062,11 +1152,15 @@ private:
         }
         catch (const std::exception& ex)
         {
+            if (CancellationRequested())
+            {
+                throw;
+            }
             LogError(L"Could not fetch Gateway asset IDs for application " + applicationId + L": " + Utf8ToWide(ex.what()));
         }
     }
 
-    static std::string HttpGetDiscord(const std::wstring& path, const std::wstring& userAgent, int timeoutMs)
+    std::string HttpGetDiscord(const std::wstring& path, const std::wstring& userAgent, int timeoutMs)
     {
         HINTERNET session = WinHttpOpen(
             userAgent.empty() ? L"DiscordRPC" : userAgent.c_str(),
@@ -1102,45 +1196,51 @@ private:
         }
         WinHttpHandle closeRequest(request);
 
-        if (!WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
-        {
-            ThrowWinHttp("WinHttpSendRequest");
-        }
-        if (!WinHttpReceiveResponse(request, nullptr))
-        {
-            ThrowWinHttp("WinHttpReceiveResponse");
-        }
-
-        DWORD status = 0;
-        DWORD statusSize = sizeof(status);
-        WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &statusSize, WINHTTP_NO_HEADER_INDEX);
-        if (status < 200 || status >= 300)
-        {
-            throw std::runtime_error("Discord asset API returned HTTP " + std::to_string(status) + ".");
-        }
-
         std::string response;
-        for (;;)
-        {
-            DWORD available = 0;
-            if (!WinHttpQueryDataAvailable(request, &available))
-            {
-                ThrowWinHttp("WinHttpQueryDataAvailable");
-            }
-            if (available == 0)
-            {
-                break;
-            }
+        RunCancellableWinHttpRequest(
+            request,
+            [&]() {
+                if (!WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
+                {
+                    ThrowWinHttp("WinHttpSendRequest");
+                }
+                if (!WinHttpReceiveResponse(request, nullptr))
+                {
+                    ThrowWinHttp("WinHttpReceiveResponse");
+                }
 
-            std::string chunk(available, '\0');
-            DWORD read = 0;
-            if (!WinHttpReadData(request, chunk.data(), available, &read))
-            {
-                ThrowWinHttp("WinHttpReadData");
-            }
-            chunk.resize(read);
-            response += chunk;
-        }
+                DWORD status = 0;
+                DWORD statusSize = sizeof(status);
+                WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &statusSize, WINHTTP_NO_HEADER_INDEX);
+                if (status < 200 || status >= 300)
+                {
+                    throw std::runtime_error("Discord asset API returned HTTP " + std::to_string(status) + ".");
+                }
+
+                for (;;)
+                {
+                    DWORD available = 0;
+                    if (!WinHttpQueryDataAvailable(request, &available))
+                    {
+                        ThrowWinHttp("WinHttpQueryDataAvailable");
+                    }
+                    if (available == 0)
+                    {
+                        break;
+                    }
+
+                    std::string chunk(available, '\0');
+                    DWORD read = 0;
+                    if (!WinHttpReadData(request, chunk.data(), available, &read))
+                    {
+                        ThrowWinHttp("WinHttpReadData");
+                    }
+                    chunk.resize(read);
+                    response += chunk;
+                }
+            },
+            [&]() { closeRequest.Release(); },
+            "Discord asset request cancelled.");
         return response;
     }
 };

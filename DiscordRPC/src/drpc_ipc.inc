@@ -36,7 +36,7 @@ public:
         {
             ThrowIfCancellationRequested();
             std::wstring pipeName = L"\\\\.\\pipe\\discord-ipc-" + std::to_wstring(i);
-            if (!WaitNamedPipeW(pipeName.c_str(), static_cast<DWORD>(options_.connectTimeoutMs)))
+            if (!WaitForPipe(pipeName, static_cast<DWORD>(options_.connectTimeoutMs)))
             {
                 ThrowIfCancellationRequested();
                 DWORD err = GetLastError();
@@ -158,6 +158,31 @@ private:
         if (IsCancellationRequested())
         {
             throw std::runtime_error("Discord IPC operation cancelled.");
+        }
+    }
+
+    bool WaitForPipe(const std::wstring& pipeName, DWORD timeoutMs) const
+    {
+        ULONGLONG deadline = GetTickCount64() + timeoutMs;
+        for (;;)
+        {
+            ThrowIfCancellationRequested();
+            ULONGLONG now = GetTickCount64();
+            DWORD remaining = now >= deadline
+                ? 0
+                : static_cast<DWORD>(deadline - now);
+            DWORD slice = std::min<DWORD>(remaining, 50);
+            if (WaitNamedPipeW(pipeName.c_str(), slice))
+            {
+                return true;
+            }
+
+            DWORD error = GetLastError();
+            if (error != ERROR_SEM_TIMEOUT || remaining == 0)
+            {
+                SetLastError(error);
+                return false;
+            }
         }
     }
 
