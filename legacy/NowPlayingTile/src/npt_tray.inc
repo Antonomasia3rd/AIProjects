@@ -87,36 +87,74 @@ static void ShowTrayMenu(RuntimeContext* ctx)
 
 static void BeginUpdate(RuntimeContext* ctx)
 {
-    if (ctx == nullptr || ctx->updateRunning)
+    if (ctx == nullptr || ctx->closing.load() || ctx->updateRunning)
     {
         return;
+    }
+
+    if (ctx->updateThread.joinable())
+    {
+        ctx->updateThread.join();
     }
 
     ctx->settings = LoadSettings();
     SetTimer(ctx->hwnd, UPDATE_TIMER_ID, static_cast<UINT>(std::max(1, ctx->settings.updateIntervalSeconds) * 1000), nullptr);
     ctx->updateRunning = true;
 
-    HWND hwnd = ctx->hwnd;
-    std::thread([hwnd]() {
-        try
-        {
-            winrt::init_apartment(winrt::apartment_type::multi_threaded);
-        }
-        catch (...)
-        {
-        }
+    try
+    {
+        ctx->updateThread = std::thread([ctx]() {
+            try
+            {
+                winrt::init_apartment(winrt::apartment_type::multi_threaded);
+            }
+            catch (...)
+            {
+            }
 
-        auto* snapshot = new MediaSnapshot(ReadMediaSnapshot());
-        PostMessageW(hwnd, WM_NPT_UPDATE_DONE, 0, reinterpret_cast<LPARAM>(snapshot));
+            std::unique_ptr<MediaSnapshot> snapshot(new MediaSnapshot(ReadMediaSnapshot()));
+            if (!ctx->closing.load() &&
+                PostMessageW(ctx->hwnd, WM_NPT_UPDATE_DONE, 0, reinterpret_cast<LPARAM>(snapshot.get())) != FALSE)
+            {
+                snapshot.release();
+            }
 
-        try
-        {
-            winrt::uninit_apartment();
-        }
-        catch (...)
-        {
-        }
-    }).detach();
+            try
+            {
+                winrt::uninit_apartment();
+            }
+            catch (...)
+            {
+            }
+        });
+    }
+    catch (const std::exception&)
+    {
+        ctx->updateRunning = false;
+        Log(L"Could not start media update worker.");
+    }
+}
+
+static void StopUpdates(RuntimeContext* ctx)
+{
+    if (ctx == nullptr)
+    {
+        return;
+    }
+
+    ctx->closing = true;
+    if (ctx->updateThread.joinable() &&
+        ctx->updateThread.get_id() != std::this_thread::get_id())
+    {
+        ctx->updateThread.join();
+    }
+
+    MSG pending = {};
+    while (PeekMessageW(&pending, ctx->hwnd, WM_NPT_UPDATE_DONE, WM_NPT_UPDATE_DONE, PM_REMOVE))
+    {
+        delete reinterpret_cast<MediaSnapshot*>(pending.lParam);
+    }
+    ctx->updateRunning = false;
 }
 
 static LRESULT CALLBACK BackgroundWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -169,6 +207,10 @@ static LRESULT CALLBACK BackgroundWndProc(HWND hwnd, UINT msg, WPARAM wParam, LP
         if (ctx != nullptr)
         {
             std::unique_ptr<MediaSnapshot> snapshot(reinterpret_cast<MediaSnapshot*>(lParam));
+            if (ctx->updateThread.joinable())
+            {
+                ctx->updateThread.join();
+            }
             ctx->updateRunning = false;
             ctx->current = *snapshot;
             MaybeUpdateLiveTile(ctx, *snapshot);
@@ -211,6 +253,7 @@ static LRESULT CALLBACK BackgroundWndProc(HWND hwnd, UINT msg, WPARAM wParam, LP
         break;
 
     case WM_CLOSE:
+        StopUpdates(ctx);
         DestroyWindow(hwnd);
         return 0;
 
@@ -218,6 +261,7 @@ static LRESULT CALLBACK BackgroundWndProc(HWND hwnd, UINT msg, WPARAM wParam, LP
         if (ctx != nullptr)
         {
             DestroyTrayIcon(ctx);
+            StopUpdates(ctx);
         }
         KillTimer(hwnd, UPDATE_TIMER_ID);
         PostQuitMessage(0);
