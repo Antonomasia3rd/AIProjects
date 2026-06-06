@@ -29,6 +29,12 @@ sealed class ProcessResult
     public string Error = "";
 }
 
+sealed class GitHubReleaseInfo
+{
+    public string tagName { get; set; }
+    public bool isDraft { get; set; }
+}
+
 static class RepoTools
 {
     static int Main(string[] args)
@@ -254,9 +260,13 @@ static class RepoTools
 
         if (!Regex.IsMatch(
                 repoTools,
-                @"release edit .* --draft .*release create .* --draft .*release upload .* --clobber.*release edit .* --draft=false",
+                @"release edit .* --draft .* --target .*release create .* --draft .* --target .*release upload .* --clobber.*release edit .* --draft=false",
                 RegexOptions.Singleline))
-            throw new InvalidOperationException("Automatic releases must remain drafts until every asset upload succeeds.");
+            throw new InvalidOperationException("Automatic releases must remain retargeted drafts until every asset upload succeeds.");
+
+        var releaseNames = new[] { "DesktopStub-v2", "DesktopStub-v5", "DesktopStub-v4" };
+        if (NextReleaseTag("DesktopStub", releaseNames) != "DesktopStub-v6")
+            throw new InvalidOperationException("Release version selection must include draft release names.");
 
         var commandLineConsumers = ProjectsUsingChangedDependencies(root, projects, new List<string> { "dependencies/command_line.inc" })
             .Select(p => p.key)
@@ -1276,6 +1286,9 @@ static class RepoTools
             string releaseBase = p.key;
             string matching = RunCaptureRequired("git", "tag --list " + QuoteArg(releaseBase + "-v*") + " --sort=-v:refname", root);
             var matchingTags = matching.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+            var releases = ListGitHubReleases(repository, root)
+                .Where(r => IsReleaseFamilyTag(releaseBase, r.tagName))
+                .ToList();
             string tag = null;
             foreach (string candidate in matchingTags)
             {
@@ -1287,79 +1300,166 @@ static class RepoTools
                 }
             }
 
-            string previousTag = matchingTags.FirstOrDefault(t => t != tag);
             if (tag == null)
             {
-                int maxVersion = 0;
-                var re = new Regex("^" + Regex.Escape(releaseBase) + "-v(?<version>\\d+)$");
-                foreach (string candidate in matchingTags)
+                GitHubReleaseInfo reusableDraft = releases
+                    .Where(r => r.isDraft)
+                    .OrderByDescending(r => ReleaseVersion(releaseBase, r.tagName))
+                    .FirstOrDefault();
+                int maxPublishedVersion = releases
+                    .Where(r => !r.isDraft)
+                    .Select(r => ReleaseVersion(releaseBase, r.tagName))
+                    .DefaultIfEmpty(0)
+                    .Max();
+                if (reusableDraft != null &&
+                    ReleaseVersion(releaseBase, reusableDraft.tagName) > maxPublishedVersion)
                 {
-                    var m = re.Match(candidate);
-                    if (m.Success)
-                        maxVersion = Math.Max(maxVersion, Int32.Parse(m.Groups["version"].Value));
+                    tag = reusableDraft.tagName;
                 }
-                tag = releaseBase + "-v" + (maxVersion + 1);
+                else
+                {
+                    tag = NextReleaseTag(
+                        releaseBase,
+                        matchingTags.Concat(releases.Select(r => r.tagName)));
+                }
             }
-            if (previousTag == null)
-                previousTag = matchingTags.FirstOrDefault(t => t != tag);
+            string previousTag = matchingTags.FirstOrDefault(t => t != tag);
 
             string workRoot = Path.Combine(Path.GetTempPath(), "release-assets-" + releaseBase + "-" + Guid.NewGuid().ToString("N"));
-            string uploadRoot = Path.Combine(workRoot, "upload");
-            Directory.CreateDirectory(uploadRoot);
-            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var releaseAssets = new List<string>();
-            foreach (string file in files.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
-                AddReleaseAsset(file, RelativeUnder(artifactRoot, file), uploadRoot, used, releaseAssets);
-
-            if (releaseAssets.Count == 0)
-                throw new InvalidOperationException("No release assets were prepared for " + p.label + ".");
-
-            string gitLogFormat = QuoteArg("--format=%h %s");
-            string logArgs = previousTag != null
-                ? "log " + gitLogFormat + " " + QuoteArg(previousTag + ".." + fullSha)
-                : "log " + gitLogFormat + " -n 10 " + QuoteArg(fullSha);
-            string commitText = RunCaptureRequired("git", logArgs, root);
-            var commitSubjects = commitText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
-            if (commitSubjects.Count == 0)
-                commitSubjects.Add(fullSha);
-
-            var checksumLines = new List<string> { "## SHA256 checksums", "", "| File | SHA256 |", "| --- | --- |" };
-            foreach (string asset in releaseAssets.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
-                checksumLines.Add("| `" + Path.GetFileName(asset) + "` | `" + Sha256File(asset).ToLowerInvariant() + "` |");
-
-            var changeLines = new List<string> { "## Changes", "" };
-            changeLines.AddRange(commitSubjects.Select(s => "- " + s));
-
-            string notes = String.Join(Environment.NewLine, new[]
+            try
             {
-                "Automated Windows build for " + p.label + " on main.",
-                "",
-                "Commit: `" + fullSha + "`",
-                "Built projects: " + projectList,
-                "Release family: `" + releaseBase + "-vN`",
-                "",
-                "Release assets are direct files from the workflow artifact payload for this project.",
-                "",
-                String.Join(Environment.NewLine, changeLines),
-                "",
-                String.Join(Environment.NewLine, checksumLines)
-            });
+                string uploadRoot = Path.Combine(workRoot, "upload");
+                Directory.CreateDirectory(uploadRoot);
+                var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var releaseAssets = new List<string>();
+                foreach (string file in files.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                    AddReleaseAsset(file, RelativeUnder(artifactRoot, file), uploadRoot, used, releaseAssets);
 
-            string notesPath = Path.Combine(workRoot, "release-notes.md");
-            File.WriteAllText(notesPath, notes, Encoding.UTF8);
-            bool releaseExists = RunCapture("gh", "release view " + QuoteArg(tag) + " --repo " + QuoteArg(repository), root, 120000).ExitCode == 0;
-            if (releaseExists)
-                RunRequired("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
-            else
-                RunRequired("gh", "release create " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft --target " + QuoteArg(fullSha) + " --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
+                if (releaseAssets.Count == 0)
+                    throw new InvalidOperationException("No release assets were prepared for " + p.label + ".");
 
-            RunRequired("gh", "release upload " + QuoteArg(tag) + " " + JoinArgs(releaseAssets.ToArray()) + " --repo " + QuoteArg(repository) + " --clobber", root);
-            RunRequired("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft=false", root);
-            summary.Add("| " + p.label + " | `" + tag + "` | " + String.Join(", ", releaseAssets.Select(Path.GetFileName)) + " |");
+                string gitLogFormat = QuoteArg("--format=%h %s");
+                string logArgs = previousTag != null
+                    ? "log " + gitLogFormat + " " + QuoteArg(previousTag + ".." + fullSha)
+                    : "log " + gitLogFormat + " -n 10 " + QuoteArg(fullSha);
+                string commitText = RunCaptureRequired("git", logArgs, root);
+                var commitSubjects = commitText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+                if (commitSubjects.Count == 0)
+                    commitSubjects.Add(fullSha);
+
+                var checksumLines = new List<string> { "## SHA256 checksums", "", "| File | SHA256 |", "| --- | --- |" };
+                foreach (string asset in releaseAssets.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                    checksumLines.Add("| `" + Path.GetFileName(asset) + "` | `" + Sha256File(asset).ToLowerInvariant() + "` |");
+
+                var changeLines = new List<string> { "## Changes", "" };
+                changeLines.AddRange(commitSubjects.Select(s => "- " + s));
+
+                string notes = String.Join(Environment.NewLine, new[]
+                {
+                    "Automated Windows build for " + p.label + " on main.",
+                    "",
+                    "Commit: `" + fullSha + "`",
+                    "Built projects: " + projectList,
+                    "Release family: `" + releaseBase + "-vN`",
+                    "",
+                    "Release assets are direct files from the workflow artifact payload for this project.",
+                    "",
+                    String.Join(Environment.NewLine, changeLines),
+                    "",
+                    String.Join(Environment.NewLine, checksumLines)
+                });
+
+                string notesPath = Path.Combine(workRoot, "release-notes.md");
+                File.WriteAllText(notesPath, notes, Encoding.UTF8);
+                GitHubReleaseInfo existingRelease = releases.FirstOrDefault(
+                    r => r.tagName.Equals(tag, StringComparison.OrdinalIgnoreCase));
+                if (existingRelease != null && !existingRelease.isDraft)
+                {
+                    Console.WriteLine("Release " + tag + " is already published; leaving it unchanged.");
+                    summary.Add("| " + p.label + " | `" + tag + "` | already published |");
+                    continue;
+                }
+
+                bool createdDraft = false;
+                try
+                {
+                    if (existingRelease != null)
+                    {
+                        RunRequired("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft --target " + QuoteArg(fullSha) + " --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
+                    }
+                    else
+                    {
+                        RunRequired("gh", "release create " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft --target " + QuoteArg(fullSha) + " --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
+                        createdDraft = true;
+                    }
+
+                    RunRequired("gh", "release upload " + QuoteArg(tag) + " " + JoinArgs(releaseAssets.ToArray()) + " --repo " + QuoteArg(repository) + " --clobber", root);
+                    RunRequired("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft=false", root);
+                }
+                catch
+                {
+                    if (createdDraft)
+                    {
+                        ProcessResult cleanup = RunCapture(
+                            "gh",
+                            "release delete " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --yes",
+                            root,
+                            120000);
+                        if (cleanup.ExitCode != 0)
+                            Console.Error.WriteLine("WARNING: Could not remove failed draft release " + tag + ": " + cleanup.Error);
+                    }
+                    throw;
+                }
+
+                summary.Add("| " + p.label + " | `" + tag + "` | " + String.Join(", ", releaseAssets.Select(Path.GetFileName)) + " |");
+            }
+            finally
+            {
+                if (Directory.Exists(workRoot))
+                    Directory.Delete(workRoot, true);
+            }
         }
 
         AppendSummary(summary);
         return 0;
+    }
+
+    static List<GitHubReleaseInfo> ListGitHubReleases(string repository, string root)
+    {
+        string json = RunCaptureRequired(
+            "gh",
+            "release list --repo " + QuoteArg(repository) + " --limit 1000 --json tagName,isDraft",
+            root);
+        var serializer = new JavaScriptSerializer();
+        return serializer.Deserialize<List<GitHubReleaseInfo>>(json) ?? new List<GitHubReleaseInfo>();
+    }
+
+    static bool IsReleaseFamilyTag(string releaseBase, string tag)
+    {
+        return ReleaseVersion(releaseBase, tag) > 0;
+    }
+
+    static int ReleaseVersion(string releaseBase, string tag)
+    {
+        if (String.IsNullOrWhiteSpace(tag))
+            return 0;
+        Match match = Regex.Match(
+            tag,
+            "^" + Regex.Escape(releaseBase) + "-v(?<version>\\d+)$",
+            RegexOptions.IgnoreCase);
+        int version;
+        return match.Success && Int32.TryParse(match.Groups["version"].Value, out version)
+            ? version
+            : 0;
+    }
+
+    static string NextReleaseTag(string releaseBase, IEnumerable<string> names)
+    {
+        int maxVersion = names
+            .Select(name => ReleaseVersion(releaseBase, name))
+            .DefaultIfEmpty(0)
+            .Max();
+        return releaseBase + "-v" + (maxVersion + 1);
     }
 
     static Tuple<string, List<string>, string> ResolveDownloadedProjectArtifact(Project p, string artifactsRoot)
