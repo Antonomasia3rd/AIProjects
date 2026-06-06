@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -40,8 +41,7 @@ static class TaskSchedulerMigration
                 Usage();
                 return 2;
             }
-            Run(options);
-            return 0;
+            return Run(options);
         }
         catch (Exception ex)
         {
@@ -83,7 +83,7 @@ static class TaskSchedulerMigration
         Console.WriteLine("  TaskSchedulerMigration.exe -OldSID S-1-5-21-... -NewUser DOMAIN\\User [-TaskPath \\Folder\\] [-WhatIf]");
     }
 
-    static void Run(Options o)
+    static int Run(Options o)
     {
         Console.ForegroundColor = ConsoleColor.Cyan;
         Console.WriteLine("=== Task Migration START (SID -> User) ===");
@@ -151,7 +151,7 @@ static class TaskSchedulerMigration
                     continue;
 
                 Directory.CreateDirectory(o.BackupDirectory);
-                string backupPath = Path.Combine(o.BackupDirectory, SafeFileName(fullName.TrimStart('\\').Replace('\\', '_')) + ".xml");
+                string backupPath = BuildBackupPath(o.BackupDirectory, fullName);
                 File.WriteAllText(backupPath, xml, Encoding.UTF8);
                 Console.ForegroundColor = ConsoleColor.DarkCyan;
                 Console.WriteLine("[BACKUP] " + backupPath);
@@ -192,6 +192,7 @@ static class TaskSchedulerMigration
         Console.WriteLine("Failed tasks: " + failed);
         Console.ResetColor();
         Console.WriteLine("=== Task Migration COMPLETE ===");
+        return failed == 0 ? 0 : 3;
     }
 
     sealed class TaskRef
@@ -284,6 +285,39 @@ static class TaskSchedulerMigration
     {
         string invalid = Regex.Escape(new string(Path.GetInvalidFileNameChars()));
         return Regex.Replace(name, "[" + invalid + "]", "_");
+    }
+
+    static string BuildBackupPath(string backupDirectory, string fullTaskName)
+    {
+        string trimmed = (fullTaskName ?? "").Trim('\\');
+        string leaf = trimmed;
+        int separator = trimmed.LastIndexOf('\\');
+        if (separator >= 0 && separator + 1 < trimmed.Length)
+            leaf = trimmed.Substring(separator + 1);
+        leaf = SafeFileName(leaf);
+        if (String.IsNullOrWhiteSpace(leaf))
+            leaf = "task";
+        if (leaf.Length > 80)
+            leaf = leaf.Substring(0, 80);
+
+        string hash;
+        using (SHA256 sha = SHA256.Create())
+        {
+            byte[] digest = sha.ComputeHash(Encoding.UTF8.GetBytes(fullTaskName ?? ""));
+            hash = BitConverter.ToString(digest, 0, 8).Replace("-", "").ToLowerInvariant();
+        }
+
+        string timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmssfff");
+        string fileName = leaf + "-" + hash + "-" + timestamp + ".xml";
+        string path = Path.Combine(backupDirectory, fileName);
+        int suffix = 2;
+        while (File.Exists(path))
+        {
+            fileName = leaf + "-" + hash + "-" + timestamp + "-" + suffix + ".xml";
+            path = Path.Combine(backupDirectory, fileName);
+            suffix++;
+        }
+        return path;
     }
 
     static bool Is(string a, string b) { return String.Equals(a, b, StringComparison.OrdinalIgnoreCase); }
