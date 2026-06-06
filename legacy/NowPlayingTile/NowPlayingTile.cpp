@@ -123,6 +123,8 @@ struct RuntimeContext
     NOTIFYICONDATAW nid = {};
     bool trayCreated = false;
     bool updateRunning = false;
+    std::atomic<bool> closing{ false };
+    std::thread updateThread;
     AppSettings settings;
     std::wstring lastTileKey;
     steady_clock::time_point lastTileUpdate = steady_clock::time_point::min();
@@ -148,6 +150,7 @@ static bool HasPackageIdentity();
 static int RunBackground(const AppOptions& options);
 static int RunWidget(const AppOptions& options);
 static void BeginUpdate(RuntimeContext* ctx);
+static void StopUpdates(RuntimeContext* ctx);
 static void MaybeUpdateLiveTile(RuntimeContext* ctx, const MediaSnapshot& snapshot);
 static void ShowHelpMessage();
 static void SignalExistingInstanceToExit();

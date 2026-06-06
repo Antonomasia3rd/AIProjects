@@ -153,6 +153,10 @@ static LRESULT CALLBACK WidgetWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         if (ctx != nullptr)
         {
             std::unique_ptr<MediaSnapshot> snapshot(reinterpret_cast<MediaSnapshot*>(lParam));
+            if (ctx->runtime.updateThread.joinable())
+            {
+                ctx->runtime.updateThread.join();
+            }
             ctx->runtime.updateRunning = false;
             ctx->runtime.current = *snapshot;
             MaybeUpdateLiveTile(&ctx->runtime, *snapshot);
@@ -224,10 +228,18 @@ static LRESULT CALLBACK WidgetWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         break;
 
     case WM_CLOSE:
+        if (ctx != nullptr)
+        {
+            StopUpdates(&ctx->runtime);
+        }
         DestroyWindow(hwnd);
         return 0;
 
     case WM_DESTROY:
+        if (ctx != nullptr)
+        {
+            StopUpdates(&ctx->runtime);
+        }
         KillTimer(hwnd, UPDATE_TIMER_ID);
         PostQuitMessage(0);
         return 0;
