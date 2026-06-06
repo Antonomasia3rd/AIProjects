@@ -7,6 +7,7 @@
 #include <tlhelp32.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cwchar>
 #include <cwctype>
 #include <mutex>
@@ -23,6 +24,10 @@ static const wchar_t* kServiceDisplayName = L"Secure Desktop Launcher";
 static SERVICE_STATUS_HANDLE gStatusHandle = nullptr;
 static SERVICE_STATUS gStatus = {};
 static HANDLE gStopEvent = nullptr;
+static HANDLE gEnsureWorkersDrainedEvent = nullptr;
+static std::atomic<bool> gStopping{ true };
+static std::mutex gEnsureWorkersMutex;
+static size_t gEnsureWorkerCount = 0;
 
 struct SessionContext
 {
@@ -822,7 +827,11 @@ static AppConfig LoadConfig()
 
 static bool LaunchProgramOnDesktop(const AppConfig& config, const ProgramConfig& program, const SessionContext& session)
 {
-    if (session.id == 0 || session.id == 0xFFFFFFFF || !program.enabled || program.path.empty()) {
+    if (gStopping.load() ||
+        session.id == 0 ||
+        session.id == 0xFFFFFFFF ||
+        !program.enabled ||
+        program.path.empty()) {
         return false;
     }
 
@@ -843,6 +852,11 @@ static bool LaunchProgramOnDesktop(const AppConfig& config, const ProgramConfig&
         nullptr);
 
     EnterCriticalSection(&launchLock);
+
+    if (gStopping.load()) {
+        LeaveCriticalSection(&launchLock);
+        return false;
+    }
 
     if (ConfiguredProgramAlreadyRunningInSession(program, session.id)) {
         LeaveCriticalSection(&launchLock);
@@ -938,8 +952,12 @@ static bool LaunchProgramOnDesktop(const AppConfig& config, const ProgramConfig&
     }
     CloseHandle(primaryToken);
 
-    if (ok && program.launchSpacingMs > 0) {
-        Sleep(program.launchSpacingMs);
+    if (ok && program.launchSpacingMs > 0 && !gStopping.load()) {
+        if (gStopEvent) {
+            WaitForSingleObject(gStopEvent, program.launchSpacingMs);
+        } else {
+            Sleep(program.launchSpacingMs);
+        }
     }
 
     LeaveCriticalSection(&launchLock);
@@ -948,7 +966,7 @@ static bool LaunchProgramOnDesktop(const AppConfig& config, const ProgramConfig&
 
 static void EnsureProgramsForSession(DWORD sessionId, WTS_CONNECTSTATE_CLASS fallbackState = WTSDisconnected)
 {
-    if (sessionId == 0 || sessionId == 0xFFFFFFFF) {
+    if (gStopping.load() || sessionId == 0 || sessionId == 0xFFFFFFFF) {
         return;
     }
 
@@ -961,6 +979,9 @@ static void EnsureProgramsForSession(DWORD sessionId, WTS_CONNECTSTATE_CLASS fal
 
     DWORD startedOrPresent = 0;
     for (const ProgramConfig& program : config.programs) {
+        if (gStopping.load()) {
+            break;
+        }
         if (config.maxProgramsPerSession > 0 && startedOrPresent >= config.maxProgramsPerSession) {
             break;
         }
@@ -1026,6 +1047,10 @@ static bool ShouldLaunchState(const AppConfig& config, WTS_CONNECTSTATE_CLASS st
 
 static void ReconcileSessions()
 {
+    if (gStopping.load()) {
+        return;
+    }
+
     AppConfig config = LoadConfig();
     if (!config.startOnServiceStart) {
         return;
@@ -1048,19 +1073,50 @@ static void ReconcileSessions()
     }
 }
 
+static void CompleteEnsureWorker()
+{
+    std::lock_guard<std::mutex> lock(gEnsureWorkersMutex);
+    if (gEnsureWorkerCount > 0) {
+        --gEnsureWorkerCount;
+    }
+    if (gEnsureWorkerCount == 0 && gEnsureWorkersDrainedEvent) {
+        SetEvent(gEnsureWorkersDrainedEvent);
+    }
+}
+
 static DWORD WINAPI EnsureWorker(void* ctx)
 {
     DWORD sessionId = *reinterpret_cast<DWORD*>(ctx);
     delete reinterpret_cast<DWORD*>(ctx);
-    EnsureProgramsForSession(sessionId);
+    if (!gStopping.load()) {
+        EnsureProgramsForSession(sessionId);
+    }
+    CompleteEnsureWorker();
     return 0;
 }
 
 static void QueueEnsure(DWORD sessionId)
 {
+    if (gStopping.load()) {
+        return;
+    }
+
     auto* boxedSessionId = new DWORD(sessionId);
+    {
+        std::lock_guard<std::mutex> lock(gEnsureWorkersMutex);
+        if (gStopping.load()) {
+            delete boxedSessionId;
+            return;
+        }
+        if (gEnsureWorkerCount == 0 && gEnsureWorkersDrainedEvent) {
+            ResetEvent(gEnsureWorkersDrainedEvent);
+        }
+        ++gEnsureWorkerCount;
+    }
+
     if (!QueueUserWorkItem(EnsureWorker, boxedSessionId, WT_EXECUTEDEFAULT)) {
         delete boxedSessionId;
+        CompleteEnsureWorker();
     }
 }
 
@@ -1087,6 +1143,7 @@ static DWORD WINAPI ServiceHandlerEx(DWORD control, DWORD eventType, LPVOID even
     switch (control) {
     case SERVICE_CONTROL_STOP:
     case SERVICE_CONTROL_SHUTDOWN:
+        gStopping.store(true);
         SetServiceState(SERVICE_STOP_PENDING, NO_ERROR, 10000);
         if (gStopEvent) {
             SetEvent(gStopEvent);
@@ -1123,15 +1180,28 @@ static void WINAPI ServiceMain(DWORD, LPWSTR*)
         SetServiceState(SERVICE_STOPPED, GetLastError());
         return;
     }
+    gEnsureWorkersDrainedEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    if (!gEnsureWorkersDrainedEvent) {
+        DWORD error = GetLastError();
+        CloseHandle(gStopEvent);
+        gStopEvent = nullptr;
+        SetServiceState(SERVICE_STOPPED, error);
+        return;
+    }
 
+    gStopping.store(false);
     SetServiceState(SERVICE_RUNNING);
     ReconcileSessions();
 
     WaitForSingleObject(gStopEvent, INFINITE);
 
+    gStopping.store(true);
     SetServiceState(SERVICE_STOP_PENDING, NO_ERROR, 10000);
+    WaitForSingleObject(gEnsureWorkersDrainedEvent, INFINITE);
     StopConfiguredProcesses();
 
+    CloseHandle(gEnsureWorkersDrainedEvent);
+    gEnsureWorkersDrainedEvent = nullptr;
     CloseHandle(gStopEvent);
     gStopEvent = nullptr;
     SetServiceState(SERVICE_STOPPED);
