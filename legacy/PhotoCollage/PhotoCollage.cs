@@ -90,8 +90,11 @@ static class PhotoCollage
         if (!Directory.Exists(o.InputFolder))
             throw new DirectoryNotFoundException(o.InputFolder);
 
+        string outputPath = Path.GetFullPath(o.OutputFile);
         var files = Directory.EnumerateFiles(o.InputFolder, "*", SearchOption.AllDirectories)
             .Where(IsSupportedImage)
+            .Where(path => !Path.GetFullPath(path).Equals(outputPath, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Take(o.MaxImages)
             .ToList();
         if (files.Count == 0)
