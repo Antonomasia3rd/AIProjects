@@ -248,6 +248,9 @@ static class DNSAutoUpdate
 
         foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
         {
+            if (ni.OperationalStatus != OperationalStatus.Up)
+                continue;
+
             string alias = ni.Name ?? "";
             if (o.IncludeInterfaceAlias.Count > 0 && !WildcardAny(alias, o.IncludeInterfaceAlias))
                 continue;
