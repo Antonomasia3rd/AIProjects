@@ -1,28 +1,7 @@
-#define NOMINMAX
-#define WIN32_LEAN_AND_MEAN
+#include "..\dependencies\desktop_app_baseline.h"
 
-#include <windows.h>
-#include <shellapi.h>
-
-#include <algorithm>
-#include <climits>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
-#include <cwchar>
-#include <cwctype>
 #include <iostream>
-#include <mutex>
-#include <string>
 #include <thread>
-#include <utility>
-#include <vector>
-
-#include "..\dependencies\baseline_app.h"
-#include "..\dependencies\core.inc"
-#include "..\dependencies\config_ini.inc"
-#include "..\dependencies\command_line.inc"
-#include "..\dependencies\tray.inc"
 
 static int g_failures = 0;
 
