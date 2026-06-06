@@ -43,18 +43,21 @@ public class AllowContentService : ServiceBase
 
     protected override void OnStart(string[] args)
     {
+        lock (watcherLock)
+        {
+            if (watcherThreads.Exists(thread => thread.IsAlive))
+                throw new InvalidOperationException("Previous registry watcher threads are still stopping.");
+            watcherThreads.Clear();
+            watchedSids.Clear();
+            watchedRootSids.Clear();
+        }
+
         running = true;
         stopEvent.Reset();
         EnsureIniFile();
         Log("Service started");
 
-        Thread hkuWatcher = new Thread(WatchHKU);
-        hkuWatcher.IsBackground = true;
-        hkuWatcher.Start();
-        lock (watcherLock)
-        {
-            watcherThreads.Add(hkuWatcher);
-        }
+        StartWatcher(WatchHKU);
 
         AttachToExistingUsers();
     }
@@ -75,9 +78,53 @@ public class AllowContentService : ServiceBase
         {
             if (thread != Thread.CurrentThread && thread.IsAlive)
             {
-                thread.Join(2000);
+                thread.Join(10000);
             }
         }
+
+        lock (watcherLock)
+        {
+            watcherThreads.RemoveAll(thread => !thread.IsAlive);
+            if (watcherThreads.Count > 0)
+                Log("WARNING: " + watcherThreads.Count + " registry watcher thread(s) did not stop within 10 seconds.");
+        }
+    }
+
+    private bool StartWatcher(ThreadStart action)
+    {
+        Thread thread = null;
+        thread = new Thread(() =>
+        {
+            try
+            {
+                action();
+            }
+            finally
+            {
+                lock (watcherLock)
+                {
+                    watcherThreads.Remove(thread);
+                }
+            }
+        });
+        thread.IsBackground = true;
+
+        lock (watcherLock)
+        {
+            if (!running)
+                return false;
+            watcherThreads.Add(thread);
+            try
+            {
+                thread.Start();
+            }
+            catch
+            {
+                watcherThreads.Remove(thread);
+                throw;
+            }
+        }
+        return true;
     }
 
     private void WatchHKU()
@@ -169,12 +216,14 @@ public class AllowContentService : ServiceBase
 
             ProcessAllKeys(key, sid);
 
-            Thread t = new Thread(() => WatchUserKey(key, sid));
-            t.IsBackground = true;
-            t.Start();
-            lock (watcherLock)
+            if (!StartWatcher(() => WatchUserKey(key, sid)))
             {
-                watcherThreads.Add(t);
+                key.Dispose();
+                lock (watcherLock)
+                {
+                    watchedSids.Remove(sid);
+                }
+                return false;
             }
 
             Log("Attached to " + sid);
@@ -223,12 +272,14 @@ public class AllowContentService : ServiceBase
                 return;
             }
 
-            Thread t = new Thread(() => WatchUserRoot(rootKey, sid));
-            t.IsBackground = true;
-            t.Start();
-            lock (watcherLock)
+            if (!StartWatcher(() => WatchUserRoot(rootKey, sid)))
             {
-                watcherThreads.Add(t);
+                rootKey.Dispose();
+                lock (watcherLock)
+                {
+                    watchedRootSids.Remove(sid);
+                }
+                return;
             }
 
             Log("Watching user root for notification settings: " + sid);
