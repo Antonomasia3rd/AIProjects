@@ -172,6 +172,26 @@ int main()
             "DiscordRPC app sources",
             app,
             "aip::SignalInstanceWindow");
+        RequireContains(
+            "DiscordRPC rejects empty --ini paths",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "--ini requires a non-empty path.");
+        RequireContains(
+            "DiscordRPC derives sidecar paths through the shared helper",
+            "src\\drpc_core.inc",
+            core,
+            "aip::BuildCurrentProcessSidecarPaths(APP_NAME)");
+        RequireContains(
+            "DiscordRPC single-instance scope follows effective INI path",
+            "src\\drpc_core.inc",
+            core,
+            "std::wstring scope = MakeAbsolutePath(g_iniPath);");
+        RequireNotContains(
+            "DiscordRPC single-instance scope does not add exe base name",
+            "src\\drpc_core.inc",
+            core,
+            "MakeAbsolutePath(g_iniPath) + L\"|\" + g_exeBaseName");
 
         RequireContains(
             "Discord Gateway connection waits are cancellable",

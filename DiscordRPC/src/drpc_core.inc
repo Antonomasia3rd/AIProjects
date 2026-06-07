@@ -58,30 +58,24 @@ static std::wstring MakeAbsolutePath(const std::wstring& path)
     return aip::MakeAbsolutePath(path);
 }
 
+static void ApplySidecarPaths(const aip::SidecarPaths& paths)
+{
+    g_exePath = paths.exePath.empty() ? APP_NAME : paths.exePath;
+    g_exeDir = paths.exeDir.empty() ? L"." : paths.exeDir;
+    g_exeBaseName = paths.exeBaseName.empty() ? APP_NAME : paths.exeBaseName;
+    g_iniPath = paths.configPath;
+    g_defaultLogPath = paths.defaultLogPath;
+    g_effectiveLogPath = g_defaultLogPath;
+}
+
 static void InitPaths()
 {
-    wchar_t buffer[4096] = {};
-    DWORD length = GetModuleFileNameW(nullptr, buffer, ARRAYSIZE(buffer));
-    if (length == 0 || length >= ARRAYSIZE(buffer))
-    {
-        g_exePath = APP_NAME;
-        g_exeDir = L".";
-        g_exeBaseName = APP_NAME;
-    }
-    else
-    {
-        g_exePath = buffer;
-        g_exeDir = GetDirectoryName(g_exePath);
-        g_exeBaseName = GetFileBaseName(g_exePath);
-        if (g_exeBaseName.empty())
-        {
-            g_exeBaseName = APP_NAME;
-        }
-    }
+    ApplySidecarPaths(aip::BuildCurrentProcessSidecarPaths(APP_NAME));
+}
 
-    g_iniPath = PathJoin(g_exeDir, g_exeBaseName + L".ini");
-    g_defaultLogPath = PathJoin(g_exeDir, g_exeBaseName + L".log");
-    g_effectiveLogPath = g_defaultLogPath;
+static void ApplyConfiguredIniPath(const std::wstring& configPath)
+{
+    ApplySidecarPaths(aip::BuildSidecarPathsFromExecutable(g_exePath, APP_NAME, configPath));
 }
 
 
@@ -618,7 +612,11 @@ static std::wstring StableHash(const std::wstring& value)
 
 static void ConfigureSingleInstanceIdentity()
 {
-    std::wstring scope = MakeAbsolutePath(g_iniPath) + L"|" + g_exeBaseName;
+    // Match DesktopStub's baseline rule: a resident instance is scoped by the
+    // effective INI path. The default INI already changes when the executable
+    // is renamed, so adding g_exeBaseName here would break explicit --ini
+    // sharing between renamed copies.
+    std::wstring scope = MakeAbsolutePath(g_iniPath);
     std::wstring suffix = StableHash(scope);
     aip::InstanceIdentity identity = aip::BuildInstanceIdentity(
         APP_NAME,

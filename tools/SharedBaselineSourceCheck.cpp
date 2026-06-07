@@ -89,8 +89,11 @@ int main()
     try
     {
         const std::string appPaths = ReadAll("dependencies/app_paths.inc");
+        const std::string baselineApp = ReadAll("dependencies/baseline_app.h");
+        const std::string commandLine = ReadAll("dependencies/command_line.inc");
         const std::string configIni = ReadAll("dependencies/config_ini.inc");
         const std::string logging = ReadAll("dependencies/logging.inc");
+        const std::string tray = ReadAll("dependencies/tray.inc");
         const std::string baselineHeader = ReadAll("dependencies/desktop_app_baseline.h");
         const std::string dependenciesReadme = ReadAll("dependencies/README.md");
         const std::string sharedTests = ReadAll("tools/SharedBaselineTests.cpp");
@@ -137,6 +140,47 @@ int main()
             "dependencies/config_ini.inc",
             configIni,
             "return QuoteIniString(key) + L\" = \" + QuoteIniString(value);");
+        RequireContains(
+            "shared command-line dependency provides baseline primitives",
+            "dependencies/command_line.inc",
+            commandLine,
+            "ParseIniSetSpec");
+        RequireContains(
+            "shared command-line dependency provides strict option-value extraction",
+            "dependencies/command_line.inc",
+            commandLine,
+            "TakeCommandLineValue");
+        RequireContains(
+            "shared tray dependency provides baseline menu primitives",
+            "dependencies/tray.inc",
+            tray,
+            "AppendTrayMenuItem");
+        RequireContains(
+            "shared tray dependency provides submenu primitives",
+            "dependencies/tray.inc",
+            tray,
+            "BeginTrayNestedMenu");
+        RequireContains(
+            "shared application baseline exposes reusable subsystem contracts",
+            "dependencies/baseline_app.h",
+            baselineApp,
+            "BuildInstanceIdentity");
+        RequireContains(
+            "shared application baseline exposes resident shutdown state",
+            "dependencies/baseline_app.h",
+            baselineApp,
+            "ResidentShutdownState");
+        RequireContains(
+            "shared config dependency exposes an explicit config store",
+            "dependencies/config_ini.inc",
+            configIni,
+            "class IniConfigStore");
+        RequireContains(
+            "shared config store supports fresh mutations",
+            "dependencies/config_ini.inc",
+            configIni,
+            "MutateFresh");
+
         RequireContains(
             "app path helper derives sidecar paths",
             "dependencies/app_paths.inc",

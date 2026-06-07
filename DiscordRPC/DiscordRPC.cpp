@@ -101,8 +101,7 @@ int wmain()
 
     if (!options.configPath.empty())
     {
-        g_iniPath = MakeAbsolutePath(options.configPath);
-        g_defaultLogPath = PathJoin(GetDirectoryName(g_iniPath), GetFileBaseName(g_iniPath) + L".log");
+        ApplyConfiguredIniPath(options.configPath);
     }
 
     if (options.showHelp)

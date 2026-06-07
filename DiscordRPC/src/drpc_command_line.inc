@@ -157,6 +157,11 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             {
                 return false;
             }
+            if (Trim(value).empty())
+            {
+                error = L"--ini requires a non-empty path.";
+                return false;
+            }
             options.configPath = value;
         }
         else if (aip::IsOptionOrInlineValue(arg, L"--set"))
