@@ -233,6 +233,16 @@ int main()
             logging,
             "LockFileEx");
         RequireContains(
+            "shared logging helper opens append handle with write access for locking",
+            "dependencies/logging.inc",
+            logging,
+            "FILE_APPEND_DATA | FILE_WRITE_DATA | SYNCHRONIZE");
+        RequireContains(
+            "shared logging helper seeks to EOF after acquiring the append lock",
+            "dependencies/logging.inc",
+            logging,
+            "SetFilePointerEx(file, end, nullptr, FILE_END)");
+        RequireContains(
             "shared logging helper loops on partial writes",
             "dependencies/logging.inc",
             logging,
