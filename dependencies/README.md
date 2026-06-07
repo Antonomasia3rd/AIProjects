@@ -5,12 +5,14 @@ product implementation:
 
 - `desktop_app_baseline.h`: stable aggregate entry point that includes the
   common modules below in their supported dependency order.
-- `baseline_app.h`: single-instance identity/signaling, taskbar recreation
-  registration, resident shutdown state, command-line help templates, and
-  flat/dropdown tray sections.
+- `baseline_app.h`: single-instance identity/signaling, path-scoped stable
+  hashing, taskbar recreation registration, resident shutdown state, command-line
+  help templates, and flat/dropdown tray sections.
 - `app_paths.inc`: executable sidecar path discovery for per-product INI and
-  log files, including configured INI override handling.
-- `logging.inc`: UTF-8 sidecar file logging and bounded recent-log buffering.
+  log files, including growable current-module path lookup and configured INI
+  override handling.
+- `logging.inc`: UTF-8 sidecar file logging and bounded recent-log buffering,
+  with concurrent appender sharing for helper/broker processes.
 - `config_ini.inc`: `IniConfigStore`, synchronized INI mutation, encoding, and
   document parsing.
 - `command_line.inc`: option value parsing, INI setting syntax, and boolean

@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <cwchar>
 #include <cwctype>
 #include <string>
 #include <utility>
@@ -76,6 +77,37 @@ inline InstanceIdentity BuildInstanceIdentity(
     }
     identity.windowTitle += L"." + suffix;
     return identity;
+}
+
+
+inline std::wstring StableHashHex64(const std::wstring& value, bool caseInsensitive = true)
+{
+    uint64_t hash = 14695981039346656037ull;
+    for (wchar_t ch : value)
+    {
+        wchar_t normalized = caseInsensitive ? towlower(ch) : ch;
+        hash ^= static_cast<uint64_t>(normalized);
+        hash *= 1099511628211ull;
+    }
+
+    wchar_t buffer[32] = {};
+    swprintf(buffer, sizeof(buffer) / sizeof(buffer[0]), L"%016llx", static_cast<unsigned long long>(hash));
+    return buffer;
+}
+
+inline InstanceIdentity BuildPathScopedInstanceIdentity(
+    const std::wstring& mutexStem,
+    const std::wstring& messageStem,
+    const std::wstring& windowClass,
+    const std::wstring& windowProduct,
+    const std::wstring& scopePath)
+{
+    return BuildInstanceIdentity(
+        mutexStem,
+        messageStem,
+        windowClass,
+        windowProduct,
+        StableHashHex64(scopePath));
 }
 
 inline HWND FindInstanceWindow(

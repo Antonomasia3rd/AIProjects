@@ -12,6 +12,30 @@ struct SidecarPaths
     std::wstring defaultLogPath;
 };
 
+inline std::wstring GetCurrentExecutablePath()
+{
+    std::vector<wchar_t> buffer(4096);
+    for (;;)
+    {
+        DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0)
+        {
+            return L"";
+        }
+
+        if (length < buffer.size() - 1)
+        {
+            return std::wstring(buffer.data(), length);
+        }
+
+        if (buffer.size() >= 32768)
+        {
+            return std::wstring(buffer.data(), length);
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+}
+
 inline SidecarPaths BuildSidecarPathsFromExecutable(
     const std::wstring& executablePath,
     const std::wstring& fallbackBaseName,
@@ -50,14 +74,7 @@ inline SidecarPaths BuildCurrentProcessSidecarPaths(
     const std::wstring& fallbackBaseName,
     const std::wstring& configOverride = L"")
 {
-    wchar_t buffer[4096] = {};
-    DWORD length = GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(sizeof(buffer) / sizeof(buffer[0])));
-    std::wstring executablePath;
-    if (length != 0 && length < static_cast<DWORD>(sizeof(buffer) / sizeof(buffer[0])))
-    {
-        executablePath.assign(buffer, length);
-    }
-    return BuildSidecarPathsFromExecutable(executablePath, fallbackBaseName, configOverride);
+    return BuildSidecarPathsFromExecutable(GetCurrentExecutablePath(), fallbackBaseName, configOverride);
 }
 }
 

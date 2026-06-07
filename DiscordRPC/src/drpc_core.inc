@@ -58,6 +58,8 @@ static std::wstring MakeAbsolutePath(const std::wstring& path)
     return aip::MakeAbsolutePath(path);
 }
 
+static void ConfigureLoggerFromRuntimeState();
+
 static void ApplySidecarPaths(const aip::SidecarPaths& paths)
 {
     g_exePath = paths.exePath.empty() ? APP_NAME : paths.exePath;
@@ -66,6 +68,7 @@ static void ApplySidecarPaths(const aip::SidecarPaths& paths)
     g_iniPath = paths.configPath;
     g_defaultLogPath = paths.defaultLogPath;
     g_effectiveLogPath = g_defaultLogPath;
+    ConfigureLoggerFromRuntimeState();
 }
 
 static void InitPaths()
@@ -174,61 +177,19 @@ static void PrintLine(const std::wstring& line, bool error = false)
     fflush(stream);
 }
 
-static void AddRecentLogLine(const std::wstring& line)
+static void ConfigureLoggerFromRuntimeState()
 {
-    std::lock_guard<std::mutex> lock(g_logMutex);
-    g_recentLog.push_back(line);
-    while (g_recentLog.size() > 250)
-    {
-        g_recentLog.pop_front();
-    }
+    aip::Utf8LoggerOptions options;
+    options.enabled = g_loggingEnabled.load();
+    options.fileEnabled = g_fileLoggingEnabled.load();
+    options.filePath = g_effectiveLogPath;
+    options.maxRecentLines = 250;
+    g_logger.Configure(options);
 }
 
 static void WriteLogLine(const wchar_t* level, const std::wstring& message)
 {
-    if (!g_loggingEnabled.load())
-    {
-        return;
-    }
-
-    SYSTEMTIME st = {};
-    GetLocalTime(&st);
-    wchar_t prefix[96] = {};
-    swprintf_s(prefix,
-        L"%04u-%02u-%02u %02u:%02u:%02u [%s] ",
-        st.wYear,
-        st.wMonth,
-        st.wDay,
-        st.wHour,
-        st.wMinute,
-        st.wSecond,
-        level);
-
-    std::wstring line = std::wstring(prefix) + message;
-    AddRecentLogLine(line);
-
-    if (!g_fileLoggingEnabled.load())
-    {
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(g_logMutex);
-    if (g_effectiveLogPath.empty())
-    {
-        return;
-    }
-    std::wstring logPath = g_effectiveLogPath;
-    EnsureDirectory(GetDirectoryName(logPath));
-    HANDLE file = CreateFileW(logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE)
-    {
-        return;
-    }
-
-    std::string utf8 = WideToUtf8(line + L"\r\n");
-    DWORD written = 0;
-    WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
-    CloseHandle(file);
+    g_logger.Write(level, message);
 }
 
 static void LogInfo(const std::wstring& message)
@@ -273,9 +234,8 @@ static void ReportConfigWriteFailure(const std::wstring& action)
 
 static std::wstring RecentLogText()
 {
-    std::lock_guard<std::mutex> lock(g_logMutex);
     std::wstring text;
-    for (const auto& line : g_recentLog)
+    for (const auto& line : g_logger.RecentLines())
     {
         text += line;
         text += L"\r\n";
@@ -554,6 +514,7 @@ static void ApplyRuntimeLoggingOverridesFromCommandLine(const AppOptions& option
             g_verboseLogging = options.verbose || parsed;
         }
     }
+    ConfigureLoggerFromRuntimeState();
 }
 
 static void ConfigureRuntimeFromConfig(const AppOptions& options)
@@ -577,10 +538,8 @@ static void ConfigureRuntimeFromConfig(const AppOptions& options)
     {
         effectiveLogPath = configuredLog;
     }
-    {
-        std::lock_guard<std::mutex> lock(g_logMutex);
-        g_effectiveLogPath = std::move(effectiveLogPath);
-    }
+    g_effectiveLogPath = std::move(effectiveLogPath);
+    ConfigureLoggerFromRuntimeState();
 
     if (options.forceShowConsole)
     {
@@ -596,20 +555,6 @@ static void ConfigureRuntimeFromConfig(const AppOptions& options)
     }
 }
 
-static std::wstring StableHash(const std::wstring& value)
-{
-    uint64_t hash = 1469598103934665603ull;
-    for (wchar_t ch : value)
-    {
-        hash ^= static_cast<uint64_t>(towlower(ch));
-        hash *= 1099511628211ull;
-    }
-
-    wchar_t buffer[32] = {};
-    swprintf_s(buffer, L"%016llx", static_cast<unsigned long long>(hash));
-    return buffer;
-}
-
 static void ConfigureSingleInstanceIdentity()
 {
     // Match DesktopStub's baseline rule: a resident instance is scoped by the
@@ -617,13 +562,12 @@ static void ConfigureSingleInstanceIdentity()
     // is renamed, so adding g_exeBaseName here would break explicit --ini
     // sharing between renamed copies.
     std::wstring scope = MakeAbsolutePath(g_iniPath);
-    std::wstring suffix = StableHash(scope);
-    aip::InstanceIdentity identity = aip::BuildInstanceIdentity(
+    aip::InstanceIdentity identity = aip::BuildPathScopedInstanceIdentity(
         APP_NAME,
         L"DiscordRPC.Stop",
         WINDOW_CLASS_NAME,
         L"",
-        suffix);
+        scope);
     g_singleInstanceMutexName = std::move(identity.mutexName);
     g_singleInstanceMessageName = std::move(identity.messageName);
     g_instanceWindowTitle = std::move(identity.windowTitle);

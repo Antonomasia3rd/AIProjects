@@ -71,10 +71,9 @@ static std::atomic<bool> g_fileLoggingEnabled(true);
 static std::atomic<bool> g_verboseLogging(false);
 static std::atomic<bool> g_notificationsEnabled(true);
 
-static std::mutex g_logMutex;
-static std::deque<std::wstring> g_recentLog;
-
 #include "..\dependencies\desktop_app_baseline.h"
+
+static aip::Utf8Logger g_logger;
 #include "..\dependencies\dpapi.inc"
 #include "src/drpc_types.inc"
 #include "src/drpc_core.inc"

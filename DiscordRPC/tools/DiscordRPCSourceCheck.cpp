@@ -183,10 +183,20 @@ int main()
             core,
             "aip::BuildCurrentProcessSidecarPaths(APP_NAME)");
         RequireContains(
+            "DiscordRPC uses shared UTF-8 logger",
+            "DiscordRPC.cpp + src\\drpc_core.inc",
+            discordMain + "\n" + core,
+            "aip::Utf8Logger");
+        RequireContains(
             "DiscordRPC single-instance scope follows effective INI path",
             "src\\drpc_core.inc",
             core,
             "std::wstring scope = MakeAbsolutePath(g_iniPath);");
+        RequireContains(
+            "DiscordRPC single-instance identity uses shared path-scoped helper",
+            "src\\drpc_core.inc",
+            core,
+            "aip::BuildPathScopedInstanceIdentity");
         RequireNotContains(
             "DiscordRPC single-instance scope does not add exe base name",
             "src\\drpc_core.inc",

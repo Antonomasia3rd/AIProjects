@@ -171,6 +171,16 @@ int main()
             baselineApp,
             "ResidentShutdownState");
         RequireContains(
+            "shared application baseline exposes stable hash helper",
+            "dependencies/baseline_app.h",
+            baselineApp,
+            "StableHashHex64");
+        RequireContains(
+            "shared application baseline exposes path-scoped instance identity",
+            "dependencies/baseline_app.h",
+            baselineApp,
+            "BuildPathScopedInstanceIdentity");
+        RequireContains(
             "shared config dependency exposes an explicit config store",
             "dependencies/config_ini.inc",
             configIni,
@@ -191,6 +201,16 @@ int main()
             "dependencies/app_paths.inc",
             appPaths,
             "configOverride");
+        RequireContains(
+            "app path helper uses growable module path lookup",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "GetCurrentExecutablePath");
+        RequireContains(
+            "app path helper does not use fixed module path buffer",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "buffer.resize(buffer.size() * 2)");
         RequireContains(
             "shared logging helper keeps a bounded recent buffer",
             "dependencies/logging.inc",
@@ -232,6 +252,16 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "shared UTF-8 logger keeps bounded recent lines");
+        RequireContains(
+            "shared tests lock concurrent logging behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared UTF-8 logger allows concurrent appenders");
+        RequireContains(
+            "shared tests lock path-scoped identity hashing",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "single-instance identity supports shared path-scoped hashing");
 
         RequireContains(
             "DiscordRPC help contract allows read-only configured templates",
