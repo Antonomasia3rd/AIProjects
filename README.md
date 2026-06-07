@@ -100,6 +100,8 @@ Read the project README before running a tool, use an elevated shell where docum
 
 Tracked files are source, build scripts, templates/manifests, and documentation. Local configs, logs, generated assets, binaries, object files, and generated release archives are ignored.
 
+Shared C++ projects must use the repository baseline INI dialect from `dependencies\config_ini.inc`: UTF-8 with BOM, quoted assignments like `"Name" = "Value"`, comment/order preservation where practical, and raw Windows path backslashes preserved on read. DesktopStub's INI style is the compatibility standard; new shared helpers must not drift to a different config dialect.
+
 Runtime configuration and logs must stay local to each program. By default, every binary must use `.ini` and `.log` files beside itself with the same base name as the binary:
 
 ```text

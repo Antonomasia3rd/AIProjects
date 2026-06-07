@@ -37,6 +37,42 @@ static void TestIniBehavior()
             text.find(L"; keep\r\n[General]\r\n\"First\" = \"updated\"\r\n\"Second\" = \"2\"") == 0,
         "INI writer preserves comments and key order");
 
+    std::wstring desktopStubDialectText =
+        L"[App]\r\n"
+        L"\"Path\" = \"C:\\Users\\Amiya\\Desktop\\DiscordRPC.log\"\r\n"
+        L"\"EscapedPath\" = \"C:\\\\Users\\\\Amiya\"\r\n"
+        L"\"Template\" = \"Line1\\nLine2\"\r\n"
+        L"\"TrailingSpaces\" = \"Value   \"\r\n"
+        L"\"UnknownEscape\" = \"Keep\\q\"\r\n";
+    auto desktopStubDialect = aip::ParseIniDocument(desktopStubDialectText);
+    std::wstring dialectValue;
+    Check(
+        aip::ReadIniValueFromDoc(desktopStubDialect, L"App", L"Path", dialectValue) &&
+            dialectValue == L"C:\\Users\\Amiya\\Desktop\\DiscordRPC.log",
+        "INI parser preserves raw Windows path backslashes");
+    Check(
+        aip::ReadIniValueFromDoc(desktopStubDialect, L"App", L"EscapedPath", dialectValue) &&
+            dialectValue == L"C:\\Users\\Amiya",
+        "INI parser decodes intentional escaped backslashes");
+    Check(
+        aip::ReadIniValueFromDoc(desktopStubDialect, L"App", L"Template", dialectValue) &&
+            dialectValue == L"Line1\\nLine2",
+        "INI parser keeps app-level template escapes raw");
+    Check(
+        aip::ReadIniValueFromDoc(desktopStubDialect, L"App", L"TrailingSpaces", dialectValue) &&
+            dialectValue == L"Value   ",
+        "INI parser preserves whitespace inside quoted values");
+    Check(
+        aip::ReadIniValueFromDoc(desktopStubDialect, L"App", L"UnknownEscape", dialectValue) &&
+            dialectValue == L"Keep\\q",
+        "INI parser preserves unknown backslash escapes");
+
+    text.clear();
+    Check(
+        aip::WriteIniValueToText(text, L"App", L"Path", L"C:\\Users\\Amiya\\Desktop\\file.txt") &&
+            text == L"[App]\r\n\"Path\" = \"C:\\\\Users\\\\Amiya\\\\Desktop\\\\file.txt\"\r\n",
+        "INI writer uses DesktopStub quoted assignment and escaped path style");
+
     std::vector<BYTE> utf8Bom = { 0xef, 0xbb, 0xbf, 'A', 0xc3, 0xa9 };
     std::wstring decoded;
     Check(aip::DecodeTextBytes(utf8Bom, decoded) && decoded == L"A\u00e9", "INI decoder accepts UTF-8 BOM");

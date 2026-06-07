@@ -50,6 +50,20 @@ if errorlevel 1 (
 )
 
 build\SharedBaselineTests.exe
+if errorlevel 1 (
+    set "STATUS=%ERRORLEVEL%"
+    popd
+    exit /b %STATUS%
+)
+
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 tools\SharedBaselineSourceCheck.cpp /Fe:build\SharedBaselineSourceCheck.exe /Fo:build\SharedBaselineSourceCheck.obj /link /SUBSYSTEM:CONSOLE
+if errorlevel 1 (
+    set "STATUS=%ERRORLEVEL%"
+    popd
+    exit /b %STATUS%
+)
+
+build\SharedBaselineSourceCheck.exe
 set "STATUS=%ERRORLEVEL%"
 popd
 exit /b %STATUS%

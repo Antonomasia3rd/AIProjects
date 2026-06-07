@@ -15,9 +15,29 @@ product implementation:
 - `tray.inc`: low-level menu construction, popup ownership, and notifications.
 - `core.inc`: path, text, JSON, and environment primitives.
 
-Include `desktop_app_baseline.h` from product translation units. Individual
-modules remain independently guarded for focused tests and compatibility, but
-consumers no longer need to reproduce their include order. Optional facilities
-such as `dpapi.inc` stay separate. Product code should keep policy and commands
-in product modules while using these shared contracts for lifecycle and
-persistence behavior.
+Include `desktop_app_baseline.h` from product translation units. That aggregate
+header is the supported public entry point for resident desktop apps and owns the
+shared include order. Individual `.inc` modules are include-guarded for focused
+tests and compatibility, but they are not guaranteed to be standalone unless a
+file explicitly says so. Optional facilities such as `dpapi.inc` stay separate.
+Product code should keep policy and commands in product modules while using
+these shared contracts for lifecycle and persistence behavior.
+
+## INI dialect compatibility
+
+The shared INI helpers must stay compatible with DesktopStub's established INI
+format. This is now the repository baseline for C++ projects:
+
+- write UTF-8 with BOM;
+- write assignments as `"Name" = "Value"`;
+- preserve comments, unrelated lines, and ordering where practical;
+- preserve whitespace inside quoted values;
+- preserve unknown backslash sequences in raw INI values, especially Windows
+  paths such as `C:\Users\Amiya\Desktop\file.txt`;
+- keep app-level escape decoding separate from raw INI parsing, so templates may
+  interpret `\n`, `\r`, and `\t` without making every INI value use those
+  escapes.
+
+Do not replace this with `GetPrivateProfileStringW` / `WritePrivateProfileStringW`
+or another parser that changes quoting, comments, order, trailing spaces, or path
+backslashes.
