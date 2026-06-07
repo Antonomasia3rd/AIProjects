@@ -7,12 +7,34 @@
 
 static int g_checks = 0;
 
+static std::string NormalizeNewlines(std::string text)
+{
+    std::string normalized;
+    normalized.reserve(text.size());
+
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        if (text[i] == '\r')
+        {
+            if (i + 1 < text.size() && text[i + 1] == '\n')
+                ++i;
+            normalized.push_back('\n');
+        }
+        else
+        {
+            normalized.push_back(text[i]);
+        }
+    }
+
+    return normalized;
+}
+
 static std::string ReadAll(const std::string& path)
 {
     std::ifstream in(path, std::ios::binary);
     if (!in)
         throw std::runtime_error("missing source file: " + path);
-    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    return NormalizeNewlines(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()));
 }
 
 static void RequireContains(const std::string& name, const std::string& sourceName, const std::string& source, const std::string& needle)
