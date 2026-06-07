@@ -86,7 +86,7 @@ inline bool AppendUtf8LineToFile(const std::wstring& filePath, const std::wstrin
     EnsureDirectory(GetDirectoryName(filePath));
     HANDLE file = CreateFileW(
         filePath.c_str(),
-        FILE_APPEND_DATA | SYNCHRONIZE,
+        FILE_APPEND_DATA | FILE_WRITE_DATA | SYNCHRONIZE,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr,
         OPEN_ALWAYS,
@@ -116,7 +116,14 @@ inline bool AppendUtf8LineToFile(const std::wstring& filePath, const std::wstrin
             }
             else
             {
-                if (writeUtf8Bom && size.QuadPart == 0)
+                LARGE_INTEGER end = {};
+                if (!SetFilePointerEx(file, end, nullptr, FILE_END))
+                {
+                    ok = false;
+                    error = GetLastError();
+                }
+
+                if (ok && writeUtf8Bom && size.QuadPart == 0)
                 {
                     static const BYTE bom[] = { 0xEF, 0xBB, 0xBF };
                     if (!WriteAllBytes(file, bom, static_cast<DWORD>(sizeof(bom))))
