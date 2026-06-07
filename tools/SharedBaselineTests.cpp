@@ -276,6 +276,53 @@ static void TestTrayBehavior()
     DestroyMenu(menu);
 }
 
+
+static void TestAppPathBehavior()
+{
+    aip::SidecarPaths paths = aip::BuildSidecarPathsFromExecutable(
+        L"C:\\Tools\\DiscordRPC.exe",
+        L"DiscordRPC");
+    Check(
+        paths.exeDir == L"C:\\Tools" &&
+            paths.exeBaseName == L"DiscordRPC" &&
+            paths.configPath == L"C:\\Tools\\DiscordRPC.ini" &&
+            paths.defaultLogPath == L"C:\\Tools\\DiscordRPC.log",
+        "sidecar paths derive default INI and log from executable name");
+
+    aip::SidecarPaths overridden = aip::BuildSidecarPathsFromExecutable(
+        L"C:\\Tools\\DiscordRPC.exe",
+        L"DiscordRPC",
+        L"C:\\Config\\custom.ini");
+    Check(
+        overridden.configPath == L"C:\\Config\\custom.ini" &&
+            overridden.defaultLogPath == L"C:\\Config\\custom.log",
+        "sidecar paths derive log path from configured INI override");
+}
+
+static void TestLoggingBehavior()
+{
+    aip::Utf8Logger logger;
+    aip::Utf8LoggerOptions options;
+    options.fileEnabled = false;
+    options.maxRecentLines = 2;
+    logger.Configure(options);
+    logger.WriteRawLine(L"first");
+    logger.WriteRawLine(L"second");
+    logger.WriteRawLine(L"third");
+    std::vector<std::wstring> recent = logger.RecentLines();
+    Check(
+        recent.size() == 2 && recent[0] == L"second" && recent[1] == L"third",
+        "shared UTF-8 logger keeps bounded recent lines");
+
+    options.enabled = false;
+    logger.Configure(options);
+    logger.WriteRawLine(L"ignored");
+    recent = logger.RecentLines();
+    Check(
+        recent.size() == 2 && recent[0] == L"second" && recent[1] == L"third",
+        "shared UTF-8 logger honors disabled logging");
+}
+
 static void TestApplicationBaseline()
 {
     aip::ResidentShutdownState shutdown;
@@ -354,6 +401,8 @@ int wmain()
     TestCommandLineBehavior();
     TestJsonBehavior();
     TestTrayBehavior();
+    TestAppPathBehavior();
+    TestLoggingBehavior();
     TestApplicationBaseline();
 
     if (g_failures != 0)

@@ -8,6 +8,9 @@ product implementation:
 - `baseline_app.h`: single-instance identity/signaling, taskbar recreation
   registration, resident shutdown state, command-line help templates, and
   flat/dropdown tray sections.
+- `app_paths.inc`: executable sidecar path discovery for per-product INI and
+  log files, including configured INI override handling.
+- `logging.inc`: UTF-8 sidecar file logging and bounded recent-log buffering.
 - `config_ini.inc`: `IniConfigStore`, synchronized INI mutation, encoding, and
   document parsing.
 - `command_line.inc`: option value parsing, INI setting syntax, and boolean
@@ -21,7 +24,7 @@ shared include order. Individual `.inc` modules are include-guarded for focused
 tests and compatibility, but they are not guaranteed to be standalone unless a
 file explicitly says so. Optional facilities such as `dpapi.inc` stay separate.
 Product code should keep policy and commands in product modules while using
-these shared contracts for lifecycle and persistence behavior.
+these shared contracts for lifecycle, sidecar paths, logging, and persistence behavior.
 
 ## INI dialect compatibility
 

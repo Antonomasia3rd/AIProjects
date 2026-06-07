@@ -49,6 +49,29 @@ static void RequireContains(const std::string& name, const std::string& sourceNa
     std::cout << "ok - " << name << "\n";
 }
 
+
+static void RequireOrderedContains(
+    const std::string& name,
+    const std::string& sourceName,
+    const std::string& source,
+    const std::vector<std::string>& needles)
+{
+    ++g_checks;
+    size_t pos = 0;
+    for (const auto& needle : needles)
+    {
+        size_t found = source.find(needle, pos);
+        if (found == std::string::npos)
+        {
+            std::cerr << "Shared baseline source regression: " << name << " missing/out-of-order " << needle
+                << " in " << sourceName << "\n";
+            throw std::runtime_error("source regression");
+        }
+        pos = found + needle.size();
+    }
+    std::cout << "ok - " << name << "\n";
+}
+
 static void RequireNotContains(const std::string& name, const std::string& sourceName, const std::string& source, const std::string& needle)
 {
     ++g_checks;
@@ -65,7 +88,9 @@ int main()
 {
     try
     {
+        const std::string appPaths = ReadAll("dependencies/app_paths.inc");
         const std::string configIni = ReadAll("dependencies/config_ini.inc");
+        const std::string logging = ReadAll("dependencies/logging.inc");
         const std::string baselineHeader = ReadAll("dependencies/desktop_app_baseline.h");
         const std::string dependenciesReadme = ReadAll("dependencies/README.md");
         const std::string sharedTests = ReadAll("tools/SharedBaselineTests.cpp");
@@ -94,17 +119,45 @@ int main()
             "dependencies/desktop_app_baseline.h",
             baselineHeader,
             "#include \"baseline_app.h\"");
-        RequireContains(
-            "baseline aggregate includes INI before command-line consumers",
+        RequireOrderedContains(
+            "baseline aggregate includes shared modules in dependency order",
             "dependencies/desktop_app_baseline.h",
             baselineHeader,
-            "#include \"config_ini.inc\"\n#include \"command_line.inc\"");
+            {
+                "#include \"core.inc\"",
+                "#include \"app_paths.inc\"",
+                "#include \"logging.inc\"",
+                "#include \"config_ini.inc\"",
+                "#include \"command_line.inc\"",
+                "#include \"tray.inc\""
+            });
 
         RequireContains(
             "INI writer emits DesktopStub quoted assignment syntax",
             "dependencies/config_ini.inc",
             configIni,
             "return QuoteIniString(key) + L\" = \" + QuoteIniString(value);");
+        RequireContains(
+            "app path helper derives sidecar paths",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "BuildSidecarPathsFromExecutable");
+        RequireContains(
+            "app path helper supports configured INI overrides",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "configOverride");
+        RequireContains(
+            "shared logging helper keeps a bounded recent buffer",
+            "dependencies/logging.inc",
+            logging,
+            "class Utf8Logger");
+        RequireContains(
+            "shared logging helper writes UTF-8 sidecar log lines",
+            "dependencies/logging.inc",
+            logging,
+            "WideToUtf8(line + L\"\\r\\n\")");
+
         RequireContains(
             "INI parser preserves unknown backslash escapes",
             "dependencies/config_ini.inc",
@@ -125,6 +178,16 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "INI parser keeps app-level template escapes raw");
+        RequireContains(
+            "shared tests lock sidecar app path behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "sidecar paths derive default INI and log from executable name");
+        RequireContains(
+            "shared tests lock bounded logging behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared UTF-8 logger keeps bounded recent lines");
 
         RequireContains(
             "DiscordRPC help contract allows read-only configured templates",
