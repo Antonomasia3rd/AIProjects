@@ -321,6 +321,38 @@ static void TestLoggingBehavior()
     Check(
         recent.size() == 2 && recent[0] == L"second" && recent[1] == L"third",
         "shared UTF-8 logger honors disabled logging");
+
+    wchar_t tempDirectory[MAX_PATH] = {};
+    DWORD length = GetTempPathW(ARRAYSIZE(tempDirectory), tempDirectory);
+    std::wstring logPath = length != 0 && length < ARRAYSIZE(tempDirectory)
+        ? std::wstring(tempDirectory) + L"AIP-SharedLogger-" + std::to_wstring(GetCurrentProcessId()) + L".log"
+        : L"AIP-SharedLogger.log";
+    DeleteFileW(logPath.c_str());
+    HANDLE held = CreateFileW(
+        logPath.c_str(),
+        FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    aip::Utf8Logger fileLogger;
+    aip::Utf8LoggerOptions fileOptions;
+    fileOptions.filePath = logPath;
+    fileOptions.maxRecentLines = 4;
+    fileLogger.Configure(fileOptions);
+    fileLogger.WriteRawLine(L"shared file logger concurrent append");
+    if (held != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(held);
+    }
+    std::vector<BYTE> logBytes;
+    std::wstring logText;
+    bool logReadable = aip::ReadWholeFileBytes(logPath, logBytes) && aip::DecodeTextBytes(logBytes, logText);
+    Check(
+        logReadable && logText.find(L"shared file logger concurrent append") != std::wstring::npos,
+        "shared UTF-8 logger allows concurrent appenders");
+    DeleteFileW(logPath.c_str());
 }
 
 static void TestApplicationBaseline()
@@ -355,6 +387,19 @@ static void TestApplicationBaseline()
             discordIdentity.messageName == L"DiscordRPC.Stop.fedcba9876543210" &&
             discordIdentity.windowTitle == L"DiscordRPCTrayWnd.fedcba9876543210",
         "single-instance identity supports product-specific window naming");
+
+    std::wstring pathHash = aip::StableHashHex64(L"C:\\Tools\\DiscordRPC.ini");
+    aip::InstanceIdentity pathScoped = aip::BuildPathScopedInstanceIdentity(
+        L"DiscordRPC",
+        L"DiscordRPC.Stop",
+        L"DiscordRPCTrayWnd",
+        L"",
+        L"C:\\Tools\\DiscordRPC.ini");
+    Check(
+        !pathHash.empty() &&
+            pathScoped.mutexName == L"Local\\DiscordRPC." + pathHash &&
+            pathScoped.messageName == L"DiscordRPC.Stop." + pathHash,
+        "single-instance identity supports shared path-scoped hashing");
 
     std::wstring formatted = aip::FormatTextTemplate(
         L"Run {exe}\\nConfig: {ini}",

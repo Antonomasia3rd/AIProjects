@@ -11,6 +11,47 @@ struct Utf8LoggerOptions
     size_t maxRecentLines = 250;
 };
 
+inline bool AppendUtf8LineToFile(const std::wstring& filePath, const std::wstring& line)
+{
+    if (filePath.empty())
+    {
+        return false;
+    }
+
+    EnsureDirectory(GetDirectoryName(filePath));
+    HANDLE file = CreateFileW(
+        filePath.c_str(),
+        FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+
+    std::string utf8 = WideToUtf8(line + L"\r\n");
+    const char* cursor = utf8.data();
+    DWORD remaining = static_cast<DWORD>(utf8.size());
+    bool ok = true;
+    while (remaining > 0)
+    {
+        DWORD written = 0;
+        if (!WriteFile(file, cursor, remaining, &written, nullptr) || written == 0)
+        {
+            ok = false;
+            break;
+        }
+        cursor += written;
+        remaining -= written;
+    }
+
+    CloseHandle(file);
+    return ok;
+}
+
 class Utf8Logger
 {
 public:
@@ -90,29 +131,10 @@ private:
             filePath = filePath_;
         }
 
-        if (!shouldWriteFile)
+        if (shouldWriteFile)
         {
-            return;
+            AppendUtf8LineToFile(filePath, line);
         }
-
-        EnsureDirectory(GetDirectoryName(filePath));
-        HANDLE file = CreateFileW(
-            filePath.c_str(),
-            FILE_APPEND_DATA,
-            FILE_SHARE_READ,
-            nullptr,
-            OPEN_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr);
-        if (file == INVALID_HANDLE_VALUE)
-        {
-            return;
-        }
-
-        std::string utf8 = WideToUtf8(line + L"\r\n");
-        DWORD written = 0;
-        WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
-        CloseHandle(file);
     }
 
     void TrimRecentLocked()

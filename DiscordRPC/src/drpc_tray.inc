@@ -280,9 +280,9 @@ static void OpenConfigFile()
 
 static void OpenLogFolder()
 {
-    std::wstring logPath;
+    std::wstring logPath = g_logger.FilePath();
+    if (logPath.empty())
     {
-        std::lock_guard<std::mutex> lock(g_logMutex);
         logPath = g_effectiveLogPath.empty() ? g_defaultLogPath : g_effectiveLogPath;
     }
     std::wstring folder = GetDirectoryName(logPath);
