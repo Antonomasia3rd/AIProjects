@@ -111,6 +111,12 @@ call :IsSkipped DiscordRPC
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build DiscordRPC"
 pushd "%REPO%\DiscordRPC" || exit /b 1
+call :Run cmd.exe /d /c TestDiscordRPCSource.cmd
+if errorlevel 1 (
+  set "STATUS=%ERRORLEVEL%"
+  popd
+  exit /b !STATUS!
+)
 call :Run cmd.exe /d /c build.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
