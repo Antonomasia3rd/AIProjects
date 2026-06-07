@@ -185,15 +185,6 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             }
             AddSetting(options, L"general", L"client_id", value);
         }
-        else if (aip::IsOptionOrInlineValue(arg, L"--token-env"))
-        {
-            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
-            {
-                return false;
-            }
-            AddSetting(options, L"general", L"token_env", value);
-            AddSetting(options, L"general", L"token", L"");
-        }
         else if (aip::IsOptionOrInlineValue(arg, L"--token"))
         {
             if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
@@ -201,7 +192,6 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
                 return false;
             }
             AddSetting(options, L"general", L"token", value);
-            AddSetting(options, L"general", L"token_env", L"");
             options.protectToken = true;
         }
         else if (aip::IsOptionOrInlineValue(arg, L"--status"))

@@ -177,6 +177,36 @@ int main()
             "src\\drpc_command_line.inc",
             commandLine,
             "--ini requires a non-empty path.");
+        RequireNotContains(
+            "DiscordRPC removes environment-backed token CLI",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            std::string("--token-") + "env");
+        RequireNotContains(
+            "DiscordRPC removes environment-backed token configuration key",
+            "DiscordRPC config sources",
+            defaults + "\n" + commandLine + "\n" + core + "\n" + app + "\n" + gateway,
+            std::string("token_") + "env");
+        RequireNotContains(
+            "DiscordRPC removes env-token shorthand",
+            "src\\drpc_core.inc",
+            core,
+            std::string("env") + ":");
+        RequireNotContains(
+            "DiscordRPC does not read environment variables as config",
+            "src\\drpc_core.inc",
+            core,
+            std::string("Read") + "EnvironmentString");
+        RequireNotContains(
+            "DiscordRPC does not keep environment token resolver",
+            "src\\drpc_core.inc",
+            core,
+            std::string("IsToken") + "EnvironmentReference");
+        RequireContains(
+            "DiscordRPC Gateway missing-token text is INI-only",
+            "DiscordRPC Gateway/app/default strings",
+            defaults + "\n" + app + "\n" + gateway,
+            "token_protected or token");
         RequireContains(
             "DiscordRPC derives sidecar paths through the shared helper",
             "src\\drpc_core.inc",

@@ -211,28 +211,6 @@ inline std::wstring Utf8ToWide(const std::string& value)
     return result;
 }
 
-inline std::wstring ReadEnvironmentString(const std::wstring& name)
-{
-    if (Trim(name).empty())
-    {
-        return L"";
-    }
-
-    DWORD needed = GetEnvironmentVariableW(name.c_str(), nullptr, 0);
-    if (needed == 0)
-    {
-        return L"";
-    }
-
-    std::vector<wchar_t> buffer(needed + 1);
-    DWORD written = GetEnvironmentVariableW(name.c_str(), buffer.data(), static_cast<DWORD>(buffer.size()));
-    if (written == 0 || written >= buffer.size())
-    {
-        return L"";
-    }
-    return std::wstring(buffer.data(), written);
-}
-
 inline std::wstring BytesToHex(const std::vector<BYTE>& bytes)
 {
     static constexpr wchar_t digits[] = L"0123456789abcdef";

@@ -38,11 +38,6 @@ static std::wstring PathJoin(const std::wstring& left, const std::wstring& right
     return aip::PathJoin(left, right);
 }
 
-static void EnsureDirectory(const std::wstring& path)
-{
-    aip::EnsureDirectory(path);
-}
-
 static std::string WideToUtf8(const std::wstring& value)
 {
     return aip::WideToUtf8(value);
@@ -361,24 +356,8 @@ static std::wstring NormalizeStatus(const std::wstring& raw)
     return L"online";
 }
 
-static bool IsTokenEnvironmentReference(const std::wstring& token)
-{
-    return StartsWithI(Trim(token), L"env:");
-}
-
 static std::wstring ResolveDiscordToken()
 {
-    std::wstring tokenEnv = Trim(IniReadS(L"general", L"token_env", L""));
-    if (!tokenEnv.empty())
-    {
-        std::wstring envToken = Trim(aip::ReadEnvironmentString(tokenEnv));
-        if (!envToken.empty())
-        {
-            return envToken;
-        }
-        LogError(L"Configured Discord token environment variable is empty or missing: " + tokenEnv);
-    }
-
     std::wstring protectedToken = Trim(IniReadS(L"general", L"token_protected", L""));
     if (!protectedToken.empty())
     {
@@ -392,26 +371,13 @@ static std::wstring ResolveDiscordToken()
         }
     }
 
-    std::wstring token = Trim(IniReadS(L"general", L"token", L""));
-    if (IsTokenEnvironmentReference(token))
-    {
-        std::wstring inlineEnv = Trim(token.substr(4));
-        std::wstring envToken = Trim(aip::ReadEnvironmentString(inlineEnv));
-        if (!envToken.empty())
-        {
-            return envToken;
-        }
-        LogError(L"Configured Discord token environment variable is empty or missing: " + inlineEnv);
-        return L"";
-    }
-
-    return token;
+    return Trim(IniReadS(L"general", L"token", L""));
 }
 
 static bool ProtectDiscordTokenInConfig(bool replaceProtectedToken = false)
 {
     std::wstring token = Trim(IniReadS(L"general", L"token", L""));
-    if (token.empty() || IsTokenEnvironmentReference(token))
+    if (token.empty())
     {
         return true;
     }

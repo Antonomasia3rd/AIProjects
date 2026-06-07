@@ -96,9 +96,9 @@ static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::uniqu
         std::wstring token = ResolveDiscordToken();
         if (token.empty())
         {
-            std::wstring message = GetUiString(L"notification_gateway_missing_token", L"Gateway mode needs token_protected, token, or token_env.");
+            std::wstring message = GetUiString(L"notification_gateway_missing_token", L"Gateway mode needs token_protected or token.");
             LogError(message);
-            Notify(ctx, L"notification_gateway_missing_token", L"Gateway mode needs token_protected, token, or token_env.", NIIF_WARNING, L"notify_on_failure");
+            Notify(ctx, L"notification_gateway_missing_token", L"Gateway mode needs token_protected or token.", NIIF_WARNING, L"notify_on_failure");
             return 2;
         }
 
