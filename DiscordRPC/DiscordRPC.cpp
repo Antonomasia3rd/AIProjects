@@ -107,7 +107,9 @@ int wmain()
 
     if (options.showHelp)
     {
-        // Keep --help side-effect-free: do not create, read, or normalize the INI.
+        // Keep --help side-effect-free: it may read an existing configured
+        // help template, but it must not create, normalize, repair, or write
+        // the INI.
         PrintLine(DefaultHelpText());
         return 0;
     }
