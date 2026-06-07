@@ -20,26 +20,12 @@ inline bool IniEquals(const std::wstring& left, const std::wstring& right)
     return _wcsicmp(left.c_str(), right.c_str()) == 0;
 }
 
-inline std::wstring IniMutexHash(const std::wstring& value)
-{
-    unsigned long long hash = 1469598103934665603ull;
-    for (wchar_t ch : value)
-    {
-        hash ^= static_cast<unsigned long long>(towlower(ch));
-        hash *= 1099511628211ull;
-    }
-
-    wchar_t buffer[32] = {};
-    swprintf_s(buffer, L"%016llx", hash);
-    return buffer;
-}
-
 class IniWriteMutexGuard
 {
 public:
     explicit IniWriteMutexGuard(const std::wstring& path)
     {
-        std::wstring name = L"Local\\AIP.ConfigIni." + IniMutexHash(MakeAbsolutePath(path));
+        std::wstring name = L"Local\\AIP.ConfigIni." + StableHashHex64(MakeAbsolutePath(path));
         handle_ = CreateMutexW(nullptr, FALSE, name.c_str());
         if (handle_ == nullptr)
         {

@@ -325,7 +325,7 @@ public:
         Close();
         if (Trim(token_).empty())
         {
-            throw std::runtime_error("Missing [general] token_protected, token, or token_env for Discord Gateway.");
+            throw std::runtime_error("Missing [general] token_protected or token for Discord Gateway.");
         }
         if (Trim(clientId_).empty())
         {
@@ -980,7 +980,7 @@ private:
                             }
                             if (closeStatus == 4004)
                             {
-                                SetLastConnectError(L"4004 Authentication failed. Check [general] token_protected, token, or token_env.");
+                                SetLastConnectError(L"4004 Authentication failed. Check [general] token_protected or token.");
                             }
                         }
                         LogError(closeText);

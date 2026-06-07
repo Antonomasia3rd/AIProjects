@@ -9,7 +9,6 @@ static constexpr const wchar_t* DEFAULT_HELP_TEMPLATE =
     L"  --set Section.Key=Value        Set and save any INI value.\\n"
     L"  --client-id <id>               Set [general] client_id.\\n"
     L"  --token <token>                Set [general] token, then protect it with DPAPI.\\n"
-    L"  --token-env <name>             Set [general] token_env.\\n"
     L"  --protect-token                Migrate plaintext [general] token to token_protected.\\n"
     L"  --status <value>               Set [general] status: online, idle, dnd, invisible.\\n"
     L"  --update-interval <seconds>    Set [general] update_interval.\\n"
@@ -32,8 +31,8 @@ static constexpr const wchar_t* DEFAULT_HELP_TEMPLATE =
     L"  --transport <ipc|gateway|auto> Set [general] transport_mode.\\n"
     L"\\n"
     L"Transports: ipc uses the local Discord desktop pipe; gateway uses a Discord\\n"
-    L"user token stored via token_env or DPAPI token_protected; auto tries IPC\\n"
-    L"first and falls back to Gateway.\\n";
+    L"user token stored through DPAPI token_protected; auto tries IPC first and\\n"
+    L"falls back to Gateway.\\n";
 
 static std::wstring DefaultHelpText()
 {
@@ -59,7 +58,6 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"general", L"status", L"online" },
     { L"general", L"details_template", L"{win_title}" },
     { L"general", L"state_template", L"CPU: {cpu}, RAM: {ram_used}/{ram_total} ({ram_pct})" },
-    { L"general", L"token_env", L"" },
     { L"general", L"token_protected", L"" },
     { L"general", L"token", L"" },
 
@@ -200,7 +198,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"strings", L"notification_connected_gateway", L"Rich Presence is active through Discord Gateway." },
     { L"strings", L"notification_failed", L"Rich Presence update failed." },
     { L"strings", L"notification_reloaded", L"Configuration reloaded." },
-    { L"strings", L"notification_gateway_missing_token", L"Gateway mode needs token_protected, token, or token_env." },
+    { L"strings", L"notification_gateway_missing_token", L"Gateway mode needs token_protected or token." },
     { L"strings", L"notification_gateway_auth_failed", L"Discord Gateway authentication failed. Check your token." },
     { L"strings", L"notification_shutdown_pending", L"Shutdown requested. Use Force shutdown from the tray if Discord cleanup does not finish." },
     { L"strings", L"previous_force_shutdown_warning", L"The previous run was force-closed while Discord cleanup was pending. Presence clearing or the Gateway close handshake may not have completed." },

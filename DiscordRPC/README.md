@@ -60,14 +60,13 @@ Useful command-line paths:
 .\build\DiscordRPC.exe --no-tray
 .\build\DiscordRPC.exe --set general.client_id=YOUR_APPLICATION_ID
 .\build\DiscordRPC.exe --transport gateway --token YOUR_DISCORD_TOKEN
-.\build\DiscordRPC.exe --transport auto --token-env DISCORD_TOKEN
 ```
 
 ## Configuration Notes
 
 - `[general] client_id` must be a valid Discord application ID.
 - `[general] transport_mode` can be `ipc`, `gateway`, or `auto`. `auto` tries IPC first, then falls back to Gateway.
-- Gateway token lookup order is `[general] token_env`, then DPAPI `[general] token_protected`, then legacy plaintext `[general] token`.
+- Gateway tokens are configured only through the INI-backed token fields: DPAPI `[general] token_protected`, or legacy plaintext `[general] token` before migration.
 - Plaintext `[general] token` values are migrated to `token_protected=dpapi:<hex>` for the current Windows user and then cleared. If a plaintext token is supplied later, it replaces the existing protected token instead of being discarded.
 - `[general] details_template` and `state_template` support tokens such as `{win_title}`, `{cpu}`, `{ram_used}`, `{ram_total}`, `{ram_pct}`, `{uptime}`, `{battery_pct}`, `{time}`, `{date}`, `{username}`, and `{computer}`.
 - `[layout]` toggles details/state fields, activity images, and buttons.

@@ -91,6 +91,7 @@ int main()
         const std::string appPaths = ReadAll("dependencies/app_paths.inc");
         const std::string baselineApp = ReadAll("dependencies/baseline_app.h");
         const std::string commandLine = ReadAll("dependencies/command_line.inc");
+        const std::string sharedCore = ReadAll("dependencies/core.inc");
         const std::string configIni = ReadAll("dependencies/config_ini.inc");
         const std::string logging = ReadAll("dependencies/logging.inc");
         const std::string tray = ReadAll("dependencies/tray.inc");
@@ -221,6 +222,46 @@ int main()
             "dependencies/logging.inc",
             logging,
             "WideToUtf8(line + L\"\\r\\n\")");
+        RequireContains(
+            "shared logging helper writes UTF-8 BOM for new files",
+            "dependencies/logging.inc",
+            logging,
+            "{ 0xEF, 0xBB, 0xBF }");
+        RequireContains(
+            "shared logging helper uses cross-process append locking",
+            "dependencies/logging.inc",
+            logging,
+            "LockFileEx");
+        RequireContains(
+            "shared logging helper loops on partial writes",
+            "dependencies/logging.inc",
+            logging,
+            "WriteAllBytes");
+        RequireContains(
+            "shared logging helper exposes file write failure state",
+            "dependencies/logging.inc",
+            logging,
+            "LastFileWriteFailed");
+        RequireContains(
+            "shared logging helper reports write failures to recent log",
+            "dependencies/logging.inc",
+            logging,
+            "Log file write failed");
+        RequireContains(
+            "shared config mutex uses stable hash helper",
+            "dependencies/config_ini.inc",
+            configIni,
+            "StableHashHex64(MakeAbsolutePath(path))");
+        RequireNotContains(
+            "shared config dependency does not keep a private mutex hash",
+            "dependencies/config_ini.inc",
+            configIni,
+            std::string("Ini") + "MutexHash");
+        RequireNotContains(
+            "shared baseline does not expose environment-backed config primitives",
+            "dependencies/core.inc",
+            sharedCore,
+            std::string("Read") + "EnvironmentString");
 
         RequireContains(
             "INI parser preserves unknown backslash escapes",
@@ -257,6 +298,16 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "shared UTF-8 logger allows concurrent appenders");
+        RequireContains(
+            "shared tests lock UTF-8 BOM logging behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared UTF-8 logger writes BOM for new log files");
+        RequireContains(
+            "shared tests lock logging failure reporting behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared UTF-8 logger reports file write failures once");
         RequireContains(
             "shared tests lock path-scoped identity hashing",
             "tools/SharedBaselineTests.cpp",

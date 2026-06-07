@@ -352,6 +352,30 @@ static void TestLoggingBehavior()
     Check(
         logReadable && logText.find(L"shared file logger concurrent append") != std::wstring::npos,
         "shared UTF-8 logger allows concurrent appenders");
+    Check(
+        logBytes.size() >= 3 && logBytes[0] == 0xEF && logBytes[1] == 0xBB && logBytes[2] == 0xBF,
+        "shared UTF-8 logger writes BOM for new log files");
+
+    std::wstring badLogPath = logPath + L".dir";
+    RemoveDirectoryW(badLogPath.c_str());
+    DeleteFileW(badLogPath.c_str());
+    CreateDirectoryW(badLogPath.c_str(), nullptr);
+    fileLogger.SetFilePath(badLogPath);
+    fileLogger.WriteRawLine(L"this should fail");
+    std::vector<std::wstring> failureRecent = fileLogger.RecentLines();
+    bool failureReported = false;
+    for (const std::wstring& line : failureRecent)
+    {
+        if (line.find(L"Log file write failed") != std::wstring::npos)
+        {
+            failureReported = true;
+            break;
+        }
+    }
+    Check(
+        fileLogger.LastFileWriteFailed() && failureReported,
+        "shared UTF-8 logger reports file write failures once");
+    RemoveDirectoryW(badLogPath.c_str());
     DeleteFileW(logPath.c_str());
 }
 
