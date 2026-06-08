@@ -70,6 +70,21 @@ inline SidecarPaths BuildSidecarPathsFromExecutable(
     return paths;
 }
 
+
+inline std::wstring BuildExecutableSidecarLogPath(const SidecarPaths& paths)
+{
+    std::wstring baseName = paths.exeBaseName.empty() ? L"Application" : paths.exeBaseName;
+    return PathJoin(paths.exeDir, baseName + L".log");
+}
+
+inline std::wstring BuildExecutableSidecarLogPath(
+    const std::wstring& executablePath,
+    const std::wstring& fallbackBaseName)
+{
+    SidecarPaths paths = BuildSidecarPathsFromExecutable(executablePath, fallbackBaseName);
+    return BuildExecutableSidecarLogPath(paths);
+}
+
 inline bool TryBuildSidecarPathsFromExecutable(
     const std::wstring& executablePath,
     const std::wstring& fallbackBaseName,

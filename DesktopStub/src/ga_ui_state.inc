@@ -1,6 +1,6 @@
-﻿// Logging buffer
+// Logging buffer
 static std::mutex g_logMutex;
-static std::vector<std::wstring> g_logBuf;
+static aip::RecentLogBuffer g_logBuf;
 static std::atomic<bool> g_logWriteFailureReported(false);
 
 // PowerShell status

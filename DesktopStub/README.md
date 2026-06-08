@@ -1,4 +1,4 @@
-﻿# DesktopStub
+# DesktopStub
 
 `DesktopStub.exe` is a tray utility that generates Windows Start tile assets from the current desktop wallpaper and registers a loose Appx manifest for a desktop tile entry.
 
@@ -191,7 +191,8 @@ Supported options:
 - `ga_registration.inc`: Appx registration and PowerShell fallback handling.
 - `ga_generation.inc`: asset generation, polling, and shutdown coordination.
 - `ga_live_tile.inc`: Live Tile notification update handling.
-- `ga_tray.inc`: tray menu and tray notifications.
+- `ga_tray.inc`: tray wrapper that includes smaller helper/menu/dispatch fragments.
+- `ga_tray_helpers.inc`, `ga_tray_menu.inc`, `ga_tray_dispatch.inc`: tray helpers, menu construction, and command dispatch.
 - `ga_app.inc`: window procedure and application startup/shutdown.
 - `ga_livetile_broker_app.inc`: implementation of the optional packaged WinRT Live Tile broker. `LiveTileBroker.cpp` is only a tiny wrapper because the broker must build as a separate executable.
 - `ga_livetile_background_task_dll.inc`: implementation of the disabled experimental background-task DLL. `LiveTileBackgroundTask.cpp` is only a tiny wrapper because the task must build as a separate DLL.
@@ -302,3 +303,6 @@ Live Tile menu additions from the previous fix remain:
 - **Clear Live Tile on shutdown**: enabled by default. Packaged instances clear the live tile during graceful shutdown. Win8/8.1 broker mode can request a package-side clear through the broker.
 
 The wallpaper poller updates its internal baseline after a failed poll-triggered generation attempt. This prevents repeated regeneration of the same wallpaper when the tile/app registration stage fails after assets were generated successfully.
+
+
+DesktopStub intentionally keeps the default log beside the executable even when `--ini` points at another directory. This preserves the pre-shared-baseline portable behavior; an explicit `[Settings] LogPath` still overrides it.

@@ -298,6 +298,10 @@ static void TestAppPathBehavior()
             overridden.defaultLogPath == L"C:\\Config\\custom.log",
         "sidecar paths derive log path from configured INI override");
 
+    Check(
+        aip::BuildExecutableSidecarLogPath(overridden) == L"C:\\Tools\\DiscordRPC.log",
+        "sidecar paths can preserve executable-side default log behavior");
+
     std::wstring absolutePath;
     Check(
         aip::TryMakeAbsolutePath(L".", absolutePath, nullptr) && !absolutePath.empty(),
@@ -321,6 +325,16 @@ static void TestLoggingBehavior()
     Check(
         recent.size() == 2 && recent[0] == L"second" && recent[1] == L"third",
         "shared UTF-8 logger keeps bounded recent lines");
+
+    aip::RecentLogBuffer recentBuffer;
+    recentBuffer.SetMaxLines(2);
+    recentBuffer.Push(L"one");
+    recentBuffer.Push(L"two");
+    recentBuffer.Push(L"three");
+    std::vector<std::wstring> recentSnapshot = recentBuffer.Snapshot();
+    Check(
+        recentSnapshot.size() == 2 && recentSnapshot[0] == L"two" && recentSnapshot[1] == L"three",
+        "shared recent log buffer preserves DesktopStub tray-log behavior");
 
     options.enabled = false;
     logger.Configure(options);
