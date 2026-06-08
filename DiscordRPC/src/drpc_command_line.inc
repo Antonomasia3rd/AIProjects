@@ -23,6 +23,27 @@ static std::wstring RedactCommandLineSettingValue(const CommandLineSetting& sett
     return IsSensitiveCommandLineSetting(setting.section, setting.key) ? L"<redacted>" : setting.value;
 }
 
+static bool ResolveCommandLineConfigPath(
+    const std::wstring& rawPath,
+    const wchar_t* optionName,
+    std::wstring& resolvedPath,
+    std::wstring& error)
+{
+    if (Trim(rawPath).empty())
+    {
+        error = std::wstring(optionName) + L" requires a non-empty path.";
+        return false;
+    }
+
+    std::wstring pathError;
+    if (!aip::TryMakeAbsolutePath(rawPath, resolvedPath, &pathError))
+    {
+        error = std::wstring(optionName) + L" path is invalid: " + (pathError.empty() ? rawPath : pathError);
+        return false;
+    }
+    return true;
+}
+
 static bool ParseCommandLine(AppOptions& options, std::wstring& error)
 {
     int argc = 0;
@@ -171,16 +192,9 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             {
                 return false;
             }
-            if (Trim(value).empty())
-            {
-                error = L"--ini requires a non-empty path.";
-                return false;
-            }
             std::wstring absoluteConfigPath;
-            std::wstring pathError;
-            if (!aip::TryMakeAbsolutePath(value, absoluteConfigPath, &pathError))
+            if (!ResolveCommandLineConfigPath(value, L"--ini", absoluteConfigPath, error))
             {
-                error = L"--ini path is invalid: " + (pathError.empty() ? value : pathError);
                 return false;
             }
             options.configPath = absoluteConfigPath;
@@ -282,7 +296,12 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
         }
         else if (options.configPath.empty())
         {
-            options.configPath = arg;
+            std::wstring absoluteConfigPath;
+            if (!ResolveCommandLineConfigPath(arg, L"positional config path", absoluteConfigPath, error))
+            {
+                return false;
+            }
+            options.configPath = absoluteConfigPath;
         }
         else
         {

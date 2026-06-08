@@ -81,6 +81,7 @@ int main()
         const std::string app = ReadAll("src\\drpc_app.inc");
         const std::string ipc = ReadAll("src\\drpc_ipc.inc");
         const std::string gateway = ReadAll("src\\drpc_gateway.inc");
+        const std::string presence = ReadAll("src\\drpc_presence.inc");
         const std::string tray = ReadAll("src\\drpc_tray.inc");
         const std::string types = ReadAll("src\\drpc_types.inc");
 
@@ -176,7 +177,12 @@ int main()
             "DiscordRPC rejects empty --ini paths",
             "src\\drpc_command_line.inc",
             commandLine,
-            "--ini requires a non-empty path.");
+            "requires a non-empty path.");
+        RequireContains(
+            "DiscordRPC validates positional config paths like --ini",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "ResolveCommandLineConfigPath(arg, L\"positional config path\"");
         RequireNotContains(
             "DiscordRPC removes environment-backed token CLI",
             "src\\drpc_command_line.inc",
@@ -243,6 +249,11 @@ int main()
             tray,
             "ID_LOG_LOCK_WAIT_5000");
         RequireContains(
+            "DiscordRPC tray log-lock presets use live reload path",
+            "src\\drpc_tray.inc",
+            tray,
+            "SetTraySetting(L\"app\", L\"log_append_lock_wait_ms\"");
+        RequireContains(
             "DiscordRPC declares bounded log append wait tray command identifiers",
             "src\\drpc_tray.inc",
             tray,
@@ -288,6 +299,16 @@ int main()
             "src\\drpc_ipc.inc",
             ipc,
             "GetOverlappedResult(handle, &overlapped");
+        RequireContains(
+            "DiscordRPC caches compiled censor regex rules",
+            "src\\drpc_presence.inc",
+            presence,
+            "GetCompiledPatternCensorRules");
+        RequireNotContains(
+            "DiscordRPC does not compile censor regex inside every title update",
+            "src\\drpc_presence.inc",
+            presence,
+            "std::wregex pattern(rule.first");
 
         std::cout << "DiscordRPC source checks passed (" << g_checks << " checks).\n";
         return 0;

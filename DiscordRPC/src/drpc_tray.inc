@@ -445,16 +445,16 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             ToggleBoolSetting(L"app", L"show_console", false);
             return 0;
         case ID_LOG_LOCK_WAIT_0:
-            IniWrite(L"app", L"log_append_lock_wait_ms", L"0");
+            SetTraySetting(L"app", L"log_append_lock_wait_ms", L"0");
             return 0;
         case ID_LOG_LOCK_WAIT_1000:
-            IniWrite(L"app", L"log_append_lock_wait_ms", L"1000");
+            SetTraySetting(L"app", L"log_append_lock_wait_ms", L"1000");
             return 0;
         case ID_LOG_LOCK_WAIT_5000:
-            IniWrite(L"app", L"log_append_lock_wait_ms", L"5000");
+            SetTraySetting(L"app", L"log_append_lock_wait_ms", L"5000");
             return 0;
         case ID_LOG_LOCK_WAIT_30000:
-            IniWrite(L"app", L"log_append_lock_wait_ms", L"30000");
+            SetTraySetting(L"app", L"log_append_lock_wait_ms", L"30000");
             return 0;
         case ID_TOGGLE_MENU_DROPDOWN:
             ToggleBoolSetting(L"app", L"show_menu_as_dropdown", true);

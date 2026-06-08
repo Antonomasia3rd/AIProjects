@@ -233,6 +233,16 @@ int main()
             sharedCore,
             "TryWideToUtf8");
         RequireContains(
+            "shared core exposes looped file writes",
+            "dependencies/core.inc",
+            sharedCore,
+            "WriteAllBytes");
+        RequireContains(
+            "shared core exposes lossy UTF-8 conversion for JSON",
+            "dependencies/core.inc",
+            sharedCore,
+            "WideToUtf8Lossy");
+        RequireContains(
             "app path helper uses growable module path lookup",
             "dependencies/app_paths.inc",
             appPaths,
@@ -287,6 +297,21 @@ int main()
             "dependencies/logging.inc",
             logging,
             "WriteAllBytes");
+        RequireContains(
+            "shared config writer loops on partial writes",
+            "dependencies/config_ini.inc",
+            configIni,
+            "WriteAllBytes(file");
+        RequireContains(
+            "shared config writer uses checked UTF-8 conversion",
+            "dependencies/config_ini.inc",
+            configIni,
+            "TryWideToUtf8(text, utf8)");
+        RequireContains(
+            "shared JSON escaping avoids strict conversion data loss",
+            "dependencies/core.inc",
+            sharedCore,
+            "WideToUtf8Lossy(value)");
         RequireContains(
             "shared logging helper exposes bounded append lock wait",
             "dependencies/logging.inc",
@@ -354,6 +379,16 @@ int main()
             sharedTests,
             "shared UTF-8 logger fails non-empty text it cannot encode");
         RequireContains(
+            "shared tests cover INI writer UTF-8 conversion failure",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "INI file writer fails non-empty text it cannot encode");
+        RequireContains(
+            "shared tests cover JSON invalid UTF-16 behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "JSON escaping does not silently empty invalid UTF-16");
+        RequireContains(
             "shared tests cover explicit default log policy",
             "tools/SharedBaselineTests.cpp",
             sharedTests,
@@ -408,6 +443,11 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "shared UTF-8 logger resets failure state when target changes");
+        RequireContains(
+            "shared tests lock logger failure reporting after recovery",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared UTF-8 logger reports a new failure after recovery");
         RequireContains(
             "shared tests lock bounded logger append wait behavior",
             "tools/SharedBaselineTests.cpp",

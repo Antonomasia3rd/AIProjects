@@ -177,6 +177,17 @@ static ForegroundWindowInfo GetForegroundWindowInfo(const std::wstring& fallback
     return info;
 }
 
+struct CompiledCensorRegexRule
+{
+    std::wstring patternText;
+    std::wstring replacement;
+    std::wregex pattern;
+};
+
+static std::mutex g_censorRegexMutex;
+static std::wstring g_cachedPatternReplaceRaw;
+static std::vector<CompiledCensorRegexRule> g_cachedPatternReplaceRules;
+
 static std::vector<std::pair<std::wstring, std::wstring>> ParseReplacementRules(const std::wstring& raw)
 {
     std::wstring normalized = raw;
@@ -219,6 +230,32 @@ static std::vector<std::pair<std::wstring, std::wstring>> ParseReplacementRules(
     return rules;
 }
 
+static std::vector<CompiledCensorRegexRule> GetCompiledPatternCensorRules(const std::wstring& rawRules)
+{
+    std::lock_guard<std::mutex> lock(g_censorRegexMutex);
+    if (rawRules != g_cachedPatternReplaceRaw)
+    {
+        g_cachedPatternReplaceRaw = rawRules;
+        g_cachedPatternReplaceRules.clear();
+        for (const auto& rule : ParseReplacementRules(rawRules))
+        {
+            try
+            {
+                CompiledCensorRegexRule compiled;
+                compiled.patternText = rule.first;
+                compiled.replacement = rule.second;
+                compiled.pattern = std::wregex(rule.first, std::regex_constants::icase);
+                g_cachedPatternReplaceRules.push_back(std::move(compiled));
+            }
+            catch (const std::exception&)
+            {
+                LogError(L"Invalid censor regex ignored: " + rule.first);
+            }
+        }
+    }
+    return g_cachedPatternReplaceRules;
+}
+
 static std::wstring ReplaceAllI(std::wstring input, const std::wstring& from, const std::wstring& to)
 {
     if (from.empty())
@@ -255,16 +292,15 @@ static std::wstring ApplyCensorRules(const std::wstring& rawTitle)
         title = ReplaceAllI(title, rule.first, rule.second);
     }
 
-    for (const auto& rule : ParseReplacementRules(IniReadS(L"censor_map", L"pattern_replace", L"")))
+    for (const auto& rule : GetCompiledPatternCensorRules(IniReadS(L"censor_map", L"pattern_replace", L"")))
     {
         try
         {
-            std::wregex pattern(rule.first, std::regex_constants::icase);
-            title = std::regex_replace(title, pattern, rule.second);
+            title = std::regex_replace(title, rule.pattern, rule.replacement);
         }
         catch (const std::exception&)
         {
-            LogError(L"Invalid censor regex ignored: " + rule.first);
+            LogError(L"Censor regex failed during replacement: " + rule.patternText);
         }
     }
 

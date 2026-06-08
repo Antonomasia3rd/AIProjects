@@ -91,6 +91,16 @@ static void TestIniBehavior()
     std::wstring persisted = store.ReadRaw(L"General", L"Name", L"");
     Check(wrote && persisted == L"Value", "INI file write/read round trip");
 
+    std::wstring invalidIniText;
+    invalidIniText.push_back(0xD800);
+    std::wstring invalidIniPath = path + L".invalid";
+    DeleteFileW(invalidIniPath.c_str());
+    Check(
+        !aip::WriteTextFileUtf8Bom(invalidIniPath, invalidIniText) &&
+            GetLastError() == ERROR_NO_UNICODE_TRANSLATION &&
+            !aip::FileExists(invalidIniPath),
+        "INI file writer fails non-empty text it cannot encode");
+
     WIN32_FILE_ATTRIBUTE_DATA originalAttributes = {};
     bool capturedTime = GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &originalAttributes) != FALSE;
     std::wstring externalText =
@@ -259,6 +269,12 @@ static void TestJsonBehavior()
     Check(
         !aip::FindJsonFieldValue("{\"nested\":{\"target\":\"wrong\"}}", "target", keyPos, valueStart, valueEnd),
         "JSON lookup does not return nested fields");
+
+    std::wstring invalidJsonText;
+    invalidJsonText.push_back(0xD800);
+    Check(
+        aip::JsonEscape(invalidJsonText) != "\"\"",
+        "JSON escaping does not silently empty invalid UTF-16");
 }
 
 static void TestTrayBehavior()
@@ -439,6 +455,24 @@ static void TestLoggingBehavior()
     Check(
         fileLogger.LastFileWriteFailed() && failureReported,
         "shared UTF-8 logger reports file write failures once");
+
+    fileLogger.SetFilePath(logPath);
+    fileLogger.WriteRawLine(L"recovery write clears failure report suppression");
+    fileLogger.SetFilePath(badLogPath);
+    fileLogger.WriteRawLine(L"second failure after recovery should be reported");
+    std::vector<std::wstring> secondFailureRecent = fileLogger.RecentLines();
+    int failureReportCount = 0;
+    for (const std::wstring& line : secondFailureRecent)
+    {
+        if (line.find(L"Log file write failed") != std::wstring::npos)
+        {
+            ++failureReportCount;
+        }
+    }
+    Check(
+        failureReportCount >= 2,
+        "shared UTF-8 logger reports a new failure after recovery");
+
     fileLogger.SetFilePath(logPath);
     Check(
         !fileLogger.LastFileWriteFailed() && fileLogger.LastFileWriteError() == ERROR_SUCCESS,
