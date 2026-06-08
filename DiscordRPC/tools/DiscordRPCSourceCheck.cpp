@@ -233,6 +233,16 @@ int main()
             tray,
             "ID_LOG_LOCK_WAIT_5000");
         RequireContains(
+            "DiscordRPC declares bounded log append wait tray command identifiers",
+            "src\\drpc_tray.inc",
+            tray,
+            "static constexpr UINT ID_LOG_LOCK_WAIT_0");
+        RequireContains(
+            "DiscordRPC declares default bounded log append wait tray command identifier",
+            "src\\drpc_tray.inc",
+            tray,
+            "static constexpr UINT ID_LOG_LOCK_WAIT_5000");
+        RequireContains(
             "DiscordRPC passes bounded lock wait to shared UTF-8 logger",
             "src\\drpc_core.inc",
             core,
