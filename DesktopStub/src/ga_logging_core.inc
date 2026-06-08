@@ -1,4 +1,4 @@
-﻿static std::wstring ExceptionTextToWide(const std::exception& ex)
+static std::wstring ExceptionTextToWide(const std::exception& ex)
 {
     const char* text = ex.what();
     if (text && *text)
@@ -82,11 +82,10 @@ void Log(const wchar_t* fmt, ...)
     if (configuredMaxLogLines < 1) configuredMaxLogLines = 1;
     if (configuredMaxLogLines > 100000) configuredMaxLogLines = 100000;
     size_t maxLogLines = static_cast<size_t>(configuredMaxLogLines);
+    g_logBuf.SetMaxLines(maxLogLines);
     auto bufferLine = [&](const std::wstring& bufferedLine)
     {
-        while (g_logBuf.size() >= maxLogLines)
-            g_logBuf.erase(g_logBuf.begin());
-        g_logBuf.push_back(bufferedLine);
+        g_logBuf.Push(bufferedLine);
         if (g_console)
             WriteConsoleLine(bufferedLine);
     };
@@ -137,7 +136,7 @@ static void BindConsoleStreams()
 static void ReplayLogBufferToConsole()
 {
     std::lock_guard<std::mutex> lk(g_logMutex);
-    for (const auto& line : g_logBuf)
+    for (const auto& line : g_logBuf.Snapshot())
         WriteConsoleLine(line);
 }
 

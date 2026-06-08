@@ -1,4 +1,4 @@
-﻿std::wstring GetExeDir()
+std::wstring GetExeDir()
 {
     size_t pos = g_exePath.find_last_of(L"\\/");
     if (pos == std::wstring::npos) return L".";
@@ -133,7 +133,9 @@ static std::wstring ExpandManifestSettingTokens(std::wstring value);
 
 static std::wstring DefaultLogPath()
 {
-    return GetExeDir() + L"\\" + ExeBaseName() + L".log";
+    // Preserve DesktopStub's legacy default-log behavior: even when --ini points
+    // at another directory, an empty LogPath still resolves beside the executable.
+    return aip::BuildExecutableSidecarLogPath(g_exePath, L"DesktopStub");
 }
 
 static std::wstring EffectiveConfiguredLogPath()

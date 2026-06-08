@@ -208,6 +208,11 @@ int main()
             appPaths,
             "TryBuildSidecarPathsFromExecutable");
         RequireContains(
+            "app path helper exposes executable-side log paths",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "BuildExecutableSidecarLogPath");
+        RequireContains(
             "shared core exposes strict absolute path helper",
             "dependencies/core.inc",
             sharedCore,
@@ -222,6 +227,11 @@ int main()
             "dependencies/app_paths.inc",
             appPaths,
             "buffer.resize(buffer.size() * 2)");
+        RequireContains(
+            "shared logging helper exposes a reusable recent log buffer",
+            "dependencies/logging.inc",
+            logging,
+            "class RecentLogBuffer");
         RequireContains(
             "shared logging helper keeps a bounded recent buffer",
             "dependencies/logging.inc",
@@ -309,10 +319,20 @@ int main()
             sharedTests,
             "sidecar paths derive default INI and log from executable name");
         RequireContains(
+            "shared tests lock executable-side log path behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "sidecar paths can preserve executable-side default log behavior");
+        RequireContains(
             "shared tests lock bounded logging behavior",
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "shared UTF-8 logger keeps bounded recent lines");
+        RequireContains(
+            "shared tests lock reusable recent log behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared recent log buffer preserves DesktopStub tray-log behavior");
         RequireContains(
             "shared tests lock concurrent logging behavior",
             "tools/SharedBaselineTests.cpp",

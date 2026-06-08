@@ -9,10 +9,12 @@ product implementation:
   hashing, taskbar recreation registration, resident shutdown state, command-line
   help templates, and flat/dropdown tray sections.
 - `app_paths.inc`: executable sidecar path discovery for per-product INI and
-  log files, including growable current-module path lookup and configured INI
-  override handling.
+  log files, including growable current-module path lookup, configured INI
+  override handling, and executable-side log defaults for products that must
+  preserve legacy log placement when `--ini` points elsewhere.
 - `logging.inc`: UTF-8 BOM sidecar file logging, cross-process append locking,
-  failure reporting, and bounded recent-log buffering for helper/broker processes.
+  failure reporting, a reusable `RecentLogBuffer`, and bounded recent-log
+  buffering for helper/broker processes.
 - `config_ini.inc`: `IniConfigStore`, synchronized INI mutation, encoding, and
   document parsing.
 - `command_line.inc`: option value parsing, INI setting syntax, and boolean
@@ -51,3 +53,15 @@ backslashes.
 Additional baseline contracts:
 - `aip::TryMakeAbsolutePath` is the strict path-resolution primitive for command-line paths such as `--ini`; callers should reject invalid or empty paths instead of silently falling back.
 - `aip::Utf8Logger` resets its file-write failure state when the configured target path or file-output mode changes, so a repaired or changed log target can report fresh status.
+
+## Logging and path baseline notes
+
+`aip::BuildSidecarPathsFromExecutable` derives the default log path beside an
+explicit `--ini` override by default. Products that already promise
+exe-side log placement, such as DesktopStub, should call
+`aip::BuildExecutableSidecarLogPath` so a custom INI path does not silently move
+the default log file.
+
+`aip::RecentLogBuffer` is the shared in-memory tray/diagnostic log model.
+Products may keep their own timestamp and UI failure text, but should use this
+buffer instead of open-coded vector trimming when preserving recent log lines.

@@ -269,6 +269,56 @@ inline bool AppendUtf8LineToFile(const std::wstring& filePath, const std::wstrin
     return ok;
 }
 
+
+class RecentLogBuffer
+{
+public:
+    void SetMaxLines(size_t maxLines)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        maxLines_ = maxLines == 0 ? 1 : maxLines;
+        TrimLocked();
+    }
+
+    size_t MaxLines() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return maxLines_;
+    }
+
+    void Push(const std::wstring& line)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        lines_.push_back(line);
+        TrimLocked();
+    }
+
+    std::vector<std::wstring> Snapshot() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return std::vector<std::wstring>(lines_.begin(), lines_.end());
+    }
+
+    void Clear()
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        lines_.clear();
+    }
+
+private:
+    void TrimLocked()
+    {
+        while (lines_.size() > maxLines_)
+        {
+            lines_.pop_front();
+        }
+    }
+
+    mutable std::mutex mutex_;
+    size_t maxLines_ = 250;
+    std::deque<std::wstring> lines_;
+};
+
 class Utf8Logger
 {
 public:
