@@ -155,6 +155,20 @@ static void TestIniBehavior()
             concurrentResult.find(L"\"First\" = \"1\"") != std::wstring::npos &&
             concurrentResult.find(L"\"Second\" = \"2\"") != std::wstring::npos,
         "fresh INI mutation serializes concurrent read-modify-write transactions");
+
+    bool boundedIniWait = false;
+    {
+        aip::IniWriteMutexGuard heldGuard(path, 0);
+        if (heldGuard.IsLocked())
+        {
+            std::thread contender([&]() {
+                aip::IniWriteMutexGuard blockedGuard(path, 0);
+                boundedIniWait = !blockedGuard.IsLocked() && blockedGuard.Error() == ERROR_SEM_TIMEOUT;
+            });
+            contender.join();
+        }
+    }
+    Check(boundedIniWait, "INI write mutex supports bounded waits");
     DeleteFileW(path.c_str());
 }
 
@@ -220,6 +234,14 @@ static void TestCommandLineBehavior()
         aip::ParseBoolValue(L" Enabled ", boolValue) && boolValue &&
             aip::ParseBoolValue(L"off", boolValue) && !boolValue,
         "command-line boolean aliases");
+
+    int intValue = 0;
+    Check(
+        aip::ParseIntValueInRange(L" 5000 ", 0, 60000, intValue) &&
+            intValue == 5000 &&
+            !aip::ParseIntValue(L"12abc", intValue) &&
+            !aip::ParseIntValueInRange(L"60001", 0, 60000, intValue),
+        "command-line integer parser rejects junk and out-of-range values");
 }
 
 static void TestJsonBehavior()
@@ -298,6 +320,15 @@ static void TestAppPathBehavior()
             overridden.defaultLogPath == L"C:\\Config\\custom.log",
         "sidecar paths derive log path from configured INI override");
 
+    aip::SidecarPaths executableLogPolicy = aip::BuildSidecarPathsFromExecutable(
+        L"C:\\Tools\\DiscordRPC.exe",
+        L"DiscordRPC",
+        L"C:\\Config\\custom.ini",
+        aip::DefaultLogPathPolicy::BesideExecutable);
+    Check(
+        executableLogPolicy.defaultLogPath == L"C:\\Tools\\DiscordRPC.log",
+        "sidecar paths expose explicit executable-side default log policy");
+
     Check(
         aip::BuildExecutableSidecarLogPath(overridden) == L"C:\\Tools\\DiscordRPC.log",
         "sidecar paths can preserve executable-side default log behavior");
@@ -350,6 +381,17 @@ static void TestLoggingBehavior()
         ? std::wstring(tempDirectory) + L"AIP-SharedLogger-" + std::to_wstring(GetCurrentProcessId()) + L".log"
         : L"AIP-SharedLogger.log";
     DeleteFileW(logPath.c_str());
+
+    std::wstring invalidWideText;
+    invalidWideText.push_back(0xD800);
+    std::string invalidUtf8;
+    Check(
+        !aip::TryWideToUtf8(invalidWideText, invalidUtf8) &&
+            !aip::AppendUtf8TextToFile(logPath, invalidWideText) &&
+            GetLastError() == ERROR_NO_UNICODE_TRANSLATION,
+        "shared UTF-8 logger fails non-empty text it cannot encode");
+    DeleteFileW(logPath.c_str());
+
     HANDLE held = CreateFileW(
         logPath.c_str(),
         FILE_APPEND_DATA,

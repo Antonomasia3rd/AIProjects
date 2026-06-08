@@ -12,6 +12,12 @@ struct SidecarPaths
     std::wstring defaultLogPath;
 };
 
+enum class DefaultLogPathPolicy
+{
+    BesideConfig,
+    BesideExecutable
+};
+
 inline std::wstring GetCurrentExecutablePath()
 {
     std::vector<wchar_t> buffer(4096);
@@ -39,7 +45,8 @@ inline std::wstring GetCurrentExecutablePath()
 inline SidecarPaths BuildSidecarPathsFromExecutable(
     const std::wstring& executablePath,
     const std::wstring& fallbackBaseName,
-    const std::wstring& configOverride = L"")
+    const std::wstring& configOverride = L"",
+    DefaultLogPathPolicy defaultLogPathPolicy = DefaultLogPathPolicy::BesideConfig)
 {
     SidecarPaths paths;
     paths.exePath = executablePath.empty() ? fallbackBaseName : executablePath;
@@ -59,7 +66,9 @@ inline SidecarPaths BuildSidecarPathsFromExecutable(
         {
             configBase = paths.exeBaseName;
         }
-        paths.defaultLogPath = PathJoin(configDir, configBase + L".log");
+        paths.defaultLogPath = defaultLogPathPolicy == DefaultLogPathPolicy::BesideExecutable
+            ? PathJoin(paths.exeDir, paths.exeBaseName + L".log")
+            : PathJoin(configDir, configBase + L".log");
     }
     else
     {
@@ -90,7 +99,8 @@ inline bool TryBuildSidecarPathsFromExecutable(
     const std::wstring& fallbackBaseName,
     const std::wstring& configOverride,
     SidecarPaths& paths,
-    std::wstring* error = nullptr)
+    std::wstring* error = nullptr,
+    DefaultLogPathPolicy defaultLogPathPolicy = DefaultLogPathPolicy::BesideConfig)
 {
     paths = {};
     if (configOverride.empty())
@@ -105,16 +115,34 @@ inline bool TryBuildSidecarPathsFromExecutable(
         return false;
     }
 
-    paths = BuildSidecarPathsFromExecutable(executablePath, fallbackBaseName, absoluteConfig);
+    paths = BuildSidecarPathsFromExecutable(executablePath, fallbackBaseName, absoluteConfig, defaultLogPathPolicy);
     paths.configPath = absoluteConfig;
     return true;
 }
 
+inline bool TryBuildSidecarPathsFromExecutable(
+    const std::wstring& executablePath,
+    const std::wstring& fallbackBaseName,
+    const std::wstring& configOverride,
+    SidecarPaths& paths,
+    DefaultLogPathPolicy defaultLogPathPolicy,
+    std::wstring* error = nullptr)
+{
+    return TryBuildSidecarPathsFromExecutable(
+        executablePath,
+        fallbackBaseName,
+        configOverride,
+        paths,
+        error,
+        defaultLogPathPolicy);
+}
+
 inline SidecarPaths BuildCurrentProcessSidecarPaths(
     const std::wstring& fallbackBaseName,
-    const std::wstring& configOverride = L"")
+    const std::wstring& configOverride = L"",
+    DefaultLogPathPolicy defaultLogPathPolicy = DefaultLogPathPolicy::BesideConfig)
 {
-    return BuildSidecarPathsFromExecutable(GetCurrentExecutablePath(), fallbackBaseName, configOverride);
+    return BuildSidecarPathsFromExecutable(GetCurrentExecutablePath(), fallbackBaseName, configOverride, defaultLogPathPolicy);
 }
 }
 

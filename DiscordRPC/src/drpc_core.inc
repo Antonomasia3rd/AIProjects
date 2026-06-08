@@ -492,7 +492,11 @@ static void ApplyRuntimeLoggingOverridesFromCommandLine(const AppOptions& option
         }
         else if (EqualsI(setting.key, L"log_append_lock_wait_ms"))
         {
-            g_logAppendLockWaitMs = static_cast<DWORD>(ClampInt(_wtoi(setting.value.c_str()), 0, 60000));
+            int lockWaitMs = 0;
+            if (aip::ParseIntValue(setting.value, lockWaitMs))
+            {
+                g_logAppendLockWaitMs = static_cast<DWORD>(ClampInt(lockWaitMs, 0, 60000));
+            }
         }
     }
     ConfigureLoggerFromRuntimeState();

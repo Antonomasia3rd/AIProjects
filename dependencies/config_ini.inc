@@ -23,7 +23,7 @@ inline bool IniEquals(const std::wstring& left, const std::wstring& right)
 class IniWriteMutexGuard
 {
 public:
-    explicit IniWriteMutexGuard(const std::wstring& path)
+    explicit IniWriteMutexGuard(const std::wstring& path, DWORD waitMs = INFINITE)
     {
         std::wstring name = L"Local\\AIP.ConfigIni." + StableHashHex64(MakeAbsolutePath(path));
         handle_ = CreateMutexW(nullptr, FALSE, name.c_str());
@@ -45,7 +45,7 @@ public:
             }
         }
 
-        DWORD wait = WaitForSingleObject(handle_, INFINITE);
+        DWORD wait = WaitForSingleObject(handle_, waitMs);
         if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED)
         {
             acquired_ = true;
@@ -850,9 +850,15 @@ inline bool WriteIniValueToText(std::wstring& text, const wchar_t* section, cons
     return true;
 }
 
-inline bool IniWriteRaw(const std::wstring& path, const wchar_t* section, const wchar_t* key, const std::wstring& value, const std::wstring& header = L"")
+inline bool IniWriteRaw(
+    const std::wstring& path,
+    const wchar_t* section,
+    const wchar_t* key,
+    const std::wstring& value,
+    const std::wstring& header = L"",
+    DWORD writeMutexWaitMs = INFINITE)
 {
-    IniWriteMutexGuard guard(path);
+    IniWriteMutexGuard guard(path, writeMutexWaitMs);
     if (!guard.IsLocked())
     {
         SetLastError(guard.Error());
@@ -882,9 +888,14 @@ struct IniDefaultValue
     const wchar_t* value;
 };
 
-inline bool IniEnsureDefaultsRaw(const std::wstring& path, const IniDefaultValue* defaults, size_t defaultCount, const std::wstring& header = L"")
+inline bool IniEnsureDefaultsRaw(
+    const std::wstring& path,
+    const IniDefaultValue* defaults,
+    size_t defaultCount,
+    const std::wstring& header = L"",
+    DWORD writeMutexWaitMs = INFINITE)
 {
-    IniWriteMutexGuard guard(path);
+    IniWriteMutexGuard guard(path, writeMutexWaitMs);
     if (!guard.IsLocked())
     {
         SetLastError(guard.Error());
@@ -932,9 +943,10 @@ inline bool IniEnsureDefaultsRaw(const std::wstring& path, const IniDefaultValue
 class IniConfigStore
 {
 public:
-    explicit IniConfigStore(std::wstring path, std::wstring header = L"")
+    explicit IniConfigStore(std::wstring path, std::wstring header = L"", DWORD writeMutexWaitMs = INFINITE)
         : path_(std::move(path)),
-          header_(std::move(header))
+          header_(std::move(header)),
+          writeMutexWaitMs_(writeMutexWaitMs)
     {
     }
 
@@ -950,12 +962,12 @@ public:
 
     bool WriteRaw(const wchar_t* section, const wchar_t* key, const std::wstring& value) const
     {
-        return IniWriteRaw(path_, section, key, value, header_);
+        return IniWriteRaw(path_, section, key, value, header_, writeMutexWaitMs_);
     }
 
     bool EnsureDefaults(const IniDefaultValue* defaults, size_t defaultCount) const
     {
-        return IniEnsureDefaultsRaw(path_, defaults, defaultCount, header_);
+        return IniEnsureDefaultsRaw(path_, defaults, defaultCount, header_, writeMutexWaitMs_);
     }
 
     bool ReadFreshText(std::wstring& text) const
@@ -966,7 +978,7 @@ public:
     template <typename Mutator>
     bool MutateFresh(Mutator&& mutator) const
     {
-        IniWriteMutexGuard guard(path_);
+        IniWriteMutexGuard guard(path_, writeMutexWaitMs_);
         if (!guard.IsLocked())
         {
             SetLastError(guard.Error());
@@ -996,7 +1008,7 @@ public:
 
     bool WriteFreshText(const std::wstring& text) const
     {
-        IniWriteMutexGuard guard(path_);
+        IniWriteMutexGuard guard(path_, writeMutexWaitMs_);
         if (!guard.IsLocked())
         {
             SetLastError(guard.Error());
@@ -1008,6 +1020,7 @@ public:
 private:
     std::wstring path_;
     std::wstring header_;
+    DWORD writeMutexWaitMs_ = INFINITE;
 };
 }
 
