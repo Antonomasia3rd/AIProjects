@@ -456,6 +456,7 @@ int main(int argc, char** argv)
         const std::string core = ReadSource("src\\ga_core.inc");
         const std::string desktopStub = ReadSource("DesktopStub.cpp");
         const std::string buildScript = ReadSource("BuildDesktopStub.cmd");
+        const std::string readme = ReadSource("README.md");
         const std::string image = ReadSource("src\\ga_image.inc");
         const std::string desktopIcon = ReadSource("src\\ga_desktop_icon_png.inc");
         const std::string registration = ReadSource("src\\ga_registration.inc");
@@ -689,6 +690,16 @@ int main(int argc, char** argv)
                 "g_singleInstanceMessageName = std::move(identity.messageName);"
             },
             "single-instance mutex/message names should include the product base so copied baseline projects do not share identity prefixes");
+        AssertContainsAll(
+            "Product-scoped single-instance policy is documented",
+            "README.md + src\\ga_app.inc",
+            readme + "\n" + app,
+            {
+                "runtime product/exe base in the mutex/message/window identity",
+                "copied or renamed baseline projects do not accidentally signal each other",
+                "std::wstring productBase = SanitizeManifestToken(ProductRuntimeBaseName(), L\"DesktopStub\");"
+            },
+            "DesktopStub should document that copied baseline projects remain product-scoped even when an explicit --ini is shared");
         AssertContainsAll(
             "Build script quotes configurable output paths",
             "BuildDesktopStub.cmd",

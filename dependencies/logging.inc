@@ -14,23 +14,6 @@ struct Utf8LoggerOptions
     size_t maxRecentLines = 250;
 };
 
-inline bool WriteAllBytes(HANDLE file, const void* data, DWORD size)
-{
-    const BYTE* cursor = static_cast<const BYTE*>(data);
-    DWORD remaining = size;
-    while (remaining > 0)
-    {
-        DWORD written = 0;
-        if (!WriteFile(file, cursor, remaining, &written, nullptr) || written == 0)
-        {
-            return false;
-        }
-        cursor += written;
-        remaining -= written;
-    }
-    return true;
-}
-
 class ExclusiveFileRangeLock
 {
 public:
@@ -393,6 +376,7 @@ private:
             std::lock_guard<std::mutex> lock(mutex_);
             lastFileWriteFailed_ = false;
             lastFileWriteError_ = ERROR_SUCCESS;
+            failureReported_ = false;
             return;
         }
 

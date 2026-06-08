@@ -201,6 +201,23 @@ inline std::wstring MakeAbsolutePath(const std::wstring& path)
     return TryMakeAbsolutePath(path, absolutePath, nullptr) ? absolutePath : path;
 }
 
+inline bool WriteAllBytes(HANDLE file, const void* data, DWORD size)
+{
+    const BYTE* cursor = static_cast<const BYTE*>(data);
+    DWORD remaining = size;
+    while (remaining > 0)
+    {
+        DWORD written = 0;
+        if (!WriteFile(file, cursor, remaining, &written, nullptr) || written == 0)
+        {
+            return false;
+        }
+        cursor += written;
+        remaining -= written;
+    }
+    return true;
+}
+
 inline bool TryWideToUtf8(const std::wstring& value, std::string& result)
 {
     result.clear();
@@ -260,6 +277,48 @@ inline std::string WideToUtf8(const std::wstring& value)
 {
     std::string result;
     return TryWideToUtf8(value, result) ? result : std::string();
+}
+
+inline std::string WideToUtf8Lossy(const std::wstring& value)
+{
+    std::string result;
+    if (TryWideToUtf8(value, result))
+    {
+        return result;
+    }
+    if (value.empty() || value.size() > static_cast<size_t>(INT_MAX))
+    {
+        return std::string();
+    }
+
+    std::wstring sanitized;
+    sanitized.reserve(value.size());
+    for (size_t i = 0; i < value.size(); ++i)
+    {
+        wchar_t ch = value[i];
+        if (ch >= 0xD800 && ch <= 0xDBFF)
+        {
+            if (i + 1 < value.size() && value[i + 1] >= 0xDC00 && value[i + 1] <= 0xDFFF)
+            {
+                sanitized.push_back(ch);
+                sanitized.push_back(value[i + 1]);
+                ++i;
+            }
+            else
+            {
+                sanitized.push_back(0xFFFD);
+            }
+            continue;
+        }
+        if (ch >= 0xDC00 && ch <= 0xDFFF)
+        {
+            sanitized.push_back(0xFFFD);
+            continue;
+        }
+        sanitized.push_back(ch);
+    }
+
+    return TryWideToUtf8(sanitized, result) ? result : std::string();
 }
 
 inline std::wstring Utf8ToWide(const std::string& value)
@@ -325,7 +384,7 @@ inline bool HexToBytes(const std::wstring& hex, std::vector<BYTE>& bytes)
 
 inline std::string JsonEscape(const std::wstring& value)
 {
-    std::string utf8 = WideToUtf8(value);
+    std::string utf8 = WideToUtf8Lossy(value);
     std::string out;
     out.reserve(utf8.size() + 2);
     out.push_back('"');

@@ -115,7 +115,7 @@ Supported options:
 - The `--help` output is configurable through `[CommandLineHelp] Template` in `DesktopStub.ini`; use `\r\n` for line breaks and `{exe}` / `{iniExampleName}` placeholders where needed.
 - `--help`, `-h`, `/?`: show command-line help.
 - `--version`, `-v`: show the embedded release tag and AppX/Win32 package version.
-- `--ini <path>`: use an alternate INI file; alternate INI instances have separate single-instance scope.
+- `--ini <path>`: use an alternate INI file; alternate INI instances have separate single-instance scope. DesktopStub also keeps the runtime product/exe base in the mutex/message/window identity, so copied or renamed baseline projects do not accidentally signal each other even if they are pointed at the same explicit INI.
 - `--set Section.Key=Value`: set and save an INI value used by the app. Manifest fields are controlled through `[Settings] Manifest*` keys; changing them by command line regenerates `AppxManifest.xml`.
 - `--exit` / `--quit`: ask the running instance to exit gracefully.
 - `--once`: generate once and exit.

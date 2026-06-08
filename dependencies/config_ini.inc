@@ -258,19 +258,17 @@ inline bool WriteTextFileUtf8Bom(const std::wstring& path, const std::wstring& t
     }
 
     static const unsigned char bom[] = { 0xef, 0xbb, 0xbf };
-    DWORD written = 0;
-    bool ok = WriteFile(file, bom, static_cast<DWORD>(sizeof(bom)), &written, nullptr) != FALSE &&
-        written == static_cast<DWORD>(sizeof(bom));
-    std::string utf8 = WideToUtf8(text);
-    if (ok && !text.empty() && utf8.empty())
+    bool ok = WriteAllBytes(file, bom, static_cast<DWORD>(sizeof(bom)));
+    std::string utf8;
+    if (ok && !TryWideToUtf8(text, utf8))
     {
-        SetLastError(ERROR_NO_UNICODE_TRANSLATION);
+        DWORD utf8Error = GetLastError();
+        SetLastError(utf8Error == ERROR_SUCCESS ? ERROR_NO_UNICODE_TRANSLATION : utf8Error);
         ok = false;
     }
     if (ok && !utf8.empty())
     {
-        ok = WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr) != FALSE &&
-            written == static_cast<DWORD>(utf8.size());
+        ok = WriteAllBytes(file, utf8.data(), static_cast<DWORD>(utf8.size()));
     }
     if (ok && !FlushFileBuffers(file))
     {
