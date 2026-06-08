@@ -475,18 +475,15 @@ static void ConfigureSingleInstanceIdentity(const std::wstring& exeDir, const st
     // executable in the same folder gives each name its own INI and its own
     // resident instance, for example GenerateAssets.exe -> GenerateAssets.ini
     // and DeskStub.exe -> DeskStub.ini.
-    std::wstring scope = ToLowerCopy(!iniPath.empty() ? iniPath : exeDir);
-    uint64_t hash = 14695981039346656037ull;
-    HashWide(hash, scope);
-    std::wstring suffix = Hex64(hash);
+    std::wstring scope = !iniPath.empty() ? iniPath : exeDir;
     std::wstring productBase = SanitizeManifestToken(ProductRuntimeBaseName(), L"DesktopStub");
 
-    aip::InstanceIdentity identity = aip::BuildInstanceIdentity(
+    aip::InstanceIdentity identity = aip::BuildPathScopedInstanceIdentity(
         productBase,
         productBase + L".RestoreRunningInstance",
         WINDOW_CLASS_NAME,
         productBase,
-        suffix);
+        scope);
     g_singleInstanceMutexName = std::move(identity.mutexName);
     g_singleInstanceMessageName = std::move(identity.messageName);
     g_instanceWindowTitle = std::move(identity.windowTitle);
@@ -1310,10 +1307,22 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         return 2;
     }
 
-    std::wstring dir = GetExeDir();
-    std::wstring base = g_exePath.substr(g_exePath.find_last_of(L"\\/")+1);
-    base = base.substr(0, base.find_last_of(L'.'));
-    g_iniPath = g_commandLine.customIniPath ? g_commandLine.iniPath : dir + L"\\" + base + L".ini";
+    aip::SidecarPaths sidecarPaths;
+    std::wstring sidecarError;
+    if (!aip::TryBuildSidecarPathsFromExecutable(
+            g_exePath,
+            L"DesktopStub",
+            g_commandLine.customIniPath ? g_commandLine.iniPath : L"",
+            sidecarPaths,
+            &sidecarError))
+    {
+        ShowCommandLineMessage(L"Invalid INI path: " + sidecarError, true);
+        return 2;
+    }
+    g_exePath = sidecarPaths.exePath;
+    g_iniPath = sidecarPaths.configPath;
+
+    std::wstring dir = sidecarPaths.exeDir.empty() ? GetExeDir() : sidecarPaths.exeDir;
     ConfigureSingleInstanceIdentity(dir, g_iniPath, g_commandLine.customIniPath);
     WaitForModeSwitchParentExitIfRequested();
 

@@ -46,3 +46,8 @@ format. This is now the repository baseline for C++ projects:
 Do not replace this with `GetPrivateProfileStringW` / `WritePrivateProfileStringW`
 or another parser that changes quoting, comments, order, trailing spaces, or path
 backslashes.
+
+
+Additional baseline contracts:
+- `aip::TryMakeAbsolutePath` is the strict path-resolution primitive for command-line paths such as `--ini`; callers should reject invalid or empty paths instead of silently falling back.
+- `aip::Utf8Logger` resets its file-write failure state when the configured target path or file-output mode changes, so a repaired or changed log target can report fresh status.

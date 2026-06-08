@@ -162,7 +162,14 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
                 error = L"--ini requires a non-empty path.";
                 return false;
             }
-            options.configPath = value;
+            std::wstring absoluteConfigPath;
+            std::wstring pathError;
+            if (!aip::TryMakeAbsolutePath(value, absoluteConfigPath, &pathError))
+            {
+                error = L"--ini path is invalid: " + (pathError.empty() ? value : pathError);
+                return false;
+            }
+            options.configPath = absoluteConfigPath;
         }
         else if (aip::IsOptionOrInlineValue(arg, L"--set"))
         {

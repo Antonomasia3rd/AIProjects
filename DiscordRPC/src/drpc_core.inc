@@ -73,7 +73,17 @@ static void InitPaths()
 
 static void ApplyConfiguredIniPath(const std::wstring& configPath)
 {
-    ApplySidecarPaths(aip::BuildSidecarPathsFromExecutable(g_exePath, APP_NAME, configPath));
+    aip::SidecarPaths paths;
+    std::wstring error;
+    if (aip::TryBuildSidecarPathsFromExecutable(g_exePath, APP_NAME, configPath, paths, &error))
+    {
+        ApplySidecarPaths(paths);
+        return;
+    }
+
+    // ParseCommandLine should already reject invalid --ini values. Keep this
+    // fallback side-effect-free and deterministic if a future caller bypasses it.
+    ApplySidecarPaths(aip::BuildSidecarPathsFromExecutable(g_exePath, APP_NAME));
 }
 
 

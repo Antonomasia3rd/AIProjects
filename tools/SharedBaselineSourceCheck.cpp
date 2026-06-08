@@ -203,6 +203,16 @@ int main()
             appPaths,
             "configOverride");
         RequireContains(
+            "app path helper exposes strict configured INI resolution",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "TryBuildSidecarPathsFromExecutable");
+        RequireContains(
+            "shared core exposes strict absolute path helper",
+            "dependencies/core.inc",
+            sharedCore,
+            "TryMakeAbsolutePath");
+        RequireContains(
             "app path helper uses growable module path lookup",
             "dependencies/app_paths.inc",
             appPaths,
@@ -318,6 +328,16 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "shared UTF-8 logger reports file write failures once");
+        RequireContains(
+            "shared tests lock logger failure-state reset behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared UTF-8 logger resets failure state when target changes");
+        RequireContains(
+            "shared tests lock strict absolute path behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "strict absolute path helper rejects empty paths");
         RequireContains(
             "shared tests lock path-scoped identity hashing",
             "tools/SharedBaselineTests.cpp",
