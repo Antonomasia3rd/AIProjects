@@ -118,6 +118,38 @@ inline bool ParseIniSetSpec(
     return true;
 }
 
+
+inline bool ParseIntValue(const std::wstring& raw, int& value)
+{
+    std::wstring trimmed = Trim(raw);
+    if (trimmed.empty())
+    {
+        return false;
+    }
+
+    wchar_t* end = nullptr;
+    long parsed = wcstol(trimmed.c_str(), &end, 10);
+    if (end == trimmed.c_str() || *end != L'\0' || parsed < INT_MIN || parsed > INT_MAX)
+    {
+        return false;
+    }
+
+    value = static_cast<int>(parsed);
+    return true;
+}
+
+inline bool ParseIntValueInRange(const std::wstring& raw, int minValue, int maxValue, int& value)
+{
+    int parsed = 0;
+    if (!ParseIntValue(raw, parsed) || parsed < minValue || parsed > maxValue)
+    {
+        return false;
+    }
+
+    value = parsed;
+    return true;
+}
+
 inline bool ParseBoolValue(const std::wstring& raw, bool& value)
 {
     std::wstring v = ToLower(Trim(raw));

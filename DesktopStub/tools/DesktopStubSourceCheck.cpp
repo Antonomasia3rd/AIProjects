@@ -97,10 +97,172 @@ static std::string SliceSource(
     return sourceText.substr(start, end - start);
 }
 
+static std::string TrimAsciiSpaces(std::string value)
+{
+    size_t first = 0;
+    while (first < value.size() && value[first] == ' ')
+        ++first;
+    size_t last = value.size();
+    while (last > first && value[last - 1] == ' ')
+        --last;
+    return value.substr(first, last - first);
+}
+
+static void PushNormalizedNeedle(std::vector<std::string>& needles, std::string& token)
+{
+    std::string normalized = TrimAsciiSpaces(NormalizeSource(token));
+    if (!normalized.empty())
+        needles.push_back(normalized);
+    token.clear();
+}
+
+static std::vector<std::string> SplitRegexAlternatives(const std::string& pattern)
+{
+    std::vector<std::string> alternatives;
+    std::string current;
+    bool escaped = false;
+    for (char ch : pattern)
+    {
+        if (escaped)
+        {
+            current.push_back('\\');
+            current.push_back(ch);
+            escaped = false;
+            continue;
+        }
+        if (ch == '\\')
+        {
+            escaped = true;
+            continue;
+        }
+        if (ch == '|')
+        {
+            alternatives.push_back(current);
+            current.clear();
+            continue;
+        }
+        current.push_back(ch);
+    }
+    if (escaped)
+        current.push_back('\\');
+    alternatives.push_back(current);
+    return alternatives;
+}
+
+static std::vector<std::string> ExtractOrderedNeedlesFromRegexLikePattern(const std::string& pattern)
+{
+    std::vector<std::string> needles;
+    std::string token;
+    std::string cleaned = StripDotAllFlag(pattern);
+
+    for (size_t i = 0; i < cleaned.size(); ++i)
+    {
+        char ch = cleaned[i];
+        if (ch == '\\')
+        {
+            if (i + 1 >= cleaned.size())
+            {
+                token.push_back(ch);
+                continue;
+            }
+
+            char escaped = cleaned[++i];
+            if (escaped == 's')
+            {
+                PushNormalizedNeedle(needles, token);
+                if (i + 1 < cleaned.size() &&
+                    (cleaned[i + 1] == '*' || cleaned[i + 1] == '+' || cleaned[i + 1] == '?'))
+                {
+                    ++i;
+                }
+                continue;
+            }
+            if (escaped == 'n' || escaped == 'r' || escaped == 't')
+            {
+                PushNormalizedNeedle(needles, token);
+                continue;
+            }
+
+            token.push_back(escaped);
+            continue;
+        }
+
+        if ((ch == '.' && i + 1 < cleaned.size() && cleaned[i + 1] == '*') ||
+            (ch == '.' && i + 1 < cleaned.size() && cleaned[i + 1] == '+'))
+        {
+            PushNormalizedNeedle(needles, token);
+            ++i;
+            continue;
+        }
+
+        if (ch == '[')
+        {
+            PushNormalizedNeedle(needles, token);
+            while (i + 1 < cleaned.size() && cleaned[i + 1] != ']')
+                ++i;
+            if (i + 1 < cleaned.size())
+                ++i;
+            if (i + 1 < cleaned.size() &&
+                (cleaned[i + 1] == '*' || cleaned[i + 1] == '+' || cleaned[i + 1] == '?'))
+            {
+                ++i;
+            }
+            continue;
+        }
+
+        if (ch == '^' || ch == '$')
+            continue;
+
+        token.push_back(ch);
+    }
+
+    PushNormalizedNeedle(needles, token);
+    return needles;
+}
+
+static bool OrderedNeedlesMatch(const std::string& normalizedSource, const std::vector<std::string>& needles)
+{
+    size_t pos = 0;
+    for (const auto& needle : needles)
+    {
+        size_t found = normalizedSource.find(needle, pos);
+        if (found == std::string::npos)
+            return false;
+        pos = found + needle.size();
+    }
+    return !needles.empty();
+}
+
+static bool RegexLikePatternMatches(const std::string& normalizedSource, const std::string& pattern)
+{
+    for (const auto& alternative : SplitRegexAlternatives(pattern))
+    {
+        if (OrderedNeedlesMatch(normalizedSource, ExtractOrderedNeedlesFromRegexLikePattern(alternative)))
+            return true;
+    }
+    return false;
+}
+
 static bool RegexMatches(const std::string& sourceText, const std::string& pattern)
 {
-    std::regex re(StripDotAllFlag(pattern), std::regex_constants::ECMAScript);
-    return std::regex_search(NormalizeSource(sourceText), re);
+    const std::string normalizedSource = NormalizeSource(sourceText);
+    const std::string cleaned = StripDotAllFlag(pattern);
+    const std::string negativeLookahead = "(?!.*";
+    size_t lookahead = cleaned.find(negativeLookahead);
+    if (lookahead != std::string::npos)
+    {
+        std::string positive = cleaned.substr(0, lookahead);
+        size_t negativeStart = lookahead + negativeLookahead.size();
+        size_t negativeEnd = cleaned.rfind(')');
+        std::string negative = negativeEnd == std::string::npos || negativeEnd < negativeStart
+            ? cleaned.substr(negativeStart)
+            : cleaned.substr(negativeStart, negativeEnd - negativeStart);
+
+        return RegexLikePatternMatches(normalizedSource, positive) &&
+            !RegexLikePatternMatches(normalizedSource, negative);
+    }
+
+    return RegexLikePatternMatches(normalizedSource, cleaned);
 }
 
 static void AssertCheck(const Check& check)

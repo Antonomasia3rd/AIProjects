@@ -179,8 +179,17 @@ inline bool AppendUtf8TextToFile(
 
             if (ok)
             {
-                std::string utf8 = WideToUtf8(text);
-                if (!utf8.empty() && !WriteAllBytes(file, utf8.data(), static_cast<DWORD>(utf8.size())))
+                std::string utf8;
+                if (!TryWideToUtf8(text, utf8))
+                {
+                    ok = false;
+                    error = GetLastError();
+                    if (error == ERROR_SUCCESS)
+                    {
+                        error = ERROR_NO_UNICODE_TRANSLATION;
+                    }
+                }
+                else if (!utf8.empty() && !WriteAllBytes(file, utf8.data(), static_cast<DWORD>(utf8.size())))
                 {
                     ok = false;
                     error = GetLastError();

@@ -149,7 +149,13 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             {
                 return false;
             }
-            AddSetting(options, L"app", L"log_append_lock_wait_ms", value);
+            int parsed = 0;
+            if (!aip::ParseIntValueInRange(value, 0, 60000, parsed))
+            {
+                error = L"--log-lock-wait-ms expects an integer from 0 to 60000.";
+                return false;
+            }
+            AddSetting(options, L"app", L"log_append_lock_wait_ms", std::to_wstring(parsed));
         }
         else if (lower == L"--show-console-setting")
         {

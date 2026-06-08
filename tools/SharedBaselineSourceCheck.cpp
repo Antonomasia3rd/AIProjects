@@ -152,6 +152,11 @@ int main()
             commandLine,
             "TakeCommandLineValue");
         RequireContains(
+            "shared command-line dependency provides strict integer parsing",
+            "dependencies/command_line.inc",
+            commandLine,
+            "ParseIntValueInRange");
+        RequireContains(
             "shared tray dependency provides baseline menu primitives",
             "dependencies/tray.inc",
             tray,
@@ -213,10 +218,20 @@ int main()
             appPaths,
             "BuildExecutableSidecarLogPath");
         RequireContains(
+            "app path helper exposes explicit default log path policy",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "DefaultLogPathPolicy");
+        RequireContains(
             "shared core exposes strict absolute path helper",
             "dependencies/core.inc",
             sharedCore,
             "TryMakeAbsolutePath");
+        RequireContains(
+            "shared core exposes checked UTF-8 conversion",
+            "dependencies/core.inc",
+            sharedCore,
+            "TryWideToUtf8");
         RequireContains(
             "app path helper uses growable module path lookup",
             "dependencies/app_paths.inc",
@@ -283,6 +298,11 @@ int main()
             logging,
             "AppendUtf8LineToFile(filePath, line, writeUtf8Bom, lockWaitMs)");
         RequireContains(
+            "shared logging helper treats UTF-8 conversion failure as write failure",
+            "dependencies/logging.inc",
+            logging,
+            "TryWideToUtf8(text, utf8)");
+        RequireContains(
             "shared logging helper exposes file write failure state",
             "dependencies/logging.inc",
             logging,
@@ -297,6 +317,11 @@ int main()
             "dependencies/config_ini.inc",
             configIni,
             "StableHashHex64(MakeAbsolutePath(path))");
+        RequireContains(
+            "shared config mutex supports bounded waits",
+            "dependencies/config_ini.inc",
+            configIni,
+            "WaitForSingleObject(handle_, waitMs)");
         RequireNotContains(
             "shared config dependency does not keep a private mutex hash",
             "dependencies/config_ini.inc",
@@ -318,6 +343,21 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "INI parser preserves raw Windows path backslashes");
+        RequireContains(
+            "shared tests cover bounded INI waits",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "INI write mutex supports bounded waits");
+        RequireContains(
+            "shared tests cover UTF-8 conversion failure",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared UTF-8 logger fails non-empty text it cannot encode");
+        RequireContains(
+            "shared tests cover explicit default log policy",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "sidecar paths expose explicit executable-side default log policy");
         RequireContains(
             "INI tests lock escaped Windows path write style",
             "tools/SharedBaselineTests.cpp",

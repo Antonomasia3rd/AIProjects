@@ -228,6 +228,16 @@ int main()
             commandLine,
             "--log-lock-wait-ms");
         RequireContains(
+            "DiscordRPC validates bounded log append wait command-line values",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "aip::ParseIntValueInRange(value, 0, 60000, parsed)");
+        RequireContains(
+            "DiscordRPC runtime log append wait override ignores invalid integers",
+            "src\\drpc_core.inc",
+            core,
+            "aip::ParseIntValue(setting.value, lockWaitMs)");
+        RequireContains(
             "DiscordRPC exposes bounded log append wait through tray presets",
             "src\\drpc_tray.inc",
             tray,

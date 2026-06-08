@@ -201,22 +201,65 @@ inline std::wstring MakeAbsolutePath(const std::wstring& path)
     return TryMakeAbsolutePath(path, absolutePath, nullptr) ? absolutePath : path;
 }
 
-inline std::string WideToUtf8(const std::wstring& value)
+inline bool TryWideToUtf8(const std::wstring& value, std::string& result)
 {
+    result.clear();
     if (value.empty())
     {
-        return std::string();
+        SetLastError(ERROR_SUCCESS);
+        return true;
     }
 
-    int length = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (value.size() > static_cast<size_t>(INT_MAX))
+    {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return false;
+    }
+
+    int inputLength = static_cast<int>(value.size());
+    int length = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        value.c_str(),
+        inputLength,
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
     if (length <= 0)
     {
-        return std::string();
+        DWORD error = GetLastError();
+        SetLastError(error == ERROR_SUCCESS ? ERROR_NO_UNICODE_TRANSLATION : error);
+        return false;
     }
 
-    std::string result(static_cast<size_t>(length), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), result.data(), length, nullptr, nullptr);
-    return result;
+    result.assign(static_cast<size_t>(length), '\0');
+    int written = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        value.c_str(),
+        inputLength,
+        result.data(),
+        length,
+        nullptr,
+        nullptr);
+    if (written <= 0)
+    {
+        DWORD error = GetLastError();
+        result.clear();
+        SetLastError(error == ERROR_SUCCESS ? ERROR_NO_UNICODE_TRANSLATION : error);
+        return false;
+    }
+
+    result.resize(static_cast<size_t>(written));
+    SetLastError(ERROR_SUCCESS);
+    return true;
+}
+
+inline std::string WideToUtf8(const std::wstring& value)
+{
+    std::string result;
+    return TryWideToUtf8(value, result) ? result : std::string();
 }
 
 inline std::wstring Utf8ToWide(const std::string& value)

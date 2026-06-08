@@ -58,9 +58,18 @@ Additional baseline contracts:
 
 `aip::BuildSidecarPathsFromExecutable` derives the default log path beside an
 explicit `--ini` override by default. Products that already promise
-exe-side log placement, such as DesktopStub, should call
+exe-side log placement, such as DesktopStub, should opt into
+`aip::DefaultLogPathPolicy::BesideExecutable` or call
 `aip::BuildExecutableSidecarLogPath` so a custom INI path does not silently move
 the default log file.
+
+`aip::TryWideToUtf8` is the checked UTF-8 conversion primitive. File/log writers
+should treat a non-empty string that cannot be encoded as a write failure instead
+of silently reporting success with no payload written.
+
+`aip::IniWriteMutexGuard` defaults to an infinite wait for compatibility, but it
+accepts a bounded wait in milliseconds for resident apps that must not hang
+indefinitely while trying to save settings.
 
 `aip::RecentLogBuffer` is the shared in-memory tray/diagnostic log model.
 Products may keep their own timestamp and UI failure text, but should use this
