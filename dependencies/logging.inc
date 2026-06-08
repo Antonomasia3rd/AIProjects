@@ -9,6 +9,7 @@ struct Utf8LoggerOptions
     bool fileEnabled = true;
     bool writeUtf8Bom = true;
     bool reportFileWriteFailuresToRecent = true;
+    DWORD lockWaitMs = 5000;
     std::wstring filePath;
     size_t maxRecentLines = 250;
 };
@@ -193,80 +194,13 @@ inline bool AppendUtf8TextToFile(
     return ok;
 }
 
-inline bool AppendUtf8LineToFile(const std::wstring& filePath, const std::wstring& line, bool writeUtf8Bom = true)
+inline bool AppendUtf8LineToFile(
+    const std::wstring& filePath,
+    const std::wstring& line,
+    bool writeUtf8Bom = true,
+    DWORD lockWaitMs = INFINITE)
 {
-    if (filePath.empty())
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return false;
-    }
-
-    EnsureDirectory(GetDirectoryName(filePath));
-    HANDLE file = CreateFileW(
-        filePath.c_str(),
-        FILE_APPEND_DATA | FILE_WRITE_DATA | SYNCHRONIZE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr,
-        OPEN_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE)
-    {
-        return false;
-    }
-
-    bool ok = true;
-    DWORD error = ERROR_SUCCESS;
-    {
-        ExclusiveFileRangeLock lock(file);
-        if (!lock.IsLocked())
-        {
-            ok = false;
-            error = lock.Error();
-        }
-        else
-        {
-            LARGE_INTEGER size = {};
-            if (!GetFileSizeEx(file, &size))
-            {
-                ok = false;
-                error = GetLastError();
-            }
-            else
-            {
-                LARGE_INTEGER end = {};
-                if (!SetFilePointerEx(file, end, nullptr, FILE_END))
-                {
-                    ok = false;
-                    error = GetLastError();
-                }
-
-                if (ok && writeUtf8Bom && size.QuadPart == 0)
-                {
-                    static const BYTE bom[] = { 0xEF, 0xBB, 0xBF };
-                    if (!WriteAllBytes(file, bom, static_cast<DWORD>(sizeof(bom))))
-                    {
-                        ok = false;
-                        error = GetLastError();
-                    }
-                }
-
-                if (ok)
-                {
-                    std::string utf8 = WideToUtf8(line + L"\r\n");
-                    if (!utf8.empty() && !WriteAllBytes(file, utf8.data(), static_cast<DWORD>(utf8.size())))
-                    {
-                        ok = false;
-                        error = GetLastError();
-                    }
-                }
-            }
-        }
-    }
-
-    CloseHandle(file);
-    SetLastError(ok ? ERROR_SUCCESS : (error == ERROR_SUCCESS ? ERROR_WRITE_FAULT : error));
-    return ok;
+    return AppendUtf8TextToFile(filePath, line + L"\r\n", writeUtf8Bom, lockWaitMs);
 }
 
 
@@ -328,11 +262,13 @@ public:
         bool targetChanged =
             filePath_ != options.filePath ||
             fileEnabled_ != options.fileEnabled ||
-            writeUtf8Bom_ != options.writeUtf8Bom;
+            writeUtf8Bom_ != options.writeUtf8Bom ||
+            lockWaitMs_ != options.lockWaitMs;
         enabled_ = options.enabled;
         fileEnabled_ = options.fileEnabled;
         writeUtf8Bom_ = options.writeUtf8Bom;
         reportFileWriteFailuresToRecent_ = options.reportFileWriteFailuresToRecent;
+        lockWaitMs_ = options.lockWaitMs;
         filePath_ = options.filePath;
         maxRecentLines_ = options.maxRecentLines == 0 ? 1 : options.maxRecentLines;
         if (targetChanged)
@@ -421,6 +357,7 @@ private:
         bool shouldWriteFile = false;
         bool writeUtf8Bom = true;
         bool reportFailure = true;
+        DWORD lockWaitMs = INFINITE;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (!enabled_)
@@ -434,6 +371,7 @@ private:
             filePath = filePath_;
             writeUtf8Bom = writeUtf8Bom_;
             reportFailure = reportFileWriteFailuresToRecent_;
+            lockWaitMs = lockWaitMs_;
         }
 
         if (!shouldWriteFile)
@@ -441,7 +379,7 @@ private:
             return;
         }
 
-        if (AppendUtf8LineToFile(filePath, line, writeUtf8Bom))
+        if (AppendUtf8LineToFile(filePath, line, writeUtf8Bom, lockWaitMs))
         {
             std::lock_guard<std::mutex> lock(mutex_);
             lastFileWriteFailed_ = false;
@@ -475,6 +413,7 @@ private:
     bool fileEnabled_ = true;
     bool writeUtf8Bom_ = true;
     bool reportFileWriteFailuresToRecent_ = true;
+    DWORD lockWaitMs_ = 5000;
     bool failureReported_ = false;
     bool lastFileWriteFailed_ = false;
     DWORD lastFileWriteError_ = ERROR_SUCCESS;

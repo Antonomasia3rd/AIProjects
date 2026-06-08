@@ -148,6 +148,14 @@ static void AppendInterval(HMENU menu, UINT id, int seconds, int current)
     aip::AppendTrayMenuItem(menu, id, text, current == seconds);
 }
 
+static void AppendMilliseconds(HMENU menu, UINT id, int milliseconds, int current)
+{
+    std::wstring text = milliseconds == 0
+        ? L"No wait"
+        : std::to_wstring(milliseconds) + L" ms";
+    aip::AppendTrayMenuItem(menu, id, text, current == milliseconds);
+}
+
 static void ShowTrayMenu(RuntimeContext* ctx)
 {
     if (ctx == nullptr)
@@ -229,6 +237,13 @@ static void ShowTrayMenu(RuntimeContext* ctx)
     AppendChecked(logging, ID_TOGGLE_FILE_LOGGING, GetUiString(L"file_logging", L"File logging"), IniReadB(L"app", L"file_logging_enabled", true));
     AppendChecked(logging, ID_TOGGLE_VERBOSE, GetUiString(L"verbose_logging", L"Verbose logging"), IniReadB(L"app", L"verbose_logging", false));
     AppendChecked(logging, ID_TOGGLE_CONSOLE, GetUiString(L"show_console", L"Show console"), IniReadB(L"app", L"show_console", false));
+    HMENU logLockWait = aip::BeginTrayNestedMenu(logging);
+    int currentLogLockWait = ClampInt(IniReadI(L"app", L"log_append_lock_wait_ms", 5000), 0, 60000);
+    AppendMilliseconds(logLockWait, ID_LOG_LOCK_WAIT_0, 0, currentLogLockWait);
+    AppendMilliseconds(logLockWait, ID_LOG_LOCK_WAIT_1000, 1000, currentLogLockWait);
+    AppendMilliseconds(logLockWait, ID_LOG_LOCK_WAIT_5000, 5000, currentLogLockWait);
+    AppendMilliseconds(logLockWait, ID_LOG_LOCK_WAIT_30000, 30000, currentLogLockWait);
+    aip::EndTrayNestedMenu(logging, logLockWait, GetUiString(L"log_lock_wait", L"Log lock wait"));
     aip::EndTrayNestedMenu(diagnostics, logging, GetUiString(L"menu_logging", L"Logging"));
     aip::AppendMenuSeparator(diagnostics);
     aip::AppendTrayMenuItem(diagnostics, ID_TRAY_OPEN_CONFIG, GetUiString(L"menu_open_config", L"Open config"));
@@ -424,6 +439,18 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             return 0;
         case ID_TOGGLE_CONSOLE:
             ToggleBoolSetting(L"app", L"show_console", false);
+            return 0;
+        case ID_LOG_LOCK_WAIT_0:
+            IniWrite(L"app", L"log_append_lock_wait_ms", L"0");
+            return 0;
+        case ID_LOG_LOCK_WAIT_1000:
+            IniWrite(L"app", L"log_append_lock_wait_ms", L"1000");
+            return 0;
+        case ID_LOG_LOCK_WAIT_5000:
+            IniWrite(L"app", L"log_append_lock_wait_ms", L"5000");
+            return 0;
+        case ID_LOG_LOCK_WAIT_30000:
+            IniWrite(L"app", L"log_append_lock_wait_ms", L"30000");
             return 0;
         case ID_TOGGLE_MENU_DROPDOWN:
             ToggleBoolSetting(L"app", L"show_menu_as_dropdown", true);

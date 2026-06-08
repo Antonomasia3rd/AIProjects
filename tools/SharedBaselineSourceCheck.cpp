@@ -241,7 +241,12 @@ int main()
             "shared logging helper writes UTF-8 sidecar log lines",
             "dependencies/logging.inc",
             logging,
-            "WideToUtf8(line + L\"\\r\\n\")");
+            "AppendUtf8LineToFile");
+        RequireContains(
+            "shared logging helper line appends reuse raw append primitive",
+            "dependencies/logging.inc",
+            logging,
+            "return AppendUtf8TextToFile(filePath, line + L\"\\r\\n\", writeUtf8Bom, lockWaitMs);");
         RequireContains(
             "shared logging helper writes UTF-8 BOM for new files",
             "dependencies/logging.inc",
@@ -267,6 +272,16 @@ int main()
             "dependencies/logging.inc",
             logging,
             "WriteAllBytes");
+        RequireContains(
+            "shared logging helper exposes bounded append lock wait",
+            "dependencies/logging.inc",
+            logging,
+            "DWORD lockWaitMs = 5000");
+        RequireContains(
+            "shared logging helper passes bounded lock wait to file appends",
+            "dependencies/logging.inc",
+            logging,
+            "AppendUtf8LineToFile(filePath, line, writeUtf8Bom, lockWaitMs)");
         RequireContains(
             "shared logging helper exposes file write failure state",
             "dependencies/logging.inc",
@@ -353,6 +368,11 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "shared UTF-8 logger resets failure state when target changes");
+        RequireContains(
+            "shared tests lock bounded logger append wait behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared UTF-8 logger uses bounded append lock wait");
         RequireContains(
             "shared tests lock strict absolute path behavior",
             "tools/SharedBaselineTests.cpp",

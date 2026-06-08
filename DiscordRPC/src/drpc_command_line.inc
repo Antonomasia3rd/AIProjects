@@ -143,6 +143,14 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
         {
             AddSetting(options, L"app", L"file_logging_enabled", L"false");
         }
+        else if (aip::IsOptionOrInlineValue(arg, L"--log-lock-wait-ms"))
+        {
+            if (!aip::TakeCommandLineValue(argc, argv, i, arg, value, error))
+            {
+                return false;
+            }
+            AddSetting(options, L"app", L"log_append_lock_wait_ms", value);
+        }
         else if (lower == L"--show-console-setting")
         {
             AddSetting(options, L"app", L"show_console", L"true");

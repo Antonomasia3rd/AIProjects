@@ -70,6 +70,7 @@ static std::atomic<bool> g_loggingEnabled(true);
 static std::atomic<bool> g_fileLoggingEnabled(true);
 static std::atomic<bool> g_verboseLogging(false);
 static std::atomic<bool> g_notificationsEnabled(true);
+static std::atomic<DWORD> g_logAppendLockWaitMs(5000);
 
 #include "..\dependencies\desktop_app_baseline.h"
 

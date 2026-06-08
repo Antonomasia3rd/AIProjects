@@ -98,3 +98,6 @@ Useful command-line paths:
 - optional log file controlled by `[app] log_path`; relative log paths resolve beside the executable
 
 Generated binaries, runtime configs, and logs should not be committed.
+
+
+Logging note: `[app] log_append_lock_wait_ms` controls the bounded wait used when the shared UTF-8 logger appends to the log file. It can be changed through the INI, `--set app.log_append_lock_wait_ms=<ms>`, `--log-lock-wait-ms <ms>`, or the tray Logging menu.

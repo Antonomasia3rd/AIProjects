@@ -218,6 +218,26 @@ int main()
             discordMain + "\n" + core,
             "aip::Utf8Logger");
         RequireContains(
+            "DiscordRPC exposes bounded log append wait in INI defaults",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "log_append_lock_wait_ms");
+        RequireContains(
+            "DiscordRPC exposes bounded log append wait on command line",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "--log-lock-wait-ms");
+        RequireContains(
+            "DiscordRPC exposes bounded log append wait through tray presets",
+            "src\\drpc_tray.inc",
+            tray,
+            "ID_LOG_LOCK_WAIT_5000");
+        RequireContains(
+            "DiscordRPC passes bounded lock wait to shared UTF-8 logger",
+            "src\\drpc_core.inc",
+            core,
+            "options.lockWaitMs = g_logAppendLockWaitMs.load()");
+        RequireContains(
             "DiscordRPC single-instance scope follows effective INI path",
             "src\\drpc_core.inc",
             core,
