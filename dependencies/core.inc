@@ -153,26 +153,52 @@ inline bool FileExists(const std::wstring& path)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
-inline std::wstring MakeAbsolutePath(const std::wstring& path)
+inline bool TryMakeAbsolutePath(const std::wstring& path, std::wstring& absolutePath, std::wstring* error = nullptr)
 {
+    absolutePath.clear();
     if (path.empty())
     {
-        return path;
+        if (error)
+        {
+            *error = L"path is empty";
+        }
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
     }
 
     DWORD needed = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
     if (needed == 0)
     {
-        return path;
+        DWORD err = GetLastError();
+        if (error)
+        {
+            *error = GetLastErrorText(err == ERROR_SUCCESS ? ERROR_INVALID_NAME : err);
+        }
+        SetLastError(err == ERROR_SUCCESS ? ERROR_INVALID_NAME : err);
+        return false;
     }
 
     std::vector<wchar_t> buffer(needed + 1);
     DWORD written = GetFullPathNameW(path.c_str(), static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
     if (written == 0 || written >= buffer.size())
     {
-        return path;
+        DWORD err = GetLastError();
+        if (error)
+        {
+            *error = GetLastErrorText(err == ERROR_SUCCESS ? ERROR_INSUFFICIENT_BUFFER : err);
+        }
+        SetLastError(err == ERROR_SUCCESS ? ERROR_INSUFFICIENT_BUFFER : err);
+        return false;
     }
-    return buffer.data();
+
+    absolutePath.assign(buffer.data(), written);
+    return true;
+}
+
+inline std::wstring MakeAbsolutePath(const std::wstring& path)
+{
+    std::wstring absolutePath;
+    return TryMakeAbsolutePath(path, absolutePath, nullptr) ? absolutePath : path;
 }
 
 inline std::string WideToUtf8(const std::wstring& value)

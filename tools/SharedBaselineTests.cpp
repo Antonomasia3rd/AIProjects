@@ -297,6 +297,14 @@ static void TestAppPathBehavior()
         overridden.configPath == L"C:\\Config\\custom.ini" &&
             overridden.defaultLogPath == L"C:\\Config\\custom.log",
         "sidecar paths derive log path from configured INI override");
+
+    std::wstring absolutePath;
+    Check(
+        aip::TryMakeAbsolutePath(L".", absolutePath, nullptr) && !absolutePath.empty(),
+        "strict absolute path helper resolves valid paths");
+    Check(
+        !aip::TryMakeAbsolutePath(L"", absolutePath, nullptr),
+        "strict absolute path helper rejects empty paths");
 }
 
 static void TestLoggingBehavior()
@@ -375,6 +383,10 @@ static void TestLoggingBehavior()
     Check(
         fileLogger.LastFileWriteFailed() && failureReported,
         "shared UTF-8 logger reports file write failures once");
+    fileLogger.SetFilePath(logPath);
+    Check(
+        !fileLogger.LastFileWriteFailed() && fileLogger.LastFileWriteError() == ERROR_SUCCESS,
+        "shared UTF-8 logger resets failure state when target changes");
     RemoveDirectoryW(badLogPath.c_str());
     DeleteFileW(logPath.c_str());
 }

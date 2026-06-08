@@ -70,6 +70,31 @@ inline SidecarPaths BuildSidecarPathsFromExecutable(
     return paths;
 }
 
+inline bool TryBuildSidecarPathsFromExecutable(
+    const std::wstring& executablePath,
+    const std::wstring& fallbackBaseName,
+    const std::wstring& configOverride,
+    SidecarPaths& paths,
+    std::wstring* error = nullptr)
+{
+    paths = {};
+    if (configOverride.empty())
+    {
+        paths = BuildSidecarPathsFromExecutable(executablePath, fallbackBaseName);
+        return true;
+    }
+
+    std::wstring absoluteConfig;
+    if (!TryMakeAbsolutePath(configOverride, absoluteConfig, error))
+    {
+        return false;
+    }
+
+    paths = BuildSidecarPathsFromExecutable(executablePath, fallbackBaseName, absoluteConfig);
+    paths.configPath = absoluteConfig;
+    return true;
+}
+
 inline SidecarPaths BuildCurrentProcessSidecarPaths(
     const std::wstring& fallbackBaseName,
     const std::wstring& configOverride = L"")

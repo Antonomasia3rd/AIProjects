@@ -33,17 +33,54 @@ inline bool WriteAllBytes(HANDLE file, const void* data, DWORD size)
 class ExclusiveFileRangeLock
 {
 public:
-    explicit ExclusiveFileRangeLock(HANDLE file)
+    explicit ExclusiveFileRangeLock(HANDLE file, DWORD waitMs = INFINITE)
         : file_(file)
     {
         overlapped_ = {};
-        if (file_ != INVALID_HANDLE_VALUE && LockFileEx(file_, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlapped_))
+        if (file_ == INVALID_HANDLE_VALUE)
         {
-            locked_ = true;
+            error_ = ERROR_INVALID_HANDLE;
+            return;
         }
-        else
+
+        if (waitMs == INFINITE)
         {
-            error_ = GetLastError();
+            if (LockFileEx(file_, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlapped_))
+            {
+                locked_ = true;
+            }
+            else
+            {
+                error_ = GetLastError();
+            }
+            return;
+        }
+
+        ULONGLONG start = GetTickCount64();
+        for (;;)
+        {
+            if (LockFileEx(file_, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, MAXDWORD, &overlapped_))
+            {
+                locked_ = true;
+                return;
+            }
+
+            DWORD err = GetLastError();
+            if (err != ERROR_LOCK_VIOLATION)
+            {
+                error_ = err;
+                return;
+            }
+
+            ULONGLONG elapsed = GetTickCount64() - start;
+            if (waitMs == 0 || elapsed >= waitMs)
+            {
+                error_ = ERROR_LOCK_VIOLATION;
+                return;
+            }
+
+            DWORD remaining = static_cast<DWORD>(waitMs - elapsed);
+            Sleep(std::min<DWORD>(remaining, 25));
         }
     }
 
@@ -74,6 +111,87 @@ private:
     bool locked_ = false;
     DWORD error_ = ERROR_SUCCESS;
 };
+
+inline bool AppendUtf8TextToFile(
+    const std::wstring& filePath,
+    const std::wstring& text,
+    bool writeUtf8Bom = true,
+    DWORD lockWaitMs = INFINITE)
+{
+    if (filePath.empty())
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
+    }
+
+    EnsureDirectory(GetDirectoryName(filePath));
+    HANDLE file = CreateFileW(
+        filePath.c_str(),
+        FILE_APPEND_DATA | FILE_WRITE_DATA | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+
+    bool ok = true;
+    DWORD error = ERROR_SUCCESS;
+    {
+        ExclusiveFileRangeLock lock(file, lockWaitMs);
+        if (!lock.IsLocked())
+        {
+            ok = false;
+            error = lock.Error();
+        }
+        else
+        {
+            LARGE_INTEGER size = {};
+            if (!GetFileSizeEx(file, &size))
+            {
+                ok = false;
+                error = GetLastError();
+            }
+
+            if (ok)
+            {
+                LARGE_INTEGER end = {};
+                if (!SetFilePointerEx(file, end, nullptr, FILE_END))
+                {
+                    ok = false;
+                    error = GetLastError();
+                }
+            }
+
+            if (ok && writeUtf8Bom && size.QuadPart == 0)
+            {
+                static const BYTE bom[] = { 0xEF, 0xBB, 0xBF };
+                if (!WriteAllBytes(file, bom, static_cast<DWORD>(sizeof(bom))))
+                {
+                    ok = false;
+                    error = GetLastError();
+                }
+            }
+
+            if (ok)
+            {
+                std::string utf8 = WideToUtf8(text);
+                if (!utf8.empty() && !WriteAllBytes(file, utf8.data(), static_cast<DWORD>(utf8.size())))
+                {
+                    ok = false;
+                    error = GetLastError();
+                }
+            }
+        }
+    }
+
+    CloseHandle(file);
+    SetLastError(ok ? ERROR_SUCCESS : (error == ERROR_SUCCESS ? ERROR_WRITE_FAULT : error));
+    return ok;
+}
 
 inline bool AppendUtf8LineToFile(const std::wstring& filePath, const std::wstring& line, bool writeUtf8Bom = true)
 {
@@ -157,19 +275,31 @@ public:
     void Configure(const Utf8LoggerOptions& options)
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        bool targetChanged =
+            filePath_ != options.filePath ||
+            fileEnabled_ != options.fileEnabled ||
+            writeUtf8Bom_ != options.writeUtf8Bom;
         enabled_ = options.enabled;
         fileEnabled_ = options.fileEnabled;
         writeUtf8Bom_ = options.writeUtf8Bom;
         reportFileWriteFailuresToRecent_ = options.reportFileWriteFailuresToRecent;
         filePath_ = options.filePath;
         maxRecentLines_ = options.maxRecentLines == 0 ? 1 : options.maxRecentLines;
+        if (targetChanged)
+        {
+            ResetFileWriteFailureLocked();
+        }
         TrimRecentLocked();
     }
 
     void SetFilePath(const std::wstring& filePath)
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        filePath_ = filePath;
+        if (filePath_ != filePath)
+        {
+            filePath_ = filePath;
+            ResetFileWriteFailureLocked();
+        }
     }
 
     std::wstring FilePath() const
@@ -224,12 +354,17 @@ public:
     {
         std::lock_guard<std::mutex> lock(mutex_);
         recent_.clear();
+        ResetFileWriteFailureLocked();
+    }
+
+private:
+    void ResetFileWriteFailureLocked()
+    {
         failureReported_ = false;
         lastFileWriteFailed_ = false;
         lastFileWriteError_ = ERROR_SUCCESS;
     }
 
-private:
     void WriteLine(const std::wstring& line)
     {
         std::wstring filePath;

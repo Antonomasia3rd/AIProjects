@@ -277,111 +277,8 @@ static bool WriteUtf8BomTextFile(const std::wstring& path, const std::wstring& t
 
 static bool AppendUtf8TextFile(const std::wstring& path, const std::wstring& text)
 {
-    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE)
-        return false;
-
-    OVERLAPPED lockOv{};
-    bool locked = false;
-
-    auto fail = [&](DWORD err) -> bool
-    {
-        if (locked)
-            UnlockFileEx(h, 0, MAXDWORD, MAXDWORD, &lockOv);
-        CloseHandle(h);
-        SetLastError(err == ERROR_SUCCESS ? ERROR_WRITE_FAULT : err);
-        return false;
-    };
-
-    auto writeAll = [&](const std::vector<BYTE>& bytes) -> bool
-    {
-        const BYTE* cursor = bytes.empty() ? nullptr : bytes.data();
-        size_t remaining = bytes.size();
-        while (remaining > 0)
-        {
-            DWORD chunk = static_cast<DWORD>(std::min<size_t>(remaining, 1024 * 1024));
-            DWORD wrote = 0;
-            if (!WriteFile(h, cursor, chunk, &wrote, nullptr))
-                return false;
-            if (wrote != chunk)
-            {
-                SetLastError(ERROR_WRITE_FAULT);
-                return false;
-            }
-            cursor += wrote;
-            remaining -= wrote;
-        }
-        return true;
-    };
-
     DWORD lockWaitMs = static_cast<DWORD>(ClampInt(g_logAppendLockWaitMs.load(), 0, 60000));
-    ULONGLONG lockStart = GetTickCount64();
-    for (;;)
-    {
-        if (LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, MAXDWORD, &lockOv))
-        {
-            locked = true;
-            break;
-        }
-
-        DWORD err = GetLastError();
-        if (err != ERROR_LOCK_VIOLATION)
-            return fail(err);
-
-        ULONGLONG elapsed = GetTickCount64() - lockStart;
-        if (lockWaitMs == 0 || elapsed >= lockWaitMs)
-            return fail(ERROR_LOCK_VIOLATION);
-
-        DWORD remaining = static_cast<DWORD>(lockWaitMs - elapsed);
-        Sleep(std::min<DWORD>(remaining, 25));
-    }
-
-    LARGE_INTEGER sz{};
-    if (!GetFileSizeEx(h, &sz))
-        return fail(GetLastError());
-    if (sz.QuadPart == 0)
-    {
-        std::vector<BYTE> bom = EncodeUtf8Text(L"", true);
-        if (bom.empty())
-            return fail(ERROR_NO_UNICODE_TRANSLATION);
-        if (!writeAll(bom))
-            return fail(GetLastError());
-    }
-    else if (sz.QuadPart < 0)
-    {
-        return fail(ERROR_INVALID_DATA);
-    }
-
-    LARGE_INTEGER end{};
-    if (!SetFilePointerEx(h, end, nullptr, FILE_END))
-        return fail(GetLastError());
-
-    std::vector<BYTE> bytes = EncodeUtf8Text(text, false);
-    if (bytes.empty() && !text.empty())
-        return fail(ERROR_NO_UNICODE_TRANSLATION);
-    if (!writeAll(bytes))
-        return fail(GetLastError());
-
-    if (locked)
-    {
-        if (!UnlockFileEx(h, 0, MAXDWORD, MAXDWORD, &lockOv))
-        {
-            DWORD err = GetLastError();
-            locked = false;
-            CloseHandle(h);
-            SetLastError(err == ERROR_SUCCESS ? ERROR_WRITE_FAULT : err);
-            return false;
-        }
-        locked = false;
-    }
-
-    if (!CloseHandle(h))
-    {
-        DWORD err = GetLastError();
-        SetLastError(err);
-        return false;
-    }
-    return true;
+    return aip::AppendUtf8TextToFile(path, text, true, lockWaitMs);
 }
 
 enum class TextNormalizeResult
@@ -434,20 +331,7 @@ static void ConfigureDpiAwareness()
 
 static std::wstring GetModulePath()
 {
-    DWORD size = 1024;
-    for (;;)
-    {
-        std::vector<wchar_t> buf(size);
-        SetLastError(ERROR_SUCCESS);
-        DWORD n = GetModuleFileNameW(nullptr, buf.data(), (DWORD)buf.size());
-        if (!n)
-            return L"";
-        if (n < buf.size() - 1)
-            return std::wstring(buf.data(), n);
-        if (size >= 32768)
-            return L"";
-        size *= 2;
-    }
+    return aip::GetCurrentExecutablePath();
 }
 
 static std::vector<std::wstring> SplitLines(const std::wstring& text)
