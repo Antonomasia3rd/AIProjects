@@ -189,6 +189,7 @@ static void ConfigureLoggerFromRuntimeState()
     options.fileEnabled = g_fileLoggingEnabled.load();
     options.filePath = g_effectiveLogPath;
     options.maxRecentLines = 250;
+    options.lockWaitMs = g_logAppendLockWaitMs.load();
     g_logger.Configure(options);
 }
 
@@ -489,6 +490,10 @@ static void ApplyRuntimeLoggingOverridesFromCommandLine(const AppOptions& option
         {
             g_verboseLogging = options.verbose || parsed;
         }
+        else if (EqualsI(setting.key, L"log_append_lock_wait_ms"))
+        {
+            g_logAppendLockWaitMs = static_cast<DWORD>(ClampInt(_wtoi(setting.value.c_str()), 0, 60000));
+        }
     }
     ConfigureLoggerFromRuntimeState();
 }
@@ -499,6 +504,7 @@ static void ConfigureRuntimeFromConfig(const AppOptions& options)
     g_fileLoggingEnabled = IniReadB(L"app", L"file_logging_enabled", true);
     g_verboseLogging = options.verbose || IniReadB(L"app", L"verbose_logging", false);
     g_notificationsEnabled = IniReadB(L"app", L"notifications_enabled", true);
+    g_logAppendLockWaitMs = static_cast<DWORD>(ClampInt(IniReadI(L"app", L"log_append_lock_wait_ms", 5000), 0, 60000));
 
     std::wstring configuredLog = Trim(IniReadS(L"app", L"log_path", L""));
     std::wstring effectiveLogPath;

@@ -138,6 +138,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"app", L"logging_enabled", L"true" },
     { L"app", L"file_logging_enabled", L"true" },
     { L"app", L"log_path", L"" },
+    { L"app", L"log_append_lock_wait_ms", L"5000" },
     { L"app", L"verbose_logging", L"false" },
     { L"app", L"dry_run_redact_sensitive", L"true" },
 
@@ -188,6 +189,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"strings", L"buttons", L"Buttons" },
     { L"strings", L"logging_enabled", L"Logging enabled" },
     { L"strings", L"file_logging", L"File logging" },
+    { L"strings", L"log_lock_wait", L"Log lock wait" },
     { L"strings", L"verbose_logging", L"Verbose logging" },
     { L"strings", L"show_console", L"Show console" },
     { L"strings", L"no_recent_log", L"No log entries yet." },

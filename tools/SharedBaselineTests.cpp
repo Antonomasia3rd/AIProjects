@@ -401,6 +401,38 @@ static void TestLoggingBehavior()
     Check(
         !fileLogger.LastFileWriteFailed() && fileLogger.LastFileWriteError() == ERROR_SUCCESS,
         "shared UTF-8 logger resets failure state when target changes");
+
+    HANDLE lockedHandle = CreateFileW(
+        logPath.c_str(),
+        FILE_APPEND_DATA | FILE_WRITE_DATA | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    bool boundedLockFailure = false;
+    if (lockedHandle != INVALID_HANDLE_VALUE)
+    {
+        aip::ExclusiveFileRangeLock heldLock(lockedHandle, 0);
+        if (heldLock.IsLocked())
+        {
+            fileOptions.lockWaitMs = 25;
+            fileOptions.filePath = logPath;
+            fileLogger.Configure(fileOptions);
+            DWORD before = GetTickCount();
+            fileLogger.WriteRawLine(L"this should hit the bounded lock wait");
+            DWORD elapsed = GetTickCount() - before;
+            boundedLockFailure =
+                fileLogger.LastFileWriteFailed() &&
+                fileLogger.LastFileWriteError() == ERROR_LOCK_VIOLATION &&
+                elapsed < 1000;
+        }
+        CloseHandle(lockedHandle);
+    }
+    Check(
+        boundedLockFailure,
+        "shared UTF-8 logger uses bounded append lock wait");
+
     RemoveDirectoryW(badLogPath.c_str());
     DeleteFileW(logPath.c_str());
 }

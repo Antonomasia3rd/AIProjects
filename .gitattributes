@@ -12,7 +12,6 @@
 *.gitignore text eol=lf
 
 # Keep source archives free of local/runtime/build artifacts.
-.gitignore export-ignore
 .github/build/ export-ignore
 **/build/ export-ignore
 **/references/ export-ignore
