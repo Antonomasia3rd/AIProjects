@@ -270,6 +270,10 @@ static class RepoTools
         if (!repoTools.Contains("RunCaptureRequiredWithRetry(") || !repoTools.Contains("release list --repo "))
             throw new InvalidOperationException("Automatic release listing must retry transient GitHub/GH API failures.");
 
+        if (!repoTools.Contains("TryViewGitHubRelease(repository, tag, root)") ||
+            !repoTools.Contains("release create reported failure, but draft release "))
+            throw new InvalidOperationException("Automatic release creation must recover if a transient failure still created a draft.");
+
         if (!repoTools.Contains("Release-pending projects also selected for build:"))
             throw new InvalidOperationException("Project selection must build release-pending projects so follow-up CI fixes do not skip previously changed consumers.");
 
@@ -1453,8 +1457,21 @@ static class RepoTools
                     }
                     else
                     {
-                        RunRequired("gh", "release create " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft --target " + QuoteArg(fullSha) + " --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
-                        createdDraft = true;
+                        try
+                        {
+                            RunRequired("gh", "release create " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft --target " + QuoteArg(fullSha) + " --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
+                            createdDraft = true;
+                        }
+                        catch
+                        {
+                            GitHubReleaseInfo createdRelease = TryViewGitHubRelease(repository, tag, root);
+                            if (createdRelease == null || !createdRelease.isDraft)
+                            {
+                                throw;
+                            }
+
+                            Console.Error.WriteLine("WARNING: release create reported failure, but draft release " + tag + " exists; continuing with upload.");
+                        }
                     }
 
                     RunRequiredWithRetry("gh", "release upload " + QuoteArg(tag) + " " + JoinArgs(releaseAssets.ToArray()) + " --repo " + QuoteArg(repository) + " --clobber", root, 120000, 4);
@@ -1498,6 +1515,31 @@ static class RepoTools
             3);
         var serializer = new JavaScriptSerializer();
         return serializer.Deserialize<List<GitHubReleaseInfo>>(json) ?? new List<GitHubReleaseInfo>();
+    }
+
+    static GitHubReleaseInfo TryViewGitHubRelease(string repository, string tag, string root)
+    {
+        ProcessResult result = RunWithRetry(
+            "gh",
+            "release view " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --json tagName,isDraft",
+            root,
+            120000,
+            3,
+            false);
+        if (result.ExitCode != 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var serializer = new JavaScriptSerializer();
+            return serializer.Deserialize<GitHubReleaseInfo>(result.Output);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     static bool IsReleaseFamilyTag(string releaseBase, string tag)

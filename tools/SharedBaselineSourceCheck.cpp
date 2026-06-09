@@ -239,6 +239,11 @@ int main()
             appPaths,
             "IsReservedWindowsDeviceBaseName");
         RequireContains(
+            "app path helper rejects alternate data stream config paths",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "ConfigFileNameContainsColon");
+        RequireContains(
             "app path helper documents unchecked raw builder",
             "dependencies/app_paths.inc",
             appPaths,
@@ -279,6 +284,11 @@ int main()
             sharedCore,
             "TryUtf8ToWide");
         RequireContains(
+            "shared UTF conversion wrappers document empty-on-failure behavior",
+            "dependencies/core.inc",
+            sharedCore,
+            "empty output and conversion failure must be distinguished");
+        RequireContains(
             "shared UTF-8 encoder verifies exact second conversion length",
             "dependencies/core.inc",
             sharedCore,
@@ -308,6 +318,16 @@ int main()
             "dependencies/core.inc",
             sharedCore,
             "JsonEscapeEnd(json, i, next)");
+        RequireContains(
+            "shared JSON scanner validates primitive tokens",
+            "dependencies/core.inc",
+            sharedCore,
+            "JsonPrimitiveTokenIsValid");
+        RequireContains(
+            "shared JSON primitive scanner rejects malformed values",
+            "dependencies/core.inc",
+            sharedCore,
+            "JsonPrimitiveValueEnd");
         RequireContains(
             "shared JSON lookup decodes object keys",
             "dependencies/core.inc",
@@ -500,6 +520,16 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "config path helper rejects reserved Windows device names");
+        RequireContains(
+            "shared tests cover alternate data stream config path rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "config path helper rejects alternate data stream names");
+        RequireContains(
+            "shared tests cover invalid JSON primitive rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "JSON lookup rejects invalid primitive tokens before later fields");
         RequireContains(
             "shared tests cover invalid JSON UTF-8 rejection",
             "tools/SharedBaselineTests.cpp",

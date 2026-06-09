@@ -78,33 +78,35 @@ static bool JsonTryParseIntegerToken(const std::string& json, size_t valueStart,
     }
 }
 
-static int JsonExtractInt(const std::string& json, const char* key, int fallback = -1)
+static bool JsonTryExtractInt(const std::string& json, const char* key, int& value)
 {
     size_t keyPos = 0;
     size_t valueStart = 0;
     size_t valueEnd = 0;
     if (!FindJsonFieldValue(json, key, keyPos, valueStart, valueEnd))
     {
-        return fallback;
+        return false;
     }
 
     long long parsed = 0;
     if (!JsonTryParseIntegerToken(json, valueStart, valueEnd, parsed) || parsed < INT_MIN || parsed > INT_MAX)
     {
-        return fallback;
+        return false;
     }
-    return static_cast<int>(parsed);
+
+    value = static_cast<int>(parsed);
+    return true;
+}
+
+static int JsonExtractInt(const std::string& json, const char* key, int fallback = -1)
+{
+    int value = fallback;
+    return JsonTryExtractInt(json, key, value) ? value : fallback;
 }
 
 static bool JsonExtractOptionalInt(const std::string& json, const char* key, int& value)
 {
-    int parsed = JsonExtractInt(json, key, INT_MIN);
-    if (parsed == INT_MIN)
-    {
-        return false;
-    }
-    value = parsed;
-    return true;
+    return JsonTryExtractInt(json, key, value);
 }
 
 static void RemoveGatewayUnsupportedInstanceField(std::string& activity)
@@ -1075,22 +1077,23 @@ private:
 
         if (op == 0)
         {
-            std::wstring eventName = ExtractJsonStringValue(json, "t");
-            if (eventName == L"READY")
+            std::wstring eventName;
+            bool eventNamePresent = TryExtractJsonStringValue(json, "t", eventName);
+            if (eventNamePresent && eventName == L"READY")
             {
                 identified_ = true;
                 LogInfo(L"Gateway READY received. Presence is now live.");
             }
-            else if (eventName == L"RESUMED")
+            else if (eventNamePresent && eventName == L"RESUMED")
             {
                 identified_ = true;
                 LogInfo(L"Gateway RESUMED.");
             }
-            else if (verbose_ && eventName == L"SESSIONS_REPLACE")
+            else if (verbose_ && eventNamePresent && eventName == L"SESSIONS_REPLACE")
             {
                 LogDebug(L"Gateway SESSIONS_REPLACE received.");
             }
-            else if (verbose_ && !eventName.empty())
+            else if (verbose_ && eventNamePresent && !eventName.empty())
             {
                 LogDebug(L"Gateway dispatch: " + eventName);
             }
@@ -1143,9 +1146,12 @@ private:
                 }
 
                 std::string entry = response.substr(objStart, objEnd - objStart);
-                std::wstring assetId = ExtractJsonStringValue(entry, "id");
-                std::wstring assetName = ExtractJsonStringValue(entry, "name");
-                if (!assetId.empty() && !assetName.empty())
+                std::wstring assetId;
+                std::wstring assetName;
+                if (TryExtractJsonStringValue(entry, "id", assetId) &&
+                    TryExtractJsonStringValue(entry, "name", assetName) &&
+                    !assetId.empty() &&
+                    !assetName.empty())
                 {
                     assetIdCache_[assetName] = assetId;
                 }

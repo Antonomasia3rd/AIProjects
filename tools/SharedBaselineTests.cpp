@@ -309,6 +309,10 @@ static void TestJsonBehavior()
     Check(
         !aip::FindJsonFieldValue(invalidEscapeJson, "bad", keyPos, valueStart, valueEnd),
         "JSON string scanning rejects invalid escape sequences");
+
+    Check(
+        !aip::FindJsonFieldValue("{\"bad\": ???, \"target\": \"ok\"}", "target", keyPos, valueStart, valueEnd),
+        "JSON lookup rejects invalid primitive tokens before later fields");
 }
 
 static void TestDpapiBehavior()
@@ -439,6 +443,11 @@ static void TestAppPathBehavior()
             !aip::TryResolveConfigFilePath(L"LPT1.log", absolutePath, &configPathError) &&
             !aip::TryResolveConfigFilePath(L"aux", absolutePath, &configPathError),
         "config path helper rejects reserved Windows device names");
+
+    Check(
+        !aip::TryResolveConfigFilePath(L"config.ini:stream", absolutePath, &configPathError) &&
+            !aip::TryResolveConfigFilePath(L"C:\\Config\\settings.ini:stream", absolutePath, &configPathError),
+        "config path helper rejects alternate data stream names");
 }
 
 static void TestLoggingBehavior()

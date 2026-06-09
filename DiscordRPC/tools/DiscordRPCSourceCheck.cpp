@@ -127,6 +127,11 @@ int main()
             sharedCore + "\n" + core,
             "using aip::ExtractJsonStringValue");
         RequireContains(
+            "DiscordRPC imports shared try-extract JSON helper for protocol logic",
+            "DiscordRPC JSON sources",
+            sharedCore + "\n" + core,
+            "using aip::TryExtractJsonStringValue");
+        RequireContains(
             "DiscordRPC uses shared JSON value ending",
             "DiscordRPC JSON sources",
             sharedCore + "\n" + core,
@@ -299,6 +304,11 @@ int main()
             commandLine,
             "aip::ParseIntValueInRange(value, 1, 86400, seconds)");
         RequireContains(
+            "DiscordRPC validates known typed --set keys",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "ValidateCommandLineSettingValue(setting, error)");
+        RequireContains(
             "DiscordRPC validates client-id command-line values",
             "src\\drpc_command_line.inc",
             commandLine,
@@ -364,6 +374,26 @@ int main()
             core,
             "MakeAbsolutePath(g_iniPath) + L\"|\" + g_exeBaseName");
 
+        RequireContains(
+            "Discord Gateway optional int parsing avoids sentinel values",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "JsonTryExtractInt");
+        RequireNotContains(
+            "Discord Gateway optional int parsing does not use INT_MIN sentinel",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "JsonExtractInt(json, key, INT_MIN)");
+        RequireContains(
+            "Discord Gateway protocol dispatch uses try-extract JSON strings",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "TryExtractJsonStringValue(json, \"t\", eventName)");
+        RequireContains(
+            "Discord Gateway asset parsing uses try-extract JSON strings",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "TryExtractJsonStringValue(entry, \"id\", assetId)");
         RequireContains(
             "Discord Gateway connection waits are cancellable",
             "src\\drpc_gateway.inc",
