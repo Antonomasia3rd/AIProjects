@@ -97,6 +97,33 @@ inline std::wstring BuildExecutableSidecarLogPath(
     return BuildExecutableSidecarLogPath(paths);
 }
 
+
+inline bool IsReservedWindowsDeviceBaseName(const std::wstring& path)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    size_t start = slash == std::wstring::npos ? 0 : slash + 1;
+    std::wstring name = path.substr(start);
+    while (!name.empty() && (name.back() == L' ' || name.back() == L'.'))
+    {
+        name.pop_back();
+    }
+
+    size_t dot = name.find(L'.');
+    std::wstring base = dot == std::wstring::npos ? name : name.substr(0, dot);
+    base = ToLower(base);
+    if (base == L"con" || base == L"prn" || base == L"aux" || base == L"nul" ||
+        base == L"conin$" || base == L"conout$")
+    {
+        return true;
+    }
+
+    if (base.size() == 4 && (base.rfind(L"com", 0) == 0 || base.rfind(L"lpt", 0) == 0))
+    {
+        return base[3] >= L'1' && base[3] <= L'9';
+    }
+    return false;
+}
+
 inline bool TryValidateConfigFilePath(const std::wstring& path, std::wstring* error = nullptr)
 {
     if (path.empty())
@@ -117,6 +144,16 @@ inline bool TryValidateConfigFilePath(const std::wstring& path, std::wstring* er
             *error = L"path refers to a directory, not an INI file";
         }
         SetLastError(ERROR_DIRECTORY);
+        return false;
+    }
+
+    if (IsReservedWindowsDeviceBaseName(path))
+    {
+        if (error)
+        {
+            *error = L"path uses a reserved Windows device name, not an INI file";
+        }
+        SetLastError(ERROR_INVALID_NAME);
         return false;
     }
 

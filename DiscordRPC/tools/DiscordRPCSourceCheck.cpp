@@ -184,6 +184,11 @@ int main()
             defaults,
             "--bool Section.Key=Value");
         RequireContains(
+            "DiscordRPC help documents typed set validation",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "known typed keys are validated");
+        RequireContains(
             "DiscordRPC help documents client-id format",
             "src\\drpc_config_defaults.inc",
             defaults,

@@ -62,6 +62,38 @@ static bool ValidateUpdateIntervalValue(const std::wstring& value, std::wstring&
     return true;
 }
 
+
+static bool ValidateCommandLineSettingValue(const CommandLineSetting& setting, std::wstring& error)
+{
+    if (EqualsI(setting.section, L"general") && EqualsI(setting.key, L"client_id"))
+    {
+        if (!Trim(setting.value).empty() && !ValidateClientIdValue(setting.value, error))
+        {
+            error = L"--set general.client_id must be empty or a 17-20 digit decimal Discord application ID.";
+            return false;
+        }
+    }
+    else if (EqualsI(setting.section, L"general") && EqualsI(setting.key, L"update_interval"))
+    {
+        if (!ValidateUpdateIntervalValue(setting.value, error))
+        {
+            error = L"--set general.update_interval must be an integer from 1 through 86400 seconds.";
+            return false;
+        }
+    }
+    else if (EqualsI(setting.section, L"app") &&
+        (EqualsI(setting.key, L"log_append_lock_wait_ms") || EqualsI(setting.key, L"ini_write_lock_wait_ms")))
+    {
+        int parsed = 0;
+        if (!aip::ParseIntValueInRange(setting.value, 0, 60000, parsed))
+        {
+            error = L"--set app." + setting.key + L" must be an integer from 0 through 60000 milliseconds.";
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool ResolveCommandLineConfigPath(
     const std::wstring& rawPath,
     const wchar_t* optionName,
@@ -246,6 +278,10 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             }
             CommandLineSetting setting;
             if (!ParseSetSpec(value, setting, error))
+            {
+                return false;
+            }
+            if (!ValidateCommandLineSettingValue(setting, error))
             {
                 return false;
             }

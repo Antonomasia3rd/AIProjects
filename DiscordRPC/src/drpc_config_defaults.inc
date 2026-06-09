@@ -7,7 +7,7 @@ static constexpr const wchar_t* DEFAULT_HELP_TEMPLATE =
     L"  --version                      Show version information.\\n"
     L"  --ini <path>                   Use an alternate INI file.\\n"
     L"  --exit                         Ask a running resident instance to exit.\\n"
-    L"  --set Section.Key=Value        Set and save any INI value.\\n"
+    L"  --set Section.Key=Value        Set and save any INI value; known typed keys are validated.\\n"
     L"  --bool Section.Key=Value       Set and save a boolean INI value.\\n"
     L"  --client-id <id>               Set [general] client_id (17-20 decimal digits).\\n"
     L"  --token <token>                Set [general] token, then protect it with DPAPI.\\n"
