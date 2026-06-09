@@ -639,10 +639,15 @@ static std::vector<IniSectionData> g_iniCacheDoc;
 static std::atomic<int> g_iniCacheRefreshMs(250);
 static steady_clock::time_point g_iniCacheLastCheck{};
 
+static DWORD CurrentIniWriteLockWaitMs()
+{
+    return static_cast<DWORD>(ClampInt(g_iniWriteLockWaitMs.load(), 0, 60000));
+}
+
 class DesktopStubIniMutationGuard
 {
 public:
-    explicit DesktopStubIniMutationGuard(DWORD waitMs = INFINITE)
+    explicit DesktopStubIniMutationGuard(DWORD waitMs = CurrentIniWriteLockWaitMs())
         : processLock_(g_iniWriteMutex),
           sharedLock_(g_iniPath, waitMs)
     {
@@ -812,8 +817,7 @@ static bool WriteIniValueWithWait(const wchar_t* s, const wchar_t* k, const wcha
 
 static bool WriteIniValue(const wchar_t* s, const wchar_t* k, const wchar_t* v)
 {
-    DWORD waitMs = static_cast<DWORD>(ClampInt(g_iniWriteLockWaitMs.load(), 0, 60000));
-    return WriteIniValueWithWait(s, k, v, waitMs);
+    return WriteIniValueWithWait(s, k, v, CurrentIniWriteLockWaitMs());
 }
 
 struct IniDefault {

@@ -1,7 +1,11 @@
 #include "..\dependencies\desktop_app_baseline.h"
+#include <wincrypt.h>
 
 #include <iostream>
+#include <stdexcept>
 #include <thread>
+
+#include "..\dependencies\dpapi.inc"
 
 static int g_failures = 0;
 
@@ -277,6 +281,32 @@ static void TestJsonBehavior()
     Check(
         aip::JsonEscape(invalidJsonText) != "\"\"",
         "JSON escaping does not silently empty invalid UTF-16");
+
+    std::string invalidUtf8Json = "{\"bad\":\"";
+    invalidUtf8Json.push_back(static_cast<char>(0xc3));
+    invalidUtf8Json.push_back('(');
+    invalidUtf8Json += "\"}";
+    Check(
+        aip::FindJsonFieldValue(invalidUtf8Json, "bad", keyPos, valueStart, valueEnd) &&
+            !aip::DecodeJsonStringRange(invalidUtf8Json, valueStart, valueEnd, invalidJsonText),
+        "JSON string decoding rejects invalid UTF-8 bytes");
+}
+
+static void TestDpapiBehavior()
+{
+    std::wstring invalidSecret;
+    invalidSecret.push_back(0xd800);
+    bool rejectedInvalidSecret = false;
+    try
+    {
+        (void)aip::ProtectSecretForCurrentUser(invalidSecret);
+    }
+    catch (const std::exception&)
+    {
+        rejectedInvalidSecret = true;
+    }
+
+    Check(rejectedInvalidSecret, "DPAPI protect rejects invalid UTF-16 before encrypting");
 }
 
 static void TestTrayBehavior()
@@ -358,6 +388,20 @@ static void TestAppPathBehavior()
     Check(
         !aip::TryMakeAbsolutePath(L"", absolutePath, nullptr),
         "strict absolute path helper rejects empty paths");
+
+    std::wstring configPathError;
+    Check(
+        !aip::TryResolveConfigFilePath(L"C:\\Config\\", absolutePath, &configPathError),
+        "config path helper rejects trailing directory separators");
+
+    wchar_t tempDirectory[MAX_PATH] = {};
+    DWORD tempLength = GetTempPathW(ARRAYSIZE(tempDirectory), tempDirectory);
+    if (tempLength != 0 && tempLength < ARRAYSIZE(tempDirectory))
+    {
+        Check(
+            !aip::TryResolveConfigFilePath(tempDirectory, absolutePath, &configPathError),
+            "config path helper rejects existing directories");
+    }
 }
 
 static void TestLoggingBehavior()
@@ -605,6 +649,7 @@ int wmain()
     TestIniBehavior();
     TestCommandLineBehavior();
     TestJsonBehavior();
+    TestDpapiBehavior();
     TestTrayBehavior();
     TestAppPathBehavior();
     TestLoggingBehavior();

@@ -74,7 +74,7 @@ void NotifyTrayBalloon(const std::wstring& title, const std::wstring& msg, DWORD
 
 static TextNormalizeResult NormalizeIniToUtf8BomIfNeeded()
 {
-    DesktopStubIniMutationGuard writeLock;
+    DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
     if (!writeLock.IsLocked())
         return TextNormalizeResult::Failed;
     return NormalizeTextFileToUtf8Bom(g_iniPath);
@@ -82,7 +82,7 @@ static TextNormalizeResult NormalizeIniToUtf8BomIfNeeded()
 
 void EnsureIniDefaults()
 {
-    DesktopStubIniMutationGuard writeLock;
+    DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
     if (!writeLock.IsLocked())
     {
         QueueStartupWarning(L"[!] Failed to lock INI while applying setting defaults (error " + std::to_wstring(GetLastError()) + L").");

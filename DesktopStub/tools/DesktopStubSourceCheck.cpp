@@ -707,10 +707,17 @@ int main(int argc, char** argv)
             {
                 "g_iniWriteLockWaitMs",
                 "L\"IniWriteLockWaitMs\", L\"5000\"",
+                "CurrentIniWriteLockWaitMs()",
                 "sharedLock_(g_iniPath, waitMs)",
                 "WriteIniValueWithWait"
             },
             "DesktopStub INI writes should use the shared bounded mutex wait so tray/CLI writes cannot hang forever on a wedged writer");
+        AssertNotContainsAny(
+            "DesktopStub does not use unbounded startup INI mutation locks",
+            "DesktopStub source",
+            desktopStub,
+            { "DesktopStubIniMutationGuard writeLock;" },
+            "Startup/default INI mutations must use CurrentIniWriteLockWaitMs() instead of the legacy infinite default wait");
         AssertContainsAll(
             "DesktopStub force shutdown records cleanup best-effort",
             "src\\ga_generation.inc",

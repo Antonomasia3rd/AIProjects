@@ -36,7 +36,7 @@ static bool ResolveCommandLineConfigPath(
     }
 
     std::wstring pathError;
-    if (!aip::TryMakeAbsolutePath(rawPath, resolvedPath, &pathError))
+    if (!aip::TryResolveConfigFilePath(rawPath, resolvedPath, &pathError))
     {
         error = std::wstring(optionName) + L" path is invalid: " + (pathError.empty() ? rawPath : pathError);
         return false;

@@ -177,6 +177,13 @@ static ForegroundWindowInfo GetForegroundWindowInfo(const std::wstring& fallback
     return info;
 }
 
+enum class CensorRuleKind
+{
+    FullReplace,
+    WordReplace,
+    PatternReplace
+};
+
 struct CompiledCensorRegexRule
 {
     std::wstring patternText;
@@ -184,9 +191,17 @@ struct CompiledCensorRegexRule
     std::wregex pattern;
 };
 
-static std::mutex g_censorRegexMutex;
+static std::mutex g_censorRulesMutex;
+static std::wstring g_cachedFullReplaceRaw;
+static std::vector<std::pair<std::wstring, std::wstring>> g_cachedFullReplaceRules;
+static std::wstring g_cachedWordReplaceRaw;
+static std::vector<std::pair<std::wstring, std::wstring>> g_cachedWordReplaceRules;
 static std::wstring g_cachedPatternReplaceRaw;
 static std::vector<CompiledCensorRegexRule> g_cachedPatternReplaceRules;
+static std::wstring g_cachedRuleOrderRaw;
+static std::vector<CensorRuleKind> g_cachedRuleOrder;
+static std::wstring g_cachedApplyPatternOnRawRaw;
+static bool g_cachedApplyPatternOnRaw = false;
 
 static std::vector<std::pair<std::wstring, std::wstring>> ParseReplacementRules(const std::wstring& raw)
 {
@@ -230,9 +245,31 @@ static std::vector<std::pair<std::wstring, std::wstring>> ParseReplacementRules(
     return rules;
 }
 
+static std::vector<std::pair<std::wstring, std::wstring>> GetCachedFullCensorRules(const std::wstring& rawRules)
+{
+    std::lock_guard<std::mutex> lock(g_censorRulesMutex);
+    if (rawRules != g_cachedFullReplaceRaw)
+    {
+        g_cachedFullReplaceRaw = rawRules;
+        g_cachedFullReplaceRules = ParseReplacementRules(rawRules);
+    }
+    return g_cachedFullReplaceRules;
+}
+
+static std::vector<std::pair<std::wstring, std::wstring>> GetCachedWordCensorRules(const std::wstring& rawRules)
+{
+    std::lock_guard<std::mutex> lock(g_censorRulesMutex);
+    if (rawRules != g_cachedWordReplaceRaw)
+    {
+        g_cachedWordReplaceRaw = rawRules;
+        g_cachedWordReplaceRules = ParseReplacementRules(rawRules);
+    }
+    return g_cachedWordReplaceRules;
+}
+
 static std::vector<CompiledCensorRegexRule> GetCompiledPatternCensorRules(const std::wstring& rawRules)
 {
-    std::lock_guard<std::mutex> lock(g_censorRegexMutex);
+    std::lock_guard<std::mutex> lock(g_censorRulesMutex);
     if (rawRules != g_cachedPatternReplaceRaw)
     {
         g_cachedPatternReplaceRaw = rawRules;
@@ -275,14 +312,7 @@ static std::wstring ReplaceAllI(std::wstring input, const std::wstring& from, co
     return input;
 }
 
-enum class CensorRuleKind
-{
-    FullReplace,
-    WordReplace,
-    PatternReplace
-};
-
-static std::vector<CensorRuleKind> ParseCensorRuleOrder(const std::wstring& rawOrder)
+static std::vector<CensorRuleKind> ParseCensorRuleOrder(const std::wstring& rawOrder, std::vector<std::wstring>* unknownTokens = nullptr)
 {
     std::vector<CensorRuleKind> order;
     size_t pos = 0;
@@ -302,9 +332,9 @@ static std::vector<CensorRuleKind> ParseCensorRuleOrder(const std::wstring& rawO
         {
             order.push_back(CensorRuleKind::PatternReplace);
         }
-        else if (!token.empty())
+        else if (!token.empty() && unknownTokens != nullptr)
         {
-            LogError(L"Unknown censor_map rule_order entry ignored: " + token);
+            unknownTokens->push_back(token);
         }
 
         if (end == std::wstring::npos)
@@ -321,9 +351,37 @@ static std::vector<CensorRuleKind> ParseCensorRuleOrder(const std::wstring& rawO
     return order;
 }
 
+static std::vector<CensorRuleKind> GetCachedCensorRuleOrder(const std::wstring& rawOrder)
+{
+    std::lock_guard<std::mutex> lock(g_censorRulesMutex);
+    if (rawOrder != g_cachedRuleOrderRaw)
+    {
+        std::vector<std::wstring> unknownTokens;
+        g_cachedRuleOrder = ParseCensorRuleOrder(rawOrder, &unknownTokens);
+        g_cachedRuleOrderRaw = rawOrder;
+        for (const auto& token : unknownTokens)
+        {
+            LogError(L"Unknown censor_map rule_order entry ignored: " + token);
+        }
+    }
+    return g_cachedRuleOrder;
+}
+
+static bool GetCachedApplyPatternOnRaw(const std::wstring& rawValue)
+{
+    std::lock_guard<std::mutex> lock(g_censorRulesMutex);
+    if (rawValue != g_cachedApplyPatternOnRawRaw)
+    {
+        bool parsed = false;
+        g_cachedApplyPatternOnRaw = aip::ParseBoolValue(rawValue, parsed) ? parsed : false;
+        g_cachedApplyPatternOnRawRaw = rawValue;
+    }
+    return g_cachedApplyPatternOnRaw;
+}
+
 static void ApplyFullCensorRules(std::wstring& title)
 {
-    for (const auto& rule : ParseReplacementRules(IniReadS(L"censor_map", L"full_replace", L"")))
+    for (const auto& rule : GetCachedFullCensorRules(IniReadS(L"censor_map", L"full_replace", L"")))
     {
         if (EqualsI(title, rule.first.c_str()))
         {
@@ -334,7 +392,7 @@ static void ApplyFullCensorRules(std::wstring& title)
 
 static void ApplyWordCensorRules(std::wstring& title)
 {
-    for (const auto& rule : ParseReplacementRules(IniReadS(L"censor_map", L"word_replace", L"")))
+    for (const auto& rule : GetCachedWordCensorRules(IniReadS(L"censor_map", L"word_replace", L"")))
     {
         title = ReplaceAllI(title, rule.first, rule.second);
     }
@@ -342,7 +400,7 @@ static void ApplyWordCensorRules(std::wstring& title)
 
 static void ApplyPatternCensorRules(std::wstring& title, const std::wstring& rawTitle)
 {
-    bool applyPatternOnRaw = IniReadB(L"censor_map", L"apply_pattern_on_raw", false);
+    bool applyPatternOnRaw = GetCachedApplyPatternOnRaw(IniReadRaw(L"censor_map", L"apply_pattern_on_raw", L"false"));
     std::wstring patternInput = applyPatternOnRaw ? rawTitle : title;
     for (const auto& rule : GetCompiledPatternCensorRules(IniReadS(L"censor_map", L"pattern_replace", L"")))
     {
@@ -361,7 +419,7 @@ static void ApplyPatternCensorRules(std::wstring& title, const std::wstring& raw
 static std::wstring ApplyCensorRules(const std::wstring& rawTitle)
 {
     std::wstring title = rawTitle;
-    for (CensorRuleKind kind : ParseCensorRuleOrder(IniReadS(L"censor_map", L"rule_order", L"full_replace, word_replace, pattern_replace")))
+    for (CensorRuleKind kind : GetCachedCensorRuleOrder(IniReadS(L"censor_map", L"rule_order", L"full_replace, word_replace, pattern_replace")))
     {
         switch (kind)
         {

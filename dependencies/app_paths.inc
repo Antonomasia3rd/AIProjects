@@ -94,6 +94,61 @@ inline std::wstring BuildExecutableSidecarLogPath(
     return BuildExecutableSidecarLogPath(paths);
 }
 
+inline bool TryValidateConfigFilePath(const std::wstring& path, std::wstring* error = nullptr)
+{
+    if (path.empty())
+    {
+        if (error)
+        {
+            *error = L"path is empty";
+        }
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
+    }
+
+    wchar_t last = path.back();
+    if (last == L'\\' || last == L'/')
+    {
+        if (error)
+        {
+            *error = L"path refers to a directory, not an INI file";
+        }
+        SetLastError(ERROR_DIRECTORY);
+        return false;
+    }
+
+    DWORD attrs = GetFileAttributesW(path.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        if (error)
+        {
+            *error = L"path refers to a directory, not an INI file";
+        }
+        SetLastError(ERROR_DIRECTORY);
+        return false;
+    }
+
+    SetLastError(ERROR_SUCCESS);
+    return true;
+}
+
+inline bool TryResolveConfigFilePath(const std::wstring& path, std::wstring& absolutePath, std::wstring* error = nullptr)
+{
+    absolutePath.clear();
+    if (!TryMakeAbsolutePath(path, absolutePath, error))
+    {
+        return false;
+    }
+
+    if (!TryValidateConfigFilePath(absolutePath, error))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+
 inline bool TryBuildSidecarPathsFromExecutable(
     const std::wstring& executablePath,
     const std::wstring& fallbackBaseName,
@@ -110,7 +165,7 @@ inline bool TryBuildSidecarPathsFromExecutable(
     }
 
     std::wstring absoluteConfig;
-    if (!TryMakeAbsolutePath(configOverride, absoluteConfig, error))
+    if (!TryResolveConfigFilePath(configOverride, absoluteConfig, error))
     {
         return false;
     }
