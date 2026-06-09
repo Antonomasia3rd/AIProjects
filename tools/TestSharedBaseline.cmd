@@ -49,9 +49,10 @@ if errorlevel 1 (
     exit /b %STATUS%
 )
 
-build\SharedBaselineTests.exe
-if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+call build\SharedBaselineTests.exe
+set "STATUS=%ERRORLEVEL%"
+echo SharedBaselineTests exit code: %STATUS%
+if not "%STATUS%"=="0" (
     popd
     exit /b %STATUS%
 )
@@ -63,7 +64,8 @@ if errorlevel 1 (
     exit /b %STATUS%
 )
 
-build\SharedBaselineSourceCheck.exe
+call build\SharedBaselineSourceCheck.exe
 set "STATUS=%ERRORLEVEL%"
+echo SharedBaselineSourceCheck exit code: %STATUS%
 popd
 exit /b %STATUS%

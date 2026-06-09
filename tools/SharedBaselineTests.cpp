@@ -268,6 +268,13 @@ static void TestJsonBehavior()
     Check(aip::ExtractJsonStringValue("{\"application\\u005fid\":\"ok\"}", "application_id") == L"ok",
         "JSON lookup decodes escaped object keys");
 
+    std::wstring extracted;
+    Check(
+        aip::TryExtractJsonStringValue("{\"empty\":\"\"}", "empty", extracted) && extracted.empty() &&
+            !aip::TryExtractJsonStringValue("{\"bad\":\"bad\\qescape\"}", "bad", extracted) &&
+            !aip::TryExtractJsonStringValue("{\"other\":\"value\"}", "missing", extracted),
+        "JSON try-extract distinguishes empty strings from missing or invalid fields");
+
     size_t keyPos = 0;
     size_t valueStart = 0;
     size_t valueEnd = 0;
@@ -426,6 +433,12 @@ static void TestAppPathBehavior()
             !aip::TryResolveConfigFilePath(tempDirectory, absolutePath, &configPathError),
             "config path helper rejects existing directories");
     }
+
+    Check(
+        !aip::TryResolveConfigFilePath(L"CON.ini", absolutePath, &configPathError) &&
+            !aip::TryResolveConfigFilePath(L"LPT1.log", absolutePath, &configPathError) &&
+            !aip::TryResolveConfigFilePath(L"aux", absolutePath, &configPathError),
+        "config path helper rejects reserved Windows device names");
 }
 
 static void TestLoggingBehavior()

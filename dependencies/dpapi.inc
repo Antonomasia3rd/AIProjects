@@ -18,8 +18,9 @@ inline std::wstring ProtectSecretForCurrentUser(const std::wstring& secret)
         throw std::runtime_error("DPAPI protect failed: secret cannot be encoded as UTF-8.");
     }
 
+    BYTE emptyPlaintextSentinel = 0;
     DATA_BLOB plain = {};
-    plain.pbData = utf8.empty() ? nullptr : reinterpret_cast<BYTE*>(utf8.data());
+    plain.pbData = utf8.empty() ? &emptyPlaintextSentinel : reinterpret_cast<BYTE*>(utf8.data());
     plain.cbData = static_cast<DWORD>(utf8.size());
 
     DATA_BLOB cipher = {};
@@ -28,16 +29,13 @@ inline std::wstring ProtectSecretForCurrentUser(const std::wstring& secret)
         throw std::runtime_error(WideToUtf8(L"DPAPI protect failed: " + GetLastErrorText(GetLastError())));
     }
 
-    std::vector<BYTE> bytes;
-    if (cipher.cbData != 0)
+    if (cipher.cbData == 0 || cipher.pbData == nullptr)
     {
-        if (cipher.pbData == nullptr)
-        {
-            LocalFree(cipher.pbData);
-            throw std::runtime_error("DPAPI protect failed: encrypted buffer is null.");
-        }
-        bytes.assign(cipher.pbData, cipher.pbData + cipher.cbData);
+        LocalFree(cipher.pbData);
+        throw std::runtime_error("DPAPI protect failed: encrypted buffer is empty.");
     }
+
+    std::vector<BYTE> bytes(cipher.pbData, cipher.pbData + cipher.cbData);
     LocalFree(cipher.pbData);
     return std::wstring(kDpapiPrefix) + BytesToHex(bytes);
 }

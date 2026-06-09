@@ -260,7 +260,7 @@ inline bool TryWideToUtf8(const std::wstring& value, std::string& result)
         length,
         nullptr,
         nullptr);
-    if (written <= 0)
+    if (written != length)
     {
         DWORD error = GetLastError();
         result.clear();
@@ -268,7 +268,6 @@ inline bool TryWideToUtf8(const std::wstring& value, std::string& result)
         return false;
     }
 
-    result.resize(static_cast<size_t>(written));
     SetLastError(ERROR_SUCCESS);
     return true;
 }
@@ -347,7 +346,7 @@ inline bool TryUtf8ToWide(const std::string& value, std::wstring& result)
 
     result.assign(static_cast<size_t>(length), L'\0');
     int written = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), inputLength, result.data(), length);
-    if (written <= 0)
+    if (written != length)
     {
         DWORD error = GetLastError();
         result.clear();
@@ -355,7 +354,6 @@ inline bool TryUtf8ToWide(const std::string& value, std::wstring& result)
         return false;
     }
 
-    result.resize(static_cast<size_t>(written));
     SetLastError(ERROR_SUCCESS);
     return true;
 }
@@ -873,22 +871,24 @@ inline bool DecodeJsonStringRange(const std::string& json, size_t valueStart, si
     return TryUtf8ToWide(utf8, value);
 }
 
-inline std::wstring ExtractJsonStringValue(const std::string& json, const char* key)
+inline bool TryExtractJsonStringValue(const std::string& json, const char* key, std::wstring& value)
 {
+    value.clear();
     size_t keyPos = 0;
     size_t valueStart = 0;
     size_t valueEnd = 0;
     if (!FindJsonFieldValue(json, key, keyPos, valueStart, valueEnd))
     {
-        return L"";
+        return false;
     }
 
+    return DecodeJsonStringRange(json, valueStart, valueEnd, value);
+}
+
+inline std::wstring ExtractJsonStringValue(const std::string& json, const char* key)
+{
     std::wstring out;
-    if (!DecodeJsonStringRange(json, valueStart, valueEnd, out))
-    {
-        return L"";
-    }
-    return out;
+    return TryExtractJsonStringValue(json, key, out) ? out : std::wstring();
 }
 }
 

@@ -234,6 +234,11 @@ int main()
             appPaths,
             "FILE_ATTRIBUTE_DIRECTORY");
         RequireContains(
+            "app path helper rejects reserved device config paths",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "IsReservedWindowsDeviceBaseName");
+        RequireContains(
             "app path helper documents unchecked raw builder",
             "dependencies/app_paths.inc",
             appPaths,
@@ -274,6 +279,11 @@ int main()
             sharedCore,
             "TryUtf8ToWide");
         RequireContains(
+            "shared UTF-8 encoder verifies exact second conversion length",
+            "dependencies/core.inc",
+            sharedCore,
+            "if (written != length)");
+        RequireContains(
             "shared config decoder verifies exact second decode length",
             "dependencies/config_ini.inc",
             configIni,
@@ -303,6 +313,11 @@ int main()
             "dependencies/core.inc",
             sharedCore,
             "DecodeJsonStringUtf8Range(json, pos, stringEnd, decodedKey)");
+        RequireContains(
+            "shared JSON helper exposes try-extract variant",
+            "dependencies/core.inc",
+            sharedCore,
+            "TryExtractJsonStringValue");
         RequireContains(
             "shared core exposes looped file writes",
             "dependencies/core.inc",
@@ -453,12 +468,12 @@ int main()
             "shared DPAPI protect handles empty plaintext buffers explicitly",
             "dependencies/dpapi.inc",
             dpapi,
-            "plain.pbData = utf8.empty() ? nullptr");
+            "emptyPlaintextSentinel");
         RequireContains(
             "shared DPAPI protect guards empty encrypted buffers",
             "dependencies/dpapi.inc",
             dpapi,
-            "if (cipher.cbData != 0)");
+            "cipher.cbData == 0 || cipher.pbData == nullptr");
         RequireContains(
             "shared DPAPI helper handles empty decrypted buffers safely",
             "dependencies/dpapi.inc",
@@ -481,6 +496,11 @@ int main()
             sharedTests,
             "config path helper rejects existing directories");
         RequireContains(
+            "shared tests cover reserved config path rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "config path helper rejects reserved Windows device names");
+        RequireContains(
             "shared tests cover invalid JSON UTF-8 rejection",
             "tools/SharedBaselineTests.cpp",
             sharedTests,
@@ -501,6 +521,11 @@ int main()
             sharedTests,
             "JSON lookup decodes escaped object keys");
         RequireContains(
+            "shared tests cover JSON try-extract helper",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "JSON try-extract distinguishes empty strings from missing or invalid fields");
+        RequireContains(
             "shared tests cover DPAPI invalid UTF-16 rejection",
             "tools/SharedBaselineTests.cpp",
             sharedTests,
@@ -510,6 +535,11 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "DPAPI empty secret round trip is safe");
+        RequireContains(
+            "shared baseline test script reports test exit code",
+            "tools/TestSharedBaseline.cmd",
+            ReadAll("tools/TestSharedBaseline.cmd"),
+            "SharedBaselineTests exit code");
         RequireContains(
             "shared tests cover UTF-8 conversion failure",
             "tools/SharedBaselineTests.cpp",
