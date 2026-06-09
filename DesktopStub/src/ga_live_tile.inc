@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Live Tile update
 // -----------------------------------------------------------------------------
 static bool CurrentProcessPackageFullName(std::wstring& packageFullName)
@@ -44,13 +44,9 @@ static std::wstring PercentEncodeUriPath(const std::wstring& path)
     if (path.empty())
         return L"";
 
-    int need = WideCharToMultiByte(CP_UTF8, 0, path.c_str(), static_cast<int>(path.size()), nullptr, 0, nullptr, nullptr);
-    if (need <= 0)
-        return path;
-
-    std::vector<char> bytes(static_cast<size_t>(need));
-    if (WideCharToMultiByte(CP_UTF8, 0, path.c_str(), static_cast<int>(path.size()), bytes.data(), need, nullptr, nullptr) <= 0)
-        return path;
+    std::string bytes;
+    if (!aip::TryWideToUtf8(path, bytes))
+        return L"";
 
     static const wchar_t hex[] = L"0123456789ABCDEF";
     std::wstring out;
@@ -539,12 +535,22 @@ static bool ReadUtf8FileTailAsWide(const std::wstring& path, unsigned long long 
         if (needed <= 0)
             return false;
         textOut.resize(needed);
-        MultiByteToWideChar(CP_ACP, 0, bytes.data(), static_cast<int>(bytes.size()), &textOut[0], needed);
+        int written = MultiByteToWideChar(CP_ACP, 0, bytes.data(), static_cast<int>(bytes.size()), &textOut[0], needed);
+        if (written != needed)
+        {
+            textOut.clear();
+            return false;
+        }
         return true;
     }
 
     textOut.resize(needed);
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), &textOut[0], needed);
+    int written = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), &textOut[0], needed);
+    if (written != needed)
+    {
+        textOut.clear();
+        return false;
+    }
     return true;
 }
 

@@ -1,4 +1,4 @@
-﻿// Experimental Win8/8.1-style Live Tile background task helper.
+// Experimental Win8/8.1-style Live Tile background task helper.
 // Built as a small WinRT component DLL and declared in AppxManifest.xml.
 // The task reads the product-scoped .livetile.pending.xml sidecar next to the DLL, updates
 // the app tile under package identity, logs the result, and exits.
@@ -283,7 +283,12 @@ static bool ReadUtf8BomTextFile(const std::wstring& path, std::wstring& out)
     if (need <= 0)
         return false;
     out.resize(static_cast<size_t>(need));
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), &out[0], need);
+    int written = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), &out[0], need);
+    if (written != need)
+    {
+        out.clear();
+        return false;
+    }
     return true;
 }
 
