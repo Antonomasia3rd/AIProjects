@@ -364,6 +364,11 @@ int main()
             "src\\drpc_presence.inc",
             presence,
             "GetCompiledPatternCensorRules");
+        RequireContains(
+            "DiscordRPC reuses compiled censor regex snapshots without copying regex objects",
+            "src\\drpc_presence.inc",
+            presence,
+            "std::shared_ptr<const std::vector<CompiledCensorRegexRule>>");
         RequireNotContains(
             "DiscordRPC does not compile censor regex inside every title update",
             "src\\drpc_presence.inc",
@@ -394,6 +399,11 @@ int main()
             "src\\drpc_presence.inc",
             presence,
             "if (rawOrder != g_cachedRuleOrderRaw)");
+        RequireContains(
+            "DiscordRPC reports censor regex replacement failures once per config value",
+            "src\\drpc_presence.inc",
+            presence,
+            "ReportPatternRuntimeFailureOnce");
 
         std::cout << "DiscordRPC source checks passed (" << g_checks << " checks).\n";
         return 0;

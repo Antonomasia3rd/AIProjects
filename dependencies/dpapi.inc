@@ -57,7 +57,17 @@ inline std::wstring UnprotectSecretForCurrentUser(const std::wstring& protectedV
         throw std::runtime_error(WideToUtf8(L"DPAPI unprotect failed: " + GetLastErrorText(GetLastError())));
     }
 
-    std::string utf8(reinterpret_cast<char*>(plain.pbData), reinterpret_cast<char*>(plain.pbData) + plain.cbData);
+    std::string utf8;
+    if (plain.cbData != 0)
+    {
+        if (plain.pbData == nullptr)
+        {
+            throw std::runtime_error("DPAPI unprotect failed: decrypted buffer is null.");
+        }
+        utf8.assign(
+            reinterpret_cast<char*>(plain.pbData),
+            reinterpret_cast<char*>(plain.pbData) + plain.cbData);
+    }
     LocalFree(plain.pbData);
 
     std::wstring result;

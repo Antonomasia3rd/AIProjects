@@ -290,6 +290,12 @@ static void TestJsonBehavior()
         aip::FindJsonFieldValue(invalidUtf8Json, "bad", keyPos, valueStart, valueEnd) &&
             !aip::DecodeJsonStringRange(invalidUtf8Json, valueStart, valueEnd, invalidJsonText),
         "JSON string decoding rejects invalid UTF-8 bytes");
+
+    const std::string rawControlJson = "{\"bad\":\"line\nfeed\"}";
+    Check(
+        aip::FindJsonFieldValue(rawControlJson, "bad", keyPos, valueStart, valueEnd) &&
+            !aip::DecodeJsonStringRange(rawControlJson, valueStart, valueEnd, invalidJsonText),
+        "JSON string decoding rejects unescaped control characters");
 }
 
 static void TestDpapiBehavior()
@@ -307,6 +313,18 @@ static void TestDpapiBehavior()
     }
 
     Check(rejectedInvalidSecret, "DPAPI protect rejects invalid UTF-16 before encrypting");
+
+    bool emptyRoundTripOk = false;
+    try
+    {
+        std::wstring protectedEmpty = aip::ProtectSecretForCurrentUser(L"");
+        emptyRoundTripOk = aip::UnprotectSecretForCurrentUser(protectedEmpty).empty();
+    }
+    catch (const std::exception&)
+    {
+        emptyRoundTripOk = false;
+    }
+    Check(emptyRoundTripOk, "DPAPI empty secret round trip is safe");
 }
 
 static void TestTrayBehavior()

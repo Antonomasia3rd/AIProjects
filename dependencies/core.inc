@@ -793,6 +793,11 @@ inline bool DecodeJsonStringRange(const std::string& json, size_t valueStart, si
         }
         else
         {
+            unsigned char uch = static_cast<unsigned char>(ch);
+            if (uch < 0x20)
+            {
+                return false;
+            }
             out.push_back(ch);
         }
     }
