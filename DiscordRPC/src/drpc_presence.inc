@@ -275,10 +275,54 @@ static std::wstring ReplaceAllI(std::wstring input, const std::wstring& from, co
     return input;
 }
 
-static std::wstring ApplyCensorRules(const std::wstring& rawTitle)
+enum class CensorRuleKind
 {
-    std::wstring title = rawTitle;
+    FullReplace,
+    WordReplace,
+    PatternReplace
+};
 
+static std::vector<CensorRuleKind> ParseCensorRuleOrder(const std::wstring& rawOrder)
+{
+    std::vector<CensorRuleKind> order;
+    size_t pos = 0;
+    while (pos <= rawOrder.size())
+    {
+        size_t end = rawOrder.find_first_of(L",;", pos);
+        std::wstring token = ToLower(Trim(end == std::wstring::npos ? rawOrder.substr(pos) : rawOrder.substr(pos, end - pos)));
+        if (token == L"full_replace")
+        {
+            order.push_back(CensorRuleKind::FullReplace);
+        }
+        else if (token == L"word_replace")
+        {
+            order.push_back(CensorRuleKind::WordReplace);
+        }
+        else if (token == L"pattern_replace")
+        {
+            order.push_back(CensorRuleKind::PatternReplace);
+        }
+        else if (!token.empty())
+        {
+            LogError(L"Unknown censor_map rule_order entry ignored: " + token);
+        }
+
+        if (end == std::wstring::npos)
+        {
+            break;
+        }
+        pos = end + 1;
+    }
+
+    if (order.empty())
+    {
+        order = { CensorRuleKind::FullReplace, CensorRuleKind::WordReplace, CensorRuleKind::PatternReplace };
+    }
+    return order;
+}
+
+static void ApplyFullCensorRules(std::wstring& title)
+{
     for (const auto& rule : ParseReplacementRules(IniReadS(L"censor_map", L"full_replace", L"")))
     {
         if (EqualsI(title, rule.first.c_str()))
@@ -286,24 +330,52 @@ static std::wstring ApplyCensorRules(const std::wstring& rawTitle)
             title = rule.second;
         }
     }
+}
 
+static void ApplyWordCensorRules(std::wstring& title)
+{
     for (const auto& rule : ParseReplacementRules(IniReadS(L"censor_map", L"word_replace", L"")))
     {
         title = ReplaceAllI(title, rule.first, rule.second);
     }
+}
 
+static void ApplyPatternCensorRules(std::wstring& title, const std::wstring& rawTitle)
+{
+    bool applyPatternOnRaw = IniReadB(L"censor_map", L"apply_pattern_on_raw", false);
+    std::wstring patternInput = applyPatternOnRaw ? rawTitle : title;
     for (const auto& rule : GetCompiledPatternCensorRules(IniReadS(L"censor_map", L"pattern_replace", L"")))
     {
         try
         {
-            title = std::regex_replace(title, rule.pattern, rule.replacement);
+            patternInput = std::regex_replace(patternInput, rule.pattern, rule.replacement);
         }
         catch (const std::exception&)
         {
             LogError(L"Censor regex failed during replacement: " + rule.patternText);
         }
     }
+    title = patternInput;
+}
 
+static std::wstring ApplyCensorRules(const std::wstring& rawTitle)
+{
+    std::wstring title = rawTitle;
+    for (CensorRuleKind kind : ParseCensorRuleOrder(IniReadS(L"censor_map", L"rule_order", L"full_replace, word_replace, pattern_replace")))
+    {
+        switch (kind)
+        {
+        case CensorRuleKind::FullReplace:
+            ApplyFullCensorRules(title);
+            break;
+        case CensorRuleKind::WordReplace:
+            ApplyWordCensorRules(title);
+            break;
+        case CensorRuleKind::PatternReplace:
+            ApplyPatternCensorRules(title, rawTitle);
+            break;
+        }
+    }
     return title;
 }
 

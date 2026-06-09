@@ -724,6 +724,7 @@ void LoadUiStrings()
     g_ui.debounceMinMsLabel = IniReadS(L"Strings", L"DebounceMinMsLabel", L"Debounce min: %d ms");
     g_ui.pollInitialDebounceBypassMsLabel = IniReadS(L"Strings", L"PollInitialDebounceBypassMsLabel", L"Initial debounce bypass: %d ms");
     g_ui.iniCacheRefreshMsLabel = IniReadS(L"Strings", L"IniCacheRefreshMsLabel", L"INI cache refresh: %d ms");
+    g_ui.iniWriteLockWaitMsLabel = IniReadS(L"Strings", L"IniWriteLockWaitMsLabel", L"INI write lock wait: %d ms");
     g_ui.wallpaperDetectionLogRepeatMsLabel = IniReadS(L"Strings", L"WallpaperDetectionLogRepeatMsLabel", L"Wallpaper detection log repeat: %d ms");
     g_ui.notificationTimeoutMsLabel = IniReadS(L"Strings", L"NotificationTimeoutMsLabel", L"Notification timeout: %d ms");
     g_ui.shutdownInitialNoticeMsLabel = IniReadS(L"Strings", L"ShutdownInitialNoticeMsLabel", L"Shutdown first notice: %d ms");
@@ -1032,6 +1033,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.debounceMinMsLabel, L"DebounceMinMsLabel", { L"%d" });
     RequireFormat(g_ui.pollInitialDebounceBypassMsLabel, L"PollInitialDebounceBypassMsLabel", { L"%d" });
     RequireFormat(g_ui.iniCacheRefreshMsLabel, L"IniCacheRefreshMsLabel", { L"%d" });
+    RequireFormat(g_ui.iniWriteLockWaitMsLabel, L"IniWriteLockWaitMsLabel", { L"%d" });
     RequireFormat(g_ui.wallpaperDetectionLogRepeatMsLabel, L"WallpaperDetectionLogRepeatMsLabel", { L"%d" });
     RequireFormat(g_ui.notificationTimeoutMsLabel, L"NotificationTimeoutMsLabel", { L"%d" });
     RequireFormat(g_ui.shutdownInitialNoticeMsLabel, L"ShutdownInitialNoticeMsLabel", { L"%d" });

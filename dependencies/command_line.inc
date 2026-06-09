@@ -127,9 +127,19 @@ inline bool ParseIntValue(const std::wstring& raw, int& value)
         return false;
     }
 
+    errno = 0;
     wchar_t* end = nullptr;
-    long parsed = wcstol(trimmed.c_str(), &end, 10);
-    if (end == trimmed.c_str() || *end != L'\0' || parsed < INT_MIN || parsed > INT_MAX)
+    long long parsed = wcstoll(trimmed.c_str(), &end, 10);
+    if (end == trimmed.c_str() || errno == ERANGE || parsed < INT_MIN || parsed > INT_MAX)
+    {
+        return false;
+    }
+
+    while (end != nullptr && *end != L'\0' && iswspace(*end) != 0)
+    {
+        ++end;
+    }
+    if (end != nullptr && *end != L'\0')
     {
         return false;
     }

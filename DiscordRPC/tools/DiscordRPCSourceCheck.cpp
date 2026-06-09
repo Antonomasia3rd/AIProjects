@@ -95,6 +95,11 @@ int main()
             "src\\drpc_core.inc",
             core,
             "aip::IniConfigStore");
+        RequireContains(
+            "DiscordRPC integer config reads use shared strict parser",
+            "src\\drpc_core.inc",
+            core,
+            "return aip::ParseIntValue(raw, parsed) ? parsed : fallback;");
         RequireNotContains(
             "DiscordRPC does not use Win32 profile INI readers",
             "DiscordRPC sources",
@@ -229,6 +234,16 @@ int main()
             defaults,
             "log_append_lock_wait_ms");
         RequireContains(
+            "DiscordRPC exposes bounded INI write wait in INI defaults",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "ini_write_lock_wait_ms");
+        RequireContains(
+            "DiscordRPC passes bounded INI wait to shared config store",
+            "src\\drpc_core.inc + src\\drpc_config_defaults.inc",
+            core + "\n" + defaults,
+            "g_iniWriteLockWaitMs.load()");
+        RequireContains(
             "DiscordRPC exposes bounded log append wait on command line",
             "src\\drpc_command_line.inc",
             commandLine,
@@ -278,6 +293,16 @@ int main()
             "src\\drpc_core.inc",
             core,
             "aip::BuildPathScopedInstanceIdentity");
+        RequireContains(
+            "DiscordRPC configures control identity before optional single-instance mutex",
+            "src\\drpc_core.inc",
+            core,
+            "ConfigureSingleInstanceIdentity();\n\n    if (!IniReadB(L\"app\", L\"single_instance\", true))");
+        RequireContains(
+            "DiscordRPC configures control identity before control window path",
+            "src\\drpc_app.inc",
+            app,
+            "ConfigureSingleInstanceIdentity();\n\n    if (options.requestExit)");
         RequireNotContains(
             "DiscordRPC single-instance scope does not add exe base name",
             "src\\drpc_core.inc",
@@ -300,6 +325,21 @@ int main()
             ipc,
             "GetOverlappedResult(handle, &overlapped");
         RequireContains(
+            "DiscordRPC implements gateway supported switch",
+            "src\\drpc_app.inc + src\\drpc_config_defaults.inc",
+            app + "\n" + defaults,
+            "IniReadB(L\"gateway\", L\"supported\", true)");
+        RequireContains(
+            "DiscordRPC guards Gateway activity JSON object insertion",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "activity.empty() || activity.front() != '{'");
+        RequireNotContains(
+            "DiscordRPC does not expose unused rpc_restarted_message default",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "rpc_restarted_message");
+        RequireContains(
             "DiscordRPC caches compiled censor regex rules",
             "src\\drpc_presence.inc",
             presence,
@@ -309,6 +349,16 @@ int main()
             "src\\drpc_presence.inc",
             presence,
             "std::wregex pattern(rule.first");
+        RequireContains(
+            "DiscordRPC implements configured censor rule order",
+            "src\\drpc_presence.inc",
+            presence,
+            "ParseCensorRuleOrder(IniReadS(L\"censor_map\", L\"rule_order\"");
+        RequireContains(
+            "DiscordRPC implements pattern-on-raw censor option",
+            "src\\drpc_presence.inc",
+            presence,
+            "IniReadB(L\"censor_map\", L\"apply_pattern_on_raw\", false)");
 
         std::cout << "DiscordRPC source checks passed (" << g_checks << " checks).\n";
         return 0;

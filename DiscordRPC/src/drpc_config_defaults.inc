@@ -124,8 +124,6 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"afk", L"show_idle_time", L"true" },
     { L"afk", L"idle_text", L"since {idle_hh}h {idle_mm}m {idle_ss}s" },
 
-    { L"messages", L"rpc_restarted_message", L"Rich Presence has been restarted." },
-
     { L"app", L"show_tray", L"true" },
     { L"app", L"show_menu_as_dropdown", L"true" },
     { L"app", L"single_instance", L"true" },
@@ -139,6 +137,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"app", L"file_logging_enabled", L"true" },
     { L"app", L"log_path", L"" },
     { L"app", L"log_append_lock_wait_ms", L"5000" },
+    { L"app", L"ini_write_lock_wait_ms", L"5000" },
     { L"app", L"verbose_logging", L"false" },
     { L"app", L"dry_run_redact_sensitive", L"true" },
 
@@ -201,6 +200,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"strings", L"notification_failed", L"Rich Presence update failed." },
     { L"strings", L"notification_reloaded", L"Configuration reloaded." },
     { L"strings", L"notification_gateway_missing_token", L"Gateway mode needs token_protected or token." },
+    { L"strings", L"notification_gateway_unsupported", L"Discord Gateway transport is disabled by [gateway] supported." },
     { L"strings", L"notification_gateway_auth_failed", L"Discord Gateway authentication failed. Check your token." },
     { L"strings", L"notification_shutdown_pending", L"Shutdown requested. Use Force shutdown from the tray if Discord cleanup does not finish." },
     { L"strings", L"previous_force_shutdown_warning", L"The previous run was force-closed while Discord cleanup was pending. Presence clearing or the Gateway close handshake may not have completed." },
@@ -216,7 +216,7 @@ static const aip::IniDefaultValue kDefaults[] =
 
 static bool EnsureDefaultConfigFile()
 {
-    if (!aip::IniConfigStore(g_iniPath, DefaultConfigHeader()).EnsureDefaults(
+    if (!aip::IniConfigStore(g_iniPath, DefaultConfigHeader(), g_iniWriteLockWaitMs.load()).EnsureDefaults(
         kDefaults,
         ARRAYSIZE(kDefaults)))
     {

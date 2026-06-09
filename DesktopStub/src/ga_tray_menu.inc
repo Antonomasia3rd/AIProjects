@@ -490,6 +490,7 @@ void Menu(HWND h)
     std::wstring debounceLine = FormatWide(g_ui.debounceMinMsLabel.c_str(), IniReadClampedI(L"Settings", L"DebounceMinMs", 1200, 0, 60000));
     std::wstring pollInitialBypassLine = FormatWide(g_ui.pollInitialDebounceBypassMsLabel.c_str(), IniReadClampedI(L"Settings", L"PollInitialDebounceBypassMs", 5000, 0, 60000));
     std::wstring iniCacheRefreshLine = FormatWide(g_ui.iniCacheRefreshMsLabel.c_str(), IniReadClampedI(L"Settings", L"IniCacheRefreshMs", 250, 0, 60000));
+    std::wstring iniWriteLockWaitLine = FormatWide(g_ui.iniWriteLockWaitMsLabel.c_str(), IniReadClampedI(L"Settings", L"IniWriteLockWaitMs", 5000, 0, 60000));
     std::wstring wallpaperDetectionLogRepeatLine = FormatWide(g_ui.wallpaperDetectionLogRepeatMsLabel.c_str(), IniReadClampedI(L"Settings", L"WallpaperDetectionLogRepeatMs", 60000, 0, 3600000));
     std::wstring notificationTimeoutLine = FormatWide(g_ui.notificationTimeoutMsLabel.c_str(), IniReadClampedI(L"Settings", L"NotificationTimeoutMs", 4000, 1000, 60000));
     std::wstring shutdownInitialLine = FormatWide(g_ui.shutdownInitialNoticeMsLabel.c_str(), IniReadClampedI(L"Settings", L"ShutdownInitialNoticeMs", 1000, 250, 60000));
@@ -521,6 +522,7 @@ void Menu(HWND h)
     addTo(advancedTimingMenu, ID_ADV_DEBOUNCE_MIN_MS, debounceLine);
     addTo(advancedTimingMenu, ID_ADV_POLL_INITIAL_BYPASS_MS, pollInitialBypassLine);
     addTo(advancedTimingMenu, ID_ADV_INI_CACHE_REFRESH_MS, iniCacheRefreshLine);
+    addTo(advancedTimingMenu, ID_ADV_INI_WRITE_LOCK_WAIT_MS, iniWriteLockWaitLine);
     addTo(advancedTimingMenu, ID_ADV_WALLPAPER_DETECTION_LOG_REPEAT_MS, wallpaperDetectionLogRepeatLine);
     addTo(advancedTimingMenu, ID_ADV_NOTIFICATION_TIMEOUT_MS, notificationTimeoutLine);
     endNestedMenu(advancedMenu, advancedTimingMenu, g_ui.advancedTimingTitle);

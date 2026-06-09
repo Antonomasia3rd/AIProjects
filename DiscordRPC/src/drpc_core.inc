@@ -131,13 +131,8 @@ static int IniReadI(const wchar_t* section, const wchar_t* key, int fallback)
         return fallback;
     }
 
-    wchar_t* end = nullptr;
-    long value = wcstol(raw.c_str(), &end, 10);
-    if (end == raw.c_str() || *end != L'\0')
-    {
-        return fallback;
-    }
-    return static_cast<int>(value);
+    int parsed = 0;
+    return aip::ParseIntValue(raw, parsed) ? parsed : fallback;
 }
 
 static bool IniReadB(const wchar_t* section, const wchar_t* key, bool fallback)
@@ -159,14 +154,24 @@ static std::wstring DefaultConfigHeader()
         L"; User-facing strings live in [strings]. Use \\n for line breaks.\r\n\r\n";
 }
 
+static bool IniWriteRawWithWait(const wchar_t* section, const wchar_t* key, const std::wstring& value, DWORD writeMutexWaitMs)
+{
+    return aip::IniConfigStore(g_iniPath, DefaultConfigHeader(), writeMutexWaitMs).WriteRaw(section, key, value);
+}
+
 static bool IniWriteRaw(const wchar_t* section, const wchar_t* key, const std::wstring& value)
 {
-    return aip::IniConfigStore(g_iniPath, DefaultConfigHeader()).WriteRaw(section, key, value);
+    return IniWriteRawWithWait(section, key, value, g_iniWriteLockWaitMs.load());
+}
+
+static bool IniWriteWithWait(const wchar_t* section, const wchar_t* key, const std::wstring& value, DWORD writeMutexWaitMs)
+{
+    return IniWriteRawWithWait(section, key, EncodeEscapes(value), writeMutexWaitMs);
 }
 
 static bool IniWrite(const wchar_t* section, const wchar_t* key, const std::wstring& value)
 {
-    return IniWriteRaw(section, key, EncodeEscapes(value));
+    return IniWriteWithWait(section, key, value, g_iniWriteLockWaitMs.load());
 }
 
 static std::wstring GetUiString(const wchar_t* key, const std::wstring& fallback)
@@ -498,6 +503,14 @@ static void ApplyRuntimeLoggingOverridesFromCommandLine(const AppOptions& option
                 g_logAppendLockWaitMs = static_cast<DWORD>(ClampInt(lockWaitMs, 0, 60000));
             }
         }
+        else if (EqualsI(setting.key, L"ini_write_lock_wait_ms"))
+        {
+            int lockWaitMs = 0;
+            if (aip::ParseIntValue(setting.value, lockWaitMs))
+            {
+                g_iniWriteLockWaitMs = static_cast<DWORD>(ClampInt(lockWaitMs, 0, 60000));
+            }
+        }
     }
     ConfigureLoggerFromRuntimeState();
 }
@@ -509,6 +522,7 @@ static void ConfigureRuntimeFromConfig(const AppOptions& options)
     g_verboseLogging = options.verbose || IniReadB(L"app", L"verbose_logging", false);
     g_notificationsEnabled = IniReadB(L"app", L"notifications_enabled", true);
     g_logAppendLockWaitMs = static_cast<DWORD>(ClampInt(IniReadI(L"app", L"log_append_lock_wait_ms", 5000), 0, 60000));
+    g_iniWriteLockWaitMs = static_cast<DWORD>(ClampInt(IniReadI(L"app", L"ini_write_lock_wait_ms", 5000), 0, 60000));
 
     std::wstring configuredLog = Trim(IniReadS(L"app", L"log_path", L""));
     std::wstring effectiveLogPath;
@@ -562,12 +576,12 @@ static void ConfigureSingleInstanceIdentity()
 
 static bool AcquireSingleInstance()
 {
+    ConfigureSingleInstanceIdentity();
+
     if (!IniReadB(L"app", L"single_instance", true))
     {
         return true;
     }
-
-    ConfigureSingleInstanceIdentity();
 
     g_singleInstanceMutex = CreateMutexW(nullptr, TRUE, g_singleInstanceMutexName.c_str());
     if (g_singleInstanceMutex == nullptr)
