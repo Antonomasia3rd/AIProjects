@@ -56,6 +56,8 @@ Additional baseline contracts:
 
 ## Logging and path baseline notes
 
+`aip::BuildSidecarPathsFromExecutable` is the unchecked path builder and is best kept for already-trusted paths or internal derivation. Apps that accept user-provided config paths should use `aip::TryBuildSidecarPathsFromExecutable`/`aip::TryResolveConfigFilePath` so empty paths, directory paths, and trailing directory separators are rejected before write-time.
+
 `aip::BuildSidecarPathsFromExecutable` derives the default log path beside an
 explicit `--ini` override by default. Products that already promise
 exe-side log placement, such as DesktopStub, should opt into

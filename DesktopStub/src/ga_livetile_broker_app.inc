@@ -154,23 +154,68 @@ static std::wstring NowStamp()
     return buf;
 }
 
-static std::string WideToUtf8(const std::wstring& text)
+static bool TryWideToUtf8(const std::wstring& text, std::string& out)
 {
+    out.clear();
     if (text.empty())
-        return std::string();
-    int need = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+        return true;
+
+    int need = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        text.c_str(),
+        static_cast<int>(text.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
     if (need <= 0)
-        return std::string();
-    std::string out(static_cast<size_t>(need), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), &out[0], need, nullptr, nullptr);
-    return out;
+        return false;
+
+    out.resize(static_cast<size_t>(need));
+    int written = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        text.c_str(),
+        static_cast<int>(text.size()),
+        out.empty() ? nullptr : &out[0],
+        need,
+        nullptr,
+        nullptr);
+    if (written != need)
+    {
+        out.clear();
+        return false;
+    }
+    return true;
+}
+
+static bool WriteAllBytes(HANDLE h, const void* data, DWORD size)
+{
+    const BYTE* ptr = static_cast<const BYTE*>(data);
+    DWORD remaining = size;
+    while (remaining > 0)
+    {
+        DWORD chunk = remaining;
+        DWORD written = 0;
+        if (!WriteFile(h, ptr, chunk, &written, nullptr))
+            return false;
+        if (written == 0)
+        {
+            SetLastError(ERROR_WRITE_FAULT);
+            return false;
+        }
+        ptr += written;
+        remaining -= written;
+    }
+    return true;
 }
 
 static void AppendActivationLog(const std::wstring& message)
 {
     std::wstring line = L"[" + NowStamp() + L"] pid=" + std::to_wstring(GetCurrentProcessId()) + L" " + message + L"\r\n";
-    std::string bytes = WideToUtf8(line);
-    if (bytes.empty())
+    std::string bytes;
+    if (!TryWideToUtf8(line, bytes) || bytes.empty())
         return;
 
     auto appendToPath = [&](const std::wstring& path) -> bool
@@ -178,23 +223,26 @@ static void AppendActivationLog(const std::wstring& message)
         if (path.empty())
             return false;
 
-        HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (h == INVALID_HANDLE_VALUE)
             return false;
 
+        bool ok = true;
         LARGE_INTEGER size{};
         if (GetFileSizeEx(h, &size) && size.QuadPart == 0)
         {
             static const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
-            DWORD written = 0;
-            WriteFile(h, bom, sizeof(bom), &written, nullptr);
+            ok = WriteAllBytes(h, bom, static_cast<DWORD>(sizeof(bom)));
         }
 
-        DWORD written = 0;
-        WriteFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
+        LARGE_INTEGER eof{};
+        if (ok && !SetFilePointerEx(h, eof, nullptr, FILE_END))
+            ok = false;
+        if (ok)
+            ok = WriteAllBytes(h, bytes.data(), static_cast<DWORD>(bytes.size()));
         CloseHandle(h);
-        return true;
+        return ok;
     };
 
     bool wroteLocalState = appendToPath(LocalStateActivationLogPath());

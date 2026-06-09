@@ -234,6 +234,11 @@ int main()
             appPaths,
             "FILE_ATTRIBUTE_DIRECTORY");
         RequireContains(
+            "app path helper documents unchecked raw builder",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "unchecked path builder");
+        RequireContains(
             "app path helper exposes executable-side log paths",
             "dependencies/app_paths.inc",
             appPaths,
@@ -263,6 +268,11 @@ int main()
             "dependencies/core.inc",
             sharedCore,
             "return TryUtf8ToWide(out, value);");
+        RequireContains(
+            "shared JSON decoding rejects raw control characters",
+            "dependencies/core.inc",
+            sharedCore,
+            "uch < 0x20");
         RequireContains(
             "shared core exposes looped file writes",
             "dependencies/core.inc",
@@ -409,6 +419,11 @@ int main()
             "dependencies/dpapi.inc",
             dpapi,
             "TryUtf8ToWide(utf8, result)");
+        RequireContains(
+            "shared DPAPI helper handles empty decrypted buffers safely",
+            "dependencies/dpapi.inc",
+            dpapi,
+            "plain.cbData != 0");
 
         RequireContains(
             "shared tests cover bounded INI waits",
@@ -431,10 +446,20 @@ int main()
             sharedTests,
             "JSON string decoding rejects invalid UTF-8 bytes");
         RequireContains(
+            "shared tests cover raw JSON control-character rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "JSON string decoding rejects unescaped control characters");
+        RequireContains(
             "shared tests cover DPAPI invalid UTF-16 rejection",
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "DPAPI protect rejects invalid UTF-16 before encrypting");
+        RequireContains(
+            "shared tests cover DPAPI empty-secret round trip",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "DPAPI empty secret round trip is safe");
         RequireContains(
             "shared tests cover UTF-8 conversion failure",
             "tools/SharedBaselineTests.cpp",

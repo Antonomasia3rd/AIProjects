@@ -1,4 +1,4 @@
-static ULONGLONG g_lastIdleTime = 0;
+﻿static ULONGLONG g_lastIdleTime = 0;
 static ULONGLONG g_lastKernelTime = 0;
 static ULONGLONG g_lastUserTime = 0;
 static bool g_haveCpuSample = false;
@@ -197,7 +197,9 @@ static std::vector<std::pair<std::wstring, std::wstring>> g_cachedFullReplaceRul
 static std::wstring g_cachedWordReplaceRaw;
 static std::vector<std::pair<std::wstring, std::wstring>> g_cachedWordReplaceRules;
 static std::wstring g_cachedPatternReplaceRaw;
-static std::vector<CompiledCensorRegexRule> g_cachedPatternReplaceRules;
+static std::shared_ptr<const std::vector<CompiledCensorRegexRule>> g_cachedPatternReplaceRules;
+static std::wstring g_cachedPatternRuntimeFailureRaw;
+static std::vector<std::wstring> g_cachedPatternRuntimeFailurePatterns;
 static std::wstring g_cachedRuleOrderRaw;
 static std::vector<CensorRuleKind> g_cachedRuleOrder;
 static std::wstring g_cachedApplyPatternOnRawRaw;
@@ -267,13 +269,12 @@ static std::vector<std::pair<std::wstring, std::wstring>> GetCachedWordCensorRul
     return g_cachedWordReplaceRules;
 }
 
-static std::vector<CompiledCensorRegexRule> GetCompiledPatternCensorRules(const std::wstring& rawRules)
+static std::shared_ptr<const std::vector<CompiledCensorRegexRule>> GetCompiledPatternCensorRules(const std::wstring& rawRules)
 {
     std::lock_guard<std::mutex> lock(g_censorRulesMutex);
-    if (rawRules != g_cachedPatternReplaceRaw)
+    if (rawRules != g_cachedPatternReplaceRaw || !g_cachedPatternReplaceRules)
     {
-        g_cachedPatternReplaceRaw = rawRules;
-        g_cachedPatternReplaceRules.clear();
+        auto compiledRules = std::make_shared<std::vector<CompiledCensorRegexRule>>();
         for (const auto& rule : ParseReplacementRules(rawRules))
         {
             try
@@ -282,15 +283,42 @@ static std::vector<CompiledCensorRegexRule> GetCompiledPatternCensorRules(const 
                 compiled.patternText = rule.first;
                 compiled.replacement = rule.second;
                 compiled.pattern = std::wregex(rule.first, std::regex_constants::icase);
-                g_cachedPatternReplaceRules.push_back(std::move(compiled));
+                compiledRules->push_back(std::move(compiled));
             }
             catch (const std::exception&)
             {
                 LogError(L"Invalid censor regex ignored: " + rule.first);
             }
         }
+        g_cachedPatternReplaceRaw = rawRules;
+        g_cachedPatternReplaceRules = compiledRules;
+        g_cachedPatternRuntimeFailureRaw = rawRules;
+        g_cachedPatternRuntimeFailurePatterns.clear();
     }
     return g_cachedPatternReplaceRules;
+}
+
+static void ReportPatternRuntimeFailureOnce(const std::wstring& rawRules, const std::wstring& patternText)
+{
+    bool shouldReport = false;
+    {
+        std::lock_guard<std::mutex> lock(g_censorRulesMutex);
+        if (rawRules != g_cachedPatternRuntimeFailureRaw)
+        {
+            g_cachedPatternRuntimeFailureRaw = rawRules;
+            g_cachedPatternRuntimeFailurePatterns.clear();
+        }
+        if (std::find(g_cachedPatternRuntimeFailurePatterns.begin(), g_cachedPatternRuntimeFailurePatterns.end(), patternText) == g_cachedPatternRuntimeFailurePatterns.end())
+        {
+            g_cachedPatternRuntimeFailurePatterns.push_back(patternText);
+            shouldReport = true;
+        }
+    }
+
+    if (shouldReport)
+    {
+        LogError(L"Censor regex failed during replacement: " + patternText);
+    }
 }
 
 static std::wstring ReplaceAllI(std::wstring input, const std::wstring& from, const std::wstring& to)
@@ -402,7 +430,9 @@ static void ApplyPatternCensorRules(std::wstring& title, const std::wstring& raw
 {
     bool applyPatternOnRaw = GetCachedApplyPatternOnRaw(IniReadRaw(L"censor_map", L"apply_pattern_on_raw", L"false"));
     std::wstring patternInput = applyPatternOnRaw ? rawTitle : title;
-    for (const auto& rule : GetCompiledPatternCensorRules(IniReadS(L"censor_map", L"pattern_replace", L"")))
+    std::wstring rawRules = IniReadS(L"censor_map", L"pattern_replace", L"");
+    auto rules = GetCompiledPatternCensorRules(rawRules);
+    for (const auto& rule : *rules)
     {
         try
         {
@@ -410,7 +440,7 @@ static void ApplyPatternCensorRules(std::wstring& title, const std::wstring& raw
         }
         catch (const std::exception&)
         {
-            LogError(L"Censor regex failed during replacement: " + rule.patternText);
+            ReportPatternRuntimeFailureOnce(rawRules, rule.patternText);
         }
     }
     title = patternInput;

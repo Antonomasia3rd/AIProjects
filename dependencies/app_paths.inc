@@ -42,6 +42,9 @@ inline std::wstring GetCurrentExecutablePath()
     }
 }
 
+// unchecked path builder: callers that accept user-provided config paths should
+// use TryBuildSidecarPathsFromExecutable/TryResolveConfigFilePath instead so
+// directory and trailing-separator mistakes fail before write-time.
 inline SidecarPaths BuildSidecarPathsFromExecutable(
     const std::wstring& executablePath,
     const std::wstring& fallbackBaseName,

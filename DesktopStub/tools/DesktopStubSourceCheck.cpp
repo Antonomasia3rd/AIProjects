@@ -803,6 +803,26 @@ int main(int argc, char** argv)
             },
             "background-task activation logging must use checked UTF-8 conversion and looped writes instead of silent conversion loss or partial WriteFile calls");
         AssertContainsAll(
+            "Live Tile broker activation logging is hardened",
+            "src\\ga_livetile_broker_app.inc",
+            brokerApp,
+            {
+                "TryWideToUtf8",
+                "WC_ERR_INVALID_CHARS",
+                "WriteAllBytes",
+                "SetFilePointerEx(h, eof, nullptr, FILE_END)"
+            },
+            "packaged broker activation logging must use checked UTF-8 conversion and looped writes instead of silent conversion loss or partial WriteFile calls");
+        AssertContainsAll(
+            "DesktopStub redirected command-line output uses looped writes",
+            "src\\ga_command_line.inc",
+            commandLine,
+            {
+                "WriteCommandLineTextToHandle",
+                "aip::WriteAllBytes(h, bytes.data()"
+            },
+            "redirected --help/--version output must not rely on a single partial WriteFile call");
+        AssertContainsAll(
             "--once survives Live Tile runtime relaunch",
             "src\\ga_app.inc",
             app,

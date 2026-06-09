@@ -1502,13 +1502,12 @@ static bool WriteCommandLineTextToHandle(HANDLE h, const std::wstring& output)
     }
 
     std::vector<BYTE> bytes = EncodeUtf8Text(output, false);
-    if (!bytes.empty() || output.empty())
+    if (!bytes.empty())
     {
-        DWORD written = 0;
-        return WriteFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) != FALSE;
+        return aip::WriteAllBytes(h, bytes.data(), static_cast<DWORD>(bytes.size()));
     }
 
-    return false;
+    return output.empty();
 }
 
 static bool WriteCommandLineTextToConsole(const std::wstring& text, bool errorOutput)
