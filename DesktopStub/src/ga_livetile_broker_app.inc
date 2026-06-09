@@ -245,8 +245,22 @@ static void AppendActivationLog(const std::wstring& message)
         return ok;
     };
 
+    HANDLE logMutex = CreateMutexW(nullptr, FALSE, L"Local\DesktopStubLiveTileBrokerActivationLogMutex");
+    bool logLocked = false;
+    if (logMutex != nullptr)
+    {
+        DWORD wait = WaitForSingleObject(logMutex, 5000);
+        logLocked = (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED);
+    }
+
     bool wroteLocalState = appendToPath(LocalStateActivationLogPath());
     bool wroteModuleDir = appendToPath(ActivationLogPath());
+
+    if (logLocked)
+        ReleaseMutex(logMutex);
+    if (logMutex != nullptr)
+        CloseHandle(logMutex);
+
     (void)wroteLocalState;
     (void)wroteModuleDir;
 }
@@ -287,11 +301,11 @@ static bool ReadUtf8BomTextFile(const std::wstring& path, std::wstring& out)
     if (bytes.empty())
         return true;
 
-    int need = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+    int need = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
     if (need <= 0)
         return false;
     out.resize(static_cast<size_t>(need));
-    MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), &out[0], need);
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), &out[0], need);
     return true;
 }
 

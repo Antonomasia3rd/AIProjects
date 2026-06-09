@@ -532,7 +532,7 @@ static bool ReadUtf8FileTailAsWide(const std::wstring& path, unsigned long long 
     if (bytes.empty())
         return true;
 
-    int needed = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+    int needed = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
     if (needed <= 0)
     {
         needed = MultiByteToWideChar(CP_ACP, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
@@ -544,7 +544,7 @@ static bool ReadUtf8FileTailAsWide(const std::wstring& path, unsigned long long 
     }
 
     textOut.resize(needed);
-    MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), &textOut[0], needed);
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), &textOut[0], needed);
     return true;
 }
 
