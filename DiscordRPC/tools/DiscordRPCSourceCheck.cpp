@@ -355,6 +355,11 @@ int main()
             gateway,
             "activity.empty() || activity.front() != '{'");
         RequireContains(
+            "DiscordRPC exposes shared JSON string decoder",
+            "src\\drpc_core.inc",
+            core,
+            "using aip::DecodeJsonStringRange;");
+        RequireContains(
             "DiscordRPC decodes Gateway asset JSON strings before lookup",
             "src\\drpc_gateway.inc",
             gateway,
