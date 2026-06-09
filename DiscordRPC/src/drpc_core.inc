@@ -280,6 +280,7 @@ static void SetConsoleVisible(bool visible, bool safeOnly)
 }
 
 using aip::ExtractJsonStringValue;
+using aip::TryExtractJsonStringValue;
 using aip::FindJsonFieldValue;
 using aip::DecodeJsonStringRange;
 using aip::JsonEscape;

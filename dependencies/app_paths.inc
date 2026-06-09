@@ -98,6 +98,14 @@ inline std::wstring BuildExecutableSidecarLogPath(
 }
 
 
+
+inline bool ConfigFileNameContainsColon(const std::wstring& path)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    size_t start = slash == std::wstring::npos ? 0 : slash + 1;
+    return path.find(L':', start) != std::wstring::npos;
+}
+
 inline bool IsReservedWindowsDeviceBaseName(const std::wstring& path)
 {
     size_t slash = path.find_last_of(L"\\/");
@@ -144,6 +152,16 @@ inline bool TryValidateConfigFilePath(const std::wstring& path, std::wstring* er
             *error = L"path refers to a directory, not an INI file";
         }
         SetLastError(ERROR_DIRECTORY);
+        return false;
+    }
+
+    if (ConfigFileNameContainsColon(path))
+    {
+        if (error)
+        {
+            *error = L"path uses an alternate data stream or device-style filename, not an INI file";
+        }
+        SetLastError(ERROR_INVALID_NAME);
         return false;
     }
 

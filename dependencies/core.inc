@@ -272,6 +272,8 @@ inline bool TryWideToUtf8(const std::wstring& value, std::string& result)
     return true;
 }
 
+// Convenience wrapper for diagnostics/optional text. Use TryWideToUtf8 when
+// empty output and conversion failure must be distinguished.
 inline std::string WideToUtf8(const std::wstring& value)
 {
     std::string result;
@@ -358,6 +360,8 @@ inline bool TryUtf8ToWide(const std::string& value, std::wstring& result)
     return true;
 }
 
+// Convenience wrapper for diagnostics/optional text. Use TryUtf8ToWide when
+// empty output and conversion failure must be distinguished.
 inline std::wstring Utf8ToWide(const std::string& value)
 {
     std::wstring result;
@@ -602,6 +606,126 @@ inline size_t JsonStringEnd(const std::string& json, size_t quote)
     return std::string::npos;
 }
 
+
+inline bool JsonIsWhitespace(char ch)
+{
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+}
+
+inline bool JsonIsDigit(char ch)
+{
+    return ch >= '0' && ch <= '9';
+}
+
+inline bool JsonIsNonZeroDigit(char ch)
+{
+    return ch >= '1' && ch <= '9';
+}
+
+inline bool JsonNumberTokenEnd(const std::string& json, size_t start, size_t end, size_t& tokenEnd)
+{
+    tokenEnd = start;
+    if (tokenEnd < end && json[tokenEnd] == '-')
+    {
+        ++tokenEnd;
+    }
+
+    if (tokenEnd >= end)
+    {
+        return false;
+    }
+
+    if (json[tokenEnd] == '0')
+    {
+        ++tokenEnd;
+    }
+    else if (JsonIsNonZeroDigit(json[tokenEnd]))
+    {
+        while (tokenEnd < end && JsonIsDigit(json[tokenEnd]))
+        {
+            ++tokenEnd;
+        }
+    }
+    else
+    {
+        return false;
+    }
+
+    if (tokenEnd < end && json[tokenEnd] == '.')
+    {
+        ++tokenEnd;
+        if (tokenEnd >= end || !JsonIsDigit(json[tokenEnd]))
+        {
+            return false;
+        }
+        while (tokenEnd < end && JsonIsDigit(json[tokenEnd]))
+        {
+            ++tokenEnd;
+        }
+    }
+
+    if (tokenEnd < end && (json[tokenEnd] == 'e' || json[tokenEnd] == 'E'))
+    {
+        ++tokenEnd;
+        if (tokenEnd < end && (json[tokenEnd] == '+' || json[tokenEnd] == '-'))
+        {
+            ++tokenEnd;
+        }
+        if (tokenEnd >= end || !JsonIsDigit(json[tokenEnd]))
+        {
+            return false;
+        }
+        while (tokenEnd < end && JsonIsDigit(json[tokenEnd]))
+        {
+            ++tokenEnd;
+        }
+    }
+
+    return true;
+}
+
+inline bool JsonPrimitiveTokenIsValid(const std::string& json, size_t tokenStart, size_t tokenEnd)
+{
+    if (tokenStart == tokenEnd)
+    {
+        return false;
+    }
+
+    size_t tokenLength = tokenEnd - tokenStart;
+    if ((tokenLength == 4 && json.compare(tokenStart, tokenLength, "true") == 0) ||
+        (tokenLength == 4 && json.compare(tokenStart, tokenLength, "null") == 0) ||
+        (tokenLength == 5 && json.compare(tokenStart, tokenLength, "false") == 0))
+    {
+        return true;
+    }
+
+    size_t numberEnd = tokenStart;
+    return JsonNumberTokenEnd(json, tokenStart, tokenEnd, numberEnd) && numberEnd == tokenEnd;
+}
+
+inline size_t JsonPrimitiveValueEnd(const std::string& json, size_t start)
+{
+    size_t rawEnd = start;
+    while (rawEnd < json.size() && json[rawEnd] != ',' && json[rawEnd] != '}' && json[rawEnd] != ']')
+    {
+        ++rawEnd;
+    }
+
+    size_t tokenStart = start;
+    while (tokenStart < rawEnd && JsonIsWhitespace(json[tokenStart]))
+    {
+        ++tokenStart;
+    }
+
+    size_t tokenEnd = rawEnd;
+    while (tokenEnd > tokenStart && JsonIsWhitespace(json[tokenEnd - 1]))
+    {
+        --tokenEnd;
+    }
+
+    return JsonPrimitiveTokenIsValid(json, tokenStart, tokenEnd) ? rawEnd : std::string::npos;
+}
+
 inline size_t JsonValueEnd(const std::string& json, size_t start)
 {
     if (start >= json.size())
@@ -672,12 +796,7 @@ inline size_t JsonValueEnd(const std::string& json, size_t start)
         return std::string::npos;
     }
 
-    size_t end = start;
-    while (end < json.size() && json[end] != ',' && json[end] != '}' && json[end] != ']')
-    {
-        ++end;
-    }
-    return end;
+    return JsonPrimitiveValueEnd(json, start);
 }
 
 inline bool DecodeJsonStringUtf8Range(const std::string& json, size_t valueStart, size_t valueEnd, std::string& value)
@@ -760,6 +879,8 @@ inline bool DecodeJsonStringUtf8Range(const std::string& json, size_t valueStart
     return true;
 }
 
+// Lightweight top-level object field scanner. It validates skipped values enough
+// to avoid walking through malformed JSON and returns the first matching key.
 inline bool FindJsonFieldValue(const std::string& json, const char* key, size_t& keyPos, size_t& valueStart, size_t& valueEnd)
 {
     keyPos = std::string::npos;
