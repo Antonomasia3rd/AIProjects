@@ -264,6 +264,12 @@ static class RepoTools
                 RegexOptions.Singleline))
             throw new InvalidOperationException("Automatic releases must remain retargeted drafts until every asset upload succeeds.");
 
+        if (!repoTools.Contains("RunRequiredWithRetry(\"gh\", \"release upload "))
+            throw new InvalidOperationException("Automatic release uploads must retry transient GitHub/GH API failures.");
+
+        if (!repoTools.Contains("RunCaptureRequiredWithRetry(") || !repoTools.Contains("release list --repo "))
+            throw new InvalidOperationException("Automatic release listing must retry transient GitHub/GH API failures.");
+
         if (!repoTools.Contains("Release-pending projects also selected for build:"))
             throw new InvalidOperationException("Project selection must build release-pending projects so follow-up CI fixes do not skip previously changed consumers.");
 
@@ -1443,7 +1449,7 @@ static class RepoTools
                 {
                     if (existingRelease != null)
                     {
-                        RunRequired("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft --target " + QuoteArg(fullSha) + " --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root);
+                        RunRequiredWithRetry("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft --target " + QuoteArg(fullSha) + " --title " + QuoteArg(tag) + " --notes-file " + QuoteArg(notesPath), root, 120000, 3);
                     }
                     else
                     {
@@ -1451,8 +1457,8 @@ static class RepoTools
                         createdDraft = true;
                     }
 
-                    RunRequired("gh", "release upload " + QuoteArg(tag) + " " + JoinArgs(releaseAssets.ToArray()) + " --repo " + QuoteArg(repository) + " --clobber", root);
-                    RunRequired("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft=false", root);
+                    RunRequiredWithRetry("gh", "release upload " + QuoteArg(tag) + " " + JoinArgs(releaseAssets.ToArray()) + " --repo " + QuoteArg(repository) + " --clobber", root, 120000, 4);
+                    RunRequiredWithRetry("gh", "release edit " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --draft=false", root, 120000, 3);
                 }
                 catch
                 {
@@ -1484,10 +1490,12 @@ static class RepoTools
 
     static List<GitHubReleaseInfo> ListGitHubReleases(string repository, string root)
     {
-        string json = RunCaptureRequired(
+        string json = RunCaptureRequiredWithRetry(
             "gh",
             "release list --repo " + QuoteArg(repository) + " --limit 1000 --json tagName,isDraft",
-            root);
+            root,
+            120000,
+            3);
         var serializer = new JavaScriptSerializer();
         return serializer.Deserialize<List<GitHubReleaseInfo>>(json) ?? new List<GitHubReleaseInfo>();
     }
@@ -1670,7 +1678,13 @@ static class RepoTools
     {
         var result = RunCapture(file, arguments, workingDirectory, 120000);
         if (result.ExitCode != 0)
-            throw new InvalidOperationException(file + " " + arguments + " failed with exit code " + result.ExitCode + Environment.NewLine + result.Output + Environment.NewLine + result.Error);
+            throw new InvalidOperationException(ProcessFailureMessage(file, arguments, result));
+        return result.Output;
+    }
+
+    static string RunCaptureRequiredWithRetry(string file, string arguments, string workingDirectory, int timeoutMs, int maxAttempts)
+    {
+        ProcessResult result = RunWithRetry(file, arguments, workingDirectory, timeoutMs, maxAttempts, false);
         return result.Output;
     }
 
@@ -1678,7 +1692,70 @@ static class RepoTools
     {
         var result = RunCapture(file, arguments, workingDirectory, 120000);
         if (result.ExitCode != 0)
-            throw new InvalidOperationException(file + " " + arguments + " failed with exit code " + result.ExitCode + Environment.NewLine + result.Output + Environment.NewLine + result.Error);
+            throw new InvalidOperationException(ProcessFailureMessage(file, arguments, result));
+        PrintProcessOutput(result);
+    }
+
+    static void RunRequiredWithRetry(string file, string arguments, string workingDirectory, int timeoutMs, int maxAttempts)
+    {
+        ProcessResult result = RunWithRetry(file, arguments, workingDirectory, timeoutMs, maxAttempts, true);
+        PrintProcessOutput(result);
+    }
+
+    static ProcessResult RunWithRetry(string file, string arguments, string workingDirectory, int timeoutMs, int maxAttempts, bool printRetryWarnings)
+    {
+        if (maxAttempts < 1)
+            maxAttempts = 1;
+
+        ProcessResult result = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            result = RunCapture(file, arguments, workingDirectory, timeoutMs);
+            if (result.ExitCode == 0)
+                return result;
+
+            if (attempt >= maxAttempts || !IsRetryableProcessFailure(file, arguments, result))
+                break;
+
+            int delayMs = Math.Min(30000, 2000 * attempt);
+            if (printRetryWarnings)
+            {
+                Console.Error.WriteLine(
+                    "WARNING: transient command failure; retrying attempt " +
+                    (attempt + 1).ToString() + "/" + maxAttempts.ToString() +
+                    " after " + delayMs.ToString() + " ms: " + file + " " + arguments);
+            }
+            System.Threading.Thread.Sleep(delayMs);
+        }
+
+        throw new InvalidOperationException(ProcessFailureMessage(file, arguments, result));
+    }
+
+    static bool IsRetryableProcessFailure(string file, string arguments, ProcessResult result)
+    {
+        if (result == null)
+            return false;
+        if (!Path.GetFileNameWithoutExtension(file).Equals("gh", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!Regex.IsMatch(arguments ?? "", @"(^|\s)release\s+(list|edit|upload)\b", RegexOptions.IgnoreCase))
+            return false;
+
+        string text = (result.Output ?? "") + "\n" + (result.Error ?? "");
+        return Regex.IsMatch(
+            text,
+            @"(We had issues producing the response|GitHub Status|HTTP\s+5\d\d|5\d\d\s+(Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|temporarily unavailable|connection (reset|refused)|TLS handshake timeout|timed? out|EOF)",
+            RegexOptions.IgnoreCase);
+    }
+
+    static string ProcessFailureMessage(string file, string arguments, ProcessResult result)
+    {
+        if (result == null)
+            return file + " " + arguments + " failed without process result.";
+        return file + " " + arguments + " failed with exit code " + result.ExitCode + Environment.NewLine + result.Output + Environment.NewLine + result.Error;
+    }
+
+    static void PrintProcessOutput(ProcessResult result)
+    {
         if (!String.IsNullOrWhiteSpace(result.Output))
             Console.Write(result.Output);
         if (!String.IsNullOrWhiteSpace(result.Error))
