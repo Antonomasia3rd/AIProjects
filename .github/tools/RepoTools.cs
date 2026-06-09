@@ -264,6 +264,9 @@ static class RepoTools
                 RegexOptions.Singleline))
             throw new InvalidOperationException("Automatic releases must remain retargeted drafts until every asset upload succeeds.");
 
+        if (!repoTools.Contains("Release-pending projects also selected for build:"))
+            throw new InvalidOperationException("Project selection must build release-pending projects so follow-up CI fixes do not skip previously changed consumers.");
+
         var releaseNames = new[] { "DesktopStub-v2", "DesktopStub-v5", "DesktopStub-v4" };
         if (NextReleaseTag("DesktopStub", releaseNames) != "DesktopStub-v6")
             throw new InvalidOperationException("Release version selection must include draft release names.");
@@ -582,6 +585,24 @@ static class RepoTools
 
         if (forceAll)
             selected = projects.ToList();
+        else if (releaseSelected.Count > 0)
+        {
+            var selectedKeysForRelease = new HashSet<string>(selected.Select(p => p.key), StringComparer.OrdinalIgnoreCase);
+            var addedReleaseProjects = new List<Project>();
+            foreach (var project in releaseSelected)
+            {
+                if (selectedKeysForRelease.Add(project.key))
+                {
+                    selected.Add(project);
+                    addedReleaseProjects.Add(project);
+                }
+            }
+            if (addedReleaseProjects.Count > 0)
+            {
+                Console.WriteLine("Release-pending projects also selected for build: " +
+                    String.Join(", ", addedReleaseProjects.Select(p => p.label)));
+            }
+        }
 
         var selectedKeys = new HashSet<string>(selected.Select(p => p.key), StringComparer.OrdinalIgnoreCase);
         releaseSelected = releaseSelected

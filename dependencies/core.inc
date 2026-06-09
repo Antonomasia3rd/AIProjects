@@ -491,6 +491,10 @@ inline size_t JsonStringEnd(const std::string& json, size_t quote)
         {
             escaped = true;
         }
+        else if (static_cast<unsigned char>(ch) < 0x20)
+        {
+            return std::string::npos;
+        }
         else if (ch == '"')
         {
             return i + 1;
@@ -529,6 +533,10 @@ inline size_t JsonValueEnd(const std::string& json, size_t start)
                 else if (ch == '\\')
                 {
                     escaped = true;
+                }
+                else if (static_cast<unsigned char>(ch) < 0x20)
+                {
+                    return std::string::npos;
                 }
                 else if (ch == '"')
                 {

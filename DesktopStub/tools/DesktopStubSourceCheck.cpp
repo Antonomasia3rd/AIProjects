@@ -814,6 +814,7 @@ int main(int argc, char** argv)
                 "ProductRuntimeBaseName() + L\"LiveTileBrokerActivationLogMutex\"",
                 "CreateMutexW",
                 "WaitForSingleObject",
+                "if (logMutex != nullptr && !logLocked)",
                 "ReleaseMutex"
             },
             "packaged broker activation logging must use checked UTF-8 conversion, looped writes, and a product-scoped cross-process mutex instead of silent conversion loss or partial/racing WriteFile calls");
@@ -851,6 +852,7 @@ int main(int argc, char** argv)
             liveTile + "\n" + brokerApp + "\n" + backgroundTask,
             {
                 "MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS",
+                "ReadAllBytes(HANDLE h, std::string& bytes)",
                 "if (written != need)",
                 "if (written != needed)"
             },

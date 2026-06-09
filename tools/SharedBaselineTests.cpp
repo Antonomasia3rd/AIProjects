@@ -293,9 +293,8 @@ static void TestJsonBehavior()
 
     const std::string rawControlJson = "{\"bad\":\"line\nfeed\"}";
     Check(
-        aip::FindJsonFieldValue(rawControlJson, "bad", keyPos, valueStart, valueEnd) &&
-            !aip::DecodeJsonStringRange(rawControlJson, valueStart, valueEnd, invalidJsonText),
-        "JSON string decoding rejects unescaped control characters");
+        !aip::FindJsonFieldValue(rawControlJson, "bad", keyPos, valueStart, valueEnd),
+        "JSON string scanning rejects unescaped control characters");
 }
 
 static void TestDpapiBehavior()

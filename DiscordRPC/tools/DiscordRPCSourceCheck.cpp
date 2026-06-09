@@ -430,6 +430,11 @@ int main()
             presence,
             "GetCachedApplyPatternOnRaw");
         RequireContains(
+            "DiscordRPC pattern-on-raw matching preserves earlier censor stages",
+            "src\\drpc_presence.inc",
+            presence,
+            "if (applyPatternOnRaw && !std::regex_search(rawTitle, rule.pattern))");
+        RequireContains(
             "DiscordRPC reports unknown censor rule-order tokens only when config changes",
             "src\\drpc_presence.inc",
             presence,
