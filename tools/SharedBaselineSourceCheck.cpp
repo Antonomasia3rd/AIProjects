@@ -274,10 +274,15 @@ int main()
             sharedCore,
             "TryUtf8ToWide");
         RequireContains(
+            "shared config decoder verifies exact second decode length",
+            "dependencies/config_ini.inc",
+            configIni,
+            "if (written != need)");
+        RequireContains(
             "shared JSON decoding rejects invalid UTF-8",
             "dependencies/core.inc",
             sharedCore,
-            "return TryUtf8ToWide(out, value);");
+            "return TryUtf8ToWide(utf8, value);");
         RequireContains(
             "shared JSON decoding rejects raw control characters",
             "dependencies/core.inc",
@@ -288,6 +293,16 @@ int main()
             "dependencies/core.inc",
             sharedCore,
             "static_cast<unsigned char>(ch) < 0x20");
+        RequireContains(
+            "shared JSON string scanner rejects invalid escapes",
+            "dependencies/core.inc",
+            sharedCore,
+            "JsonEscapeEnd(json, i, next)");
+        RequireContains(
+            "shared JSON lookup decodes object keys",
+            "dependencies/core.inc",
+            sharedCore,
+            "DecodeJsonStringUtf8Range(json, pos, stringEnd, decodedKey)");
         RequireContains(
             "shared core exposes looped file writes",
             "dependencies/core.inc",
@@ -435,6 +450,16 @@ int main()
             dpapi,
             "TryUtf8ToWide(utf8, result)");
         RequireContains(
+            "shared DPAPI protect handles empty plaintext buffers explicitly",
+            "dependencies/dpapi.inc",
+            dpapi,
+            "plain.pbData = utf8.empty() ? nullptr");
+        RequireContains(
+            "shared DPAPI protect guards empty encrypted buffers",
+            "dependencies/dpapi.inc",
+            dpapi,
+            "if (cipher.cbData != 0)");
+        RequireContains(
             "shared DPAPI helper handles empty decrypted buffers safely",
             "dependencies/dpapi.inc",
             dpapi,
@@ -465,6 +490,16 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "JSON string scanning rejects unescaped control characters");
+        RequireContains(
+            "shared tests cover invalid JSON escape rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "JSON string scanning rejects invalid escape sequences");
+        RequireContains(
+            "shared tests cover escaped JSON object keys",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "JSON lookup decodes escaped object keys");
         RequireContains(
             "shared tests cover DPAPI invalid UTF-16 rejection",
             "tools/SharedBaselineTests.cpp",

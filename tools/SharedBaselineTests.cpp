@@ -265,6 +265,8 @@ static void TestJsonBehavior()
     const std::string json = "{\"nested\":{\"target\":\"wrong\"},\"target\":\"right\",\"unicode\":\"A\\u00e9\"}";
     Check(aip::ExtractJsonStringValue(json, "target") == L"right", "JSON lookup stays in the current object");
     Check(aip::ExtractJsonStringValue(json, "unicode") == L"A\u00e9", "JSON string decoding handles Unicode escapes");
+    Check(aip::ExtractJsonStringValue("{\"application\\u005fid\":\"ok\"}", "application_id") == L"ok",
+        "JSON lookup decodes escaped object keys");
 
     size_t keyPos = 0;
     size_t valueStart = 0;
@@ -295,6 +297,11 @@ static void TestJsonBehavior()
     Check(
         !aip::FindJsonFieldValue(rawControlJson, "bad", keyPos, valueStart, valueEnd),
         "JSON string scanning rejects unescaped control characters");
+
+    const std::string invalidEscapeJson = "{\"bad\":\"bad\\qescape\"}";
+    Check(
+        !aip::FindJsonFieldValue(invalidEscapeJson, "bad", keyPos, valueStart, valueEnd),
+        "JSON string scanning rejects invalid escape sequences");
 }
 
 static void TestDpapiBehavior()

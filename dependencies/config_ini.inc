@@ -168,7 +168,13 @@ inline bool DecodeCodePageText(UINT codePage, const BYTE* data, size_t size, std
     }
 
     out.resize(static_cast<size_t>(need));
-    return MultiByteToWideChar(codePage, flags, reinterpret_cast<LPCCH>(data), static_cast<int>(size), out.data(), need) > 0;
+    int written = MultiByteToWideChar(codePage, flags, reinterpret_cast<LPCCH>(data), static_cast<int>(size), out.data(), need);
+    if (written != need)
+    {
+        out.clear();
+        return false;
+    }
+    return true;
 }
 
 inline bool DecodeTextBytes(const std::vector<BYTE>& bytes, std::wstring& out)

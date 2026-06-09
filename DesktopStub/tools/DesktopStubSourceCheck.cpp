@@ -837,6 +837,17 @@ int main(int argc, char** argv)
             },
             "DesktopStub-local UTF-8 text writes must use the shared checked converter instead of a weaker WideCharToMultiByte(CP_UTF8, 0) duplicate");
         AssertContainsAll(
+            "DesktopStub local code-page decoder verifies exact second decode length",
+            "src\\ga_core.inc",
+            core,
+            {
+                "DecodeCodePageText",
+                "int written = MultiByteToWideChar",
+                "if (written != need)",
+                "out.clear()"
+            },
+            "DesktopStub local process-output decoding must not ignore a failed or short second MultiByteToWideChar call");
+        AssertContainsAll(
             "Live Tile URI path encoding uses shared checked UTF-8 conversion",
             "src\\ga_live_tile.inc",
             liveTile,
