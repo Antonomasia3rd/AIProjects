@@ -809,6 +809,15 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--ini-write-lock-wait-ms", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            if (!AddCommandLineClampedIntSetting(L"Settings", L"IniWriteLockWaitMs", L"--ini-write-lock-wait-ms", value, 0, 60000, error))
+                return fail(error);
+            continue;
+        }
+
         if (IEquals(arg, L"--compact-crt-heap-on-idle"))
         {
             AddCommandLineBoolSetting(L"Settings", L"CompactCrtHeapOnIdle", true);

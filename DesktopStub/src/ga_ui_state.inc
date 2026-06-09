@@ -576,6 +576,7 @@ struct UiStrings
     std::wstring debounceMinMsLabel;
     std::wstring pollInitialDebounceBypassMsLabel;
     std::wstring iniCacheRefreshMsLabel;
+    std::wstring iniWriteLockWaitMsLabel;
     std::wstring wallpaperDetectionLogRepeatMsLabel;
     std::wstring notificationTimeoutMsLabel;
     std::wstring shutdownInitialNoticeMsLabel;

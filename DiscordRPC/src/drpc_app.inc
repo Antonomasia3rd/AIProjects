@@ -93,6 +93,13 @@ static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::uniqu
     auto updateGateway = [&]() -> int
     {
         ipc.reset();
+        if (!IniReadB(L"gateway", L"supported", true))
+        {
+            std::wstring message = L"Discord Gateway transport is disabled by [gateway] supported.";
+            LogError(message);
+            Notify(ctx, L"notification_gateway_unsupported", message.c_str(), NIIF_WARNING, L"notify_on_failure");
+            return 2;
+        }
         std::wstring token = ResolveDiscordToken();
         if (token.empty())
         {
@@ -335,6 +342,8 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
 
 static int RunApplication(const AppOptions& options)
 {
+    ConfigureSingleInstanceIdentity();
+
     if (options.requestExit)
     {
         return SignalExistingInstanceToExit() ? 0 : 2;

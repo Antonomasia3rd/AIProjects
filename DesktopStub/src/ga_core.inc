@@ -642,9 +642,9 @@ static steady_clock::time_point g_iniCacheLastCheck{};
 class DesktopStubIniMutationGuard
 {
 public:
-    DesktopStubIniMutationGuard()
+    explicit DesktopStubIniMutationGuard(DWORD waitMs = INFINITE)
         : processLock_(g_iniWriteMutex),
-          sharedLock_(g_iniPath)
+          sharedLock_(g_iniPath, waitMs)
     {
         if (!sharedLock_.IsLocked())
             SetLastError(sharedLock_.Error());
@@ -787,9 +787,9 @@ static bool WriteIniValueToText(std::wstring& text, const wchar_t* s, const wcha
     return aip::WriteIniValueToText(text, s, k, v ? v : L"");
 }
 
-static bool WriteIniValue(const wchar_t* s, const wchar_t* k, const wchar_t* v)
+static bool WriteIniValueWithWait(const wchar_t* s, const wchar_t* k, const wchar_t* v, DWORD writeMutexWaitMs)
 {
-    DesktopStubIniMutationGuard writeLock;
+    DesktopStubIniMutationGuard writeLock(writeMutexWaitMs);
     if (!writeLock.IsLocked())
         return false;
 
@@ -808,6 +808,12 @@ static bool WriteIniValue(const wchar_t* s, const wchar_t* k, const wchar_t* v)
         SetIniCacheUnlocked(text);
     }
     return true;
+}
+
+static bool WriteIniValue(const wchar_t* s, const wchar_t* k, const wchar_t* v)
+{
+    DWORD waitMs = static_cast<DWORD>(ClampInt(g_iniWriteLockWaitMs.load(), 0, 60000));
+    return WriteIniValueWithWait(s, k, v, waitMs);
 }
 
 struct IniDefault {

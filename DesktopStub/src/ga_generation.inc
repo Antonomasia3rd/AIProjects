@@ -2483,10 +2483,10 @@ static void RecordForceShutdownPendingCleanup()
     std::wstring skipped = ForceShutdownSkippedCleanupSummary();
     std::wstring downside = ForceShutdownCleanupDownsideSummary();
 
-    IniWrite(L"State", L"ForceShutdownPendingCleanup", L"1");
-    IniWrite(L"State", L"ForceShutdownReason", reason.c_str());
-    IniWrite(L"State", L"ForceShutdownSkippedCleanup", skipped.c_str());
-    IniWrite(L"State", L"ForceShutdownDownside", downside.c_str());
+    WriteIniValueWithWait(L"State", L"ForceShutdownPendingCleanup", L"1", 250);
+    WriteIniValueWithWait(L"State", L"ForceShutdownReason", reason.c_str(), 250);
+    WriteIniValueWithWait(L"State", L"ForceShutdownSkippedCleanup", skipped.c_str(), 250);
+    WriteIniValueWithWait(L"State", L"ForceShutdownDownside", downside.c_str(), 250);
 }
 
 static bool ConsumePreviousForceShutdownCleanupWarning(std::wstring& warning)

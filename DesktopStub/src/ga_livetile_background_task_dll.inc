@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cwctype>
+#include <climits>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.ApplicationModel.Background.h>
@@ -159,41 +160,86 @@ static std::wstring NowStamp()
     return buf;
 }
 
-static std::string WideToUtf8(const std::wstring& text)
+static bool TryWideToUtf8(const std::wstring& text, std::string& out)
 {
+    out.clear();
     if (text.empty())
-        return std::string();
-    int need = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+        return true;
+    if (text.size() > static_cast<size_t>(INT_MAX))
+    {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return false;
+    }
+
+    int inputLength = static_cast<int>(text.size());
+    int need = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.c_str(), inputLength, nullptr, 0, nullptr, nullptr);
     if (need <= 0)
-        return std::string();
-    std::string out(static_cast<size_t>(need), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), &out[0], need, nullptr, nullptr);
-    return out;
+    {
+        DWORD err = GetLastError();
+        SetLastError(err == ERROR_SUCCESS ? ERROR_NO_UNICODE_TRANSLATION : err);
+        return false;
+    }
+
+    out.assign(static_cast<size_t>(need), '\0');
+    int written = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.c_str(), inputLength, out.data(), need, nullptr, nullptr);
+    if (written != need)
+    {
+        DWORD err = GetLastError();
+        SetLastError(err == ERROR_SUCCESS ? ERROR_NO_UNICODE_TRANSLATION : err);
+        out.clear();
+        return false;
+    }
+    return true;
+}
+
+static bool WriteAllBytes(HANDLE h, const void* data, DWORD size)
+{
+    const BYTE* cursor = static_cast<const BYTE*>(data);
+    DWORD remaining = size;
+    while (remaining > 0)
+    {
+        DWORD written = 0;
+        if (!WriteFile(h, cursor, remaining, &written, nullptr) || written == 0)
+            return false;
+        cursor += written;
+        remaining -= written;
+    }
+    return true;
 }
 
 static void AppendActivationLog(const std::wstring& message)
 {
     std::wstring line = L"[" + NowStamp() + L"] pid=" + std::to_wstring(GetCurrentProcessId()) + L" " + message + L"\r\n";
-    std::string bytes = WideToUtf8(line);
-    if (bytes.empty())
+    std::string bytes;
+    if (!TryWideToUtf8(line, bytes) || bytes.empty())
         return;
 
     std::wstring path = ActivationLogPath();
-    HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE)
         return;
 
     LARGE_INTEGER size{};
-    if (GetFileSizeEx(h, &size) && size.QuadPart == 0)
+    bool ok = true;
+    if (!GetFileSizeEx(h, &size))
     {
-        static const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
-        DWORD written = 0;
-        WriteFile(h, bom, sizeof(bom), &written, nullptr);
+        ok = false;
     }
-
-    DWORD written = 0;
-    WriteFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
+    else
+    {
+        LARGE_INTEGER eof{};
+        eof.QuadPart = 0;
+        ok = SetFilePointerEx(h, eof, nullptr, FILE_END) != FALSE;
+        if (ok && size.QuadPart == 0)
+        {
+            static const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+            ok = WriteAllBytes(h, bom, static_cast<DWORD>(sizeof(bom)));
+        }
+        if (ok)
+            ok = WriteAllBytes(h, bytes.data(), static_cast<DWORD>(bytes.size()));
+    }
+    (void)ok;
     CloseHandle(h);
 }
 

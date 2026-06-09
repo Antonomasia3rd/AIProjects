@@ -250,8 +250,10 @@ static void TestCommandLineBehavior()
         aip::ParseIntValueInRange(L" 5000 ", 0, 60000, intValue) &&
             intValue == 5000 &&
             !aip::ParseIntValue(L"12abc", intValue) &&
+            !aip::ParseIntValue(L"999999999999999999999999", intValue) &&
+            !aip::ParseIntValue(L"-999999999999999999999999", intValue) &&
             !aip::ParseIntValueInRange(L"60001", 0, 60000, intValue),
-        "command-line integer parser rejects junk and out-of-range values");
+        "command-line integer parser rejects junk, overflow, and out-of-range values");
 }
 
 static void TestJsonBehavior()

@@ -324,6 +324,7 @@ static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
     g_trayIconHiddenDelayMs = IniReadClampedI(L"Settings", L"TrayIconHiddenDelayMs", 750, 0, 10000);
     g_logBufferLines = IniReadClampedI(L"Settings", L"LogBufferLines", 128, 1, 100000);
     g_logAppendLockWaitMs = IniReadClampedI(L"Settings", L"LogAppendLockWaitMs", 1000, 0, 60000);
+    g_iniWriteLockWaitMs = IniReadClampedI(L"Settings", L"IniWriteLockWaitMs", 5000, 0, 60000);
     g_trimWorkingSetOnIdle = IniReadI(L"Settings", L"TrimWorkingSetOnIdle", 1) != 0;
     g_compactCrtHeapOnIdle = IniReadI(L"Settings", L"CompactCrtHeapOnIdle", 1) != 0;
     g_keepGdiPlusLoaded = IniReadI(L"Settings", L"KeepGdiPlusLoaded", 0) != 0;

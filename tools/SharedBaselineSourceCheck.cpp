@@ -157,6 +157,16 @@ int main()
             commandLine,
             "ParseIntValueInRange");
         RequireContains(
+            "shared command-line integer parser checks overflow",
+            "dependencies/command_line.inc",
+            commandLine,
+            "errno == ERANGE");
+        RequireContains(
+            "shared command-line integer parser uses wide long long parsing",
+            "dependencies/command_line.inc",
+            commandLine,
+            "wcstoll");
+        RequireContains(
             "shared tray dependency provides baseline menu primitives",
             "dependencies/tray.inc",
             tray,
@@ -373,6 +383,11 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "INI write mutex supports bounded waits");
+        RequireContains(
+            "shared tests cover strict integer overflow rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "integer parser rejects junk, overflow, and out-of-range values");
         RequireContains(
             "shared tests cover UTF-8 conversion failure",
             "tools/SharedBaselineTests.cpp",

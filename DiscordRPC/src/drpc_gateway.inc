@@ -785,6 +785,11 @@ private:
         size_t valueEnd = 0;
         if (!FindJsonFieldValue(activity, "application_id", keyPos, valueStart, valueEnd))
         {
+            if (activity.empty() || activity.front() != '{')
+            {
+                LogError(L"Gateway activity JSON was not an object; rebuilding a minimal activity object.");
+                activity = "{}";
+            }
             activity.insert(1, "\"application_id\":" + JsonEscape(clientId_) + ",");
         }
         return activity;

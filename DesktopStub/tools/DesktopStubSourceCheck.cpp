@@ -701,6 +701,26 @@ int main(int argc, char** argv)
             },
             "DesktopStub should document that copied baseline projects remain product-scoped even when an explicit --ini is shared");
         AssertContainsAll(
+            "DesktopStub uses bounded shared INI write waits",
+            "INI write sources",
+            desktopStub + "\n" + defaults + "\n" + core,
+            {
+                "g_iniWriteLockWaitMs",
+                "L\"IniWriteLockWaitMs\", L\"5000\"",
+                "sharedLock_(g_iniPath, waitMs)",
+                "WriteIniValueWithWait"
+            },
+            "DesktopStub INI writes should use the shared bounded mutex wait so tray/CLI writes cannot hang forever on a wedged writer");
+        AssertContainsAll(
+            "DesktopStub force shutdown records cleanup best-effort",
+            "src\\ga_generation.inc",
+            generation,
+            {
+                "WriteIniValueWithWait(L\"State\", L\"ForceShutdownPendingCleanup\", L\"1\", 250)",
+                "ExitProcess(0)"
+            },
+            "Force shutdown must not wait forever on the INI write mutex before reaching ExitProcess");
+        AssertContainsAll(
             "Build script quotes configurable output paths",
             "BuildDesktopStub.cmd",
             buildScript,
@@ -764,6 +784,17 @@ int main(int argc, char** argv)
                 "return ProductManifestToken() + L\".LiveTileBackgroundTask\";"
             },
             "experimental background task manifest entries must only be advertised when the setting is enabled and the DLL exists, and its fallback class id must be product-scoped");
+        AssertContainsAll(
+            "Live Tile background task logging is hardened",
+            "src\\ga_livetile_background_task_dll.inc",
+            backgroundTask,
+            {
+                "TryWideToUtf8",
+                "WC_ERR_INVALID_CHARS",
+                "WriteAllBytes",
+                "SetFilePointerEx(h, eof, nullptr, FILE_END)"
+            },
+            "background-task activation logging must use checked UTF-8 conversion and looped writes instead of silent conversion loss or partial WriteFile calls");
         AssertContainsAll(
             "--once survives Live Tile runtime relaunch",
             "src\\ga_app.inc",

@@ -100,6 +100,7 @@ static bool TryParseIntStrict(const std::wstring& value, int& parsed);
 static std::wstring g_iniPath, g_logPath, g_exePath;
 static std::mutex g_pathMutex;
 static std::atomic<int> g_logAppendLockWaitMs(1000);
+static std::atomic<int> g_iniWriteLockWaitMs(5000);
 static constexpr const wchar_t* WINDOW_CLASS_NAME = L"DesktopStubTrayWnd";
 static constexpr const wchar_t* COM_REGISTRATION_HELPER_ARG = L"--ds-com-register";
 static constexpr const wchar_t* COM_REGISTRATION_HELPER_ARG_LEGACY = L"--ga-com-register";
