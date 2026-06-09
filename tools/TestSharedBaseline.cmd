@@ -42,7 +42,7 @@ if errorlevel 1 (
     exit /b %ERRORLEVEL%
 )
 
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\SharedBaselineTests.cpp /Fe:build\SharedBaselineTests.exe /Fo:build\SharedBaselineTests.obj /link user32.lib shell32.lib /SUBSYSTEM:CONSOLE
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\SharedBaselineTests.cpp /Fe:build\SharedBaselineTests.exe /Fo:build\SharedBaselineTests.obj /link user32.lib shell32.lib crypt32.lib /SUBSYSTEM:CONSOLE
 if errorlevel 1 (
     set "STATUS=%ERRORLEVEL%"
     popd

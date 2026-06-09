@@ -169,6 +169,21 @@ int main()
             discordMain + "\n" + defaults,
             "DefaultHelpText");
         RequireContains(
+            "DiscordRPC help documents resident exit",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "--exit");
+        RequireContains(
+            "DiscordRPC help documents advanced logging toggles",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "--logging / --no-logging");
+        RequireContains(
+            "DiscordRPC help documents strict boolean setting helper",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "--bool Section.Key=Value");
+        RequireContains(
             "DiscordRPC registers taskbar recreation message",
             "DiscordRPC app/tray sources",
             app + "\n" + tray,
@@ -188,6 +203,11 @@ int main()
             "src\\drpc_command_line.inc",
             commandLine,
             "ResolveCommandLineConfigPath(arg, L\"positional config path\"");
+        RequireContains(
+            "DiscordRPC rejects directory config paths early",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "aip::TryResolveConfigFilePath(rawPath, resolvedPath, &pathError)");
         RequireNotContains(
             "DiscordRPC removes environment-backed token CLI",
             "src\\drpc_command_line.inc",
@@ -353,12 +373,27 @@ int main()
             "DiscordRPC implements configured censor rule order",
             "src\\drpc_presence.inc",
             presence,
-            "ParseCensorRuleOrder(IniReadS(L\"censor_map\", L\"rule_order\"");
+            "GetCachedCensorRuleOrder(IniReadS(L\"censor_map\", L\"rule_order\"");
         RequireContains(
-            "DiscordRPC implements pattern-on-raw censor option",
+            "DiscordRPC caches full replacement censor rules",
             "src\\drpc_presence.inc",
             presence,
-            "IniReadB(L\"censor_map\", L\"apply_pattern_on_raw\", false)");
+            "GetCachedFullCensorRules");
+        RequireContains(
+            "DiscordRPC caches word replacement censor rules",
+            "src\\drpc_presence.inc",
+            presence,
+            "GetCachedWordCensorRules");
+        RequireContains(
+            "DiscordRPC caches pattern-on-raw censor option",
+            "src\\drpc_presence.inc",
+            presence,
+            "GetCachedApplyPatternOnRaw");
+        RequireContains(
+            "DiscordRPC reports unknown censor rule-order tokens only when config changes",
+            "src\\drpc_presence.inc",
+            presence,
+            "if (rawOrder != g_cachedRuleOrderRaw)");
 
         std::cout << "DiscordRPC source checks passed (" << g_checks << " checks).\n";
         return 0;

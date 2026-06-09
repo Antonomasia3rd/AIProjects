@@ -991,7 +991,7 @@ static const StringDefault g_stringDefaults[] = {
 
 static void EnsureIniStringDefaults()
 {
-    DesktopStubIniMutationGuard writeLock;
+    DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
     if (!writeLock.IsLocked())
     {
         QueueStartupWarning(L"[!] Failed to lock INI while applying string defaults (error " + std::to_wstring(GetLastError()) + L").");
@@ -1100,7 +1100,7 @@ static std::wstring BuildInitialIniTemplate()
 
 static bool EnsureInitialIniTemplate()
 {
-    DesktopStubIniMutationGuard writeLock;
+    DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
     if (!writeLock.IsLocked())
         return false;
 
@@ -1149,7 +1149,7 @@ static void UpgradeStringDefaultIfUnmodified(const wchar_t* key, const wchar_t* 
 
 static void RepairBrokenPowerShellOutputTruncatedDefault()
 {
-    DesktopStubIniMutationGuard writeLock;
+    DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
     if (!writeLock.IsLocked())
         return;
 
@@ -1224,7 +1224,7 @@ static void RepairBrokenPowerShellOutputTruncatedDefault()
 
 static void RemoveObsoleteManifestIniSettings()
 {
-    DesktopStubIniMutationGuard writeLock;
+    DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
     if (!writeLock.IsLocked())
         return;
 

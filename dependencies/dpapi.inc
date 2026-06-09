@@ -12,7 +12,12 @@ inline bool IsDpapiProtectedValue(const std::wstring& value)
 
 inline std::wstring ProtectSecretForCurrentUser(const std::wstring& secret)
 {
-    std::string utf8 = WideToUtf8(secret);
+    std::string utf8;
+    if (!TryWideToUtf8(secret, utf8))
+    {
+        throw std::runtime_error("DPAPI protect failed: secret cannot be encoded as UTF-8.");
+    }
+
     DATA_BLOB plain = {};
     plain.pbData = reinterpret_cast<BYTE*>(utf8.data());
     plain.cbData = static_cast<DWORD>(utf8.size());
@@ -54,7 +59,13 @@ inline std::wstring UnprotectSecretForCurrentUser(const std::wstring& protectedV
 
     std::string utf8(reinterpret_cast<char*>(plain.pbData), reinterpret_cast<char*>(plain.pbData) + plain.cbData);
     LocalFree(plain.pbData);
-    return Utf8ToWide(utf8);
+
+    std::wstring result;
+    if (!TryUtf8ToWide(utf8, result))
+    {
+        throw std::runtime_error("DPAPI unprotect failed: decrypted value is not valid UTF-8.");
+    }
+    return result;
 }
 }
 

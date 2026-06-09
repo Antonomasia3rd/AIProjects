@@ -93,6 +93,7 @@ int main()
         const std::string commandLine = ReadAll("dependencies/command_line.inc");
         const std::string sharedCore = ReadAll("dependencies/core.inc");
         const std::string configIni = ReadAll("dependencies/config_ini.inc");
+        const std::string dpapi = ReadAll("dependencies/dpapi.inc");
         const std::string logging = ReadAll("dependencies/logging.inc");
         const std::string tray = ReadAll("dependencies/tray.inc");
         const std::string baselineHeader = ReadAll("dependencies/desktop_app_baseline.h");
@@ -223,6 +224,16 @@ int main()
             appPaths,
             "TryBuildSidecarPathsFromExecutable");
         RequireContains(
+            "app path helper validates configured INI file paths",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "TryResolveConfigFilePath");
+        RequireContains(
+            "app path helper rejects directory config paths",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "FILE_ATTRIBUTE_DIRECTORY");
+        RequireContains(
             "app path helper exposes executable-side log paths",
             "dependencies/app_paths.inc",
             appPaths,
@@ -242,6 +253,16 @@ int main()
             "dependencies/core.inc",
             sharedCore,
             "TryWideToUtf8");
+        RequireContains(
+            "shared core exposes checked UTF-8 decoding",
+            "dependencies/core.inc",
+            sharedCore,
+            "TryUtf8ToWide");
+        RequireContains(
+            "shared JSON decoding rejects invalid UTF-8",
+            "dependencies/core.inc",
+            sharedCore,
+            "return TryUtf8ToWide(out, value);");
         RequireContains(
             "shared core exposes looped file writes",
             "dependencies/core.inc",
@@ -379,6 +400,17 @@ int main()
             sharedTests,
             "INI parser preserves raw Windows path backslashes");
         RequireContains(
+            "shared DPAPI helper uses checked UTF-8 encoding",
+            "dependencies/dpapi.inc",
+            dpapi,
+            "TryWideToUtf8(secret, utf8)");
+        RequireContains(
+            "shared DPAPI helper rejects invalid decrypted UTF-8",
+            "dependencies/dpapi.inc",
+            dpapi,
+            "TryUtf8ToWide(utf8, result)");
+
+        RequireContains(
             "shared tests cover bounded INI waits",
             "tools/SharedBaselineTests.cpp",
             sharedTests,
@@ -388,6 +420,21 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "integer parser rejects junk, overflow, and out-of-range values");
+        RequireContains(
+            "shared tests cover directory config path rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "config path helper rejects existing directories");
+        RequireContains(
+            "shared tests cover invalid JSON UTF-8 rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "JSON string decoding rejects invalid UTF-8 bytes");
+        RequireContains(
+            "shared tests cover DPAPI invalid UTF-16 rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "DPAPI protect rejects invalid UTF-16 before encrypting");
         RequireContains(
             "shared tests cover UTF-8 conversion failure",
             "tools/SharedBaselineTests.cpp",

@@ -321,22 +321,49 @@ inline std::string WideToUtf8Lossy(const std::wstring& value)
     return TryWideToUtf8(sanitized, result) ? result : std::string();
 }
 
-inline std::wstring Utf8ToWide(const std::string& value)
+inline bool TryUtf8ToWide(const std::string& value, std::wstring& result)
 {
+    result.clear();
     if (value.empty())
     {
-        return std::wstring();
+        SetLastError(ERROR_SUCCESS);
+        return true;
     }
 
-    int length = MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
+    if (value.size() > static_cast<size_t>(INT_MAX))
+    {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return false;
+    }
+
+    int inputLength = static_cast<int>(value.size());
+    int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), inputLength, nullptr, 0);
     if (length <= 0)
     {
-        return std::wstring();
+        DWORD error = GetLastError();
+        SetLastError(error == ERROR_SUCCESS ? ERROR_NO_UNICODE_TRANSLATION : error);
+        return false;
     }
 
-    std::wstring result(static_cast<size_t>(length), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), length);
-    return result;
+    result.assign(static_cast<size_t>(length), L'\0');
+    int written = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), inputLength, result.data(), length);
+    if (written <= 0)
+    {
+        DWORD error = GetLastError();
+        result.clear();
+        SetLastError(error == ERROR_SUCCESS ? ERROR_NO_UNICODE_TRANSLATION : error);
+        return false;
+    }
+
+    result.resize(static_cast<size_t>(written));
+    SetLastError(ERROR_SUCCESS);
+    return true;
+}
+
+inline std::wstring Utf8ToWide(const std::string& value)
+{
+    std::wstring result;
+    return TryUtf8ToWide(value, result) ? result : std::wstring();
 }
 
 inline std::wstring BytesToHex(const std::vector<BYTE>& bytes)
@@ -773,8 +800,7 @@ inline bool DecodeJsonStringRange(const std::string& json, size_t valueStart, si
     {
         return false;
     }
-    value = Utf8ToWide(out);
-    return true;
+    return TryUtf8ToWide(out, value);
 }
 
 inline std::wstring ExtractJsonStringValue(const std::string& json, const char* key)
