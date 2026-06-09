@@ -1,4 +1,4 @@
-﻿// Experimental Win8/8.1-style packaged WinRT broker app for Live Tile updates.
+// Experimental Win8/8.1-style packaged WinRT broker app for Live Tile updates.
 // Unlike DesktopStubAppxStub.exe, this is a real CoreApplication-based
 // Windows Runtime app executable. It is intended to satisfy the old RT app
 // activation contract, update the tile under package identity, then exit as
@@ -245,7 +245,8 @@ static void AppendActivationLog(const std::wstring& message)
         return ok;
     };
 
-    HANDLE logMutex = CreateMutexW(nullptr, FALSE, L"Local\DesktopStubLiveTileBrokerActivationLogMutex");
+    std::wstring mutexName = L"Local\\" + ProductRuntimeBaseName() + L"LiveTileBrokerActivationLogMutex";
+    HANDLE logMutex = CreateMutexW(nullptr, FALSE, mutexName.c_str());
     bool logLocked = false;
     if (logMutex != nullptr)
     {
@@ -305,7 +306,12 @@ static bool ReadUtf8BomTextFile(const std::wstring& path, std::wstring& out)
     if (need <= 0)
         return false;
     out.resize(static_cast<size_t>(need));
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), &out[0], need);
+    int written = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes.data(), static_cast<int>(bytes.size()), &out[0], need);
+    if (written != need)
+    {
+        out.clear();
+        return false;
+    }
     return true;
 }
 

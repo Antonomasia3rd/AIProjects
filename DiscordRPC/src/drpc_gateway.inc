@@ -821,16 +821,16 @@ private:
             return;
         }
 
-        std::string raw = assets.substr(valueStart + 1, valueEnd - valueStart - 2);
-        if (raw.find('\\') != std::string::npos ||
-            StartsWithI(Utf8ToWide(raw), L"http://") ||
-            StartsWithI(Utf8ToWide(raw), L"https://") ||
-            StartsWithI(Utf8ToWide(raw), L"mp:"))
+        std::wstring decoded;
+        if (!DecodeJsonStringRange(assets, valueStart, valueEnd, decoded) ||
+            StartsWithI(decoded, L"http://") ||
+            StartsWithI(decoded, L"https://") ||
+            StartsWithI(decoded, L"mp:"))
         {
             return;
         }
 
-        auto found = assetIdCache_.find(Utf8ToWide(raw));
+        auto found = assetIdCache_.find(decoded);
         if (found == assetIdCache_.end())
         {
             return;

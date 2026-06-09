@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Command-line parsing and persisted INI setting changes
 // -----------------------------------------------------------------------------
 using CommandLineIniSetting = aip::IniSetting;
@@ -287,9 +287,8 @@ static bool ParseCommandLineClampedInt(
     int& value,
     std::wstring& error)
 {
-    std::wstring trimmed = TrimCopy(rawValue);
     int parsed = 0;
-    if (!TryParseIntStrict(trimmed, parsed) || parsed < minValue || parsed > maxValue)
+    if (!aip::ParseIntValueInRange(rawValue, minValue, maxValue, parsed))
     {
         error = std::wstring(optionName ? optionName : L"Option") +
             L" expects an integer from " + std::to_wstring(minValue) +
@@ -372,23 +371,7 @@ static bool TryParseCommandLineKeyValue(
 
 static bool CommandLineParseInteger(const std::wstring& rawValue, int& value)
 {
-    std::wstring trimmed = TrimCopy(rawValue);
-    if (trimmed.empty())
-        return false;
-
-    errno = 0;
-    wchar_t* end = nullptr;
-    long parsed = wcstol(trimmed.c_str(), &end, 10);
-    if (end == trimmed.c_str() || errno == ERANGE || parsed < INT_MIN || parsed > INT_MAX)
-        return false;
-
-    while (end && *end && iswspace(*end) != 0)
-        ++end;
-    if (end && *end)
-        return false;
-
-    value = static_cast<int>(parsed);
-    return true;
+    return aip::ParseIntValue(rawValue, value);
 }
 
 static bool IsSupportedCommandLineScale(int scale)

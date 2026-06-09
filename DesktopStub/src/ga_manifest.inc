@@ -159,23 +159,7 @@ static std::wstring ManifestSetting(const wchar_t* key, const wchar_t* fallback,
 
 static bool TryParseIntStrict(const std::wstring& value, int& parsed)
 {
-    std::wstring trimmed = TrimCopy(value);
-    if (trimmed.empty())
-        return false;
-
-    errno = 0;
-    wchar_t* end = nullptr;
-    long result = wcstol(trimmed.c_str(), &end, 10);
-    if (end == trimmed.c_str() || errno == ERANGE || result < INT_MIN || result > INT_MAX)
-        return false;
-
-    while (end && *end && iswspace(*end) != 0)
-        ++end;
-    if (end && *end)
-        return false;
-
-    parsed = static_cast<int>(result);
-    return true;
+    return aip::ParseIntValue(value, parsed);
 }
 
 static bool IsManifestSimpleTokenChar(wchar_t ch)

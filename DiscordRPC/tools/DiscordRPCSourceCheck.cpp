@@ -354,6 +354,21 @@ int main()
             "src\\drpc_gateway.inc",
             gateway,
             "activity.empty() || activity.front() != '{'");
+        RequireContains(
+            "DiscordRPC decodes Gateway asset JSON strings before lookup",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "DecodeJsonStringRange(assets, valueStart, valueEnd, decoded)");
+        RequireContains(
+            "DiscordRPC Gateway asset lookup uses decoded strings",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "assetIdCache_.find(decoded)");
+        RequireNotContains(
+            "DiscordRPC Gateway asset resolution avoids unchecked UTF-8 conversion",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "Utf8ToWide(raw)");
         RequireNotContains(
             "DiscordRPC does not expose unused rpc_restarted_message default",
             "src\\drpc_config_defaults.inc",

@@ -243,22 +243,8 @@ int IniReadI(const wchar_t* s, const wchar_t* k, int d)
     if (!ReadIniValueCached(s, k, value))
         return d;
 
-    std::wstring trimmed = TrimCopy(value);
-    if (trimmed.empty())
-        return d;
-
-    errno = 0;
-    wchar_t* end = nullptr;
-    long parsed = wcstol(trimmed.c_str(), &end, 10);
-    if (end == trimmed.c_str() || errno == ERANGE || parsed < INT_MIN || parsed > INT_MAX)
-        return d;
-
-    while (end && *end && iswspace(*end) != 0)
-        ++end;
-    if (end && *end)
-        return d;
-
-    return static_cast<int>(parsed);
+    int parsed = 0;
+    return aip::ParseIntValue(value, parsed) ? parsed : d;
 }
 
 static int ClampInt(int value, int minValue, int maxValue)

@@ -811,11 +811,20 @@ int main(int argc, char** argv)
                 "WC_ERR_INVALID_CHARS",
                 "WriteAllBytes",
                 "SetFilePointerEx(h, eof, nullptr, FILE_END)",
+                "ProductRuntimeBaseName() + L\"LiveTileBrokerActivationLogMutex\"",
                 "CreateMutexW",
                 "WaitForSingleObject",
                 "ReleaseMutex"
             },
-            "packaged broker activation logging must use checked UTF-8 conversion, looped writes, and a cross-process mutex instead of silent conversion loss or partial/racing WriteFile calls");
+            "packaged broker activation logging must use checked UTF-8 conversion, looped writes, and a product-scoped cross-process mutex instead of silent conversion loss or partial/racing WriteFile calls");
+        AssertNotContainsAny(
+            "Live Tile broker activation logging has no duplicated EOF seek check",
+            "src\\ga_livetile_broker_app.inc",
+            NormalizeSource(brokerApp),
+            {
+                "SetFilePointerEx(h, eof, nullptr, FILE_END)) if (ok && !SetFilePointerEx(h, eof, nullptr, FILE_END))"
+            },
+            "packaged broker activation logging must not accidentally duplicate the EOF seek condition");
         AssertContainsAll(
             "DesktopStub local UTF-8 text encoding uses shared checked conversion",
             "src\\ga_core.inc",
@@ -827,13 +836,46 @@ int main(int argc, char** argv)
             },
             "DesktopStub-local UTF-8 text writes must use the shared checked converter instead of a weaker WideCharToMultiByte(CP_UTF8, 0) duplicate");
         AssertContainsAll(
+            "Live Tile URI path encoding uses shared checked UTF-8 conversion",
+            "src\\ga_live_tile.inc",
+            liveTile,
+            {
+                "PercentEncodeUriPath",
+                "aip::TryWideToUtf8(path, bytes)",
+                "return L\"\";"
+            },
+            "Live Tile ms-appx URI path encoding must fail safely on invalid UTF-16 instead of returning raw unencoded text");
+        AssertContainsAll(
             "Live Tile UTF-8 read helpers reject invalid UTF-8 before fallback",
             "live tile UTF-8 readers",
             liveTile + "\n" + brokerApp + "\n" + backgroundTask,
             {
-                "MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS"
+                "MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS",
+                "if (written != need)",
+                "if (written != needed)"
             },
-            "Live Tile log/XML readers must not silently accept malformed UTF-8 bytes");
+            "Live Tile log/XML readers must not silently accept malformed UTF-8 bytes or ignore a failed second decode call");
+        AssertContainsAll(
+            "DesktopStub integer parsing uses shared strict parser",
+            "integer parsing sources",
+            manifest + "\n" + commandLine + "\n" + loggingCore,
+            {
+                "return aip::ParseIntValue(value, parsed);",
+                "aip::ParseIntValueInRange(rawValue, minValue, maxValue, parsed)",
+                "return aip::ParseIntValue(rawValue, value);",
+                "return aip::ParseIntValue(value, parsed) ? parsed : d;"
+            },
+            "DesktopStub should route local INI, command-line, and manifest integer parsing through the shared strict parser");
+        AssertNotContainsAny(
+            "DesktopStub no longer has local wcstol integer parsers",
+            "DesktopStub src",
+            JoinSource({
+                "src\\ga_manifest.inc",
+                "src\\ga_command_line.inc",
+                "src\\ga_logging_core.inc"
+            }),
+            {"wcstol("},
+            "DesktopStub baseline integer parsing should not drift from shared aip::ParseIntValue");
         AssertContainsAll(
             "DesktopStub redirected command-line output uses looped writes",
             "src\\ga_command_line.inc",
