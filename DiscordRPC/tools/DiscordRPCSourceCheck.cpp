@@ -184,6 +184,16 @@ int main()
             defaults,
             "--bool Section.Key=Value");
         RequireContains(
+            "DiscordRPC help documents client-id format",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "17-20 decimal digits");
+        RequireContains(
+            "DiscordRPC help documents update interval range",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "1-86400");
+        RequireContains(
             "DiscordRPC registers taskbar recreation message",
             "DiscordRPC app/tray sources",
             app + "\n" + tray,
@@ -273,6 +283,26 @@ int main()
             "src\\drpc_command_line.inc",
             commandLine,
             "aip::ParseIntValueInRange(value, 0, 60000, parsed)");
+        RequireContains(
+            "DiscordRPC validates update interval command-line values",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "ValidateUpdateIntervalValue(value, error)");
+        RequireContains(
+            "DiscordRPC bounds update interval command-line values",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "aip::ParseIntValueInRange(value, 1, 86400, seconds)");
+        RequireContains(
+            "DiscordRPC validates client-id command-line values",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "ValidateClientIdValue(value, error)");
+        RequireContains(
+            "DiscordRPC trims client-id before saving",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "AddSetting(options, L\"general\", L\"client_id\", Trim(value))");
         RequireContains(
             "DiscordRPC runtime log append wait override ignores invalid integers",
             "src\\drpc_core.inc",

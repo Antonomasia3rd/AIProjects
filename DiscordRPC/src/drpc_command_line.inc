@@ -23,6 +23,45 @@ static std::wstring RedactCommandLineSettingValue(const CommandLineSetting& sett
     return IsSensitiveCommandLineSetting(setting.section, setting.key) ? L"<redacted>" : setting.value;
 }
 
+
+static bool IsDecimalSnowflakeId(const std::wstring& value)
+{
+    std::wstring trimmed = Trim(value);
+    if (trimmed.size() < 17 || trimmed.size() > 20)
+    {
+        return false;
+    }
+    for (wchar_t ch : trimmed)
+    {
+        if (ch < L'0' || ch > L'9')
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool ValidateClientIdValue(const std::wstring& value, std::wstring& error)
+{
+    if (!IsDecimalSnowflakeId(value))
+    {
+        error = L"--client-id must be a 17-20 digit decimal Discord application ID.";
+        return false;
+    }
+    return true;
+}
+
+static bool ValidateUpdateIntervalValue(const std::wstring& value, std::wstring& error)
+{
+    int seconds = 0;
+    if (!aip::ParseIntValueInRange(value, 1, 86400, seconds))
+    {
+        error = L"--update-interval must be an integer from 1 through 86400 seconds.";
+        return false;
+    }
+    return true;
+}
+
 static bool ResolveCommandLineConfigPath(
     const std::wstring& rawPath,
     const wchar_t* optionName,
@@ -218,7 +257,11 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             {
                 return false;
             }
-            AddSetting(options, L"general", L"client_id", value);
+            if (!ValidateClientIdValue(value, error))
+            {
+                return false;
+            }
+            AddSetting(options, L"general", L"client_id", Trim(value));
         }
         else if (aip::IsOptionOrInlineValue(arg, L"--token"))
         {
@@ -243,7 +286,11 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             {
                 return false;
             }
-            AddSetting(options, L"general", L"update_interval", value);
+            if (!ValidateUpdateIntervalValue(value, error))
+            {
+                return false;
+            }
+            AddSetting(options, L"general", L"update_interval", Trim(value));
         }
         else if (aip::IsOptionOrInlineValue(arg, L"--details-template"))
         {
