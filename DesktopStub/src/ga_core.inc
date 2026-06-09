@@ -235,24 +235,18 @@ static std::wstring DecodeProcessOutput(const std::vector<BYTE>& bytes)
 
 static std::vector<BYTE> EncodeUtf8Text(const std::wstring& text, bool includeBom)
 {
+    std::string utf8;
+    if (!aip::TryWideToUtf8(text, utf8))
+        return {};
+
     std::vector<BYTE> out;
-    if (text.size() > INT_MAX)
-        return out;
-
-    int need = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), nullptr, 0, nullptr, nullptr);
-    if (need <= 0 && !text.empty())
-        return out;
-
     if (includeBom)
     {
         static const BYTE bom[] = { 0xEF, 0xBB, 0xBF };
         out.insert(out.end(), bom, bom + sizeof(bom));
     }
 
-    size_t offset = out.size();
-    out.resize(offset + (size_t)need);
-    if (need > 0)
-        WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), (LPSTR)(out.data() + offset), need, nullptr, nullptr);
+    out.insert(out.end(), utf8.begin(), utf8.end());
     return out;
 }
 

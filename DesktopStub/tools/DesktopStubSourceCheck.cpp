@@ -810,9 +810,30 @@ int main(int argc, char** argv)
                 "TryWideToUtf8",
                 "WC_ERR_INVALID_CHARS",
                 "WriteAllBytes",
-                "SetFilePointerEx(h, eof, nullptr, FILE_END)"
+                "SetFilePointerEx(h, eof, nullptr, FILE_END)",
+                "CreateMutexW",
+                "WaitForSingleObject",
+                "ReleaseMutex"
             },
-            "packaged broker activation logging must use checked UTF-8 conversion and looped writes instead of silent conversion loss or partial WriteFile calls");
+            "packaged broker activation logging must use checked UTF-8 conversion, looped writes, and a cross-process mutex instead of silent conversion loss or partial/racing WriteFile calls");
+        AssertContainsAll(
+            "DesktopStub local UTF-8 text encoding uses shared checked conversion",
+            "src\\ga_core.inc",
+            core,
+            {
+                "EncodeUtf8Text",
+                "aip::TryWideToUtf8(text, utf8)",
+                "out.insert(out.end(), utf8.begin(), utf8.end())"
+            },
+            "DesktopStub-local UTF-8 text writes must use the shared checked converter instead of a weaker WideCharToMultiByte(CP_UTF8, 0) duplicate");
+        AssertContainsAll(
+            "Live Tile UTF-8 read helpers reject invalid UTF-8 before fallback",
+            "live tile UTF-8 readers",
+            liveTile + "\n" + brokerApp + "\n" + backgroundTask,
+            {
+                "MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS"
+            },
+            "Live Tile log/XML readers must not silently accept malformed UTF-8 bytes");
         AssertContainsAll(
             "DesktopStub redirected command-line output uses looped writes",
             "src\\ga_command_line.inc",

@@ -191,21 +191,23 @@ struct CompiledCensorRegexRule
     std::wregex pattern;
 };
 
+using ReplacementRule = std::pair<std::wstring, std::wstring>;
+
 static std::mutex g_censorRulesMutex;
 static std::wstring g_cachedFullReplaceRaw;
-static std::vector<std::pair<std::wstring, std::wstring>> g_cachedFullReplaceRules;
+static std::shared_ptr<const std::vector<ReplacementRule>> g_cachedFullReplaceRules;
 static std::wstring g_cachedWordReplaceRaw;
-static std::vector<std::pair<std::wstring, std::wstring>> g_cachedWordReplaceRules;
+static std::shared_ptr<const std::vector<ReplacementRule>> g_cachedWordReplaceRules;
 static std::wstring g_cachedPatternReplaceRaw;
 static std::shared_ptr<const std::vector<CompiledCensorRegexRule>> g_cachedPatternReplaceRules;
 static std::wstring g_cachedPatternRuntimeFailureRaw;
 static std::vector<std::wstring> g_cachedPatternRuntimeFailurePatterns;
 static std::wstring g_cachedRuleOrderRaw;
-static std::vector<CensorRuleKind> g_cachedRuleOrder;
+static std::shared_ptr<const std::vector<CensorRuleKind>> g_cachedRuleOrder;
 static std::wstring g_cachedApplyPatternOnRawRaw;
 static bool g_cachedApplyPatternOnRaw = false;
 
-static std::vector<std::pair<std::wstring, std::wstring>> ParseReplacementRules(const std::wstring& raw)
+static std::vector<ReplacementRule> ParseReplacementRules(const std::wstring& raw)
 {
     std::wstring normalized = raw;
     std::replace(normalized.begin(), normalized.end(), L'\r', L'\n');
@@ -214,7 +216,7 @@ static std::vector<std::pair<std::wstring, std::wstring>> ParseReplacementRules(
         std::replace(normalized.begin(), normalized.end(), L';', L'\n');
     }
 
-    std::vector<std::pair<std::wstring, std::wstring>> rules;
+    std::vector<ReplacementRule> rules;
     std::wistringstream stream(normalized);
     std::wstring line;
     while (std::getline(stream, line))
@@ -247,24 +249,24 @@ static std::vector<std::pair<std::wstring, std::wstring>> ParseReplacementRules(
     return rules;
 }
 
-static std::vector<std::pair<std::wstring, std::wstring>> GetCachedFullCensorRules(const std::wstring& rawRules)
+static std::shared_ptr<const std::vector<ReplacementRule>> GetCachedFullCensorRules(const std::wstring& rawRules)
 {
     std::lock_guard<std::mutex> lock(g_censorRulesMutex);
-    if (rawRules != g_cachedFullReplaceRaw)
+    if (rawRules != g_cachedFullReplaceRaw || !g_cachedFullReplaceRules)
     {
         g_cachedFullReplaceRaw = rawRules;
-        g_cachedFullReplaceRules = ParseReplacementRules(rawRules);
+        g_cachedFullReplaceRules = std::make_shared<const std::vector<ReplacementRule>>(ParseReplacementRules(rawRules));
     }
     return g_cachedFullReplaceRules;
 }
 
-static std::vector<std::pair<std::wstring, std::wstring>> GetCachedWordCensorRules(const std::wstring& rawRules)
+static std::shared_ptr<const std::vector<ReplacementRule>> GetCachedWordCensorRules(const std::wstring& rawRules)
 {
     std::lock_guard<std::mutex> lock(g_censorRulesMutex);
-    if (rawRules != g_cachedWordReplaceRaw)
+    if (rawRules != g_cachedWordReplaceRaw || !g_cachedWordReplaceRules)
     {
         g_cachedWordReplaceRaw = rawRules;
-        g_cachedWordReplaceRules = ParseReplacementRules(rawRules);
+        g_cachedWordReplaceRules = std::make_shared<const std::vector<ReplacementRule>>(ParseReplacementRules(rawRules));
     }
     return g_cachedWordReplaceRules;
 }
@@ -379,13 +381,13 @@ static std::vector<CensorRuleKind> ParseCensorRuleOrder(const std::wstring& rawO
     return order;
 }
 
-static std::vector<CensorRuleKind> GetCachedCensorRuleOrder(const std::wstring& rawOrder)
+static std::shared_ptr<const std::vector<CensorRuleKind>> GetCachedCensorRuleOrder(const std::wstring& rawOrder)
 {
     std::lock_guard<std::mutex> lock(g_censorRulesMutex);
-    if (rawOrder != g_cachedRuleOrderRaw)
+    if (rawOrder != g_cachedRuleOrderRaw || !g_cachedRuleOrder)
     {
         std::vector<std::wstring> unknownTokens;
-        g_cachedRuleOrder = ParseCensorRuleOrder(rawOrder, &unknownTokens);
+        g_cachedRuleOrder = std::make_shared<const std::vector<CensorRuleKind>>(ParseCensorRuleOrder(rawOrder, &unknownTokens));
         g_cachedRuleOrderRaw = rawOrder;
         for (const auto& token : unknownTokens)
         {
@@ -409,7 +411,8 @@ static bool GetCachedApplyPatternOnRaw(const std::wstring& rawValue)
 
 static void ApplyFullCensorRules(std::wstring& title)
 {
-    for (const auto& rule : GetCachedFullCensorRules(IniReadS(L"censor_map", L"full_replace", L"")))
+    auto rules = GetCachedFullCensorRules(IniReadS(L"censor_map", L"full_replace", L""));
+    for (const auto& rule : *rules)
     {
         if (EqualsI(title, rule.first.c_str()))
         {
@@ -420,7 +423,8 @@ static void ApplyFullCensorRules(std::wstring& title)
 
 static void ApplyWordCensorRules(std::wstring& title)
 {
-    for (const auto& rule : GetCachedWordCensorRules(IniReadS(L"censor_map", L"word_replace", L"")))
+    auto rules = GetCachedWordCensorRules(IniReadS(L"censor_map", L"word_replace", L""));
+    for (const auto& rule : *rules)
     {
         title = ReplaceAllI(title, rule.first, rule.second);
     }
@@ -449,7 +453,8 @@ static void ApplyPatternCensorRules(std::wstring& title, const std::wstring& raw
 static std::wstring ApplyCensorRules(const std::wstring& rawTitle)
 {
     std::wstring title = rawTitle;
-    for (CensorRuleKind kind : GetCachedCensorRuleOrder(IniReadS(L"censor_map", L"rule_order", L"full_replace, word_replace, pattern_replace")))
+    auto order = GetCachedCensorRuleOrder(IniReadS(L"censor_map", L"rule_order", L"full_replace, word_replace, pattern_replace"));
+    for (CensorRuleKind kind : *order)
     {
         switch (kind)
         {

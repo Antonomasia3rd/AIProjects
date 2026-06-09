@@ -369,6 +369,16 @@ int main()
             "src\\drpc_presence.inc",
             presence,
             "std::shared_ptr<const std::vector<CompiledCensorRegexRule>>");
+        RequireContains(
+            "DiscordRPC reuses full/word censor rule snapshots without per-update vector copies",
+            "src\\drpc_presence.inc",
+            presence,
+            "std::shared_ptr<const std::vector<ReplacementRule>>");
+        RequireContains(
+            "DiscordRPC reuses censor rule-order snapshots without empty-cache startup bugs",
+            "src\\drpc_presence.inc",
+            presence,
+            "std::shared_ptr<const std::vector<CensorRuleKind>>");
         RequireNotContains(
             "DiscordRPC does not compile censor regex inside every title update",
             "src\\drpc_presence.inc",
@@ -379,6 +389,11 @@ int main()
             "src\\drpc_presence.inc",
             presence,
             "GetCachedCensorRuleOrder(IniReadS(L\"censor_map\", L\"rule_order\"");
+        RequireContains(
+            "DiscordRPC initializes empty censor rule_order through parser fallback",
+            "src\\drpc_presence.inc",
+            presence,
+            "rawOrder != g_cachedRuleOrderRaw || !g_cachedRuleOrder");
         RequireContains(
             "DiscordRPC caches full replacement censor rules",
             "src\\drpc_presence.inc",
@@ -398,7 +413,7 @@ int main()
             "DiscordRPC reports unknown censor rule-order tokens only when config changes",
             "src\\drpc_presence.inc",
             presence,
-            "if (rawOrder != g_cachedRuleOrderRaw)");
+            "if (rawOrder != g_cachedRuleOrderRaw || !g_cachedRuleOrder)");
         RequireContains(
             "DiscordRPC reports censor regex replacement failures once per config value",
             "src\\drpc_presence.inc",
