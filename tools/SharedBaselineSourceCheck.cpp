@@ -239,6 +239,16 @@ int main()
             appPaths,
             "unchecked path builder");
         RequireContains(
+            "app path helper exposes safe current-process path builder",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "TryBuildCurrentProcessSidecarPaths");
+        RequireContains(
+            "safe current-process path builder validates user config overrides",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "TryBuildSidecarPathsFromExecutable(\n        GetCurrentExecutablePath()");
+        RequireContains(
             "app path helper exposes executable-side log paths",
             "dependencies/app_paths.inc",
             appPaths,
@@ -273,6 +283,11 @@ int main()
             "dependencies/core.inc",
             sharedCore,
             "uch < 0x20");
+        RequireContains(
+            "shared JSON string scanner rejects raw control characters",
+            "dependencies/core.inc",
+            sharedCore,
+            "static_cast<unsigned char>(ch) < 0x20");
         RequireContains(
             "shared core exposes looped file writes",
             "dependencies/core.inc",
@@ -449,7 +464,7 @@ int main()
             "shared tests cover raw JSON control-character rejection",
             "tools/SharedBaselineTests.cpp",
             sharedTests,
-            "JSON string decoding rejects unescaped control characters");
+            "JSON string scanning rejects unescaped control characters");
         RequireContains(
             "shared tests cover DPAPI invalid UTF-16 rejection",
             "tools/SharedBaselineTests.cpp",

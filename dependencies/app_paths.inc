@@ -195,6 +195,38 @@ inline bool TryBuildSidecarPathsFromExecutable(
         defaultLogPathPolicy);
 }
 
+
+inline bool TryBuildCurrentProcessSidecarPaths(
+    const std::wstring& fallbackBaseName,
+    const std::wstring& configOverride,
+    SidecarPaths& paths,
+    std::wstring* error = nullptr,
+    DefaultLogPathPolicy defaultLogPathPolicy = DefaultLogPathPolicy::BesideConfig)
+{
+    return TryBuildSidecarPathsFromExecutable(
+        GetCurrentExecutablePath(),
+        fallbackBaseName,
+        configOverride,
+        paths,
+        error,
+        defaultLogPathPolicy);
+}
+
+inline bool TryBuildCurrentProcessSidecarPaths(
+    const std::wstring& fallbackBaseName,
+    const std::wstring& configOverride,
+    SidecarPaths& paths,
+    DefaultLogPathPolicy defaultLogPathPolicy,
+    std::wstring* error = nullptr)
+{
+    return TryBuildCurrentProcessSidecarPaths(
+        fallbackBaseName,
+        configOverride,
+        paths,
+        error,
+        defaultLogPathPolicy);
+}
+
 inline SidecarPaths BuildCurrentProcessSidecarPaths(
     const std::wstring& fallbackBaseName,
     const std::wstring& configOverride = L"",

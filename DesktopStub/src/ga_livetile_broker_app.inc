@@ -211,6 +211,26 @@ static bool WriteAllBytes(HANDLE h, const void* data, DWORD size)
     return true;
 }
 
+static bool ReadAllBytes(HANDLE h, std::string& bytes)
+{
+    char* cursor = bytes.empty() ? nullptr : &bytes[0];
+    DWORD remaining = static_cast<DWORD>(bytes.size());
+    while (remaining > 0)
+    {
+        DWORD read = 0;
+        if (!ReadFile(h, cursor, remaining, &read, nullptr))
+            return false;
+        if (read == 0)
+        {
+            SetLastError(ERROR_READ_FAULT);
+            return false;
+        }
+        cursor += read;
+        remaining -= read;
+    }
+    return true;
+}
+
 static void AppendActivationLog(const std::wstring& message)
 {
     std::wstring line = L"[" + NowStamp() + L"] pid=" + std::to_wstring(GetCurrentProcessId()) + L" " + message + L"\r\n";
@@ -254,6 +274,12 @@ static void AppendActivationLog(const std::wstring& message)
         logLocked = (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED);
     }
 
+    if (logMutex != nullptr && !logLocked)
+    {
+        CloseHandle(logMutex);
+        return;
+    }
+
     bool wroteLocalState = appendToPath(LocalStateActivationLogPath());
     bool wroteModuleDir = appendToPath(ActivationLogPath());
 
@@ -282,14 +308,10 @@ static bool ReadUtf8BomTextFile(const std::wstring& path, std::wstring& out)
     }
 
     std::string bytes(static_cast<size_t>(li.QuadPart), '\0');
-    DWORD read = 0;
-    BOOL ok = TRUE;
-    if (!bytes.empty())
-        ok = ReadFile(h, &bytes[0], static_cast<DWORD>(bytes.size()), &read, nullptr);
+    bool ok = ReadAllBytes(h, bytes);
     CloseHandle(h);
     if (!ok)
         return false;
-    bytes.resize(read);
 
     if (bytes.size() >= 3 &&
         static_cast<unsigned char>(bytes[0]) == 0xEF &&

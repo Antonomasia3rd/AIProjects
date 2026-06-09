@@ -433,21 +433,23 @@ static void ApplyWordCensorRules(std::wstring& title)
 static void ApplyPatternCensorRules(std::wstring& title, const std::wstring& rawTitle)
 {
     bool applyPatternOnRaw = GetCachedApplyPatternOnRaw(IniReadRaw(L"censor_map", L"apply_pattern_on_raw", L"false"));
-    std::wstring patternInput = applyPatternOnRaw ? rawTitle : title;
     std::wstring rawRules = IniReadS(L"censor_map", L"pattern_replace", L"");
     auto rules = GetCompiledPatternCensorRules(rawRules);
     for (const auto& rule : *rules)
     {
         try
         {
-            patternInput = std::regex_replace(patternInput, rule.pattern, rule.replacement);
+            if (applyPatternOnRaw && !std::regex_search(rawTitle, rule.pattern))
+            {
+                continue;
+            }
+            title = std::regex_replace(title, rule.pattern, rule.replacement);
         }
         catch (const std::exception&)
         {
             ReportPatternRuntimeFailureOnce(rawRules, rule.patternText);
         }
     }
-    title = patternInput;
 }
 
 static std::wstring ApplyCensorRules(const std::wstring& rawTitle)
