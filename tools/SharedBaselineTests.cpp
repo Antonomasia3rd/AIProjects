@@ -453,6 +453,13 @@ static void TestAppPathBehavior()
         !aip::TryResolveConfigFilePath(L"config.ini:stream", absolutePath, &configPathError) &&
             !aip::TryResolveConfigFilePath(L"C:\\Config\\settings.ini:stream", absolutePath, &configPathError),
         "config path helper rejects alternate data stream names");
+
+    Check(
+        !aip::TryResolveConfigFilePath(L"bad<name.ini", absolutePath, &configPathError) &&
+            !aip::TryResolveConfigFilePath(L"bad|name.ini", absolutePath, &configPathError) &&
+            !aip::TryResolveConfigFilePath(L"badname.ini.", absolutePath, &configPathError) &&
+            !aip::TryResolveConfigFilePath(L"badname.ini ", absolutePath, &configPathError),
+        "config path helper rejects invalid Windows filename characters");
 }
 
 static void TestLoggingBehavior()

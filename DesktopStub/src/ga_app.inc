@@ -56,8 +56,8 @@ static void ApplySettingsChangedByCommandLine(bool applyTrayIcon)
 static std::wstring ConsumeCommandLineWallpaperRequest()
 {
     std::wstring wallpaper = IniReadS(L"State", L"CommandLineWallpaperRequest", L"");
-    if (!wallpaper.empty())
-        IniWrite(L"State", L"CommandLineWallpaperRequest", L"");
+    if (!wallpaper.empty() && !IniWrite(L"State", L"CommandLineWallpaperRequest", L""))
+        return L"";
     return wallpaper;
 }
 
@@ -1369,6 +1369,18 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     if (!g_singleInstanceMutex)
     {
         singleInstanceMutexFailure = singleInstanceMutexLastError;
+        ErrorAction earlySingleInstanceFailureAction = CurrentSingleInstanceFailureAction();
+        if (earlySingleInstanceFailureAction == ErrorAction::Exit)
+        {
+            std::wstring message = L"Failed to create DesktopStub single-instance mutex before initialization (error " +
+                std::to_wstring(singleInstanceMutexFailure) + L": " + Win32ErrorString(singleInstanceMutexFailure) + L").";
+            ShowCommandLineMessage(message, true);
+            return 1;
+        }
+        if (earlySingleInstanceFailureAction == ErrorAction::Crash)
+        {
+            RaiseFailFastException(nullptr, nullptr, 0);
+        }
     }
     else if (singleInstanceMutexLastError == ERROR_ALREADY_EXISTS)
     {

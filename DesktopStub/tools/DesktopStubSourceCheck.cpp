@@ -467,6 +467,7 @@ int main(int argc, char** argv)
         const std::string desktopStubResource = ReadSource("DesktopStub.rc");
         const std::string brokerResource = ReadSource("LiveTileBroker.rc");
         const std::string trayWrapper = ReadSource("src\\ga_tray.inc");
+        const std::string trayDispatch = ReadSource("src\\ga_tray_dispatch.inc");
         const std::string tray = JoinSource({
             "src\\ga_tray.inc",
             "src\\ga_tray_helpers.inc",
@@ -630,6 +631,13 @@ int main(int argc, char** argv)
 
         for (const auto& check : checks)
             AssertCheck(check);
+
+        AssertNotContainsAny(
+            "DesktopStub tray dispatch checks direct INI writes",
+            "src\\ga_tray_dispatch.inc",
+            trayDispatch,
+            {"\n        IniWrite(", "\n            IniWrite(", "\n                IniWrite(", "\n    IniWrite("},
+            "tray command handlers must not log or proceed after unchecked INI write failures");
 
         AssertContainsAll(
             "Runtime sidecar file names are product-scoped",

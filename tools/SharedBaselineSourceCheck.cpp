@@ -244,6 +244,11 @@ int main()
             appPaths,
             "ConfigFileNameContainsColon");
         RequireContains(
+            "app path helper rejects invalid Windows config filename characters",
+            "dependencies/app_paths.inc",
+            appPaths,
+            "ConfigFileNameHasInvalidCharacters");
+        RequireContains(
             "app path helper documents unchecked raw builder",
             "dependencies/app_paths.inc",
             appPaths,
@@ -540,6 +545,11 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "config path helper rejects alternate data stream names");
+        RequireContains(
+            "shared tests cover invalid config filename character rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "config path helper rejects invalid Windows filename characters");
         RequireContains(
             "shared tests cover invalid JSON primitive rejection",
             "tools/SharedBaselineTests.cpp",

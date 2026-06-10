@@ -1132,16 +1132,46 @@ private:
             assetIdCache_.clear();
 
             size_t search = 0;
+            while (search < response.size() && isspace(static_cast<unsigned char>(response[search])))
+            {
+                ++search;
+            }
+            if (search >= response.size() || response[search] != '[')
+            {
+                LogError(L"Gateway asset ID response was not a JSON array; asset IDs were not cached for application " + applicationId + L".");
+                return;
+            }
+            ++search;
+
+            bool parsedArray = false;
+            bool malformedArray = false;
             for (;;)
             {
-                size_t objStart = FindJsonObjectStart(response, search);
-                if (objStart == std::string::npos)
+                while (search < response.size() && (isspace(static_cast<unsigned char>(response[search])) || response[search] == ','))
                 {
+                    ++search;
+                }
+                if (search >= response.size())
+                {
+                    malformedArray = true;
                     break;
                 }
+                if (response[search] == ']')
+                {
+                    parsedArray = true;
+                    break;
+                }
+                if (response[search] != '{')
+                {
+                    malformedArray = true;
+                    break;
+                }
+
+                size_t objStart = search;
                 size_t objEnd = JsonValueEnd(response, objStart);
                 if (objEnd == std::string::npos)
                 {
+                    malformedArray = true;
                     break;
                 }
 
@@ -1156,6 +1186,13 @@ private:
                     assetIdCache_[assetName] = assetId;
                 }
                 search = objEnd;
+            }
+
+            if (!parsedArray || malformedArray)
+            {
+                assetIdCache_.clear();
+                LogError(L"Gateway asset ID response could not be parsed completely; asset IDs were not cached for application " + applicationId + L".");
+                return;
             }
 
             cachedAssetApplicationId_ = applicationId;

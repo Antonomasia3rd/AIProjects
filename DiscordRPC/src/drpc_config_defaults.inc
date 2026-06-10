@@ -206,6 +206,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"strings", L"notification_failed", L"Rich Presence update failed." },
     { L"strings", L"notification_reloaded", L"Configuration reloaded." },
     { L"strings", L"notification_gateway_missing_token", L"Gateway mode needs DPAPI token_protected. Legacy plaintext token is only read for migration." },
+    { L"strings", L"notification_gateway_auto_missing_token", L"Discord IPC update failed. Gateway fallback is enabled by transport_mode=auto, but no DPAPI token_protected is configured. Set transport_mode=ipc to disable Gateway fallback, or protect a token for Gateway mode." },
     { L"strings", L"notification_gateway_unsupported", L"Discord Gateway transport is disabled by [gateway] supported." },
     { L"strings", L"notification_gateway_auth_failed", L"Discord Gateway authentication failed. Check your token." },
     { L"strings", L"notification_shutdown_pending", L"Shutdown requested. Use Force shutdown from the tray if Discord cleanup does not finish." },

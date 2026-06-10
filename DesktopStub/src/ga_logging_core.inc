@@ -195,8 +195,8 @@ static void ApplyConsoleSetting(bool enable, bool writeIni, bool logState)
                     g_console = false;
                     g_consoleAttached = false;
                     LogWin32FailureText(L"AllocConsole", err);
-                    if (writeIni)
-                        IniWrite(L"Settings", L"ShowConsole", L"0");
+                    if (writeIni && !IniWrite(L"Settings", L"ShowConsole", L"0"))
+                        return;
                     return;
                 }
                 attached = true;
@@ -219,8 +219,8 @@ static void ApplyConsoleSetting(bool enable, bool writeIni, bool logState)
         g_console = false;
     }
 
-    if (writeIni)
-        IniWrite(L"Settings", L"ShowConsole", g_console ? L"1" : L"0");
+    if (writeIni && !IniWrite(L"Settings", L"ShowConsole", g_console ? L"1" : L"0"))
+        return;
     if (logState)
         Log(g_ui.consoleSummary.c_str(), StateOn(g_console));
 }

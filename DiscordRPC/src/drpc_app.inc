@@ -90,7 +90,7 @@ static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::uniqu
         return 0;
     };
 
-    auto updateGateway = [&]() -> int
+    auto updateGateway = [&](bool afterIpcFallback) -> int
     {
         ipc.reset();
         if (!IniReadB(L"gateway", L"supported", true))
@@ -103,9 +103,15 @@ static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::uniqu
         std::wstring token = ResolveDiscordToken();
         if (token.empty())
         {
-            std::wstring message = GetUiString(L"notification_gateway_missing_token", L"Gateway mode needs DPAPI token_protected. Legacy plaintext token is only read for migration.");
+            const wchar_t* fallbackMessage = afterIpcFallback
+                ? L"Discord IPC update failed. Gateway fallback is enabled by transport_mode=auto, but no DPAPI token_protected is configured. Set transport_mode=ipc to disable Gateway fallback, or protect a token for Gateway mode."
+                : L"Gateway mode needs DPAPI token_protected. Legacy plaintext token is only read for migration.";
+            const wchar_t* stringKey = afterIpcFallback
+                ? L"notification_gateway_auto_missing_token"
+                : L"notification_gateway_missing_token";
+            std::wstring message = GetUiString(stringKey, fallbackMessage);
             LogError(message);
-            Notify(ctx, L"notification_gateway_missing_token", L"Gateway mode needs DPAPI token_protected. Legacy plaintext token is only read for migration.", NIIF_WARNING, L"notify_on_failure");
+            Notify(ctx, stringKey, fallbackMessage, NIIF_WARNING, L"notify_on_failure");
             return 2;
         }
 
@@ -127,7 +133,7 @@ static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::uniqu
 
     if (transport == L"gateway")
     {
-        return updateGateway();
+        return updateGateway(false);
     }
 
     if (transport == L"auto")
@@ -140,7 +146,7 @@ static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::uniqu
         {
             LogError(L"Discord IPC update failed; trying Gateway fallback: " + Utf8ToWide(ex.what()));
             ipc.reset();
-            return updateGateway();
+            return updateGateway(true);
         }
     }
 
@@ -164,7 +170,10 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
             L"The previous run was force-closed while Discord cleanup was pending. Presence clearing or the Gateway close handshake may not have completed.");
         LogError(warning);
         Notify(ctx, L"previous_force_shutdown_warning", warning.c_str(), NIIF_WARNING, L"notify_on_failure");
-        IniWrite(L"state", L"force_shutdown_pending_cleanup", L"false");
+        if (!IniWrite(L"state", L"force_shutdown_pending_cleanup", L"false"))
+        {
+            ReportConfigWriteFailure(L"Clearing force-shutdown pending cleanup state");
+        }
     }
 
     try

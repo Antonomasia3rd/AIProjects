@@ -168,6 +168,11 @@ int main()
             "src\\drpc_tray.inc",
             tray,
             "Force shutdown state could not be recorded before process exit.");
+        RequireContains(
+            "DiscordRPC force shutdown warning clear reports write failures",
+            "src\\drpc_app.inc",
+            app,
+            "Clearing force-shutdown pending cleanup state");
 
         RequireContains(
             "DiscordRPC help remains read-only side-effect-free",
@@ -319,6 +324,11 @@ int main()
             "DiscordRPC Gateway/app/default strings",
             defaults + "\n" + app + "\n" + gateway,
             "Gateway mode needs DPAPI token_protected");
+        RequireContains(
+            "DiscordRPC auto Gateway fallback explains missing token after IPC failure",
+            "DiscordRPC app/default strings",
+            defaults + "\n" + app,
+            "Gateway fallback is enabled by transport_mode=auto");
         RequireNotContains(
             "DiscordRPC default INI no longer creates a plaintext token key",
             "src\\drpc_config_defaults.inc",
@@ -480,6 +490,16 @@ int main()
             "src\\drpc_gateway.inc",
             gateway,
             "TryExtractJsonStringValue(entry, \"id\", assetId)");
+        RequireContains(
+            "Discord Gateway asset cache rejects non-array responses",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "Gateway asset ID response was not a JSON array");
+        RequireContains(
+            "Discord Gateway asset cache does not cache malformed responses",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "asset IDs were not cached for application");
         RequireContains(
             "Discord Gateway connection waits are cancellable",
             "src\\drpc_gateway.inc",
