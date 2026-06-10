@@ -144,12 +144,17 @@ int wmain()
     {
         options.reloadExistingInstance = true;
     }
-    bool plaintextTokenPresent = !Trim(IniReadS(L"general", L"token", L"")).empty();
-    if ((options.protectToken || plaintextTokenPresent) && !ProtectDiscordTokenInConfig(plaintextTokenPresent))
+    bool explicitTokenPresent = options.tokenProvided && !Trim(options.tokenToProtect).empty();
+    if (explicitTokenPresent && !ProtectExplicitDiscordTokenInConfig(options.tokenToProtect))
     {
         return 1;
     }
-    if (options.protectToken || plaintextTokenPresent)
+    bool plaintextTokenPresent = !Trim(IniReadS(L"general", L"token", L"")).empty();
+    if (!explicitTokenPresent && (options.protectToken || plaintextTokenPresent) && !ProtectDiscordTokenInConfig(plaintextTokenPresent))
+    {
+        return 1;
+    }
+    if (options.protectToken || explicitTokenPresent || plaintextTokenPresent)
     {
         options.reloadExistingInstance = true;
     }

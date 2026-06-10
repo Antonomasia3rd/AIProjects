@@ -164,6 +164,12 @@ int main()
             "show_menu_as_dropdown");
 
         RequireContains(
+            "DiscordRPC force shutdown reports cleanup-state write failures",
+            "src\\drpc_tray.inc",
+            tray,
+            "Force shutdown state could not be recorded before process exit.");
+
+        RequireContains(
             "DiscordRPC help remains read-only side-effect-free",
             "DiscordRPC.cpp",
             discordMain,
@@ -228,6 +234,26 @@ int main()
             "src\\drpc_command_line.inc",
             commandLine,
             "aip::TryResolveConfigFilePath(rawPath, resolvedPath, &pathError)");
+        RequireContains(
+            "DiscordRPC keeps explicit token out of generic command-line INI writes",
+            "src\\drpc_command_line.inc + src\\drpc_types.inc",
+            commandLine + "\n" + types,
+            "tokenToProtect");
+        RequireNotContains(
+            "DiscordRPC --token does not persist plaintext token before DPAPI protection",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "AddSetting(options, L\"general\", L\"token\"");
+        RequireContains(
+            "DiscordRPC writes explicit tokens directly to DPAPI-protected config",
+            "DiscordRPC.cpp + src\\drpc_core.inc",
+            discordMain + "\n" + core,
+            "ProtectExplicitDiscordTokenInConfig(options.tokenToProtect)");
+        RequireContains(
+            "DiscordRPC --bool is restricted to known boolean INI keys",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "--bool only accepts known boolean INI keys.");
         RequireNotContains(
             "DiscordRPC removes environment-backed token CLI",
             "src\\drpc_command_line.inc",

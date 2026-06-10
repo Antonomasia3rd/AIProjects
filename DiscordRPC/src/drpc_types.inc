@@ -15,6 +15,8 @@ struct AppOptions
     bool requestExit = false;
     bool protectToken = false;
     bool reloadExistingInstance = false;
+    bool tokenProvided = false;
+    std::wstring tokenToProtect;
     std::wstring configPath;
     std::vector<CommandLineSetting> settings;
 };

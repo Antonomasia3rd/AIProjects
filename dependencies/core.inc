@@ -904,6 +904,7 @@ inline bool FindJsonFieldValue(const std::string& json, const char* key, size_t&
     }
     ++pos;
 
+    bool firstMember = true;
     while (pos < json.size())
     {
         while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
@@ -914,11 +915,23 @@ inline bool FindJsonFieldValue(const std::string& json, const char* key, size_t&
         {
             return false;
         }
-        if (json[pos] == ',')
+        if (!firstMember)
         {
+            if (json[pos] != ',')
+            {
+                return false;
+            }
             ++pos;
-            continue;
+            while (pos < json.size() && isspace(static_cast<unsigned char>(json[pos])))
+            {
+                ++pos;
+            }
+            if (pos >= json.size() || json[pos] == '}')
+            {
+                return false;
+            }
         }
+        firstMember = false;
         if (json[pos] != '"')
         {
             return false;
@@ -969,11 +982,7 @@ inline bool FindJsonFieldValue(const std::string& json, const char* key, size_t&
         {
             ++pos;
         }
-        if (pos < json.size() && json[pos] == ',')
-        {
-            ++pos;
-        }
-        else if (pos < json.size() && json[pos] != '}')
+        if (pos < json.size() && json[pos] != ',' && json[pos] != '}')
         {
             return false;
         }

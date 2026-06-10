@@ -313,6 +313,11 @@ static void TestJsonBehavior()
     Check(
         !aip::FindJsonFieldValue("{\"bad\": ???, \"target\": \"ok\"}", "target", keyPos, valueStart, valueEnd),
         "JSON lookup rejects invalid primitive tokens before later fields");
+    Check(
+        !aip::FindJsonFieldValue("{,\"target\":\"ok\"}", "target", keyPos, valueStart, valueEnd) &&
+            !aip::FindJsonFieldValue("{\"bad\":0,,\"target\":\"ok\"}", "target", keyPos, valueStart, valueEnd) &&
+            !aip::FindJsonFieldValue("{\"bad\":0,}", "target", keyPos, valueStart, valueEnd),
+        "JSON lookup rejects leading, repeated, and trailing commas");
 }
 
 static void TestDpapiBehavior()

@@ -392,6 +392,44 @@ static std::wstring ResolveDiscordToken()
     return Trim(IniReadS(L"general", L"token", L""));
 }
 
+static bool WriteProtectedDiscordTokenToConfig(const std::wstring& rawToken, const std::wstring& successMessage)
+{
+    std::wstring token = Trim(rawToken);
+    if (token.empty())
+    {
+        return true;
+    }
+
+    try
+    {
+        if (!IniWriteRaw(L"general", L"token_protected", aip::ProtectSecretForCurrentUser(token)))
+        {
+            ReportConfigWriteFailure(L"Writing DPAPI-protected Discord token");
+            return false;
+        }
+        LogInfo(successMessage);
+    }
+    catch (const std::exception& ex)
+    {
+        LogError(L"Failed to protect Discord token in config: " + Utf8ToWide(ex.what()));
+        return false;
+    }
+
+    if (!IniWriteRaw(L"general", L"token", L""))
+    {
+        ReportConfigWriteFailure(L"Clearing legacy plaintext Discord token");
+        return false;
+    }
+    return true;
+}
+
+static bool ProtectExplicitDiscordTokenInConfig(const std::wstring& token)
+{
+    return WriteProtectedDiscordTokenToConfig(
+        token,
+        L"Writing explicit Discord token directly to DPAPI-protected [general] token_protected without persisting plaintext [general] token.");
+}
+
 static bool ProtectDiscordTokenInConfig(bool replaceProtectedToken = false)
 {
     std::wstring token = Trim(IniReadS(L"general", L"token", L""));
@@ -403,28 +441,14 @@ static bool ProtectDiscordTokenInConfig(bool replaceProtectedToken = false)
     std::wstring protectedToken = Trim(IniReadS(L"general", L"token_protected", L""));
     if (protectedToken.empty() || replaceProtectedToken)
     {
-        try
-        {
-            if (!IniWriteRaw(L"general", L"token_protected", aip::ProtectSecretForCurrentUser(token)))
-            {
-                ReportConfigWriteFailure(L"Writing DPAPI-protected Discord token");
-                return false;
-            }
-            LogInfo(protectedToken.empty()
+        return WriteProtectedDiscordTokenToConfig(
+            token,
+            protectedToken.empty()
                 ? L"Migrating [general] token to DPAPI-protected [general] token_protected."
-                : L"Replacing DPAPI-protected [general] token_protected from an explicit plaintext token update.");
-        }
-        catch (const std::exception& ex)
-        {
-            LogError(L"Failed to protect Discord token in config: " + Utf8ToWide(ex.what()));
-            return false;
-        }
-    }
-    else
-    {
-        LogInfo(L"Clearing legacy plaintext [general] token because token_protected is already configured.");
+                : L"Replacing DPAPI-protected [general] token_protected from legacy plaintext [general] token.");
     }
 
+    LogInfo(L"Clearing legacy plaintext [general] token because token_protected is already configured.");
     if (!IniWriteRaw(L"general", L"token", L""))
     {
         ReportConfigWriteFailure(L"Clearing legacy plaintext Discord token");
