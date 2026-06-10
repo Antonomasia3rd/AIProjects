@@ -879,8 +879,9 @@ inline bool DecodeJsonStringUtf8Range(const std::string& json, size_t valueStart
     return true;
 }
 
-// Lightweight top-level object field scanner. It validates skipped values enough
-// to avoid walking through malformed JSON and returns the first matching key.
+// Lightweight top-level object field scanner, not a full JSON parser. It
+// validates enough of skipped values to avoid walking through malformed payloads
+// and returns the first matching key in the current object only.
 inline bool FindJsonFieldValue(const std::string& json, const char* key, size_t& keyPos, size_t& valueStart, size_t& valueEnd)
 {
     keyPos = std::string::npos;

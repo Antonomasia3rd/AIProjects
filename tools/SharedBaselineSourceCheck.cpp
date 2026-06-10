@@ -429,6 +429,16 @@ int main()
             logging,
             "DWORD lockWaitMs = 5000");
         RequireContains(
+            "shared JSON field scanner is documented as not a full parser",
+            "dependencies/core.inc",
+            sharedCore,
+            "not a full JSON parser");
+        RequireNotContains(
+            "shared JSON field scanner does not keep duplicate malformed-string checks",
+            "dependencies/core.inc",
+            sharedCore,
+            "if (stringEnd == std::string::npos)\n        if (stringEnd == std::string::npos)");
+        RequireContains(
             "shared logging helper passes bounded lock wait to file appends",
             "dependencies/logging.inc",
             logging,

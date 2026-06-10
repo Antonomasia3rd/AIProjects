@@ -2477,16 +2477,18 @@ static std::wstring ForceShutdownCleanupDownsideSummary()
     return L"in-progress tile PNGs, AppxManifest.xml, or AppX registration may be incomplete; a temporary .tmp PNG can remain next to an asset; Windows will reclaim process handles/GDI+ memory, but normal cleanup logs may be missing";
 }
 
-static void RecordForceShutdownPendingCleanup()
+static bool RecordForceShutdownPendingCleanup()
 {
     std::wstring reason = GenerationWorkPending() ? CurrentGenerationReason() : g_ui.unspecifiedReason;
     std::wstring skipped = ForceShutdownSkippedCleanupSummary();
     std::wstring downside = ForceShutdownCleanupDownsideSummary();
 
-    WriteIniValueWithWait(L"State", L"ForceShutdownPendingCleanup", L"1", 250);
-    WriteIniValueWithWait(L"State", L"ForceShutdownReason", reason.c_str(), 250);
-    WriteIniValueWithWait(L"State", L"ForceShutdownSkippedCleanup", skipped.c_str(), 250);
-    WriteIniValueWithWait(L"State", L"ForceShutdownDownside", downside.c_str(), 250);
+    bool ok = true;
+    ok = WriteIniValueWithWait(L"State", L"ForceShutdownPendingCleanup", L"1", 250) && ok;
+    ok = WriteIniValueWithWait(L"State", L"ForceShutdownReason", reason.c_str(), 250) && ok;
+    ok = WriteIniValueWithWait(L"State", L"ForceShutdownSkippedCleanup", skipped.c_str(), 250) && ok;
+    ok = WriteIniValueWithWait(L"State", L"ForceShutdownDownside", downside.c_str(), 250) && ok;
+    return ok;
 }
 
 static bool ConsumePreviousForceShutdownCleanupWarning(std::wstring& warning)
@@ -2593,7 +2595,8 @@ static void CancelRequestedShutdown(HWND h)
 static void ForceShutdownNow()
 {
     LogText(g_ui.forceShutdownRequested);
-    RecordForceShutdownPendingCleanup();
+    if (!RecordForceShutdownPendingCleanup())
+        LogText(L"[!] Force shutdown cleanup state could not be recorded before process exit.");
     TrayRemove();
     ExitProcess(0);
 }

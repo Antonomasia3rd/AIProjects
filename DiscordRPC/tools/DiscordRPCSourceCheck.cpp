@@ -245,6 +245,11 @@ int main()
             commandLine,
             "AddSetting(options, L\"general\", L\"token\"");
         RequireContains(
+            "DiscordRPC --set blocks plaintext token persistence",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "--set general.token is blocked because it would persist a plaintext Discord token. Use --token instead.");
+        RequireContains(
             "DiscordRPC writes explicit tokens directly to DPAPI-protected config",
             "DiscordRPC.cpp + src\\drpc_core.inc",
             discordMain + "\n" + core,
@@ -280,10 +285,20 @@ int main()
             core,
             std::string("IsToken") + "EnvironmentReference");
         RequireContains(
-            "DiscordRPC Gateway missing-token text is INI-only",
+            "DiscordRPC Gateway missing-token text points users at protected token storage",
             "DiscordRPC Gateway/app/default strings",
             defaults + "\n" + app + "\n" + gateway,
-            "token_protected or token");
+            "Gateway mode needs DPAPI token_protected");
+        RequireNotContains(
+            "DiscordRPC default INI no longer creates a plaintext token key",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "{ L\"general\", L\"token\", L\"\" }");
+        RequireContains(
+            "DiscordRPC --token help documents direct protected storage",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "Store token as DPAPI-protected token_protected");
         RequireContains(
             "DiscordRPC derives sidecar paths through the shared helper",
             "src\\drpc_core.inc",
@@ -375,6 +390,11 @@ int main()
             core,
             "options.lockWaitMs = g_logAppendLockWaitMs.load()");
         RequireContains(
+            "DiscordRPC resolves relative log paths beside the effective INI profile",
+            "src\\drpc_core.inc",
+            core,
+            "std::wstring configDir = GetDirectoryName(MakeAbsolutePath(g_iniPath));");
+        RequireContains(
             "DiscordRPC single-instance scope follows effective INI path",
             "src\\drpc_core.inc",
             core,
@@ -384,6 +404,16 @@ int main()
             "src\\drpc_core.inc",
             core,
             "aip::BuildPathScopedInstanceIdentity");
+        RequireContains(
+            "DiscordRPC exits when single-instance mutex creation fails",
+            "src\\drpc_core.inc",
+            core,
+            "Could not create single-instance mutex");
+        RequireContains(
+            "DiscordRPC does not continue without single-instance protection after mutex creation failure",
+            "src\\drpc_core.inc",
+            core,
+            "LogError(L\"Could not create single-instance mutex: \" + GetLastErrorText(GetLastError()));\n        return false;");
         RequireContains(
             "DiscordRPC configures control identity before optional single-instance mutex",
             "src\\drpc_core.inc",
