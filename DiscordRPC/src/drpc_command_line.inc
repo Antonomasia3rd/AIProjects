@@ -62,6 +62,19 @@ static bool ValidateUpdateIntervalValue(const std::wstring& value, std::wstring&
     return true;
 }
 
+static bool IsKnownBooleanCommandLineSetting(const std::wstring& section, const std::wstring& key)
+{
+    for (const auto& value : kDefaults)
+    {
+        if (EqualsI(section, value.section) && EqualsI(key, value.key))
+        {
+            bool ignored = false;
+            return aip::ParseBoolValue(value.value, ignored);
+        }
+    }
+    return false;
+}
+
 
 static bool ValidateCommandLineSettingValue(const CommandLineSetting& setting, std::wstring& error)
 {
@@ -305,7 +318,8 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             {
                 return false;
             }
-            AddSetting(options, L"general", L"token", value);
+            options.tokenProvided = true;
+            options.tokenToProtect = value;
             options.protectToken = true;
         }
         else if (aip::IsOptionOrInlineValue(arg, L"--status"))
@@ -367,6 +381,11 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             if (!aip::ParseBoolValue(setting.value, parsed))
             {
                 error = L"--bool expects a true/false value.";
+                return false;
+            }
+            if (!IsKnownBooleanCommandLineSetting(setting.section, setting.key))
+            {
+                error = L"--bool only accepts known boolean INI keys.";
                 return false;
             }
             setting.value = parsed ? L"true" : L"false";

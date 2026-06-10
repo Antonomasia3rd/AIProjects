@@ -136,7 +136,11 @@ static void RequestDiscordShutdown(RuntimeContext* ctx)
 static void ForceDiscordShutdown(RuntimeContext* ctx)
 {
     LogError(L"Force shutdown requested; Discord cleanup will be skipped.");
-    IniWriteWithWait(L"state", L"force_shutdown_pending_cleanup", L"true", 250);
+    if (!IniWriteWithWait(L"state", L"force_shutdown_pending_cleanup", L"true", 250))
+    {
+        ReportConfigWriteFailure(L"Recording force-shutdown pending cleanup state");
+        LogError(L"Force shutdown state could not be recorded before process exit.");
+    }
     DestroyTrayIcon(ctx);
     ExitProcess(0);
 }

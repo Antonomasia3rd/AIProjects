@@ -334,6 +334,11 @@ int main()
             sharedCore,
             "DecodeJsonStringUtf8Range(json, pos, stringEnd, decodedKey)");
         RequireContains(
+            "shared JSON top-level scanner tracks comma/member state",
+            "dependencies/core.inc",
+            sharedCore,
+            "bool firstMember = true;");
+        RequireContains(
             "shared JSON helper exposes try-extract variant",
             "dependencies/core.inc",
             sharedCore,
