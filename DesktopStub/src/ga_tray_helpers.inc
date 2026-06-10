@@ -257,14 +257,16 @@ static int NextSettingPreset(int current, std::initializer_list<int> values)
 
 static void WriteSettingInt(const wchar_t* key, int value)
 {
-    IniWrite(L"Settings", key, std::to_wstring(value).c_str());
+    if (!IniWrite(L"Settings", key, std::to_wstring(value).c_str()))
+        return;
     ReloadRuntimeSettingsFromIni();
     Log(L"[i] Setting changed: [%s] %s = %d", L"Settings", key ? key : L"", value);
 }
 
 static void WriteSettingBool(const wchar_t* key, bool value)
 {
-    IniWrite(L"Settings", key, value ? L"1" : L"0");
+    if (!IniWrite(L"Settings", key, value ? L"1" : L"0"))
+        return;
     ReloadRuntimeSettingsFromIni();
     Log(L"[i] Setting changed: [%s] %s = %s", L"Settings", key ? key : L"", StateEnabled(value));
 }
@@ -310,7 +312,8 @@ static const wchar_t* NextTileTextVerticalAlign(const std::wstring& current)
 
 static void WriteTileTextBool(const wchar_t* key, bool value)
 {
-    IniWrite(L"TileText", key, value ? L"1" : L"0");
+    if (!IniWrite(L"TileText", key, value ? L"1" : L"0"))
+        return;
     Log(L"[i] Setting changed: [%s] %s = %s", L"TileText", key ? key : L"", StateEnabled(value));
 }
 
@@ -325,7 +328,8 @@ static void CycleTileTextFontSize(const wchar_t* key, int fallback, const std::w
     int current = IniReadClampedI(L"TileText", key, fallback, 6, 256);
     int next = NextSettingPreset(current, { 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64 });
     next = ClampInt(next, 6, 256);
-    IniWrite(L"TileText", key, std::to_wstring(next).c_str());
+    if (!IniWrite(L"TileText", key, std::to_wstring(next).c_str()))
+        return;
     Log(logFormat.c_str(), next);
 }
 
@@ -339,7 +343,8 @@ static void PromptTileTextStringSetting(
     std::wstring value = IniReadS(L"TileText", key, fallback ? fallback : L"");
     if (ShowTextInputDialog(owner, title, prompt, value, true) == IDOK)
     {
-        IniWrite(L"TileText", key, value.c_str());
+        if (!IniWrite(L"TileText", key, value.c_str()))
+            return;
         Log(g_ui.tileTextSettingChanged.c_str(), key ? key : L"", value.c_str());
     }
 }
@@ -367,7 +372,8 @@ static void PromptTileTextIntSetting(
         return;
     }
 
-    IniWrite(L"TileText", key, std::to_wstring(parsed).c_str());
+    if (!IniWrite(L"TileText", key, std::to_wstring(parsed).c_str()))
+        return;
     Log(logFormat.c_str(), parsed);
 }
 
@@ -403,7 +409,8 @@ static void PromptManifestStringSetting(
     if (ShowTextInputDialog(owner, g_ui.manifestSettingInputTitle, prompt, value, true) != IDOK)
         return;
 
-    IniWrite(L"Settings", key, value.c_str());
+    if (!IniWrite(L"Settings", key, value.c_str()))
+        return;
     Log(g_ui.manifestSettingChanged.c_str(), key ? key : L"", value.c_str());
     RegenerateManifestAndQueueGeneration(owner);
 }
@@ -423,7 +430,8 @@ static const wchar_t* NextSingleInstanceFailureActionName(ErrorAction current)
 static void CycleSingleInstanceFailureActionSetting()
 {
     const wchar_t* next = NextSingleInstanceFailureActionName(CurrentSingleInstanceFailureAction());
-    IniWrite(L"Settings", L"SingleInstanceFailureAction", next);
+    if (!IniWrite(L"Settings", L"SingleInstanceFailureAction", next))
+        return;
     Log(L"[i] Setting changed: [%s] %s = %s", L"Settings", L"SingleInstanceFailureAction", next);
 }
 
@@ -445,7 +453,8 @@ static void ChoosePowerShellExe(HWND owner)
 
     if (GetOpenFileNameW(&ofn))
     {
-        IniWrite(L"Settings", L"PowerShellExe", file.data());
+        if (!IniWrite(L"Settings", L"PowerShellExe", file.data()))
+            return;
         Log(L"[i] Setting changed: [%s] %s = %s", L"Settings", L"PowerShellExe", file.data());
     }
 }

@@ -377,19 +377,20 @@ static std::wstring NormalizeStatus(const std::wstring& raw)
 static std::wstring ResolveDiscordToken()
 {
     std::wstring protectedToken = Trim(IniReadS(L"general", L"token_protected", L""));
-    if (!protectedToken.empty())
+    if (protectedToken.empty())
     {
-        try
-        {
-            return Trim(aip::UnprotectSecretForCurrentUser(protectedToken));
-        }
-        catch (const std::exception& ex)
-        {
-            LogError(L"Could not decrypt [general] token_protected with DPAPI for this user: " + Utf8ToWide(ex.what()));
-        }
+        return L"";
     }
 
-    return Trim(IniReadS(L"general", L"token", L""));
+    try
+    {
+        return Trim(aip::UnprotectSecretForCurrentUser(protectedToken));
+    }
+    catch (const std::exception& ex)
+    {
+        LogError(L"Could not decrypt [general] token_protected with DPAPI for this user: " + Utf8ToWide(ex.what()));
+        return L"";
+    }
 }
 
 static bool WriteProtectedDiscordTokenToConfig(const std::wstring& rawToken, const std::wstring& successMessage)

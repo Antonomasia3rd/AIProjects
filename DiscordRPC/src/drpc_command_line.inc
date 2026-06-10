@@ -1,5 +1,14 @@
 static void AddSetting(AppOptions& options, const std::wstring& section, const std::wstring& key, const std::wstring& value)
 {
+    for (auto& setting : options.settings)
+    {
+        if (EqualsI(setting.section, section.c_str()) && EqualsI(setting.key, key.c_str()))
+        {
+            setting.value = value;
+            return;
+        }
+    }
+
     CommandLineSetting setting;
     setting.section = section;
     setting.key = key;
@@ -316,7 +325,7 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             }
             if (!sideEffectFreeMode)
             {
-                options.settings.push_back(setting);
+                AddSetting(options, setting.section, setting.key, setting.value);
             }
         }
         else if (aip::IsOptionOrInlineValue(arg, L"--client-id"))
@@ -396,19 +405,21 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             {
                 return false;
             }
-            bool parsed = false;
-            if (!aip::ParseBoolValue(setting.value, parsed))
+            if (!sideEffectFreeMode)
             {
-                error = L"--bool expects a true/false value.";
-                return false;
+                bool parsed = false;
+                if (!aip::ParseBoolValue(setting.value, parsed))
+                {
+                    error = L"--bool expects a true/false value.";
+                    return false;
+                }
+                if (!IsKnownBooleanCommandLineSetting(setting.section, setting.key))
+                {
+                    error = L"--bool only accepts known boolean INI keys.";
+                    return false;
+                }
+                AddSetting(options, setting.section, setting.key, parsed ? L"true" : L"false");
             }
-            if (!IsKnownBooleanCommandLineSetting(setting.section, setting.key))
-            {
-                error = L"--bool only accepts known boolean INI keys.";
-                return false;
-            }
-            setting.value = parsed ? L"true" : L"false";
-            options.settings.push_back(setting);
         }
         else if (!arg.empty() && (arg[0] == L'-' || arg[0] == L'/'))
         {
