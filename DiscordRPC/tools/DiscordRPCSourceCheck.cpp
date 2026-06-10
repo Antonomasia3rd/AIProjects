@@ -175,6 +175,21 @@ int main()
             discordMain,
             "must not create, normalize, repair, or write");
         RequireContains(
+            "DiscordRPC help/version mode detects side-effect-free parsing early",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "bool sideEffectFreeMode = false;");
+        RequireContains(
+            "DiscordRPC help/version mode does not reject blocked --set values",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "!sideEffectFreeMode && !ValidateCommandLineSettingValue(setting, error)");
+        RequireContains(
+            "DiscordRPC help/version mode does not queue --set writes",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "if (!sideEffectFreeMode)\n            {\n                options.settings.push_back(setting);\n            }");
+        RequireContains(
             "DiscordRPC help may read configured template",
             "DiscordRPC help/config sources",
             discordMain + "\n" + defaults,
