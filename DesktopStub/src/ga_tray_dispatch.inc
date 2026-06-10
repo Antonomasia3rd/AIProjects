@@ -12,7 +12,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_USE_PS:
     {
         bool v = !UsePowerShell();
-        IniWrite(L"Settings", L"UsePowerShell", v ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"UsePowerShell", v ? L"1" : L"0"))
+            return;
         Log(g_ui.usePowerShellSummary.c_str(), v, v ? g_ui.powerShellEnabledMode.c_str() : g_ui.comPreferredMode.c_str());
     }
     break;
@@ -32,7 +33,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
             bool wasPackaged = CurrentProcessHasPackageIdentity();
             bool relaunchOnSwitch = g_liveTileRelaunchOnSwitch.load();
             g_liveTileUpdateMode = static_cast<int>(newLiveTileMode);
-            IniWrite(L"Settings", L"ExperimentalLiveTileUpdate", LiveTileUpdateModeIniValue(newLiveTileMode).c_str());
+            if (!IniWrite(L"Settings", L"ExperimentalLiveTileUpdate", LiveTileUpdateModeIniValue(newLiveTileMode).c_str()))
+                return;
             Log(g_ui.liveTileUpdateSummary.c_str(), LiveTileUpdateModeSummaryText().c_str());
 
             bool shouldRunPackagedForNewMode = false;
@@ -86,21 +88,24 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_LIVE_TILE_RELAUNCH_ON_SWITCH:
     {
         g_liveTileRelaunchOnSwitch = !g_liveTileRelaunchOnSwitch;
-        IniWrite(L"Settings", L"LiveTileRelaunchOnSwitch", g_liveTileRelaunchOnSwitch ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"LiveTileRelaunchOnSwitch", g_liveTileRelaunchOnSwitch ? L"1" : L"0"))
+            return;
     }
     break;
 
     case ID_CLEAR_LIVE_TILE_ON_SHUTDOWN:
     {
         g_clearLiveTileOnShutdown = !g_clearLiveTileOnShutdown;
-        IniWrite(L"Settings", L"ClearLiveTileOnShutdown", g_clearLiveTileOnShutdown ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"ClearLiveTileOnShutdown", g_clearLiveTileOnShutdown ? L"1" : L"0"))
+            return;
     }
     break;
 
     case ID_WIN8_LIVE_TILE_BROKER_APP:
     {
         bool value = IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) == 0;
-        IniWrite(L"Settings", L"Win8LiveTileBrokerApp", value ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"Win8LiveTileBrokerApp", value ? L"1" : L"0"))
+            return;
         Log(g_ui.win8LiveTileBrokerAppState.c_str(), value ? 1 : 0);
     }
     break;
@@ -108,7 +113,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_WIN8_LIVE_TILE_BACKGROUND_TASK:
     {
         bool value = IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) == 0;
-        IniWrite(L"Settings", L"Win8LiveTileBackgroundTask", value ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"Win8LiveTileBackgroundTask", value ? L"1" : L"0"))
+            return;
         Log(g_ui.win8LiveTileBackgroundTaskState.c_str(), value ? 1 : 0);
     }
     break;
@@ -116,7 +122,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_WIN8_LIVE_TILE_OOP_HELPER:
     {
         bool value = IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) == 0;
-        IniWrite(L"Settings", L"Win8LiveTileOopHelper", value ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"Win8LiveTileOopHelper", value ? L"1" : L"0"))
+            return;
         Log(g_ui.win8LiveTileOopHelperState.c_str(), value ? 1 : 0);
     }
     break;
@@ -160,7 +167,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_LOG:
     {
         g_logging = !g_logging;
-        IniWrite(L"Settings",L"Logging", g_logging?L"1":L"0");
+        if (!IniWrite(L"Settings",L"Logging", g_logging?L"1":L"0"))
+            return;
         Log(g_ui.loggingSummary.c_str(), StateOn(g_logging));
     }
     break;
@@ -198,7 +206,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
             break;
 
         g_manifestCompatibilityTarget = static_cast<int>(newTarget);
-        IniWrite(L"Settings", L"AppxManifestTarget", ManifestCompatibilityTargetIniValue(newTarget).c_str());
+        if (!IniWrite(L"Settings", L"AppxManifestTarget", ManifestCompatibilityTargetIniValue(newTarget).c_str()))
+            return;
         Log(g_ui.manifestTargetSummary.c_str(), ManifestCompatibilityTargetSummaryText().c_str());
         RegenerateManifestAndQueueGeneration(h);
     }
@@ -301,7 +310,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_GENERATE_STARTUP:
     {
         g_generateOnStartup = !g_generateOnStartup;
-        IniWrite(L"Settings", L"GenerateOnStartup", g_generateOnStartup ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"GenerateOnStartup", g_generateOnStartup ? L"1" : L"0"))
+            return;
         Log(g_ui.generateOnStartupSummary.c_str(), StateEnabled(g_generateOnStartup));
     }
     break;
@@ -311,7 +321,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         if (!g_generateOnStartup)
             break;
         g_generateOnStartupOnlyWhenChanged = !g_generateOnStartupOnlyWhenChanged;
-        IniWrite(L"Settings", L"GenerateOnStartupOnlyWhenChanged", g_generateOnStartupOnlyWhenChanged ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"GenerateOnStartupOnlyWhenChanged", g_generateOnStartupOnlyWhenChanged ? L"1" : L"0"))
+            return;
         Log(g_ui.generateOnStartupOnlyWhenChangedSummary.c_str(), StateEnabled(g_generateOnStartupOnlyWhenChanged));
     }
     break;
@@ -319,7 +330,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_HIDE_DISABLED:
     {
         g_hideDisabled = !g_hideDisabled;
-        IniWrite(L"Settings", L"HideDisabledEntries", g_hideDisabled ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"HideDisabledEntries", g_hideDisabled ? L"1" : L"0"))
+            return;
         Log(g_ui.hideDisabledEntriesSummary.c_str(), StateEnabled(g_hideDisabled));
     }
     break;
@@ -327,7 +339,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_GENERATE_DESKTOP_ICON_DISABLED:
     {
         g_generateDesktopIconForDisabledEntries = !g_generateDesktopIconForDisabledEntries;
-        IniWrite(L"Settings", L"GenerateDesktopIconForDisabledEntries", g_generateDesktopIconForDisabledEntries ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"GenerateDesktopIconForDisabledEntries", g_generateDesktopIconForDisabledEntries ? L"1" : L"0"))
+            return;
         Log(g_ui.generateDesktopIconForDisabledEntriesSummary.c_str(), StateEnabled(g_generateDesktopIconForDisabledEntries));
     }
     break;
@@ -337,7 +350,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         if (g_generateDesktopIconForDisabledEntries)
             break;
         g_deleteDisabledAssets = !g_deleteDisabledAssets;
-        IniWrite(L"Settings", L"DeleteDisabledAssets", g_deleteDisabledAssets ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"DeleteDisabledAssets", g_deleteDisabledAssets ? L"1" : L"0"))
+            return;
         Log(g_ui.deleteDisabledAssetsSummary.c_str(), StateEnabled(g_deleteDisabledAssets));
     }
     break;
@@ -345,7 +359,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_SCALE_AUTO:
     {
         g_generateScaleAuto = !g_generateScaleAuto;
-        IniWrite(L"Settings", L"GenerateScaleAuto", g_generateScaleAuto ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"GenerateScaleAuto", g_generateScaleAuto ? L"1" : L"0"))
+            return;
         Log(g_ui.generateScaleAutoSummary.c_str(), StateEnabled(g_generateScaleAuto));
     }
     break;
@@ -367,7 +382,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
 
         bool value = !setting->load();
         *setting = value;
-        IniWrite(L"Settings", key, value ? L"1" : L"0");
+        if (!IniWrite(L"Settings", key, value ? L"1" : L"0"))
+            return;
         Log(g_ui.generateScaleSummary.c_str(), scale, StateEnabled(value));
     }
     break;
@@ -381,16 +397,19 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         std::wstring text = IniReadS(L"TileText", L"Text", L"");
         if (ShowTextInputDialog(h, g_ui.tileTextInputTitle, g_ui.tileTextInputPrompt, text, true) == IDOK)
         {
-            IniWrite(L"TileText", L"Text", text.c_str());
+            if (!IniWrite(L"TileText", L"Text", text.c_str()))
+                return;
             if (!TrimCopy(text).empty())
-                IniWrite(L"TileText", L"Enabled", L"1");
+                if (!IniWrite(L"TileText", L"Enabled", L"1"))
+                    return;
             Log(g_ui.tileTextEdited.c_str(), text.c_str());
         }
     }
     break;
 
     case ID_TILE_TEXT_CLEAR:
-        IniWrite(L"TileText", L"Text", L"");
+        if (!IniWrite(L"TileText", L"Text", L""))
+            return;
         LogText(g_ui.tileTextCleared);
         break;
 
@@ -399,16 +418,19 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         std::wstring text = IniReadS(L"TileText", L"SecondaryText", L"");
         if (ShowTextInputDialog(h, g_ui.tileTextSecondaryInputTitle, g_ui.tileTextSecondaryInputPrompt, text, true) == IDOK)
         {
-            IniWrite(L"TileText", L"SecondaryText", text.c_str());
+            if (!IniWrite(L"TileText", L"SecondaryText", text.c_str()))
+                return;
             if (!TrimCopy(text).empty())
-                IniWrite(L"TileText", L"Enabled", L"1");
+                if (!IniWrite(L"TileText", L"Enabled", L"1"))
+                    return;
             Log(g_ui.tileTextEdited.c_str(), text.c_str());
         }
     }
     break;
 
     case ID_TILE_TEXT_SECONDARY_CLEAR:
-        IniWrite(L"TileText", L"SecondaryText", L"");
+        if (!IniWrite(L"TileText", L"SecondaryText", L""))
+            return;
         LogText(g_ui.tileTextCleared);
         break;
 
@@ -417,23 +439,27 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         std::wstring text = IniReadS(L"TileText", L"BadgeText", L"");
         if (ShowTextInputDialog(h, g_ui.tileTextBadgeInputTitle, g_ui.tileTextBadgeInputPrompt, text, true) == IDOK)
         {
-            IniWrite(L"TileText", L"BadgeText", text.c_str());
+            if (!IniWrite(L"TileText", L"BadgeText", text.c_str()))
+                return;
             if (!TrimCopy(text).empty())
-                IniWrite(L"TileText", L"Enabled", L"1");
+                if (!IniWrite(L"TileText", L"Enabled", L"1"))
+                    return;
             Log(g_ui.tileTextEdited.c_str(), text.c_str());
         }
     }
     break;
 
     case ID_TILE_TEXT_BADGE_CLEAR:
-        IniWrite(L"TileText", L"BadgeText", L"");
+        if (!IniWrite(L"TileText", L"BadgeText", L""))
+            return;
         LogText(g_ui.tileTextCleared);
         break;
 
     case ID_TILE_TEXT_H_ALIGN:
     {
         const wchar_t* next = NextTileTextHorizontalAlign(IniReadS(L"TileText", L"HorizontalAlign", L"Center"));
-        IniWrite(L"TileText", L"HorizontalAlign", next);
+        if (!IniWrite(L"TileText", L"HorizontalAlign", next))
+            return;
         Log(g_ui.tileTextHorizontalAlign.c_str(), next);
     }
     break;
@@ -441,7 +467,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_TILE_TEXT_V_ALIGN:
     {
         const wchar_t* next = NextTileTextVerticalAlign(IniReadS(L"TileText", L"VerticalAlign", L"Top"));
-        IniWrite(L"TileText", L"VerticalAlign", next);
+        if (!IniWrite(L"TileText", L"VerticalAlign", next))
+            return;
         Log(g_ui.tileTextVerticalAlign.c_str(), next);
     }
     break;
@@ -449,7 +476,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_TILE_TEXT_BADGE_H_ALIGN:
     {
         const wchar_t* next = NextTileTextHorizontalAlign(IniReadS(L"TileText", L"BadgeHorizontalAlign", L"Right"));
-        IniWrite(L"TileText", L"BadgeHorizontalAlign", next);
+        if (!IniWrite(L"TileText", L"BadgeHorizontalAlign", next))
+            return;
         Log(g_ui.tileTextBadgeHorizontalAlign.c_str(), next);
     }
     break;
@@ -457,7 +485,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_TILE_TEXT_BADGE_V_ALIGN:
     {
         const wchar_t* next = NextTileTextVerticalAlign(IniReadS(L"TileText", L"BadgeVerticalAlign", L"Top"));
-        IniWrite(L"TileText", L"BadgeVerticalAlign", next);
+        if (!IniWrite(L"TileText", L"BadgeVerticalAlign", next))
+            return;
         Log(g_ui.tileTextBadgeVerticalAlign.c_str(), next);
     }
     break;
@@ -561,7 +590,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_GENERATED_ASSET_CACHE:
     {
         bool value = !GeneratedAssetCacheEnabled();
-        IniWrite(L"Settings", L"GeneratedAssetCache", value ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"GeneratedAssetCache", value ? L"1" : L"0"))
+            return;
         Log(g_ui.generatedAssetCacheSummary.c_str(), StateEnabled(value), GeneratedAssetCacheMaxEntries());
     }
     break;
@@ -572,7 +602,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
             break;
 
         bool value = IniReadI(L"Settings", L"GeneratedAssetPrecache", 0) == 0;
-        IniWrite(L"Settings", L"GeneratedAssetPrecache", value ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"GeneratedAssetPrecache", value ? L"1" : L"0"))
+            return;
         Log(g_ui.generatedAssetPrecacheSummary.c_str(), StateEnabled(value), GeneratedAssetPrecacheMaxFiles());
     }
     break;
@@ -657,7 +688,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_ADV_TRIM_WORKING_SET_ON_IDLE:
     {
         g_trimWorkingSetOnIdle = !g_trimWorkingSetOnIdle;
-        IniWrite(L"Settings", L"TrimWorkingSetOnIdle", g_trimWorkingSetOnIdle ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"TrimWorkingSetOnIdle", g_trimWorkingSetOnIdle ? L"1" : L"0"))
+            return;
         Log(g_ui.trimWorkingSetOnIdleSummary.c_str(), StateEnabled(g_trimWorkingSetOnIdle));
         if (g_trimWorkingSetOnIdle)
             TrimIdleWorkingSetIfConfigured();
@@ -677,7 +709,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_ADV_COMPACT_CRT_HEAP_ON_IDLE:
     {
         g_compactCrtHeapOnIdle = !g_compactCrtHeapOnIdle;
-        IniWrite(L"Settings", L"CompactCrtHeapOnIdle", g_compactCrtHeapOnIdle ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"CompactCrtHeapOnIdle", g_compactCrtHeapOnIdle ? L"1" : L"0"))
+            return;
         Log(g_ui.compactCrtHeapOnIdleSummary.c_str(), StateEnabled(g_compactCrtHeapOnIdle));
         TrimIdleWorkingSetIfConfigured();
     }
@@ -686,7 +719,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_ADV_KEEP_GDIPLUS_LOADED:
     {
         g_keepGdiPlusLoaded = !g_keepGdiPlusLoaded;
-        IniWrite(L"Settings", L"KeepGdiPlusLoaded", g_keepGdiPlusLoaded ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"KeepGdiPlusLoaded", g_keepGdiPlusLoaded ? L"1" : L"0"))
+            return;
         Log(g_ui.keepGdiPlusLoadedSummary.c_str(), StateEnabled(g_keepGdiPlusLoaded));
         ReleaseIdleGdiPlusIfAllowed();
         TrimIdleWorkingSetIfConfigured();
@@ -733,7 +767,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_SHOW_MENU_DROPDOWN:
     {
         g_showMenuAsDropdown = !g_showMenuAsDropdown;
-        IniWrite(L"Settings", L"ShowMenuAsDropdown", g_showMenuAsDropdown ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"ShowMenuAsDropdown", g_showMenuAsDropdown ? L"1" : L"0"))
+            return;
         Log(g_ui.showMenuAsDropdownSummary.c_str(), StateEnabled(g_showMenuAsDropdown));
     }
     break;
@@ -741,7 +776,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_NOTIF_ENABLED:
     {
         g_notificationsEnabled = !g_notificationsEnabled;
-        IniWrite(L"Settings", L"NotificationsEnabled", g_notificationsEnabled ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"NotificationsEnabled", g_notificationsEnabled ? L"1" : L"0"))
+            return;
         Log(g_ui.notificationsSummary.c_str(), StateEnabled(g_notificationsEnabled), StateOn(g_notifyOnStart), StateOn(g_notifyOnSuccess), StateOn(g_notifyOnFailure), StateOn(g_notifyOnBusy), StateOn(g_notifyOnAlreadyRunning), StateOn(g_notifyOnSingleInstanceFailure));
     }
     break;
@@ -749,7 +785,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_NOTIFY_START:
     {
         g_notifyOnStart = !g_notifyOnStart;
-        IniWrite(L"Settings", L"NotifyOnStart", g_notifyOnStart ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"NotifyOnStart", g_notifyOnStart ? L"1" : L"0"))
+            return;
         Log(g_ui.notifyOnStartState.c_str(), (int)g_notifyOnStart);
     }
     break;
@@ -757,7 +794,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_NOTIFY_SUCCESS:
     {
         g_notifyOnSuccess = !g_notifyOnSuccess;
-        IniWrite(L"Settings", L"NotifyOnSuccess", g_notifyOnSuccess ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"NotifyOnSuccess", g_notifyOnSuccess ? L"1" : L"0"))
+            return;
         Log(g_ui.notifyOnSuccessState.c_str(), (int)g_notifyOnSuccess);
     }
     break;
@@ -765,7 +803,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_NOTIFY_FAILURE:
     {
         g_notifyOnFailure = !g_notifyOnFailure;
-        IniWrite(L"Settings", L"NotifyOnFailure", g_notifyOnFailure ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"NotifyOnFailure", g_notifyOnFailure ? L"1" : L"0"))
+            return;
         Log(g_ui.notifyOnFailureState.c_str(), (int)g_notifyOnFailure);
     }
     break;
@@ -773,7 +812,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_NOTIFY_BUSY:
     {
         g_notifyOnBusy = !g_notifyOnBusy;
-        IniWrite(L"Settings", L"NotifyOnBusy", g_notifyOnBusy ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"NotifyOnBusy", g_notifyOnBusy ? L"1" : L"0"))
+            return;
         Log(g_ui.notifyOnBusyState.c_str(), (int)g_notifyOnBusy);
     }
     break;
@@ -781,7 +821,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_NOTIFY_ALREADY_RUNNING:
     {
         g_notifyOnAlreadyRunning = !g_notifyOnAlreadyRunning;
-        IniWrite(L"Settings", L"NotifyOnAlreadyRunning", g_notifyOnAlreadyRunning ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"NotifyOnAlreadyRunning", g_notifyOnAlreadyRunning ? L"1" : L"0"))
+            return;
         Log(g_ui.notifyOnAlreadyRunningState.c_str(), (int)g_notifyOnAlreadyRunning);
     }
     break;
@@ -789,7 +830,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_NOTIFY_SINGLE_INSTANCE_FAILURE:
     {
         g_notifyOnSingleInstanceFailure = !g_notifyOnSingleInstanceFailure;
-        IniWrite(L"Settings", L"NotifyOnSingleInstanceFailure", g_notifyOnSingleInstanceFailure ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"NotifyOnSingleInstanceFailure", g_notifyOnSingleInstanceFailure ? L"1" : L"0"))
+            return;
         Log(g_ui.notifyOnSingleInstanceFailureState.c_str(), (int)g_notifyOnSingleInstanceFailure);
     }
     break;
@@ -805,7 +847,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_LISTEN_WP:
     {
         g_listenWallpaper = !g_listenWallpaper;
-        IniWrite(L"Settings", L"ListenWallpaper", g_listenWallpaper ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"ListenWallpaper", g_listenWallpaper ? L"1" : L"0"))
+            return;
         Log(g_ui.listenWallpaperState.c_str(), (int)g_listenWallpaper);
     }
     break;
@@ -813,7 +856,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_LISTEN_FIT:
     {
         g_listenFit = !g_listenFit;
-        IniWrite(L"Settings", L"ListenFit", g_listenFit ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"ListenFit", g_listenFit ? L"1" : L"0"))
+            return;
         Log(g_ui.listenFitState.c_str(), (int)g_listenFit);
     }
     break;
@@ -821,14 +865,16 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_DISABLE_FIT:
     {
         g_disableFitting = !g_disableFitting;
-        IniWrite(L"Settings", L"DisableFitting", g_disableFitting ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"DisableFitting", g_disableFitting ? L"1" : L"0"))
+            return;
         if (g_disableFitting)
         {
             // Turn off listener to save CPU
             if (g_listenFit)
             {
                 g_listenFit = false;
-                IniWrite(L"Settings", L"ListenFit", L"0");
+                if (!IniWrite(L"Settings", L"ListenFit", L"0"))
+                    return;
                 LogText(g_ui.listenFitAutoDisabled);
             }
         }
@@ -853,7 +899,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
             method = WallpaperDetectionMethod::Auto;
 
         const wchar_t* methodName = WallpaperDetectionMethodName(method);
-        IniWrite(L"Settings", L"WallpaperDetectionMethod", methodName);
+        if (!IniWrite(L"Settings", L"WallpaperDetectionMethod", methodName))
+            return;
         Log(g_ui.wallpaperDetectionMethodLabel.c_str(), methodName);
     }
     break;
@@ -861,7 +908,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_WP_METHOD_FALLBACK:
     {
         g_wallpaperDetectionFallbackOnInvalid = !g_wallpaperDetectionFallbackOnInvalid;
-        IniWrite(L"Settings", L"WallpaperDetectionFallbackOnInvalid", g_wallpaperDetectionFallbackOnInvalid ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"WallpaperDetectionFallbackOnInvalid", g_wallpaperDetectionFallbackOnInvalid ? L"1" : L"0"))
+            return;
         Log(g_ui.wallpaperDetectionFallbackSummary.c_str(), StateEnabled(g_wallpaperDetectionFallbackOnInvalid));
     }
     break;
@@ -869,7 +917,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_LIVE_WALLPAPER_CAPTURE:
     {
         bool value = IniReadI(L"Settings", L"LiveWallpaperCapture", 0) == 0;
-        IniWrite(L"Settings", L"LiveWallpaperCapture", value ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"LiveWallpaperCapture", value ? L"1" : L"0"))
+            return;
         Log(g_ui.liveWallpaperCaptureSummary.c_str(),
             StateEnabled(value),
             IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000),
@@ -880,7 +929,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_LIVE_WALLPAPER_CAPTURE_SCREEN_FALLBACK:
     {
         bool value = IniReadI(L"Settings", L"LiveWallpaperCaptureScreenFallback", 0) == 0;
-        IniWrite(L"Settings", L"LiveWallpaperCaptureScreenFallback", value ? L"1" : L"0");
+        if (!IniWrite(L"Settings", L"LiveWallpaperCaptureScreenFallback", value ? L"1" : L"0"))
+            return;
         Log(g_ui.liveWallpaperCaptureScreenFallbackState.c_str(), value ? 1 : 0);
     }
     break;
@@ -889,7 +939,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     {
         int current = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureDelayMs", 2500, 0, 30000);
         int next = NextLiveWallpaperCaptureDelayMs(current);
-        IniWrite(L"Settings", L"LiveWallpaperCaptureDelayMs", std::to_wstring(next).c_str());
+        if (!IniWrite(L"Settings", L"LiveWallpaperCaptureDelayMs", std::to_wstring(next).c_str()))
+            return;
         Log(g_ui.liveWallpaperCaptureDelayState.c_str(), next);
     }
     break;
@@ -898,7 +949,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     {
         int current = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureRefreshMs", 10000, 0, 3600000);
         int next = NextLiveWallpaperCaptureRefreshMs(current);
-        IniWrite(L"Settings", L"LiveWallpaperCaptureRefreshMs", std::to_wstring(next).c_str());
+        if (!IniWrite(L"Settings", L"LiveWallpaperCaptureRefreshMs", std::to_wstring(next).c_str()))
+            return;
         Log(g_ui.liveWallpaperCaptureRefreshState.c_str(), next);
     }
     break;
@@ -907,7 +959,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     {
         int current = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", 1000, 0, 3600000);
         int next = NextLiveWallpaperCaptureStartupRefreshMs(current);
-        IniWrite(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", std::to_wstring(next).c_str());
+        if (!IniWrite(L"Settings", L"LiveWallpaperCaptureStartupRefreshMs", std::to_wstring(next).c_str()))
+            return;
         Log(g_ui.liveWallpaperCaptureStartupRefreshState.c_str(), next);
     }
     break;
@@ -916,7 +969,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     {
         int current = IniReadClampedI(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", 0, 0, 3600000);
         int next = NextLiveWallpaperCaptureStartupRefreshDurationMs(current);
-        IniWrite(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", std::to_wstring(next).c_str());
+        if (!IniWrite(L"Settings", L"LiveWallpaperCaptureStartupRefreshDurationMs", std::to_wstring(next).c_str()))
+            return;
         Log(g_ui.liveWallpaperCaptureStartupRefreshDurationState.c_str(), next);
     }
     break;
@@ -940,7 +994,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         {
             std::wstring newLogPath = file.data();
             SetLogPathCopy(newLogPath);
-            IniWrite(L"Settings", L"LogPath", newLogPath.c_str());
+            if (!IniWrite(L"Settings", L"LogPath", newLogPath.c_str()))
+                return;
 
             Log(g_ui.logPathChanged.c_str(), newLogPath.c_str());
             LogText(g_ui.futureLogEntriesNewPath);
@@ -954,7 +1009,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         if (ShowRenameDialog(h, newPath) == IDOK)
         {
             SetLogPathCopy(newPath);
-            IniWrite(L"Settings", L"LogPath", newPath.c_str());
+            if (!IniWrite(L"Settings", L"LogPath", newPath.c_str()))
+                return;
             Log(g_ui.logPathRenamed.c_str(), newPath.c_str());
             LogText(g_ui.futureLogEntriesRenamedPath);
         }
@@ -978,7 +1034,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     {
         std::wstring newLogPath = DefaultLogPath();
         SetLogPathCopy(newLogPath);
-        IniWrite(L"Settings", L"LogPath", L"");
+        if (!IniWrite(L"Settings", L"LogPath", L""))
+            return;
         Log(g_ui.logPathReset.c_str(), newLogPath.c_str());
         LogText(g_ui.futureLogEntriesDefaultPath);
     }
@@ -989,7 +1046,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
             int i = static_cast<int>(cmd) - ID_A1;
             const wchar_t* k = kAssetMenuKeys[i];
             bool nv = IniReadI(L"Assets",k,0) == 0;
-            IniWrite(L"Assets",k,nv?L"1":L"0");
+            if (!IniWrite(L"Assets",k,nv?L"1":L"0"))
+                return;
             Log(g_ui.assetToggleState.c_str(), k, StateOn(nv));
         }
         break;

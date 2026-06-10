@@ -106,6 +106,36 @@ inline bool ConfigFileNameContainsColon(const std::wstring& path)
     return path.find(L':', start) != std::wstring::npos;
 }
 
+inline std::wstring ConfigFileNamePart(const std::wstring& path)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    size_t start = slash == std::wstring::npos ? 0 : slash + 1;
+    return path.substr(start);
+}
+
+inline bool ConfigFileNameHasInvalidCharacters(const std::wstring& path)
+{
+    std::wstring name = ConfigFileNamePart(path);
+    if (name.empty())
+    {
+        return true;
+    }
+    if (!name.empty() && (name.back() == L' ' || name.back() == L'.'))
+    {
+        return true;
+    }
+
+    for (wchar_t ch : name)
+    {
+        if (ch < 0x20 || ch == L'<' || ch == L'>' || ch == L'"' ||
+            ch == L'|' || ch == L'?' || ch == L'*')
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline bool IsReservedWindowsDeviceBaseName(const std::wstring& path)
 {
     size_t slash = path.find_last_of(L"\\/");
@@ -160,6 +190,16 @@ inline bool TryValidateConfigFilePath(const std::wstring& path, std::wstring* er
         if (error)
         {
             *error = L"path uses an alternate data stream or device-style filename, not an INI file";
+        }
+        SetLastError(ERROR_INVALID_NAME);
+        return false;
+    }
+
+    if (ConfigFileNameHasInvalidCharacters(path))
+    {
+        if (error)
+        {
+            *error = L"path filename contains invalid Windows filename characters, control characters, or trailing space/dot";
         }
         SetLastError(ERROR_INVALID_NAME);
         return false;

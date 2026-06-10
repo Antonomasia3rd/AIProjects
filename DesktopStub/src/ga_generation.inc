@@ -1282,8 +1282,8 @@ static bool LiveTileModeReregistrationStateIsCurrent()
 static void StoreLiveTileModeReregistrationState()
 {
     std::wstring key = BuildLiveTileModeReregistrationStateKey();
-    if (!key.empty())
-        IniWrite(L"State", L"LastLiveTileModeReregistrationKey", key.c_str());
+    if (!key.empty() && !IniWrite(L"State", L"LastLiveTileModeReregistrationKey", key.c_str()))
+        return;
 }
 
 static bool LiveTileModeReregistrationPending()
@@ -1293,7 +1293,8 @@ static bool LiveTileModeReregistrationPending()
 
 static void SetLiveTileModeReregistrationPending(bool pending)
 {
-    IniWrite(L"State", L"LiveTileModeReregistrationPending", pending ? L"1" : L"0");
+    if (!IniWrite(L"State", L"LiveTileModeReregistrationPending", pending ? L"1" : L"0"))
+        return;
 }
 
 static bool LiveTileWasClearedOnShutdown()
@@ -1303,7 +1304,8 @@ static bool LiveTileWasClearedOnShutdown()
 
 static void SetLiveTileClearedOnShutdown(bool cleared)
 {
-    IniWrite(L"State", L"LiveTileClearedOnShutdown", cleared ? L"1" : L"0");
+    if (!IniWrite(L"State", L"LiveTileClearedOnShutdown", cleared ? L"1" : L"0"))
+        return;
 }
 
 static bool StartupLiveTileClearedStateNeedsGeneration()
@@ -1345,8 +1347,8 @@ static bool StartupGenerationCanSkip(const std::wstring& wallpaperPath)
 static void StoreSuccessfulGenerationState(const std::wstring& wallpaperPath)
 {
     std::wstring key = BuildGenerationStateKey(wallpaperPath);
-    if (!key.empty())
-        IniWrite(L"State", L"LastSuccessfulGenerationKey", key.c_str());
+    if (!key.empty() && !IniWrite(L"State", L"LastSuccessfulGenerationKey", key.c_str()))
+        return;
 }
 
 static bool PrepareWallpaperRenderSource(
@@ -2511,10 +2513,13 @@ static bool ConsumePreviousForceShutdownCleanupWarning(std::wstring& warning)
 
     warning = FormatWide(g_ui.previousForceShutdownCleanupWarning.c_str(), reason.c_str(), skipped.c_str(), downside.c_str());
 
-    IniWrite(L"State", L"ForceShutdownPendingCleanup", L"0");
-    IniWrite(L"State", L"ForceShutdownReason", L"");
-    IniWrite(L"State", L"ForceShutdownSkippedCleanup", L"");
-    IniWrite(L"State", L"ForceShutdownDownside", L"");
+    bool cleared = true;
+    cleared = IniWrite(L"State", L"ForceShutdownPendingCleanup", L"0") && cleared;
+    cleared = IniWrite(L"State", L"ForceShutdownReason", L"") && cleared;
+    cleared = IniWrite(L"State", L"ForceShutdownSkippedCleanup", L"") && cleared;
+    cleared = IniWrite(L"State", L"ForceShutdownDownside", L"") && cleared;
+    if (!cleared)
+        LogText(L"[!] Failed to clear one or more force-shutdown cleanup state values; the warning may reappear on next startup.");
     return true;
 }
 

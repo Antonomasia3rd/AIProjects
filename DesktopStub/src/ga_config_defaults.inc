@@ -1143,8 +1143,8 @@ static bool EnsureInitialIniTemplate()
 static void UpgradeStringDefaultIfUnmodified(const wchar_t* key, const wchar_t* oldValue, const wchar_t* newValue)
 {
     std::wstring current = IniReadS(L"Strings", key, L"");
-    if (current == oldValue)
-        IniWrite(L"Strings", key, newValue);
+    if (current == oldValue && !IniWrite(L"Strings", key, newValue))
+        return;
 }
 
 static void RepairBrokenPowerShellOutputTruncatedDefault()
@@ -1284,17 +1284,21 @@ static void UpgradeTileTextDefaultAlignment()
 
     std::wstring current = ToLowerCopy(TrimCopy(IniReadS(L"TileText", L"VerticalAlign", L"")));
     if (current.empty() || current == L"bottom")
-        IniWrite(L"TileText", L"VerticalAlign", L"Top");
+    {
+        if (!IniWrite(L"TileText", L"VerticalAlign", L"Top"))
+            return;
+    }
 
-    IniWrite(L"State", L"TileTextVerticalAlignDefaultMigrated", L"1");
+    if (!IniWrite(L"State", L"TileTextVerticalAlignDefaultMigrated", L"1"))
+        return;
 }
 
 static void UpgradePowerShellExeDefault()
 {
     const wchar_t* legacyDefault = L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
     std::wstring current = TrimCopy(IniReadS(L"Settings", L"PowerShellExe", L""));
-    if (IEquals(current, legacyDefault))
-        IniWrite(L"Settings", L"PowerShellExe", L"");
+    if (IEquals(current, legacyDefault) && !IniWrite(L"Settings", L"PowerShellExe", L""))
+        return;
 }
 
 static void UpgradeRenamedStringDefaults()
