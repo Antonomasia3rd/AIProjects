@@ -1510,6 +1510,16 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     LogCommandLineSummary();
     FlushStartupWarnings();
 
+    if (singleInstanceMutexFailure != ERROR_SUCCESS)
+    {
+        int exitCode = HandleSingleInstanceMutexFailure(singleInstanceMutexFailure);
+        if (exitCode != 0)
+        {
+            ShutdownGdiPlusForExit();
+            return exitCode;
+        }
+    }
+
     std::wstring startupManifestPath;
     bool startupManifestCreated = false;
     DWORD startupManifestError = ERROR_SUCCESS;
@@ -1665,17 +1675,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     bool queuedLiveTileRuntimeRelaunch = false;
     if (!g_shutdownState.IsRequested())
         queuedLiveTileRuntimeRelaunch = QueueLiveTileRuntimeConditionRelaunch(g_hwnd);
-
-    if (singleInstanceMutexFailure != ERROR_SUCCESS)
-    {
-        int exitCode = HandleSingleInstanceMutexFailure(singleInstanceMutexFailure);
-        if (exitCode != 0)
-        {
-            TrayRemove();
-            ShutdownGdiPlusForExit();
-            return exitCode;
-        }
-    }
 
     if (!queuedLiveTileRuntimeRelaunch && CommandLineLiveTileModeChanged())
     {

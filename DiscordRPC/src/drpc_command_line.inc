@@ -78,6 +78,11 @@ static bool IsKnownBooleanCommandLineSetting(const std::wstring& section, const 
 
 static bool ValidateCommandLineSettingValue(const CommandLineSetting& setting, std::wstring& error)
 {
+    if (EqualsI(setting.section, L"general") && EqualsI(setting.key, L"token"))
+    {
+        error = L"--set general.token is blocked because it would persist a plaintext Discord token. Use --token instead.";
+        return false;
+    }
     if (EqualsI(setting.section, L"general") && EqualsI(setting.key, L"client_id"))
     {
         if (!Trim(setting.value).empty() && !ValidateClientIdValue(setting.value, error))

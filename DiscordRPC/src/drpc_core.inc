@@ -558,7 +558,10 @@ static void ConfigureRuntimeFromConfig(const AppOptions& options)
     }
     else if (PathIsRelativeW(configuredLog.c_str()))
     {
-        effectiveLogPath = PathJoin(g_exeDir, configuredLog);
+        // A relative log path belongs to the selected INI profile, not to the
+        // executable folder. This keeps --ini profile bundles self-contained.
+        std::wstring configDir = GetDirectoryName(MakeAbsolutePath(g_iniPath));
+        effectiveLogPath = PathJoin(configDir.empty() ? g_exeDir : configDir, configuredLog);
     }
     else
     {
@@ -613,7 +616,7 @@ static bool AcquireSingleInstance()
     if (g_singleInstanceMutex == nullptr)
     {
         LogError(L"Could not create single-instance mutex: " + GetLastErrorText(GetLastError()));
-        return true;
+        return false;
     }
 
     if (GetLastError() == ERROR_ALREADY_EXISTS)

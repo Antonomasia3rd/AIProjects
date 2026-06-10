@@ -327,7 +327,7 @@ public:
         Close();
         if (Trim(token_).empty())
         {
-            throw std::runtime_error("Missing [general] token_protected or token for Discord Gateway.");
+            throw std::runtime_error("Missing [general] token_protected for Discord Gateway. Legacy plaintext token is only read for migration.");
         }
         if (Trim(clientId_).empty())
         {
@@ -987,7 +987,7 @@ private:
                             }
                             if (closeStatus == 4004)
                             {
-                                SetLastConnectError(L"4004 Authentication failed. Check [general] token_protected or token.");
+                                SetLastConnectError(L"4004 Authentication failed. Check [general] token_protected. Legacy plaintext token is only read for migration.");
                             }
                         }
                         LogError(closeText);

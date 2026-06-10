@@ -724,9 +724,10 @@ int main(int argc, char** argv)
             generation,
             {
                 "WriteIniValueWithWait(L\"State\", L\"ForceShutdownPendingCleanup\", L\"1\", 250)",
+                "Force shutdown cleanup state could not be recorded before process exit.",
                 "ExitProcess(0)"
             },
-            "Force shutdown must not wait forever on the INI write mutex before reaching ExitProcess");
+            "Force shutdown must not wait forever on the INI write mutex before reaching ExitProcess and must report if skipped-cleanup state could not be persisted");
         AssertContainsAll(
             "Build script quotes configurable output paths",
             "BuildDesktopStub.cmd",

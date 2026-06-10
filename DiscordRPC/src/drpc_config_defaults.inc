@@ -7,11 +7,11 @@ static constexpr const wchar_t* DEFAULT_HELP_TEMPLATE =
     L"  --version                      Show version information.\\n"
     L"  --ini <path>                   Use an alternate INI file.\\n"
     L"  --exit                         Ask a running resident instance to exit.\\n"
-    L"  --set Section.Key=Value        Set and save any INI value; known typed keys are validated.\\n"
-    L"  --bool Section.Key=Value       Set and save a boolean INI value.\\n"
+    L"  --set Section.Key=Value        Set and save a non-secret INI value; known typed keys are validated.\\n"
+    L"  --bool Section.Key=Value       Set and save a known boolean INI value.\\n"
     L"  --client-id <id>               Set [general] client_id (17-20 decimal digits).\\n"
-    L"  --token <token>                Set [general] token, then protect it with DPAPI.\\n"
-    L"  --protect-token                Migrate plaintext [general] token to token_protected.\\n"
+    L"  --token <token>                Store token as DPAPI-protected token_protected and clear legacy plaintext token.\\n"
+    L"  --protect-token                Migrate legacy plaintext [general] token to token_protected.\\n"
     L"  --status <value>               Set [general] status: online, idle, dnd, invisible.\\n"
     L"  --update-interval <seconds>    Set [general] update_interval (1-86400).\\n"
     L"  --details-template <template>  Set [general] details_template.\\n"
@@ -66,7 +66,6 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"general", L"details_template", L"{win_title}" },
     { L"general", L"state_template", L"CPU: {cpu}, RAM: {ram_used}/{ram_total} ({ram_pct})" },
     { L"general", L"token_protected", L"" },
-    { L"general", L"token", L"" },
 
     { L"censor_map", L"rule_order", L"full_replace, word_replace, pattern_replace" },
     { L"censor_map", L"full_replace", L"" },
@@ -206,7 +205,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"strings", L"notification_connected_gateway", L"Rich Presence is active through Discord Gateway." },
     { L"strings", L"notification_failed", L"Rich Presence update failed." },
     { L"strings", L"notification_reloaded", L"Configuration reloaded." },
-    { L"strings", L"notification_gateway_missing_token", L"Gateway mode needs token_protected or token." },
+    { L"strings", L"notification_gateway_missing_token", L"Gateway mode needs DPAPI token_protected. Legacy plaintext token is only read for migration." },
     { L"strings", L"notification_gateway_unsupported", L"Discord Gateway transport is disabled by [gateway] supported." },
     { L"strings", L"notification_gateway_auth_failed", L"Discord Gateway authentication failed. Check your token." },
     { L"strings", L"notification_shutdown_pending", L"Shutdown requested. Use Force shutdown from the tray if Discord cleanup does not finish." },
