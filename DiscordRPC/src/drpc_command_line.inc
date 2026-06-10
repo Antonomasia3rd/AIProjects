@@ -146,6 +146,17 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
     std::unique_ptr<LPWSTR, decltype(&LocalFree)> argvHolder(rawArgv, LocalFree);
     wchar_t** argv = rawArgv;
 
+    bool sideEffectFreeMode = false;
+    for (int scan = 1; scan < argc; ++scan)
+    {
+        std::wstring scanLower = ToLower(argv[scan]);
+        if (scanLower == L"--help" || scanLower == L"-h" || scanLower == L"/?" || scanLower == L"--version")
+        {
+            sideEffectFreeMode = true;
+            break;
+        }
+    }
+
     for (int i = 1; i < argc; ++i)
     {
         std::wstring arg = argv[i];
@@ -299,11 +310,14 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             {
                 return false;
             }
-            if (!ValidateCommandLineSettingValue(setting, error))
+            if (!sideEffectFreeMode && !ValidateCommandLineSettingValue(setting, error))
             {
                 return false;
             }
-            options.settings.push_back(setting);
+            if (!sideEffectFreeMode)
+            {
+                options.settings.push_back(setting);
+            }
         }
         else if (aip::IsOptionOrInlineValue(arg, L"--client-id"))
         {
