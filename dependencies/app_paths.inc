@@ -233,6 +233,16 @@ inline bool TryValidateConfigFilePath(const std::wstring& path, std::wstring* er
 inline bool TryResolveConfigFilePath(const std::wstring& path, std::wstring& absolutePath, std::wstring* error = nullptr)
 {
     absolutePath.clear();
+
+    // Validate the caller-provided spelling before normalizing it. On Windows,
+    // GetFullPathNameW can normalize away trailing spaces/dots, so checking only
+    // the resolved path would accidentally accept inputs such as "settings.ini."
+    // or "settings.ini ".
+    if (!TryValidateConfigFilePath(path, error))
+    {
+        return false;
+    }
+
     if (!TryMakeAbsolutePath(path, absolutePath, error))
     {
         return false;
