@@ -188,7 +188,17 @@ int main()
             "DiscordRPC help/version mode does not queue --set writes",
             "src\\drpc_command_line.inc",
             commandLine,
-            "if (!sideEffectFreeMode)\n            {\n                options.settings.push_back(setting);\n            }");
+            "if (!sideEffectFreeMode)\n            {\n                AddSetting(options, setting.section, setting.key, setting.value);\n            }");
+        RequireContains(
+            "DiscordRPC help/version mode does not validate or queue --bool writes",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "if (!sideEffectFreeMode)\n            {\n                bool parsed = false;");
+        RequireContains(
+            "DiscordRPC command-line INI setting overrides de-duplicate by key",
+            "src\\drpc_command_line.inc",
+            commandLine,
+            "for (auto& setting : options.settings)");
         RequireContains(
             "DiscordRPC help may read configured template",
             "DiscordRPC help/config sources",
@@ -269,6 +279,11 @@ int main()
             "DiscordRPC.cpp + src\\drpc_core.inc",
             discordMain + "\n" + core,
             "ProtectExplicitDiscordTokenInConfig(options.tokenToProtect)");
+        RequireNotContains(
+            "DiscordRPC runtime token resolver does not fall back to plaintext token",
+            "src\\drpc_core.inc",
+            core,
+            "return Trim(IniReadS(L\"general\", L\"token\", L\"\"));");
         RequireContains(
             "DiscordRPC --bool is restricted to known boolean INI keys",
             "src\\drpc_command_line.inc",

@@ -349,10 +349,10 @@ std::wstring IniReadS(const wchar_t* s, const wchar_t* k, const wchar_t* d)
     return d ? d : L"";
 }
 
-void IniWrite(const wchar_t* s, const wchar_t* k, const wchar_t* v)
+bool IniWrite(const wchar_t* s, const wchar_t* k, const wchar_t* v)
 {
     if (WriteIniValue(s, k, v))
-        return;
+        return true;
 
     DWORD err = GetLastError();
     if (err == ERROR_SUCCESS)
@@ -362,5 +362,6 @@ void IniWrite(const wchar_t* s, const wchar_t* k, const wchar_t* v)
         ? L"[!] Failed to write INI value [%s] %s (error %lu: %s)."
         : g_ui.iniWriteFailed.c_str();
     Log(fmt, s ? s : L"", k ? k : L"", err, Win32ErrorString(err).c_str());
+    return false;
 }
 
