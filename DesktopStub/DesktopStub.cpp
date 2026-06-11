@@ -85,6 +85,12 @@ enum class LiveTileUpdateMode
     Auto
 };
 
+enum class LiveTileTemplateStyle
+{
+    Adaptive,
+    Windows81Preset
+};
+
 enum class ManifestCompatibilityTarget
 {
     Windows10,

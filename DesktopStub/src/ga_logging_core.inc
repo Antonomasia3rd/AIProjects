@@ -279,6 +279,8 @@ static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
     g_generateOnStartupOnlyWhenChanged = IniReadI(L"Settings", L"GenerateOnStartupOnlyWhenChanged", 1) != 0;
     g_liveTileUpdateMode = static_cast<int>(ParseLiveTileUpdateModeValue(
         IniReadS(L"Settings", L"ExperimentalLiveTileUpdate", L"Auto")));
+    g_liveTileTemplateStyle = static_cast<int>(ParseLiveTileTemplateStyleValue(
+        IniReadS(L"Settings", L"LiveTileTemplateStyle", L"Adaptive")));
     g_liveTileRelaunchOnSwitch = IniReadI(L"Settings", L"LiveTileRelaunchOnSwitch", 1) != 0;
     g_clearLiveTileOnShutdown = IniReadI(L"Settings", L"ClearLiveTileOnShutdown", 1) != 0;
     g_manifestCompatibilityTarget = static_cast<int>(ParseManifestCompatibilityTargetValue(

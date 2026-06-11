@@ -224,6 +224,10 @@ void LoadUiStrings()
     g_ui.liveTileModeEnabled = IniReadS(L"Strings", L"LiveTileModeEnabled", L"Enabled");
     g_ui.liveTileModeDisabled = IniReadS(L"Strings", L"LiveTileModeDisabled", L"Disabled");
     g_ui.liveTileModeTitle = IniReadS(L"Strings", L"LiveTileModeTitle", L"Mode");
+    g_ui.liveTileTemplateTitle = IniReadS(L"Strings", L"LiveTileTemplateTitle", L"Windows 10 template");
+    g_ui.liveTileTemplateAdaptive = IniReadS(L"Strings", L"LiveTileTemplateAdaptive", L"Adaptive");
+    g_ui.liveTileTemplateWindows81Preset = IniReadS(L"Strings", L"LiveTileTemplateWindows81Preset", L"Windows 8.1 preset catalog");
+    g_ui.liveTileTemplateChangedReason = IniReadS(L"Strings", L"LiveTileTemplateChangedReason", L"Live Tile template style changed");
     g_ui.liveTileRegistrationTitle = IniReadS(L"Strings", L"LiveTileRegistrationTitle", L"Registration");
     g_ui.liveTileRuntimeTitle = IniReadS(L"Strings", L"LiveTileRuntimeTitle", L"Runtime behavior");
     g_ui.liveTileWindows8Title = IniReadS(L"Strings", L"LiveTileWindows8Title", L"Windows 8 / 8.1");
@@ -562,6 +566,7 @@ void LoadUiStrings()
     g_ui.powerShellRegistrationSummary = IniReadS(L"Strings", L"PowerShellRegistrationSummary", L"[i] PowerShell registration: %s");
     g_ui.usePowerShellSummary = IniReadS(L"Strings", L"UsePowerShellSummary", L"[i] UsePowerShell = %d (%s)");
     g_ui.liveTileUpdateSummary = IniReadS(L"Strings", L"LiveTileUpdateSummary", L"[i] Live Tile update mode: %s");
+    g_ui.liveTileTemplateStyleSummary = IniReadS(L"Strings", L"LiveTileTemplateStyleSummary", L"[i] Windows 10 Live Tile template style: %s");
     g_ui.manifestTargetSummary = IniReadS(L"Strings", L"ManifestTargetSummary", L"[i] AppxManifest target: %s");
     g_ui.wallpaperDetectionFallbackSummary = IniReadS(L"Strings", L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s");
     g_ui.liveWallpaperCaptureSummary = IniReadS(L"Strings", L"LiveWallpaperCaptureSummary", L"[i] Live wallpaper capture: %s (delay=%d ms, refresh=%s)");
@@ -843,6 +848,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.powerShellRegistrationSummary, L"PowerShellRegistrationSummary", { L"%s" });
     RequireFormat(g_ui.usePowerShellSummary, L"UsePowerShellSummary", { L"%d", L"%s" });
     RequireFormat(g_ui.liveTileUpdateSummary, L"LiveTileUpdateSummary", { L"%s" });
+    RequireFormat(g_ui.liveTileTemplateStyleSummary, L"LiveTileTemplateStyleSummary", { L"%s" });
     RequireFormat(g_ui.wallpaperDetectionFallbackSummary, L"WallpaperDetectionFallbackSummary", { L"%s" });
     RequireFormat(g_ui.win8LiveTileOopHelperState, L"Win8LiveTileOopHelperState", { L"%d" });
     RequireFormat(g_ui.win8LiveTileBackgroundTaskState, L"Win8LiveTileBackgroundTaskState", { L"%d" });

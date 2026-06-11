@@ -1180,7 +1180,7 @@ static void AppendRectFingerprint(std::wstring& out, const wchar_t* name, const 
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
 {
     std::wstring state;
-    state += L"v=5;";
+    state += L"v=6;";
     state += L"wallpaper=" + FileFingerprint(wallpaperPath) + L";";
     state += L"wallpaperDecodeLowMemory=" + IntToWString(IniReadI(L"Settings", L"WallpaperDecodeLowMemory", 1) ? 1 : 0) + L";";
     state += L"wallpaperDecodeMaxLongEdge=" + IntToWString(IniReadClampedI(L"Settings", L"WallpaperDecodeMaxLongEdge", 0, 0, 32768)) + L";";
@@ -1190,6 +1190,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     state += L"methodFallback=" + IntToWString(g_wallpaperDetectionFallbackOnInvalid ? 1 : 0) + L";";
     state += L"usePowerShell=" + IntToWString(UsePowerShell() ? 1 : 0) + L";";
     state += L"liveTileUpdateMode=" + LiveTileUpdateModeIniValue(ConfiguredLiveTileUpdateMode()) + L";";
+    state += L"liveTileTemplateStyle=" + LiveTileTemplateStyleIniValue(ConfiguredLiveTileTemplateStyle()) + L";";
     state += L"effectiveLiveTileUpdate=" + IntToWString(UseExperimentalLiveTileUpdate() ? 1 : 0) + L";";
     state += L"disableFitting=" + IntToWString(g_disableFitting ? 1 : 0) + L";";
     state += L"fit=" + IntToWString(static_cast<int>(g_disableFitting ? FitMode::Fill : GetWallpaperFit())) + L";";
@@ -1384,8 +1385,8 @@ static bool ShouldBakeTileTextIntoAssets(bool liveTileUpdateMode)
     if (!TileTextOverlayEnabled())
         return false;
 
-    // Windows 10 adaptive Live Tiles can carry text in XML. Static/registration
-    // tiles and older image-template Live Tiles need the text baked into PNGs.
+    // Windows 10 Live Tiles can carry text in adaptive or preset-catalog XML.
+    // Static/registration tiles and older Live Tiles need it baked into PNGs.
     return !liveTileUpdateMode || ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10;
 }
 

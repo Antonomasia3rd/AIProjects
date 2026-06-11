@@ -95,7 +95,14 @@ static std::wstring LiveTileAssetUriIfValid(
 
 static bool LiveTileUsesAdaptiveXml()
 {
-    return ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10;
+    return ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10 &&
+        ConfiguredLiveTileTemplateStyle() == LiveTileTemplateStyle::Adaptive;
+}
+
+static bool LiveTileUsesWindows81PresetXml()
+{
+    return ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10 &&
+        ConfiguredLiveTileTemplateStyle() == LiveTileTemplateStyle::Windows81Preset;
 }
 
 static const wchar_t* LiveTileTemplateForTarget(const wchar_t* win10TemplateName)
@@ -200,6 +207,8 @@ static void AppendLiveTileImageBinding(
     xml += L"    </binding>\r\n";
 }
 
+#include "ga_live_tile_templates.inc"
+
 static std::wstring BuildLiveTileXml(
     const std::wstring& exeDir,
     const ManifestDisplayInfo& manifestInfo,
@@ -208,10 +217,12 @@ static std::wstring BuildLiveTileXml(
     (void)manifestInfo;
 
     std::wstring xml;
-    bool hasUsableAsset = false;
+    bool hasUsableBinding = false;
     xml += L"<tile>\r\n";
     if (LiveTileUsesAdaptiveXml())
         xml += L"  <visual branding=\"nameAndLogo\">\r\n";
+    else if (LiveTileUsesWindows81PresetXml())
+        xml += L"  <visual version=\"4\" branding=\"logo\">\r\n";
     else if (ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows81)
         xml += L"  <visual version=\"2\">\r\n";
     else
@@ -219,17 +230,23 @@ static std::wstring BuildLiveTileXml(
 
     for (const auto& asset : liveTileAssets)
     {
+        std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file, asset.w, asset.h);
+        if (LiveTileUsesWindows81PresetXml())
+        {
+            if (AppendWindows81PresetLiveTileBinding(xml, asset.binding, asset.name, uri))
+                hasUsableBinding = true;
+            continue;
+        }
+
         const wchar_t* templateName = LiveTileTemplateForTarget(asset.binding);
-        if (!templateName)
+        if (!templateName || uri.empty())
             continue;
 
-        std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file, asset.w, asset.h);
-        if (!uri.empty())
-            hasUsableAsset = true;
         AppendLiveTileImageBinding(xml, templateName, uri, 0, asset.name);
+        hasUsableBinding = true;
     }
 
-    if (!hasUsableAsset)
+    if (!hasUsableBinding)
         return L"";
 
     xml += L"  </visual>\r\n";
