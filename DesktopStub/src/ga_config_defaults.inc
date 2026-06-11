@@ -209,32 +209,9 @@ static const IniDefault g_defaults[] = {
     {L"TileText", L"Text", L""},
     {L"TileText", L"SecondaryText", L""},
     {L"TileText", L"BadgeText", L""},
-    {L"TileText", L"Font", L"Segoe UI"},
-    {L"TileText", L"FontSize", L"18"},
-    {L"TileText", L"SecondaryFontSize", L"12"},
-    {L"TileText", L"BadgeFontSize", L"40"},
-    {L"TileText", L"Bold", L"0"},
-    {L"TileText", L"SecondaryBold", L"0"},
-    {L"TileText", L"BadgeBold", L"0"},
-    {L"TileText", L"Italic", L"0"},
-    {L"TileText", L"Color", L"#FFFFFFFF"},
-    {L"TileText", L"SecondaryColor", L"#CCFFFFFF"},
-    {L"TileText", L"BadgeColor", L"#FFFFFFFF"},
-    {L"TileText", L"Shadow", L"1"},
-    {L"TileText", L"ShadowColor", L"#AA000000"},
-    {L"TileText", L"HorizontalAlign", L"Center"},
-    {L"TileText", L"VerticalAlign", L"Top"},
-    {L"TileText", L"BadgeHorizontalAlign", L"Right"},
-    {L"TileText", L"BadgeVerticalAlign", L"Top"},
-    {L"TileText", L"MarginX", L"8"},
-    {L"TileText", L"MarginY", L"10"},
-    {L"TileText", L"LineGap", L"2"},
-    {L"TileText", L"MaxSecondaryLines", L"2"},
     {L"TileText", L"ApplyToMediumTile", L"1"},
     {L"TileText", L"ApplyToWideTile", L"1"},
     {L"TileText", L"ApplyToLargeTile", L"1"},
-    {L"TileText", L"ApplyToSmallTile", L"0"},
-    {L"TileText", L"ApplyToLogos", L"0"},
 
 };
 
@@ -292,37 +269,6 @@ static const IniDefault g_commandLineHelpDefaults[] = {
         L"                                      Enable/disable tile text overlay.\\r\\n"
         L"  --tile-text-clear | --tile-text-secondary-clear | --tile-text-badge-clear\\r\\n"
         L"                                      Clear primary, secondary, or badge tile text.\\r\\n"
-        L"  --tile-text-align <left|center|right>\\r\\n"
-        L"                                      Set horizontal text alignment.\\r\\n"
-        L"  --tile-text-valign <top|center|bottom>\\r\\n"
-        L"                                      Set vertical text alignment.\\r\\n"
-        L"  --tile-text-badge-align <left|center|right>\\r\\n"
-        L"                                      Set badge horizontal alignment.\\r\\n"
-        L"  --tile-text-badge-valign <top|center|bottom>\\r\\n"
-        L"                                      Set badge vertical alignment.\\r\\n"
-        L"  --tile-text-font <name>             Set baked text font family.\\r\\n"
-        L"  --tile-text-font-size <px>          Set primary text size, 6-256 px.\\r\\n"
-        L"  --tile-text-secondary-font-size <px> Set secondary text size, 6-256 px.\\r\\n"
-        L"  --tile-text-badge-font-size <px>    Set badge text size, 6-256 px.\\r\\n"
-        L"  --tile-text-bold | --no-tile-text-bold\\r\\n"
-        L"                                      Enable/disable primary bold baked text.\\r\\n"
-        L"  --tile-text-secondary-bold | --no-tile-text-secondary-bold\\r\\n"
-        L"                                      Enable/disable secondary bold baked text.\\r\\n"
-        L"  --tile-text-badge-bold | --no-tile-text-badge-bold\\r\\n"
-        L"                                      Enable/disable badge bold baked text.\\r\\n"
-        L"  --tile-text-italic | --no-tile-text-italic\\r\\n"
-        L"                                      Enable/disable italic baked text.\\r\\n"
-        L"  --tile-text-color <#AARRGGBB>       Set primary static/baked text color.\\r\\n"
-        L"  --tile-text-secondary-color <#AARRGGBB>\\r\\n"
-        L"                                      Set secondary static/baked text color.\\r\\n"
-        L"  --tile-text-badge-color <#AARRGGBB> Set badge static/baked text color.\\r\\n"
-        L"  --tile-text-shadow | --no-tile-text-shadow\\r\\n"
-        L"                                      Enable/disable baked text shadow.\\r\\n"
-        L"  --tile-text-shadow-color <#AARRGGBB> Set baked text shadow color.\\r\\n"
-        L"  --tile-text-margin-x <px> | --tile-text-margin-y <px>\\r\\n"
-        L"                                      Set baked text margins, 0-512 px.\\r\\n"
-        L"  --tile-text-line-gap <px>           Set baked text line gap, 0-128 px.\\r\\n"
-        L"  --tile-text-max-secondary-lines <n> Set baked secondary line limit, 0-32.\\r\\n"
         L"  --manifest-target <target>          Set and regenerate manifest: Windows10, Windows81, or Windows8.\\r\\n"
         L"  --manifest-win10|--manifest-win81|--manifest-win8\\r\\n"
         L"                                      Shortcuts for --manifest-target.\\r\\n"
@@ -653,8 +599,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileClearOnShutdownSkipped", L"[i] Clear Live Tile on shutdown skipped: %s"},
     {L"LiveTileClearOnShutdownSuccess", L"[i] Live Tile cleared on shutdown."},
     {L"TileAppearanceTitle", L"Tile appearance:"},
-    {L"TileTextTitle", L"Text overlay"},
-    {L"TileTextFont", L"Font: %s"},
+    {L"TileTextTitle", L"Windows tile text"},
     {L"TileTextEnabled", L"Enable text overlay"},
     {L"TileTextEdit", L"Edit text..."},
     {L"TileTextClear", L"Clear text"},
@@ -665,60 +610,18 @@ static const StringDefault g_stringDefaults[] = {
     {L"TileTextBadgeEdit", L"Edit badge text..."},
     {L"TileTextBadgeClear", L"Clear badge text"},
     {L"TileTextBadgeCurrent", L"Badge: %s"},
-    {L"TileTextHorizontalAlign", L"Text horizontal: %s"},
-    {L"TileTextVerticalAlign", L"Text vertical: %s"},
-    {L"TileTextBadgeHorizontalAlign", L"Badge horizontal: %s"},
-    {L"TileTextBadgeVerticalAlign", L"Badge vertical: %s"},
-    {L"TileTextFontSize", L"Primary font size: %d px"},
-    {L"TileTextSecondaryFontSize", L"Secondary font size: %d px"},
-    {L"TileTextBadgeFontSize", L"Badge font size: %d px"},
-    {L"TileTextBold", L"Primary bold"},
-    {L"TileTextSecondaryBold", L"Secondary bold"},
-    {L"TileTextBadgeBold", L"Badge bold"},
-    {L"TileTextItalic", L"Italic"},
-    {L"TileTextColor", L"Primary color: %s"},
-    {L"TileTextSecondaryColor", L"Secondary color: %s"},
-    {L"TileTextBadgeColor", L"Badge color: %s"},
-    {L"TileTextShadow", L"Shadow"},
-    {L"TileTextShadowColor", L"Shadow color: %s"},
-    {L"TileTextMarginX", L"Margin X: %d px"},
-    {L"TileTextMarginY", L"Margin Y: %d px"},
-    {L"TileTextLineGap", L"Line gap: %d px"},
-    {L"TileTextMaxSecondaryLines", L"Max secondary lines: %d"},
     {L"TileTextApplyMedium", L"Apply to Medium tile"},
     {L"TileTextApplyWide", L"Apply to Wide tile"},
     {L"TileTextApplyLarge", L"Apply to Large tile"},
-    {L"TileTextApplySmall", L"Apply to Small tile"},
-    {L"TileTextApplyLogos", L"Apply to logos"},
     {L"TileTextEdited", L"[i] Tile text changed: %s"},
     {L"TileTextCleared", L"[i] Tile text cleared."},
-    {L"TileTextSettingChanged", L"[i] Tile text setting changed: %s = %s"},
-    {L"TileTextIntInputInvalid", L"Value must be an integer from %d to %d."},
     {L"TileTextSummary", L"[i] Tile text overlay: %s (%s)"},
     {L"TileTextInputTitle", L"Edit tile text"},
     {L"TileTextSecondaryInputTitle", L"Edit secondary tile text"},
     {L"TileTextBadgeInputTitle", L"Edit tile badge text"},
-    {L"TileTextFontInputTitle", L"Edit tile text font"},
-    {L"TileTextColorInputTitle", L"Edit primary tile text color"},
-    {L"TileTextSecondaryColorInputTitle", L"Edit secondary tile text color"},
-    {L"TileTextBadgeColorInputTitle", L"Edit tile badge color"},
-    {L"TileTextShadowColorInputTitle", L"Edit tile text shadow color"},
-    {L"TileTextMarginXInputTitle", L"Edit tile text horizontal margin"},
-    {L"TileTextMarginYInputTitle", L"Edit tile text vertical margin"},
-    {L"TileTextLineGapInputTitle", L"Edit tile text line gap"},
-    {L"TileTextMaxSecondaryLinesInputTitle", L"Edit max secondary tile text lines"},
     {L"TileTextInputPrompt", L"Enter the primary text to render on generated tile assets."},
     {L"TileTextSecondaryInputPrompt", L"Enter the secondary text to render with the primary tile text."},
     {L"TileTextBadgeInputPrompt", L"Enter the badge text to render on generated tile assets."},
-    {L"TileTextFontInputPrompt", L"Enter the font family used for tile text."},
-    {L"TileTextColorInputPrompt", L"Enter the primary tile text color as #AARRGGBB or #RRGGBB."},
-    {L"TileTextSecondaryColorInputPrompt", L"Enter the secondary tile text color as #AARRGGBB or #RRGGBB."},
-    {L"TileTextBadgeColorInputPrompt", L"Enter the badge text color as #AARRGGBB or #RRGGBB."},
-    {L"TileTextShadowColorInputPrompt", L"Enter the tile text shadow color as #AARRGGBB or #RRGGBB."},
-    {L"TileTextMarginXInputPrompt", L"Enter the horizontal text margin in pixels."},
-    {L"TileTextMarginYInputPrompt", L"Enter the vertical text margin in pixels."},
-    {L"TileTextLineGapInputPrompt", L"Enter the gap between tile text lines in pixels."},
-    {L"TileTextMaxSecondaryLinesInputPrompt", L"Enter the maximum number of secondary text lines."},
     {L"GenerateOnStartup", L"Generate on Startup"},
     {L"GenerateOnStartupOnlyWhenChanged", L"Generate on Startup only when changed"},
     {L"HideDisabledEntries", L"Hide disabled entries"},
@@ -1277,22 +1180,6 @@ static void RemoveObsoleteManifestIniSettings()
     SetIniCacheUnlocked(text);
 }
 
-static void UpgradeTileTextDefaultAlignment()
-{
-    if (IniReadI(L"State", L"TileTextVerticalAlignDefaultMigrated", 0) != 0)
-        return;
-
-    std::wstring current = ToLowerCopy(TrimCopy(IniReadS(L"TileText", L"VerticalAlign", L"")));
-    if (current.empty() || current == L"bottom")
-    {
-        if (!IniWrite(L"TileText", L"VerticalAlign", L"Top"))
-            return;
-    }
-
-    if (!IniWrite(L"State", L"TileTextVerticalAlignDefaultMigrated", L"1"))
-        return;
-}
-
 static void UpgradePowerShellExeDefault()
 {
     const wchar_t* legacyDefault = L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
@@ -1327,7 +1214,6 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from built-in defaults", L"Regenerate AppxManifest.xml from config");
     UpgradeStringDefaultIfUnmodified(L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with WIC: %lu x %lu.", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu (max long edge=%d).");
     UpgradePowerShellExeDefault();
-    UpgradeTileTextDefaultAlignment();
     RemoveObsoleteManifestIniSettings();
 }
 

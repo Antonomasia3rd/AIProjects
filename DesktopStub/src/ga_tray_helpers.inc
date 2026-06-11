@@ -107,32 +107,9 @@ enum {
     ID_TILE_TEXT_SECONDARY_CLEAR,
     ID_TILE_TEXT_BADGE_EDIT,
     ID_TILE_TEXT_BADGE_CLEAR,
-    ID_TILE_TEXT_H_ALIGN,
-    ID_TILE_TEXT_V_ALIGN,
-    ID_TILE_TEXT_BADGE_H_ALIGN,
-    ID_TILE_TEXT_BADGE_V_ALIGN,
-    ID_TILE_TEXT_FONT,
-    ID_TILE_TEXT_FONT_SIZE,
-    ID_TILE_TEXT_SECONDARY_FONT_SIZE,
-    ID_TILE_TEXT_BADGE_FONT_SIZE,
-    ID_TILE_TEXT_BOLD,
-    ID_TILE_TEXT_SECONDARY_BOLD,
-    ID_TILE_TEXT_BADGE_BOLD,
-    ID_TILE_TEXT_ITALIC,
-    ID_TILE_TEXT_COLOR,
-    ID_TILE_TEXT_SECONDARY_COLOR,
-    ID_TILE_TEXT_BADGE_COLOR,
-    ID_TILE_TEXT_SHADOW,
-    ID_TILE_TEXT_SHADOW_COLOR,
-    ID_TILE_TEXT_MARGIN_X,
-    ID_TILE_TEXT_MARGIN_Y,
-    ID_TILE_TEXT_LINE_GAP,
-    ID_TILE_TEXT_MAX_SECONDARY_LINES,
     ID_TILE_TEXT_APPLY_MEDIUM,
     ID_TILE_TEXT_APPLY_WIDE,
     ID_TILE_TEXT_APPLY_LARGE,
-    ID_TILE_TEXT_APPLY_SMALL,
-    ID_TILE_TEXT_APPLY_LOGOS,
 
     // Advanced configurable settings
     ID_ADV_POLL_INTERVAL,
@@ -290,26 +267,6 @@ static void CycleSettingIntPreset(
     WriteSettingInt(key, next);
 }
 
-static const wchar_t* NextTileTextHorizontalAlign(const std::wstring& current)
-{
-    std::wstring value = ToLowerCopy(TrimCopy(current));
-    if (value == L"left")
-        return L"Center";
-    if (value == L"center")
-        return L"Right";
-    return L"Left";
-}
-
-static const wchar_t* NextTileTextVerticalAlign(const std::wstring& current)
-{
-    std::wstring value = ToLowerCopy(TrimCopy(current));
-    if (value == L"top")
-        return L"Center";
-    if (value == L"center" || value == L"middle")
-        return L"Bottom";
-    return L"Top";
-}
-
 static void WriteTileTextBool(const wchar_t* key, bool value)
 {
     if (!IniWrite(L"TileText", key, value ? L"1" : L"0"))
@@ -321,60 +278,6 @@ static void ToggleTileTextBool(const wchar_t* key, int fallback)
 {
     bool value = IniReadI(L"TileText", key, fallback) == 0;
     WriteTileTextBool(key, value);
-}
-
-static void CycleTileTextFontSize(const wchar_t* key, int fallback, const std::wstring& logFormat)
-{
-    int current = IniReadClampedI(L"TileText", key, fallback, 6, 256);
-    int next = NextSettingPreset(current, { 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64 });
-    next = ClampInt(next, 6, 256);
-    if (!IniWrite(L"TileText", key, std::to_wstring(next).c_str()))
-        return;
-    Log(logFormat.c_str(), next);
-}
-
-static void PromptTileTextStringSetting(
-    HWND owner,
-    const wchar_t* key,
-    const std::wstring& title,
-    const std::wstring& prompt,
-    const wchar_t* fallback = L"")
-{
-    std::wstring value = IniReadS(L"TileText", key, fallback ? fallback : L"");
-    if (ShowTextInputDialog(owner, title, prompt, value, true) == IDOK)
-    {
-        if (!IniWrite(L"TileText", key, value.c_str()))
-            return;
-        Log(g_ui.tileTextSettingChanged.c_str(), key ? key : L"", value.c_str());
-    }
-}
-
-static void PromptTileTextIntSetting(
-    HWND owner,
-    const wchar_t* key,
-    int fallback,
-    int minValue,
-    int maxValue,
-    const std::wstring& title,
-    const std::wstring& prompt,
-    const std::wstring& logFormat)
-{
-    int current = IniReadClampedI(L"TileText", key, fallback, minValue, maxValue);
-    std::wstring text = std::to_wstring(current);
-    if (ShowTextInputDialog(owner, title, prompt, text, false) != IDOK)
-        return;
-
-    int parsed = 0;
-    if (!TryParseIntStrict(text, parsed) || parsed < minValue || parsed > maxValue)
-    {
-        std::wstring message = FormatWide(g_ui.tileTextIntInputInvalid.c_str(), minValue, maxValue);
-        MessageBoxW(owner, message.c_str(), g_ui.errorTitle.c_str(), MB_OK | MB_ICONWARNING);
-        return;
-    }
-
-    if (!IniWrite(L"TileText", key, std::to_wstring(parsed).c_str()))
-        return;
-    Log(logFormat.c_str(), parsed);
 }
 
 static void RegenerateManifestAndQueueGeneration(HWND owner)
