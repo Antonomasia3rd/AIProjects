@@ -173,6 +173,40 @@ void Menu(HWND h)
             addTo(liveTileMenu, ID_LIVE_TILE_MODE_AUTO, g_ui.liveTileModeAuto.c_str(), liveTileMode == LiveTileUpdateMode::Auto);
         }
 
+        LiveTileTemplateStyle templateStyle = ConfiguredLiveTileTemplateStyle();
+        bool templateStyleAvailable =
+            ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10;
+        HMENU templateMenu = CreatePopupMenu();
+        if (templateMenu)
+        {
+            addTo(templateMenu,
+                ID_LIVE_TILE_TEMPLATE_ADAPTIVE,
+                g_ui.liveTileTemplateAdaptive.c_str(),
+                templateStyle == LiveTileTemplateStyle::Adaptive,
+                templateStyleAvailable);
+            addTo(templateMenu,
+                ID_LIVE_TILE_TEMPLATE_WINDOWS81_PRESET,
+                g_ui.liveTileTemplateWindows81Preset.c_str(),
+                templateStyle == LiveTileTemplateStyle::Windows81Preset,
+                templateStyleAvailable);
+            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)templateMenu, g_ui.liveTileTemplateTitle.c_str()))
+                DestroyMenu(templateMenu);
+        }
+        else
+        {
+            LogWin32Failure(L"CreatePopupMenu(Live Tile Template)");
+            addTo(liveTileMenu,
+                ID_LIVE_TILE_TEMPLATE_ADAPTIVE,
+                g_ui.liveTileTemplateAdaptive.c_str(),
+                templateStyle == LiveTileTemplateStyle::Adaptive,
+                templateStyleAvailable);
+            addTo(liveTileMenu,
+                ID_LIVE_TILE_TEMPLATE_WINDOWS81_PRESET,
+                g_ui.liveTileTemplateWindows81Preset.c_str(),
+                templateStyle == LiveTileTemplateStyle::Windows81Preset,
+                templateStyleAvailable);
+        }
+
         HMENU registrationMenu = CreatePopupMenu();
         if (registrationMenu)
         {

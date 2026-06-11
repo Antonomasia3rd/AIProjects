@@ -17,6 +17,24 @@ static LiveTileUpdateMode ConfiguredLiveTileUpdateMode()
     }
 }
 
+static LiveTileTemplateStyle ConfiguredLiveTileTemplateStyle()
+{
+    LiveTileTemplateStyle style = static_cast<LiveTileTemplateStyle>(g_liveTileTemplateStyle.load());
+    switch (style)
+    {
+    case LiveTileTemplateStyle::Adaptive:
+    case LiveTileTemplateStyle::Windows81Preset:
+        return style;
+    default:
+        return LiveTileTemplateStyle::Adaptive;
+    }
+}
+
+static std::wstring LiveTileTemplateStyleSummaryText()
+{
+    return LiveTileTemplateStyleName(ConfiguredLiveTileTemplateStyle());
+}
+
 static ManifestCompatibilityTarget ConfiguredManifestCompatibilityTarget()
 {
     ManifestCompatibilityTarget target = static_cast<ManifestCompatibilityTarget>(g_manifestCompatibilityTarget.load());

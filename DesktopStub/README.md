@@ -133,6 +133,8 @@ Supported options:
 - `--live-tile` / `--no-live-tile`: set and save Live Tile update mode.
 - `--live-tile-auto`: set and save automatic Live Tile update mode.
 - `--live-tile-mode Auto|Registration|LiveTile`: set and save Live Tile update mode.
+- `--live-tile-template Adaptive|Windows81Preset`: choose adaptive Windows 10 XML or the native Windows 8.1 preset-template catalog while keeping the Windows 10 manifest target.
+- `--live-tile-adaptive` / `--live-tile-windows81-preset`: shortcuts for `--live-tile-template`.
 - `--tile-text <text>`, `--tile-text-secondary <text>` / `--tile-subtext <text>`, and `--tile-text-badge <text>` / `--tile-badge <text>`: configure optional primary, secondary, and badge text overlays.
 - `--tile-text-enable`, `--tile-text-disable`, `--tile-text-clear`, `--tile-text-secondary-clear`, and `--tile-text-badge-clear`: enable/disable or clear overlay parts.
 - `--manifest-target Windows10|Windows81|Windows8`: set the generated AppX manifest dialect and regenerate `AppxManifest.xml`. Windows 10 remains the default.
@@ -164,7 +166,7 @@ Supported options:
 - Can internally capture a still frame from WorkerW-hosted live wallpaper apps and use that snapshot as the generation source, without overwriting the user's real Windows wallpaper.
 - Uses COM Appx registration by default with optional PowerShell-only mode and fallback behavior; the COM isolation helper is disabled by default to avoid spawning an extra helper process on normal registration.
 - Can automatically use Live Tile notification updates when launched with package identity, with manual registration/Live Tile overrides.
-- Supports optional tile text overlays. Windows renders the text in native Windows 10 Live Tile mode; registration/static-image modes use fixed Windows 8/8.1 template typography and geometry.
+- Supports optional tile text overlays. Windows renders the text from adaptive or Windows 8.1 preset XML in native Windows 10 Live Tile mode; registration/static-image modes use fixed Windows 8/8.1 template typography and geometry.
 - Uses low-memory wallpaper decode, generated asset caching, lazy GDI+, and idle working-set trimming to keep large-wallpaper generation from permanently inflating resident memory.
 - Can dynamically create or regenerate `AppxManifest.xml` from `[Settings] Manifest*` defaults.
 - Supports quoted INI values and inline comments.
@@ -189,6 +191,7 @@ Supported options:
 - `ga_registration.inc`: Appx registration and PowerShell fallback handling.
 - `ga_generation.inc`: asset generation, polling, and shutdown coordination.
 - `ga_live_tile.inc`: Live Tile notification update handling.
+- `ga_live_tile_templates.inc`: Windows 8.1 preset-catalog binding selection and XML fragments.
 - `ga_tray.inc`: tray wrapper that includes smaller helper/menu/dispatch fragments.
 - `ga_tray_helpers.inc`, `ga_tray_menu.inc`, `ga_tray_dispatch.inc`: tray helpers, menu construction, and command dispatch.
 - `ga_app.inc`: window procedure and application startup/shutdown.
@@ -245,9 +248,16 @@ Changing the Live Tile update mode queues one asset regeneration and one Appx re
 
 The mismatch relaunch guard is enabled by default and can be changed from the command line with `--live-tile-relaunch-on-mismatch` or `--no-live-tile-relaunch-on-mismatch`. The INI key remains `LiveTileRelaunchOnSwitch` for backward compatibility with existing configs.
 
+For a Windows 10 manifest target, `LiveTileTemplateStyle` selects the notification XML family without changing package registration:
+
+- `Adaptive` is the default and preserves DesktopStub's existing adaptive bindings.
+- `Windows81Preset` uses Microsoft's native Windows 8.1 preset-template catalog on Windows 10. Medium, wide, and large bindings select image, text, image-and-text, or block layouts from the enabled tile-text content.
+
+The preset style emits version-4 Windows 10 notification XML with Windows 8 fallback names where the catalog defines them. It does not affect `AppxManifestTarget=Windows81` or `Windows8`; those compatibility targets keep their existing legacy XML and packaged broker path.
+
 ## Tile Text Overlay
 
-`[TileText]` controls optional content for generated tiles. It is disabled by default. In Windows 10 Live Tile mode, DesktopStub adds the configured content to the adaptive Live Tile XML and leaves its presentation to Windows. Registration/static-image mode and Windows 8/8.1 compatibility Live Tile targets bake the content into generated PNG assets using fixed Windows 8/8.1 template layouts:
+`[TileText]` controls optional content for generated tiles. It is disabled by default. In Windows 10 Live Tile mode, DesktopStub adds the configured content to either adaptive XML or native Windows 8.1 preset bindings and leaves its presentation to Windows. Registration/static-image mode and Windows 8/8.1 compatibility Live Tile targets bake the content into generated PNG assets using fixed Windows 8/8.1 template layouts:
 
 - Medium tiles use a `TileSquareText02`-style heading/body layout, or a block-style layout when badge text is present.
 - Wide tiles use an `ImageAndText01`-style image with a bottom text band, or a block-and-text layout when badge text is present.

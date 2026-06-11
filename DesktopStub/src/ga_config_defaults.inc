@@ -9,6 +9,7 @@ static std::atomic<bool> g_wallpaperDetectionFallbackOnInvalid(true);
 static std::atomic<bool> g_generateOnStartup(true);
 static std::atomic<bool> g_generateOnStartupOnlyWhenChanged(true);
 static std::atomic<int> g_liveTileUpdateMode(static_cast<int>(LiveTileUpdateMode::Auto));
+static std::atomic<int> g_liveTileTemplateStyle(static_cast<int>(LiveTileTemplateStyle::Adaptive));
 static std::atomic<bool> g_liveTileRelaunchOnSwitch(true);
 static std::atomic<bool> g_clearLiveTileOnShutdown(true);
 static std::atomic<int> g_relaunchAfterExit(0);
@@ -121,6 +122,7 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"DisableFitting", L"0"},
     {L"Settings", L"UsePowerShell", L"0"},
     {L"Settings", L"ExperimentalLiveTileUpdate", L"Auto"},
+    {L"Settings", L"LiveTileTemplateStyle", L"Adaptive"},
     {L"Settings", L"LiveTileRelaunchOnSwitch", L"1"},
     {L"Settings", L"ClearLiveTileOnShutdown", L"1"},
     {L"Settings", L"AppxManifestTarget", L"Windows10"},
@@ -258,6 +260,9 @@ static const IniDefault g_commandLineHelpDefaults[] = {
         L"  --live-tile | --no-live-tile         Set and save Live Tile update mode.\\r\\n"
         L"  --live-tile-auto                     Set and save automatic Live Tile update mode.\\r\\n"
         L"  --live-tile-mode <mode>              Set mode: Auto, Registration, or LiveTile.\\r\\n"
+        L"  --live-tile-template <style>         Set Windows 10 XML style: Adaptive or Windows81Preset.\\r\\n"
+        L"  --live-tile-adaptive | --live-tile-windows81-preset\\r\\n"
+        L"                                      Shortcuts for --live-tile-template.\\r\\n"
         L"  --live-tile-relaunch-on-mismatch | --no-live-tile-relaunch-on-mismatch\\r\\n"
         L"                                      Relaunch when process package state does not match mode.\\r\\n"
         L"  --tile-text <text>                  Set primary tile text and enable it if non-empty.\\r\\n"
@@ -343,6 +348,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"PowerShellRegistrationSummary", L"[i] PowerShell registration: %s"},
     {L"UsePowerShellSummary", L"[i] UsePowerShell = %d (%s)"},
     {L"LiveTileUpdateSummary", L"[i] Live Tile update mode: %s"},
+    {L"LiveTileTemplateStyleSummary", L"[i] Windows 10 Live Tile template style: %s"},
     {L"ManifestTargetSummary", L"[i] AppxManifest target: %s"},
     {L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s"},
     {L"LiveWallpaperCaptureSummary", L"[i] Live wallpaper capture: %s (delay=%d ms, refresh=%s)"},
@@ -588,6 +594,10 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileModeEnabled", L"Enabled"},
     {L"LiveTileModeDisabled", L"Disabled"},
     {L"LiveTileModeTitle", L"Mode"},
+    {L"LiveTileTemplateTitle", L"Windows 10 template"},
+    {L"LiveTileTemplateAdaptive", L"Adaptive"},
+    {L"LiveTileTemplateWindows81Preset", L"Windows 8.1 preset catalog"},
+    {L"LiveTileTemplateChangedReason", L"Live Tile template style changed"},
     {L"LiveTileRegistrationTitle", L"Registration"},
     {L"LiveTileRuntimeTitle", L"Runtime behavior"},
     {L"LiveTileWindows8Title", L"Windows 8 / 8.1"},

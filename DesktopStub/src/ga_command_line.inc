@@ -111,6 +111,60 @@ static void AddCommandLineLiveTileModeSetting(LiveTileUpdateMode mode)
     AddCommandLineIniSetting(L"Settings", L"ExperimentalLiveTileUpdate", LiveTileUpdateModeIniValue(mode));
 }
 
+static LiveTileTemplateStyle ParseLiveTileTemplateStyleValue(
+    const std::wstring& rawValue,
+    LiveTileTemplateStyle fallback = LiveTileTemplateStyle::Adaptive)
+{
+    std::wstring v = ToLowerCopy(TrimCopy(rawValue));
+    if (v.empty())
+        return fallback;
+
+    if (v == L"adaptive" || v == L"windows10" || v == L"windows 10" ||
+        v == L"win10" || v == L"default")
+        return LiveTileTemplateStyle::Adaptive;
+    if (v == L"windows81preset" || v == L"windows81" || v == L"windows8.1" ||
+        v == L"windows 8.1" || v == L"win81" || v == L"win8.1" ||
+        v == L"preset" || v == L"legacy")
+        return LiveTileTemplateStyle::Windows81Preset;
+
+    return fallback;
+}
+
+static std::wstring LiveTileTemplateStyleIniValue(LiveTileTemplateStyle style)
+{
+    switch (style)
+    {
+    case LiveTileTemplateStyle::Windows81Preset:
+        return L"Windows81Preset";
+    case LiveTileTemplateStyle::Adaptive:
+    default:
+        return L"Adaptive";
+    }
+}
+
+static const wchar_t* LiveTileTemplateStyleName(LiveTileTemplateStyle style)
+{
+    switch (style)
+    {
+    case LiveTileTemplateStyle::Windows81Preset:
+        return L"Windows 8.1 preset catalog";
+    case LiveTileTemplateStyle::Adaptive:
+    default:
+        return L"Adaptive";
+    }
+}
+
+static bool IsValidLiveTileTemplateStyle(LiveTileTemplateStyle style)
+{
+    return style == LiveTileTemplateStyle::Adaptive ||
+        style == LiveTileTemplateStyle::Windows81Preset;
+}
+
+static void AddCommandLineLiveTileTemplateStyleSetting(LiveTileTemplateStyle style)
+{
+    AddCommandLineIniSetting(L"Settings", L"LiveTileTemplateStyle", LiveTileTemplateStyleIniValue(style));
+}
+
 static ManifestCompatibilityTarget ParseManifestCompatibilityTargetValue(
     const std::wstring& rawValue,
     ManifestCompatibilityTarget fallback = ManifestCompatibilityTarget::Windows10)
@@ -1086,6 +1140,17 @@ static bool ParseCommandLineOptions()
             AddCommandLineLiveTileModeSetting(LiveTileUpdateMode::Auto);
             continue;
         }
+        if (IEquals(arg, L"--live-tile-adaptive"))
+        {
+            AddCommandLineLiveTileTemplateStyleSetting(LiveTileTemplateStyle::Adaptive);
+            continue;
+        }
+        if (IEquals(arg, L"--live-tile-windows81-preset") ||
+            IEquals(arg, L"--live-tile-win81-preset"))
+        {
+            AddCommandLineLiveTileTemplateStyleSetting(LiveTileTemplateStyle::Windows81Preset);
+            continue;
+        }
         if (IEquals(arg, L"--live-tile-relaunch-on-mismatch") ||
             IEquals(arg, L"--relaunch-on-live-tile-mismatch") ||
             IEquals(arg, L"--live-tile-relaunch-on-switch"))
@@ -1111,6 +1176,22 @@ static bool ParseCommandLineOptions()
                 return fail(L"Unsupported Live Tile mode: " + trimmed + L". Supported values are Auto, Registration, and LiveTile.");
             }
             AddCommandLineLiveTileModeSetting(mode);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--live-tile-template", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring trimmed = TrimCopy(value);
+            LiveTileTemplateStyle style = ParseLiveTileTemplateStyleValue(
+                trimmed,
+                static_cast<LiveTileTemplateStyle>(-1));
+            if (!IsValidLiveTileTemplateStyle(style))
+            {
+                return fail(L"Unsupported Live Tile template style: " + trimmed +
+                    L". Supported values are Adaptive and Windows81Preset.");
+            }
+            AddCommandLineLiveTileTemplateStyleSetting(style);
             continue;
         }
 

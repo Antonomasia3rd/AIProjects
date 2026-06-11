@@ -85,6 +85,27 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     }
     break;
 
+    case ID_LIVE_TILE_TEMPLATE_ADAPTIVE:
+    case ID_LIVE_TILE_TEMPLATE_WINDOWS81_PRESET:
+    {
+        LiveTileTemplateStyle newStyle =
+            cmd == ID_LIVE_TILE_TEMPLATE_WINDOWS81_PRESET
+                ? LiveTileTemplateStyle::Windows81Preset
+                : LiveTileTemplateStyle::Adaptive;
+        if (ConfiguredLiveTileTemplateStyle() == newStyle)
+            break;
+
+        if (!IniWrite(L"Settings", L"LiveTileTemplateStyle", LiveTileTemplateStyleIniValue(newStyle).c_str()))
+            return;
+        g_liveTileTemplateStyle = static_cast<int>(newStyle);
+        Log(g_ui.liveTileTemplateStyleSummary.c_str(), LiveTileTemplateStyleSummaryText().c_str());
+
+        std::wstring wp = GetWallpaper();
+        if (!wp.empty())
+            QueueGenerate(wp, g_ui.liveTileTemplateChangedReason);
+    }
+    break;
+
     case ID_LIVE_TILE_RELAUNCH_ON_SWITCH:
     {
         g_liveTileRelaunchOnSwitch = !g_liveTileRelaunchOnSwitch;
