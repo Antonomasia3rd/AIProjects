@@ -35,6 +35,50 @@ static std::wstring LiveTileTemplateStyleSummaryText()
     return LiveTileTemplateStyleName(ConfiguredLiveTileTemplateStyle());
 }
 
+static LiveTileBranding ConfiguredLiveTileBranding()
+{
+    LiveTileBranding branding = static_cast<LiveTileBranding>(g_liveTileBranding.load());
+    return IsValidLiveTileBranding(branding) ? branding : LiveTileBranding::Auto;
+}
+
+static LiveTileBranding EffectiveLiveTileBranding()
+{
+    LiveTileBranding branding = ConfiguredLiveTileBranding();
+    if (branding != LiveTileBranding::Auto)
+        return branding;
+
+    return ConfiguredLiveTileTemplateStyle() == LiveTileTemplateStyle::Windows81Preset
+        ? LiveTileBranding::Name
+        : LiveTileBranding::NameAndLogo;
+}
+
+static const wchar_t* LiveTileBrandingXmlValue()
+{
+    switch (EffectiveLiveTileBranding())
+    {
+    case LiveTileBranding::None:
+        return L"none";
+    case LiveTileBranding::Logo:
+        return L"logo";
+    case LiveTileBranding::Name:
+        return L"name";
+    case LiveTileBranding::NameAndLogo:
+    case LiveTileBranding::Auto:
+    default:
+        return L"nameAndLogo";
+    }
+}
+
+static std::wstring LiveTileBrandingSummaryText()
+{
+    LiveTileBranding configured = ConfiguredLiveTileBranding();
+    if (configured != LiveTileBranding::Auto)
+        return LiveTileBrandingName(configured);
+
+    return std::wstring(LiveTileBrandingName(configured)) +
+        L" (" + LiveTileBrandingName(EffectiveLiveTileBranding()) + L")";
+}
+
 static ManifestCompatibilityTarget ConfiguredManifestCompatibilityTarget()
 {
     ManifestCompatibilityTarget target = static_cast<ManifestCompatibilityTarget>(g_manifestCompatibilityTarget.load());

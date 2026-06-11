@@ -46,3 +46,4 @@ Older releases are intentionally kept when practical so users can compare behavi
 - Added optional tile text overlays configurable by INI, tray menu, and command line. Windows 10 Live Tile mode emits the text into Live Tile XML, while registration/static-image modes bake the text into generated tile PNGs.
 - Reworked baked/static tile text to use fixed Windows 8/8.1 medium, wide, and large template layouts. Removed arbitrary font, color, alignment, margin, and small/logo controls that native Live Tiles do not support.
 - Added an optional Windows 8.1 preset-template catalog mode for Windows 10 Live Tile notifications while retaining adaptive XML as the compatibility-preserving default.
+- Added configurable Windows 10 Live Tile branding with style-aware defaults, including restoring the manifest display name in preset-template mode.
