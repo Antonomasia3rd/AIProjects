@@ -156,25 +156,19 @@ static void AppendLiveTileImageBinding(
             xml += L"        <subgroup hint-weight=\"3\">\r\n";
             if (!tileText.empty())
             {
-                xml += L"          <text hint-style=\"caption\" hint-align=\"";
-                xml += TileTextXmlHorizontalAlign();
-                xml += L"\">";
+                xml += L"          <text hint-style=\"caption\">";
                 xml += XmlEscape(tileText);
                 xml += L"</text>\r\n";
             }
             if (!secondaryText.empty())
             {
-                xml += L"          <text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-align=\"";
-                xml += TileTextXmlHorizontalAlign();
-                xml += L"\">";
+                xml += L"          <text hint-style=\"captionSubtle\" hint-wrap=\"true\">";
                 xml += XmlEscape(secondaryText);
                 xml += L"</text>\r\n";
             }
             xml += L"        </subgroup>\r\n";
             xml += L"        <subgroup hint-weight=\"1\">\r\n";
-            xml += L"          <text hint-style=\"title\" hint-align=\"";
-            xml += TileTextXmlBadgeHorizontalAlign();
-            xml += L"\">";
+            xml += L"          <text hint-style=\"title\" hint-align=\"right\">";
             xml += XmlEscape(badgeText);
             xml += L"</text>\r\n";
             xml += L"        </subgroup>\r\n";
@@ -184,25 +178,19 @@ static void AppendLiveTileImageBinding(
         {
             if (!badgeText.empty())
             {
-                xml += L"      <text hint-style=\"title\" hint-align=\"";
-                xml += TileTextXmlBadgeHorizontalAlign();
-                xml += L"\">";
+                xml += L"      <text hint-style=\"title\" hint-align=\"right\">";
                 xml += XmlEscape(badgeText);
                 xml += L"</text>\r\n";
             }
             if (!tileText.empty())
             {
-                xml += L"      <text hint-style=\"caption\" hint-align=\"";
-                xml += TileTextXmlHorizontalAlign();
-                xml += L"\">";
+                xml += L"      <text hint-style=\"caption\">";
                 xml += XmlEscape(tileText);
                 xml += L"</text>\r\n";
             }
             if (!secondaryText.empty())
             {
-                xml += L"      <text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-align=\"";
-                xml += TileTextXmlHorizontalAlign();
-                xml += L"\">";
+                xml += L"      <text hint-style=\"captionSubtle\" hint-wrap=\"true\">";
                 xml += XmlEscape(secondaryText);
                 xml += L"</text>\r\n";
             }

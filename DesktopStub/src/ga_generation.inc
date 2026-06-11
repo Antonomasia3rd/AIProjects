@@ -1180,7 +1180,7 @@ static void AppendRectFingerprint(std::wstring& out, const wchar_t* name, const 
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
 {
     std::wstring state;
-    state += L"v=4;";
+    state += L"v=5;";
     state += L"wallpaper=" + FileFingerprint(wallpaperPath) + L";";
     state += L"wallpaperDecodeLowMemory=" + IntToWString(IniReadI(L"Settings", L"WallpaperDecodeLowMemory", 1) ? 1 : 0) + L";";
     state += L"wallpaperDecodeMaxLongEdge=" + IntToWString(IniReadClampedI(L"Settings", L"WallpaperDecodeMaxLongEdge", 0, 0, 32768)) + L";";
@@ -1217,32 +1217,10 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     state += L"tileText=" + IniReadS(L"TileText", L"Text", L"") + L";";
     state += L"tileTextSecondary=" + IniReadS(L"TileText", L"SecondaryText", L"") + L";";
     state += L"tileTextBadge=" + IniReadS(L"TileText", L"BadgeText", L"") + L";";
-    state += L"tileTextFont=" + IniReadS(L"TileText", L"Font", L"Segoe UI") + L";";
-    state += L"tileTextFontSize=" + IntToWString(IniReadClampedI(L"TileText", L"FontSize", 18, 6, 256)) + L";";
-    state += L"tileTextSecondaryFontSize=" + IntToWString(IniReadClampedI(L"TileText", L"SecondaryFontSize", 12, 6, 256)) + L";";
-    state += L"tileTextBadgeFontSize=" + IntToWString(IniReadClampedI(L"TileText", L"BadgeFontSize", 40, 6, 256)) + L";";
-    state += L"tileTextBold=" + IntToWString(IniReadI(L"TileText", L"Bold", 0) ? 1 : 0) + L";";
-    state += L"tileTextSecondaryBold=" + IntToWString(IniReadI(L"TileText", L"SecondaryBold", 0) ? 1 : 0) + L";";
-    state += L"tileTextBadgeBold=" + IntToWString(IniReadI(L"TileText", L"BadgeBold", 0) ? 1 : 0) + L";";
-    state += L"tileTextItalic=" + IntToWString(IniReadI(L"TileText", L"Italic", 0) ? 1 : 0) + L";";
-    state += L"tileTextColor=" + IniReadS(L"TileText", L"Color", L"#FFFFFFFF") + L";";
-    state += L"tileTextSecondaryColor=" + IniReadS(L"TileText", L"SecondaryColor", L"#CCFFFFFF") + L";";
-    state += L"tileTextBadgeColor=" + IniReadS(L"TileText", L"BadgeColor", L"#FFFFFFFF") + L";";
-    state += L"tileTextShadow=" + IntToWString(IniReadI(L"TileText", L"Shadow", 1) ? 1 : 0) + L";";
-    state += L"tileTextShadowColor=" + IniReadS(L"TileText", L"ShadowColor", L"#AA000000") + L";";
-    state += L"tileTextH=" + IniReadS(L"TileText", L"HorizontalAlign", L"Center") + L";";
-    state += L"tileTextV=" + IniReadS(L"TileText", L"VerticalAlign", L"Top") + L";";
-    state += L"tileTextBadgeH=" + IniReadS(L"TileText", L"BadgeHorizontalAlign", L"Right") + L";";
-    state += L"tileTextBadgeV=" + IniReadS(L"TileText", L"BadgeVerticalAlign", L"Top") + L";";
-    state += L"tileTextMarginX=" + IntToWString(IniReadClampedI(L"TileText", L"MarginX", 8, 0, 1000)) + L";";
-    state += L"tileTextMarginY=" + IntToWString(IniReadClampedI(L"TileText", L"MarginY", 10, 0, 1000)) + L";";
-    state += L"tileTextLineGap=" + IntToWString(IniReadClampedI(L"TileText", L"LineGap", 2, 0, 1000)) + L";";
-    state += L"tileTextMaxSecondaryLines=" + IntToWString(IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 0, 32)) + L";";
+    state += L"tileTextBackground=" + EffectiveManifestBackgroundColor() + L";";
     state += L"tileTextApplyMedium=" + IntToWString(IniReadI(L"TileText", L"ApplyToMediumTile", 1) ? 1 : 0) + L";";
     state += L"tileTextApplyWide=" + IntToWString(IniReadI(L"TileText", L"ApplyToWideTile", 1) ? 1 : 0) + L";";
     state += L"tileTextApplyLarge=" + IntToWString(IniReadI(L"TileText", L"ApplyToLargeTile", 1) ? 1 : 0) + L";";
-    state += L"tileTextApplySmall=" + IntToWString(IniReadI(L"TileText", L"ApplyToSmallTile", 0) ? 1 : 0) + L";";
-    state += L"tileTextApplyLogos=" + IntToWString(IniReadI(L"TileText", L"ApplyToLogos", 0) ? 1 : 0) + L";";
 
     uint64_t hash = 14695981039346656037ull;
     HashWide(hash, state);

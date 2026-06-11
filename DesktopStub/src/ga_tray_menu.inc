@@ -251,22 +251,6 @@ void Menu(HWND h)
         std::wstring textLine = FormatWide(g_ui.tileTextCurrent.c_str(), shortTileText(tileText).c_str());
         std::wstring secondaryLine = FormatWide(g_ui.tileTextSecondaryCurrent.c_str(), shortTileText(secondaryText).c_str());
         std::wstring badgeLine = FormatWide(g_ui.tileTextBadgeCurrent.c_str(), shortTileText(badgeText).c_str());
-        std::wstring hLine = FormatWide(g_ui.tileTextHorizontalAlign.c_str(), NormalizedTileTextHorizontalAlign());
-        std::wstring vLine = FormatWide(g_ui.tileTextVerticalAlign.c_str(), NormalizedTileTextVerticalAlign());
-        std::wstring badgeHLine = FormatWide(g_ui.tileTextBadgeHorizontalAlign.c_str(), NormalizedTileTextBadgeHorizontalAlign());
-        std::wstring badgeVLine = FormatWide(g_ui.tileTextBadgeVerticalAlign.c_str(), NormalizedTileTextBadgeVerticalAlign());
-        std::wstring fontLine = FormatWide(g_ui.tileTextFont.c_str(), IniReadS(L"TileText", L"Font", L"Segoe UI").c_str());
-        std::wstring fontSizeLine = FormatWide(g_ui.tileTextFontSize.c_str(), IniReadClampedI(L"TileText", L"FontSize", 18, 6, 256));
-        std::wstring secondaryFontSizeLine = FormatWide(g_ui.tileTextSecondaryFontSize.c_str(), IniReadClampedI(L"TileText", L"SecondaryFontSize", 12, 6, 256));
-        std::wstring badgeFontSizeLine = FormatWide(g_ui.tileTextBadgeFontSize.c_str(), IniReadClampedI(L"TileText", L"BadgeFontSize", 40, 6, 256));
-        std::wstring colorLine = FormatWide(g_ui.tileTextColor.c_str(), IniReadS(L"TileText", L"Color", L"#FFFFFFFF").c_str());
-        std::wstring secondaryColorLine = FormatWide(g_ui.tileTextSecondaryColor.c_str(), IniReadS(L"TileText", L"SecondaryColor", L"#CCFFFFFF").c_str());
-        std::wstring badgeColorLine = FormatWide(g_ui.tileTextBadgeColor.c_str(), IniReadS(L"TileText", L"BadgeColor", L"#FFFFFFFF").c_str());
-        std::wstring shadowColorLine = FormatWide(g_ui.tileTextShadowColor.c_str(), IniReadS(L"TileText", L"ShadowColor", L"#AA000000").c_str());
-        std::wstring marginXLine = FormatWide(g_ui.tileTextMarginX.c_str(), IniReadClampedI(L"TileText", L"MarginX", 8, 0, 512));
-        std::wstring marginYLine = FormatWide(g_ui.tileTextMarginY.c_str(), IniReadClampedI(L"TileText", L"MarginY", 10, 0, 512));
-        std::wstring lineGapLine = FormatWide(g_ui.tileTextLineGap.c_str(), IniReadClampedI(L"TileText", L"LineGap", 2, 0, 128));
-        std::wstring maxSecondaryLinesLine = FormatWide(g_ui.tileTextMaxSecondaryLines.c_str(), IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 0, 32));
 
         addTo(textMenu, ID_TILE_TEXT_ENABLED, g_ui.tileTextEnabled.c_str(), tileTextEnabled);
         addTo(textMenu, ID_TILE_TEXT_EDIT, g_ui.tileTextEdit.c_str());
@@ -278,32 +262,9 @@ void Menu(HWND h)
         addTo(textMenu, ID_TILE_TEXT_BADGE_EDIT, g_ui.tileTextBadgeEdit.c_str());
         addTo(textMenu, ID_TILE_TEXT_BADGE_CLEAR, g_ui.tileTextBadgeClear.c_str(), false, !badgeText.empty());
         AppendMenuChecked(textMenu, MF_STRING | MF_DISABLED, 0, badgeLine.c_str());
-        addTo(textMenu, ID_TILE_TEXT_H_ALIGN, hLine);
-        addTo(textMenu, ID_TILE_TEXT_V_ALIGN, vLine);
-        addTo(textMenu, ID_TILE_TEXT_BADGE_H_ALIGN, badgeHLine);
-        addTo(textMenu, ID_TILE_TEXT_BADGE_V_ALIGN, badgeVLine);
-        addTo(textMenu, ID_TILE_TEXT_FONT, fontLine);
-        addTo(textMenu, ID_TILE_TEXT_FONT_SIZE, fontSizeLine);
-        addTo(textMenu, ID_TILE_TEXT_SECONDARY_FONT_SIZE, secondaryFontSizeLine);
-        addTo(textMenu, ID_TILE_TEXT_BADGE_FONT_SIZE, badgeFontSizeLine);
-        addTo(textMenu, ID_TILE_TEXT_BOLD, g_ui.tileTextBold.c_str(), IniReadI(L"TileText", L"Bold", 0) != 0);
-        addTo(textMenu, ID_TILE_TEXT_SECONDARY_BOLD, g_ui.tileTextSecondaryBold.c_str(), IniReadI(L"TileText", L"SecondaryBold", 0) != 0);
-        addTo(textMenu, ID_TILE_TEXT_BADGE_BOLD, g_ui.tileTextBadgeBold.c_str(), IniReadI(L"TileText", L"BadgeBold", 0) != 0);
-        addTo(textMenu, ID_TILE_TEXT_ITALIC, g_ui.tileTextItalic.c_str(), IniReadI(L"TileText", L"Italic", 0) != 0);
-        addTo(textMenu, ID_TILE_TEXT_COLOR, colorLine);
-        addTo(textMenu, ID_TILE_TEXT_SECONDARY_COLOR, secondaryColorLine);
-        addTo(textMenu, ID_TILE_TEXT_BADGE_COLOR, badgeColorLine);
-        addTo(textMenu, ID_TILE_TEXT_SHADOW, g_ui.tileTextShadow.c_str(), IniReadI(L"TileText", L"Shadow", 1) != 0);
-        addTo(textMenu, ID_TILE_TEXT_SHADOW_COLOR, shadowColorLine);
-        addTo(textMenu, ID_TILE_TEXT_MARGIN_X, marginXLine);
-        addTo(textMenu, ID_TILE_TEXT_MARGIN_Y, marginYLine);
-        addTo(textMenu, ID_TILE_TEXT_LINE_GAP, lineGapLine);
-        addTo(textMenu, ID_TILE_TEXT_MAX_SECONDARY_LINES, maxSecondaryLinesLine);
         addTo(textMenu, ID_TILE_TEXT_APPLY_MEDIUM, g_ui.tileTextApplyMedium.c_str(), IniReadI(L"TileText", L"ApplyToMediumTile", 1) != 0);
         addTo(textMenu, ID_TILE_TEXT_APPLY_WIDE, g_ui.tileTextApplyWide.c_str(), IniReadI(L"TileText", L"ApplyToWideTile", 1) != 0);
         addTo(textMenu, ID_TILE_TEXT_APPLY_LARGE, g_ui.tileTextApplyLarge.c_str(), IniReadI(L"TileText", L"ApplyToLargeTile", 1) != 0);
-        addTo(textMenu, ID_TILE_TEXT_APPLY_SMALL, g_ui.tileTextApplySmall.c_str(), IniReadI(L"TileText", L"ApplyToSmallTile", 0) != 0);
-        addTo(textMenu, ID_TILE_TEXT_APPLY_LOGOS, g_ui.tileTextApplyLogos.c_str(), IniReadI(L"TileText", L"ApplyToLogos", 0) != 0);
     }
     endNestedMenu(appearanceAssetsMenu, tileTextMenu, g_ui.tileTextTitle);
 

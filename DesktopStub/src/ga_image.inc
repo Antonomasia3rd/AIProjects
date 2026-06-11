@@ -512,7 +512,7 @@ static bool TryParseHexByte(const std::wstring& text, size_t offset, BYTE& value
     return true;
 }
 
-static Color ParseTileTextColor(const std::wstring& raw, Color fallback)
+static Color ParseTileColor(const std::wstring& raw, Color fallback)
 {
     std::wstring value = TrimCopy(raw);
     if (!value.empty() && value.front() == L'#')
@@ -574,66 +574,32 @@ static bool TileTextAppliesToTileName(const wchar_t* tileName)
         return IniReadI(L"TileText", L"ApplyToWideTile", 1) != 0;
     if (IEquals(name, L"LargeTile") || IEquals(name, L"LiveLargeTile"))
         return IniReadI(L"TileText", L"ApplyToLargeTile", 1) != 0;
-    if (IEquals(name, L"SmallTile"))
-        return IniReadI(L"TileText", L"ApplyToSmallTile", 0) != 0;
-    if (IEquals(name, L"StoreLogo") ||
-        IEquals(name, L"Square44x44Logo") ||
-        IEquals(name, L"Square30x30Logo"))
-        return IniReadI(L"TileText", L"ApplyToLogos", 0) != 0;
     return false;
 }
 
-static const wchar_t* NormalizeTileTextHorizontalAlignValue(const std::wstring& raw, const wchar_t* fallback)
+enum class SimulatedTileTextLayout
 {
-    std::wstring value = ToLowerCopy(TrimCopy(raw));
-    if (value == L"left")
-        return L"Left";
-    if (value == L"right")
-        return L"Right";
-    if (value == L"center" || value == L"middle")
-        return L"Center";
-    return fallback && *fallback ? fallback : L"Center";
+    None,
+    Medium,
+    Wide,
+    Large
+};
+
+static SimulatedTileTextLayout SimulatedTileTextLayoutForName(const wchar_t* tileName)
+{
+    std::wstring name = tileName ? tileName : L"";
+    if (IEquals(name, L"MediumTile") || IEquals(name, L"LiveMediumTile"))
+        return SimulatedTileTextLayout::Medium;
+    if (IEquals(name, L"WideTile") || IEquals(name, L"LiveWideTile"))
+        return SimulatedTileTextLayout::Wide;
+    if (IEquals(name, L"LargeTile") || IEquals(name, L"LiveLargeTile"))
+        return SimulatedTileTextLayout::Large;
+    return SimulatedTileTextLayout::None;
 }
 
-static const wchar_t* NormalizeTileTextVerticalAlignValue(const std::wstring& raw, const wchar_t* fallback)
+static std::unique_ptr<FontFamily> CreateSystemTileFontFamily(const wchar_t* preferred)
 {
-    std::wstring value = ToLowerCopy(TrimCopy(raw));
-    if (value == L"top")
-        return L"Top";
-    if (value == L"center" || value == L"middle")
-        return L"Center";
-    if (value == L"bottom")
-        return L"Bottom";
-    return fallback && *fallback ? fallback : L"Top";
-}
-
-static const wchar_t* NormalizedTileTextHorizontalAlign()
-{
-    return NormalizeTileTextHorizontalAlignValue(IniReadS(L"TileText", L"HorizontalAlign", L"Center"), L"Center");
-}
-
-static const wchar_t* NormalizedTileTextVerticalAlign()
-{
-    return NormalizeTileTextVerticalAlignValue(IniReadS(L"TileText", L"VerticalAlign", L"Top"), L"Top");
-}
-
-static const wchar_t* NormalizedTileTextBadgeHorizontalAlign()
-{
-    return NormalizeTileTextHorizontalAlignValue(IniReadS(L"TileText", L"BadgeHorizontalAlign", L"Right"), L"Right");
-}
-
-static const wchar_t* NormalizedTileTextBadgeVerticalAlign()
-{
-    return NormalizeTileTextVerticalAlignValue(IniReadS(L"TileText", L"BadgeVerticalAlign", L"Top"), L"Top");
-}
-
-static std::unique_ptr<FontFamily> CreateTileTextFontFamily()
-{
-    std::wstring fontName = TrimCopy(IniReadS(L"TileText", L"Font", L"Segoe UI"));
-    if (fontName.empty())
-        fontName = L"Segoe UI";
-
-    std::unique_ptr<FontFamily> family(new FontFamily(fontName.c_str()));
+    std::unique_ptr<FontFamily> family(new FontFamily(preferred && *preferred ? preferred : L"Segoe UI"));
     if (!family || family->GetLastStatus() != Ok)
         family.reset(new FontFamily(L"Segoe UI"));
     if (!family || family->GetLastStatus() != Ok)
@@ -641,62 +607,168 @@ static std::unique_ptr<FontFamily> CreateTileTextFontFamily()
     return family;
 }
 
-static int TileTextFontStyle(const wchar_t* boldKey, int boldFallback)
-{
-    int fontStyle = FontStyleRegular;
-    if (IniReadI(L"TileText", boldKey, boldFallback) != 0)
-        fontStyle |= FontStyleBold;
-    if (IniReadI(L"TileText", L"Italic", 0) != 0)
-        fontStyle |= FontStyleItalic;
-    return fontStyle;
-}
-
-static StringAlignment TileTextHorizontalStringAlignment(const std::wstring& value)
-{
-    std::wstring align = ToLowerCopy(value);
-    if (align == L"left")
-        return StringAlignmentNear;
-    if (align == L"right")
-        return StringAlignmentFar;
-    return StringAlignmentCenter;
-}
-
-static StringAlignment TileTextVerticalStringAlignment(const std::wstring& value)
-{
-    std::wstring align = ToLowerCopy(value);
-    if (align == L"top")
-        return StringAlignmentNear;
-    if (align == L"bottom")
-        return StringAlignmentFar;
-    return StringAlignmentCenter;
-}
-
-static bool DrawTileTextString(
+static bool DrawSystemTileText(
     Graphics& graphics,
     const std::wstring& text,
     Font& font,
     const RectF& layout,
-    StringFormat& format,
-    SolidBrush& brush,
-    double scale,
+    StringAlignment alignment,
+    StringTrimming trimming,
     const wchar_t* operation)
 {
     if (text.empty())
         return true;
 
-    if (IniReadI(L"TileText", L"Shadow", 1) != 0)
+    StringFormat format;
+    format.SetAlignment(alignment);
+    format.SetLineAlignment(StringAlignmentNear);
+    format.SetTrimming(trimming);
+    format.SetFormatFlags(StringFormatFlagsLineLimit);
+    SolidBrush brush(Color(255, 255, 255, 255));
+    return GdiOk(
+        graphics.DrawString(text.c_str(), static_cast<INT>(text.size()), &font, layout, &format, &brush),
+        operation);
+}
+
+static Color SimulatedTileBackgroundColor()
+{
+    return ParseTileColor(EffectiveManifestBackgroundColor(), Color(255, 0, 120, 215));
+}
+
+static REAL ScaleTileMetric(REAL logicalValue, double scale)
+{
+    return static_cast<REAL>(logicalValue * scale);
+}
+
+static RectF ScaleTileRect(REAL x, REAL y, REAL width, REAL height, double scale)
+{
+    return RectF(
+        ScaleTileMetric(x, scale),
+        ScaleTileMetric(y, scale),
+        std::max(1.0f, ScaleTileMetric(width, scale)),
+        std::max(1.0f, ScaleTileMetric(height, scale)));
+}
+
+static bool RenderMediumTileTextSimulation(
+    Graphics& graphics,
+    const std::wstring& primaryText,
+    const std::wstring& secondaryText,
+    const std::wstring& badgeText,
+    double scale)
+{
+    SolidBrush background(SimulatedTileBackgroundColor());
+    if (!GdiOk(graphics.FillRectangle(&background, ScaleTileRect(0, 0, 150, 150, scale)), L"fill medium tile text background"))
+        return false;
+
+    std::unique_ptr<FontFamily> titleFamily = CreateSystemTileFontFamily(L"Segoe UI Light");
+    std::unique_ptr<FontFamily> bodyFamily = CreateSystemTileFontFamily(L"Segoe UI");
+    if (!titleFamily || !bodyFamily)
+        return false;
+
+    Font titleFont(titleFamily.get(), ScaleTileMetric(24, scale), FontStyleRegular, UnitPixel);
+    Font bodyFont(bodyFamily.get(), ScaleTileMetric(15, scale), FontStyleRegular, UnitPixel);
+    Font blockFont(titleFamily.get(), ScaleTileMetric(54, scale), FontStyleRegular, UnitPixel);
+    if (titleFont.GetLastStatus() != Ok || bodyFont.GetLastStatus() != Ok || blockFont.GetLastStatus() != Ok)
+        return false;
+
+    if (!badgeText.empty())
     {
-        int shadowOffset = std::max(1, static_cast<int>(scale + 0.5));
-        RectF shadowLayout = layout;
-        shadowLayout.X += static_cast<REAL>(shadowOffset);
-        shadowLayout.Y += static_cast<REAL>(shadowOffset);
-        Color shadowColor = ParseTileTextColor(IniReadS(L"TileText", L"ShadowColor", L"#AA000000"), Color(170, 0, 0, 0));
-        SolidBrush shadowBrush(shadowColor);
-        if (!GdiOk(graphics.DrawString(text.c_str(), static_cast<INT>(text.size()), &font, shadowLayout, &format, &shadowBrush), operation))
+        if (!DrawSystemTileText(graphics, badgeText, blockFont, ScaleTileRect(10, 7, 130, 67, scale),
+                StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw medium tile block text"))
             return false;
+        if (!DrawSystemTileText(graphics, primaryText, bodyFont, ScaleTileRect(10, 80, 130, 20, scale),
+                StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw medium tile block label"))
+            return false;
+        return DrawSystemTileText(graphics, secondaryText, bodyFont, ScaleTileRect(10, 103, 130, 37, scale),
+            StringAlignmentNear, StringTrimmingEllipsisWord, L"draw medium tile block detail");
     }
 
-    return GdiOk(graphics.DrawString(text.c_str(), static_cast<INT>(text.size()), &font, layout, &format, &brush), operation);
+    REAL secondaryTop = primaryText.empty() ? 10.0f : 44.0f;
+    if (!DrawSystemTileText(graphics, primaryText, titleFont, ScaleTileRect(10, 8, 130, 32, scale),
+            StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw medium tile header"))
+        return false;
+    return DrawSystemTileText(graphics, secondaryText, bodyFont, ScaleTileRect(10, secondaryTop, 130, 96, scale),
+        StringAlignmentNear, StringTrimmingEllipsisWord, L"draw medium tile body");
+}
+
+static bool RenderWideTileTextSimulation(
+    Graphics& graphics,
+    const std::wstring& primaryText,
+    const std::wstring& secondaryText,
+    const std::wstring& badgeText,
+    double scale)
+{
+    Color backgroundColor = SimulatedTileBackgroundColor();
+    SolidBrush background(backgroundColor);
+    std::unique_ptr<FontFamily> titleFamily = CreateSystemTileFontFamily(L"Segoe UI Light");
+    std::unique_ptr<FontFamily> bodyFamily = CreateSystemTileFontFamily(L"Segoe UI");
+    if (!titleFamily || !bodyFamily)
+        return false;
+
+    Font bodyFont(bodyFamily.get(), ScaleTileMetric(15, scale), FontStyleRegular, UnitPixel);
+    Font blockFont(titleFamily.get(), ScaleTileMetric(54, scale), FontStyleRegular, UnitPixel);
+    if (bodyFont.GetLastStatus() != Ok || blockFont.GetLastStatus() != Ok)
+        return false;
+
+    if (!badgeText.empty())
+    {
+        if (!GdiOk(graphics.FillRectangle(&background, ScaleTileRect(0, 0, 310, 150, scale)), L"fill wide tile block background"))
+            return false;
+        if (!DrawSystemTileText(graphics, primaryText, bodyFont, ScaleTileRect(10, 10, 190, 22, scale),
+                StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw wide tile block label"))
+            return false;
+        if (!DrawSystemTileText(graphics, secondaryText, bodyFont, ScaleTileRect(10, 36, 190, 104, scale),
+                StringAlignmentNear, StringTrimmingEllipsisWord, L"draw wide tile block detail"))
+            return false;
+        return DrawSystemTileText(graphics, badgeText, blockFont, ScaleTileRect(210, 27, 90, 76, scale),
+            StringAlignmentFar, StringTrimmingEllipsisCharacter, L"draw wide tile block text");
+    }
+
+    if (!GdiOk(graphics.FillRectangle(&background, ScaleTileRect(0, 100, 310, 50, scale)), L"fill wide tile text band"))
+        return false;
+
+    if (secondaryText.empty())
+        return DrawSystemTileText(graphics, primaryText, bodyFont, ScaleTileRect(10, 104, 290, 39, scale),
+            StringAlignmentNear, StringTrimmingEllipsisWord, L"draw wide tile text");
+
+    if (!DrawSystemTileText(graphics, primaryText, bodyFont, ScaleTileRect(10, 103, 290, 20, scale),
+            StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw wide tile first line"))
+        return false;
+    return DrawSystemTileText(graphics, secondaryText, bodyFont, ScaleTileRect(10, 124, 290, 19, scale),
+        StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw wide tile second line");
+}
+
+static bool RenderLargeTileTextSimulation(
+    Graphics& graphics,
+    const std::wstring& primaryText,
+    const std::wstring& secondaryText,
+    const std::wstring& badgeText,
+    double scale)
+{
+    SolidBrush imageDarkener(Color(72, 0, 0, 0));
+    if (!GdiOk(graphics.FillRectangle(&imageDarkener, ScaleTileRect(0, 0, 310, 310, scale)), L"darken large tile image"))
+        return false;
+
+    std::unique_ptr<FontFamily> titleFamily = CreateSystemTileFontFamily(L"Segoe UI Light");
+    std::unique_ptr<FontFamily> bodyFamily = CreateSystemTileFontFamily(L"Segoe UI");
+    if (!titleFamily || !bodyFamily)
+        return false;
+
+    Font titleFont(titleFamily.get(), ScaleTileMetric(30, scale), FontStyleRegular, UnitPixel);
+    Font bodyFont(bodyFamily.get(), ScaleTileMetric(15, scale), FontStyleRegular, UnitPixel);
+    Font blockFont(titleFamily.get(), ScaleTileMetric(54, scale), FontStyleRegular, UnitPixel);
+    if (titleFont.GetLastStatus() != Ok || bodyFont.GetLastStatus() != Ok || blockFont.GetLastStatus() != Ok)
+        return false;
+
+    REAL titleWidth = badgeText.empty() ? 270.0f : 170.0f;
+    if (!DrawSystemTileText(graphics, primaryText, titleFont, ScaleTileRect(20, 15, titleWidth, 82, scale),
+            StringAlignmentNear, StringTrimmingEllipsisWord, L"draw large tile header"))
+        return false;
+    if (!DrawSystemTileText(graphics, secondaryText, bodyFont, ScaleTileRect(20, 224, 270, 66, scale),
+            StringAlignmentNear, StringTrimmingEllipsisWord, L"draw large tile body"))
+        return false;
+    return DrawSystemTileText(graphics, badgeText, blockFont, ScaleTileRect(200, 17, 90, 72, scale),
+        StringAlignmentFar, StringTrimmingEllipsisCharacter, L"draw large tile block text");
 }
 
 static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int logicalWidth, int logicalHeight)
@@ -715,15 +787,6 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
     if (primaryText.empty() && secondaryText.empty() && badgeText.empty())
         return true;
 
-    int primaryFontSize = IniReadClampedI(L"TileText", L"FontSize", 18, 6, 256);
-    int secondaryFontSize = IniReadClampedI(L"TileText", L"SecondaryFontSize", 12, 6, 256);
-    int badgeFontSize = IniReadClampedI(L"TileText", L"BadgeFontSize", 40, 6, 256);
-    int marginX = IniReadClampedI(L"TileText", L"MarginX", 8, 0, 1000);
-    int marginY = IniReadClampedI(L"TileText", L"MarginY", 10, 0, 1000);
-    int lineGap = IniReadClampedI(L"TileText", L"LineGap", 2, 0, 1000);
-    int maxSecondaryLines = IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 0, 32);
-    bool drawSecondaryText = !secondaryText.empty() && maxSecondaryLines > 0;
-
     double scale = 1.0;
     if (logicalWidth > 0 && logicalHeight > 0)
     {
@@ -734,113 +797,24 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
     if (scale <= 0.0)
         scale = 1.0;
 
-    REAL scaledPrimaryFontSize = static_cast<REAL>(std::max(1, static_cast<int>(primaryFontSize * scale + 0.5)));
-    REAL scaledSecondaryFontSize = static_cast<REAL>(std::max(1, static_cast<int>(secondaryFontSize * scale + 0.5)));
-    REAL scaledBadgeFontSize = static_cast<REAL>(std::max(1, static_cast<int>(badgeFontSize * scale + 0.5)));
-    REAL scaledLineGap = static_cast<REAL>(std::max(0, static_cast<int>(lineGap * scale + 0.5)));
-    int scaledMarginX = std::max(0, static_cast<int>(marginX * scale + 0.5));
-    int scaledMarginY = std::max(0, static_cast<int>(marginY * scale + 0.5));
-
-    RectF content(
-        static_cast<REAL>(scaledMarginX),
-        static_cast<REAL>(scaledMarginY),
-        static_cast<REAL>(std::max(1, bitmapWidth - scaledMarginX * 2)),
-        static_cast<REAL>(std::max(1, bitmapHeight - scaledMarginY * 2)));
-
-    std::unique_ptr<FontFamily> family = CreateTileTextFontFamily();
-    if (!family || family->GetLastStatus() != Ok)
-        return false;
-
-    Font primaryFont(family.get(), scaledPrimaryFontSize, TileTextFontStyle(L"Bold", 0), UnitPixel);
-    Font secondaryFont(family.get(), scaledSecondaryFontSize, TileTextFontStyle(L"SecondaryBold", 0), UnitPixel);
-    Font badgeFont(family.get(), scaledBadgeFontSize, TileTextFontStyle(L"BadgeBold", 0), UnitPixel);
-    if (primaryFont.GetLastStatus() != Ok || secondaryFont.GetLastStatus() != Ok || badgeFont.GetLastStatus() != Ok)
-        return false;
-
     Graphics graphics(bitmap);
     if (!GraphicsOk(graphics, L"create tile text graphics"))
         return false;
 
     graphics.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
     graphics.SetSmoothingMode(SmoothingModeAntiAlias);
-
-    std::wstring hAlign = ToLowerCopy(NormalizedTileTextHorizontalAlign());
-    std::wstring vAlign = ToLowerCopy(NormalizedTileTextVerticalAlign());
-    std::wstring badgeHAlign = ToLowerCopy(NormalizedTileTextBadgeHorizontalAlign());
-    std::wstring badgeVAlign = ToLowerCopy(NormalizedTileTextBadgeVerticalAlign());
-
-    REAL primaryLineHeight = scaledPrimaryFontSize * 1.25f;
-    REAL secondaryLineHeight = scaledSecondaryFontSize * 1.20f;
-    REAL secondaryBlockHeight = drawSecondaryText ? secondaryLineHeight * static_cast<REAL>(maxSecondaryLines) : 0.0f;
-    REAL blockHeight = 0.0f;
-    if (!primaryText.empty())
-        blockHeight += primaryLineHeight;
-    if (!primaryText.empty() && drawSecondaryText)
-        blockHeight += scaledLineGap;
-    if (drawSecondaryText)
-        blockHeight += secondaryBlockHeight;
-    if (blockHeight <= 0.0f)
-        blockHeight = primaryLineHeight;
-
-    REAL textY = content.Y;
-    if (vAlign == L"center")
-        textY = content.Y + std::max(0.0f, (content.Height - blockHeight) / 2.0f);
-    else if (vAlign == L"bottom")
-        textY = content.Y + std::max(0.0f, content.Height - blockHeight);
-
-    REAL badgeReserve = 0.0f;
-    if (!badgeText.empty() && (badgeHAlign == L"right" || badgeHAlign == L"left") && (!primaryText.empty() || drawSecondaryText))
-        badgeReserve = std::min(content.Width * 0.42f, std::max(scaledBadgeFontSize * 1.35f, content.Width * 0.24f));
-
-    RectF textContent = content;
-    if (badgeReserve > 0.0f && badgeHAlign == L"right" && hAlign != L"right")
-        textContent.Width = std::max(1.0f, textContent.Width - badgeReserve);
-    else if (badgeReserve > 0.0f && badgeHAlign == L"left" && hAlign != L"left")
+    switch (SimulatedTileTextLayoutForName(tileName))
     {
-        textContent.X += badgeReserve;
-        textContent.Width = std::max(1.0f, textContent.Width - badgeReserve);
+    case SimulatedTileTextLayout::Medium:
+        return RenderMediumTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale);
+    case SimulatedTileTextLayout::Wide:
+        return RenderWideTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale);
+    case SimulatedTileTextLayout::Large:
+        return RenderLargeTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale);
+    case SimulatedTileTextLayout::None:
+    default:
+        return true;
     }
-
-    StringFormat textFormat;
-    textFormat.SetAlignment(TileTextHorizontalStringAlignment(hAlign));
-    textFormat.SetLineAlignment(StringAlignmentNear);
-    textFormat.SetTrimming(StringTrimmingEllipsisWord);
-    textFormat.SetFormatFlags(StringFormatFlagsLineLimit);
-
-    Color primaryColor = ParseTileTextColor(IniReadS(L"TileText", L"Color", L"#FFFFFFFF"), Color(255, 255, 255, 255));
-    Color secondaryColor = ParseTileTextColor(IniReadS(L"TileText", L"SecondaryColor", L"#CCFFFFFF"), Color(204, 255, 255, 255));
-    Color badgeColor = ParseTileTextColor(IniReadS(L"TileText", L"BadgeColor", L"#FFFFFFFF"), Color(255, 255, 255, 255));
-    SolidBrush primaryBrush(primaryColor);
-    SolidBrush secondaryBrush(secondaryColor);
-    SolidBrush badgeBrush(badgeColor);
-
-    if (!primaryText.empty())
-    {
-        RectF primaryRect(textContent.X, textY, textContent.Width, primaryLineHeight + scaledLineGap);
-        if (!DrawTileTextString(graphics, primaryText, primaryFont, primaryRect, textFormat, primaryBrush, scale, L"draw primary tile text"))
-            return false;
-        textY += primaryLineHeight + scaledLineGap;
-    }
-
-    if (drawSecondaryText)
-    {
-        RectF secondaryRect(textContent.X, textY, textContent.Width, std::max(1.0f, secondaryBlockHeight));
-        if (!DrawTileTextString(graphics, secondaryText, secondaryFont, secondaryRect, textFormat, secondaryBrush, scale, L"draw secondary tile text"))
-            return false;
-    }
-
-    if (!badgeText.empty())
-    {
-        StringFormat badgeFormat;
-        badgeFormat.SetAlignment(TileTextHorizontalStringAlignment(badgeHAlign));
-        badgeFormat.SetLineAlignment(TileTextVerticalStringAlignment(badgeVAlign));
-        badgeFormat.SetTrimming(StringTrimmingEllipsisCharacter);
-        badgeFormat.SetFormatFlags(StringFormatFlagsLineLimit);
-        if (!DrawTileTextString(graphics, badgeText, badgeFont, content, badgeFormat, badgeBrush, scale, L"draw tile badge text"))
-            return false;
-    }
-
-    return true;
 }
 
 static std::wstring TileTextXmlText()
@@ -854,8 +828,6 @@ static std::wstring TileTextXmlSecondaryText()
 {
     if (!TileTextOverlayEnabled())
         return L"";
-    if (IniReadClampedI(L"TileText", L"MaxSecondaryLines", 2, 0, 32) <= 0)
-        return L"";
     return TileTextSecondaryText();
 }
 
@@ -864,22 +836,6 @@ static std::wstring TileTextXmlBadgeText()
     if (!TileTextOverlayEnabled())
         return L"";
     return TileTextBadgeText();
-}
-
-static std::wstring TileTextXmlHorizontalAlign()
-{
-    std::wstring value = ToLowerCopy(NormalizedTileTextHorizontalAlign());
-    if (value == L"left" || value == L"right")
-        return value;
-    return L"center";
-}
-
-static std::wstring TileTextXmlBadgeHorizontalAlign()
-{
-    std::wstring value = ToLowerCopy(NormalizedTileTextBadgeHorizontalAlign());
-    if (value == L"left" || value == L"right")
-        return value;
-    return L"center";
 }
 
 static Bitmap* ResizeBitmapToMode(Bitmap* src, int w, int h, FitMode mode, Color background)

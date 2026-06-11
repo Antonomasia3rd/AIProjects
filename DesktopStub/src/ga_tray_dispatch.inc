@@ -455,110 +455,6 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         LogText(g_ui.tileTextCleared);
         break;
 
-    case ID_TILE_TEXT_H_ALIGN:
-    {
-        const wchar_t* next = NextTileTextHorizontalAlign(IniReadS(L"TileText", L"HorizontalAlign", L"Center"));
-        if (!IniWrite(L"TileText", L"HorizontalAlign", next))
-            return;
-        Log(g_ui.tileTextHorizontalAlign.c_str(), next);
-    }
-    break;
-
-    case ID_TILE_TEXT_V_ALIGN:
-    {
-        const wchar_t* next = NextTileTextVerticalAlign(IniReadS(L"TileText", L"VerticalAlign", L"Top"));
-        if (!IniWrite(L"TileText", L"VerticalAlign", next))
-            return;
-        Log(g_ui.tileTextVerticalAlign.c_str(), next);
-    }
-    break;
-
-    case ID_TILE_TEXT_BADGE_H_ALIGN:
-    {
-        const wchar_t* next = NextTileTextHorizontalAlign(IniReadS(L"TileText", L"BadgeHorizontalAlign", L"Right"));
-        if (!IniWrite(L"TileText", L"BadgeHorizontalAlign", next))
-            return;
-        Log(g_ui.tileTextBadgeHorizontalAlign.c_str(), next);
-    }
-    break;
-
-    case ID_TILE_TEXT_BADGE_V_ALIGN:
-    {
-        const wchar_t* next = NextTileTextVerticalAlign(IniReadS(L"TileText", L"BadgeVerticalAlign", L"Top"));
-        if (!IniWrite(L"TileText", L"BadgeVerticalAlign", next))
-            return;
-        Log(g_ui.tileTextBadgeVerticalAlign.c_str(), next);
-    }
-    break;
-
-    case ID_TILE_TEXT_FONT:
-        PromptTileTextStringSetting(h, L"Font", g_ui.tileTextFontInputTitle, g_ui.tileTextFontInputPrompt, L"Segoe UI");
-        break;
-
-    case ID_TILE_TEXT_FONT_SIZE:
-        CycleTileTextFontSize(L"FontSize", 18, g_ui.tileTextFontSize);
-        break;
-
-    case ID_TILE_TEXT_SECONDARY_FONT_SIZE:
-        CycleTileTextFontSize(L"SecondaryFontSize", 12, g_ui.tileTextSecondaryFontSize);
-        break;
-
-    case ID_TILE_TEXT_BADGE_FONT_SIZE:
-        CycleTileTextFontSize(L"BadgeFontSize", 40, g_ui.tileTextBadgeFontSize);
-        break;
-
-    case ID_TILE_TEXT_BOLD:
-        ToggleTileTextBool(L"Bold", 0);
-        break;
-
-    case ID_TILE_TEXT_SECONDARY_BOLD:
-        ToggleTileTextBool(L"SecondaryBold", 0);
-        break;
-
-    case ID_TILE_TEXT_BADGE_BOLD:
-        ToggleTileTextBool(L"BadgeBold", 0);
-        break;
-
-    case ID_TILE_TEXT_ITALIC:
-        ToggleTileTextBool(L"Italic", 0);
-        break;
-
-    case ID_TILE_TEXT_COLOR:
-        PromptTileTextStringSetting(h, L"Color", g_ui.tileTextColorInputTitle, g_ui.tileTextColorInputPrompt, L"#FFFFFFFF");
-        break;
-
-    case ID_TILE_TEXT_SECONDARY_COLOR:
-        PromptTileTextStringSetting(h, L"SecondaryColor", g_ui.tileTextSecondaryColorInputTitle, g_ui.tileTextSecondaryColorInputPrompt, L"#CCFFFFFF");
-        break;
-
-    case ID_TILE_TEXT_BADGE_COLOR:
-        PromptTileTextStringSetting(h, L"BadgeColor", g_ui.tileTextBadgeColorInputTitle, g_ui.tileTextBadgeColorInputPrompt, L"#FFFFFFFF");
-        break;
-
-    case ID_TILE_TEXT_SHADOW:
-        ToggleTileTextBool(L"Shadow", 1);
-        break;
-
-    case ID_TILE_TEXT_SHADOW_COLOR:
-        PromptTileTextStringSetting(h, L"ShadowColor", g_ui.tileTextShadowColorInputTitle, g_ui.tileTextShadowColorInputPrompt, L"#AA000000");
-        break;
-
-    case ID_TILE_TEXT_MARGIN_X:
-        PromptTileTextIntSetting(h, L"MarginX", 8, 0, 512, g_ui.tileTextMarginXInputTitle, g_ui.tileTextMarginXInputPrompt, g_ui.tileTextMarginX);
-        break;
-
-    case ID_TILE_TEXT_MARGIN_Y:
-        PromptTileTextIntSetting(h, L"MarginY", 10, 0, 512, g_ui.tileTextMarginYInputTitle, g_ui.tileTextMarginYInputPrompt, g_ui.tileTextMarginY);
-        break;
-
-    case ID_TILE_TEXT_LINE_GAP:
-        PromptTileTextIntSetting(h, L"LineGap", 2, 0, 128, g_ui.tileTextLineGapInputTitle, g_ui.tileTextLineGapInputPrompt, g_ui.tileTextLineGap);
-        break;
-
-    case ID_TILE_TEXT_MAX_SECONDARY_LINES:
-        PromptTileTextIntSetting(h, L"MaxSecondaryLines", 2, 0, 32, g_ui.tileTextMaxSecondaryLinesInputTitle, g_ui.tileTextMaxSecondaryLinesInputPrompt, g_ui.tileTextMaxSecondaryLines);
-        break;
-
     case ID_TILE_TEXT_APPLY_MEDIUM:
         ToggleTileTextBool(L"ApplyToMediumTile", 1);
         break;
@@ -569,14 +465,6 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
 
     case ID_TILE_TEXT_APPLY_LARGE:
         ToggleTileTextBool(L"ApplyToLargeTile", 1);
-        break;
-
-    case ID_TILE_TEXT_APPLY_SMALL:
-        ToggleTileTextBool(L"ApplyToSmallTile", 0);
-        break;
-
-    case ID_TILE_TEXT_APPLY_LOGOS:
-        ToggleTileTextBool(L"ApplyToLogos", 0);
         break;
 
     case ID_WALLPAPER_DECODE_LOW_MEMORY:
