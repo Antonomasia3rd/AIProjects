@@ -165,6 +165,80 @@ static void AddCommandLineLiveTileTemplateStyleSetting(LiveTileTemplateStyle sty
     AddCommandLineIniSetting(L"Settings", L"LiveTileTemplateStyle", LiveTileTemplateStyleIniValue(style));
 }
 
+static LiveTileBranding ParseLiveTileBrandingValue(
+    const std::wstring& rawValue,
+    LiveTileBranding fallback = LiveTileBranding::Auto)
+{
+    std::wstring v = ToLowerCopy(TrimCopy(rawValue));
+    if (v.empty())
+        return fallback;
+
+    if (v == L"auto" || v == L"automatic" || v == L"default")
+        return LiveTileBranding::Auto;
+    if (v == L"none" || v == L"off" || v == L"disabled")
+        return LiveTileBranding::None;
+    if (v == L"logo")
+        return LiveTileBranding::Logo;
+    if (v == L"name")
+        return LiveTileBranding::Name;
+    if (v == L"nameandlogo" || v == L"name-and-logo" ||
+        v == L"name_and_logo" || v == L"name+logo" ||
+        v == L"name and logo")
+        return LiveTileBranding::NameAndLogo;
+
+    return fallback;
+}
+
+static std::wstring LiveTileBrandingIniValue(LiveTileBranding branding)
+{
+    switch (branding)
+    {
+    case LiveTileBranding::None:
+        return L"None";
+    case LiveTileBranding::Logo:
+        return L"Logo";
+    case LiveTileBranding::Name:
+        return L"Name";
+    case LiveTileBranding::NameAndLogo:
+        return L"NameAndLogo";
+    case LiveTileBranding::Auto:
+    default:
+        return L"Auto";
+    }
+}
+
+static const wchar_t* LiveTileBrandingName(LiveTileBranding branding)
+{
+    switch (branding)
+    {
+    case LiveTileBranding::None:
+        return L"None";
+    case LiveTileBranding::Logo:
+        return L"Logo";
+    case LiveTileBranding::Name:
+        return L"Name";
+    case LiveTileBranding::NameAndLogo:
+        return L"Name + logo";
+    case LiveTileBranding::Auto:
+    default:
+        return L"Automatic";
+    }
+}
+
+static bool IsValidLiveTileBranding(LiveTileBranding branding)
+{
+    return branding == LiveTileBranding::Auto ||
+        branding == LiveTileBranding::None ||
+        branding == LiveTileBranding::Logo ||
+        branding == LiveTileBranding::Name ||
+        branding == LiveTileBranding::NameAndLogo;
+}
+
+static void AddCommandLineLiveTileBrandingSetting(LiveTileBranding branding)
+{
+    AddCommandLineIniSetting(L"Settings", L"LiveTileBranding", LiveTileBrandingIniValue(branding));
+}
+
 static ManifestCompatibilityTarget ParseManifestCompatibilityTargetValue(
     const std::wstring& rawValue,
     ManifestCompatibilityTarget fallback = ManifestCompatibilityTarget::Windows10)
@@ -1192,6 +1266,22 @@ static bool ParseCommandLineOptions()
                     L". Supported values are Adaptive and Windows81Preset.");
             }
             AddCommandLineLiveTileTemplateStyleSetting(style);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--live-tile-branding", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring trimmed = TrimCopy(value);
+            LiveTileBranding branding = ParseLiveTileBrandingValue(
+                trimmed,
+                static_cast<LiveTileBranding>(-1));
+            if (!IsValidLiveTileBranding(branding))
+            {
+                return fail(L"Unsupported Live Tile branding: " + trimmed +
+                    L". Supported values are Auto, None, Logo, Name, and NameAndLogo.");
+            }
+            AddCommandLineLiveTileBrandingSetting(branding);
             continue;
         }
 

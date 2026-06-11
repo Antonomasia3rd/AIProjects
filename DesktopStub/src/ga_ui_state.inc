@@ -79,6 +79,13 @@ struct UiStrings
     std::wstring liveTileTemplateAdaptive;
     std::wstring liveTileTemplateWindows81Preset;
     std::wstring liveTileTemplateChangedReason;
+    std::wstring liveTileBrandingTitle;
+    std::wstring liveTileBrandingAuto;
+    std::wstring liveTileBrandingNone;
+    std::wstring liveTileBrandingLogo;
+    std::wstring liveTileBrandingName;
+    std::wstring liveTileBrandingNameAndLogo;
+    std::wstring liveTileBrandingChangedReason;
     std::wstring liveTileRegistrationTitle;
     std::wstring liveTileRuntimeTitle;
     std::wstring liveTileWindows8Title;
@@ -432,6 +439,7 @@ struct UiStrings
     std::wstring usePowerShellSummary;
     std::wstring liveTileUpdateSummary;
     std::wstring liveTileTemplateStyleSummary;
+    std::wstring liveTileBrandingSummary;
     std::wstring manifestTargetSummary;
     std::wstring wallpaperDetectionFallbackSummary;
     std::wstring trayIconSummary;

@@ -91,6 +91,15 @@ enum class LiveTileTemplateStyle
     Windows81Preset
 };
 
+enum class LiveTileBranding
+{
+    Auto,
+    None,
+    Logo,
+    Name,
+    NameAndLogo
+};
+
 enum class ManifestCompatibilityTarget
 {
     Windows10,

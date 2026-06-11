@@ -220,9 +220,17 @@ static std::wstring BuildLiveTileXml(
     bool hasUsableBinding = false;
     xml += L"<tile>\r\n";
     if (LiveTileUsesAdaptiveXml())
-        xml += L"  <visual branding=\"nameAndLogo\">\r\n";
+    {
+        xml += L"  <visual branding=\"";
+        xml += LiveTileBrandingXmlValue();
+        xml += L"\">\r\n";
+    }
     else if (LiveTileUsesWindows81PresetXml())
-        xml += L"  <visual version=\"4\" branding=\"logo\">\r\n";
+    {
+        xml += L"  <visual version=\"4\" branding=\"";
+        xml += LiveTileBrandingXmlValue();
+        xml += L"\">\r\n";
+    }
     else if (ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows81)
         xml += L"  <visual version=\"2\">\r\n";
     else

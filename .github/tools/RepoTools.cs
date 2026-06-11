@@ -876,6 +876,7 @@ static class RepoTools
                     string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
                     string customHelpIni = Path.Combine(tempRoot, "CustomHelp.ini");
                     string concurrentIni = Path.Combine(tempRoot, "ConcurrentWrites.ini");
+                    string invalidBrandingIni = Path.Combine(tempRoot, "InvalidBranding.ini");
                     string wallpaper = Path.Combine(tempRoot, "wallpaper.bmp");
                     string trailingSpaces = new string(' ', 2);
                     WriteTestBmp(wallpaper);
@@ -894,9 +895,12 @@ static class RepoTools
                         throw new InvalidOperationException("DesktopStub --help did not use the configured INI template.");
                     if (!customHelpBefore.SequenceEqual(File.ReadAllBytes(customHelpIni)))
                         throw new InvalidOperationException("DesktopStub --help modified its configured INI.");
-                    SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--live-tile-template", "Windows81Preset", "--scales", "auto", "--asset", "MediumTile=1", "--set", "Strings.TrayTip=DesktopStub" + trailingSpaces, "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
+                    SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--live-tile-template", "Windows81Preset", "--live-tile-branding", "NameAndLogo", "--scales", "auto", "--asset", "MediumTile=1", "--set", "Strings.TrayTip=DesktopStub" + trailingSpaces, "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
                     AssertFileContains(ini, "\"TrayTip\" = \"DesktopStub" + trailingSpaces + "\"", "DesktopStub --set must preserve trailing value spaces");
                     AssertFileContains(ini, "\"LiveTileTemplateStyle\" = \"Windows81Preset\"", "DesktopStub must persist the selected Windows 10 Live Tile template style");
+                    AssertFileContains(ini, "\"LiveTileBranding\" = \"NameAndLogo\"", "DesktopStub must persist the selected Windows 10 Live Tile branding");
+                    SmokeProcess(exe, new[] { "--ini", invalidBrandingIni, "--live-tile-branding", "invalid" }, new[] { 2 }, 30, "DesktopStub invalid Live Tile branding");
+                    AssertFileDoesNotExist(invalidBrandingIni, "DesktopStub must reject invalid Live Tile branding without creating an INI");
                     string manifestPath = Path.Combine(Path.GetDirectoryName(exe), "AppxManifest.xml");
                     smokeIdentity = "dev.local.desktopstubsmoke." + Guid.NewGuid().ToString("N").Substring(0, 16);
                     SetDesktopStubManifestIdentity(manifestPath, smokeIdentity);

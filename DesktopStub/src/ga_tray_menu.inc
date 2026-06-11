@@ -207,6 +207,30 @@ void Menu(HWND h)
                 templateStyleAvailable);
         }
 
+        LiveTileBranding branding = ConfiguredLiveTileBranding();
+        std::wstring automaticBrandingLine = g_ui.liveTileBrandingAuto +
+            L" (" + LiveTileBrandingName(EffectiveLiveTileBranding()) + L")";
+        HMENU brandingMenu = CreatePopupMenu();
+        if (brandingMenu)
+        {
+            addTo(brandingMenu, ID_LIVE_TILE_BRANDING_AUTO, automaticBrandingLine.c_str(), branding == LiveTileBranding::Auto, templateStyleAvailable);
+            addTo(brandingMenu, ID_LIVE_TILE_BRANDING_NONE, g_ui.liveTileBrandingNone.c_str(), branding == LiveTileBranding::None, templateStyleAvailable);
+            addTo(brandingMenu, ID_LIVE_TILE_BRANDING_LOGO, g_ui.liveTileBrandingLogo.c_str(), branding == LiveTileBranding::Logo, templateStyleAvailable);
+            addTo(brandingMenu, ID_LIVE_TILE_BRANDING_NAME, g_ui.liveTileBrandingName.c_str(), branding == LiveTileBranding::Name, templateStyleAvailable);
+            addTo(brandingMenu, ID_LIVE_TILE_BRANDING_NAME_AND_LOGO, g_ui.liveTileBrandingNameAndLogo.c_str(), branding == LiveTileBranding::NameAndLogo, templateStyleAvailable);
+            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)brandingMenu, g_ui.liveTileBrandingTitle.c_str()))
+                DestroyMenu(brandingMenu);
+        }
+        else
+        {
+            LogWin32Failure(L"CreatePopupMenu(Live Tile Branding)");
+            addTo(liveTileMenu, ID_LIVE_TILE_BRANDING_AUTO, automaticBrandingLine.c_str(), branding == LiveTileBranding::Auto, templateStyleAvailable);
+            addTo(liveTileMenu, ID_LIVE_TILE_BRANDING_NONE, g_ui.liveTileBrandingNone.c_str(), branding == LiveTileBranding::None, templateStyleAvailable);
+            addTo(liveTileMenu, ID_LIVE_TILE_BRANDING_LOGO, g_ui.liveTileBrandingLogo.c_str(), branding == LiveTileBranding::Logo, templateStyleAvailable);
+            addTo(liveTileMenu, ID_LIVE_TILE_BRANDING_NAME, g_ui.liveTileBrandingName.c_str(), branding == LiveTileBranding::Name, templateStyleAvailable);
+            addTo(liveTileMenu, ID_LIVE_TILE_BRANDING_NAME_AND_LOGO, g_ui.liveTileBrandingNameAndLogo.c_str(), branding == LiveTileBranding::NameAndLogo, templateStyleAvailable);
+        }
+
         HMENU registrationMenu = CreatePopupMenu();
         if (registrationMenu)
         {

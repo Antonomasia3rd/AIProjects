@@ -99,10 +99,49 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
             return;
         g_liveTileTemplateStyle = static_cast<int>(newStyle);
         Log(g_ui.liveTileTemplateStyleSummary.c_str(), LiveTileTemplateStyleSummaryText().c_str());
+        Log(g_ui.liveTileBrandingSummary.c_str(), LiveTileBrandingSummaryText().c_str());
 
         std::wstring wp = GetWallpaper();
         if (!wp.empty())
             QueueGenerate(wp, g_ui.liveTileTemplateChangedReason);
+    }
+    break;
+
+    case ID_LIVE_TILE_BRANDING_AUTO:
+    case ID_LIVE_TILE_BRANDING_NONE:
+    case ID_LIVE_TILE_BRANDING_LOGO:
+    case ID_LIVE_TILE_BRANDING_NAME:
+    case ID_LIVE_TILE_BRANDING_NAME_AND_LOGO:
+    {
+        LiveTileBranding newBranding = LiveTileBranding::Auto;
+        switch (cmd)
+        {
+        case ID_LIVE_TILE_BRANDING_NONE:
+            newBranding = LiveTileBranding::None;
+            break;
+        case ID_LIVE_TILE_BRANDING_LOGO:
+            newBranding = LiveTileBranding::Logo;
+            break;
+        case ID_LIVE_TILE_BRANDING_NAME:
+            newBranding = LiveTileBranding::Name;
+            break;
+        case ID_LIVE_TILE_BRANDING_NAME_AND_LOGO:
+            newBranding = LiveTileBranding::NameAndLogo;
+            break;
+        default:
+            break;
+        }
+        if (ConfiguredLiveTileBranding() == newBranding)
+            break;
+
+        if (!IniWrite(L"Settings", L"LiveTileBranding", LiveTileBrandingIniValue(newBranding).c_str()))
+            return;
+        g_liveTileBranding = static_cast<int>(newBranding);
+        Log(g_ui.liveTileBrandingSummary.c_str(), LiveTileBrandingSummaryText().c_str());
+
+        std::wstring wp = GetWallpaper();
+        if (!wp.empty())
+            QueueGenerate(wp, g_ui.liveTileBrandingChangedReason);
     }
     break;
 

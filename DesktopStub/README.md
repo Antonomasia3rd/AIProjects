@@ -135,6 +135,7 @@ Supported options:
 - `--live-tile-mode Auto|Registration|LiveTile`: set and save Live Tile update mode.
 - `--live-tile-template Adaptive|Windows81Preset`: choose adaptive Windows 10 XML or the native Windows 8.1 preset-template catalog while keeping the Windows 10 manifest target.
 - `--live-tile-adaptive` / `--live-tile-windows81-preset`: shortcuts for `--live-tile-template`.
+- `--live-tile-branding Auto|None|Logo|Name|NameAndLogo`: choose the Windows 10 Live Tile notification branding.
 - `--tile-text <text>`, `--tile-text-secondary <text>` / `--tile-subtext <text>`, and `--tile-text-badge <text>` / `--tile-badge <text>`: configure optional primary, secondary, and badge text overlays.
 - `--tile-text-enable`, `--tile-text-disable`, `--tile-text-clear`, `--tile-text-secondary-clear`, and `--tile-text-badge-clear`: enable/disable or clear overlay parts.
 - `--manifest-target Windows10|Windows81|Windows8`: set the generated AppX manifest dialect and regenerate `AppxManifest.xml`. Windows 10 remains the default.
@@ -254,6 +255,13 @@ For a Windows 10 manifest target, `LiveTileTemplateStyle` selects the notificati
 - `Windows81Preset` uses Microsoft's native Windows 8.1 preset-template catalog on Windows 10. Medium, wide, and large bindings select image, text, image-and-text, or block layouts from the enabled tile-text content.
 
 The preset style emits version-4 Windows 10 notification XML with Windows 8 fallback names where the catalog defines them. It does not affect `AppxManifestTarget=Windows81` or `Windows8`; those compatibility targets keep their existing legacy XML and packaged broker path.
+
+`LiveTileBranding` controls the branding rendered by Windows for either Windows 10 XML style:
+
+- `Auto` is the default. It resolves to `NameAndLogo` for Adaptive and `Name` for the Windows 8.1 preset catalog.
+- `None`, `Logo`, `Name`, and `NameAndLogo` request that exact Windows 10 branding value.
+
+The displayed name comes from `ManifestDisplayName` (`Desktop` by default). Branding does not change the primary, secondary, or badge content configured under `[TileText]`. Windows 8/8.1 manifest targets retain their legacy branding behavior.
 
 ## Tile Text Overlay
 

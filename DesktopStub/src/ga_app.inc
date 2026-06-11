@@ -36,6 +36,7 @@ static void ApplySettingsChangedByCommandLine(bool applyTrayIcon)
 {
     LiveTileUpdateMode liveTileBefore = ConfiguredLiveTileUpdateMode();
     LiveTileTemplateStyle templateStyleBefore = ConfiguredLiveTileTemplateStyle();
+    LiveTileBranding brandingBefore = ConfiguredLiveTileBranding();
     ManifestCompatibilityTarget manifestTargetBefore = ConfiguredManifestCompatibilityTarget();
     ReloadRuntimeSettingsFromIni();
     EnsureIniStringDefaults();
@@ -48,12 +49,24 @@ static void ApplySettingsChangedByCommandLine(bool applyTrayIcon)
 
     if (liveTileBefore != ConfiguredLiveTileUpdateMode())
         QueueLiveTileModeReregistration();
-    if (templateStyleBefore != ConfiguredLiveTileTemplateStyle())
+    bool templateStyleChanged = templateStyleBefore != ConfiguredLiveTileTemplateStyle();
+    bool brandingChanged = brandingBefore != ConfiguredLiveTileBranding();
+    if (templateStyleChanged)
     {
         Log(g_ui.liveTileTemplateStyleSummary.c_str(), LiveTileTemplateStyleSummaryText().c_str());
+        Log(g_ui.liveTileBrandingSummary.c_str(), LiveTileBrandingSummaryText().c_str());
+    }
+    if (brandingChanged && !templateStyleChanged)
+        Log(g_ui.liveTileBrandingSummary.c_str(), LiveTileBrandingSummaryText().c_str());
+    if (templateStyleChanged || brandingChanged)
+    {
         std::wstring wp = GetWallpaper();
         if (!wp.empty())
-            QueueGenerate(wp, g_ui.liveTileTemplateChangedReason);
+            QueueGenerate(
+                wp,
+                brandingChanged
+                    ? g_ui.liveTileBrandingChangedReason
+                    : g_ui.liveTileTemplateChangedReason);
     }
     if (manifestTargetBefore != ConfiguredManifestCompatibilityTarget())
         Log(g_ui.manifestTargetSummary.c_str(), ManifestCompatibilityTargetSummaryText().c_str());
@@ -1587,6 +1600,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.powerShellRegistrationSummary.c_str(), UsePowerShell() ? g_ui.powerShellEnabledMode.c_str() : g_ui.comPreferredMode.c_str());
     Log(g_ui.liveTileUpdateSummary.c_str(), LiveTileUpdateModeSummaryText().c_str());
     Log(g_ui.liveTileTemplateStyleSummary.c_str(), LiveTileTemplateStyleSummaryText().c_str());
+    Log(g_ui.liveTileBrandingSummary.c_str(), LiveTileBrandingSummaryText().c_str());
     Log(g_ui.manifestTargetSummary.c_str(), ManifestCompatibilityTargetSummaryText().c_str());
     Log(g_ui.generatedAssetCacheSummary.c_str(),
         StateEnabled(GeneratedAssetCacheEnabled()),
