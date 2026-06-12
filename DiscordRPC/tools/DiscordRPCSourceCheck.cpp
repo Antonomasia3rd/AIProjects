@@ -516,6 +516,26 @@ int main()
             ipc,
             "GetOverlappedResult(handle, &overlapped");
         RequireContains(
+            "Discord IPC handshake parses READY dispatch structurally",
+            "src\\drpc_ipc.inc",
+            ipc,
+            "TryExtractJsonStringValue(response, \"evt\", eventName)");
+        RequireContains(
+            "Discord IPC request responses are correlated by nonce",
+            "src\\drpc_presence.inc + src\\drpc_ipc.inc",
+            presence + "\n" + ipc,
+            "ReadResponseForNonce(nonce, options_.responseTimeoutMs)");
+        RequireContains(
+            "Discord IPC ignores unrelated frames under one response deadline",
+            "src\\drpc_ipc.inc",
+            ipc,
+            "ReadFrameUntil(deadline)");
+        RequireNotContains(
+            "DiscordRPC removes unused JSON object-start scanner",
+            "src\\drpc_core.inc",
+            core,
+            "FindJsonObjectStart");
+        RequireContains(
             "DiscordRPC implements gateway supported switch",
             "src\\drpc_app.inc + src\\drpc_config_defaults.inc",
             app + "\n" + defaults,

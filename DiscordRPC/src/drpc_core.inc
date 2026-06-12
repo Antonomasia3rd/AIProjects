@@ -330,30 +330,6 @@ static void RemoveJsonObjectMember(std::string& objectJson, size_t keyPos, size_
     objectJson.erase(removeStart, removeEnd - removeStart);
 }
 
-static size_t FindJsonObjectStart(const std::string& json, size_t search)
-{
-    size_t pos = search;
-    while (pos < json.size())
-    {
-        if (json[pos] == '"')
-        {
-            size_t end = JsonStringEnd(json, pos);
-            if (end == std::string::npos)
-            {
-                return std::string::npos;
-            }
-            pos = end;
-            continue;
-        }
-        if (json[pos] == '{')
-        {
-            return pos;
-        }
-        ++pos;
-    }
-    return std::string::npos;
-}
-
 static std::wstring NormalizeTransportMode(const std::wstring& raw)
 {
     std::wstring mode = ToLower(Trim(raw));
