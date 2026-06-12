@@ -56,6 +56,7 @@ static class RepoTools
             if (command == "detect-projects") return DetectProjects(rest);
             if (command == "checksum-summary") return ChecksumSummary(rest);
             if (command == "smoke-windows-build") return SmokeWindowsBuild(rest);
+            if (command == "smoke-rss-live-tile") return SmokeRssLiveTile(rest);
             if (command == "publish-project-releases") return PublishProjectReleases(rest);
             if (command == "version")
             {
@@ -82,6 +83,7 @@ static class RepoTools
         Console.WriteLine("  detect-projects");
         Console.WriteLine("  checksum-summary");
         Console.WriteLine("  smoke-windows-build");
+        Console.WriteLine("  smoke-rss-live-tile");
         Console.WriteLine("  publish-project-releases");
     }
 
@@ -285,7 +287,7 @@ static class RepoTools
             .Select(p => p.key)
             .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var expectedConsumers = new[] { "DesktopStub", "DiscordRPC" };
+        var expectedConsumers = new[] { "DesktopStub", "DiscordRPC", "RssLiveTile" };
         if (!commandLineConsumers.SequenceEqual(expectedConsumers.OrderBy(k => k, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Dependency consumer detection for dependencies/command_line.inc returned " + String.Join(", ", commandLineConsumers) + ".");
 
@@ -1008,6 +1010,14 @@ static class RepoTools
             }
         }
 
+        Project rssLiveTile = projects.FirstOrDefault(p => p.key == "RssLiveTile");
+        if (rssLiveTile != null)
+        {
+            string sourceExe = Path.Combine(root, rssLiveTile.artifactPath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(sourceExe))
+                VerifyRssLiveTile(sourceExe);
+        }
+
         foreach (var p in projects.Where(p => p.key != "DesktopStub"))
         {
             string path = Path.Combine(root, p.artifactPath.Replace('/', Path.DirectorySeparatorChar));
@@ -1025,6 +1035,20 @@ static class RepoTools
         }
 
         Console.WriteLine("Windows build smoke tests completed.");
+        return 0;
+    }
+
+    static int SmokeRssLiveTile(string[] args)
+    {
+        string root = RepositoryRoot(args);
+        Project project = LoadProjectMap(root).FirstOrDefault(p => p.key == "RssLiveTile");
+        if (project == null)
+            throw new InvalidOperationException("RssLiveTile is missing from the project map.");
+        string sourceExe = Path.Combine(root, project.artifactPath.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(sourceExe))
+            throw new FileNotFoundException("RssLiveTile must be built before its smoke test.", sourceExe);
+        VerifyRssLiveTile(sourceExe);
+        Console.WriteLine("RssLiveTile smoke tests completed.");
         return 0;
     }
 
@@ -1216,6 +1240,138 @@ static class RepoTools
                     try { resident.WaitForExit(); } catch { }
                 }
             }
+        }
+    }
+
+    static void VerifyRssLiveTile(string sourceExe)
+    {
+        string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
+        if (String.IsNullOrWhiteSpace(tempBase))
+            tempBase = Path.GetTempPath();
+        string tempRoot = Path.Combine(tempBase, "RssLiveTileSmoke-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
+            File.Copy(sourceExe, exe, true);
+
+            string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
+            string invalidIni = Path.Combine(tempRoot, "InvalidSetting.ini");
+            string manifestIni = Path.Combine(tempRoot, "Manifest.ini");
+            string residentIni = Path.Combine(tempRoot, "Resident.ini");
+            string residentLog = Path.Combine(tempRoot, "RssLiveTile.log");
+
+            ProcessResult help = SmokeProcess(
+                exe,
+                new[] { "--help", "--ini", helpIni, "--set", "Settings.UpdateIntervalSeconds=60" },
+                new[] { 0 },
+                10,
+                "RssLiveTile help");
+            if (help.Output.IndexOf("RSS Live Tile", StringComparison.Ordinal) < 0)
+                throw new InvalidOperationException("RssLiveTile --help did not write command-line help.");
+            AssertFileDoesNotExist(helpIni, "RssLiveTile --help must be side-effect-free");
+
+            SmokeProcess(
+                exe,
+                new[] { "--ini", invalidIni, "--interval", "14", "--no-bootstrap" },
+                new[] { 2 },
+                10,
+                "RssLiveTile invalid interval");
+            AssertFileDoesNotExist(invalidIni, "RssLiveTile must reject invalid typed settings before creating an INI");
+
+            SmokeProcess(
+                exe,
+                new[]
+                {
+                    "--ini", manifestIni,
+                    "--set", "Manifest.DisplayName=RSS Smoke Tile",
+                    "--set", "Settings.BootstrapPackageOnLaunch=0",
+                    "--regenerate-manifest"
+                },
+                new[] { 0 },
+                30,
+                "RssLiveTile manifest generation");
+            string manifest = Path.Combine(tempRoot, "AppxManifest.xml");
+            AssertFileContains(manifest, "DisplayName=\"RSS Smoke Tile\"", "RssLiveTile manifest must use configured display name");
+            AssertFileContains(manifest, "Executable=\"RssLiveTile.exe\"", "RssLiveTile manifest must target the copied executable");
+            foreach (string asset in new[]
+            {
+                "StoreLogo.png",
+                "Square44x44Logo.png",
+                "Square71x71Logo.png",
+                "Square150x150Logo.png",
+                "Wide310x150Logo.png",
+                "Square310x310Logo.png"
+            })
+            {
+                string assetPath = Path.Combine(tempRoot, "Assets", asset);
+                if (!File.Exists(assetPath) || new FileInfo(assetPath).Length == 0)
+                    throw new InvalidOperationException("RssLiveTile did not generate asset: " + assetPath);
+            }
+
+            string residentConfig =
+                "[Settings]\r\n" +
+                "\"FeedUrl\" = \"http://127.0.0.1:9/feed.xml\"\r\n" +
+                "\"UpdateIntervalSeconds\" = \"15\"\r\n" +
+                "\"TileRefreshSeconds\" = \"0\"\r\n" +
+                "\"MaxItems\" = \"5\"\r\n" +
+                "\"ShowTrayIcon\" = \"0\"\r\n" +
+                "\"BootstrapPackageOnLaunch\" = \"0\"\r\n" +
+                "\"UserAgent\" = \"RssLiveTileSmoke/1.0\"\r\n" +
+                "\"HttpTimeoutSeconds\" = \"5\"\r\n" +
+                "\"MaxFeedBytes\" = \"1048576\"\r\n";
+            File.WriteAllText(residentIni, residentConfig, new UTF8Encoding(true));
+
+            var psi = new ProcessStartInfo(
+                exe,
+                JoinArgs(new[] { "--ini", residentIni, "--no-bootstrap", "--no-tray" }))
+            {
+                WorkingDirectory = tempRoot,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using (var resident = new Process { StartInfo = psi })
+            {
+                if (!resident.Start())
+                    throw new InvalidOperationException("Failed to start RssLiveTile no-tray resident.");
+                try
+                {
+                    WaitForFileText(residentLog, "Resident control window ready.", 10000, "RssLiveTile resident startup");
+                    SmokeProcess(
+                        exe,
+                        new[] { "--ini", residentIni, "--no-bootstrap", "--no-tray" },
+                        new[] { 0 },
+                        10,
+                        "RssLiveTile resident refresh");
+                    SmokeProcess(
+                        exe,
+                        new[] { "--ini", residentIni, "--exit" },
+                        new[] { 0 },
+                        10,
+                        "RssLiveTile resident exit");
+                    if (!resident.WaitForExit(10000))
+                        throw new TimeoutException("RssLiveTile no-tray resident did not stop after --exit.");
+                    SmokeProcess(
+                        exe,
+                        new[] { "--ini", residentIni, "--exit" },
+                        new[] { 2 },
+                        10,
+                        "RssLiveTile missing resident exit");
+                }
+                finally
+                {
+                    if (!resident.HasExited)
+                    {
+                        try { resident.Kill(); } catch { }
+                        try { resident.WaitForExit(); } catch { }
+                    }
+                }
+            }
+            Console.WriteLine("ok - RssLiveTile no-tray resident control");
+        }
+        finally
+        {
+            try { Directory.Delete(tempRoot, true); } catch { }
         }
     }
 

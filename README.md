@@ -16,6 +16,7 @@ Small Windows utility projects and experiments. Active baseline projects live at
 | `legacy/NowPlayingTile` | C++ app plus Appx helpers | SMTC-based Windows Start live tile updater with optional widget mode. |
 | `legacy/PhotoCollage` | C# console app | Creates a simple JPEG grid/collage from images in a folder. |
 | `legacy/RealTimeNotesDeskband` | C++ Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes resources. |
+| `RssLiveTile` | C++ Win32 resident app | RSS/Atom feed reader that periodically queues Windows 10 Live Tile entries through a loose Desktop Bridge package. |
 | `legacy/SecureDesktopLauncher` | C++ service/tools | Launches trusted configured programs on secure desktops, with an optional password-gated launcher. |
 | `legacy/TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
 | `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
@@ -67,6 +68,9 @@ Useful build options:
 
 # Skip DesktopStub.
 .github\scripts\build-windows.cmd /skip:DesktopStub
+
+# Skip RssLiveTile.
+.github\scripts\build-windows.cmd /skip:RssLiveTile
 ```
 
 Run repository validation and smoke checks:
