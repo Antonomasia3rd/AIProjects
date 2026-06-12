@@ -51,6 +51,9 @@ static constexpr const wchar_t* PACKAGE_NAME = L"NowPlayingTile.App";
 static constexpr const wchar_t* PACKAGE_PUBLISHER = L"CN=NowPlayingTile";
 static constexpr UINT WM_NPT_UPDATE_DONE = WM_APP + 42;
 static constexpr UINT_PTR UPDATE_TIMER_ID = 1;
+static constexpr DWORD POWERSHELL_COMMAND_TIMEOUT_MS = 120000;
+static constexpr DWORD POWERSHELL_POLL_MS = 50;
+static constexpr DWORD POWERSHELL_TERMINATE_WAIT_MS = 5000;
 
 static HINSTANCE g_hInst = nullptr;
 static ULONG_PTR g_gdiplusToken = 0;

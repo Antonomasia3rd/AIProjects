@@ -197,5 +197,6 @@ Normal launch behavior:
 
 - If the executable is started directly from `build`, it first generates `AppxManifest.xml` and `Assets`, registers the loose package, launches the packaged Start-menu identity, then exits the unpackaged bootstrap process.
 - If automatic registration fails, the unpackaged bootstrap process exits after logging the PowerShell/Appx deployment error instead of continuing to spam Live Tile update failures.
+- PowerShell registration, removal, and packaged-launch helpers time out after two minutes and terminate the helper instead of leaving the bootstrap process hung indefinitely.
 - Live Tile updates only work from the packaged identity. The direct/unpackaged process cannot update the tile because Windows gives it no package identity.
 - `build\obj` contains MSVC intermediate `.obj` files. This matches `DesktopStub/BuildDesktopStub.cmd`, which creates `build\obj\DesktopStub.obj`; it is not source and can be deleted safely after a build.

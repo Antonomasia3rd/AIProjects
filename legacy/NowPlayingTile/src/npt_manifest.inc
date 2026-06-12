@@ -137,7 +137,13 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring* outp
         Log(L"CreatePipe failed: %s", GetLastErrorText(GetLastError()).c_str());
         return false;
     }
-    SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
+    if (!SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0))
+    {
+        Log(L"SetHandleInformation(pipe read handle) failed: %s", GetLastErrorText(GetLastError()).c_str());
+        CloseHandle(readPipe);
+        CloseHandle(writePipe);
+        return false;
+    }
 
     HANDLE nulIn = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (nulIn == INVALID_HANDLE_VALUE)
@@ -178,16 +184,102 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring* outp
 
     std::vector<BYTE> bytes;
     BYTE buffer[4096] = {};
-    DWORD read = 0;
-    while (ReadFile(readPipe, buffer, static_cast<DWORD>(sizeof(buffer)), &read, nullptr) && read != 0)
+    auto drainPipe = [&]()
     {
-        bytes.insert(bytes.end(), buffer, buffer + read);
-    }
-    CloseHandle(readPipe);
+        for (;;)
+        {
+            DWORD available = 0;
+            if (!PeekNamedPipe(readPipe, nullptr, 0, nullptr, &available, nullptr) || available == 0)
+            {
+                break;
+            }
 
-    WaitForSingleObject(pi.hProcess, INFINITE);
+            DWORD toRead = std::min<DWORD>(available, static_cast<DWORD>(sizeof(buffer)));
+            DWORD read = 0;
+            if (!ReadFile(readPipe, buffer, toRead, &read, nullptr) || read == 0)
+            {
+                break;
+            }
+            bytes.insert(bytes.end(), buffer, buffer + read);
+        }
+    };
+
+    bool timedOut = false;
+    DWORD waitFailure = ERROR_SUCCESS;
+    ULONGLONG deadline = GetTickCount64() + POWERSHELL_COMMAND_TIMEOUT_MS;
+    for (;;)
+    {
+        drainPipe();
+
+        ULONGLONG now = GetTickCount64();
+        DWORD waitMs = now >= deadline
+            ? 0
+            : static_cast<DWORD>(std::min<ULONGLONG>(deadline - now, POWERSHELL_POLL_MS));
+        DWORD waitResult = WaitForSingleObject(pi.hProcess, waitMs);
+        if (waitResult == WAIT_OBJECT_0)
+        {
+            drainPipe();
+            break;
+        }
+        if (waitResult == WAIT_FAILED)
+        {
+            waitFailure = GetLastError();
+            Log(L"WaitForSingleObject(powershell.exe) failed: %s", GetLastErrorText(waitFailure).c_str());
+            if (!TerminateProcess(pi.hProcess, waitFailure))
+            {
+                Log(L"TerminateProcess(powershell.exe after wait failure) failed: %s", GetLastErrorText(GetLastError()).c_str());
+            }
+            DWORD terminateWait = WaitForSingleObject(pi.hProcess, POWERSHELL_TERMINATE_WAIT_MS);
+            if (terminateWait == WAIT_TIMEOUT)
+            {
+                Log(L"PowerShell process %lu did not exit within %lu ms after wait failure.",
+                    pi.dwProcessId,
+                    POWERSHELL_TERMINATE_WAIT_MS);
+            }
+            drainPipe();
+            break;
+        }
+        if (GetTickCount64() >= deadline)
+        {
+            timedOut = true;
+            Log(L"PowerShell command timed out after %lu ms; terminating process %lu.",
+                POWERSHELL_COMMAND_TIMEOUT_MS,
+                pi.dwProcessId);
+            if (!TerminateProcess(pi.hProcess, WAIT_TIMEOUT))
+            {
+                Log(L"TerminateProcess(powershell.exe) failed: %s", GetLastErrorText(GetLastError()).c_str());
+            }
+            DWORD terminateWait = WaitForSingleObject(pi.hProcess, POWERSHELL_TERMINATE_WAIT_MS);
+            if (terminateWait == WAIT_TIMEOUT)
+            {
+                Log(L"PowerShell process %lu did not exit within %lu ms after termination.",
+                    pi.dwProcessId,
+                    POWERSHELL_TERMINATE_WAIT_MS);
+            }
+            else if (terminateWait == WAIT_FAILED)
+            {
+                Log(L"WaitForSingleObject(powershell.exe termination) failed: %s", GetLastErrorText(GetLastError()).c_str());
+            }
+            drainPipe();
+            break;
+        }
+    }
+
+    CloseHandle(readPipe);
     DWORD code = 1;
-    GetExitCodeProcess(pi.hProcess, &code);
+    if (timedOut)
+    {
+        code = WAIT_TIMEOUT;
+    }
+    else if (waitFailure != ERROR_SUCCESS)
+    {
+        code = waitFailure;
+    }
+    else if (!GetExitCodeProcess(pi.hProcess, &code))
+    {
+        Log(L"GetExitCodeProcess(powershell.exe) failed: %s", GetLastErrorText(GetLastError()).c_str());
+        code = 1;
+    }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
 
@@ -196,6 +288,15 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring* outp
         *exitCode = code;
     }
     DecodeUtf8Bytes(bytes, output);
+    if (timedOut && output != nullptr)
+    {
+        if (!output->empty())
+        {
+            *output += L"\r\n";
+        }
+        *output += L"PowerShell command timed out after " +
+            std::to_wstring(POWERSHELL_COMMAND_TIMEOUT_MS) + L" ms.";
+    }
     return true;
 }
 
