@@ -1146,61 +1146,6 @@ static void RepairBrokenPowerShellOutputTruncatedDefault()
 }
 
 
-static void RemoveObsoleteManifestIniSettings()
-{
-    DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
-    if (!writeLock.IsLocked())
-        return;
-
-    std::wstring iniText;
-    if (!ReadIniFileForMutation(iniText))
-        return;
-
-    std::vector<std::wstring> lines = SplitLines(iniText);
-    if (!lines.empty())
-        StripLeadingBom(lines[0]);
-
-    std::vector<std::wstring> kept;
-    kept.reserve(lines.size());
-    bool inManifest = false;
-    bool changed = false;
-
-    for (const std::wstring& line : lines)
-    {
-        std::wstring sectionName;
-        if (TryParseIniSectionHeader(line, sectionName))
-        {
-            inManifest = IEquals(sectionName, L"Manifest");
-            if (inManifest)
-            {
-                changed = true;
-                continue;
-            }
-        }
-
-        if (inManifest)
-        {
-            changed = true;
-            continue;
-        }
-
-        kept.push_back(line);
-    }
-
-    if (!changed)
-        return;
-
-    TrimTrailingEmptyLines(kept);
-    std::wstring text = JoinLines(kept);
-    if (!text.empty())
-        text += L"\r\n";
-    if (!WriteUtf8BomTextFile(g_iniPath, text))
-        return;
-
-    std::lock_guard<std::mutex> lk(g_iniCacheMutex);
-    SetIniCacheUnlocked(text);
-}
-
 static void UpgradePowerShellExeDefault()
 {
     const wchar_t* legacyDefault = L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
@@ -1235,6 +1180,5 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from built-in defaults", L"Regenerate AppxManifest.xml from config");
     UpgradeStringDefaultIfUnmodified(L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with WIC: %lu x %lu.", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu (max long edge=%d).");
     UpgradePowerShellExeDefault();
-    RemoveObsoleteManifestIniSettings();
 }
 
