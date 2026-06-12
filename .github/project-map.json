@@ -111,6 +111,20 @@
     ]
   },
   {
+    "key": "RssLiveTile",
+    "label": "RssLiveTile",
+    "folder": "RssLiveTile",
+    "buildOutput": "build_rss_live_tile",
+    "artifactName": "RssLiveTile",
+    "artifactPath": "RssLiveTile/build/RssLiveTile.exe",
+    "smokePath": "RssLiveTile/build/RssLiveTile.exe",
+    "skipKey": "RssLiveTile",
+    "artifactPaths": [
+      "RssLiveTile/build/RssLiveTile.exe",
+      "RssLiveTile/README.md"
+    ]
+  },
+  {
     "key": "CharmTray",
     "label": "CharmTray",
     "folder": "legacy/CharmTray",

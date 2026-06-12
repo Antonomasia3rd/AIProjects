@@ -47,3 +47,8 @@ Older releases are intentionally kept when practical so users can compare behavi
 - Reworked baked/static tile text to use fixed Windows 8/8.1 medium, wide, and large template layouts. Removed arbitrary font, color, alignment, margin, and small/logo controls that native Live Tiles do not support.
 - Added an optional Windows 8.1 preset-template catalog mode for Windows 10 Live Tile notifications while retaining adaptive XML as the compatibility-preserving default.
 - Added configurable Windows 10 Live Tile branding with style-aware defaults, including restoring the manifest display name in preset-template mode.
+
+### RssLiveTile
+
+- Added `RssLiveTile`, a shared-baseline Win32 resident app that registers a loose Desktop Bridge package, preserves alternate INI scope across packaged relaunches, polls RSS or Atom feeds, and updates Windows Start with up to five queued text notifications.
+- Added namespace-aware RSS/Atom parsing, declared feed-encoding support, article activation links, live configuration reload, cancellable network shutdown, typed CLI validation, package-file refresh, source regression tests, and no-tray resident smoke coverage.

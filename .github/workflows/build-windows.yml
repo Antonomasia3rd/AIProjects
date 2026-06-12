@@ -23,6 +23,7 @@ on:
           - NowPlayingTile
           - PhotoCollage
           - DesktopStub
+          - RssLiveTile
           - CharmTray
           - SecureDesktopLauncher
           - TaskSchedulerMigration
@@ -54,6 +55,7 @@ jobs:
       build_now_playing_tile: ${{ steps.detect.outputs.build_now_playing_tile }}
       build_photo_collage: ${{ steps.detect.outputs.build_photo_collage }}
       build_desktop_stub: ${{ steps.detect.outputs.build_desktop_stub }}
+      build_rss_live_tile: ${{ steps.detect.outputs.build_rss_live_tile }}
       build_charm_tray: ${{ steps.detect.outputs.build_charm_tray }}
       build_secure_desktop_launcher: ${{ steps.detect.outputs.build_secure_desktop_launcher }}
       build_task_scheduler_migration: ${{ steps.detect.outputs.build_task_scheduler_migration }}
@@ -201,6 +203,16 @@ jobs:
           path: |
             DesktopStub/build/DesktopStub.exe
             DesktopStub/build/DesktopStubLiveTileBroker.exe
+          if-no-files-found: error
+
+      - name: Upload RssLiveTile artifact
+        if: needs.detect-projects.outputs.build_rss_live_tile == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: RssLiveTile
+          path: |
+            RssLiveTile/build/RssLiveTile.exe
+            RssLiveTile/README.md
           if-no-files-found: error
 
       - name: Upload CharmTray artifact

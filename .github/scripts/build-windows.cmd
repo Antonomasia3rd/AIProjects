@@ -41,6 +41,7 @@ call :BuildDNSAutoUpdate || goto Fail
 call :BuildNowPlayingTile || goto Fail
 call :BuildPhotoCollage || goto Fail
 call :BuildDesktopStub || goto Fail
+call :BuildRssLiveTile || goto Fail
 call :BuildCharmTray || goto Fail
 call :BuildSecureDesktopLauncher || goto Fail
 call :BuildTaskSchedulerMigration || goto Fail
@@ -181,6 +182,26 @@ if not "%STATUS%"=="0" exit /b %STATUS%
 call :RecordArtifact "%REPO%\DesktopStub\build\DesktopStub.exe"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%REPO%\DesktopStub\build\DesktopStubLiveTileBroker.exe"
+exit /b %ERRORLEVEL%
+
+:BuildRssLiveTile
+call :IsSkipped RssLiveTile
+if "!SKIP_RESULT!"=="1" exit /b 0
+call :Section "Build RssLiveTile"
+pushd "%REPO%\RssLiveTile" || exit /b 1
+call :Run cmd.exe /d /c BuildRssLiveTile.cmd check
+if errorlevel 1 (
+  set "STATUS=%ERRORLEVEL%"
+  popd
+  exit /b !STATUS!
+)
+call :Run cmd.exe /d /c BuildRssLiveTile.cmd
+set "STATUS=%ERRORLEVEL%"
+popd
+if not "%STATUS%"=="0" exit /b %STATUS%
+call :RecordArtifact "%REPO%\RssLiveTile\build\RssLiveTile.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%REPO%\RssLiveTile\README.md"
 exit /b %ERRORLEVEL%
 
 :BuildCharmTray
