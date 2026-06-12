@@ -897,6 +897,8 @@ static class RepoTools
                         throw new InvalidOperationException("DesktopStub --help did not use the configured INI template.");
                     if (!customHelpBefore.SequenceEqual(File.ReadAllBytes(customHelpIni)))
                         throw new InvalidOperationException("DesktopStub --help modified its configured INI.");
+                    SmokeProcess(exe, new[] { "--ini", customHelpIni, "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub custom help preservation");
+                    AssertFileContains(customHelpIni, "CUSTOM_HELP_MARKER {exe}", "DesktopStub startup migration must preserve customized command-line help");
                     string legacyManifestText =
                         "[Manifest]\r\n" +
                         "; Preserve user comments and unknown legacy values.\r\n" +

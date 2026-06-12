@@ -1071,6 +1071,35 @@ static void UpgradeStringDefaultIfUnmodified(const wchar_t* key, const wchar_t* 
         return;
 }
 
+static void UpgradeCommandLineHelpDefaultIfUnmodified()
+{
+    struct ManagedHelpTemplateFingerprint
+    {
+        size_t length;
+        const wchar_t* hash;
+    };
+
+    static constexpr ManagedHelpTemplateFingerprint managedDefaults[] = {
+        {8096, L"ce47473f6c8921e3"},
+        {6040, L"775f1ff3c40747f0"},
+        {6271, L"d1a1d116fb1b5ba7"},
+    };
+
+    std::wstring current = IniReadS(COMMAND_LINE_HELP_SECTION, COMMAND_LINE_HELP_TEMPLATE_KEY, L"");
+    if (current.empty() || current == g_commandLineHelpDefaults[0].value)
+        return;
+
+    std::wstring hash = aip::StableHashHex64(current, false);
+    for (const auto& managedDefault : managedDefaults)
+    {
+        if (current.size() == managedDefault.length && hash == managedDefault.hash)
+        {
+            IniWrite(COMMAND_LINE_HELP_SECTION, COMMAND_LINE_HELP_TEMPLATE_KEY, g_commandLineHelpDefaults[0].value);
+            return;
+        }
+    }
+}
+
 static void RepairBrokenPowerShellOutputTruncatedDefault()
 {
     DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
@@ -1157,6 +1186,7 @@ static void UpgradePowerShellExeDefault()
 static void UpgradeRenamedStringDefaults()
 {
     RepairBrokenPowerShellOutputTruncatedDefault();
+    UpgradeCommandLineHelpDefaultIfUnmodified();
     UpgradeStringDefaultIfUnmodified(L"UsePowerShell", L"Use PowerShell", L"PowerShell only");
     UpgradeStringDefaultIfUnmodified(L"TrayIcon", L"Tray Icon", L"Tray Icon (this session)");
     UpgradeStringDefaultIfUnmodified(L"ExperimentalLiveTileUpdate", L"Experimental Live Tile update", L"Live Tile update mode");
