@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <new>
 #include <random>
 #include <string>
 #include <vector>
@@ -55,6 +56,7 @@ static const wchar_t kDeskBandCatid[] = L"{00021492-0000-0000-C000-000000000046}
 static const wchar_t kConfigWindowClassName[] = L"RealTimeNotesDeskbandConfigWindow";
 static const UINT_PTR kRefreshTimer = 1;
 static const UINT kStatusReadyMessage = WM_APP + 0x343;
+static const UINT kRefreshRequestedMessage = kStatusReadyMessage + 1;
 static const UINT kMinRefreshSeconds = 30;
 static const UINT kDefaultRefreshSeconds = 300;
 static const UINT kMaxRefreshSeconds = 24 * 60 * 60;
@@ -64,6 +66,7 @@ HMODULE g_module = nullptr;
 long g_objectCount = 0;
 long g_lockCount = 0;
 LONG g_legacyMigrationAttempted = 0;
+volatile LONG g_windowGeneration = 0;
 
 enum class ResourceKind
 {
@@ -2244,6 +2247,7 @@ public:
         InterlockedIncrement(&g_objectCount);
         InitializeCriticalSection(&m_stateLock);
         InitializeCriticalSection(&m_settingsLock);
+        InitializeCriticalSection(&m_windowLock);
         ReloadSettings();
     }
 
@@ -2251,6 +2255,7 @@ public:
     {
         CloseDW(0);
         SetSite(nullptr);
+        DeleteCriticalSection(&m_windowLock);
         DeleteCriticalSection(&m_settingsLock);
         DeleteCriticalSection(&m_stateLock);
         InterlockedDecrement(&g_objectCount);
@@ -2330,12 +2335,16 @@ public:
 
     IFACEMETHODIMP CloseDW(DWORD) override
     {
-        if (m_hwnd)
+        EnterCriticalSection(&m_windowLock);
+        HWND hwnd = m_hwnd;
+        if (hwnd)
         {
-            KillTimer(m_hwnd, kRefreshTimer);
-            DestroyWindow(m_hwnd);
+            KillTimer(hwnd, kRefreshTimer);
+            DestroyWindow(hwnd);
             m_hwnd = nullptr;
+            m_windowToken = 0;
         }
+        LeaveCriticalSection(&m_windowLock);
         return S_OK;
     }
 
@@ -2585,7 +2594,11 @@ private:
             auto create = reinterpret_cast<CREATESTRUCTW*>(lParam);
             band = reinterpret_cast<RealTimeNotesBand*>(create->lpCreateParams);
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(band));
+            EnterCriticalSection(&band->m_windowLock);
             band->m_hwnd = hwnd;
+            band->m_windowToken = static_cast<ULONG_PTR>(
+                static_cast<ULONG>(InterlockedIncrement(&g_windowGeneration)));
+            LeaveCriticalSection(&band->m_windowLock);
         }
 
         if (!band)
@@ -2623,17 +2636,44 @@ private:
             InvalidateRect(hwnd, nullptr, TRUE);
             return 0;
         case kStatusReadyMessage:
+        {
+            EnterCriticalSection(&band->m_windowLock);
+            bool isCurrentWindow =
+                band->m_hwnd == hwnd &&
+                static_cast<ULONG_PTR>(wParam) == band->m_windowToken;
+            LeaveCriticalSection(&band->m_windowLock);
+            if (!isCurrentWindow)
+            {
+                return 0;
+            }
             KillTimer(hwnd, kRefreshTimer);
             SetTimer(hwnd, kRefreshTimer, band->CurrentRefreshSeconds() * 1000, nullptr);
             InvalidateRect(hwnd, nullptr, TRUE);
             band->NotifyBandInfoChanged();
             return 0;
+        }
+        case kRefreshRequestedMessage:
+        {
+            EnterCriticalSection(&band->m_windowLock);
+            bool isCurrentWindow =
+                band->m_hwnd == hwnd &&
+                static_cast<ULONG_PTR>(wParam) == band->m_windowToken;
+            LeaveCriticalSection(&band->m_windowLock);
+            if (isCurrentWindow)
+            {
+                band->BeginRefresh();
+            }
+            return 0;
+        }
         case WM_NCDESTROY:
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            EnterCriticalSection(&band->m_windowLock);
             if (band->m_hwnd == hwnd)
             {
                 band->m_hwnd = nullptr;
+                band->m_windowToken = 0;
             }
+            LeaveCriticalSection(&band->m_windowLock);
             return 0;
         default:
             break;
@@ -2647,6 +2687,13 @@ private:
         std::wstring installDir;
         std::wstring configDir;
         std::wstring assetDir;
+    };
+
+    struct RefreshContext
+    {
+        RealTimeNotesBand* band;
+        HWND hwnd;
+        ULONG_PTR windowToken;
     };
 
     BandSettings CurrentSettings()
@@ -2664,12 +2711,30 @@ private:
             return;
         }
 
+        EnterCriticalSection(&m_windowLock);
+        HWND hwnd = m_hwnd;
+        ULONG_PTR windowToken = m_windowToken;
+        LeaveCriticalSection(&m_windowLock);
+        if (!hwnd || windowToken == 0)
+        {
+            InterlockedExchange(&m_refreshing, 0);
+            return;
+        }
+
+        auto context = new (std::nothrow) RefreshContext{ this, hwnd, windowToken };
+        if (!context)
+        {
+            InterlockedExchange(&m_refreshing, 0);
+            return;
+        }
+
         AddRef();
-        HANDLE thread = CreateThread(nullptr, 0, RefreshThread, this, 0, nullptr);
+        HANDLE thread = CreateThread(nullptr, 0, RefreshThread, context, 0, nullptr);
         if (!thread)
         {
             InterlockedExchange(&m_refreshing, 0);
             Release();
+            delete context;
             return;
         }
         CloseHandle(thread);
@@ -2677,20 +2742,46 @@ private:
 
     static DWORD WINAPI RefreshThread(void* context)
     {
-        auto band = static_cast<RealTimeNotesBand*>(context);
+        auto refresh = static_cast<RefreshContext*>(context);
+        auto band = refresh->band;
         BandSettings settings = band->CurrentSettings();
         NoteState state = FetchState(settings.configDir);
 
-        EnterCriticalSection(&band->m_stateLock);
-        band->m_state = state;
-        LeaveCriticalSection(&band->m_stateLock);
-
-        if (band->m_hwnd)
+        bool published = false;
+        EnterCriticalSection(&band->m_windowLock);
+        if (band->m_hwnd == refresh->hwnd &&
+            band->m_windowToken == refresh->windowToken &&
+            IsWindow(refresh->hwnd))
         {
-            PostMessageW(band->m_hwnd, kStatusReadyMessage, 0, 0);
+            EnterCriticalSection(&band->m_stateLock);
+            band->m_state = state;
+            LeaveCriticalSection(&band->m_stateLock);
+            published = PostMessageW(
+                refresh->hwnd,
+                kStatusReadyMessage,
+                static_cast<WPARAM>(refresh->windowToken),
+                0) != FALSE;
         }
+        LeaveCriticalSection(&band->m_windowLock);
 
         InterlockedExchange(&band->m_refreshing, 0);
+        if (!published)
+        {
+            EnterCriticalSection(&band->m_windowLock);
+            if (band->m_hwnd &&
+                band->m_windowToken != 0 &&
+                (band->m_hwnd != refresh->hwnd || band->m_windowToken != refresh->windowToken))
+            {
+                PostMessageW(
+                    band->m_hwnd,
+                    kRefreshRequestedMessage,
+                    static_cast<WPARAM>(band->m_windowToken),
+                    0);
+            }
+            LeaveCriticalSection(&band->m_windowLock);
+        }
+
+        delete refresh;
         band->Release();
         return 0;
     }
@@ -3211,6 +3302,8 @@ private:
     long m_refreshing = 0;
     CRITICAL_SECTION m_stateLock{};
     CRITICAL_SECTION m_settingsLock{};
+    CRITICAL_SECTION m_windowLock{};
+    ULONG_PTR m_windowToken = 0;
     NoteState m_state{};
     std::wstring m_installDir;
     std::wstring m_configDir;
