@@ -74,8 +74,12 @@ public:
                 SendFrame(0, handshake);
 
                 std::string response = ReadFrame(options_.responseTimeoutMs);
-                if (response.find("\"evt\":\"READY\"") == std::string::npos &&
-                    response.find("\"cmd\":\"DISPATCH\"") == std::string::npos)
+                std::wstring eventName;
+                std::wstring commandName;
+                bool haveEvent = TryExtractJsonStringValue(response, "evt", eventName);
+                bool haveCommand = TryExtractJsonStringValue(response, "cmd", commandName);
+                if (!haveEvent || eventName != L"READY" ||
+                    !haveCommand || commandName != L"DISPATCH")
                 {
                     throw std::runtime_error("Unexpected Discord IPC handshake response: " + WideToUtf8(SummarizeJson(response)));
                 }
@@ -101,9 +105,10 @@ public:
             throw std::runtime_error("Discord IPC is not connected.");
         }
 
-        std::string payload = BuildSetActivityPayload(activityJson);
+        std::wstring nonce = NextDiscordRpcNonce();
+        std::string payload = BuildSetActivityPayload(activityJson, nonce);
         SendFrame(1, payload);
-        std::string response = ReadFrame(options_.responseTimeoutMs);
+        std::string response = ReadResponseForNonce(nonce, options_.responseTimeoutMs);
         ThrowIfError(response);
         LogInfo(L"Presence updated via Discord IPC.");
     }
@@ -117,7 +122,9 @@ public:
 
         try
         {
-            SendFrame(1, BuildClearActivityPayload());
+            std::wstring nonce = NextDiscordRpcNonce();
+            SendFrame(1, BuildClearActivityPayload(nonce));
+            ThrowIfError(ReadResponseForNonce(nonce, options_.responseTimeoutMs));
         }
         catch (const std::exception&)
         {
@@ -201,7 +208,11 @@ private:
         ULONGLONG deadline = GetTickCount64() + timeoutMs;
         for (;;)
         {
-            ThrowIfCancellationRequested();
+            if (IsCancellationRequested())
+            {
+                CancelPendingIo(handle, overlapped);
+                throw std::runtime_error("Discord IPC operation cancelled.");
+            }
 
             ULONGLONG now = GetTickCount64();
             DWORD remaining = now >= deadline
@@ -352,12 +363,22 @@ private:
         }
     }
 
-    std::string ReadFrame(int timeoutMs)
+    static DWORD RemainingTimeout(ULONGLONG deadline)
+    {
+        ULONGLONG now = GetTickCount64();
+        if (now >= deadline)
+        {
+            return 0;
+        }
+        return static_cast<DWORD>(std::min<ULONGLONG>(deadline - now, MAXDWORD));
+    }
+
+    std::string ReadFrameUntil(ULONGLONG deadline)
     {
         for (;;)
         {
             uint32_t header[2] = {};
-            ReadExact(header, sizeof(header), static_cast<DWORD>(timeoutMs));
+            ReadExact(header, sizeof(header), RemainingTimeout(deadline));
             uint32_t opcode = header[0];
             uint32_t length = header[1];
             if (length > 1024 * 1024)
@@ -368,7 +389,7 @@ private:
             std::string payload(length, '\0');
             if (length > 0)
             {
-                ReadExact(payload.data(), length, static_cast<DWORD>(timeoutMs));
+                ReadExact(payload.data(), length, RemainingTimeout(deadline));
             }
 
             if (verbose_)
@@ -390,6 +411,34 @@ private:
                 throw std::runtime_error("Unexpected Discord IPC opcode.");
             }
             return payload;
+        }
+    }
+
+    std::string ReadFrame(int timeoutMs)
+    {
+        DWORD timeout = static_cast<DWORD>(std::max(timeoutMs, 0));
+        return ReadFrameUntil(GetTickCount64() + timeout);
+    }
+
+    std::string ReadResponseForNonce(const std::wstring& expectedNonce, int timeoutMs)
+    {
+        DWORD timeout = static_cast<DWORD>(std::max(timeoutMs, 0));
+        ULONGLONG deadline = GetTickCount64() + timeout;
+        for (;;)
+        {
+            std::string response = ReadFrameUntil(deadline);
+            std::wstring responseNonce;
+            if (TryExtractJsonStringValue(response, "nonce", responseNonce) &&
+                responseNonce == expectedNonce)
+            {
+                return response;
+            }
+
+            if (verbose_)
+            {
+                LogDebug(L"Ignoring unrelated Discord IPC frame while waiting for nonce " +
+                    expectedNonce + L": " + SummarizeRpcPayload(response));
+            }
         }
     }
 

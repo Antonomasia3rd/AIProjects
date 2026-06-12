@@ -846,16 +846,21 @@ static PresencePayload BuildPresencePayload()
     return payload;
 }
 
-static std::string BuildSetActivityPayload(const std::string& activityJson)
+static std::wstring NextDiscordRpcNonce()
+{
+    static std::atomic<unsigned long> nonceCounter(0);
+    return std::to_wstring(GetTickCount64()) + L"." +
+        std::to_wstring(GetCurrentProcessId()) + L"." +
+        std::to_wstring(++nonceCounter);
+}
+
+static std::string BuildSetActivityPayload(const std::string& activityJson, const std::wstring& nonce)
 {
     std::string args = "{";
     bool argsFirst = true;
     JsonFieldNumber(args, argsFirst, "pid", GetCurrentProcessId());
     JsonFieldRaw(args, argsFirst, "activity", activityJson);
     args.push_back('}');
-
-    static std::atomic<unsigned long> nonceCounter(0);
-    std::wstring nonce = std::to_wstring(GetTickCount64()) + L"." + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(++nonceCounter);
 
     std::string payload = "{";
     bool first = true;
@@ -866,7 +871,7 @@ static std::string BuildSetActivityPayload(const std::string& activityJson)
     return payload;
 }
 
-static std::string BuildClearActivityPayload()
+static std::string BuildClearActivityPayload(const std::wstring& nonce)
 {
     std::string args = "{";
     bool argsFirst = true;
@@ -878,7 +883,7 @@ static std::string BuildClearActivityPayload()
     bool first = true;
     JsonFieldString(payload, first, "cmd", L"SET_ACTIVITY");
     JsonFieldRaw(payload, first, "args", args);
-    JsonFieldString(payload, first, "nonce", std::to_wstring(GetTickCount64()));
+    JsonFieldString(payload, first, "nonce", nonce);
     payload.push_back('}');
     return payload;
 }
