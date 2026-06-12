@@ -429,7 +429,8 @@ static class RepoTools
             Tuple.Create("DesktopStub/src/ga_app.inc", "Maintenance marker", JoinLiteral("ob", "solete") + " AppX launch-forwarding fallback kept for diagnostics/rollback"),
             Tuple.Create("DesktopStub/src/ga_livetile_broker_app.inc", "Profile storage", JoinLiteral("Application", "Data::Current().LocalFolder()")),
             Tuple.Create("DesktopStub/tools/DesktopStubSourceCheck.cpp", "Maintenance marker", "INI template does not expose " + JoinLiteral("ob", "solete") + " Manifest section"),
-            Tuple.Create("DesktopStub/tools/DesktopStubSourceCheck.cpp", "Maintenance marker", JoinLiteral("Ob", "solete") + " Manifest INI section is removed and blocked"),
+            Tuple.Create("DesktopStub/tools/DesktopStubSourceCheck.cpp", "Maintenance marker", JoinLiteral("Ob", "solete") + " Manifest INI section is preserved but blocked"),
+            Tuple.Create("DesktopStub/tools/DesktopStubSourceCheck.cpp", "Maintenance marker", JoinLiteral("Ob", "solete") + " Manifest INI section has no remover"),
             Tuple.Create("legacy/asusblink/asusblink.cs", "Profile storage", "Environment.GetFolderPath(Environment." + JoinLiteral("Special", "Folder") + ".Startup)")
         };
 
@@ -877,6 +878,7 @@ static class RepoTools
                     string customHelpIni = Path.Combine(tempRoot, "CustomHelp.ini");
                     string concurrentIni = Path.Combine(tempRoot, "ConcurrentWrites.ini");
                     string invalidBrandingIni = Path.Combine(tempRoot, "InvalidBranding.ini");
+                    string legacyManifestIni = Path.Combine(tempRoot, "LegacyManifest.ini");
                     string wallpaper = Path.Combine(tempRoot, "wallpaper.bmp");
                     string trailingSpaces = new string(' ', 2);
                     WriteTestBmp(wallpaper);
@@ -895,6 +897,15 @@ static class RepoTools
                         throw new InvalidOperationException("DesktopStub --help did not use the configured INI template.");
                     if (!customHelpBefore.SequenceEqual(File.ReadAllBytes(customHelpIni)))
                         throw new InvalidOperationException("DesktopStub --help modified its configured INI.");
+                    string legacyManifestText =
+                        "[Manifest]\r\n" +
+                        "; Preserve user comments and unknown legacy values.\r\n" +
+                        "\"CustomLegacyValue\" = \"keep-me\"\r\n";
+                    File.WriteAllText(legacyManifestIni, legacyManifestText, new UTF8Encoding(true));
+                    SmokeProcess(exe, new[] { "--ini", legacyManifestIni, "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub legacy Manifest preservation");
+                    AssertFileContains(legacyManifestIni, "[Manifest]", "DesktopStub must preserve an existing legacy Manifest section");
+                    AssertFileContains(legacyManifestIni, "; Preserve user comments and unknown legacy values.", "DesktopStub must preserve comments in legacy configuration");
+                    AssertFileContains(legacyManifestIni, "\"CustomLegacyValue\" = \"keep-me\"", "DesktopStub must preserve unknown legacy configuration values");
                     SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--live-tile-template", "Windows81Preset", "--live-tile-branding", "NameAndLogo", "--scales", "auto", "--asset", "MediumTile=1", "--set", "Strings.TrayTip=DesktopStub" + trailingSpaces, "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
                     AssertFileContains(ini, "\"TrayTip\" = \"DesktopStub" + trailingSpaces + "\"", "DesktopStub --set must preserve trailing value spaces");
                     AssertFileContains(ini, "\"LiveTileTemplateStyle\" = \"Windows81Preset\"", "DesktopStub must persist the selected Windows 10 Live Tile template style");
