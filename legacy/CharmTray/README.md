@@ -41,6 +41,8 @@ The app creates a tray icon. Right-click the icon and choose a charm flyout. The
 
 On first launch, the app creates `CharmTray.ini` and writes `CharmTray.log` beside the executable. If the executable is renamed, the default INI/log names follow the renamed executable. Set `[Settings] LoggingEnabled=0` in the local INI to disable file logging.
 
+Startup failures for the singleton mutex, COM apartment, message window, or tray icon are logged and cause the process to exit instead of leaving a hidden unusable instance running.
+
 ## Limitations
 
 - Windows 10/11 are out of scope.

@@ -361,7 +361,7 @@ static void ShowCharm(int charmId)
 // ---------------------------------------------------------------------------
 static NOTIFYICONDATA g_nid = {};
 
-static void AddTrayIcon(HWND hwnd)
+static bool AddTrayIcon(HWND hwnd)
 {
     g_nid.cbSize           = sizeof(g_nid);
     g_nid.hWnd             = hwnd;
@@ -370,7 +370,7 @@ static void AddTrayIcon(HWND hwnd)
     g_nid.uCallbackMessage = WM_TRAY_ICON;
     g_nid.hIcon            = LoadIcon(nullptr, IDI_APPLICATION);
     lstrcpy(g_nid.szTip, L"Charm Launcher");
-    Shell_NotifyIcon(NIM_ADD, &g_nid);
+    return Shell_NotifyIcon(NIM_ADD, &g_nid) != FALSE;
 }
 
 static void RemoveTrayIcon()
@@ -417,8 +417,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case ID_DEVICES:  ShowCharm(CHARM_DEVICES);  break;
         case ID_SETTINGS: ShowCharm(CHARM_SETTINGS); break;
         case ID_EXIT:
-            RemoveTrayIcon();
-            PostQuitMessage(0);
+            DestroyWindow(hwnd);
             break;
         }
         return 0;
@@ -437,38 +436,86 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
     LogLine(L"Starting");
 
     HANDLE hMutex = CreateMutex(nullptr, TRUE, L"CharmTray_SingleInstance");
+    if (!hMutex)
+    {
+        LogLine(L"Failed to create the single-instance mutex");
+        return 1;
+    }
+
     if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
         LogLine(L"Another instance is already running");
-        if (hMutex) CloseHandle(hMutex);
+        CloseHandle(hMutex);
         return 0;
     }
 
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(comResult))
+    {
+        LogLine(L"Failed to initialize COM");
+        CloseHandle(hMutex);
+        return 1;
+    }
 
     WNDCLASSEX wc   = {};
     wc.cbSize        = sizeof(wc);
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInstance;
     wc.lpszClassName = L"CharmTrayWnd";
-    RegisterClassEx(&wc);
+    if (!RegisterClassEx(&wc))
+    {
+        LogLine(L"Failed to register the message-window class");
+        CoUninitialize();
+        CloseHandle(hMutex);
+        return 1;
+    }
 
     HWND hwnd = CreateWindowEx(0, L"CharmTrayWnd", L"CharmTray",
                                 0, 0, 0, 0, 0,
                                 HWND_MESSAGE, nullptr, hInstance, nullptr);
-    if (!hwnd) { LogLine(L"Failed to create message window"); CoUninitialize(); CloseHandle(hMutex); return 1; }
-
-    AddTrayIcon(hwnd);
-
-    MSG msg;
-    while (GetMessage(&msg, nullptr, 0, 0))
+    if (!hwnd)
     {
+        LogLine(L"Failed to create the message window");
+        CoUninitialize();
+        CloseHandle(hMutex);
+        return 1;
+    }
+
+    if (!AddTrayIcon(hwnd))
+    {
+        LogLine(L"Failed to add the tray icon");
+        DestroyWindow(hwnd);
+        CoUninitialize();
+        CloseHandle(hMutex);
+        return 1;
+    }
+
+    MSG msg = {};
+    int exitCode = 0;
+    for (;;)
+    {
+        BOOL messageResult = GetMessage(&msg, nullptr, 0, 0);
+        if (messageResult == 0)
+        {
+            exitCode = static_cast<int>(msg.wParam);
+            break;
+        }
+        if (messageResult == -1)
+        {
+            LogLine(L"Failed to read the window message queue");
+            exitCode = 1;
+            break;
+        }
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
 
+    if (IsWindow(hwnd))
+    {
+        DestroyWindow(hwnd);
+    }
     CoUninitialize();
     CloseHandle(hMutex);
     LogLine(L"Stopped");
-    return static_cast<int>(msg.wParam);
+    return exitCode;
 }
