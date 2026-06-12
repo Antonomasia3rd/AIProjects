@@ -66,6 +66,7 @@ if errorlevel 1 (
     exit /b %errorlevel%
 )
 
+if not defined DESKTOPSTUB_VERSION if not defined DESKTOPSTUB_RELEASE_TAG call :RefreshDesktopStubTags
 call :ResolveDesktopStubVersion
 if errorlevel 1 (
     set "STATUS=%ERRORLEVEL%"
@@ -196,6 +197,18 @@ exit /b 0
 :WriteCppVersionDefines
 > "%~1" echo #define DESKTOPSTUB_RELEASE_TAG "%~2"
 if errorlevel 1 exit /b %ERRORLEVEL%
+exit /b 0
+
+:RefreshDesktopStubTags
+if /i "%DESKTOPSTUB_SKIP_TAG_REFRESH%"=="1" exit /b 0
+where git.exe >nul 2>nul
+if errorlevel 1 exit /b 0
+git rev-parse --is-inside-work-tree >nul 2>nul
+if errorlevel 1 exit /b 0
+git remote get-url origin >nul 2>nul
+if errorlevel 1 exit /b 0
+git fetch --quiet --force --tags --prune --prune-tags origin
+if errorlevel 1 echo [!] Could not refresh DesktopStub release tags from origin; continuing with local tags.
 exit /b 0
 
 :ResolveDesktopStubVersion
