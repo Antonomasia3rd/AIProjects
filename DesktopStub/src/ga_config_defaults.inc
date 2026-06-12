@@ -282,11 +282,11 @@ static const IniDefault g_commandLineHelpDefaults[] = {
         L"                                      Shortcuts for --manifest-target.\\r\\n"
         L"  --set Settings.ManifestDisplayName=Name\\r\\n"
         L"                                      Set manifest fields and regenerate the manifest.\\r\\n"
-        L"  --win8-broker | --no-win8-broker    Enable/disable Win8/8.1 broker helper.\\r\\n"
+        L"  --win8-broker | --no-win8-broker    Enable/disable broker helper and regenerate the manifest.\\r\\n"
         L"  --win8-background-task | --no-win8-background-task\\r\\n"
-        L"                                      Enable/disable experimental background task helper.\\r\\n"
+        L"                                      Enable/disable background task helper and regenerate.\\r\\n"
         L"  --win8-oop-helper | --no-win8-oop-helper\\r\\n"
-        L"                                      Enable/disable experimental OOP helper.\\r\\n"
+        L"                                      Enable/disable OOP helper and regenerate.\\r\\n"
         L"  --detect <method>                   Set and save wallpaper detection method.\\r\\n"
         L"  --live-wallpaper-capture | --no-live-wallpaper-capture\\r\\n"
         L"                                      Enable/disable live wallpaper snapshots.\\r\\n"
@@ -1083,6 +1083,7 @@ static void UpgradeCommandLineHelpDefaultIfUnmodified()
         {8096, L"ce47473f6c8921e3"},
         {6040, L"775f1ff3c40747f0"},
         {6271, L"d1a1d116fb1b5ba7"},
+        {6366, L"d895e53d6fd772c1"},
     };
 
     std::wstring current = IniReadS(COMMAND_LINE_HELP_SECTION, COMMAND_LINE_HELP_TEMPLATE_KEY, L"");

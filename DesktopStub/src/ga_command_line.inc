@@ -1651,6 +1651,13 @@ static bool CommandLineSettingChangesManifest(const CommandLineIniSetting& entry
     if (ToLowerCopy(TrimCopy(entry.key)).rfind(L"manifest", 0) == 0)
         return true;
 
+    if (IEquals(entry.key, L"Win8LiveTileBrokerApp") ||
+        IEquals(entry.key, L"Win8LiveTileBackgroundTask") ||
+        IEquals(entry.key, L"Win8LiveTileOopHelper"))
+    {
+        return true;
+    }
+
     if (!IEquals(entry.key, L"AppxManifestTarget"))
         return false;
 
