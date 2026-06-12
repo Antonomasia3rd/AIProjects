@@ -167,6 +167,7 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         if (!IniWrite(L"Settings", L"Win8LiveTileBrokerApp", value ? L"1" : L"0"))
             return;
         Log(g_ui.win8LiveTileBrokerAppState.c_str(), value ? 1 : 0);
+        RegenerateManifestAndQueueGeneration(h);
     }
     break;
 
@@ -176,6 +177,7 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         if (!IniWrite(L"Settings", L"Win8LiveTileBackgroundTask", value ? L"1" : L"0"))
             return;
         Log(g_ui.win8LiveTileBackgroundTaskState.c_str(), value ? 1 : 0);
+        RegenerateManifestAndQueueGeneration(h);
     }
     break;
 
@@ -185,6 +187,7 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         if (!IniWrite(L"Settings", L"Win8LiveTileOopHelper", value ? L"1" : L"0"))
             return;
         Log(g_ui.win8LiveTileOopHelperState.c_str(), value ? 1 : 0);
+        RegenerateManifestAndQueueGeneration(h);
     }
     break;
 

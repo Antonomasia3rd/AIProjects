@@ -878,6 +878,7 @@ static class RepoTools
                     string customHelpIni = Path.Combine(tempRoot, "CustomHelp.ini");
                     string concurrentIni = Path.Combine(tempRoot, "ConcurrentWrites.ini");
                     string invalidBrandingIni = Path.Combine(tempRoot, "InvalidBranding.ini");
+                    string helperManifestIni = Path.Combine(tempRoot, "HelperManifest.ini");
                     string legacyManifestIni = Path.Combine(tempRoot, "LegacyManifest.ini");
                     string wallpaper = Path.Combine(tempRoot, "wallpaper.bmp");
                     string trailingSpaces = new string(' ', 2);
@@ -915,6 +916,12 @@ static class RepoTools
                     SmokeProcess(exe, new[] { "--ini", invalidBrandingIni, "--live-tile-branding", "invalid" }, new[] { 2 }, 30, "DesktopStub invalid Live Tile branding");
                     AssertFileDoesNotExist(invalidBrandingIni, "DesktopStub must reject invalid Live Tile branding without creating an INI");
                     string manifestPath = Path.Combine(Path.GetDirectoryName(exe), "AppxManifest.xml");
+                    SmokeProcess(exe, new[] { "--ini", helperManifestIni, "--manifest-win81", "--win8-broker" }, new[] { 0 }, 30, "DesktopStub Win8 broker manifest");
+                    AssertFileContains(manifestPath, "DesktopStubLiveTileBroker.exe", "DesktopStub Win8 broker switch must regenerate the manifest with the broker executable");
+                    SmokeProcess(exe, new[] { "--ini", helperManifestIni, "--no-win8-broker" }, new[] { 0 }, 30, "DesktopStub Win8 activation stub manifest");
+                    AssertFileContains(manifestPath, "DesktopStubAppxStub.exe", "DesktopStub Win8 broker switch must regenerate the manifest with the activation stub");
+                    SmokeProcess(exe, new[] { "--ini", helperManifestIni, "--win8-oop-helper" }, new[] { 0 }, 30, "DesktopStub Win8 OOP helper manifest");
+                    AssertFileContains(manifestPath, "windows.activatableClass.outOfProcessServer", "DesktopStub Win8 OOP helper switch must regenerate the manifest extension");
                     smokeIdentity = "dev.local.desktopstubsmoke." + Guid.NewGuid().ToString("N").Substring(0, 16);
                     SetDesktopStubManifestIdentity(manifestPath, smokeIdentity);
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", wallpaper, "--once", "--no-tray", "--no-monitor" }, new[] { 0 }, 30, "DesktopStub one-shot generation");

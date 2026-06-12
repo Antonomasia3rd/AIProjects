@@ -140,9 +140,9 @@ Supported options:
 - `--tile-text-enable`, `--tile-text-disable`, `--tile-text-clear`, `--tile-text-secondary-clear`, and `--tile-text-badge-clear`: enable/disable or clear overlay parts.
 - `--manifest-target Windows10|Windows81|Windows8`: set the generated AppX manifest dialect and regenerate `AppxManifest.xml`. Windows 10 remains the default.
 - `--manifest-win10`, `--manifest-win81` / `--manifest-win8.1`, `--manifest-win8` / `--manifest-win8.0`: shortcuts for `--manifest-target`.
-- `--win8-broker` / `--no-win8-broker`: set and save `Win8LiveTileBrokerApp`.
-- `--win8-background-task` / `--no-win8-background-task`: set and save `Win8LiveTileBackgroundTask`.
-- `--win8-oop-helper` / `--no-win8-oop-helper`: set and save `Win8LiveTileOopHelper`.
+- `--win8-broker` / `--no-win8-broker`: set and save `Win8LiveTileBrokerApp`, then regenerate `AppxManifest.xml`.
+- `--win8-background-task` / `--no-win8-background-task`: set and save `Win8LiveTileBackgroundTask`, then regenerate `AppxManifest.xml`.
+- `--win8-oop-helper` / `--no-win8-oop-helper`: set and save `Win8LiveTileOopHelper`, then regenerate `AppxManifest.xml`.
 - `--detect <method>`: set and save `WallpaperDetectionMethod`.
 - `--live-wallpaper-capture` / `--no-live-wallpaper-capture`: set and save live wallpaper snapshot capture.
 - `--wallpaper-decode-low-memory` / `--no-wallpaper-decode-low-memory`: set and save `WallpaperDecodeLowMemory`. It is on by default.
@@ -225,7 +225,7 @@ For Start Screen / Live Tile simulator experiments, the generator can instead em
 - `Windows81`: uses the Windows 8.1-era base namespace plus `m2` 2013 extensions, `<Prerequisites>`, `m2:VisualElements`, `Square150x150Logo`, `Square30x30Logo`, `m2:DefaultTile`, 70/150/310 tile names, splash screen, and Live Tile XML with `TileSquare150x150Image`, `TileWide310x150Image`, and `TileSquare310x310Image`.
 - `Windows8`: uses the Windows 8 base namespace, `<Prerequisites>`, unprefixed `VisualElements`, `Logo`, `SmallLogo`, `DefaultTile WideLogo`, and Live Tile XML with the older `TileSquareImage` / `TileWideImage` templates. There is no 310x310 large-tile notification binding for this target.
 
-For Windows 8/8.1 targets, the default compatibility helper is now `DesktopStubLiveTileBroker.exe`, a tiny CoreApplication-based WinRT broker app. The normal `DesktopStub.exe` remains the unpackaged tray/wallpaper monitor; the broker only exists so the registered package can update the Live Tile under package identity. The standard build script always builds this broker, regardless of arguments, before `--manifest-win8` or `--manifest-win81` are used. Set `[Settings] ManifestLiveTileBrokerExecutable` when reusing the baseline under a different broker filename. Set `[Settings] Win8LiveTileBrokerApp=0` and regenerate the manifest to fall back to the older `DesktopStubAppxStub.exe` behavior.
+For Windows 8/8.1 targets, the default compatibility helper is now `DesktopStubLiveTileBroker.exe`, a tiny CoreApplication-based WinRT broker app. The normal `DesktopStub.exe` remains the unpackaged tray/wallpaper monitor; the broker only exists so the registered package can update the Live Tile under package identity. The standard build script always builds this broker, regardless of arguments, before `--manifest-win8` or `--manifest-win81` are used. Set `[Settings] ManifestLiveTileBrokerExecutable` when reusing the baseline under a different broker filename. Set `[Settings] Win8LiveTileBrokerApp=0` to fall back to the older `DesktopStubAppxStub.exe` behavior; the tray and dedicated command-line switches regenerate the manifest automatically.
 
 Experimental helper paths remain in the source for later testing, but they are disabled by default: `[Settings] Win8LiveTileBackgroundTask=0` and `[Settings] Win8LiveTileOopHelper=0`. The background-task extension is only emitted into a generated manifest when `Win8LiveTileBackgroundTask=1` and the matching `{ProductRuntimeBaseName}LiveTileTask.dll` exists next to the host. Its default runtime class ID is derived from the product manifest token, so copied projects do not inherit `DesktopStub.LiveTileBackgroundTask`. The background-task path currently requires package identity for the caller; the OOP-server path did not register reliably with the loose Windows 8-style package.
 
