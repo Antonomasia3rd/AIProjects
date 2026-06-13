@@ -17,6 +17,10 @@ inline std::wstring ProtectSecretForCurrentUser(const std::wstring& secret)
     {
         throw std::runtime_error("DPAPI protect failed: secret cannot be encoded as UTF-8.");
     }
+    if (utf8.size() > MAXDWORD)
+    {
+        throw std::runtime_error("DPAPI protect failed: secret is too large.");
+    }
 
     BYTE emptyPlaintextSentinel = 0;
     DATA_BLOB plain = {};
@@ -52,6 +56,10 @@ inline std::wstring UnprotectSecretForCurrentUser(const std::wstring& protectedV
     if (!HexToBytes(text.substr(wcslen(kDpapiPrefix)), cipherBytes))
     {
         throw std::runtime_error("Protected value contains invalid hex.");
+    }
+    if (cipherBytes.size() > MAXDWORD)
+    {
+        throw std::runtime_error("DPAPI unprotect failed: encrypted value is too large.");
     }
 
     DATA_BLOB cipher = {};

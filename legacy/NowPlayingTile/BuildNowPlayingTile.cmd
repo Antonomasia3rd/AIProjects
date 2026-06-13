@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "ROOT=%~dp0"
 set "VCVARS="
@@ -50,9 +50,11 @@ if errorlevel 1 (
 
 if /I "%~1"=="check" (
     cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /Zs NowPlayingTile.cpp
-    set "STATUS=%ERRORLEVEL%"
+    set "STATUS=!ERRORLEVEL!"
+    if "!STATUS!"=="0" call TestNowPlayingTileSource.cmd
+    if "!STATUS!"=="0" set "STATUS=!ERRORLEVEL!"
     popd
-    exit /b %STATUS%
+    exit /b !STATUS!
 )
 
 set "OUT_EXE=build\NowPlayingTile.exe"

@@ -26,11 +26,13 @@ The stock Windows 11 taskbar does not expose classic taskbar toolbars.
 BuildDeskband.cmd
 ```
 
-Syntax check only:
+Syntax and source-regression checks:
 
 ```cmd
 BuildDeskband.cmd check
 ```
+
+The source checks cover shared/atomic INI persistence, strict parsing and UTF conversion, modal dialog teardown, deskband site/window lifetime, refresh timer setup, and refresh-worker generation checks.
 
 Side-by-side build for a locked installed DLL:
 
@@ -98,6 +100,7 @@ The deskband asks Explorer to resize when status text changes, so the toolbar wi
 - Refreshes use WinHTTP with connect/send/receive timeouts.
 - HTTP responses are capped at 1 MiB before parsing so Explorer does not retain an unexpectedly large API body.
 - Settings are copied under a lock before refresh workers use them, so changing config/asset directories from the menu cannot race with a background refresh.
+- Account save and removal operations are serialized and atomically replace the INI, so failed writes do not leave partially updated credentials.
 - Refresh workers are tied to the exact deskband window generation that started them, so Explorer teardown or recreation cannot receive a stale worker completion.
 - If no icon resource is found, the deskband draws a built-in fallback marker.
 - HoYoLAB request signing, headers, and response fields intentionally mirror the original Real-Time Notes upstream behavior. Local upstream/reference copies may be kept in an ignored `references\` folder for research, but those copies are not part of the publishable source package. Treat compatibility changes here as HoYoLAB compatibility updates, not generic API refactors.

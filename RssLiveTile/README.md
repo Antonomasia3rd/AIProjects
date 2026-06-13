@@ -56,7 +56,7 @@ On first launch from `build`, the unpackaged process creates:
 
 It then registers `AppxManifest.xml`, launches the packaged `shell:AppsFolder\...!App` entry, and exits the unpackaged bootstrap process. Live Tile updates happen from the packaged process because unpackaged Win32 processes do not have the package identity required by `TileUpdateManager`.
 
-The tray menu exposes refresh, configuration reload, the latest article, settings/log shortcuts, asynchronous package registration/launch actions, and exit. Package maintenance is started through separate command-line helper processes so the resident window remains responsive.
+The tray menu exposes refresh, configuration reload, the latest article, settings/log shortcuts, asynchronous package registration/launch actions, and exit. Package maintenance is started through separate command-line helper processes so the resident window remains responsive. Command-line setting changes reload an existing resident automatically.
 
 ## Settings
 
@@ -122,7 +122,7 @@ Supported options:
 - `--allow-multiple`: skip the single-instance guard.
 - `--exit` / `--quit`: ask the running instance to exit.
 
-`--open-url <url>` is used by queued tile activation. Only HTTP(S) links are accepted.
+`--open-url <url>` is used by queued tile activation. Only HTTP(S) links are accepted. Packaged tile launches read chaseable-notification arguments through `AppInstance.GetActivatedEventArgs()`; they are not assumed to appear in the normal process command line.
 
 ## Notes
 

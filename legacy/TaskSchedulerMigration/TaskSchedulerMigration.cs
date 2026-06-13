@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -61,12 +62,28 @@ static class TaskSchedulerMigration
             if (Is(a, "-WhatIf") || Is(a, "--what-if")) { o.WhatIf = true; continue; }
             if (Is(a, "-Confirm") || Is(a, "--confirm")) { o.Confirm = true; continue; }
 
-            string value = i + 1 < args.Length ? args[++i] : "";
-            if (Is(a, "-OldSID") || Is(a, "--old-sid")) o.OldSID = value;
-            else if (Is(a, "-NewUser") || Is(a, "--new-user")) o.NewUser = value;
-            else if (Is(a, "-BackupDirectory") || Is(a, "--backup-directory")) o.BackupDirectory = value;
-            else if (Is(a, "-TaskPath") || Is(a, "--task-path")) o.TaskPath = value;
+            if (Is(a, "-OldSID") || Is(a, "--old-sid")) o.OldSID = RequireValue(args, ref i, a);
+            else if (Is(a, "-NewUser") || Is(a, "--new-user")) o.NewUser = RequireValue(args, ref i, a);
+            else if (Is(a, "-BackupDirectory") || Is(a, "--backup-directory")) o.BackupDirectory = RequireValue(args, ref i, a);
+            else if (Is(a, "-TaskPath") || Is(a, "--task-path")) o.TaskPath = RequireValue(args, ref i, a);
             else throw new ArgumentException("Unknown argument: " + a);
+        }
+
+        if (!String.IsNullOrWhiteSpace(o.OldSID))
+        {
+            try
+            {
+                o.OldSID = new SecurityIdentifier(o.OldSID).Value;
+            }
+            catch (ArgumentException)
+            {
+                throw new ArgumentException("-OldSID is not a valid Windows SID: " + o.OldSID);
+            }
+        }
+        if (!String.IsNullOrWhiteSpace(o.NewUser) &&
+            o.NewUser.Any(ch => Char.IsControl(ch)))
+        {
+            throw new ArgumentException("-NewUser contains control characters.");
         }
 
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -95,104 +112,138 @@ static class TaskSchedulerMigration
         Type serviceType = Type.GetTypeFromProgID("Schedule.Service");
         if (serviceType == null)
             throw new InvalidOperationException("Task Scheduler COM service is not available.");
-        dynamic service = Activator.CreateInstance(serviceType);
-        service.Connect();
-
+        dynamic service = null;
         var taskRefs = new List<TaskRef>();
-        if (!String.IsNullOrWhiteSpace(o.TaskPath))
+        var folders = new List<object>();
+        try
         {
-            dynamic folder = service.GetFolder(o.TaskPath);
-            EnumerateFolder(folder, taskRefs, false);
-        }
-        else
-        {
-            dynamic root = service.GetFolder("\\");
-            EnumerateFolder(root, taskRefs, true);
-        }
+            service = Activator.CreateInstance(serviceType);
+            service.Connect();
 
-        int updated = 0;
-        int skippedCredential = 0;
-        int failed = 0;
-
-        foreach (var taskRef in taskRefs)
-        {
-            string fullName = taskRef.FullName;
-            try
+            int enumerationFailures = 0;
+            if (!String.IsNullOrWhiteSpace(o.TaskPath))
             {
-                string xml = (string)taskRef.Task.Xml;
-                if (!TaskXmlContainsUserId(xml, o.OldSID))
-                    continue;
+                dynamic folder = service.GetFolder(o.TaskPath);
+                EnumerateFolders(folder, taskRefs, folders, false, ref enumerationFailures);
+            }
+            else
+            {
+                dynamic root = service.GetFolder("\\");
+                EnumerateFolders(root, taskRefs, folders, true, ref enumerationFailures);
+            }
 
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("[MATCH] UserId: " + fullName);
-                Console.ResetColor();
+            int updated = 0;
+            int skippedCredential = 0;
+            int skippedUninspectable = 0;
+            int failed = 0;
 
-                int logonType = 0;
-                try { logonType = (int)taskRef.Task.Definition.Principal.LogonType; } catch { }
-                if (IsCredentialSensitive(logonType))
+            foreach (var taskRef in taskRefs)
+            {
+                string fullName = taskRef.FullName;
+                try
                 {
-                    string message = "[SKIP] Credential-sensitive task: " + fullName + " (LogonType=" + LogonTypeName(logonType) + "). Re-run with -IncludeCredentialSensitiveTasks only after confirming credentials/logon behavior.";
-                    if (!o.IncludeCredentialSensitiveTasks)
+                    string xml = (string)taskRef.Task.Xml;
+                    if (!TaskXmlContainsUserId(xml, o.OldSID))
+                        continue;
+
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("[MATCH] UserId: " + fullName);
+                    Console.ResetColor();
+
+                    int logonType;
+                    string logonError;
+                    if (!TryGetLogonType(taskRef, out logonType, out logonError))
                     {
-                        Console.ForegroundColor = ConsoleColor.Magenta;
-                        Console.WriteLine(message);
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine("[SKIP] Could not inspect task logon type safely: " + fullName);
                         Console.ResetColor();
+                        Console.WriteLine(logonError);
                         Console.WriteLine();
-                        skippedCredential++;
+                        skippedUninspectable++;
                         continue;
                     }
-                    Console.ForegroundColor = ConsoleColor.Magenta;
-                    Console.WriteLine("[WARN] Updating credential-sensitive task: " + fullName + " (LogonType=" + LogonTypeName(logonType) + ")");
+
+                    if (IsCredentialSensitive(logonType))
+                    {
+                        string message = "[SKIP] Credential-sensitive task: " + fullName + " (LogonType=" + LogonTypeName(logonType) + "). Re-run with -IncludeCredentialSensitiveTasks only after confirming credentials/logon behavior.";
+                        if (!o.IncludeCredentialSensitiveTasks)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Magenta;
+                            Console.WriteLine(message);
+                            Console.ResetColor();
+                            Console.WriteLine();
+                            skippedCredential++;
+                            continue;
+                        }
+                        Console.ForegroundColor = ConsoleColor.Magenta;
+                        Console.WriteLine("[WARN] Updating credential-sensitive task: " + fullName + " (LogonType=" + LogonTypeName(logonType) + ")");
+                        Console.ResetColor();
+                    }
+
+                    string updatedXml = UpdateTaskXmlUserId(xml, o.OldSID, o.NewUser);
+                    if (!ShouldApply(o, fullName, "Re-register scheduled task with matching UserId values changed to '" + o.NewUser + "'"))
+                        continue;
+
+                    Directory.CreateDirectory(o.BackupDirectory);
+                    string backupPath = BuildBackupPath(o.BackupDirectory, fullName);
+                    File.WriteAllText(backupPath, xml, Encoding.UTF8);
+                    Console.ForegroundColor = ConsoleColor.DarkCyan;
+                    Console.WriteLine("[BACKUP] " + backupPath);
                     Console.ResetColor();
+
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.WriteLine("[ACTION] Re-registering: " + fullName);
+                    Console.ResetColor();
+                    object registeredTask = taskRef.Folder.RegisterTask(taskRef.Name, updatedXml, TASK_CREATE_OR_UPDATE, null, null, TASK_LOGON_NONE, null);
+                    ReleaseComObject(registeredTask);
+
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("[SUCCESS] Updated: " + fullName);
+                    Console.ResetColor();
+                    Console.WriteLine();
+                    updated++;
                 }
-
-                string updatedXml = UpdateTaskXmlUserId(xml, o.OldSID, o.NewUser);
-                if (!ShouldApply(o, fullName, "Re-register scheduled task with matching UserId values changed to '" + o.NewUser + "'"))
-                    continue;
-
-                Directory.CreateDirectory(o.BackupDirectory);
-                string backupPath = BuildBackupPath(o.BackupDirectory, fullName);
-                File.WriteAllText(backupPath, xml, Encoding.UTF8);
-                Console.ForegroundColor = ConsoleColor.DarkCyan;
-                Console.WriteLine("[BACKUP] " + backupPath);
-                Console.ResetColor();
-
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine("[ACTION] Re-registering: " + fullName);
-                Console.ResetColor();
-                taskRef.Folder.RegisterTask(taskRef.Name, updatedXml, TASK_CREATE_OR_UPDATE, null, null, TASK_LOGON_NONE, null);
-
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("[SUCCESS] Updated: " + fullName);
-                Console.ResetColor();
-                Console.WriteLine();
-                updated++;
+                catch (Exception ex)
+                {
+                    failed++;
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("[ERROR] Failed: " + fullName);
+                    Console.ResetColor();
+                    Console.WriteLine(Unwrap(ex).Message);
+                    Console.WriteLine();
+                }
             }
-            catch (Exception ex)
-            {
-                failed++;
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("[ERROR] Failed: " + fullName);
-                Console.ResetColor();
-                Console.WriteLine(Unwrap(ex).Message);
-                Console.WriteLine();
-            }
+
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("========================================");
+            Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("Total updated tasks: " + updated);
+            Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("Credential-sensitive tasks skipped: " + skippedCredential);
+            Console.WriteLine("Tasks skipped because logon type could not be inspected: " + skippedUninspectable);
+            Console.WriteLine("Task folders/items that could not be enumerated: " + enumerationFailures);
+            Console.ResetColor();
+            Console.ForegroundColor =
+                failed == 0 && skippedUninspectable == 0 && enumerationFailures == 0
+                    ? ConsoleColor.Green
+                    : ConsoleColor.Red;
+            Console.WriteLine("Failed tasks: " + failed);
+            Console.ResetColor();
+            Console.WriteLine("=== Task Migration COMPLETE ===");
+            return failed == 0 && skippedUninspectable == 0 && enumerationFailures == 0 ? 0 : 3;
         }
-
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine("========================================");
-        Console.ResetColor();
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("Total updated tasks: " + updated);
-        Console.ResetColor();
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("Credential-sensitive tasks skipped: " + skippedCredential);
-        Console.ResetColor();
-        Console.ForegroundColor = failed == 0 ? ConsoleColor.Green : ConsoleColor.Red;
-        Console.WriteLine("Failed tasks: " + failed);
-        Console.ResetColor();
-        Console.WriteLine("=== Task Migration COMPLETE ===");
-        return failed == 0 ? 0 : 3;
+        finally
+        {
+            foreach (TaskRef taskRef in taskRefs)
+            {
+                ReleaseComObject(taskRef.Task);
+            }
+            foreach (object folder in folders)
+                ReleaseComObject(folder);
+            ReleaseComObject(service);
+        }
     }
 
     sealed class TaskRef
@@ -203,24 +254,125 @@ static class TaskSchedulerMigration
         public string FullName;
     }
 
-    static void EnumerateFolder(dynamic folder, List<TaskRef> tasks, bool recursive)
+    static void EnumerateFolders(
+        dynamic initialFolder,
+        List<TaskRef> tasks,
+        List<object> folders,
+        bool recursive,
+        ref int failures)
     {
-        foreach (dynamic task in folder.GetTasks(1))
+        var pending = new Stack<object>();
+        pending.Push(initialFolder);
+        while (pending.Count != 0)
         {
-            string name = (string)task.Name;
-            string path = (string)task.Path;
-            tasks.Add(new TaskRef { Folder = folder, Task = task, Name = name, FullName = path });
+            dynamic folder = pending.Pop();
+            folders.Add(folder);
+            string folderPath = SafeFolderPath(folder);
+
+            dynamic taskCollection = null;
+            try
+            {
+                taskCollection = folder.GetTasks(1);
+                int taskCount = (int)taskCollection.Count;
+                for (int i = 1; i <= taskCount; ++i)
+                {
+                    dynamic task = null;
+                    try
+                    {
+                        task = taskCollection.Item(i);
+                        string name = (string)task.Name;
+                        string path = (string)task.Path;
+                        tasks.Add(new TaskRef
+                        {
+                            Folder = folder,
+                            Task = task,
+                            Name = name,
+                            FullName = path
+                        });
+                        task = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        ReleaseComObject(task);
+                        ReportEnumerationFailure(
+                            "task item " + i + " in " + folderPath,
+                            ex);
+                        failures++;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ReportEnumerationFailure("tasks in " + folderPath, ex);
+                failures++;
+            }
+            finally
+            {
+                ReleaseComObject(taskCollection);
+            }
+
+            if (!recursive)
+                continue;
+
+            dynamic folderCollection = null;
+            try
+            {
+                folderCollection = folder.GetFolders(0);
+                int folderCount = (int)folderCollection.Count;
+                for (int i = 1; i <= folderCount; ++i)
+                {
+                    dynamic child = null;
+                    try
+                    {
+                        child = folderCollection.Item(i);
+                        pending.Push(child);
+                        child = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        ReleaseComObject(child);
+                        ReportEnumerationFailure(
+                            "child folder " + i + " in " + folderPath,
+                            ex);
+                        failures++;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ReportEnumerationFailure("child folders in " + folderPath, ex);
+                failures++;
+            }
+            finally
+            {
+                ReleaseComObject(folderCollection);
+            }
         }
-        if (!recursive)
-            return;
-        foreach (dynamic child in folder.GetFolders(0))
-            EnumerateFolder(child, tasks, true);
+    }
+
+    static string SafeFolderPath(dynamic folder)
+    {
+        try
+        {
+            return (string)folder.Path;
+        }
+        catch
+        {
+            return "<unknown task folder>";
+        }
+    }
+
+    static void ReportEnumerationFailure(string target, Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("[ERROR] Could not enumerate " + target + ".");
+        Console.ResetColor();
+        Console.WriteLine(Unwrap(ex).Message);
     }
 
     static bool TaskXmlContainsUserId(string xml, string oldSid)
     {
-        var doc = new XmlDocument { PreserveWhitespace = true };
-        doc.LoadXml(xml);
+        XmlDocument doc = LoadTaskXml(xml);
         foreach (XmlNode node in doc.GetElementsByTagName("UserId"))
         {
             if (node.InnerText == oldSid)
@@ -231,8 +383,7 @@ static class TaskSchedulerMigration
 
     static string UpdateTaskXmlUserId(string xml, string from, string to)
     {
-        var doc = new XmlDocument { PreserveWhitespace = true };
-        doc.LoadXml(xml);
+        XmlDocument doc = LoadTaskXml(xml);
         bool changed = false;
         foreach (XmlNode node in doc.GetElementsByTagName("UserId"))
         {
@@ -245,6 +396,40 @@ static class TaskSchedulerMigration
         if (!changed)
             throw new InvalidOperationException("Matched task XML did not contain a UserId node for " + from);
         return doc.OuterXml;
+    }
+
+    static XmlDocument LoadTaskXml(string xml)
+    {
+        var settings = new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null
+        };
+        var doc = new XmlDocument
+        {
+            PreserveWhitespace = true,
+            XmlResolver = null
+        };
+        using (var text = new StringReader(xml ?? ""))
+        using (XmlReader reader = XmlReader.Create(text, settings))
+            doc.Load(reader);
+        return doc;
+    }
+
+    static bool TryGetLogonType(TaskRef taskRef, out int logonType, out string error)
+    {
+        try
+        {
+            logonType = (int)taskRef.Task.Definition.Principal.LogonType;
+            error = "";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logonType = TASK_LOGON_NONE;
+            error = Unwrap(ex).Message;
+            return false;
+        }
     }
 
     static bool ShouldApply(Options o, string target, string action)
@@ -318,6 +503,39 @@ static class TaskSchedulerMigration
             suffix++;
         }
         return path;
+    }
+
+    static void ReleaseComObject(object value)
+    {
+        if (value == null || !Marshal.IsComObject(value))
+            return;
+        try
+        {
+            Marshal.FinalReleaseComObject(value);
+        }
+        catch
+        {
+        }
+    }
+
+    static string RequireValue(string[] args, ref int index, string option)
+    {
+        if (index + 1 >= args.Length || IsKnownOption(args[index + 1]))
+            throw new ArgumentException("Missing value for " + option + ".");
+        return args[++index];
+    }
+
+    static bool IsKnownOption(string value)
+    {
+        string[] options =
+        {
+            "-h", "--help", "/?", "-IncludeCredentialSensitiveTasks",
+            "--include-credential-sensitive-tasks", "-WhatIf", "--what-if",
+            "-Confirm", "--confirm", "-OldSID", "--old-sid", "-NewUser",
+            "--new-user", "-BackupDirectory", "--backup-directory", "-TaskPath",
+            "--task-path"
+        };
+        return options.Any(option => Is(value, option));
     }
 
     static bool Is(string a, string b) { return String.Equals(a, b, StringComparison.OrdinalIgnoreCase); }

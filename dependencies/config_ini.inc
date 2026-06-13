@@ -3,6 +3,8 @@
 
 namespace aip
 {
+inline constexpr size_t kMaxIniFileBytes = 16u * 1024u * 1024u;
+
 struct IniEntry
 {
     std::wstring key;
@@ -89,7 +91,10 @@ private:
     DWORD error_ = ERROR_SUCCESS;
 };
 
-inline bool ReadWholeFileBytes(const std::wstring& path, std::vector<BYTE>& bytes)
+inline bool ReadWholeFileBytes(
+    const std::wstring& path,
+    std::vector<BYTE>& bytes,
+    size_t maxBytes = static_cast<size_t>(INT_MAX))
 {
     bytes.clear();
     HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -115,7 +120,9 @@ inline bool ReadWholeFileBytes(const std::wstring& path, std::vector<BYTE>& byte
     {
         return fail(ERROR_INVALID_DATA);
     }
-    if (size.QuadPart > 0x7fffffffll)
+    if (size.QuadPart > INT_MAX ||
+        static_cast<unsigned long long>(size.QuadPart) >
+            static_cast<unsigned long long>(maxBytes))
     {
         return fail(ERROR_FILE_TOO_LARGE);
     }
@@ -235,7 +242,7 @@ inline bool DecodeTextBytes(const std::vector<BYTE>& bytes, std::wstring& out)
 inline bool ReadTextFileUtf8BomAware(const std::wstring& path, std::wstring& text)
 {
     std::vector<BYTE> bytes;
-    if (!ReadWholeFileBytes(path, bytes))
+    if (!ReadWholeFileBytes(path, bytes, kMaxIniFileBytes))
     {
         return false;
     }
@@ -694,6 +701,7 @@ inline bool LoadIniText(const std::wstring& path, std::wstring& text)
     {
         return true;
     }
+    DWORD readError = GetLastError();
     DWORD attrs = GetFileAttributesW(path.c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES)
     {
@@ -712,6 +720,7 @@ inline bool LoadIniText(const std::wstring& path, std::wstring& text)
         SetLastError(ERROR_ACCESS_DENIED);
         return false;
     }
+    SetLastError(readError == ERROR_SUCCESS ? ERROR_READ_FAULT : readError);
     return false;
 }
 
@@ -850,6 +859,126 @@ inline bool WriteIniValueToText(std::wstring& text, const wchar_t* section, cons
     if (!text.empty())
     {
         text += L"\r\n";
+    }
+    return true;
+}
+
+inline bool RemoveIniValueFromText(
+    std::wstring& text,
+    const wchar_t* section,
+    const wchar_t* key,
+    bool* removed = nullptr)
+{
+    std::wstring sectionName = section ? section : L"";
+    std::wstring keyName = key ? key : L"";
+    std::vector<std::wstring> lines = SplitIniLines(text);
+    if (!lines.empty())
+    {
+        StripLeadingIniBom(lines[0]);
+    }
+
+    bool inTargetSection = false;
+    bool didRemove = false;
+    std::vector<std::wstring> kept;
+    kept.reserve(lines.size());
+    for (const std::wstring& line : lines)
+    {
+        std::wstring trimmed = Trim(line);
+        std::wstring sectionHeaderName;
+        if (!trimmed.empty() &&
+            trimmed.front() != L';' &&
+            trimmed.front() != L'#' &&
+            TryParseIniSectionHeader(line, sectionHeaderName))
+        {
+            inTargetSection = IniEquals(sectionHeaderName, sectionName);
+            kept.push_back(line);
+            continue;
+        }
+
+        bool removeLine = false;
+        if (inTargetSection &&
+            !trimmed.empty() &&
+            trimmed.front() != L';' &&
+            trimmed.front() != L'#')
+        {
+            size_t equals = line.find(L'=');
+            if (equals != std::wstring::npos)
+            {
+                removeLine = IniEquals(ParseIniName(line.substr(0, equals)), keyName);
+            }
+        }
+
+        if (removeLine)
+        {
+            didRemove = true;
+        }
+        else
+        {
+            kept.push_back(line);
+        }
+    }
+
+    TrimTrailingIniBlankLines(kept);
+    text = JoinIniLines(kept);
+    if (!text.empty())
+    {
+        text += L"\r\n";
+    }
+    if (removed)
+    {
+        *removed = didRemove;
+    }
+    return true;
+}
+
+inline bool RemoveIniSectionFromText(
+    std::wstring& text,
+    const wchar_t* section,
+    bool* removed = nullptr)
+{
+    std::wstring sectionName = section ? section : L"";
+    std::vector<std::wstring> lines = SplitIniLines(text);
+    if (!lines.empty())
+    {
+        StripLeadingIniBom(lines[0]);
+    }
+
+    bool inTargetSection = false;
+    bool didRemove = false;
+    std::vector<std::wstring> kept;
+    kept.reserve(lines.size());
+    for (const std::wstring& line : lines)
+    {
+        std::wstring trimmed = Trim(line);
+        std::wstring sectionHeaderName;
+        if (!trimmed.empty() &&
+            trimmed.front() != L';' &&
+            trimmed.front() != L'#' &&
+            TryParseIniSectionHeader(line, sectionHeaderName))
+        {
+            inTargetSection = IniEquals(sectionHeaderName, sectionName);
+            if (inTargetSection)
+            {
+                didRemove = true;
+                continue;
+            }
+        }
+
+        if (!inTargetSection)
+        {
+            kept.push_back(line);
+        }
+    }
+
+    TrimTrailingIniBlankLines(kept);
+    text = JoinIniLines(kept);
+    if (!text.empty())
+    {
+        text += L"\r\n";
+    }
+    if (removed)
+    {
+        *removed = didRemove;
     }
     return true;
 }

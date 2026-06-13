@@ -1,5 +1,6 @@
 #define UNICODE
 #define _UNICODE
+#define NOMINMAX
 
 #include <windows.h>
 #include <wtsapi32.h>
@@ -11,8 +12,11 @@
 #include <cwchar>
 #include <cwctype>
 #include <mutex>
+#include <new>
 #include <string>
 #include <vector>
+
+#include "../../dependencies/desktop_app_baseline.h"
 
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "wtsapi32.lib")
@@ -26,6 +30,8 @@ static SERVICE_STATUS gStatus = {};
 static HANDLE gStopEvent = nullptr;
 static HANDLE gEnsureWorkersDrainedEvent = nullptr;
 static std::atomic<bool> gStopping{ true };
+static std::mutex gServiceStatusMutex;
+static std::mutex gStopEventMutex;
 static std::mutex gEnsureWorkersMutex;
 static size_t gEnsureWorkerCount = 0;
 
@@ -86,10 +92,16 @@ static std::vector<LaunchedProcessRecord> gLaunchedProcesses;
 
 static void SetServiceState(DWORD state, DWORD win32ExitCode = NO_ERROR, DWORD waitHint = 0)
 {
+    std::lock_guard<std::mutex> lock(gServiceStatusMutex);
+    static DWORD checkpoint = 1;
     gStatus.dwCurrentState = state;
     gStatus.dwWin32ExitCode = win32ExitCode;
     gStatus.dwWaitHint = waitHint;
     gStatus.dwControlsAccepted = 0;
+    gStatus.dwCheckPoint =
+        state == SERVICE_START_PENDING || state == SERVICE_STOP_PENDING
+            ? checkpoint++
+            : 0;
 
     if (state == SERVICE_RUNNING) {
         gStatus.dwControlsAccepted =
@@ -97,14 +109,16 @@ static void SetServiceState(DWORD state, DWORD win32ExitCode = NO_ERROR, DWORD w
     }
 
     if (gStatusHandle) {
-        SetServiceStatus(gStatusHandle, &gStatus);
+        if (!SetServiceStatus(gStatusHandle, &gStatus)) {
+            OutputDebugStringW(L"SecureDesktopLauncher: SetServiceStatus failed.\n");
+        }
     }
 }
 
-static std::wstring ToLower(std::wstring value)
+static bool SignalStopEvent() noexcept
 {
-    std::transform(value.begin(), value.end(), value.begin(), towlower);
-    return value;
+    std::lock_guard<std::mutex> lock(gStopEventMutex);
+    return gStopEvent == nullptr || SetEvent(gStopEvent) != FALSE;
 }
 
 static std::wstring Trim(const std::wstring& value)
@@ -215,21 +229,37 @@ static void LogServiceWarning(const std::wstring& message)
     std::wstring debugLine = std::wstring(kServiceName) + L": " + message + L"\n";
     OutputDebugStringW(debugLine.c_str());
 
-    HANDLE file = CreateFileW(DefaultLogPath().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) return;
-
     SYSTEMTIME st;
     GetLocalTime(&st);
     wchar_t timestamp[64];
     swprintf_s(timestamp, ARRAYSIZE(timestamp), L"%04u-%02u-%02u %02u:%02u:%02u  ",
         st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    DWORD bytes = 0;
-    WriteFile(file, timestamp, static_cast<DWORD>(wcslen(timestamp) * sizeof(wchar_t)), &bytes, nullptr);
-    WriteFile(file, message.c_str(), static_cast<DWORD>(message.size() * sizeof(wchar_t)), &bytes, nullptr);
-    const wchar_t newline[] = L"\r\n";
-    WriteFile(file, newline, static_cast<DWORD>((ARRAYSIZE(newline) - 1) * sizeof(wchar_t)), &bytes, nullptr);
-    CloseHandle(file);
+    (void)aip::AppendUtf16LineToFile(
+        DefaultLogPath(),
+        std::wstring(timestamp) + message,
+        false,
+        5000);
+}
+
+static void LogServiceWarningNoThrow(const wchar_t* message) noexcept
+{
+    try {
+        LogServiceWarning(message ? message : L"Unknown service error.");
+    }
+    catch (...) {
+        OutputDebugStringW(L"SecureDesktopLauncher: logging failed while handling an exception.\n");
+    }
+}
+
+static void LogServiceExceptionNoThrow(const wchar_t* context, const std::exception& ex) noexcept
+{
+    try {
+        LogServiceWarning(std::wstring(context ? context : L"Service callback failed: ") +
+            aip::Utf8ToWide(ex.what()));
+    }
+    catch (...) {
+        OutputDebugStringW(L"SecureDesktopLauncher: exception reporting failed.\n");
+    }
 }
 
 static bool IsAbsoluteFileSystemPath(const std::wstring& path)
@@ -331,69 +361,66 @@ static std::wstring FindConfigPath()
 }
 
 static std::wstring ReadIniString(
-    const std::wstring& path,
+    const std::vector<aip::IniSectionData>& document,
     const std::wstring& section,
     const std::wstring& key,
     const std::wstring& defaultValue)
 {
-    DWORD size = 512;
-    for (;;) {
-        std::vector<wchar_t> buffer(size);
-        DWORD read = GetPrivateProfileStringW(
-            section.c_str(),
-            key.c_str(),
-            defaultValue.c_str(),
-            buffer.data(),
-            size,
-            path.c_str());
-
-        if (read < size - 2 || size >= 32768) {
-            return Trim(std::wstring(buffer.data(), read));
-        }
-        size *= 2;
-    }
+    std::wstring value;
+    return Trim(aip::ReadIniValueFromDoc(
+        document,
+        section.c_str(),
+        key.c_str(),
+        value)
+        ? value
+        : defaultValue);
 }
 
 static bool ReadIniBool(
-    const std::wstring& path,
+    const std::vector<aip::IniSectionData>& document,
     const std::wstring& section,
     const std::wstring& key,
     bool defaultValue)
 {
-    std::wstring raw = ToLower(ReadIniString(path, section, key, defaultValue ? L"1" : L"0"));
-    return raw == L"1" || raw == L"true" || raw == L"yes" || raw == L"on";
+    bool value = false;
+    return aip::ParseBoolValue(ReadIniString(document, section, key, L""), value)
+        ? value
+        : defaultValue;
 }
 
 static DWORD ReadIniDword(
-    const std::wstring& path,
+    const std::vector<aip::IniSectionData>& document,
     const std::wstring& section,
     const std::wstring& key,
     DWORD defaultValue)
 {
-    std::wstring raw = ReadIniString(path, section, key, L"");
+    std::wstring raw = ReadIniString(document, section, key, L"");
     if (raw.empty()) {
         return defaultValue;
     }
 
+    errno = 0;
     wchar_t* end = nullptr;
-    unsigned long value = wcstoul(raw.c_str(), &end, 10);
-    return end && *end == L'\0' ? static_cast<DWORD>(value) : defaultValue;
+    unsigned long long value = wcstoull(raw.c_str(), &end, 10);
+    return end != raw.c_str() &&
+        end != nullptr &&
+        *end == L'\0' &&
+        errno != ERANGE &&
+        value <= MAXDWORD
+        ? static_cast<DWORD>(value)
+        : defaultValue;
 }
 
 static int ReadIniInt(
-    const std::wstring& path,
+    const std::vector<aip::IniSectionData>& document,
     const std::wstring& section,
     const std::wstring& key,
     int defaultValue)
 {
-    std::wstring raw = ReadIniString(path, section, key, L"");
-    if (raw.empty()) {
-        return defaultValue;
-    }
-
-    wchar_t* end = nullptr;
-    long value = wcstol(raw.c_str(), &end, 10);
-    return end && *end == L'\0' ? static_cast<int>(value) : defaultValue;
+    int value = 0;
+    return aip::ParseIntValue(ReadIniString(document, section, key, L""), value)
+        ? value
+        : defaultValue;
 }
 
 static std::vector<std::wstring> SplitList(const std::wstring& value)
@@ -609,24 +636,34 @@ static bool FileTimeEquals(const FILETIME& left, const FILETIME& right)
         left.dwHighDateTime == right.dwHighDateTime;
 }
 
-static void RecordLaunchedProcess(const ProgramConfig& program, const PROCESS_INFORMATION& pi)
+static bool RecordLaunchedProcess(const ProgramConfig& program, const PROCESS_INFORMATION& pi) noexcept
 {
     if (!pi.hProcess || pi.dwProcessId == 0)
     {
-        return;
+        return false;
     }
 
-    LaunchedProcessRecord record;
-    record.pid = pi.dwProcessId;
-    record.path = program.path;
-    if (!TryGetProcessCreationTime(pi.hProcess, record.creationTime))
-    {
-        LogServiceWarning(L"Could not read process creation time for launched process: " + program.name);
-        return;
-    }
+    try {
+        LaunchedProcessRecord record;
+        record.pid = pi.dwProcessId;
+        record.path = program.path;
+        if (!TryGetProcessCreationTime(pi.hProcess, record.creationTime))
+        {
+            LogServiceWarningNoThrow(L"Could not read process creation time for a launched process.");
+            return false;
+        }
 
-    std::lock_guard<std::mutex> lock(gLaunchedProcessesMutex);
-    gLaunchedProcesses.push_back(record);
+        std::lock_guard<std::mutex> lock(gLaunchedProcessesMutex);
+        gLaunchedProcesses.push_back(record);
+        return true;
+    }
+    catch (const std::exception& ex) {
+        LogServiceExceptionNoThrow(L"Could not record a launched process: ", ex);
+    }
+    catch (...) {
+        LogServiceWarningNoThrow(L"Could not record a launched process due to an unknown exception.");
+    }
+    return false;
 }
 
 static bool StopOnServiceStopEnabledForPath(const AppConfig& config, const std::wstring& path)
@@ -732,28 +769,6 @@ static SessionContext GetSessionContext(DWORD sessionId, WTS_CONNECTSTATE_CLASS 
     return session;
 }
 
-static std::vector<std::wstring> ReadIniSectionNames(const std::wstring& path)
-{
-    DWORD size = 4096;
-    for (;;) {
-        std::vector<wchar_t> buffer(size);
-        DWORD read = GetPrivateProfileSectionNamesW(buffer.data(), size, path.c_str());
-        if (read < size - 2) {
-            std::vector<std::wstring> sections;
-            wchar_t* cursor = buffer.data();
-            while (*cursor) {
-                sections.push_back(cursor);
-                cursor += wcslen(cursor) + 1;
-            }
-            return sections;
-        }
-        size *= 2;
-        if (size > 65536) {
-            return {};
-        }
-    }
-}
-
 static AppConfig LoadConfig()
 {
     AppConfig config;
@@ -775,42 +790,54 @@ static AppConfig LoadConfig()
         return config;
     }
 
-    const std::wstring general = L"General";
-    config.desktop = ReadIniString(config.configPath, general, L"Desktop", config.desktop);
-    config.launchSpacingMs = ReadIniDword(config.configPath, general, L"LaunchSpacingMs", config.launchSpacingMs);
-    config.maxProgramsPerSession = ReadIniDword(config.configPath, general, L"MaxProgramsPerSession", 0);
-    config.stopOnServiceStop = ReadIniBool(config.configPath, general, L"StopOnServiceStop", true);
-    config.startOnServiceStart = ReadIniBool(config.configPath, general, L"StartOnServiceStart", true);
-    config.startOnConsoleConnect = ReadIniBool(config.configPath, general, L"StartOnConsoleConnect", true);
-    config.startOnRemoteConnect = ReadIniBool(config.configPath, general, L"StartOnRemoteConnect", true);
-    config.startOnLogon = ReadIniBool(config.configPath, general, L"StartOnLogon", true);
-    config.startOnLock = ReadIniBool(config.configPath, general, L"StartOnLock", true);
-    config.startOnUnlock = ReadIniBool(config.configPath, general, L"StartOnUnlock", true);
-    config.launchDisconnectedSessions = ReadIniBool(config.configPath, general, L"LaunchDisconnectedSessions", true);
-    config.includeUsers = SplitList(ReadIniString(config.configPath, general, L"IncludeUsers", L""));
-    config.excludeUsers = SplitList(ReadIniString(config.configPath, general, L"ExcludeUsers", L""));
+    std::vector<aip::IniSectionData> document;
+    if (!aip::LoadIniDocument(config.configPath, document))
+    {
+        LogServiceWarning(
+            L"Could not parse configuration file: " +
+            config.configPath +
+            L" (error " +
+            std::to_wstring(GetLastError()) +
+            L")");
+        return config;
+    }
 
-    std::vector<std::wstring> sections = ReadIniSectionNames(config.configPath);
-    for (const std::wstring& section : sections) {
+    const std::wstring general = L"General";
+    config.desktop = ReadIniString(document, general, L"Desktop", config.desktop);
+    config.launchSpacingMs = ReadIniDword(document, general, L"LaunchSpacingMs", config.launchSpacingMs);
+    config.maxProgramsPerSession = ReadIniDword(document, general, L"MaxProgramsPerSession", 0);
+    config.stopOnServiceStop = ReadIniBool(document, general, L"StopOnServiceStop", true);
+    config.startOnServiceStart = ReadIniBool(document, general, L"StartOnServiceStart", true);
+    config.startOnConsoleConnect = ReadIniBool(document, general, L"StartOnConsoleConnect", true);
+    config.startOnRemoteConnect = ReadIniBool(document, general, L"StartOnRemoteConnect", true);
+    config.startOnLogon = ReadIniBool(document, general, L"StartOnLogon", true);
+    config.startOnLock = ReadIniBool(document, general, L"StartOnLock", true);
+    config.startOnUnlock = ReadIniBool(document, general, L"StartOnUnlock", true);
+    config.launchDisconnectedSessions = ReadIniBool(document, general, L"LaunchDisconnectedSessions", true);
+    config.includeUsers = SplitList(ReadIniString(document, general, L"IncludeUsers", L""));
+    config.excludeUsers = SplitList(ReadIniString(document, general, L"ExcludeUsers", L""));
+
+    for (const aip::IniSectionData& sectionData : document) {
+        const std::wstring& section = sectionData.name;
         const std::wstring prefix = L"Program:";
-        if (section.rfind(prefix, 0) != 0) {
+        if (!aip::StartsWithI(section, prefix.c_str())) {
             continue;
         }
 
         ProgramConfig program;
         program.name = section.substr(prefix.size());
-        program.enabled = ReadIniBool(config.configPath, section, L"Enabled", true);
-        program.path = ReadIniString(config.configPath, section, L"Path", L"");
-        program.arguments = ReadIniString(config.configPath, section, L"Arguments", L"");
-        program.commandLine = ReadIniString(config.configPath, section, L"CommandLine", L"");
-        program.workingDirectory = ReadIniString(config.configPath, section, L"WorkingDirectory", DirectoryOf(program.path));
-        program.desktop = ReadIniString(config.configPath, section, L"Desktop", config.desktop);
-        program.includeUsers = SplitList(ReadIniString(config.configPath, section, L"IncludeUsers", L""));
-        program.excludeUsers = SplitList(ReadIniString(config.configPath, section, L"ExcludeUsers", L""));
-        program.preventDuplicate = ReadIniBool(config.configPath, section, L"PreventDuplicate", true);
-        program.stopOnServiceStop = ReadIniBool(config.configPath, section, L"StopOnServiceStop", true);
-        program.launchSpacingMs = ReadIniDword(config.configPath, section, L"LaunchSpacingMs", config.launchSpacingMs);
-        program.showWindow = ReadIniInt(config.configPath, section, L"ShowWindow", SW_SHOWNOACTIVATE);
+        program.enabled = ReadIniBool(document, section, L"Enabled", true);
+        program.path = ReadIniString(document, section, L"Path", L"");
+        program.arguments = ReadIniString(document, section, L"Arguments", L"");
+        program.commandLine = ReadIniString(document, section, L"CommandLine", L"");
+        program.workingDirectory = ReadIniString(document, section, L"WorkingDirectory", DirectoryOf(program.path));
+        program.desktop = ReadIniString(document, section, L"Desktop", config.desktop);
+        program.includeUsers = SplitList(ReadIniString(document, section, L"IncludeUsers", L""));
+        program.excludeUsers = SplitList(ReadIniString(document, section, L"ExcludeUsers", L""));
+        program.preventDuplicate = ReadIniBool(document, section, L"PreventDuplicate", true);
+        program.stopOnServiceStop = ReadIniBool(document, section, L"StopOnServiceStop", true);
+        program.launchSpacingMs = ReadIniDword(document, section, L"LaunchSpacingMs", config.launchSpacingMs);
+        program.showWindow = ReadIniInt(document, section, L"ShowWindow", SW_SHOWNOACTIVATE);
 
         if (!program.name.empty() &&
             !program.path.empty() &&
@@ -842,24 +869,25 @@ static bool LaunchProgramOnDesktop(const AppConfig& config, const ProgramConfig&
 
     static CRITICAL_SECTION launchLock;
     static INIT_ONCE launchLockOnce = INIT_ONCE_STATIC_INIT;
-    InitOnceExecuteOnce(
+    if (!InitOnceExecuteOnce(
         &launchLockOnce,
         [](PINIT_ONCE, PVOID, PVOID*) -> BOOL {
             InitializeCriticalSection(&launchLock);
             return TRUE;
         },
         nullptr,
-        nullptr);
+        nullptr)) {
+        LogServiceWarningNoThrow(L"Could not initialize the process-launch lock.");
+        return false;
+    }
 
-    EnterCriticalSection(&launchLock);
+    aip::CriticalSectionLock lock(launchLock);
 
     if (gStopping.load()) {
-        LeaveCriticalSection(&launchLock);
         return false;
     }
 
     if (ConfiguredProgramAlreadyRunningInSession(program, session.id)) {
-        LeaveCriticalSection(&launchLock);
         return true;
     }
 
@@ -867,40 +895,47 @@ static bool LaunchProgramOnDesktop(const AppConfig& config, const ProgramConfig&
     EnablePrivilege(SE_INCREASE_QUOTA_NAME);
     EnablePrivilege(SE_TCB_NAME);
 
-    HANDLE selfToken = nullptr;
+    HANDLE rawSelfToken = nullptr;
     if (!OpenProcessToken(
             GetCurrentProcess(),
             TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY |
                 TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID,
-            &selfToken)) {
-        LeaveCriticalSection(&launchLock);
+            &rawSelfToken)) {
         return false;
     }
+    aip::UniqueKernelHandle selfToken(rawSelfToken);
 
-    HANDLE primaryToken = nullptr;
+    HANDLE rawPrimaryToken = nullptr;
     if (!DuplicateTokenEx(
-            selfToken,
+            selfToken.Get(),
             MAXIMUM_ALLOWED,
             nullptr,
             SecurityImpersonation,
             TokenPrimary,
-            &primaryToken)) {
-        CloseHandle(selfToken);
-        LeaveCriticalSection(&launchLock);
+            &rawPrimaryToken)) {
         return false;
     }
-
-    CloseHandle(selfToken);
+    aip::UniqueKernelHandle primaryToken(rawPrimaryToken);
 
     DWORD tokenSessionId = session.id;
-    if (!SetTokenInformation(primaryToken, TokenSessionId, &tokenSessionId, sizeof(tokenSessionId))) {
-        CloseHandle(primaryToken);
-        LeaveCriticalSection(&launchLock);
+    if (!SetTokenInformation(primaryToken.Get(), TokenSessionId, &tokenSessionId, sizeof(tokenSessionId))) {
         return false;
     }
 
-    LPVOID environment = nullptr;
-    CreateEnvironmentBlock(&environment, primaryToken, FALSE);
+    struct EnvironmentBlockGuard
+    {
+        LPVOID value = nullptr;
+        ~EnvironmentBlockGuard()
+        {
+            if (value) {
+                DestroyEnvironmentBlock(value);
+            }
+        }
+    } environment;
+    if (!CreateEnvironmentBlock(&environment.value, primaryToken.Get(), FALSE)) {
+        LogServiceWarning(L"Could not create environment block for session " + std::to_wstring(session.id));
+        return false;
+    }
 
     STARTUPINFOW si = {};
     si.cb = sizeof(si);
@@ -924,43 +959,35 @@ static bool LaunchProgramOnDesktop(const AppConfig& config, const ProgramConfig&
     std::wstring workingDirectory = ExpandTokens(program.workingDirectory, program, session);
     DWORD creationFlags = CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_PROCESS_GROUP;
     BOOL ok = CreateProcessAsUserW(
-        primaryToken,
+        primaryToken.Get(),
         program.path.c_str(),
         commandLine.empty() ? nullptr : &commandLine[0],
         nullptr,
         nullptr,
         FALSE,
         creationFlags,
-        environment,
+        environment.value,
         workingDirectory.empty() ? nullptr : workingDirectory.c_str(),
         &si,
         &pi);
 
-    if (ok)
-    {
+    aip::UniqueKernelHandle process(pi.hProcess);
+    aip::UniqueKernelHandle thread(pi.hThread);
+    if (ok) {
         RecordLaunchedProcess(program, pi);
     }
 
-    if (pi.hThread) {
-        CloseHandle(pi.hThread);
-    }
-    if (pi.hProcess) {
-        CloseHandle(pi.hProcess);
-    }
-    if (environment) {
-        DestroyEnvironmentBlock(environment);
-    }
-    CloseHandle(primaryToken);
-
     if (ok && program.launchSpacingMs > 0 && !gStopping.load()) {
         if (gStopEvent) {
-            WaitForSingleObject(gStopEvent, program.launchSpacingMs);
+            DWORD wait = WaitForSingleObject(gStopEvent, program.launchSpacingMs);
+            if (wait == WAIT_FAILED) {
+                LogServiceWarningNoThrow(L"Waiting between configured program launches failed.");
+            }
         } else {
             Sleep(program.launchSpacingMs);
         }
     }
 
-    LeaveCriticalSection(&launchLock);
     return ok != FALSE;
 }
 
@@ -1012,21 +1039,31 @@ static void StopConfiguredProcesses()
             continue;
         }
 
-        HANDLE process = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, target.pid);
+        aip::UniqueKernelHandle process(OpenProcess(
+            PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+            FALSE,
+            target.pid));
         if (!process) {
             continue;
         }
 
         FILETIME creationTime = {};
-        if (!TryGetProcessCreationTime(process, creationTime) ||
+        if (!TryGetProcessCreationTime(process.Get(), creationTime) ||
             !FileTimeEquals(creationTime, target.creationTime)) {
-            CloseHandle(process);
             continue;
         }
 
-        TerminateProcess(process, 0);
-        WaitForSingleObject(process, 5000);
-        CloseHandle(process);
+        if (!TerminateProcess(process.Get(), 0)) {
+            LogServiceWarningNoThrow(L"Could not terminate a configured process during service shutdown.");
+            continue;
+        }
+        DWORD wait = WaitForSingleObject(process.Get(), 5000);
+        if (wait != WAIT_OBJECT_0) {
+            LogServiceWarningNoThrow(
+                wait == WAIT_TIMEOUT
+                    ? L"Timed out waiting for a configured process to stop."
+                    : L"Waiting for a configured process to stop failed.");
+        }
     }
 }
 
@@ -1080,7 +1117,9 @@ static void CompleteEnsureWorker()
         --gEnsureWorkerCount;
     }
     if (gEnsureWorkerCount == 0 && gEnsureWorkersDrainedEvent) {
-        SetEvent(gEnsureWorkersDrainedEvent);
+        if (!SetEvent(gEnsureWorkersDrainedEvent)) {
+            LogServiceWarningNoThrow(L"Could not signal the worker-drained event.");
+        }
     }
 }
 
@@ -1088,8 +1127,16 @@ static DWORD WINAPI EnsureWorker(void* ctx)
 {
     DWORD sessionId = *reinterpret_cast<DWORD*>(ctx);
     delete reinterpret_cast<DWORD*>(ctx);
-    if (!gStopping.load()) {
-        EnsureProgramsForSession(sessionId);
+    try {
+        if (!gStopping.load()) {
+            EnsureProgramsForSession(sessionId);
+        }
+    }
+    catch (const std::exception& ex) {
+        LogServiceExceptionNoThrow(L"Session worker failed: ", ex);
+    }
+    catch (...) {
+        LogServiceWarningNoThrow(L"Session worker failed with an unknown exception.");
     }
     CompleteEnsureWorker();
     return 0;
@@ -1101,7 +1148,11 @@ static void QueueEnsure(DWORD sessionId)
         return;
     }
 
-    auto* boxedSessionId = new DWORD(sessionId);
+    auto* boxedSessionId = new (std::nothrow) DWORD(sessionId);
+    if (!boxedSessionId) {
+        LogServiceWarningNoThrow(L"Could not allocate a session worker request.");
+        return;
+    }
     {
         std::lock_guard<std::mutex> lock(gEnsureWorkersMutex);
         if (gStopping.load()) {
@@ -1109,7 +1160,11 @@ static void QueueEnsure(DWORD sessionId)
             return;
         }
         if (gEnsureWorkerCount == 0 && gEnsureWorkersDrainedEvent) {
-            ResetEvent(gEnsureWorkersDrainedEvent);
+            if (!ResetEvent(gEnsureWorkersDrainedEvent)) {
+                LogServiceWarningNoThrow(L"Could not reset the worker-drained event.");
+                delete boxedSessionId;
+                return;
+            }
         }
         ++gEnsureWorkerCount;
     }
@@ -1117,6 +1172,29 @@ static void QueueEnsure(DWORD sessionId)
     if (!QueueUserWorkItem(EnsureWorker, boxedSessionId, WT_EXECUTEDEFAULT)) {
         delete boxedSessionId;
         CompleteEnsureWorker();
+    }
+}
+
+static void WaitForEnsureWorkersToDrain()
+{
+    for (;;) {
+        {
+            std::lock_guard<std::mutex> lock(gEnsureWorkersMutex);
+            if (gEnsureWorkerCount == 0) {
+                return;
+            }
+        }
+
+        DWORD wait = WaitForSingleObject(gEnsureWorkersDrainedEvent, 1000);
+        if (wait == WAIT_FAILED) {
+            LogServiceWarningNoThrow(L"Waiting for session workers failed; polling worker state.");
+            Sleep(100);
+        }
+        else if (wait == WAIT_OBJECT_0) {
+            // A stale signal must not bypass the protected worker count.
+            Sleep(10);
+        }
+        SetServiceState(SERVICE_STOP_PENDING, NO_ERROR, 10000);
     }
 }
 
@@ -1140,29 +1218,38 @@ static bool ShouldHandleSessionEvent(const AppConfig& config, DWORD eventType)
 
 static DWORD WINAPI ServiceHandlerEx(DWORD control, DWORD eventType, LPVOID eventData, LPVOID)
 {
-    switch (control) {
-    case SERVICE_CONTROL_STOP:
-    case SERVICE_CONTROL_SHUTDOWN:
-        gStopping.store(true);
-        SetServiceState(SERVICE_STOP_PENDING, NO_ERROR, 10000);
-        if (gStopEvent) {
-            SetEvent(gStopEvent);
-        }
-        return NO_ERROR;
-
-    case SERVICE_CONTROL_SESSIONCHANGE:
-        if (eventData) {
-            AppConfig config = LoadConfig();
-            if (ShouldHandleSessionEvent(config, eventType)) {
-                auto* notice = reinterpret_cast<WTSSESSION_NOTIFICATION*>(eventData);
-                QueueEnsure(notice->dwSessionId);
+    try {
+        switch (control) {
+        case SERVICE_CONTROL_STOP:
+        case SERVICE_CONTROL_SHUTDOWN:
+            gStopping.store(true);
+            SetServiceState(SERVICE_STOP_PENDING, NO_ERROR, 10000);
+            if (!SignalStopEvent()) {
+                LogServiceWarningNoThrow(L"Could not signal the service stop event.");
             }
-        }
-        return NO_ERROR;
+            return NO_ERROR;
 
-    default:
-        return NO_ERROR;
+        case SERVICE_CONTROL_SESSIONCHANGE:
+            if (eventData) {
+                AppConfig config = LoadConfig();
+                if (ShouldHandleSessionEvent(config, eventType)) {
+                    auto* notice = reinterpret_cast<WTSSESSION_NOTIFICATION*>(eventData);
+                    QueueEnsure(notice->dwSessionId);
+                }
+            }
+            return NO_ERROR;
+
+        default:
+            return NO_ERROR;
+        }
     }
+    catch (const std::exception& ex) {
+        LogServiceExceptionNoThrow(L"Service control handler failed: ", ex);
+    }
+    catch (...) {
+        LogServiceWarningNoThrow(L"Service control handler failed with an unknown exception.");
+    }
+    return ERROR_UNHANDLED_EXCEPTION;
 }
 
 static void WINAPI ServiceMain(DWORD, LPWSTR*)
@@ -1175,7 +1262,10 @@ static void WINAPI ServiceMain(DWORD, LPWSTR*)
     gStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
     SetServiceState(SERVICE_START_PENDING, NO_ERROR, 3000);
 
-    gStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    {
+        std::lock_guard<std::mutex> lock(gStopEventMutex);
+        gStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    }
     if (!gStopEvent) {
         SetServiceState(SERVICE_STOPPED, GetLastError());
         return;
@@ -1183,28 +1273,62 @@ static void WINAPI ServiceMain(DWORD, LPWSTR*)
     gEnsureWorkersDrainedEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
     if (!gEnsureWorkersDrainedEvent) {
         DWORD error = GetLastError();
-        CloseHandle(gStopEvent);
-        gStopEvent = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(gStopEventMutex);
+            CloseHandle(gStopEvent);
+            gStopEvent = nullptr;
+        }
         SetServiceState(SERVICE_STOPPED, error);
         return;
     }
 
     gStopping.store(false);
     SetServiceState(SERVICE_RUNNING);
-    ReconcileSessions();
+    DWORD serviceError = NO_ERROR;
+    try {
+        ReconcileSessions();
 
-    WaitForSingleObject(gStopEvent, INFINITE);
+        DWORD stopWait = WaitForSingleObject(gStopEvent, INFINITE);
+        if (stopWait != WAIT_OBJECT_0) {
+            serviceError = stopWait == WAIT_FAILED ? GetLastError() : ERROR_GEN_FAILURE;
+            if (serviceError == ERROR_SUCCESS) {
+                serviceError = ERROR_GEN_FAILURE;
+            }
+            LogServiceWarningNoThrow(L"Waiting for the service stop event failed.");
+        }
+    }
+    catch (const std::exception& ex) {
+        serviceError = ERROR_UNHANDLED_EXCEPTION;
+        LogServiceExceptionNoThrow(L"Service main loop failed: ", ex);
+    }
+    catch (...) {
+        serviceError = ERROR_UNHANDLED_EXCEPTION;
+        LogServiceWarningNoThrow(L"Service main loop failed with an unknown exception.");
+    }
 
     gStopping.store(true);
     SetServiceState(SERVICE_STOP_PENDING, NO_ERROR, 10000);
-    WaitForSingleObject(gEnsureWorkersDrainedEvent, INFINITE);
-    StopConfiguredProcesses();
+    try {
+        WaitForEnsureWorkersToDrain();
+        StopConfiguredProcesses();
+    }
+    catch (const std::exception& ex) {
+        serviceError = ERROR_UNHANDLED_EXCEPTION;
+        LogServiceExceptionNoThrow(L"Service shutdown cleanup failed: ", ex);
+    }
+    catch (...) {
+        serviceError = ERROR_UNHANDLED_EXCEPTION;
+        LogServiceWarningNoThrow(L"Service shutdown cleanup failed with an unknown exception.");
+    }
 
     CloseHandle(gEnsureWorkersDrainedEvent);
     gEnsureWorkersDrainedEvent = nullptr;
-    CloseHandle(gStopEvent);
-    gStopEvent = nullptr;
-    SetServiceState(SERVICE_STOPPED);
+    {
+        std::lock_guard<std::mutex> lock(gStopEventMutex);
+        CloseHandle(gStopEvent);
+        gStopEvent = nullptr;
+    }
+    SetServiceState(SERVICE_STOPPED, serviceError);
 }
 
 static int InstallService()

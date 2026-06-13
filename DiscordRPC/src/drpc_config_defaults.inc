@@ -39,7 +39,8 @@ static constexpr const wchar_t* DEFAULT_HELP_TEMPLATE =
     L"\\n"
     L"Transports: ipc uses the local Discord desktop pipe; gateway uses a Discord\\n"
     L"user token stored through DPAPI token_protected; auto tries IPC first and\\n"
-    L"falls back to Gateway.\\n";
+    L"falls back to Gateway. Discord forbids automating normal user accounts and\\n"
+    L"warns that doing so can terminate the account; prefer IPC.\\n";
 
 static std::wstring DefaultHelpText()
 {

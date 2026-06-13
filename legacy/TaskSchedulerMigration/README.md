@@ -63,8 +63,11 @@ TaskSchedulerMigration.cmd -OldSID "S-1-5-21-..." -NewUser "DOMAIN\User" -WhatIf
 - Matching tasks are exported to the backup directory before they are changed.
 - The utility uses Task Scheduler COM registration, so matching tasks are overwritten with updated XML.
 - Tasks with credential-sensitive logon types are reported and skipped unless `-IncludeCredentialSensitiveTasks` is supplied.
+- Tasks whose logon type cannot be inspected are skipped instead of being re-registered with an assumed logon mode.
 - Only exact old-SID text matches in task XML are replaced.
-- Review console output after running; failures are printed per task.
+- Task XML is parsed with DTDs and external entity resolution disabled.
+- Inaccessible folders/items are reported while the scan continues through other folders. Any partial enumeration, uninspectable task, or failed update returns exit code `3`.
+- Review console output after running; failures are printed per task or folder.
 - Consider exporting important tasks manually before bulk migration.
 
 ## Generated Files

@@ -37,16 +37,17 @@ CharmTray\BuildCharmTray.cmd check
 build\CharmTray.exe
 ```
 
-The app creates a tray icon. Right-click the icon and choose a charm flyout. The app is single-instance guarded by a mutex.
+The app creates a tray icon. Click or right-click the icon and choose a charm flyout. Keyboard tray activation is also supported. The app is single-instance guarded per executable path, so renamed or separately installed copies do not block each other.
 
-On first launch, the app creates `CharmTray.ini` and writes `CharmTray.log` beside the executable. If the executable is renamed, the default INI/log names follow the renamed executable. Set `[Settings] LoggingEnabled=0` in the local INI to disable file logging.
+On first launch, the app atomically creates `CharmTray.ini` and writes a UTF-8 `CharmTray.log` beside the executable. If the executable is renamed, the default INI/log names follow the renamed executable. Set `[Settings] LoggingEnabled=0` in the local INI to disable file logging. Invalid boolean values are rejected instead of silently changing behavior.
 
-Startup failures for the singleton mutex, COM apartment, message window, or tray icon are logged and cause the process to exit instead of leaving a hidden unusable instance running.
+Startup failures for the supported-Windows check, settings file, singleton mutex, COM apartment, message window, or tray icon are reported and cause the process to exit instead of leaving a hidden unusable instance running. Undocumented shell COM failures are logged and shown as a tray notification. The tray icon is restored after Explorer restarts.
 
 ## Limitations
 
 - Windows 10/11 are out of scope.
 - This depends on undocumented Windows 8 shell internals and can break across shell updates.
+- The shell COM paths cannot be exercised by current Windows 10/11 CI. Builds and source invariants are checked there; flyout behavior still requires a Windows 8/8.1 runtime test.
 
 ## Generated Files
 

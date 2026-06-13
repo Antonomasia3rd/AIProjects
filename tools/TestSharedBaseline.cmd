@@ -25,14 +25,14 @@ for %%D in ("%ProgramFiles%" "%ProgramFiles(x86)%" "D:\Program Files" "D:\Progra
     )
 )
 
-if defined VCVARS (
-    call "%VCVARS%" >nul
-    if errorlevel 1 exit /b %ERRORLEVEL%
-    goto HaveCompiler
-)
-
+if defined VCVARS goto LoadCompiler
 echo ERROR: cl.exe not found. Install Visual Studio Build Tools with the C++ workload.
 exit /b 1
+
+:LoadCompiler
+call "%VCVARS%" >nul
+if errorlevel 1 exit /b %ERRORLEVEL%
+goto HaveCompiler
 
 :HaveCompiler
 pushd "%ROOT%" || exit /b 1
@@ -43,8 +43,8 @@ if errorlevel 1 (
 )
 
 cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\SharedBaselineTests.cpp /Fe:build\SharedBaselineTests.exe /Fo:build\SharedBaselineTests.obj /link user32.lib shell32.lib crypt32.lib /SUBSYSTEM:CONSOLE
-if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
     popd
     exit /b %STATUS%
 )
@@ -58,8 +58,8 @@ if not "%STATUS%"=="0" (
 )
 
 cl /nologo /utf-8 /std:c++17 /EHsc /W4 tools\SharedBaselineSourceCheck.cpp /Fe:build\SharedBaselineSourceCheck.exe /Fo:build\SharedBaselineSourceCheck.obj /link /SUBSYSTEM:CONSOLE
-if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
     popd
     exit /b %STATUS%
 )

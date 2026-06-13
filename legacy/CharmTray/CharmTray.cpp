@@ -17,6 +17,8 @@
 #include <objbase.h>
 #include <string>
 
+#include "../../dependencies/desktop_app_baseline.h"
+
 // ---------------------------------------------------------------------------
 // Tray / menu constants
 // ---------------------------------------------------------------------------
@@ -34,66 +36,94 @@
 #define CHARM_DEVICES   3
 #define CHARM_SETTINGS  4
 
-static std::wstring ModulePath()
-{
-    wchar_t buffer[MAX_PATH];
-    DWORD len = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    if (len == 0 || len >= MAX_PATH) return L"CharmTray.exe";
-    return std::wstring(buffer, len);
-}
-
-static std::wstring DirectoryOf(const std::wstring& path)
-{
-    size_t pos = path.find_last_of(L"\\/");
-    return pos == std::wstring::npos ? L"." : path.substr(0, pos);
-}
-
-static std::wstring BaseNameWithoutExtension(const std::wstring& path)
-{
-    size_t slash = path.find_last_of(L"\\/");
-    size_t start = slash == std::wstring::npos ? 0 : slash + 1;
-    size_t dot = path.find_last_of(L'.');
-    if (dot == std::wstring::npos || dot < start) dot = path.size();
-    std::wstring name = path.substr(start, dot - start);
-    return name.empty() ? L"CharmTray" : name;
-}
-
-static std::wstring ModuleLocalPath(const wchar_t* extension)
-{
-    std::wstring module = ModulePath();
-    return DirectoryOf(module) + L"\\" + BaseNameWithoutExtension(module) + extension;
-}
-
-static void EnsureIniFile()
-{
-    std::wstring ini = ModuleLocalPath(L".ini");
-    DWORD attrs = GetFileAttributesW(ini.c_str());
-    if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY)) return;
-    WritePrivateProfileStringW(L"Settings", L"LoggingEnabled", L"1", ini.c_str());
-}
-
-static bool IsLoggingEnabled()
-{
-    EnsureIniFile();
-    return GetPrivateProfileIntW(L"Settings", L"LoggingEnabled", 1, ModuleLocalPath(L".ini").c_str()) != 0;
-}
+static aip::SidecarPaths g_paths;
+static aip::InstanceIdentity g_instanceIdentity;
+static aip::Utf8Logger g_logger;
+static UINT g_taskbarCreated = 0;
+static bool g_trayCreated = false;
+static const wchar_t kWindowClass[] = L"CharmTrayWnd";
 
 static void LogLine(const wchar_t* message)
 {
-    if (!IsLoggingEnabled()) return;
-    std::wstring path = ModuleLocalPath(L".log");
-    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) return;
+    g_logger.Write(L"info", message != nullptr ? message : L"");
+}
 
-    SYSTEMTIME st;
-    GetLocalTime(&st);
-    wchar_t line[512];
-    int len = wsprintfW(line, L"%04u-%02u-%02u %02u:%02u:%02u  %s\r\n",
-        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, message);
-    DWORD bytes = 0;
-    WriteFile(file, line, static_cast<DWORD>(len * sizeof(wchar_t)), &bytes, nullptr);
-    CloseHandle(file);
+static void LogHResult(const wchar_t* operation, HRESULT result)
+{
+    wchar_t code[32] = {};
+    swprintf_s(code, L"0x%08X", static_cast<unsigned int>(result));
+    LogLine((std::wstring(operation) + L" failed (" + code + L"): " +
+        aip::GetLastErrorText(static_cast<DWORD>(result))).c_str());
+}
+
+static void ShowStartupError(const std::wstring& message)
+{
+    LogLine(message.c_str());
+    MessageBoxW(nullptr, message.c_str(), L"CharmTray", MB_OK | MB_ICONERROR);
+}
+
+static bool IsSupportedWindowsVersion()
+{
+    using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOW*);
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    auto getVersion = ntdll == nullptr ? nullptr :
+        reinterpret_cast<RtlGetVersionFn>(GetProcAddress(ntdll, "RtlGetVersion"));
+    if (getVersion == nullptr)
+    {
+        return false;
+    }
+
+    OSVERSIONINFOW version = {};
+    version.dwOSVersionInfoSize = sizeof(version);
+    return getVersion(&version) >= 0 &&
+        version.dwMajorVersion == 6 &&
+        (version.dwMinorVersion == 2 || version.dwMinorVersion == 3);
+}
+
+static bool InitializeSettings()
+{
+    g_paths = aip::BuildCurrentProcessSidecarPaths(L"CharmTray");
+    g_instanceIdentity = aip::BuildPathScopedInstanceIdentity(
+        L"CharmTray",
+        L"CharmTray.Message",
+        kWindowClass,
+        L"CharmTray",
+        g_paths.exePath);
+
+    const aip::IniDefaultValue defaults[] =
+    {
+        { L"Settings", L"LoggingEnabled", L"1" }
+    };
+    aip::IniConfigStore config(
+        g_paths.configPath,
+        L"; CharmTray settings\r\n",
+        5000);
+    if (!config.EnsureDefaults(defaults, ARRAYSIZE(defaults)))
+    {
+        ShowStartupError(
+            L"Could not create or update the settings file:\r\n" +
+            g_paths.configPath + L"\r\n\r\n" +
+            aip::GetLastErrorText(GetLastError()));
+        return false;
+    }
+
+    bool loggingEnabled = true;
+    std::wstring raw = config.ReadRaw(L"Settings", L"LoggingEnabled", L"1");
+    if (!aip::ParseBoolValue(raw, loggingEnabled))
+    {
+        ShowStartupError(
+            L"Invalid [Settings] LoggingEnabled value in:\r\n" +
+            g_paths.configPath + L"\r\n\r\nUse 0/1, true/false, yes/no, or on/off.");
+        return false;
+    }
+
+    aip::Utf8LoggerOptions options;
+    options.enabled = true;
+    options.fileEnabled = loggingEnabled;
+    options.filePath = g_paths.defaultLogPath;
+    options.lockWaitMs = 5000;
+    g_logger.Configure(options);
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,33 +250,71 @@ struct IHwndProvider : IUnknown
 // Helpers
 // ---------------------------------------------------------------------------
 
-static IServiceProvider_* GetShellSP()
+static bool GetShellSP(IServiceProvider_** shell)
 {
-    IServiceProvider_* pSP = nullptr;
-    CoCreateInstance(CLSID_ImmersiveShell, nullptr, CLSCTX_LOCAL_SERVER,
-                     IID_IServiceProvider_,
-                     reinterpret_cast<void**>(&pSP));
-    return pSP;
+    if (shell == nullptr)
+    {
+        return false;
+    }
+    *shell = nullptr;
+    HRESULT result = CoCreateInstance(
+        CLSID_ImmersiveShell,
+        nullptr,
+        CLSCTX_LOCAL_SERVER,
+        IID_IServiceProvider_,
+        reinterpret_cast<void**>(shell));
+    if (FAILED(result) || *shell == nullptr)
+    {
+        LogHResult(L"CoCreateInstance(CLSID_ImmersiveShell)", result);
+        return false;
+    }
+    return true;
 }
 
 // func_0x1740 — get edge placement for the current cursor monitor
-static IUnknown* GetEdgePlacement(IServiceProvider_* pSP)
+static bool GetEdgePlacement(IServiceProvider_* pSP, IUnknown** placement)
 {
-    if (!pSP) return nullptr;
+    if (pSP == nullptr || placement == nullptr)
+    {
+        return false;
+    }
+    *placement = nullptr;
+
     IEdgeUiTracker* pTracker = nullptr;
     // rdx=SID_IEdgeUiTracker, r8=IID_IEdgeUiTracker  (verified from disasm)
-    pSP->QueryService(SID_IEdgeUiTracker, IID_IEdgeUiTracker,
-                      reinterpret_cast<void**>(&pTracker));
-    if (!pTracker) return nullptr;
+    HRESULT result = pSP->QueryService(
+        SID_IEdgeUiTracker,
+        IID_IEdgeUiTracker,
+        reinterpret_cast<void**>(&pTracker));
+    if (FAILED(result) || pTracker == nullptr)
+    {
+        LogHResult(L"QueryService(IEdgeUiTracker)", result);
+        return false;
+    }
 
     POINT pt = {};
-    GetCursorPos(&pt);
+    if (!GetCursorPos(&pt))
+    {
+        LogLine(L"GetCursorPos failed while selecting the charm monitor.");
+        pTracker->Release();
+        return false;
+    }
     HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    if (hMon == nullptr)
+    {
+        LogLine(L"MonitorFromPoint did not return a monitor.");
+        pTracker->Release();
+        return false;
+    }
 
-    IUnknown* pPlacement = nullptr;
-    pTracker->SetMonitorEdge(hMon, &pPlacement);
+    result = pTracker->SetMonitorEdge(hMon, placement);
     pTracker->Release();
-    return pPlacement;
+    if (FAILED(result) || *placement == nullptr)
+    {
+        LogHResult(L"IEdgeUiTracker::SetMonitorEdge", result);
+        return false;
+    }
+    return true;
 }
 
 // func_0x1670 — get immersive shell HWND (desktop window as fallback)
@@ -258,32 +326,62 @@ static HWND GetImmersiveHWND(IServiceProvider_* pSP)
     // Step 1: QueryService(SID=IID=GUID_IShellHostObject) → IShellHostObject
     // NOTE: SID == IID here (bf63999f) — verified from disasm
     IShellHostObject* pShellHost = nullptr;
-    pSP->QueryService(GUID_IShellHostObject, GUID_IShellHostObject,
-                      reinterpret_cast<void**>(&pShellHost));
-    if (!pShellHost) return hwnd;
+    HRESULT result = pSP->QueryService(
+        GUID_IShellHostObject,
+        GUID_IShellHostObject,
+        reinterpret_cast<void**>(&pShellHost));
+    if (FAILED(result) || pShellHost == nullptr)
+    {
+        LogHResult(L"QueryService(IShellHostObject)", result);
+        return hwnd;
+    }
 
     // Step 2: vtable[4] = GetHostContainer
     IUnknown* pContainer = nullptr;
-    pShellHost->GetHostContainer(&pContainer);
+    result = pShellHost->GetHostContainer(&pContainer);
     pShellHost->Release();
-    if (!pContainer) return hwnd;
+    if (FAILED(result) || pContainer == nullptr)
+    {
+        LogHResult(L"IShellHostObject::GetHostContainer", result);
+        return hwnd;
+    }
 
     // Step 3: QueryService on container: SID=NULL, IID=IHwndProvider
     IServiceProvider_* pContainerSP = nullptr;
-    pContainer->QueryInterface(IID_IServiceProvider_,
-                               reinterpret_cast<void**>(&pContainerSP));
-    if (pContainerSP)
+    result = pContainer->QueryInterface(
+        IID_IServiceProvider_,
+        reinterpret_cast<void**>(&pContainerSP));
+    if (SUCCEEDED(result) && pContainerSP != nullptr)
     {
         IHwndProvider* pHwndProv = nullptr;
         // rdx=NULL (xor edx,edx), r8=IID_IHwndProvider — verified from disasm
-        pContainerSP->QueryService(GUID_NULL, IID_IHwndProvider,
-                                   reinterpret_cast<void**>(&pHwndProv));
-        if (pHwndProv)
+        result = pContainerSP->QueryService(
+            GUID_NULL,
+            IID_IHwndProvider,
+            reinterpret_cast<void**>(&pHwndProv));
+        if (SUCCEEDED(result) && pHwndProv != nullptr)
         {
-            pHwndProv->GetHwnd(&hwnd);
+            HWND immersiveHwnd = nullptr;
+            result = pHwndProv->GetHwnd(&immersiveHwnd);
+            if (SUCCEEDED(result) && immersiveHwnd != nullptr)
+            {
+                hwnd = immersiveHwnd;
+            }
+            else
+            {
+                LogHResult(L"IHwndProvider::GetHwnd", result);
+            }
             pHwndProv->Release();
         }
+        else
+        {
+            LogHResult(L"QueryService(IHwndProvider)", result);
+        }
         pContainerSP->Release();
+    }
+    else
+    {
+        LogHResult(L"QueryInterface(IServiceProvider)", result);
     }
     pContainer->Release();
     return hwnd;
@@ -292,23 +390,41 @@ static HWND GetImmersiveHWND(IServiceProvider_* pSP)
 // ---------------------------------------------------------------------------
 // ShowCharm — the core function
 // ---------------------------------------------------------------------------
-static void ShowCharm(int charmId)
+static bool ShowCharm(int charmId)
 {
-    IServiceProvider_* pSP = GetShellSP();
-    if (!pSP) return;
+    IServiceProvider_* pSP = nullptr;
+    if (!GetShellSP(&pSP))
+    {
+        return false;
+    }
 
+    bool shown = false;
     if (charmId == CHARM_SEARCH)
     {
         // QueryService: rdx(SID)=SID_SearchPane, r8(IID)=IID_ISearchPane
         ISearchPane* pSearch = nullptr;
-        pSP->QueryService(SID_SearchPane, IID_ISearchPane,
-                          reinterpret_cast<void**>(&pSearch));
-        if (pSearch)
+        HRESULT result = pSP->QueryService(
+            SID_SearchPane,
+            IID_ISearchPane,
+            reinterpret_cast<void**>(&pSearch));
+        if (SUCCEEDED(result) && pSearch != nullptr)
         {
-            IUnknown* pPlacement = GetEdgePlacement(pSP);
-            pSearch->Show(pPlacement, nullptr, nullptr);
-            if (pPlacement) pPlacement->Release();
+            IUnknown* pPlacement = nullptr;
+            if (GetEdgePlacement(pSP, &pPlacement))
+            {
+                result = pSearch->Show(pPlacement, nullptr, nullptr);
+                shown = SUCCEEDED(result);
+                if (!shown)
+                {
+                    LogHResult(L"ISearchPane::Show", result);
+                }
+                pPlacement->Release();
+            }
             pSearch->Release();
+        }
+        else
+        {
+            LogHResult(L"QueryService(ISearchPane)", result);
         }
     }
     else if (charmId == CHARM_SHARE || charmId == CHARM_START)
@@ -318,42 +434,81 @@ static void ShowCharm(int charmId)
         const GUID& sid =
             (charmId == CHARM_SHARE) ? SID_IShareFlyout : SID_IStartFlyout;
         ICharmFlyout* pFlyout = nullptr;
-        pSP->QueryService(sid, IID_ICharmFlyout,
-                          reinterpret_cast<void**>(&pFlyout));
-        if (pFlyout)
+        HRESULT result = pSP->QueryService(
+            sid,
+            IID_ICharmFlyout,
+            reinterpret_cast<void**>(&pFlyout));
+        if (SUCCEEDED(result) && pFlyout != nullptr)
         {
-            IUnknown* pPlacement = GetEdgePlacement(pSP);
-            HWND      hwnd       = GetImmersiveHWND(pSP);
-            pFlyout->Show(pPlacement, hwnd);
-            if (pPlacement) pPlacement->Release();
+            IUnknown* pPlacement = nullptr;
+            if (GetEdgePlacement(pSP, &pPlacement))
+            {
+                HWND hwnd = GetImmersiveHWND(pSP);
+                result = pFlyout->Show(pPlacement, hwnd);
+                shown = SUCCEEDED(result);
+                if (!shown)
+                {
+                    LogHResult(L"ICharmFlyout::Show", result);
+                }
+                pPlacement->Release();
+            }
             pFlyout->Release();
         }
+        else
+        {
+            LogHResult(L"QueryService(ICharmFlyout)", result);
+        }
     }
-    else // CHARM_DEVICES or CHARM_SETTINGS
+    else if (charmId == CHARM_DEVICES || charmId == CHARM_SETTINGS)
     {
         // Level-1: rdx(SID)=SID_DevSettIntermediate, r8(IID)=IID_IServiceProvider_
         IServiceProvider_* pInterm = nullptr;
-        pSP->QueryService(SID_DevSettIntermediate, IID_IServiceProvider_,
-                          reinterpret_cast<void**>(&pInterm));
-        if (pInterm)
+        HRESULT result = pSP->QueryService(
+            SID_DevSettIntermediate,
+            IID_IServiceProvider_,
+            reinterpret_cast<void**>(&pInterm));
+        if (SUCCEEDED(result) && pInterm != nullptr)
         {
             // Level-2: rdx(SID)=SID_IDevSettFlyout, r8(IID)=IID_ICharmFlyout
             ICharmFlyout* pFlyout = nullptr;
-            pInterm->QueryService(SID_IDevSettFlyout, IID_ICharmFlyout,
-                                  reinterpret_cast<void**>(&pFlyout));
-            if (pFlyout)
+            result = pInterm->QueryService(
+                SID_IDevSettFlyout,
+                IID_ICharmFlyout,
+                reinterpret_cast<void**>(&pFlyout));
+            if (SUCCEEDED(result) && pFlyout != nullptr)
             {
-                IUnknown* pPlacement = GetEdgePlacement(pSP);
-                HWND      hwnd       = GetImmersiveHWND(pSP);
-                pFlyout->Show(pPlacement, hwnd);
-                if (pPlacement) pPlacement->Release();
+                IUnknown* pPlacement = nullptr;
+                if (GetEdgePlacement(pSP, &pPlacement))
+                {
+                    HWND hwnd = GetImmersiveHWND(pSP);
+                    result = pFlyout->Show(pPlacement, hwnd);
+                    shown = SUCCEEDED(result);
+                    if (!shown)
+                    {
+                        LogHResult(L"ICharmFlyout::Show", result);
+                    }
+                    pPlacement->Release();
+                }
                 pFlyout->Release();
+            }
+            else
+            {
+                LogHResult(L"QueryService(IDevSettFlyout)", result);
             }
             pInterm->Release();
         }
+        else
+        {
+            LogHResult(L"QueryService(DevSettIntermediate)", result);
+        }
+    }
+    else
+    {
+        LogLine(L"Rejected an unknown charm command.");
     }
 
     pSP->Release();
+    return shown;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,37 +518,104 @@ static NOTIFYICONDATA g_nid = {};
 
 static bool AddTrayIcon(HWND hwnd)
 {
+    if (g_trayCreated)
+    {
+        return true;
+    }
+
+    g_nid = {};
     g_nid.cbSize           = sizeof(g_nid);
     g_nid.hWnd             = hwnd;
     g_nid.uID              = IDI_TRAY;
     g_nid.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAY_ICON;
-    g_nid.hIcon            = LoadIcon(nullptr, IDI_APPLICATION);
-    lstrcpy(g_nid.szTip, L"Charm Launcher");
-    return Shell_NotifyIcon(NIM_ADD, &g_nid) != FALSE;
+    g_nid.hIcon            = LoadIconW(nullptr, IDI_APPLICATION);
+    wcsncpy_s(g_nid.szTip, L"Charm Launcher", _TRUNCATE);
+    if (g_nid.hIcon == nullptr || !Shell_NotifyIconW(NIM_ADD, &g_nid))
+    {
+        return false;
+    }
+
+    g_trayCreated = true;
+    g_nid.uVersion = NOTIFYICON_VERSION_4;
+    if (!Shell_NotifyIconW(NIM_SETVERSION, &g_nid))
+    {
+        LogLine(L"Shell_NotifyIconW(NIM_SETVERSION) failed.");
+    }
+    return true;
 }
 
 static void RemoveTrayIcon()
 {
-    Shell_NotifyIcon(NIM_DELETE, &g_nid);
+    if (g_trayCreated)
+    {
+        if (!Shell_NotifyIconW(NIM_DELETE, &g_nid))
+        {
+            LogLine(L"Shell_NotifyIconW(NIM_DELETE) failed.");
+        }
+        g_trayCreated = false;
+    }
+}
+
+static void ShowTrayFailure()
+{
+    if (!g_trayCreated)
+    {
+        return;
+    }
+    NOTIFYICONDATAW notification = g_nid;
+    notification.uFlags = NIF_INFO;
+    notification.dwInfoFlags = NIIF_ERROR;
+    wcsncpy_s(notification.szInfoTitle, L"Charm Launcher", _TRUNCATE);
+    wcsncpy_s(
+        notification.szInfo,
+        L"The selected charm could not be opened. See the log for details.",
+        _TRUNCATE);
+    Shell_NotifyIconW(NIM_MODIFY, &notification);
 }
 
 static void ShowContextMenu(HWND hwnd)
 {
     HMENU hMenu = CreatePopupMenu();
     if (!hMenu) return;
-    AppendMenu(hMenu, MF_STRING, ID_SEARCH,   L"Search");
-    AppendMenu(hMenu, MF_STRING, ID_SHARE,    L"Share");
-    AppendMenu(hMenu, MF_STRING, ID_START,    L"Start");
-    AppendMenu(hMenu, MF_STRING, ID_DEVICES,  L"Devices");
-    AppendMenu(hMenu, MF_STRING, ID_SETTINGS, L"Settings");
-    AppendMenu(hMenu, MF_SEPARATOR, 0, nullptr);
-    AppendMenu(hMenu, MF_STRING, ID_EXIT,     L"Exit");
+
+    bool built =
+        aip::AppendTrayMenuItem(hMenu, ID_SEARCH, L"Search") &&
+        aip::AppendTrayMenuItem(hMenu, ID_SHARE, L"Share") &&
+        aip::AppendTrayMenuItem(hMenu, ID_START, L"Start") &&
+        aip::AppendTrayMenuItem(hMenu, ID_DEVICES, L"Devices") &&
+        aip::AppendTrayMenuItem(hMenu, ID_SETTINGS, L"Settings") &&
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr) != FALSE &&
+        aip::AppendTrayMenuItem(hMenu, ID_EXIT, L"Exit");
+    if (!built)
+    {
+        LogLine(L"Failed to build the tray menu.");
+        DestroyMenu(hMenu);
+        return;
+    }
+
     SetForegroundWindow(hwnd);
-    POINT pt; GetCursorPos(&pt);
-    TrackPopupMenu(hMenu, TPM_BOTTOMALIGN | TPM_LEFTALIGN,
-                   pt.x, pt.y, 0, hwnd, nullptr);
+    POINT pt = {};
+    if (!GetCursorPos(&pt))
+    {
+        LogLine(L"GetCursorPos failed while opening the tray menu.");
+        DestroyMenu(hMenu);
+        return;
+    }
+    UINT command = static_cast<UINT>(TrackPopupMenu(
+        hMenu,
+        TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_LEFTALIGN,
+        pt.x,
+        pt.y,
+        0,
+        hwnd,
+        nullptr));
+    PostMessageW(hwnd, WM_NULL, 0, 0);
     DestroyMenu(hMenu);
+    if (command != 0)
+    {
+        SendMessageW(hwnd, WM_COMMAND, command, 0);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -401,21 +623,50 @@ static void ShowContextMenu(HWND hwnd)
 // ---------------------------------------------------------------------------
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    if (g_taskbarCreated != 0 && msg == g_taskbarCreated)
+    {
+        g_trayCreated = false;
+        if (!AddTrayIcon(hwnd))
+        {
+            LogLine(L"Failed to restore the tray icon after Explorer restarted.");
+        }
+        return 0;
+    }
+
     switch (msg)
     {
     case WM_TRAY_ICON:
-        if (lp == WM_RBUTTONUP || lp == WM_LBUTTONUP)
+    {
+        UINT notification = LOWORD(static_cast<DWORD_PTR>(lp));
+        if (notification == WM_CONTEXTMENU ||
+            notification == WM_RBUTTONUP ||
+            notification == WM_LBUTTONUP ||
+            notification == NIN_SELECT ||
+            notification == NIN_KEYSELECT)
+        {
             ShowContextMenu(hwnd);
+        }
         return 0;
+    }
 
     case WM_COMMAND:
         switch (LOWORD(wp))
         {
-        case ID_SEARCH:   ShowCharm(CHARM_SEARCH);   break;
-        case ID_SHARE:    ShowCharm(CHARM_SHARE);    break;
-        case ID_START:    ShowCharm(CHARM_START);    break;
-        case ID_DEVICES:  ShowCharm(CHARM_DEVICES);  break;
-        case ID_SETTINGS: ShowCharm(CHARM_SETTINGS); break;
+        case ID_SEARCH:
+            if (!ShowCharm(CHARM_SEARCH)) ShowTrayFailure();
+            break;
+        case ID_SHARE:
+            if (!ShowCharm(CHARM_SHARE)) ShowTrayFailure();
+            break;
+        case ID_START:
+            if (!ShowCharm(CHARM_START)) ShowTrayFailure();
+            break;
+        case ID_DEVICES:
+            if (!ShowCharm(CHARM_DEVICES)) ShowTrayFailure();
+            break;
+        case ID_SETTINGS:
+            if (!ShowCharm(CHARM_SETTINGS)) ShowTrayFailure();
+            break;
         case ID_EXIT:
             DestroyWindow(hwnd);
             break;
@@ -432,13 +683,26 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 {
-    EnsureIniFile();
+    if (!IsSupportedWindowsVersion())
+    {
+        MessageBoxW(
+            nullptr,
+            L"CharmTray supports only Windows 8 and Windows 8.1.",
+            L"CharmTray",
+            MB_OK | MB_ICONERROR);
+        return 1;
+    }
+
+    if (!InitializeSettings())
+    {
+        return 1;
+    }
     LogLine(L"Starting");
 
-    HANDLE hMutex = CreateMutex(nullptr, TRUE, L"CharmTray_SingleInstance");
+    HANDLE hMutex = CreateMutexW(nullptr, TRUE, g_instanceIdentity.mutexName.c_str());
     if (!hMutex)
     {
-        LogLine(L"Failed to create the single-instance mutex");
+        ShowStartupError(L"Failed to create the single-instance mutex.");
         return 1;
     }
 
@@ -452,30 +716,48 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
     HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(comResult))
     {
-        LogLine(L"Failed to initialize COM");
+        LogHResult(L"CoInitializeEx", comResult);
+        ShowStartupError(L"Failed to initialize COM.");
         CloseHandle(hMutex);
         return 1;
+    }
+
+    g_taskbarCreated = aip::RegisterTaskbarCreatedMessage();
+    if (g_taskbarCreated == 0)
+    {
+        LogLine(L"Could not register the TaskbarCreated message.");
     }
 
     WNDCLASSEX wc   = {};
     wc.cbSize        = sizeof(wc);
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInstance;
-    wc.lpszClassName = L"CharmTrayWnd";
-    if (!RegisterClassEx(&wc))
+    wc.lpszClassName = kWindowClass;
+    if (!RegisterClassExW(&wc))
     {
-        LogLine(L"Failed to register the message-window class");
+        ShowStartupError(L"Failed to register the message-window class.");
         CoUninitialize();
         CloseHandle(hMutex);
         return 1;
     }
 
-    HWND hwnd = CreateWindowEx(0, L"CharmTrayWnd", L"CharmTray",
-                                0, 0, 0, 0, 0,
-                                HWND_MESSAGE, nullptr, hInstance, nullptr);
+    HWND hwnd = CreateWindowExW(
+        0,
+        kWindowClass,
+        g_instanceIdentity.windowTitle.c_str(),
+        0,
+        0,
+        0,
+        0,
+        0,
+        HWND_MESSAGE,
+        nullptr,
+        hInstance,
+        nullptr);
     if (!hwnd)
     {
-        LogLine(L"Failed to create the message window");
+        ShowStartupError(L"Failed to create the message window.");
+        UnregisterClassW(kWindowClass, hInstance);
         CoUninitialize();
         CloseHandle(hMutex);
         return 1;
@@ -483,8 +765,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 
     if (!AddTrayIcon(hwnd))
     {
-        LogLine(L"Failed to add the tray icon");
+        ShowStartupError(L"Failed to add the tray icon.");
         DestroyWindow(hwnd);
+        UnregisterClassW(kWindowClass, hInstance);
         CoUninitialize();
         CloseHandle(hMutex);
         return 1;
@@ -514,6 +797,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
     {
         DestroyWindow(hwnd);
     }
+    UnregisterClassW(kWindowClass, hInstance);
     CoUninitialize();
     CloseHandle(hMutex);
     LogLine(L"Stopped");

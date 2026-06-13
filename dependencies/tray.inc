@@ -78,13 +78,13 @@ inline void TrackPostAndDestroyTrayMenu(HMENU menu, HWND hwnd, const POINT& pt, 
     DestroyMenu(menu);
 }
 
-inline void ShowTrayBalloon(NOTIFYICONDATAW& nid, const std::wstring& title, const std::wstring& message, DWORD icon)
+inline bool ShowTrayBalloon(NOTIFYICONDATAW& nid, const std::wstring& title, const std::wstring& message, DWORD icon)
 {
     nid.uFlags = NIF_INFO;
     wcsncpy_s(nid.szInfoTitle, ARRAYSIZE(nid.szInfoTitle), title.c_str(), _TRUNCATE);
     wcsncpy_s(nid.szInfo, ARRAYSIZE(nid.szInfo), message.c_str(), _TRUNCATE);
     nid.dwInfoFlags = icon;
-    Shell_NotifyIconW(NIM_MODIFY, &nid);
+    return Shell_NotifyIconW(NIM_MODIFY, &nid) != FALSE;
 }
 }
 

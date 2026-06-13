@@ -23,11 +23,11 @@ static void SetTrayTip(RuntimeContext* ctx, const std::wstring& text)
     Shell_NotifyIconW(NIM_MODIFY, &ctx->nid);
 }
 
-static void CreateTrayIcon(RuntimeContext* ctx)
+static bool CreateTrayIcon(RuntimeContext* ctx)
 {
     if (ctx == nullptr || ctx->trayCreated)
     {
-        return;
+        return ctx != nullptr && ctx->trayCreated;
     }
 
     ctx->nid = {};
@@ -43,8 +43,13 @@ static void CreateTrayIcon(RuntimeContext* ctx)
     if (ctx->trayCreated)
     {
         ctx->nid.uVersion = NOTIFYICON_VERSION_4;
-        Shell_NotifyIconW(NIM_SETVERSION, &ctx->nid);
+        if (!Shell_NotifyIconW(NIM_SETVERSION, &ctx->nid))
+        {
+            Log(L"Could not select the modern tray notification behavior: %s",
+                GetLastErrorText(GetLastError()).c_str());
+        }
     }
+    return ctx->trayCreated;
 }
 
 static void DestroyTrayIcon(RuntimeContext* ctx)
@@ -63,31 +68,66 @@ static void ShowTrayMenu(RuntimeContext* ctx)
         return;
     }
 
-    HMENU menu = CreatePopupMenu();
+    HMENU menu = aip::CreateTrayPopupMenu();
     if (menu == nullptr)
     {
         return;
     }
 
-    AppendMenuW(menu, MF_STRING, ID_TRAY_REFRESH, L"Refresh now");
-    AppendMenuW(menu, MF_STRING, ID_TRAY_WIDGET, L"Open widget");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, ID_TRAY_REGISTER, L"Register Start tile");
-    AppendMenuW(menu, MF_STRING, ID_TRAY_LAUNCH_PACKAGED, L"Launch packaged instance");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+    bool built =
+        aip::AppendTrayMenuItem(menu, ID_TRAY_REFRESH, L"Refresh now") &&
+        aip::AppendTrayMenuItem(menu, ID_TRAY_WIDGET, L"Open widget") &&
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr) != FALSE &&
+        aip::AppendTrayMenuItem(menu, ID_TRAY_REGISTER, L"Register Start tile") &&
+        aip::AppendTrayMenuItem(menu, ID_TRAY_LAUNCH_PACKAGED, L"Launch packaged instance") &&
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr) != FALSE &&
+        aip::AppendTrayMenuItem(menu, ID_TRAY_EXIT, L"Exit");
+    if (!built)
+    {
+        Log(L"Could not build the tray menu: %s", GetLastErrorText(GetLastError()).c_str());
+        DestroyMenu(menu);
+        return;
+    }
 
     POINT pt = {};
-    GetCursorPos(&pt);
+    if (!GetCursorPos(&pt))
+    {
+        Log(L"Could not read the cursor position for the tray menu: %s",
+            GetLastErrorText(GetLastError()).c_str());
+        DestroyMenu(menu);
+        return;
+    }
     SetForegroundWindow(ctx->hwnd);
-    TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_LEFTALIGN, pt.x, pt.y, 0, ctx->hwnd, nullptr);
-    PostMessageW(ctx->hwnd, WM_NULL, 0, 0);
-    DestroyMenu(menu);
+    aip::TrackPostAndDestroyTrayMenu(
+        menu,
+        ctx->hwnd,
+        pt,
+        TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_LEFTALIGN);
+}
+
+static bool LaunchSelfFromTray(const wchar_t* arguments)
+{
+    HINSTANCE result = ShellExecuteW(
+        nullptr,
+        L"open",
+        g_exePath.c_str(),
+        arguments,
+        g_exeDir.c_str(),
+        SW_SHOWNORMAL);
+    INT_PTR status = reinterpret_cast<INT_PTR>(result);
+    if (status <= 32)
+    {
+        Log(L"Could not launch tray action \"%s\" (ShellExecute=%lld).",
+            arguments ? arguments : L"",
+            static_cast<long long>(status));
+        return false;
+    }
+    return true;
 }
 
 static void BeginUpdate(RuntimeContext* ctx)
 {
-    if (ctx == nullptr || ctx->closing.load() || ctx->updateRunning)
+    if (ctx == nullptr || ctx->closing.load() || ctx->updateRunning.load())
     {
         return;
     }
@@ -98,39 +138,75 @@ static void BeginUpdate(RuntimeContext* ctx)
     }
 
     ctx->settings = LoadSettings();
-    SetTimer(ctx->hwnd, UPDATE_TIMER_ID, static_cast<UINT>(std::max(1, ctx->settings.updateIntervalSeconds) * 1000), nullptr);
-    ctx->updateRunning = true;
+    if (SetTimer(
+            ctx->hwnd,
+            UPDATE_TIMER_ID,
+            static_cast<UINT>((std::max)(1, ctx->settings.updateIntervalSeconds) * 1000),
+            nullptr) == 0)
+    {
+        Log(L"Could not update the media refresh timer: %s",
+            GetLastErrorText(GetLastError()).c_str());
+    }
+    ctx->updateRunning.store(true);
 
     try
     {
         ctx->updateThread = std::thread([ctx]() {
+            bool apartmentInitialized = false;
             try
             {
                 winrt::init_apartment(winrt::apartment_type::multi_threaded);
+                apartmentInitialized = true;
+
+                std::unique_ptr<MediaSnapshot> snapshot =
+                    std::make_unique<MediaSnapshot>(ReadMediaSnapshot());
+                if (!ctx->closing.load() &&
+                    PostMessageW(
+                        ctx->hwnd,
+                        WM_NPT_UPDATE_DONE,
+                        0,
+                        reinterpret_cast<LPARAM>(snapshot.get())) != FALSE)
+                {
+                    snapshot.release();
+                }
+                else
+                {
+                    ctx->updateRunning.store(false);
+                }
+            }
+            catch (const winrt::hresult_error& ex)
+            {
+                ctx->updateRunning.store(false);
+                Log(L"Media update worker failed: 0x%08X %s",
+                    static_cast<unsigned int>(ex.code()),
+                    ex.message().c_str());
+            }
+            catch (const std::exception& ex)
+            {
+                ctx->updateRunning.store(false);
+                Log(L"Media update worker failed: %S", ex.what());
             }
             catch (...)
             {
+                ctx->updateRunning.store(false);
+                Log(L"Media update worker failed with an unknown exception.");
             }
 
-            std::unique_ptr<MediaSnapshot> snapshot(new MediaSnapshot(ReadMediaSnapshot()));
-            if (!ctx->closing.load() &&
-                PostMessageW(ctx->hwnd, WM_NPT_UPDATE_DONE, 0, reinterpret_cast<LPARAM>(snapshot.get())) != FALSE)
+            if (apartmentInitialized)
             {
-                snapshot.release();
-            }
-
-            try
-            {
-                winrt::uninit_apartment();
-            }
-            catch (...)
-            {
+                try
+                {
+                    winrt::uninit_apartment();
+                }
+                catch (...)
+                {
+                }
             }
         });
     }
     catch (const std::exception&)
     {
-        ctx->updateRunning = false;
+        ctx->updateRunning.store(false);
         Log(L"Could not start media update worker.");
     }
 }
@@ -154,7 +230,7 @@ static void StopUpdates(RuntimeContext* ctx)
     {
         delete reinterpret_cast<MediaSnapshot*>(pending.lParam);
     }
-    ctx->updateRunning = false;
+    ctx->updateRunning.store(false);
 }
 
 static LRESULT CALLBACK BackgroundWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -170,6 +246,19 @@ static LRESULT CALLBACK BackgroundWndProc(HWND hwnd, UINT msg, WPARAM wParam, LP
         {
             ctx->hwnd = hwnd;
         }
+    }
+
+    if (g_taskbarCreatedMessage != 0 && msg == g_taskbarCreatedMessage)
+    {
+        if (ctx != nullptr && ctx->settings.showTrayIcon)
+        {
+            ctx->trayCreated = false;
+            if (!CreateTrayIcon(ctx))
+            {
+                Log(L"Could not restore the tray icon after Explorer restarted.");
+            }
+        }
+        return 0;
     }
 
     if (g_restoreMessage != 0 && msg == g_restoreMessage)
@@ -188,9 +277,12 @@ static LRESULT CALLBACK BackgroundWndProc(HWND hwnd, UINT msg, WPARAM wParam, LP
         {
             if (ctx->settings.showTrayIcon)
             {
-                CreateTrayIcon(ctx);
+                if (!CreateTrayIcon(ctx))
+                {
+                    Log(L"Could not create the tray icon: %s",
+                        GetLastErrorText(GetLastError()).c_str());
+                }
             }
-            SetTimer(hwnd, UPDATE_TIMER_ID, static_cast<UINT>(std::max(1, ctx->settings.updateIntervalSeconds) * 1000), nullptr);
             BeginUpdate(ctx);
         }
         return 0;
@@ -211,7 +303,7 @@ static LRESULT CALLBACK BackgroundWndProc(HWND hwnd, UINT msg, WPARAM wParam, LP
             {
                 ctx->updateThread.join();
             }
-            ctx->updateRunning = false;
+            ctx->updateRunning.store(false);
             ctx->current = *snapshot;
             MaybeUpdateLiveTile(ctx, *snapshot);
             SetTrayTip(ctx, snapshot->title);
@@ -219,13 +311,16 @@ static LRESULT CALLBACK BackgroundWndProc(HWND hwnd, UINT msg, WPARAM wParam, LP
         return 0;
 
     case WM_NPT_TRAY:
-        if (LOWORD(lParam) == WM_CONTEXTMENU || LOWORD(lParam) == WM_RBUTTONUP)
+        if (LOWORD(lParam) == WM_CONTEXTMENU ||
+            LOWORD(lParam) == WM_RBUTTONUP ||
+            LOWORD(lParam) == NIN_KEYSELECT)
         {
             ShowTrayMenu(ctx);
         }
-        else if (LOWORD(lParam) == WM_LBUTTONDBLCLK)
+        else if (LOWORD(lParam) == NIN_SELECT ||
+            LOWORD(lParam) == WM_LBUTTONDBLCLK)
         {
-            ShellExecuteW(nullptr, L"open", g_exePath.c_str(), L"--widget --allow-multiple", g_exeDir.c_str(), SW_SHOWNORMAL);
+            LaunchSelfFromTray(L"--widget --allow-multiple");
         }
         return 0;
 
@@ -236,13 +331,13 @@ static LRESULT CALLBACK BackgroundWndProc(HWND hwnd, UINT msg, WPARAM wParam, LP
             BeginUpdate(ctx);
             return 0;
         case ID_TRAY_WIDGET:
-            ShellExecuteW(nullptr, L"open", g_exePath.c_str(), L"--widget --allow-multiple", g_exeDir.c_str(), SW_SHOWNORMAL);
+            LaunchSelfFromTray(L"--widget --allow-multiple");
             return 0;
         case ID_TRAY_REGISTER:
-            ShellExecuteW(nullptr, L"open", g_exePath.c_str(), L"--register", g_exeDir.c_str(), SW_SHOWNORMAL);
+            LaunchSelfFromTray(L"--register");
             return 0;
         case ID_TRAY_LAUNCH_PACKAGED:
-            ShellExecuteW(nullptr, L"open", g_exePath.c_str(), L"--launch-packaged", g_exeDir.c_str(), SW_SHOWNORMAL);
+            LaunchSelfFromTray(L"--launch-packaged");
             return 0;
         case ID_TRAY_EXIT:
             DestroyWindow(hwnd);
@@ -291,12 +386,16 @@ static int RunBackground(const AppOptions& options)
     wc.lpszClassName = WINDOW_CLASS_NAME;
     wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    RegisterClassExW(&wc);
+    if (RegisterClassExW(&wc) == 0)
+    {
+        Log(L"Could not register background window class: %s", GetLastErrorText(GetLastError()).c_str());
+        return 1;
+    }
 
     HWND hwnd = CreateWindowExW(
         0,
         WINDOW_CLASS_NAME,
-        APP_DISPLAY_NAME,
+        g_instanceIdentity.windowTitle.c_str(),
         WS_OVERLAPPED,
         0,
         0,
@@ -314,11 +413,19 @@ static int RunBackground(const AppOptions& options)
     }
 
     MSG msg = {};
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0)
+    for (;;)
     {
+        BOOL result = GetMessageW(&msg, nullptr, 0, 0);
+        if (result == 0)
+        {
+            return static_cast<int>(msg.wParam);
+        }
+        if (result == -1)
+        {
+            Log(L"GetMessageW(background window) failed: %s", GetLastErrorText(GetLastError()).c_str());
+            return 1;
+        }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
-
-    return static_cast<int>(msg.wParam);
 }

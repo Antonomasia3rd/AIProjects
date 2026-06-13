@@ -245,6 +245,56 @@ int main()
             app + "\n" + tray,
             "aip::RegisterTaskbarCreatedMessage");
         RequireContains(
+            "DiscordRPC reports taskbar recreation registration failures",
+            "src\\drpc_app.inc",
+            app,
+            "Could not register the TaskbarCreated message:");
+        RequireContains(
+            "DiscordRPC reports shell-open failures",
+            "src\\drpc_tray.inc",
+            tray,
+            "Could not open shell path");
+        RequireContains(
+            "DiscordRPC reports tray icon creation failures",
+            "src\\drpc_tray.inc",
+            tray,
+            "Could not create tray icon:");
+        RequireContains(
+            "DiscordRPC reports tray version negotiation failures",
+            "src\\drpc_tray.inc",
+            tray,
+            "Could not enable tray icon version 4 behavior:");
+        RequireContains(
+            "DiscordRPC reports tray balloon delivery failures",
+            "src\\drpc_tray.inc",
+            tray,
+            "Could not show tray notification:");
+        RequireContains(
+            "DiscordRPC validates control-window class registration",
+            "src\\drpc_tray.inc",
+            tray,
+            "GetLastError() != ERROR_CLASS_ALREADY_EXISTS");
+        RequireContains(
+            "DiscordRPC handles main message-loop failures",
+            "src\\drpc_app.inc",
+            app,
+            "if (messageResult == -1)");
+        RequireContains(
+            "DiscordRPC reports main message-loop failure as nonzero",
+            "src\\drpc_app.inc",
+            app,
+            "return messageLoopFailed ? 1 : static_cast<int>(ctx.workerExitCode);");
+        RequireContains(
+            "DiscordRPC worker completion cannot be lost to a full message queue",
+            "src\\drpc_app.inc",
+            app,
+            "SendMessageW(ctx.hwnd, WM_DRPC_WORKER_FINISHED");
+        RequireContains(
+            "DiscordRPC console shutdown falls back when UI signaling fails",
+            "src\\drpc_app.inc",
+            app,
+            "if (!PostMessageW(hwnd, WM_DRPC_REQUEST_SHUTDOWN, ctrlType, 0))");
+        RequireContains(
             "DiscordRPC signals running instance through shared primitive",
             "DiscordRPC app sources",
             app,
@@ -445,6 +495,11 @@ int main()
             core,
             "aip::BuildPathScopedInstanceIdentity");
         RequireContains(
+            "DiscordRPC reports single-instance message registration failures",
+            "src\\drpc_core.inc",
+            core,
+            "Could not register the single-instance control message:");
+        RequireContains(
             "DiscordRPC exits when single-instance mutex creation fails",
             "src\\drpc_core.inc",
             core,
@@ -506,6 +561,51 @@ int main()
             gateway,
             "RunCancellableWinHttpRequest");
         RequireContains(
+            "Discord Gateway requires configured WinHTTP timeouts",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "ThrowWinHttp(\"WinHttpSetTimeouts(Gateway)\")");
+        RequireContains(
+            "Discord asset requests require configured WinHTTP timeouts",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "ThrowWinHttp(\"WinHttpSetTimeouts(asset request)\")");
+        RequireContains(
+            "Discord Gateway rejects oversized outbound payloads before Discord closes the connection",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "Gateway payload exceeds Discord's 4096-byte limit");
+        RequireContains(
+            "Discord Gateway bounds inbound message assembly",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "Gateway inbound payload exceeds the 1 MiB safety limit.");
+        RequireContains(
+            "Discord Gateway bounds REST asset responses",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "Discord asset response exceeds the 4 MiB safety limit.");
+        RequireContains(
+            "Discord Gateway treats requested-heartbeat send failures as disconnects",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "Gateway-requested heartbeat failed:");
+        RequireContains(
+            "Discord Gateway randomizes the first heartbeat within the negotiated interval",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "std::uniform_int_distribution<int> initialDelay");
+        RequireContains(
+            "Discord Gateway cleans up when reader or heartbeat thread startup fails",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "catch (...)\n        {\n            Close();\n            throw;\n        }");
+        RequireNotContains(
+            "Discord Gateway does not send an unconditional immediate first heartbeat",
+            "src\\drpc_gateway.inc",
+            gateway,
+            "SendHeartbeat();\n        heartbeat_ = std::thread");
+        RequireContains(
             "Discord Gateway cancellation closes pending request handles",
             "src\\drpc_gateway.inc",
             gateway,
@@ -530,6 +630,11 @@ int main()
             "src\\drpc_ipc.inc",
             ipc,
             "ReadFrameUntil(deadline)");
+        RequireContains(
+            "Discord IPC bounds outbound frames like inbound frames",
+            "src\\drpc_ipc.inc",
+            ipc,
+            "Discord IPC outbound frame exceeds the 1 MiB safety limit.");
         RequireNotContains(
             "DiscordRPC removes unused JSON object-start scanner",
             "src\\drpc_core.inc",
@@ -575,6 +680,11 @@ int main()
             "src\\drpc_presence.inc",
             presence,
             "GetCompiledPatternCensorRules");
+        RequireContains(
+            "foreground process image paths grow beyond MAX_PATH",
+            "src\\drpc_presence.inc",
+            presence,
+            "buffer.resize((std::min)(buffer.size() * 2, static_cast<size_t>(32768)))");
         RequireContains(
             "DiscordRPC reuses compiled censor regex snapshots without copying regex objects",
             "src\\drpc_presence.inc",

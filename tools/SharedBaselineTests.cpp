@@ -41,6 +41,24 @@ static void TestIniBehavior()
             text.find(L"; keep\r\n[General]\r\n\"First\" = \"updated\"\r\n\"Second\" = \"2\"") == 0,
         "INI writer preserves comments and key order");
 
+    bool removed = false;
+    Check(
+        aip::RemoveIniValueFromText(text, L"General", L"First", &removed) &&
+            removed &&
+            text.find(L"\"First\"") == std::wstring::npos &&
+            text.find(L"\"Second\" = \"2\"") != std::wstring::npos,
+        "INI value removal preserves neighboring entries");
+
+    text += L"\r\n[Account.secret]\r\n\"Token\" = \"remove\"\r\n[Other]\r\n\"Keep\" = \"yes\"\r\n";
+    removed = false;
+    Check(
+        aip::RemoveIniSectionFromText(text, L"Account.secret", &removed) &&
+            removed &&
+            text.find(L"[Account.secret]") == std::wstring::npos &&
+            text.find(L"[Other]") != std::wstring::npos &&
+            text.find(L"\"Keep\" = \"yes\"") != std::wstring::npos,
+        "INI section removal preserves following sections");
+
     std::wstring desktopStubDialectText =
         L"[App]\r\n"
         L"\"Path\" = \"C:\\Users\\Amiya\\Desktop\\DiscordRPC.log\"\r\n"
@@ -104,6 +122,34 @@ static void TestIniBehavior()
             GetLastError() == ERROR_NO_UNICODE_TRANSLATION &&
             !aip::FileExists(invalidIniPath),
         "INI file writer fails non-empty text it cannot encode");
+
+    std::wstring oversizedIniPath = path + L".oversized";
+    DeleteFileW(oversizedIniPath.c_str());
+    HANDLE oversizedIni = CreateFileW(
+        oversizedIniPath.c_str(),
+        GENERIC_WRITE,
+        FILE_SHARE_READ,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    LARGE_INTEGER oversizedLength = {};
+    oversizedLength.QuadPart = static_cast<LONGLONG>(aip::kMaxIniFileBytes) + 1;
+    bool madeOversizedIni =
+        oversizedIni != INVALID_HANDLE_VALUE &&
+        SetFilePointerEx(oversizedIni, oversizedLength, nullptr, FILE_BEGIN) != FALSE &&
+        SetEndOfFile(oversizedIni) != FALSE;
+    if (oversizedIni != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(oversizedIni);
+    }
+    std::wstring oversizedIniText;
+    Check(
+        madeOversizedIni &&
+            !aip::LoadIniText(oversizedIniPath, oversizedIniText) &&
+            GetLastError() == ERROR_FILE_TOO_LARGE,
+        "INI reader rejects oversized sidecar files before allocation");
+    DeleteFileW(oversizedIniPath.c_str());
 
     WIN32_FILE_ATTRIBUTE_DATA originalAttributes = {};
     bool capturedTime = GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &originalAttributes) != FALSE;
@@ -389,6 +435,14 @@ static void TestTrayBehavior()
 
 static void TestAppPathBehavior()
 {
+    std::wstring systemDirectory = aip::GetSystemDirectoryPath();
+    DWORD systemDirectoryAttributes = GetFileAttributesW(systemDirectory.c_str());
+    Check(
+        !systemDirectory.empty() &&
+            systemDirectoryAttributes != INVALID_FILE_ATTRIBUTES &&
+            (systemDirectoryAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0,
+        "system directory helper returns an existing directory");
+
     aip::SidecarPaths paths = aip::BuildSidecarPathsFromExecutable(
         L"C:\\Tools\\DiscordRPC.exe",
         L"DiscordRPC");
@@ -540,6 +594,23 @@ static void TestLoggingBehavior()
         logBytes.size() >= 3 && logBytes[0] == 0xEF && logBytes[1] == 0xBB && logBytes[2] == 0xBF,
         "shared UTF-8 logger writes BOM for new log files");
 
+    std::wstring utf16LogPath = logPath + L".utf16";
+    DeleteFileW(utf16LogPath.c_str());
+    std::vector<BYTE> utf16Bytes;
+    const std::wstring expectedUtf16 = L"legacy one\r\nlegacy two\r\n";
+    bool utf16AppendOk =
+        aip::AppendUtf16LineToFile(utf16LogPath, L"legacy one", false, 5000) &&
+        aip::AppendUtf16LineToFile(utf16LogPath, L"legacy two", false, 5000) &&
+        aip::ReadWholeFileBytes(utf16LogPath, utf16Bytes);
+    Check(
+        utf16AppendOk &&
+            utf16Bytes.size() == expectedUtf16.size() * sizeof(wchar_t) &&
+            std::memcmp(
+                utf16Bytes.data(),
+                expectedUtf16.data(),
+                utf16Bytes.size()) == 0,
+        "shared UTF-16 compatibility logger appends complete lines");
+
     std::wstring badLogPath = logPath + L".dir";
     RemoveDirectoryW(badLogPath.c_str());
     DeleteFileW(badLogPath.c_str());
@@ -614,6 +685,7 @@ static void TestLoggingBehavior()
         "shared UTF-8 logger uses bounded append lock wait");
 
     RemoveDirectoryW(badLogPath.c_str());
+    DeleteFileW(utf16LogPath.c_str());
     DeleteFileW(logPath.c_str());
 }
 

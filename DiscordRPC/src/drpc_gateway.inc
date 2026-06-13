@@ -351,12 +351,15 @@ public:
             ThrowWinHttp("WinHttpOpen");
         }
 
-        WinHttpSetTimeouts(
-            session_,
-            options_.connectTimeoutMs,
-            options_.connectTimeoutMs,
-            options_.sendTimeoutMs,
-            options_.sendTimeoutMs);
+        if (!WinHttpSetTimeouts(
+                session_,
+                options_.connectTimeoutMs,
+                options_.connectTimeoutMs,
+                options_.sendTimeoutMs,
+                options_.sendTimeoutMs))
+        {
+            ThrowWinHttp("WinHttpSetTimeouts(Gateway)");
+        }
 
         connect_ = WinHttpConnect(session_, L"gateway.discord.gg", INTERNET_DEFAULT_HTTPS_PORT, 0);
         if (connect_ == nullptr)
@@ -420,7 +423,15 @@ public:
         request_ = nullptr;
 
         connected_ = true;
-        reader_ = std::thread([this]() { ReadLoop(); });
+        try
+        {
+            reader_ = std::thread([this]() { ReadLoop(); });
+        }
+        catch (...)
+        {
+            Close();
+            throw;
+        }
 
         if (!WaitFor([this]() {
                 return heartbeatIntervalMs_.load() > 0 || !connected_.load() || CancellationRequested();
@@ -439,8 +450,15 @@ public:
             throw std::runtime_error("Gateway disconnected before HELLO.");
         }
 
-        SendHeartbeat();
-        heartbeat_ = std::thread([this]() { HeartbeatLoop(); });
+        try
+        {
+            heartbeat_ = std::thread([this]() { HeartbeatLoop(); });
+        }
+        catch (...)
+        {
+            Close();
+            throw;
+        }
         Identify(initialActivityJson, initialStatus);
 
         if (!WaitFor([this]() {
@@ -859,6 +877,14 @@ private:
 
     void SendText(const std::string& json)
     {
+        static constexpr size_t kMaxGatewayPayloadBytes = 4096;
+        if (json.size() > kMaxGatewayPayloadBytes)
+        {
+            throw std::runtime_error(
+                "Gateway payload exceeds Discord's 4096-byte limit (" +
+                std::to_string(json.size()) + " bytes).");
+        }
+
         std::lock_guard<std::mutex> lock(sendMutex_);
         if (!connected_.load() || websocket_ == nullptr)
         {
@@ -878,6 +904,7 @@ private:
 
     void SendHeartbeat()
     {
+        heartbeatAcked_ = false;
         std::string payload = "{";
         bool first = true;
         JsonFieldNumber(payload, first, "op", 1);
@@ -900,10 +927,19 @@ private:
 
     void HeartbeatLoop()
     {
+        int interval = heartbeatIntervalMs_.load();
+        if (interval <= 0)
+        {
+            interval = 41250;
+        }
+
+        std::random_device seed;
+        std::mt19937 random(seed());
+        std::uniform_int_distribution<int> initialDelay(0, std::max(interval - 1, 0));
+        int remaining = initialDelay(random);
+
         while (connected_.load())
         {
-            int interval = heartbeatIntervalMs_.load();
-            int remaining = interval > 0 ? interval : 41250;
             while (remaining > 0 && connected_.load())
             {
                 int slice = std::min(remaining, 250);
@@ -920,7 +956,6 @@ private:
                 connected_ = false;
                 break;
             }
-            heartbeatAcked_ = false;
             try
             {
                 SendHeartbeat();
@@ -934,6 +969,8 @@ private:
                 connected_ = false;
                 break;
             }
+            interval = heartbeatIntervalMs_.load();
+            remaining = interval > 0 ? interval : 41250;
         }
     }
 
@@ -941,6 +978,7 @@ private:
     {
         try
         {
+            static constexpr size_t kMaxGatewayInboundPayloadBytes = 1024 * 1024;
             std::vector<char> buffer(65536);
             while (connected_.load())
             {
@@ -997,6 +1035,12 @@ private:
 
                     if (bytesRead > 0)
                     {
+                        if (message.size() >
+                            kMaxGatewayInboundPayloadBytes - bytesRead)
+                        {
+                            throw std::runtime_error(
+                                "Gateway inbound payload exceeds the 1 MiB safety limit.");
+                        }
                         message.append(buffer.data(), buffer.data() + bytesRead);
                     }
 
@@ -1062,8 +1106,13 @@ private:
             {
                 SendHeartbeat();
             }
-            catch (const std::exception&)
+            catch (const std::exception& ex)
             {
+                std::wstring message =
+                    L"Gateway-requested heartbeat failed: " + Utf8ToWide(ex.what());
+                SetLastConnectError(message);
+                LogError(message);
+                connected_ = false;
             }
             return;
         }
@@ -1222,7 +1271,15 @@ private:
         }
         WinHttpHandle closeSession(session);
 
-        WinHttpSetTimeouts(session, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
+        if (!WinHttpSetTimeouts(
+                session,
+                timeoutMs,
+                timeoutMs,
+                timeoutMs,
+                timeoutMs))
+        {
+            ThrowWinHttp("WinHttpSetTimeouts(asset request)");
+        }
         HINTERNET connect = WinHttpConnect(session, L"discord.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
         if (connect == nullptr)
         {
@@ -1277,6 +1334,14 @@ private:
                         break;
                     }
 
+                    static constexpr size_t kMaxAssetResponseBytes =
+                        4 * 1024 * 1024;
+                    if (available > kMaxAssetResponseBytes ||
+                        response.size() > kMaxAssetResponseBytes - available)
+                    {
+                        throw std::runtime_error(
+                            "Discord asset response exceeds the 4 MiB safety limit.");
+                    }
                     std::string chunk(available, '\0');
                     DWORD read = 0;
                     if (!WinHttpReadData(request, chunk.data(), available, &read))

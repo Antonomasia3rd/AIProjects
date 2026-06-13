@@ -1,5 +1,6 @@
 #define UNICODE
 #define _UNICODE
+#define NOMINMAX
 #define _WIN32_WINNT 0x0601
 #define _WIN32_IE 0x0700
 
@@ -24,10 +25,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <exception>
+#include <memory>
 #include <new>
 #include <random>
 #include <string>
 #include <vector>
+
+#include "../../dependencies/desktop_app_baseline.h"
 
 #ifdef _MSC_VER
 #pragma comment(lib, "advapi32.lib")
@@ -172,9 +177,28 @@ static std::wstring GuidToString(REFGUID guid)
 
 static std::wstring ModulePath()
 {
-    wchar_t path[MAX_PATH]{};
-    GetModuleFileNameW(g_module, path, ARRAYSIZE(path));
-    return path;
+    std::vector<wchar_t> path(512);
+    for (;;)
+    {
+        DWORD length = GetModuleFileNameW(
+            g_module,
+            path.data(),
+            static_cast<DWORD>(path.size()));
+        if (length == 0)
+        {
+            return L"";
+        }
+        if (length < path.size())
+        {
+            return std::wstring(path.data(), length);
+        }
+        if (path.size() >= 32768)
+        {
+            SetLastError(ERROR_BUFFER_OVERFLOW);
+            return L"";
+        }
+        path.resize((std::min)(path.size() * 2, static_cast<size_t>(32768)));
+    }
 }
 
 static std::wstring ParentDirectoryOf(const std::wstring& path)
@@ -240,25 +264,14 @@ static std::wstring AppIniPath()
 
 static bool TryReadIniString(const wchar_t* section, const wchar_t* key, std::wstring& value)
 {
-    static const wchar_t sentinel[] = L"\x1e__missing__";
-    DWORD size = 512;
-    for (;;)
+    std::wstring path = AppIniPath();
+    if (!aip::IniHasKey(path, section, key))
     {
-        std::vector<wchar_t> buffer(size);
-        DWORD read = GetPrivateProfileStringW(section, key, sentinel, buffer.data(), size, AppIniPath().c_str());
-        if (read < size - 2 || size >= 32768)
-        {
-            value.assign(buffer.data(), read);
-            if (value == sentinel)
-            {
-                value.clear();
-                return false;
-            }
-            value = TrimWide(value);
-            return true;
-        }
-        size *= 2;
+        value.clear();
+        return false;
     }
+    value = TrimWide(aip::IniConfigStore(path).ReadRaw(section, key, L""));
+    return true;
 }
 
 static bool TryReadIniDword(const wchar_t* section, const wchar_t* key, DWORD& value)
@@ -269,9 +282,14 @@ static bool TryReadIniDword(const wchar_t* section, const wchar_t* key, DWORD& v
         return false;
     }
 
+    errno = 0;
     wchar_t* end = nullptr;
-    unsigned long parsed = wcstoul(raw.c_str(), &end, 10);
-    if (!end || *end != L'\0')
+    unsigned long long parsed = wcstoull(raw.c_str(), &end, 10);
+    if (end == raw.c_str() ||
+        !end ||
+        *end != L'\0' ||
+        errno == ERANGE ||
+        parsed > MAXDWORD)
     {
         return false;
     }
@@ -286,24 +304,22 @@ static DWORD ReadIniDwordValue(const wchar_t* section, const wchar_t* key, DWORD
     return TryReadIniDword(section, key, value) ? value : fallback;
 }
 
-static void WriteIniStringValue(const wchar_t* section, const wchar_t* key, const std::wstring& value)
+static bool WriteIniStringValue(const wchar_t* section, const wchar_t* key, const std::wstring& value)
 {
-    WritePrivateProfileStringW(section, key, value.c_str(), AppIniPath().c_str());
+    return aip::IniConfigStore(AppIniPath(), L"", 5000).WriteRaw(section, key, value);
 }
 
-static void WriteIniDwordValue(const wchar_t* section, const wchar_t* key, DWORD value)
+static bool WriteIniDwordValue(const wchar_t* section, const wchar_t* key, DWORD value)
 {
-    WriteIniStringValue(section, key, std::to_wstring(value));
+    return WriteIniStringValue(section, key, std::to_wstring(value));
 }
 
-static void DeleteIniValue(const wchar_t* section, const wchar_t* key)
+static bool DeleteIniSection(const wchar_t* section)
 {
-    WritePrivateProfileStringW(section, key, nullptr, AppIniPath().c_str());
-}
-
-static void DeleteIniSection(const wchar_t* section)
-{
-    WritePrivateProfileStringW(section, nullptr, nullptr, AppIniPath().c_str());
+    return aip::IniConfigStore(AppIniPath(), L"", 5000).MutateFresh(
+        [&](std::wstring& text) {
+            return aip::RemoveIniSectionFromText(text, section);
+        });
 }
 
 static void LogLine(const std::wstring& message)
@@ -313,24 +329,46 @@ static void LogLine(const std::wstring& message)
         return;
     }
 
-    HANDLE file = CreateFileW(ModuleLocalPath(L".log").c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE)
-    {
-        return;
-    }
-
     SYSTEMTIME st;
     GetLocalTime(&st);
     wchar_t timestamp[64];
     wsprintfW(timestamp, L"%04u-%02u-%02u %02u:%02u:%02u  ",
         st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    DWORD bytes = 0;
-    WriteFile(file, timestamp, static_cast<DWORD>(wcslen(timestamp) * sizeof(wchar_t)), &bytes, nullptr);
-    WriteFile(file, message.c_str(), static_cast<DWORD>(message.size() * sizeof(wchar_t)), &bytes, nullptr);
-    const wchar_t newline[] = L"\r\n";
-    WriteFile(file, newline, static_cast<DWORD>((ARRAYSIZE(newline) - 1) * sizeof(wchar_t)), &bytes, nullptr);
-    CloseHandle(file);
+    (void)aip::AppendUtf16LineToFile(
+        ModuleLocalPath(L".log"),
+        std::wstring(timestamp) + message,
+        false,
+        5000);
+}
+
+static void LogLineNoThrow(const wchar_t* message) noexcept
+{
+    try
+    {
+        LogLine(message ? message : L"Unknown error.");
+    }
+    catch (...)
+    {
+        OutputDebugStringW(L"RealTimeNotesDeskband: logging failed while handling an exception.\n");
+    }
+}
+
+static bool OpenShellTarget(HWND owner, const std::wstring& target)
+{
+    HINSTANCE result = ShellExecuteW(
+        owner,
+        L"open",
+        target.c_str(),
+        nullptr,
+        nullptr,
+        SW_SHOWNORMAL);
+    if (reinterpret_cast<INT_PTR>(result) > 32)
+    {
+        return true;
+    }
+
+    LogLine(L"Could not open shell target: " + target);
+    return false;
 }
 
 static UINT ClampRefreshSeconds(UINT seconds)
@@ -430,34 +468,14 @@ static std::wstring DefaultAssetDir(const std::wstring& installDir)
 
 static std::wstring Utf8ToWide(const std::string& text)
 {
-    if (text.empty())
-    {
-        return L"";
-    }
-    int len = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-    if (len <= 0)
-    {
-        return L"";
-    }
-    std::wstring wide(len, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), &wide[0], len);
-    return wide;
+    std::wstring wide;
+    return aip::TryUtf8ToWide(text, wide) ? wide : L"";
 }
 
 static std::string WideToUtf8(const std::wstring& text)
 {
-    if (text.empty())
-    {
-        return "";
-    }
-    int len = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
-    if (len <= 0)
-    {
-        return "";
-    }
-    std::string utf8(len, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), &utf8[0], len, nullptr, nullptr);
-    return utf8;
+    std::string utf8;
+    return aip::TryWideToUtf8(text, utf8) ? utf8 : "";
 }
 
 static std::wstring ReadRegString(HKEY root, const wchar_t* subkey, const wchar_t* valueName, const std::wstring& fallback)
@@ -602,6 +620,7 @@ static bool UnprotectSecretString(const std::wstring& value, std::wstring& plain
     }
 
     plain.assign(reinterpret_cast<wchar_t*>(output.pbData), output.cbData / sizeof(wchar_t));
+    SecureZeroMemory(output.pbData, output.cbData);
     LocalFree(output.pbData);
     return true;
 }
@@ -641,14 +660,14 @@ static bool TryReadSettingDword(const wchar_t* valueName, DWORD& value)
     return TryReadIniDword(L"Settings", valueName, value);
 }
 
-static void WriteSettingString(const wchar_t* valueName, const std::wstring& value)
+static bool WriteSettingString(const wchar_t* valueName, const std::wstring& value)
 {
-    WriteIniStringValue(L"Settings", valueName, value);
+    return WriteIniStringValue(L"Settings", valueName, value);
 }
 
-static void WriteSettingDword(const wchar_t* valueName, DWORD value)
+static bool WriteSettingDword(const wchar_t* valueName, DWORD value)
 {
-    WriteIniDwordValue(L"Settings", valueName, value);
+    return WriteIniDwordValue(L"Settings", valueName, value);
 }
 
 static std::wstring ReadAccountString(ResourceKind resource, const wchar_t* valueName, const wchar_t* fallbackValueName = nullptr)
@@ -694,24 +713,6 @@ static bool KeepLegacyPlaintextSecrets(ResourceKind resource)
     return false;
 }
 
-static bool WriteProtectedAccountString(ResourceKind resource, const wchar_t* valueName, const std::wstring& value, bool keepLegacyPlaintext)
-{
-    std::wstring section = AccountSectionFor(resource);
-    std::wstring protectedName = ProtectedValueName(valueName);
-    std::wstring protectedValue = ProtectSecretString(value);
-    if (protectedValue.empty())
-    {
-        return false;
-    }
-
-    WriteIniStringValue(section.c_str(), protectedName.c_str(), protectedValue);
-    if (!keepLegacyPlaintext)
-    {
-        DeleteIniValue(section.c_str(), valueName);
-    }
-    return true;
-}
-
 static bool HasAccountConfig(ResourceKind resource)
 {
     return !ReadAccountString(resource, L"UID", L"uid").empty() &&
@@ -719,45 +720,71 @@ static bool HasAccountConfig(ResourceKind resource)
         !ReadProtectedAccountString(resource, L"LTuidV2", L"ltuid_v2").empty();
 }
 
-static void SaveAccountConfig(ResourceKind resource, const AppConfig& cfg)
+static bool SaveAccountConfig(ResourceKind resource, const AppConfig& cfg)
 {
     std::wstring section = AccountSectionFor(resource);
     bool keepLegacyPlaintext = KeepLegacyPlaintextSecrets(resource);
-    WriteIniStringValue(section.c_str(), L"UID", Utf8ToWide(cfg.uid));
-    if (keepLegacyPlaintext)
+    std::wstring uid = Utf8ToWide(cfg.uid);
+    std::wstring ltoken = Utf8ToWide(cfg.ltoken);
+    std::wstring ltuid = Utf8ToWide(cfg.ltuid);
+    std::wstring protectedLtoken = ProtectSecretString(ltoken);
+    std::wstring protectedLtuid = ProtectSecretString(ltuid);
+    if (uid.empty() ||
+        ltoken.empty() ||
+        ltuid.empty() ||
+        protectedLtoken.empty() ||
+        protectedLtuid.empty())
     {
-        WriteIniStringValue(section.c_str(), L"LTokenV2", Utf8ToWide(cfg.ltoken));
-        WriteIniStringValue(section.c_str(), L"LTuidV2", Utf8ToWide(cfg.ltuid));
+        return false;
     }
-    if (WriteProtectedAccountString(resource, L"LTokenV2", Utf8ToWide(cfg.ltoken), keepLegacyPlaintext))
-    {
-        if (!keepLegacyPlaintext)
-        {
-            DeleteIniValue(section.c_str(), L"ltoken_v2");
-        }
-    }
-    if (WriteProtectedAccountString(resource, L"LTuidV2", Utf8ToWide(cfg.ltuid), keepLegacyPlaintext))
-    {
-        if (!keepLegacyPlaintext)
-        {
-            DeleteIniValue(section.c_str(), L"ltuid_v2");
-        }
-    }
-    if (cfg.refreshSeconds > 0)
-    {
-        WriteIniDwordValue(section.c_str(), L"RefreshIntervalSeconds", cfg.refreshSeconds);
-    }
-    else
-    {
-        DeleteIniValue(section.c_str(), L"RefreshIntervalSeconds");
-    }
+
+    return aip::IniConfigStore(AppIniPath(), L"", 5000).MutateFresh(
+        [&](std::wstring& text) {
+            if (!aip::WriteIniValueToText(text, section.c_str(), L"UID", uid) ||
+                !aip::WriteIniValueToText(text, section.c_str(), L"LTokenV2Protected", protectedLtoken) ||
+                !aip::WriteIniValueToText(text, section.c_str(), L"LTuidV2Protected", protectedLtuid))
+            {
+                return false;
+            }
+
+            if (keepLegacyPlaintext)
+            {
+                if (!aip::WriteIniValueToText(text, section.c_str(), L"LTokenV2", ltoken) ||
+                    !aip::WriteIniValueToText(text, section.c_str(), L"LTuidV2", ltuid))
+                {
+                    return false;
+                }
+            }
+            else if (!aip::RemoveIniValueFromText(text, section.c_str(), L"LTokenV2") ||
+                !aip::RemoveIniValueFromText(text, section.c_str(), L"LTuidV2") ||
+                !aip::RemoveIniValueFromText(text, section.c_str(), L"ltoken_v2") ||
+                !aip::RemoveIniValueFromText(text, section.c_str(), L"ltuid_v2"))
+            {
+                return false;
+            }
+
+            return cfg.refreshSeconds > 0
+                ? aip::WriteIniValueToText(
+                    text,
+                    section.c_str(),
+                    L"RefreshIntervalSeconds",
+                    std::to_wstring(cfg.refreshSeconds))
+                : aip::RemoveIniValueFromText(
+                    text,
+                    section.c_str(),
+                    L"RefreshIntervalSeconds");
+        });
 }
 
-static void DeleteAccountConfig(ResourceKind resource)
+static bool DeleteAccountConfig(ResourceKind resource)
 {
     std::wstring section = AccountSectionFor(resource);
-    DeleteIniSection(section.c_str());
-    RegDeleteTreeW(HKEY_CURRENT_USER, AccountKeyFor(resource).c_str());
+    if (!DeleteIniSection(section.c_str()))
+    {
+        return false;
+    }
+    LONG result = RegDeleteTreeW(HKEY_CURRENT_USER, AccountKeyFor(resource).c_str());
+    return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
 }
 
 static std::wstring ReadIniAccountStringOnly(ResourceKind resource, const wchar_t* valueName, const wchar_t* fallbackValueName = nullptr)
@@ -893,8 +920,14 @@ static void MigrateLegacyRegistryToIniOnce()
         AppConfig cfg;
         if (LoadLegacyAccountConfig(item.resource, cfg))
         {
-            SaveAccountConfig(item.resource, cfg);
-            LogLine(std::wstring(L"Migrated legacy registry account settings for ") + item.displayName);
+            if (SaveAccountConfig(item.resource, cfg))
+            {
+                LogLine(std::wstring(L"Migrated legacy registry account settings for ") + item.displayName);
+            }
+            else
+            {
+                LogLine(std::wstring(L"Could not migrate legacy registry account settings for ") + item.displayName);
+            }
         }
     }
 }
@@ -958,14 +991,24 @@ static std::string ReadFileUtf8(const std::wstring& path)
     }
 
     std::string data(static_cast<size_t>(size.QuadPart), '\0');
-    DWORD read = 0;
-    BOOL ok = ReadFile(file, &data[0], static_cast<DWORD>(data.size()), &read, nullptr);
+    size_t offset = 0;
+    bool ok = true;
+    while (offset < data.size())
+    {
+        DWORD read = 0;
+        DWORD chunk = static_cast<DWORD>(std::min<size_t>(data.size() - offset, 64 * 1024));
+        if (!ReadFile(file, &data[offset], chunk, &read, nullptr) || read == 0)
+        {
+            ok = false;
+            break;
+        }
+        offset += read;
+    }
     CloseHandle(file);
     if (!ok)
     {
         return "";
     }
-    data.resize(read);
     return data;
 }
 
@@ -1205,7 +1248,47 @@ static bool JsonInt(const std::string& json, const std::string& key, int& out)
             return false;
         }
     }
+
+    if (quoted)
+    {
+        if (pos >= json.size() || json[pos] != '"')
+        {
+            return false;
+        }
+        ++pos;
+    }
+    pos = JsonSkipWhitespace(json, pos);
+    if (pos < json.size() &&
+        json[pos] != ',' &&
+        json[pos] != '}' &&
+        json[pos] != ']')
+    {
+        return false;
+    }
+
     out = static_cast<int>(value);
+    return true;
+}
+
+static bool ParseAsciiInt(const std::string& text, int& value)
+{
+    if (text.empty())
+    {
+        return false;
+    }
+    errno = 0;
+    char* end = nullptr;
+    long long parsed = strtoll(text.c_str(), &end, 10);
+    if (end == text.c_str() ||
+        !end ||
+        *end != '\0' ||
+        errno == ERANGE ||
+        parsed < INT_MIN ||
+        parsed > INT_MAX)
+    {
+        return false;
+    }
+    value = static_cast<int>(parsed);
     return true;
 }
 
@@ -1364,6 +1447,11 @@ static bool LoadAccountConfig(ResourceKind resource, AppConfig& cfg)
 
 static std::string Md5Hex(const std::string& text)
 {
+    if (text.size() > MAXDWORD)
+    {
+        return "";
+    }
+
     HCRYPTPROV provider = 0;
     HCRYPTHASH hash = 0;
     BYTE bytes[16]{};
@@ -1444,7 +1532,11 @@ static bool HttpGet(const ResourceMetadata& metadata, const std::wstring& server
     {
         return false;
     }
-    WinHttpSetTimeouts(session, 5000, 5000, 5000, 10000);
+    if (!WinHttpSetTimeouts(session, 5000, 5000, 5000, 10000))
+    {
+        WinHttpCloseHandle(session);
+        return false;
+    }
 
     HINTERNET connection = WinHttpConnect(session, metadata.host, INTERNET_DEFAULT_HTTPS_PORT, 0);
     if (!connection)
@@ -1734,7 +1826,7 @@ static NoteState FetchState(const std::wstring& configDir)
         parsed = JsonInt(body, "current_resin", current) && JsonInt(body, "max_resin", max);
         if (JsonString(body, "resin_recovery_time", recovery))
         {
-            seconds = atoi(recovery.c_str());
+            ParseAsciiInt(recovery, seconds);
         }
     }
     else if (resource == ResourceKind::Stamina)
@@ -1884,46 +1976,107 @@ static HFONT CreateBandFont(int dpi)
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 }
 
+static bool BrowseForFileSystemPath(
+    HWND owner,
+    const wchar_t* title,
+    bool pickFolder,
+    const COMDLG_FILTERSPEC* filters,
+    UINT filterCount,
+    const wchar_t* defaultExtension,
+    std::wstring& out)
+{
+    struct ComApartment
+    {
+        bool uninitialize = false;
+        ~ComApartment()
+        {
+            if (uninitialize) {
+                CoUninitialize();
+            }
+        }
+    } apartment;
+
+    try {
+        HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        apartment.uninitialize = SUCCEEDED(init);
+        if (FAILED(init) && init != RPC_E_CHANGED_MODE) {
+            return false;
+        }
+
+        IFileOpenDialog* rawDialog = nullptr;
+        HRESULT hr = CoCreateInstance(
+            CLSID_FileOpenDialog,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&rawDialog));
+        if (FAILED(hr) || !rawDialog) {
+            return false;
+        }
+        auto releaseDialog = [](IFileOpenDialog* value) {
+            if (value) value->Release();
+        };
+        std::unique_ptr<IFileOpenDialog, decltype(releaseDialog)> dialog(rawDialog, releaseDialog);
+
+        FILEOPENDIALOGOPTIONS options = {};
+        if (FAILED(dialog->GetOptions(&options))) {
+            return false;
+        }
+        options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+        options |= pickFolder ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST;
+        if (FAILED(dialog->SetOptions(options)) ||
+            (title && FAILED(dialog->SetTitle(title))) ||
+            (filterCount != 0 && filters && FAILED(dialog->SetFileTypes(filterCount, filters))) ||
+            (defaultExtension && FAILED(dialog->SetDefaultExtension(defaultExtension))) ||
+            FAILED(dialog->Show(owner))) {
+            return false;
+        }
+
+        IShellItem* rawItem = nullptr;
+        if (FAILED(dialog->GetResult(&rawItem)) || !rawItem) {
+            return false;
+        }
+        auto releaseItem = [](IShellItem* value) {
+            if (value) value->Release();
+        };
+        std::unique_ptr<IShellItem, decltype(releaseItem)> item(rawItem, releaseItem);
+
+        PWSTR rawPath = nullptr;
+        if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &rawPath)) || !rawPath) {
+            return false;
+        }
+        auto freePath = [](wchar_t* value) {
+            CoTaskMemFree(value);
+        };
+        std::unique_ptr<wchar_t, decltype(freePath)> path(rawPath, freePath);
+        out.assign(path.get());
+        return !out.empty();
+    }
+    catch (...) {
+        LogLineNoThrow(L"File-system picker failed with a C++ exception.");
+        return false;
+    }
+}
+
 static bool BrowseForFolder(HWND owner, const wchar_t* title, std::wstring& out)
 {
-    BROWSEINFOW browse{};
-    browse.hwndOwner = owner;
-    browse.lpszTitle = title;
-    browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_USENEWUI;
-
-    PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&browse);
-    if (!pidl)
-    {
-        return false;
-    }
-
-    wchar_t path[MAX_PATH]{};
-    bool ok = SHGetPathFromIDListW(pidl, path) != FALSE;
-    CoTaskMemFree(pidl);
-    if (!ok || !path[0])
-    {
-        return false;
-    }
-
-    out = path;
-    return true;
+    return BrowseForFileSystemPath(owner, title, true, nullptr, 0, nullptr, out);
 }
 
 static bool OpenCookieJson(HWND owner, ResourceKind resource, AppConfig& cfg)
 {
-    wchar_t fileName[MAX_PATH]{};
-    OPENFILENAMEW ofn{};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = owner;
-    ofn.lpstrFilter = L"Cookie JSON (*.json)\0*.json\0All files (*.*)\0*.*\0";
-    ofn.lpstrFile = fileName;
-    ofn.nMaxFile = ARRAYSIZE(fileName);
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    ofn.lpstrTitle = L"Import HoYoLAB cookie JSON";
-    ofn.lpstrDefExt = L"json";
-
-    if (!GetOpenFileNameW(&ofn))
-    {
+    const COMDLG_FILTERSPEC filters[] = {
+        { L"Cookie JSON (*.json)", L"*.json" },
+        { L"All files (*.*)", L"*.*" }
+    };
+    std::wstring fileName;
+    if (!BrowseForFileSystemPath(
+            owner,
+            L"Import HoYoLAB cookie JSON",
+            false,
+            filters,
+            ARRAYSIZE(filters),
+            L"json",
+            fileName)) {
         return false;
     }
 
@@ -1935,7 +2088,11 @@ static bool OpenCookieJson(HWND owner, ResourceKind resource, AppConfig& cfg)
     }
 
     cfg = imported;
-    SaveAccountConfig(resource, cfg);
+    if (!SaveAccountConfig(resource, cfg))
+    {
+        MessageBoxW(owner, L"The account could not be saved. Check the deskband log and INI file permissions.", L"Import Cookie JSON", MB_OK | MB_ICONERROR);
+        return false;
+    }
     return true;
 }
 
@@ -2040,10 +2197,19 @@ static bool SaveAccountDialog(AccountDialogState* state)
     cfg.ltoken = WideToUtf8(ltoken);
     cfg.ltuid = WideToUtf8(ltuid);
     cfg.refreshSeconds = refresh;
-    SaveAccountConfig(resource, cfg);
+    if (cfg.uid.empty() || cfg.ltoken.empty() || cfg.ltuid.empty() ||
+        !SaveAccountConfig(resource, cfg))
+    {
+        MessageBoxW(state->hwnd, L"The account could not be saved. Check the deskband log and INI file permissions.", L"Configure Account", MB_OK | MB_ICONERROR);
+        return false;
+    }
     if (state->selectAfterSave)
     {
-        WriteSettingString(L"Resource", MetadataFor(resource).registryValue);
+        if (!WriteSettingString(L"Resource", MetadataFor(resource).registryValue))
+        {
+            MessageBoxW(state->hwnd, L"The account was saved, but the selected resource could not be updated.", L"Configure Account", MB_OK | MB_ICONWARNING);
+            return false;
+        }
     }
 
     state->saved = true;
@@ -2063,11 +2229,12 @@ static HWND CreateDialogControl(HWND parent, const wchar_t* cls, const wchar_t* 
     return control;
 }
 
-static void CreateAccountDialogControls(AccountDialogState* state)
+static bool CreateAccountDialogControls(AccountDialogState* state)
 {
     HWND hwnd = state->hwnd;
-    CreateDialogControl(hwnd, L"STATIC", L"Resource:", 0, 0, 14, 18, 95, 20, 0);
+    bool created = CreateDialogControl(hwnd, L"STATIC", L"Resource:", 0, 0, 14, 18, 95, 20, 0) != nullptr;
     state->comboResource = CreateDialogControl(hwnd, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 0, 118, 14, 290, 120, 101);
+    created = state->comboResource != nullptr && created;
     int initialIndex = 0;
     for (int i = 0; i < static_cast<int>(ARRAYSIZE(kResources)); ++i)
     {
@@ -2079,21 +2246,29 @@ static void CreateAccountDialogControls(AccountDialogState* state)
     }
     SendMessageW(state->comboResource, CB_SETCURSEL, initialIndex, 0);
 
-    CreateDialogControl(hwnd, L"STATIC", L"UID:", 0, 0, 14, 52, 95, 20, 0);
+    created = CreateDialogControl(hwnd, L"STATIC", L"UID:", 0, 0, 14, 52, 95, 20, 0) != nullptr && created;
     state->editUid = CreateDialogControl(hwnd, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, 118, 48, 290, 24, 102);
-    CreateDialogControl(hwnd, L"STATIC", L"ltoken_v2:", 0, 0, 14, 84, 95, 20, 0);
+    created = state->editUid != nullptr && created;
+    created = CreateDialogControl(hwnd, L"STATIC", L"ltoken_v2:", 0, 0, 14, 84, 95, 20, 0) != nullptr && created;
     state->editLToken = CreateDialogControl(hwnd, L"EDIT", L"", ES_AUTOHSCROLL | ES_PASSWORD | WS_TABSTOP, WS_EX_CLIENTEDGE, 118, 80, 290, 24, 103);
-    CreateDialogControl(hwnd, L"STATIC", L"ltuid_v2:", 0, 0, 14, 116, 95, 20, 0);
+    created = state->editLToken != nullptr && created;
+    created = CreateDialogControl(hwnd, L"STATIC", L"ltuid_v2:", 0, 0, 14, 116, 95, 20, 0) != nullptr && created;
     state->editLTuid = CreateDialogControl(hwnd, L"EDIT", L"", ES_AUTOHSCROLL | ES_PASSWORD | WS_TABSTOP, WS_EX_CLIENTEDGE, 118, 112, 290, 24, 104);
-    CreateDialogControl(hwnd, L"STATIC", L"Refresh seconds:", 0, 0, 14, 148, 95, 20, 0);
+    created = state->editLTuid != nullptr && created;
+    created = CreateDialogControl(hwnd, L"STATIC", L"Refresh seconds:", 0, 0, 14, 148, 95, 20, 0) != nullptr && created;
     state->editRefresh = CreateDialogControl(hwnd, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, 118, 144, 120, 24, 105);
+    created = state->editRefresh != nullptr && created;
 
-    CreateDialogControl(hwnd, L"BUTTON", L"Import JSON...", BS_PUSHBUTTON | WS_TABSTOP, 0, 14, 184, 116, 28, 106);
-    CreateDialogControl(hwnd, L"BUTTON", L"Open HoYoLAB", BS_PUSHBUTTON | WS_TABSTOP, 0, 138, 184, 116, 28, 107);
-    CreateDialogControl(hwnd, L"BUTTON", L"Save", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 262, 184, 70, 28, IDOK);
-    CreateDialogControl(hwnd, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 0, 338, 184, 70, 28, IDCANCEL);
+    created = CreateDialogControl(hwnd, L"BUTTON", L"Import JSON...", BS_PUSHBUTTON | WS_TABSTOP, 0, 14, 184, 116, 28, 106) != nullptr && created;
+    created = CreateDialogControl(hwnd, L"BUTTON", L"Open HoYoLAB", BS_PUSHBUTTON | WS_TABSTOP, 0, 138, 184, 116, 28, 107) != nullptr && created;
+    created = CreateDialogControl(hwnd, L"BUTTON", L"Save", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 262, 184, 70, 28, IDOK) != nullptr && created;
+    created = CreateDialogControl(hwnd, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 0, 338, 184, 70, 28, IDCANCEL) != nullptr && created;
 
-    SetAccountDialogFields(state, state->initialResource);
+    if (created)
+    {
+        SetAccountDialogFields(state, state->initialResource);
+    }
+    return created;
 }
 
 static LRESULT CALLBACK AccountDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -2110,8 +2285,7 @@ static LRESULT CALLBACK AccountDialogProc(HWND hwnd, UINT message, WPARAM wParam
     switch (message)
     {
     case WM_CREATE:
-        CreateAccountDialogControls(state);
-        return 0;
+        return state && CreateAccountDialogControls(state) ? 0 : -1;
     case WM_COMMAND:
     {
         int id = LOWORD(wParam);
@@ -2146,7 +2320,10 @@ static LRESULT CALLBACK AccountDialogProc(HWND hwnd, UINT message, WPARAM wParam
         }
         if (id == 107)
         {
-            ShellExecuteW(hwnd, L"open", L"https://www.hoyolab.com/home", nullptr, nullptr, SW_SHOWNORMAL);
+            if (!OpenShellTarget(hwnd, L"https://www.hoyolab.com/home"))
+            {
+                MessageBoxW(hwnd, L"Could not open the HoYoLAB sign-in page.", kBandName, MB_OK | MB_ICONERROR);
+            }
             return 0;
         }
         break;
@@ -2154,6 +2331,9 @@ static LRESULT CALLBACK AccountDialogProc(HWND hwnd, UINT message, WPARAM wParam
     case WM_CLOSE:
         DestroyWindow(hwnd);
         return 0;
+    case WM_NCDESTROY:
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        return DefWindowProcW(hwnd, message, wParam, lParam);
     default:
         break;
     }
@@ -2161,12 +2341,12 @@ static LRESULT CALLBACK AccountDialogProc(HWND hwnd, UINT message, WPARAM wParam
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
-static void RegisterAccountDialogClass()
+static bool RegisterAccountDialogClass()
 {
     static ATOM atom = 0;
     if (atom)
     {
-        return;
+        return true;
     }
 
     WNDCLASSW wc{};
@@ -2176,11 +2356,19 @@ static void RegisterAccountDialogClass()
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
     wc.lpszClassName = kConfigWindowClassName;
     atom = RegisterClassW(&wc);
+    if (!atom && GetLastError() == ERROR_CLASS_ALREADY_EXISTS)
+    {
+        atom = 1;
+    }
+    return atom != 0;
 }
 
 static bool ShowAccountDialog(HWND owner, ResourceKind initialResource, bool selectAfterSave)
 {
-    RegisterAccountDialogClass();
+    if (!RegisterAccountDialogClass())
+    {
+        return false;
+    }
     InitCommonControls();
 
     AccountDialogState state;
@@ -2217,11 +2405,24 @@ static bool ShowAccountDialog(HWND owner, ResourceKind initialResource, bool sel
     UpdateWindow(hwnd);
 
     MSG msg{};
+    bool loopFailed = false;
+    bool repostQuit = false;
+    int quitCode = 0;
     while (IsWindow(hwnd))
     {
         BOOL got = GetMessageW(&msg, nullptr, 0, 0);
-        if (got <= 0)
+        if (got == -1)
         {
+            loopFailed = true;
+            LogLine(L"GetMessageW(account dialog) failed: " + std::to_wstring(GetLastError()));
+            DestroyWindow(hwnd);
+            break;
+        }
+        if (got == 0)
+        {
+            repostQuit = true;
+            quitCode = static_cast<int>(msg.wParam);
+            DestroyWindow(hwnd);
             break;
         }
         if (!IsDialogMessageW(hwnd, &msg))
@@ -2236,7 +2437,11 @@ static bool ShowAccountDialog(HWND owner, ResourceKind initialResource, bool sel
         EnableWindow(modalOwner, TRUE);
         SetActiveWindow(modalOwner);
     }
-    return state.saved;
+    if (repostQuit)
+    {
+        PostQuitMessage(quitCode);
+    }
+    return state.saved && !loopFailed && !repostQuit;
 }
 
 class RealTimeNotesBand final : public IDeskBand2, public IObjectWithSite, public IPersistStream, public IInputObject
@@ -2335,7 +2540,7 @@ public:
 
     IFACEMETHODIMP CloseDW(DWORD) override
     {
-        EnterCriticalSection(&m_windowLock);
+        aip::CriticalSectionLock lock(m_windowLock);
         HWND hwnd = m_hwnd;
         if (hwnd)
         {
@@ -2344,7 +2549,6 @@ public:
             m_hwnd = nullptr;
             m_windowToken = 0;
         }
-        LeaveCriticalSection(&m_windowLock);
         return S_OK;
     }
 
@@ -2448,55 +2652,70 @@ public:
             return S_OK;
         }
 
-        if (m_site)
-        {
-            m_site->Release();
-            m_site = nullptr;
-        }
-        if (m_inputSite)
-        {
-            m_inputSite->Release();
-            m_inputSite = nullptr;
-        }
-
-        site->AddRef();
-        m_site = site;
-
         IOleWindow* oleWindow = nullptr;
         HRESULT hr = site->QueryInterface(IID_IOleWindow, reinterpret_cast<void**>(&oleWindow));
-        if (SUCCEEDED(hr))
-        {
-            hr = oleWindow->GetWindow(&m_parent);
-            oleWindow->Release();
-        }
         if (FAILED(hr))
         {
             return hr;
         }
-
-        RegisterWindowClass();
-        if (!m_hwnd)
+        HWND newParent = nullptr;
+        hr = oleWindow->GetWindow(&newParent);
+        oleWindow->Release();
+        if (FAILED(hr) || !newParent)
         {
-            m_hwnd = CreateWindowExW(
-                0,
-                kClassName,
-                nullptr,
-                WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-                0,
-                0,
-                0,
-                0,
-                m_parent,
-                nullptr,
-                g_module,
-                this);
-            if (!m_hwnd)
-            {
-                return HRESULT_FROM_WIN32(GetLastError());
-            }
+            return FAILED(hr) ? hr : E_FAIL;
         }
 
-        site->QueryInterface(IID_IInputObjectSite, reinterpret_cast<void**>(&m_inputSite));
+        if (!RegisterWindowClass())
+        {
+            DWORD error = GetLastError();
+            return HRESULT_FROM_WIN32(error == ERROR_SUCCESS ? ERROR_CANNOT_MAKE : error);
+        }
+
+        IInputObjectSite* newInputSite = nullptr;
+        site->QueryInterface(IID_IInputObjectSite, reinterpret_cast<void**>(&newInputSite));
+        site->AddRef();
+
+        CloseDW(0);
+        if (m_inputSite)
+        {
+            m_inputSite->Release();
+        }
+        if (m_site)
+        {
+            m_site->Release();
+        }
+        m_site = site;
+        m_inputSite = newInputSite;
+        m_parent = newParent;
+
+        m_hwnd = CreateWindowExW(
+            0,
+            kClassName,
+            nullptr,
+            WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+            0,
+            0,
+            0,
+            0,
+            m_parent,
+            nullptr,
+            g_module,
+            this);
+        if (!m_hwnd)
+        {
+            DWORD error = GetLastError();
+            if (m_inputSite)
+            {
+                m_inputSite->Release();
+                m_inputSite = nullptr;
+            }
+            m_site->Release();
+            m_site = nullptr;
+            m_parent = nullptr;
+            return HRESULT_FROM_WIN32(error);
+        }
+
         BeginRefresh();
         return S_OK;
     }
@@ -2569,12 +2788,12 @@ public:
     }
 
 private:
-    static void RegisterWindowClass()
+    static bool RegisterWindowClass()
     {
         static ATOM atom = 0;
         if (atom)
         {
-            return;
+            return true;
         }
 
         WNDCLASSW wc{};
@@ -2584,6 +2803,11 @@ private:
         wc.lpszClassName = kClassName;
         wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
         atom = RegisterClassW(&wc);
+        if (!atom && GetLastError() == ERROR_CLASS_ALREADY_EXISTS)
+        {
+            atom = 1;
+        }
+        return atom != 0;
     }
 
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -2594,11 +2818,10 @@ private:
             auto create = reinterpret_cast<CREATESTRUCTW*>(lParam);
             band = reinterpret_cast<RealTimeNotesBand*>(create->lpCreateParams);
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(band));
-            EnterCriticalSection(&band->m_windowLock);
+            aip::CriticalSectionLock lock(band->m_windowLock);
             band->m_hwnd = hwnd;
             band->m_windowToken = static_cast<ULONG_PTR>(
                 static_cast<ULONG>(InterlockedIncrement(&g_windowGeneration)));
-            LeaveCriticalSection(&band->m_windowLock);
         }
 
         if (!band)
@@ -2637,28 +2860,35 @@ private:
             return 0;
         case kStatusReadyMessage:
         {
-            EnterCriticalSection(&band->m_windowLock);
-            bool isCurrentWindow =
-                band->m_hwnd == hwnd &&
-                static_cast<ULONG_PTR>(wParam) == band->m_windowToken;
-            LeaveCriticalSection(&band->m_windowLock);
+            bool isCurrentWindow = false;
+            {
+                aip::CriticalSectionLock lock(band->m_windowLock);
+                isCurrentWindow =
+                    band->m_hwnd == hwnd &&
+                    static_cast<ULONG_PTR>(wParam) == band->m_windowToken;
+            }
             if (!isCurrentWindow)
             {
                 return 0;
             }
             KillTimer(hwnd, kRefreshTimer);
-            SetTimer(hwnd, kRefreshTimer, band->CurrentRefreshSeconds() * 1000, nullptr);
+            if (SetTimer(hwnd, kRefreshTimer, band->CurrentRefreshSeconds() * 1000, nullptr) == 0)
+            {
+                LogLine(L"Could not schedule the deskband refresh timer: " + std::to_wstring(GetLastError()));
+            }
             InvalidateRect(hwnd, nullptr, TRUE);
             band->NotifyBandInfoChanged();
             return 0;
         }
         case kRefreshRequestedMessage:
         {
-            EnterCriticalSection(&band->m_windowLock);
-            bool isCurrentWindow =
-                band->m_hwnd == hwnd &&
-                static_cast<ULONG_PTR>(wParam) == band->m_windowToken;
-            LeaveCriticalSection(&band->m_windowLock);
+            bool isCurrentWindow = false;
+            {
+                aip::CriticalSectionLock lock(band->m_windowLock);
+                isCurrentWindow =
+                    band->m_hwnd == hwnd &&
+                    static_cast<ULONG_PTR>(wParam) == band->m_windowToken;
+            }
             if (isCurrentWindow)
             {
                 band->BeginRefresh();
@@ -2667,13 +2897,14 @@ private:
         }
         case WM_NCDESTROY:
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            EnterCriticalSection(&band->m_windowLock);
-            if (band->m_hwnd == hwnd)
             {
-                band->m_hwnd = nullptr;
-                band->m_windowToken = 0;
+                aip::CriticalSectionLock lock(band->m_windowLock);
+                if (band->m_hwnd == hwnd)
+                {
+                    band->m_hwnd = nullptr;
+                    band->m_windowToken = 0;
+                }
             }
-            LeaveCriticalSection(&band->m_windowLock);
             return 0;
         default:
             break;
@@ -2698,9 +2929,8 @@ private:
 
     BandSettings CurrentSettings()
     {
-        EnterCriticalSection(&m_settingsLock);
+        aip::CriticalSectionLock lock(m_settingsLock);
         BandSettings settings{ m_installDir, m_configDir, m_assetDir };
-        LeaveCriticalSection(&m_settingsLock);
         return settings;
     }
 
@@ -2711,10 +2941,13 @@ private:
             return;
         }
 
-        EnterCriticalSection(&m_windowLock);
-        HWND hwnd = m_hwnd;
-        ULONG_PTR windowToken = m_windowToken;
-        LeaveCriticalSection(&m_windowLock);
+        HWND hwnd = nullptr;
+        ULONG_PTR windowToken = 0;
+        {
+            aip::CriticalSectionLock lock(m_windowLock);
+            hwnd = m_hwnd;
+            windowToken = m_windowToken;
+        }
         if (!hwnd || windowToken == 0)
         {
             InterlockedExchange(&m_refreshing, 0);
@@ -2744,41 +2977,54 @@ private:
     {
         auto refresh = static_cast<RefreshContext*>(context);
         auto band = refresh->band;
-        BandSettings settings = band->CurrentSettings();
-        NoteState state = FetchState(settings.configDir);
-
         bool published = false;
-        EnterCriticalSection(&band->m_windowLock);
-        if (band->m_hwnd == refresh->hwnd &&
-            band->m_windowToken == refresh->windowToken &&
-            IsWindow(refresh->hwnd))
+        try
         {
-            EnterCriticalSection(&band->m_stateLock);
-            band->m_state = state;
-            LeaveCriticalSection(&band->m_stateLock);
-            published = PostMessageW(
-                refresh->hwnd,
-                kStatusReadyMessage,
-                static_cast<WPARAM>(refresh->windowToken),
-                0) != FALSE;
+            BandSettings settings = band->CurrentSettings();
+            NoteState state = FetchState(settings.configDir);
+
+            aip::CriticalSectionLock windowLock(band->m_windowLock);
+            if (band->m_hwnd == refresh->hwnd &&
+                band->m_windowToken == refresh->windowToken &&
+                IsWindow(refresh->hwnd))
+            {
+                {
+                    aip::CriticalSectionLock stateLock(band->m_stateLock);
+                    band->m_state = state;
+                }
+                published = PostMessageW(
+                    refresh->hwnd,
+                    kStatusReadyMessage,
+                    static_cast<WPARAM>(refresh->windowToken),
+                    0) != FALSE;
+            }
         }
-        LeaveCriticalSection(&band->m_windowLock);
+        catch (const std::exception&)
+        {
+            LogLineNoThrow(L"Deskband refresh worker failed with a C++ exception.");
+        }
+        catch (...)
+        {
+            LogLineNoThrow(L"Deskband refresh worker failed with an unknown exception.");
+        }
 
         InterlockedExchange(&band->m_refreshing, 0);
         if (!published)
         {
-            EnterCriticalSection(&band->m_windowLock);
-            if (band->m_hwnd &&
-                band->m_windowToken != 0 &&
-                (band->m_hwnd != refresh->hwnd || band->m_windowToken != refresh->windowToken))
             {
-                PostMessageW(
-                    band->m_hwnd,
-                    kRefreshRequestedMessage,
-                    static_cast<WPARAM>(band->m_windowToken),
-                    0);
+                aip::CriticalSectionLock lock(band->m_windowLock);
+                if (band->m_hwnd &&
+                    band->m_windowToken != 0 &&
+                    (band->m_hwnd != refresh->hwnd || band->m_windowToken != refresh->windowToken) &&
+                    !PostMessageW(
+                        band->m_hwnd,
+                        kRefreshRequestedMessage,
+                        static_cast<WPARAM>(band->m_windowToken),
+                        0))
+                {
+                    LogLineNoThrow(L"Could not request a refresh for the replacement deskband window.");
+                }
             }
-            LeaveCriticalSection(&band->m_windowLock);
         }
 
         delete refresh;
@@ -2788,9 +3034,8 @@ private:
 
     NoteState CurrentState()
     {
-        EnterCriticalSection(&m_stateLock);
+        aip::CriticalSectionLock lock(m_stateLock);
         NoteState copy = m_state;
-        LeaveCriticalSection(&m_stateLock);
         return copy;
     }
 
@@ -3011,25 +3256,25 @@ private:
         std::wstring configDir = ReadSettingString(L"ConfigDir", DefaultConfigDir(installDir));
         std::wstring assetDir = ReadSettingString(L"AssetDir", DefaultAssetDir(installDir));
 
-        EnterCriticalSection(&m_settingsLock);
+        aip::CriticalSectionLock lock(m_settingsLock);
         m_installDir = installDir;
         m_configDir = configDir;
         m_assetDir = assetDir;
-        LeaveCriticalSection(&m_settingsLock);
     }
 
     void SetLoadingState(ResourceKind resource, const wchar_t* detail)
     {
         UINT refreshSeconds = CurrentRefreshSeconds();
-        EnterCriticalSection(&m_stateLock);
-        m_state.resource = resource;
-        m_state.state = StateKind::Loading;
-        m_state.line1 = L"Loading";
-        m_state.line2 = detail && detail[0] ? detail : MetadataFor(resource).displayName;
-        m_state.tooltip = L"Refreshing Real-Time Notes";
-        m_state.menuLines.clear();
-        m_state.refreshSeconds = refreshSeconds;
-        LeaveCriticalSection(&m_stateLock);
+        {
+            aip::CriticalSectionLock lock(m_stateLock);
+            m_state.resource = resource;
+            m_state.state = StateKind::Loading;
+            m_state.line1 = L"Loading";
+            m_state.line2 = detail && detail[0] ? detail : MetadataFor(resource).displayName;
+            m_state.tooltip = L"Refreshing Real-Time Notes";
+            m_state.menuLines.clear();
+            m_state.refreshSeconds = refreshSeconds;
+        }
 
         if (m_hwnd)
         {
@@ -3072,15 +3317,20 @@ private:
         message += L"?";
         if (MessageBoxW(m_hwnd, message.c_str(), L"Clear Account", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES)
         {
-            DeleteAccountConfig(resource);
-            BeginRefreshWithCurrentSettings();
+            if (DeleteAccountConfig(resource))
+            {
+                BeginRefreshWithCurrentSettings();
+            }
+            else
+            {
+                MessageBoxW(m_hwnd, L"The saved account could not be removed.", L"Clear Account", MB_OK | MB_ICONERROR);
+            }
         }
     }
 
     void OpenDirectory(const std::wstring& path)
     {
-        HINSTANCE result = ShellExecuteW(m_hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-        if (reinterpret_cast<INT_PTR>(result) <= 32)
+        if (!OpenShellTarget(m_hwnd, path))
         {
             MessageBoxW(m_hwnd, path.c_str(), L"Could not open directory", MB_OK | MB_ICONERROR);
         }
@@ -3236,7 +3486,10 @@ private:
         }
         else if (command == kCommandOpenLogin)
         {
-            ShellExecuteW(m_hwnd, L"open", L"https://www.hoyolab.com/home", nullptr, nullptr, SW_SHOWNORMAL);
+            if (!OpenShellTarget(m_hwnd, L"https://www.hoyolab.com/home"))
+            {
+                MessageBoxW(m_hwnd, L"Could not open the HoYoLAB sign-in page.", kBandName, MB_OK | MB_ICONERROR);
+            }
         }
         else if (command == kCommandClearSelected)
         {
@@ -3387,7 +3640,11 @@ static HRESULT SetRegValueString(HKEY root, const std::wstring& subkey, const wc
         return HRESULT_FROM_WIN32(result);
     }
     result = RegSetValueExW(key, valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
-    RegCloseKey(key);
+    LONG closeResult = RegCloseKey(key);
+    if (result == ERROR_SUCCESS)
+    {
+        result = closeResult;
+    }
     return HRESULT_FROM_WIN32(result);
 }
 
@@ -3397,9 +3654,16 @@ static HRESULT EnsureRegKey(HKEY root, const std::wstring& subkey)
     LONG result = RegCreateKeyExW(root, subkey.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr);
     if (result == ERROR_SUCCESS)
     {
-        RegCloseKey(key);
+        result = RegCloseKey(key);
     }
     return HRESULT_FROM_WIN32(result);
+}
+
+static HRESULT LastErrorAsHresult()
+{
+    DWORD error = GetLastError();
+    return HRESULT_FROM_WIN32(
+        error == ERROR_SUCCESS ? ERROR_WRITE_FAULT : error);
 }
 
 static void DeleteCategoryCache()
@@ -3454,6 +3718,13 @@ extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllRegisterServer()
     std::wstring clsid = GuidToString(CLSID_RealTimeNotesDeskband);
     std::wstring clsidKey = std::wstring(kClassesClsidKey) + L"\\" + clsid;
     std::wstring modulePath = ModulePath();
+    if (modulePath.empty())
+    {
+        return HRESULT_FROM_WIN32(
+            GetLastError() == ERROR_SUCCESS
+                ? ERROR_FILE_NOT_FOUND
+                : GetLastError());
+    }
     std::wstring installDir = ParentDirectoryOf(modulePath);
     std::wstring configDir = DefaultConfigDir(installDir);
     std::wstring assetDir = DefaultAssetDir(installDir);
@@ -3469,23 +3740,38 @@ extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllRegisterServer()
     hr = SetRegValueString(HKEY_CURRENT_USER, L"Software\\Classes\\Component Categories\\" + std::wstring(kDeskBandCatid), nullptr, L"Desk Band");
     if (FAILED(hr)) return hr;
 
-    WriteSettingString(L"InstallDir", installDir);
+    if (!WriteSettingString(L"InstallDir", installDir))
+    {
+        return LastErrorAsHresult();
+    }
     if (ReadSettingString(L"ConfigDir", L"").empty())
     {
-        WriteSettingString(L"ConfigDir", configDir);
+        if (!WriteSettingString(L"ConfigDir", configDir))
+        {
+            return LastErrorAsHresult();
+        }
     }
     if (ReadSettingString(L"AssetDir", L"").empty())
     {
-        WriteSettingString(L"AssetDir", assetDir);
+        if (!WriteSettingString(L"AssetDir", assetDir))
+        {
+            return LastErrorAsHresult();
+        }
     }
     if (ReadSettingString(L"Resource", L"").empty())
     {
-        WriteSettingString(L"Resource", L"auto");
+        if (!WriteSettingString(L"Resource", L"auto"))
+        {
+            return LastErrorAsHresult();
+        }
     }
     DWORD loggingEnabled = 0;
     if (!TryReadIniDword(L"Settings", L"LoggingEnabled", loggingEnabled))
     {
-        WriteSettingDword(L"LoggingEnabled", 1);
+        if (!WriteSettingDword(L"LoggingEnabled", 1))
+        {
+            return LastErrorAsHresult();
+        }
     }
 
     DeleteCategoryCache();
@@ -3496,7 +3782,9 @@ extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE DllUnregisterServer()
 {
     std::wstring clsid = GuidToString(CLSID_RealTimeNotesDeskband);
     std::wstring clsidKey = std::wstring(kClassesClsidKey) + L"\\" + clsid;
-    RegDeleteTreeW(HKEY_CURRENT_USER, clsidKey.c_str());
+    LONG result = RegDeleteTreeW(HKEY_CURRENT_USER, clsidKey.c_str());
     DeleteCategoryCache();
-    return S_OK;
+    return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND
+        ? S_OK
+        : HRESULT_FROM_WIN32(result);
 }

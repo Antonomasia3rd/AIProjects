@@ -42,15 +42,18 @@ PhotoCollage.cmd -InputFolder "C:\Photos" -OutputFile "C:\Photos\collage.jpg" -C
 - `-Cols`: number of columns. Default: `5`.
 - `-MaxImages`: maximum number of images to include. Default: `25`.
 - `-JpegQuality`: JPEG quality from 1 to 100 when writing `.jpg` or `.jpeg`. Default: `80`.
+- `-MaxCanvasMegapixels`: hard limit for the calculated canvas size. Default: `100`; range: `1` through `1024`.
 - `-LogFile`: optional log path. Default: `PhotoCollage.log` beside the compiled helper executable. Relative paths resolve from the helper directory.
 
 ## Behavior And Limitations
 
-- Image order follows the recursive file enumeration order returned by .NET.
+- Image paths are ordered case-insensitively for deterministic output.
 - The first image defines the cell size for the whole collage.
 - Source images are scaled into cells but not cropped individually.
 - Mixed aspect ratios/sizes can produce uneven-looking output.
-- Existing output files are overwritten by `System.Drawing` save behavior if the path can be written.
+- The requested output file is excluded from input discovery.
+- Canvas dimension arithmetic is checked and the megapixel limit is enforced before allocation.
+- Output is written to a temporary file and atomically replaces an existing destination; failed writes do not destroy the prior collage.
 
 ## Generated Files
 

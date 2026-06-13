@@ -162,11 +162,22 @@ static std::wstring GetWallpaperFromDesktopWallpaperCOM()
 
 static std::wstring GetWallpaperFromTranscodedWallpaperFile()
 {
-    wchar_t appData[MAX_PATH] = {};
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, appData)))
+    PWSTR appData = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &appData)) ||
+        appData == nullptr)
         return L"";
 
-    std::wstring path = std::wstring(appData) + L"\\Microsoft\\Windows\\Themes\\TranscodedWallpaper";
+    std::wstring path;
+    try
+    {
+        path = std::wstring(appData) + L"\\Microsoft\\Windows\\Themes\\TranscodedWallpaper";
+    }
+    catch (...)
+    {
+        CoTaskMemFree(appData);
+        throw;
+    }
+    CoTaskMemFree(appData);
     return PathFileExistsW(path.c_str()) ? path : L"";
 }
 
@@ -320,12 +331,8 @@ static bool EnsureDirectoryExistsSimple(const std::wstring& path)
 
 static std::wstring GetLiveWallpaperSnapshotDirectory()
 {
-    std::vector<wchar_t> tempPath(MAX_PATH * 4, L'\0');
-    DWORD len = GetTempPathW((DWORD)tempPath.size(), tempPath.data());
-    std::wstring base;
-    if (len > 0 && len < tempPath.size())
-        base.assign(tempPath.data(), len);
-    else
+    std::wstring base = aip::GetTemporaryDirectoryPath();
+    if (base.empty())
         base = GetExeDir() + L"\\";
 
     while (!base.empty() && (base.back() == L'\\' || base.back() == L'/'))

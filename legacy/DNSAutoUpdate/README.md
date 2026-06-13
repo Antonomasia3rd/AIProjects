@@ -58,6 +58,12 @@ Preview DNS changes without applying them:
 DNSAutoUpdate.cmd -ZoneName "server.local" -ManagedRecordName "@,app" -WhatIf
 ```
 
+Run exactly one cycle, suitable for Task Scheduler:
+
+```cmd
+DNSAutoUpdate.cmd -ZoneName "server.local" -ManagedRecordName "@,app" -Once
+```
+
 ## Parameters
 
 - `-ZoneName`: DNS zone to maintain. Default: `server.local`.
@@ -74,6 +80,7 @@ DNSAutoUpdate.cmd -ZoneName "server.local" -ManagedRecordName "@,app" -WhatIf
 - `-IncludeUnpreferred`: include IPv4 addresses whose `AddressState` is not `Preferred`.
 - `-WhatIf`: log and preview DNS add/remove operations without changing records.
 - `-Confirm`: prompt before each DNS add/remove operation.
+- `-Once`: run one complete scan/update cycle and exit. A successful cycle returns `0`; no eligible address or any read/write failure returns `3`.
 
 ## Safety Notes
 
@@ -82,5 +89,7 @@ DNSAutoUpdate.cmd -ZoneName "server.local" -ManagedRecordName "@,app" -WhatIf
 - If no eligible IPv4 address remains, the cycle skips DNS changes instead of deleting records.
 - Loopback, APIPA, `0.0.0.0`, unpreferred addresses, and excluded virtual adapters are ignored by default.
 - The repository root also contains a `DNSAutoUpdate.cmd` convenience wrapper that forwards to this utility with the same parameters.
-- The utility runs forever until the process is stopped.
+- Without `-Once`, the utility runs until the process is stopped.
+- `dnscmd` output is accepted only from lines that contain an exact IPv4 `A` record; unrelated server/noise addresses are ignored.
+- Timed-out `dnscmd` processes are terminated and their output drain is bounded.
 - Generated logs are ignored by git. Long-running jobs should keep log rotation enabled or send `-LogFile` to a managed logging location.

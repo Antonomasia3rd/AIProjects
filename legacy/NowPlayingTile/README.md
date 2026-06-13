@@ -19,11 +19,13 @@ From the repository root:
 NowPlayingTile\BuildNowPlayingTile.cmd
 ```
 
-Syntax-only check:
+Syntax and source-regression checks:
 
 ```cmd
 NowPlayingTile\BuildNowPlayingTile.cmd check
 ```
+
+The source checks cover command-line side effects, shared-baseline integration, initialization failures, strict settings parsing, bounded subprocess output, tray recovery, and window/message-loop error handling.
 
 Output:
 
@@ -129,21 +131,23 @@ Diagnostics are written to:
 <exe folder>\<exe name>.log
 ```
 
-For the default build output, those files are `build\NowPlayingTile.ini` and `build\NowPlayingTile.log`. If the executable is renamed, the default INI/log names follow the renamed executable.
+For the default build output, those files are `build\NowPlayingTile.ini` and `build\NowPlayingTile.log`. If the executable is renamed, the default INI/log names follow the renamed executable. Log appends use the shared synchronized UTF-8 logger, so concurrent writers do not interleave records.
 
 Available settings:
 
 ```ini
 # NowPlayingTile settings
-# TileLayout: Cycle, Text, Artwork, Combined
+# TileLayout is retained for forward compatibility; current builds render text.
 [Settings]
-TileLayout=Cycle
+TileLayout=Text
 UpdateIntervalSeconds=2
 TileRefreshSeconds=60
 ShowTrayIcon=false
 ```
 
-`Cycle` is the default. It sends two Live Tile notifications: a text-only view and an artwork view. This avoids the artwork-only tile problem while still showing album/site artwork when Windows rotates the Live Tile queue.
+`TileLayout` currently renders the same text payload for every accepted value. The
+setting remains in the file so artwork layouts can return without another
+configuration migration.
 
 ## Notes
 
@@ -167,7 +171,7 @@ Running `NowPlayingTile.exe` directly from `build` starts as an unpackaged proce
 
 `NowPlayingTile.cpp` is the single translation-unit entry point. Most implementation code is split into ordered fragments under `NowPlayingTile\src`:
 
-- `npt_core.inc`: path helpers, logging, string helpers, XML escaping, and file URI helpers.
+- `npt_core.inc`: shared sidecar/logging integration plus product-specific string, XML, and file URI helpers.
 - `npt_config_defaults.inc`: generated INI defaults and settings parsing.
 - `npt_command_line.inc`: command-line parsing and single-instance exit signaling.
 - `npt_manifest.inc`: generated Appx manifest/default logo assets and loose-package register/launch helpers.
@@ -198,5 +202,6 @@ Normal launch behavior:
 - If the executable is started directly from `build`, it first generates `AppxManifest.xml` and `Assets`, registers the loose package, launches the packaged Start-menu identity, then exits the unpackaged bootstrap process.
 - If automatic registration fails, the unpackaged bootstrap process exits after logging the PowerShell/Appx deployment error instead of continuing to spam Live Tile update failures.
 - PowerShell registration, removal, and packaged-launch helpers time out after two minutes and terminate the helper instead of leaving the bootstrap process hung indefinitely.
+- When enabled, the tray icon is restored after Explorer restarts; keyboard/context activation opens the menu and primary activation opens the widget.
 - Live Tile updates only work from the packaged identity. The direct/unpackaged process cannot update the tile because Windows gives it no package identity.
 - `build\obj` contains MSVC intermediate `.obj` files. This matches `DesktopStub/BuildDesktopStub.cmd`, which creates `build\obj\DesktopStub.obj`; it is not source and can be deleted safely after a build.

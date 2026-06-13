@@ -15,7 +15,7 @@ From this folder:
 
 ```cmd
 mkdir build 2>nul
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:exe /optimize+ /out:build\AllowContentAboveLock.exe /r:System.ServiceProcess.dll AllowContentAboveLock.cs
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:exe /optimize+ /out:build\AllowContentAboveLock.exe /r:System.ServiceProcess.dll ..\..\dependencies\registry_notification_service.cs AllowContentAboveLock.cs
 ```
 
 ## Install
@@ -39,6 +39,7 @@ sc.exe delete AllowContentAboveLockService
 ## Runtime Behavior
 
 - Watches `HKEY_USERS` for newly loaded user hives.
+- Uses the shared restartable registry-notification service engine under `dependencies`.
 - Attaches to loaded domain/local `S-1-5-21-*` and Azure AD `S-1-12-1-*` user hives.
 - Watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for child-key and value changes.
 - Sets `AllowContentAboveLock` to DWORD `1` on notification setting subkeys.

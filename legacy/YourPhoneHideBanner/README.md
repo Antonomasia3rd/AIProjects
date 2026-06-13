@@ -24,7 +24,7 @@ From this folder:
 
 ```cmd
 mkdir build 2>nul
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:exe /optimize+ /out:build\YourPhoneHideBanner.exe /r:System.ServiceProcess.dll YourPhoneHideBanner.cs
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:exe /optimize+ /out:build\YourPhoneHideBanner.exe /r:System.ServiceProcess.dll ..\..\dependencies\registry_notification_service.cs YourPhoneHideBanner.cs
 ```
 
 The service class is `YourPhoneHideBannerService`; the installed Windows service name is also `YourPhoneHideBannerService`.
@@ -50,6 +50,7 @@ sc.exe delete YourPhoneHideBannerService
 ## Runtime Behavior
 
 - Watches `HKEY_USERS` for newly loaded user hives.
+- Uses the shared restartable registry-notification service engine under `dependencies`.
 - Attaches to loaded domain/local `S-1-5-21-*` and Azure AD `S-1-12-1-*` user hives.
 - Watches `HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings` for child-key and value changes.
 - Reapplies the banner/sound values when matching keys are created or changed.

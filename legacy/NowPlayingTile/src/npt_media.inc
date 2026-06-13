@@ -70,7 +70,7 @@ static void CleanupOldArtwork(const std::wstring& keepPath)
 
 static bool SaveArtworkAsJpeg(const std::vector<uint8_t>& bytes, const std::wstring& path)
 {
-    if (bytes.empty())
+    if (bytes.empty() || bytes.size() > static_cast<size_t>(UINT_MAX))
     {
         return false;
     }
@@ -83,8 +83,21 @@ static bool SaveArtworkAsJpeg(const std::vector<uint8_t>& bytes, const std::wstr
 
     Image image(stream);
     CLSID jpegClsid = {};
-    bool ok = image.GetLastStatus() == Ok && GetEncoderClsid(L"image/jpeg", &jpegClsid) >= 0 && image.Save(path.c_str(), &jpegClsid, nullptr) == Ok;
+    std::wstring temporaryPath = BuildTemporarySiblingPath(path);
+    DeleteFileW(temporaryPath.c_str());
+    bool ok =
+        image.GetLastStatus() == Ok &&
+        GetEncoderClsid(L"image/jpeg", &jpegClsid) >= 0 &&
+        image.Save(temporaryPath.c_str(), &jpegClsid, nullptr) == Ok;
     stream->Release();
+    if (ok)
+    {
+        ok = CommitTemporaryFile(temporaryPath, path);
+    }
+    else
+    {
+        DeleteFileW(temporaryPath.c_str());
+    }
     return ok;
 }
 

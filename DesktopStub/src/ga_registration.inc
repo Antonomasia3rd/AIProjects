@@ -41,10 +41,9 @@ static std::wstring PowerShellUtf8Preamble()
 
 static std::wstring DefaultPowerShellExe()
 {
-    wchar_t systemDirectory[MAX_PATH] = {};
-    UINT len = GetSystemDirectoryW(systemDirectory, ARRAYSIZE(systemDirectory));
-    if (len > 0 && len < ARRAYSIZE(systemDirectory))
-        return std::wstring(systemDirectory) + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
+    std::wstring systemDirectory = aip::GetSystemDirectoryPath();
+    if (!systemDirectory.empty())
+        return systemDirectory + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
 
     return L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 }

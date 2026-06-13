@@ -27,7 +27,10 @@
 #include <vector>
 
 #include <winrt/base.h>
+#include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.ApplicationModel.Activation.h>
 #include <winrt/Windows.Data.Xml.Dom.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.UI.Notifications.h>
 
 #include "..\dependencies\desktop_app_baseline.h"
@@ -47,6 +50,7 @@ static constexpr UINT WM_RLT_UPDATE_DONE = WM_APP + 11;
 static constexpr UINT WM_RLT_CONTROL = WM_APP + 12;
 static constexpr WPARAM RLT_CONTROL_EXIT = 1;
 static constexpr WPARAM RLT_CONTROL_REFRESH = 2;
+static constexpr WPARAM RLT_CONTROL_RELOAD = 3;
 static constexpr UINT_PTR UPDATE_TIMER_ID = 1;
 static constexpr UINT TRAY_UID = 1;
 static constexpr DWORD POWERSHELL_TIMEOUT_MS = 120000;
@@ -439,11 +443,10 @@ static std::wstring PowerShellUtf8Preamble()
 
 static std::wstring DefaultPowerShellExe()
 {
-    wchar_t systemDirectory[MAX_PATH] = {};
-    UINT len = GetSystemDirectoryW(systemDirectory, ARRAYSIZE(systemDirectory));
-    if (len > 0 && len < ARRAYSIZE(systemDirectory))
+    std::wstring systemDirectory = aip::GetSystemDirectoryPath();
+    if (!systemDirectory.empty())
     {
-        return std::wstring(systemDirectory) + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
+        return systemDirectory + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
     }
     return L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 }
@@ -1012,6 +1015,37 @@ static bool IsHttpUrl(const std::wstring& value)
     return ValidateFeedUrl(value, error);
 }
 
+static bool TryParseTileActivationArguments(
+    const std::wstring& arguments,
+    std::wstring& openUrl)
+{
+    openUrl.clear();
+    if (arguments.empty())
+    {
+        return false;
+    }
+
+    std::wstring commandLine = L"RssLiveTile.exe " + arguments;
+    int argc = 0;
+    wchar_t** argv = CommandLineToArgvW(commandLine.c_str(), &argc);
+    if (argv == nullptr)
+    {
+        return false;
+    }
+
+    bool valid =
+        argc == 3 &&
+        aip::EqualsI(argv[1] ? argv[1] : L"", L"--open-url") &&
+        argv[2] != nullptr &&
+        IsHttpUrl(argv[2]);
+    if (valid)
+    {
+        openUrl = argv[2];
+    }
+    LocalFree(argv);
+    return valid;
+}
+
 static bool ValidateManifestIdentity(const std::wstring& value)
 {
     std::wstring trimmed = aip::Trim(value);
@@ -1377,6 +1411,56 @@ public:
 private:
     bool initialized_ = false;
 };
+
+static bool TryGetTileActivationUrl(std::wstring& openUrl)
+{
+    openUrl.clear();
+    if (!CurrentProcessHasPackageIdentity())
+    {
+        return false;
+    }
+
+    try
+    {
+        WinrtApartment apartment;
+        using namespace winrt::Windows::ApplicationModel;
+        using namespace winrt::Windows::ApplicationModel::Activation;
+
+        IActivatedEventArgs activated = AppInstance::GetActivatedEventArgs();
+        if (activated == nullptr || activated.Kind() != ActivationKind::Launch)
+        {
+            return false;
+        }
+
+        auto launch = activated.try_as<ILaunchActivatedEventArgs2>();
+        if (launch == nullptr)
+        {
+            return false;
+        }
+
+        TileActivatedInfo tileInfo = launch.TileActivatedInfo();
+        if (tileInfo == nullptr)
+        {
+            return false;
+        }
+
+        auto notifications = tileInfo.RecentlyShownNotifications();
+        for (const auto& notification : notifications)
+        {
+            if (TryParseTileActivationArguments(notification.Arguments().c_str(), openUrl))
+            {
+                return true;
+            }
+        }
+    }
+    catch (const winrt::hresult_error&)
+    {
+    }
+    catch (...)
+    {
+    }
+    return false;
+}
 
 static std::wstring ExtractCharset(const std::wstring& value)
 {
@@ -2250,7 +2334,18 @@ static void BeginUpdate(RuntimeContext* ctx, bool force)
                     std::lock_guard<std::mutex> lock(ctx->mutex);
                     ctx->pendingResult = std::move(result);
                 }
-                PostMessageW(ctx->hwnd, WM_RLT_UPDATE_DONE, 0, 0);
+                if (!PostMessageW(ctx->hwnd, WM_RLT_UPDATE_DONE, 0, 0))
+                {
+                    {
+                        std::lock_guard<std::mutex> lock(ctx->mutex);
+                        ctx->pendingResult.reset();
+                    }
+                    if (!ctx->closing.load())
+                    {
+                        LogError(L"Could not publish the completed feed update: " +
+                            aip::GetLastErrorText(GetLastError()));
+                    }
+                }
             }
         });
     }
@@ -2276,7 +2371,11 @@ static void UpdateTrayTip(RuntimeContext* ctx, const std::wstring& tip)
     }
     ctx->nid.uFlags = NIF_TIP;
     wcsncpy_s(ctx->nid.szTip, ARRAYSIZE(ctx->nid.szTip), tip.c_str(), _TRUNCATE);
-    Shell_NotifyIconW(NIM_MODIFY, &ctx->nid);
+    if (!Shell_NotifyIconW(NIM_MODIFY, &ctx->nid))
+    {
+        LogWarn(L"Could not update the tray tooltip: " +
+            aip::GetLastErrorText(GetLastError()));
+    }
 }
 
 static bool AddTrayIcon(RuntimeContext* ctx)
@@ -2302,7 +2401,11 @@ static bool AddTrayIcon(RuntimeContext* ctx)
     if (ctx->trayCreated)
     {
         ctx->nid.uVersion = NOTIFYICON_VERSION_4;
-        Shell_NotifyIconW(NIM_SETVERSION, &ctx->nid);
+        if (!Shell_NotifyIconW(NIM_SETVERSION, &ctx->nid))
+        {
+            LogWarn(L"Could not enable tray icon version 4 behavior: " +
+                aip::GetLastErrorText(GetLastError()));
+        }
     }
     return ctx->trayCreated;
 }
@@ -2357,6 +2460,25 @@ static bool LaunchSelfAction(const wchar_t* action)
     }
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
+    return true;
+}
+
+static bool OpenShellTarget(HWND owner, const std::wstring& target, const wchar_t* description)
+{
+    HINSTANCE result = ShellExecuteW(
+        owner,
+        L"open",
+        target.c_str(),
+        nullptr,
+        nullptr,
+        SW_SHOWNORMAL);
+    INT_PTR status = reinterpret_cast<INT_PTR>(result);
+    if (status <= 32)
+    {
+        LogWarn(L"Could not open " + std::wstring(description) +
+            L" (ShellExecute=" + std::to_wstring(status) + L"): " + target);
+        return false;
+    }
     return true;
 }
 
@@ -2486,15 +2608,15 @@ static void HandleTrayCommand(RuntimeContext* ctx, UINT id)
         }
         if (IsHttpUrl(url))
         {
-            ShellExecuteW(ctx->hwnd, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            OpenShellTarget(ctx->hwnd, url, L"latest article");
         }
         break;
     }
     case IDM_OPEN_LOG:
-        ShellExecuteW(ctx->hwnd, L"open", g_paths.defaultLogPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        OpenShellTarget(ctx->hwnd, g_paths.defaultLogPath, L"log file");
         break;
     case IDM_OPEN_INI:
-        ShellExecuteW(ctx->hwnd, L"open", g_paths.configPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        OpenShellTarget(ctx->hwnd, g_paths.configPath, L"configuration file");
         break;
     case IDM_REGISTER:
         LaunchSelfAction(L"--register");
@@ -2563,6 +2685,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (wParam == RLT_CONTROL_REFRESH)
         {
             BeginUpdate(ctx, true);
+            return 0;
+        }
+        if (wParam == RLT_CONTROL_RELOAD)
+        {
+            ReloadRuntimeSettings(ctx);
             return 0;
         }
         break;
@@ -2761,7 +2888,6 @@ static AppOptions ParseCommandLine()
     {
         std::wstring arg = argv[i] ? argv[i] : L"";
         std::wstring value;
-        std::wstring error;
 
         if (aip::EqualsI(arg, L"--help") || aip::EqualsI(arg, L"-h") || aip::EqualsI(arg, L"/?"))
         {
@@ -2968,6 +3094,11 @@ static bool SignalExistingInstance(WPARAM request)
         false);
 }
 
+static WPARAM ExistingInstanceRequestForOptions(const AppOptions& options)
+{
+    return options.writes.empty() ? RLT_CONTROL_REFRESH : RLT_CONTROL_RELOAD;
+}
+
 enum class SingleInstanceResult
 {
     Acquired,
@@ -2991,8 +3122,7 @@ static SingleInstanceResult AcquireSingleInstance(const AppOptions& options)
 
     if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
-        bool signaled = SignalExistingInstance(
-            options.requestExit ? RLT_CONTROL_EXIT : RLT_CONTROL_REFRESH);
+        bool signaled = SignalExistingInstance(ExistingInstanceRequestForOptions(options));
         CloseHandle(g_singleInstanceMutex);
         g_singleInstanceMutex = nullptr;
         if (!signaled)
@@ -3138,6 +3268,16 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
         return 0;
     }
 
+    if (options.requestExit)
+    {
+        return SignalExistingInstance(RLT_CONTROL_EXIT) ? 0 : 2;
+    }
+
+    if (options.openUrl.empty())
+    {
+        TryGetTileActivationUrl(options.openUrl);
+    }
+
     LogText(std::wstring(L"Starting ") + APP_NAME + L" from " + g_paths.exePath);
 
     if (!EnsureDefaultSettingsFile())
@@ -3178,11 +3318,6 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
         {
             LogWarn(L"Could not open article URL: " + options.openUrl);
         }
-    }
-
-    if (options.requestExit)
-    {
-        return SignalExistingInstance(RLT_CONTROL_EXIT) ? 0 : 2;
     }
 
     if (!InitGdiplus())

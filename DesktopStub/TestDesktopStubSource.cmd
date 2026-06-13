@@ -48,8 +48,8 @@ if errorlevel 1 (
 )
 
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\DesktopStubSourceCheck.cpp /Fe:build\DesktopStubSourceCheck.exe /Fo:build\obj\DesktopStubSourceCheck.obj
-if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
     popd
     exit /b %STATUS%
 )

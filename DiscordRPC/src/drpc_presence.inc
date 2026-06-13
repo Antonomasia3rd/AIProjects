@@ -127,12 +127,24 @@ static std::wstring QueryProcessPath(DWORD pid)
         return L"";
     }
 
-    std::vector<wchar_t> buffer(4096);
-    DWORD size = static_cast<DWORD>(buffer.size());
     std::wstring path;
-    if (QueryFullProcessImageNameW(process, 0, buffer.data(), &size))
+    std::vector<wchar_t> buffer(512);
+    for (;;)
     {
-        path.assign(buffer.data(), size);
+        DWORD size = static_cast<DWORD>(buffer.size());
+        if (QueryFullProcessImageNameW(process, 0, buffer.data(), &size))
+        {
+            if (size != 0)
+            {
+                path.assign(buffer.data(), size);
+            }
+            break;
+        }
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || buffer.size() >= 32768)
+        {
+            break;
+        }
+        buffer.resize((std::min)(buffer.size() * 2, static_cast<size_t>(32768)));
     }
     CloseHandle(process);
     return path;

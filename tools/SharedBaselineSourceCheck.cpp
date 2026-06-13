@@ -178,6 +178,11 @@ int main()
             tray,
             "BeginTrayNestedMenu");
         RequireContains(
+            "shared tray balloon helper reports notification-area failures",
+            "dependencies/tray.inc",
+            tray,
+            "return Shell_NotifyIconW(NIM_MODIFY, &nid) != FALSE;");
+        RequireContains(
             "shared application baseline exposes reusable subsystem contracts",
             "dependencies/baseline_app.h",
             baselineApp,
@@ -207,6 +212,16 @@ int main()
             "dependencies/config_ini.inc",
             configIni,
             "MutateFresh");
+        RequireContains(
+            "shared config dependency supports value removal",
+            "dependencies/config_ini.inc",
+            configIni,
+            "RemoveIniValueFromText");
+        RequireContains(
+            "shared config dependency supports section removal",
+            "dependencies/config_ini.inc",
+            configIni,
+            "RemoveIniSectionFromText");
 
         RequireContains(
             "app path helper derives sidecar paths",
@@ -279,6 +294,36 @@ int main()
             sharedCore,
             "TryMakeAbsolutePath");
         RequireContains(
+            "shared core exposes exception-safe Win32 critical-section locking",
+            "dependencies/core.inc",
+            sharedCore,
+            "class CriticalSectionLock");
+        RequireContains(
+            "shared critical-section lock is non-copyable",
+            "dependencies/core.inc",
+            sharedCore,
+            "CriticalSectionLock(const CriticalSectionLock&) = delete;");
+        RequireContains(
+            "shared core exposes move-only kernel handle ownership",
+            "dependencies/core.inc",
+            sharedCore,
+            "class UniqueKernelHandle");
+        RequireContains(
+            "shared kernel handle owner rejects invalid handles",
+            "dependencies/core.inc",
+            sharedCore,
+            "handle != nullptr && handle != INVALID_HANDLE_VALUE");
+        RequireContains(
+            "shared core exposes growable temporary-directory lookup",
+            "dependencies/core.inc",
+            sharedCore,
+            "GetTemporaryDirectoryPath");
+        RequireContains(
+            "shared core exposes growable system-directory lookup",
+            "dependencies/core.inc",
+            sharedCore,
+            "GetSystemDirectoryPath");
+        RequireContains(
             "shared core exposes checked UTF-8 conversion",
             "dependencies/core.inc",
             sharedCore,
@@ -303,6 +348,16 @@ int main()
             "dependencies/config_ini.inc",
             configIni,
             "if (written != need)");
+        RequireContains(
+            "shared INI reader bounds sidecar allocation",
+            "dependencies/config_ini.inc",
+            configIni,
+            "kMaxIniFileBytes");
+        RequireContains(
+            "shared INI loader preserves read and decode failures",
+            "dependencies/config_ini.inc",
+            configIni,
+            "SetLastError(readError == ERROR_SUCCESS ? ERROR_READ_FAULT : readError)");
         RequireContains(
             "shared JSON decoding rejects invalid UTF-8",
             "dependencies/core.inc",
@@ -389,6 +444,16 @@ int main()
             logging,
             "return AppendUtf8TextToFile(filePath, line + L\"\\r\\n\", writeUtf8Bom, lockWaitMs);");
         RequireContains(
+            "shared logging helper preserves synchronized UTF-16 compatibility logs",
+            "dependencies/logging.inc",
+            logging,
+            "AppendUtf16LineToFile");
+        RequireContains(
+            "shared UTF-16 compatibility logger writes complete records",
+            "dependencies/logging.inc",
+            logging,
+            "text.size() * sizeof(wchar_t)");
+        RequireContains(
             "shared logging helper writes UTF-8 BOM for new files",
             "dependencies/logging.inc",
             logging,
@@ -413,6 +478,11 @@ int main()
             "dependencies/logging.inc",
             logging,
             "WriteAllBytes");
+        RequireContains(
+            "shared logging helper propagates delayed close failures",
+            "dependencies/logging.inc",
+            logging,
+            "if (!CloseHandle(file) && ok)");
         RequireContains(
             "shared config writer loops on partial writes",
             "dependencies/config_ini.inc",
@@ -500,6 +570,16 @@ int main()
             dpapi,
             "TryWideToUtf8(secret, utf8)");
         RequireContains(
+            "shared DPAPI helper validates Win32 plaintext blob lengths",
+            "dependencies/dpapi.inc",
+            dpapi,
+            "utf8.size() > MAXDWORD");
+        RequireContains(
+            "shared DPAPI helper validates Win32 encrypted blob lengths",
+            "dependencies/dpapi.inc",
+            dpapi,
+            "cipherBytes.size() > MAXDWORD");
+        RequireContains(
             "shared DPAPI helper rejects invalid decrypted UTF-8",
             "dependencies/dpapi.inc",
             dpapi,
@@ -525,6 +605,16 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "INI write mutex supports bounded waits");
+        RequireContains(
+            "shared tests cover INI value removal",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "INI value removal preserves neighboring entries");
+        RequireContains(
+            "shared tests cover INI section removal",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "INI section removal preserves following sections");
         RequireContains(
             "shared tests cover strict integer overflow rejection",
             "tools/SharedBaselineTests.cpp",
@@ -606,6 +696,11 @@ int main()
             sharedTests,
             "INI file writer fails non-empty text it cannot encode");
         RequireContains(
+            "shared tests cover oversized INI rejection",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "INI reader rejects oversized sidecar files before allocation");
+        RequireContains(
             "shared tests cover JSON invalid UTF-16 behavior",
             "tools/SharedBaselineTests.cpp",
             sharedTests,
@@ -656,6 +751,11 @@ int main()
             sharedTests,
             "shared UTF-8 logger writes BOM for new log files");
         RequireContains(
+            "shared tests lock UTF-16 compatibility logging behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared UTF-16 compatibility logger appends complete lines");
+        RequireContains(
             "shared tests lock logging failure reporting behavior",
             "tools/SharedBaselineTests.cpp",
             sharedTests,
@@ -680,6 +780,11 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "strict absolute path helper rejects empty paths");
+        RequireContains(
+            "shared tests lock system-directory path behavior",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "system directory helper returns an existing directory");
         RequireContains(
             "shared tests lock path-scoped identity hashing",
             "tools/SharedBaselineTests.cpp",

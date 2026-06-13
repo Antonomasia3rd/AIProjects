@@ -1,5 +1,6 @@
 #define UNICODE
 #define _UNICODE
+#define NOMINMAX
 
 #include <windows.h>
 #include <bcrypt.h>
@@ -13,6 +14,8 @@
 #include <cwctype>
 #include <string>
 #include <vector>
+
+#include "../../dependencies/desktop_app_baseline.h"
 
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -295,23 +298,16 @@ static std::wstring DefaultLogPath()
 
 static void LogLine(const std::wstring& message)
 {
-    HANDLE file = CreateFileW(DefaultLogPath().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return;
-    }
-
     SYSTEMTIME st;
     GetLocalTime(&st);
     wchar_t timestamp[64];
     wsprintfW(timestamp, L"%04u-%02u-%02u %02u:%02u:%02u  ",
         st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    DWORD bytes = 0;
-    WriteFile(file, timestamp, static_cast<DWORD>(wcslen(timestamp) * sizeof(wchar_t)), &bytes, nullptr);
-    WriteFile(file, message.c_str(), static_cast<DWORD>(message.size() * sizeof(wchar_t)), &bytes, nullptr);
-    const wchar_t newline[] = L"\r\n";
-    WriteFile(file, newline, static_cast<DWORD>((ARRAYSIZE(newline) - 1) * sizeof(wchar_t)), &bytes, nullptr);
-    CloseHandle(file);
+    (void)aip::AppendUtf16LineToFile(
+        DefaultLogPath(),
+        std::wstring(timestamp) + message,
+        false,
+        5000);
 }
 
 static std::wstring ReadIniString(
@@ -320,22 +316,10 @@ static std::wstring ReadIniString(
     const std::wstring& key,
     const std::wstring& defaultValue)
 {
-    DWORD size = 512;
-    for (;;) {
-        std::vector<wchar_t> buffer(size);
-        DWORD read = GetPrivateProfileStringW(
-            section.c_str(),
-            key.c_str(),
-            defaultValue.c_str(),
-            buffer.data(),
-            size,
-            path.c_str());
-
-        if (read < size - 2 || size >= 32768) {
-            return Trim(std::wstring(buffer.data(), read));
-        }
-        size *= 2;
-    }
+    return Trim(aip::IniConfigStore(path).ReadRaw(
+        section.c_str(),
+        key.c_str(),
+        defaultValue.c_str()));
 }
 
 static bool ReadIniBool(
@@ -344,9 +328,10 @@ static bool ReadIniBool(
     const std::wstring& key,
     bool defaultValue)
 {
-    std::wstring raw = ReadIniString(path, section, key, defaultValue ? L"1" : L"0");
-    std::transform(raw.begin(), raw.end(), raw.begin(), towlower);
-    return raw == L"1" || raw == L"true" || raw == L"yes" || raw == L"on";
+    bool value = false;
+    return aip::ParseBoolValue(ReadIniString(path, section, key, L""), value)
+        ? value
+        : defaultValue;
 }
 
 static DWORD ReadIniDword(
@@ -360,9 +345,16 @@ static DWORD ReadIniDword(
         return defaultValue;
     }
 
+    errno = 0;
     wchar_t* end = nullptr;
-    unsigned long value = wcstoul(raw.c_str(), &end, 10);
-    return end && *end == L'\0' ? static_cast<DWORD>(value) : defaultValue;
+    unsigned long long value = wcstoull(raw.c_str(), &end, 10);
+    return end != raw.c_str() &&
+        end != nullptr &&
+        *end == L'\0' &&
+        errno != ERANGE &&
+        value <= MAXDWORD
+        ? static_cast<DWORD>(value)
+        : defaultValue;
 }
 
 static int ReadIniInt(
@@ -371,14 +363,10 @@ static int ReadIniInt(
     const std::wstring& key,
     int defaultValue)
 {
-    std::wstring raw = ReadIniString(path, section, key, L"");
-    if (raw.empty()) {
-        return defaultValue;
-    }
-
-    wchar_t* end = nullptr;
-    long value = wcstol(raw.c_str(), &end, 10);
-    return end && *end == L'\0' ? static_cast<int>(value) : defaultValue;
+    int value = 0;
+    return aip::ParseIntValue(ReadIniString(path, section, key, L""), value)
+        ? value
+        : defaultValue;
 }
 
 static void MarkInvalid(GateConfig& config, const std::wstring& error)
@@ -566,6 +554,32 @@ static bool ConstantTimeEquals(const std::vector<BYTE>& left, const std::vector<
     return diff == 0;
 }
 
+static void SecureClear(std::wstring& value)
+{
+    if (!value.empty()) {
+        SecureZeroMemory(&value[0], value.size() * sizeof(wchar_t));
+        value.clear();
+    }
+}
+
+static bool WritePasswordUpgrade(
+    const GateConfig& config,
+    const std::vector<BYTE>& pbkdf2Hash)
+{
+    std::wstring iterations = std::to_wstring(kPasswordKdfIterations);
+    std::wstring pbkdf2Hex = BytesToHex(pbkdf2Hash);
+    std::wstring keepLegacy = config.keepLegacySha256Hash ? L"1" : L"0";
+    return aip::IniConfigStore(config.configPath, L"", 5000).MutateFresh(
+        [&](std::wstring& text) {
+            return aip::WriteIniValueToText(text, L"Security", L"Kdf", kPasswordKdfName) &&
+                aip::WriteIniValueToText(text, L"Security", L"Iterations", iterations) &&
+                aip::WriteIniValueToText(text, L"Security", L"PasswordPbkdf2HashHex", pbkdf2Hex) &&
+                aip::WriteIniValueToText(text, L"Security", L"KeepLegacySha256Hash", keepLegacy) &&
+                (config.keepLegacySha256Hash ||
+                    aip::WriteIniValueToText(text, L"Security", L"PasswordHashHex", L""));
+        });
+}
+
 static void TryUpgradeLegacyPasswordHash(
     const GateConfig& config,
     const std::vector<BYTE>& salt,
@@ -580,12 +594,8 @@ static void TryUpgradeLegacyPasswordHash(
         return;
     }
 
-    WritePrivateProfileStringW(L"Security", L"Kdf", kPasswordKdfName, config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"Iterations", std::to_wstring(kPasswordKdfIterations).c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"PasswordPbkdf2HashHex", BytesToHex(pbkdf2Hash).c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"KeepLegacySha256Hash", config.keepLegacySha256Hash ? L"1" : L"0", config.configPath.c_str());
-    if (!config.keepLegacySha256Hash) {
-        WritePrivateProfileStringW(L"Security", L"PasswordHashHex", nullptr, config.configPath.c_str());
+    if (!WritePasswordUpgrade(config, pbkdf2Hash)) {
+        LogLine(L"Could not atomically upgrade the legacy password hash");
     }
 }
 
@@ -628,6 +638,9 @@ static LRESULT CALLBACK PasswordWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
         HWND ok = CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
             272, buttonY, 84, 28, hwnd, reinterpret_cast<HMENU>(IDOK), nullptr, nullptr);
         SendMessageW(ok, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+        if (!label || !state->edit1 || !ok || (state->confirm && !state->edit2)) {
+            return -1;
+        }
         SetFocus(state->edit1);
         return 0;
     }
@@ -639,15 +652,21 @@ static LRESULT CALLBACK PasswordWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
             if (state->confirm) {
                 GetWindowTextW(state->edit2, second, static_cast<int>(std::size(second)));
                 if (wcscmp(first, second) != 0) {
+                    SecureZeroMemory(first, sizeof(first));
+                    SecureZeroMemory(second, sizeof(second));
                     MessageBoxW(hwnd, L"The passwords do not match.", L"Password", MB_OK | MB_ICONERROR);
                     return 0;
                 }
                 if (first[0] == L'\0') {
+                    SecureZeroMemory(first, sizeof(first));
+                    SecureZeroMemory(second, sizeof(second));
                     MessageBoxW(hwnd, L"Password cannot be empty.", L"Password", MB_OK | MB_ICONERROR);
                     return 0;
                 }
             }
             state->password = first;
+            SecureZeroMemory(first, sizeof(first));
+            SecureZeroMemory(second, sizeof(second));
             state->accepted = true;
             DestroyWindow(hwnd);
             return 0;
@@ -687,7 +706,10 @@ static bool ShowPasswordDialog(const std::wstring& title, const std::wstring& pr
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     wc.lpszClassName = className;
-    RegisterClassW(&wc);
+    ATOM classAtom = RegisterClassW(&wc);
+    if (classAtom == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        return false;
+    }
 
     int height = confirm ? 230 : 164;
     DWORD exStyle = WS_EX_APPWINDOW;
@@ -723,7 +745,16 @@ static bool ShowPasswordDialog(const std::wstring& title, const std::wstring& pr
     ShowWindow(hwnd, startMinimized ? SW_SHOWMINNOACTIVE : SW_SHOWNORMAL);
 
     MSG msg = {};
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    for (;;) {
+        BOOL result = GetMessageW(&msg, nullptr, 0, 0);
+        if (result == 0) {
+            break;
+        }
+        if (result == -1) {
+            LogLine(L"GetMessageW(password dialog) failed: " + std::to_wstring(GetLastError()));
+            SecureClear(state.password);
+            return false;
+        }
         if (msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN) {
             SendMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
             continue;
@@ -735,6 +766,7 @@ static bool ShowPasswordDialog(const std::wstring& title, const std::wstring& pr
     if (state.accepted) {
         password = state.password;
     }
+    SecureClear(state.password);
     return state.accepted;
 }
 
@@ -752,28 +784,37 @@ static int SetPassword()
     if (!GenerateRandomBytes(salt) ||
         !DerivePasswordHash(salt, password, kPasswordKdfIterations, pbkdf2Hash) ||
         (config.keepLegacySha256Hash && !HashPasswordLegacySha256(salt, password, legacyHash))) {
+        SecureClear(password);
         MessageBoxW(nullptr, L"Failed to generate password hash.", L"Password", MB_OK | MB_ICONERROR);
         return 1;
     }
 
-    WritePrivateProfileStringW(L"Security", L"Kdf", kPasswordKdfName, config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"Iterations", std::to_wstring(kPasswordKdfIterations).c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"SaltHex", BytesToHex(salt).c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"KeepLegacySha256Hash", config.keepLegacySha256Hash ? L"1" : L"0", config.configPath.c_str());
-    if (config.keepLegacySha256Hash) {
-        WritePrivateProfileStringW(L"Security", L"PasswordHashHex", BytesToHex(legacyHash).c_str(), config.configPath.c_str());
-    } else {
-        WritePrivateProfileStringW(L"Security", L"PasswordHashHex", nullptr, config.configPath.c_str());
+    std::wstring saltHex = BytesToHex(salt);
+    std::wstring legacyHex = config.keepLegacySha256Hash ? BytesToHex(legacyHash) : L"";
+    std::wstring pbkdf2Hex = BytesToHex(pbkdf2Hash);
+    bool saved = aip::IniConfigStore(config.configPath, L"", 5000).MutateFresh(
+        [&](std::wstring& text) {
+            return aip::WriteIniValueToText(text, L"Security", L"Kdf", kPasswordKdfName) &&
+                aip::WriteIniValueToText(text, L"Security", L"Iterations", std::to_wstring(kPasswordKdfIterations)) &&
+                aip::WriteIniValueToText(text, L"Security", L"SaltHex", saltHex) &&
+                aip::WriteIniValueToText(text, L"Security", L"KeepLegacySha256Hash", config.keepLegacySha256Hash ? L"1" : L"0") &&
+                aip::WriteIniValueToText(text, L"Security", L"PasswordHashHex", legacyHex) &&
+                aip::WriteIniValueToText(text, L"Security", L"PasswordPbkdf2HashHex", pbkdf2Hex) &&
+                aip::WriteIniValueToText(text, L"Security", L"MaxAttempts", std::to_wstring(config.maxAttempts)) &&
+                aip::WriteIniValueToText(text, L"Security", L"LockoutSeconds", std::to_wstring(config.lockoutSeconds)) &&
+                aip::WriteIniValueToText(text, L"Launch", L"Path", config.launchPath) &&
+                aip::WriteIniValueToText(text, L"Launch", L"Arguments", config.arguments) &&
+                aip::WriteIniValueToText(text, L"Launch", L"WorkingDirectory", config.workingDirectory) &&
+                aip::WriteIniValueToText(text, L"Launch", L"Desktop", config.desktop) &&
+                aip::WriteIniValueToText(text, L"Launch", L"ShowWindow", L"1") &&
+                aip::WriteIniValueToText(text, L"UI", L"AutoLockMinutes", std::to_wstring(config.autoLockMinutes));
+        });
+    SecureClear(password);
+    if (!saved) {
+        LogLine(L"Could not atomically save password configuration");
+        MessageBoxW(nullptr, L"Failed to save the password configuration.", L"Password", MB_OK | MB_ICONERROR);
+        return 1;
     }
-    WritePrivateProfileStringW(L"Security", L"PasswordPbkdf2HashHex", BytesToHex(pbkdf2Hash).c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"MaxAttempts", std::to_wstring(config.maxAttempts).c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Security", L"LockoutSeconds", std::to_wstring(config.lockoutSeconds).c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Launch", L"Path", config.launchPath.c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Launch", L"Arguments", config.arguments.c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Launch", L"WorkingDirectory", config.workingDirectory.c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Launch", L"Desktop", config.desktop.c_str(), config.configPath.c_str());
-    WritePrivateProfileStringW(L"Launch", L"ShowWindow", L"1", config.configPath.c_str());
-    WritePrivateProfileStringW(L"UI", L"AutoLockMinutes", std::to_wstring(config.autoLockMinutes).c_str(), config.configPath.c_str());
 
     LogLine(L"Password configuration saved");
     MessageBoxW(nullptr, config.configPath.c_str(), L"Password saved", MB_OK | MB_ICONINFORMATION);
@@ -809,13 +850,22 @@ static bool VerifyPassword(const GateConfig& config, bool startMinimized)
         bool hashed = hasPbkdf2Hash
             ? DerivePasswordHash(salt, password, config.kdfIterations, actualHash)
             : HashPasswordLegacySha256(salt, password, actualHash);
-        if (hashed && ConstantTimeEquals(actualHash, expectedHash)) {
+        bool matches = hashed && ConstantTimeEquals(actualHash, expectedHash);
+        if (matches) {
             if (!hasPbkdf2Hash) {
                 TryUpgradeLegacyPasswordHash(config, salt, password);
+            }
+            SecureClear(password);
+            if (!actualHash.empty()) {
+                SecureZeroMemory(actualHash.data(), actualHash.size());
             }
             return true;
         }
 
+        SecureClear(password);
+        if (!actualHash.empty()) {
+            SecureZeroMemory(actualHash.data(), actualHash.size());
+        }
         MessageBoxW(nullptr, L"Incorrect password.", L"Secure Desktop Password Prompt", MB_OK | MB_ICONERROR);
     }
 
@@ -1219,25 +1269,31 @@ static void PruneExitedProcesses(ControlWindowState* state)
         return;
     }
 
-    std::vector<LaunchedProcess> running;
-    for (LaunchedProcess& process : state->processes) {
-        if (!process.process) {
+    auto process = state->processes.begin();
+    while (process != state->processes.end()) {
+        if (!process->process) {
+            process = state->processes.erase(process);
             continue;
         }
 
-        DWORD wait = WaitForSingleObject(process.process, 0);
+        DWORD wait = WaitForSingleObject(process->process, 0);
         if (wait == WAIT_TIMEOUT) {
-            running.push_back(process);
-        } else {
-            if (process.wait) {
-                UnregisterWaitEx(process.wait, INVALID_HANDLE_VALUE);
-                process.wait = nullptr;
-            }
-            CloseHandle(process.process);
+            ++process;
+            continue;
         }
-    }
+        if (wait == WAIT_FAILED) {
+            LogLine(L"Could not query a tracked process state: " + std::to_wstring(GetLastError()));
+            ++process;
+            continue;
+        }
 
-    state->processes.swap(running);
+        if (process->wait) {
+            UnregisterWaitEx(process->wait, INVALID_HANDLE_VALUE);
+            process->wait = nullptr;
+        }
+        CloseHandle(process->process);
+        process = state->processes.erase(process);
+    }
 }
 
 static std::wstring RunningProcessText(size_t count)
@@ -1505,8 +1561,8 @@ static void CleanupControlWindowState(ControlWindowState* state)
 static void CALLBACK ProcessExitedCallback(PVOID context, BOOLEAN)
 {
     HWND hwnd = reinterpret_cast<HWND>(context);
-    if (hwnd) {
-        PostMessageW(hwnd, kProcessExitedMessage, 0, 0);
+    if (hwnd && !PostMessageW(hwnd, kProcessExitedMessage, 0, 0)) {
+        OutputDebugStringW(L"SecureDesktopPasswordLauncher: could not publish process-exit notification.\n");
     }
 }
 
@@ -1562,19 +1618,44 @@ static bool LaunchConfiguredTarget(ControlWindowState* state)
         return false;
     }
 
-    ResumeThread(pi.hThread);
+    if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1)) {
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 5000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        MessageBoxW(state->hwnd, L"Failed to resume the target program.", L"Secure Desktop Password Launcher", MB_OK | MB_ICONERROR);
+        return false;
+    }
 
     LaunchedProcess launched = {};
     launched.process = pi.hProcess;
     launched.pid = pi.dwProcessId;
-    RegisterWaitForSingleObject(
+    if (!RegisterWaitForSingleObject(
         &launched.wait,
         launched.process,
         ProcessExitedCallback,
         state->hwnd,
         INFINITE,
-        WT_EXECUTEONLYONCE);
-    state->processes.push_back(launched);
+        WT_EXECUTEONLYONCE)) {
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 5000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        MessageBoxW(state->hwnd, L"Failed to register target process monitoring.", L"Secure Desktop Password Launcher", MB_OK | MB_ICONERROR);
+        return false;
+    }
+    try {
+        state->processes.push_back(launched);
+    }
+    catch (...) {
+        UnregisterWaitEx(launched.wait, INVALID_HANDLE_VALUE);
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 5000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        MessageBoxW(state->hwnd, L"Failed to track the target process.", L"Secure Desktop Password Launcher", MB_OK | MB_ICONERROR);
+        return false;
+    }
 
     CloseHandle(pi.hThread);
 
@@ -1714,8 +1795,13 @@ static LRESULT CALLBACK ControlWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         SendMessageW(quickLock, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
         SendMessageW(openProgram, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
         SendMessageW(exit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+        if (!state || !state->processCount || !quickLock || !openProgram || !exit) {
+            return -1;
+        }
         if (state && state->config.autoLockMinutes > 0) {
-            SetTimer(hwnd, kAutoLockTimerId, 10000, nullptr);
+            if (SetTimer(hwnd, kAutoLockTimerId, 10000, nullptr) == 0) {
+                return -1;
+            }
         }
         UpdateProcessListDisplay(state);
         return 0;
@@ -1789,7 +1875,11 @@ static int RunControlWindow(const GateConfig& config)
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     wc.lpszClassName = className;
-    RegisterClassW(&wc);
+    ATOM classAtom = RegisterClassW(&wc);
+    if (classAtom == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        CleanupControlWindowState(&state);
+        return 1;
+    }
 
     DWORD exStyle = WS_EX_APPWINDOW;
     if (config.topMost) {
@@ -1836,13 +1926,23 @@ static int RunControlWindow(const GateConfig& config)
     LaunchConfiguredTarget(&state);
 
     MSG msg = {};
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    int rc = 0;
+    for (;;) {
+        BOOL result = GetMessageW(&msg, nullptr, 0, 0);
+        if (result == 0) {
+            break;
+        }
+        if (result == -1) {
+            LogLine(L"GetMessageW(control window) failed: " + std::to_wstring(GetLastError()));
+            rc = 1;
+            break;
+        }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
 
     CleanupControlWindowState(&state);
-    return 0;
+    return rc;
 }
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)

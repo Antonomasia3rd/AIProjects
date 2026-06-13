@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <regex>
 #include <sstream>
 #include <stdexcept>

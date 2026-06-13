@@ -2,7 +2,7 @@
 // @id              always-uiaccess
 // @name            Always UIAccess
 // @description     Creates or patches allowlisted child processes as UIAccess from hook-host processes selected by Windhawk's own inclusion list.
-// @version         2.4.1
+// @version         2.4.2
 // @author          local
 // @include         windhawk.exe
 // @compilerOptions -ladvapi32 -luser32
@@ -82,6 +82,8 @@ No osk.exe token source is used.
 
 #include <windows.h>
 #include <sddl.h>
+#include <tlhelp32.h>
+#include <memory>
 #include <string>
 #include <vector>
 #include <cwctype>
@@ -95,10 +97,23 @@ static constexpr const wchar_t* kRelaunchMarkerName =
 static constexpr const wchar_t* kRelaunchMarkerEntry =
     L"WH_ALWAYS_UIACCESS_RELAUNCHED=1";
 static constexpr DWORD kPipeTimeoutMs = 5000;
+static constexpr size_t kPathChars = 32768;
 static constexpr size_t kCommandLineChars = 32768;
+static constexpr size_t kEnvironmentChars = 32768;
 static constexpr DWORD kRequestFlagPatchCurrentProcessToken = 0x00000001;
 static constexpr DWORD kRequestFlagPatchTargetProcessToken = 0x00000002;
 static constexpr DWORD kRequestFlagCreateTargetProcess = 0x00000004;
+static constexpr DWORD kAllowedProxiedCreationFlags =
+    CREATE_SUSPENDED | CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP |
+    CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_SEPARATE_WOW_VDM |
+    CREATE_BREAKAWAY_FROM_JOB | CREATE_DEFAULT_ERROR_MODE |
+    IDLE_PRIORITY_CLASS | BELOW_NORMAL_PRIORITY_CLASS |
+    NORMAL_PRIORITY_CLASS | ABOVE_NORMAL_PRIORITY_CLASS |
+    HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS;
+static constexpr DWORD kPriorityClassFlags =
+    IDLE_PRIORITY_CLASS | BELOW_NORMAL_PRIORITY_CLASS |
+    NORMAL_PRIORITY_CLASS | ABOVE_NORMAL_PRIORITY_CLASS |
+    HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS;
 
 using NtSetInformationToken_t = NTSTATUS(NTAPI*)(
     HANDLE TokenHandle,
@@ -106,8 +121,6 @@ using NtSetInformationToken_t = NTSTATUS(NTAPI*)(
     PVOID TokenInformation,
     ULONG TokenInformationLength);
 
-using CreateEnvironmentBlock_t = BOOL(WINAPI*)(LPVOID*, HANDLE, BOOL);
-using DestroyEnvironmentBlock_t = BOOL(WINAPI*)(LPVOID);
 using GetNamedPipeClientProcessId_t = BOOL(WINAPI*)(HANDLE, PULONG);
 using Wow64DisableWow64FsRedirection_t = BOOL(WINAPI*)(PVOID*);
 using Wow64RevertWow64FsRedirection_t = BOOL(WINAPI*)(PVOID);
@@ -124,8 +137,6 @@ using CreateProcessW_t = BOOL(WINAPI*)(
     LPPROCESS_INFORMATION lpProcessInformation);
 
 static NtSetInformationToken_t g_NtSetInformationToken = nullptr;
-static CreateEnvironmentBlock_t g_CreateEnvironmentBlock = nullptr;
-static DestroyEnvironmentBlock_t g_DestroyEnvironmentBlock = nullptr;
 static GetNamedPipeClientProcessId_t g_GetNamedPipeClientProcessId = nullptr;
 static Wow64DisableWow64FsRedirection_t g_Wow64DisableWow64FsRedirection = nullptr;
 static Wow64RevertWow64FsRedirection_t g_Wow64RevertWow64FsRedirection = nullptr;
@@ -148,12 +159,15 @@ struct UIAccessRequest {
     DWORD size;
     DWORD flags;
     DWORD targetPid;
-    WCHAR exe[MAX_PATH];
-    WCHAR currentDirectory[MAX_PATH];
+    WCHAR exe[kPathChars];
+    WCHAR currentDirectory[kPathChars];
     DWORD creationFlags;
+    DWORD errorMode;
     DWORD startupFlags;
     WORD startupShowWindow;
     WCHAR commandLine[kCommandLineChars];
+    DWORD environmentChars;
+    WCHAR environment[kEnvironmentChars];
 };
 
 // Keep this structure pointer-size independent. The Windhawk service is often
@@ -175,6 +189,8 @@ struct UIAccessResponse {
 
 static_assert(sizeof(UIAccessResponse) == 1064,
               "UIAccessResponse must remain identical between 32-bit and 64-bit builds.");
+static_assert(sizeof(UIAccessRequest) == 262174,
+              "UIAccessRequest must remain identical between 32-bit and 64-bit builds.");
 
 static bool CurrentProcessHasUIAccess();
 
@@ -251,10 +267,16 @@ static std::wstring FullPathToString(PCWSTR value) {
         return std::wstring();
     }
 
-    WCHAR fullPath[MAX_PATH]{};
-    DWORD copied = GetFullPathNameW(value, ARRAYSIZE(fullPath), fullPath, nullptr);
-    if (copied && copied < ARRAYSIZE(fullPath)) {
-        return fullPath;
+    DWORD needed = GetFullPathNameW(value, 0, nullptr, nullptr);
+    if (!needed || needed > kPathChars) {
+        return value;
+    }
+
+    std::vector<WCHAR> fullPath(needed);
+    DWORD copied =
+        GetFullPathNameW(value, needed, fullPath.data(), nullptr);
+    if (copied && copied < needed) {
+        return std::wstring(fullPath.data(), copied);
     }
 
     return value;
@@ -410,17 +432,29 @@ static bool IsNativeSystem32Path(PCWSTR path) {
         return false;
     }
 
-    WCHAR windowsDirectory[MAX_PATH]{};
-    DWORD windowsDirectoryLength = GetWindowsDirectoryW(
-        windowsDirectory,
-        ARRAYSIZE(windowsDirectory));
-    if (!windowsDirectoryLength ||
-        windowsDirectoryLength >= ARRAYSIZE(windowsDirectory)) {
-        return false;
+    std::vector<WCHAR> windowsDirectoryBuffer(256);
+    std::wstring windowsDirectory;
+    for (;;) {
+        UINT windowsDirectoryLength = GetWindowsDirectoryW(
+            windowsDirectoryBuffer.data(),
+            static_cast<UINT>(windowsDirectoryBuffer.size()));
+        if (!windowsDirectoryLength) {
+            return false;
+        }
+        if (windowsDirectoryLength < windowsDirectoryBuffer.size()) {
+            windowsDirectory.assign(
+                windowsDirectoryBuffer.data(),
+                windowsDirectoryLength);
+            break;
+        }
+        if (windowsDirectoryLength > 32768) {
+            return false;
+        }
+        windowsDirectoryBuffer.resize(windowsDirectoryLength);
     }
 
     std::wstring normalizedPath = FullPathToString(path);
-    std::wstring system32Prefix = FullPathToString(windowsDirectory);
+    std::wstring system32Prefix = FullPathToString(windowsDirectory.c_str());
     TrimStringInPlace(&normalizedPath);
     TrimStringInPlace(&system32Prefix);
 
@@ -595,7 +629,7 @@ static void StopAutoTopmostThread() {
     }
 
     if (g_autoTopmostThread) {
-        WaitForSingleObject(g_autoTopmostThread, 3000);
+        WaitForSingleObject(g_autoTopmostThread, INFINITE);
         CloseHandle(g_autoTopmostThread);
         g_autoTopmostThread = nullptr;
     }
@@ -632,13 +666,32 @@ static void SetResponseError(UIAccessResponse* response,
 }
 
 static bool IsWindhawkProcess() {
-    WCHAR path[MAX_PATH]{};
-    if (!GetModuleFileNameW(nullptr, path, ARRAYSIZE(path))) {
-        return false;
+    std::wstring path;
+    std::vector<WCHAR> buffer(512);
+    for (;;) {
+        DWORD copied = GetModuleFileNameW(
+            nullptr,
+            buffer.data(),
+            static_cast<DWORD>(buffer.size()));
+        if (!copied) {
+            return false;
+        }
+        if (copied < buffer.size()) {
+            path.assign(buffer.data(), copied);
+            break;
+        }
+        if (buffer.size() >= kPathChars) {
+            SetLastError(ERROR_BUFFER_OVERFLOW);
+            return false;
+        }
+        buffer.resize((std::min)(buffer.size() * 2, kPathChars));
     }
 
-    const WCHAR* base = wcsrchr(path, L'\\');
-    return base && _wcsicmp(base + 1, L"windhawk.exe") == 0;
+    const WCHAR* base = wcsrchr(path.c_str(), L'\\');
+    if (!base) {
+        return false;
+    }
+    return _wcsicmp(base + 1, L"windhawk.exe") == 0;
 }
 
 static bool IsWindhawkServiceProcess() {
@@ -707,15 +760,81 @@ static bool CurrentProcessHasUIAccess() {
     return result;
 }
 
-static bool QueryCurrentProcessPath(WCHAR path[MAX_PATH]) {
-    return !!GetModuleFileNameW(nullptr, path, MAX_PATH);
+static bool QueryCurrentProcessPath(std::wstring* path) {
+    path->clear();
+    std::vector<WCHAR> buffer(512);
+    for (;;) {
+        DWORD copied = GetModuleFileNameW(
+            nullptr,
+            buffer.data(),
+            static_cast<DWORD>(buffer.size()));
+        if (!copied) {
+            return false;
+        }
+        if (copied < buffer.size()) {
+            path->assign(buffer.data(), copied);
+            return true;
+        }
+        if (buffer.size() >= kPathChars) {
+            SetLastError(ERROR_BUFFER_OVERFLOW);
+            return false;
+        }
+        buffer.resize((std::min)(buffer.size() * 2, kPathChars));
+    }
 }
 
-static void CopyFirstCommandLineToken(PCWSTR commandLine,
-                                      WCHAR token[MAX_PATH]) {
-    token[0] = L'\0';
+static bool QueryProcessPath(HANDLE process, std::wstring* path) {
+    path->clear();
+    std::vector<WCHAR> buffer(512);
+    for (;;) {
+        DWORD chars = static_cast<DWORD>(buffer.size());
+        if (QueryFullProcessImageNameW(
+                process,
+                0,
+                buffer.data(),
+                &chars)) {
+            if (!chars) {
+                SetLastError(ERROR_INVALID_DATA);
+                return false;
+            }
+            path->assign(buffer.data(), chars);
+            return true;
+        }
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER ||
+            buffer.size() >= kPathChars) {
+            return false;
+        }
+        buffer.resize((std::min)(buffer.size() * 2, kPathChars));
+    }
+}
+
+static bool QueryProcessParentId(DWORD processId, DWORD* parentId) {
+    *parentId = 0;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    bool found = false;
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if (entry.th32ProcessID == processId) {
+                *parentId = entry.th32ParentProcessID;
+                found = true;
+                break;
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+
+    CloseHandle(snapshot);
+    return found;
+}
+
+static std::wstring CopyFirstCommandLineToken(PCWSTR commandLine) {
     if (!commandLine) {
-        return;
+        return std::wstring();
     }
 
     while (*commandLine == L' ' || *commandLine == L'\t') {
@@ -723,7 +842,7 @@ static void CopyFirstCommandLineToken(PCWSTR commandLine,
     }
 
     if (!*commandLine) {
-        return;
+        return std::wstring();
     }
 
     const WCHAR* start = commandLine;
@@ -742,43 +861,44 @@ static void CopyFirstCommandLineToken(PCWSTR commandLine,
         }
     }
 
-    size_t length = static_cast<size_t>(end - start);
-    if (length >= MAX_PATH) {
-        length = MAX_PATH - 1;
-    }
-
-    wcsncpy_s(token, MAX_PATH, start, length);
+    return std::wstring(start, end);
 }
 
 
 static bool SearchPathToString(PCWSTR fileName, std::wstring* resolved) {
-    WCHAR found[MAX_PATH]{};
-    DWORD copied = SearchPathW(nullptr,
-                               fileName,
-                               L".exe",
-                               ARRAYSIZE(found),
-                               found,
-                               nullptr);
-    if (copied && copied < ARRAYSIZE(found)) {
-        *resolved = FullPathToString(found);
-        return true;
+    std::vector<WCHAR> found(512);
+    for (;;) {
+        DWORD copied = SearchPathW(
+            nullptr,
+            fileName,
+            L".exe",
+            static_cast<DWORD>(found.size()),
+            found.data(),
+            nullptr);
+        if (!copied) {
+            return false;
+        }
+        if (copied < found.size()) {
+            *resolved = FullPathToString(found.data());
+            return true;
+        }
+        if (copied >= kPathChars) {
+            SetLastError(ERROR_BUFFER_OVERFLOW);
+            return false;
+        }
+        found.resize(static_cast<size_t>(copied) + 1);
     }
-
-    return false;
 }
 
 static bool ResolveCreateProcessTargetPath(LPCWSTR applicationName,
                                            LPCWSTR commandLine,
                                            std::wstring* resolved) {
-    WCHAR rawTarget[MAX_PATH]{};
+    std::wstring rawTarget =
+        applicationName && *applicationName
+            ? std::wstring(applicationName)
+            : CopyFirstCommandLineToken(commandLine);
 
-    if (applicationName && *applicationName) {
-        wcsncpy_s(rawTarget, applicationName, _TRUNCATE);
-    } else {
-        CopyFirstCommandLineToken(commandLine, rawTarget);
-    }
-
-    std::wstring target = ExpandEnvironmentStringsToString(rawTarget);
+    std::wstring target = ExpandEnvironmentStringsToString(rawTarget.c_str());
     TrimStringInPlace(&target);
     if (target.empty()) {
         return false;
@@ -798,9 +918,112 @@ static bool ResolveCreateProcessTargetPath(LPCWSTR applicationName,
     return !resolved->empty();
 }
 
-static bool QueryCurrentDirectoryPath(WCHAR path[MAX_PATH]) {
-    DWORD copied = GetCurrentDirectoryW(MAX_PATH, path);
-    return copied != 0 && copied < MAX_PATH;
+static bool QueryCurrentDirectoryPath(std::wstring* path) {
+    path->clear();
+    DWORD needed = GetCurrentDirectoryW(0, nullptr);
+    if (!needed || needed > kPathChars) {
+        if (needed > kPathChars) {
+            SetLastError(ERROR_BUFFER_OVERFLOW);
+        }
+        return false;
+    }
+
+    std::vector<WCHAR> buffer(needed);
+    DWORD copied =
+        GetCurrentDirectoryW(needed, buffer.data());
+    if (!copied || copied >= needed) {
+        return false;
+    }
+    path->assign(buffer.data(), copied);
+    return true;
+}
+
+static bool CopyRequestString(WCHAR* destination,
+                              size_t destinationChars,
+                              PCWSTR source,
+                              PCWSTR fieldName,
+                              UIAccessResponse* response) {
+    if (!source) {
+        destination[0] = L'\0';
+        return true;
+    }
+
+    size_t length = 0;
+    while (length < destinationChars && source[length]) {
+        ++length;
+    }
+    if (length >= destinationChars) {
+        WCHAR message[160]{};
+        swprintf_s(message,
+                   L"%s exceeds the broker protocol limit.",
+                   fieldName);
+        SetResponseError(response, message, ERROR_BUFFER_OVERFLOW);
+        return false;
+    }
+
+    memcpy(destination, source, (length + 1) * sizeof(WCHAR));
+    return true;
+}
+
+static bool CopyEnvironmentToRequest(PCWSTR environment,
+                                     UIAccessRequest* request,
+                                     UIAccessResponse* response) {
+    PWSTR ownedEnvironment = nullptr;
+    if (!environment) {
+        ownedEnvironment = GetEnvironmentStringsW();
+        environment = ownedEnvironment;
+    }
+    if (!environment) {
+        SetResponseError(response,
+                         L"Could not read the client environment.",
+                         GetLastError());
+        return false;
+    }
+
+    size_t chars = 0;
+    bool complete = false;
+    while (chars + 1 < kEnvironmentChars) {
+        if (environment[chars] == L'\0' &&
+            environment[chars + 1] == L'\0') {
+            chars += 2;
+            complete = true;
+            break;
+        }
+        ++chars;
+    }
+
+    if (!complete) {
+        if (ownedEnvironment) {
+            FreeEnvironmentStringsW(ownedEnvironment);
+        }
+        SetResponseError(response,
+                         L"Client environment exceeds the broker protocol limit.",
+                         ERROR_BUFFER_OVERFLOW);
+        return false;
+    }
+
+    memcpy(request->environment, environment, chars * sizeof(WCHAR));
+    request->environmentChars = static_cast<DWORD>(chars);
+    if (ownedEnvironment) {
+        FreeEnvironmentStringsW(ownedEnvironment);
+    }
+    return true;
+}
+
+static bool RequestEnvironmentIsValid(const UIAccessRequest* request) {
+    if (request->environmentChars < 2 ||
+        request->environmentChars > kEnvironmentChars) {
+        return false;
+    }
+
+    for (DWORD i = 0; i + 1 < request->environmentChars; ++i) {
+        if (request->environment[i] == L'\0' &&
+            request->environment[i + 1] == L'\0') {
+            return i + 2 == request->environmentChars;
+        }
+    }
+
+    return false;
 }
 
 static bool AppendRelaunchMarkerToEnvironment(LPVOID environment,
@@ -850,15 +1073,9 @@ static bool SetTokenUIAccess(HANDLE token, UIAccessResponse* response) {
 
 static bool PatchClientProcessTokenUIAccess(DWORD clientPid,
                                             PCWSTR clientPathForPolicy,
-                                            UIAccessResponse* response) {
+                                            UIAccessResponse* response,
+                                            DWORD expectedParentPid = 0) {
     response->size = sizeof(*response);
-
-    if (!IsPathInTargetAllowlist(clientPathForPolicy)) {
-        SetResponseError(response,
-                         L"Target path is not in the UIAccess allowlist.",
-                         ERROR_ACCESS_DENIED);
-        return false;
-    }
 
     if (!g_NtSetInformationToken) {
         SetResponseError(response, L"NtSetInformationToken is unavailable.");
@@ -880,6 +1097,49 @@ static bool PatchClientProcessTokenUIAccess(DWORD clientPid,
                          L"OpenProcess(client) failed.",
                          GetLastError());
         return false;
+    }
+
+    std::wstring actualPath;
+    if (!QueryProcessPath(process, &actualPath)) {
+        DWORD error = GetLastError();
+        CloseHandle(process);
+        SetResponseError(response,
+                         L"Could not verify the target process image path.",
+                         error);
+        return false;
+    }
+
+    std::wstring normalizedActual =
+        NormalizeTargetPathForMatch(actualPath);
+    std::wstring normalizedRequested =
+        NormalizeTargetPathForMatch(clientPathForPolicy);
+    if (normalizedActual.empty() || normalizedRequested.empty() ||
+        _wcsicmp(normalizedActual.c_str(), normalizedRequested.c_str()) != 0) {
+        CloseHandle(process);
+        SetResponseError(response,
+                         L"Requested path does not match the target process image.",
+                         ERROR_ACCESS_DENIED);
+        return false;
+    }
+
+    if (!IsPathInTargetAllowlist(normalizedActual.c_str())) {
+        CloseHandle(process);
+        SetResponseError(response,
+                         L"Target process image is not in the UIAccess allowlist.",
+                         ERROR_ACCESS_DENIED);
+        return false;
+    }
+
+    if (expectedParentPid) {
+        DWORD actualParentPid = 0;
+        if (!QueryProcessParentId(clientPid, &actualParentPid) ||
+            actualParentPid != expectedParentPid) {
+            CloseHandle(process);
+            SetResponseError(response,
+                             L"Target process is not a child of the requesting process.",
+                             ERROR_ACCESS_DENIED);
+            return false;
+        }
     }
 
     HANDLE token = nullptr;
@@ -1003,6 +1263,32 @@ static bool DuplicateProcessHandleForClient(DWORD clientPid,
     return true;
 }
 
+static void CloseDuplicatedHandleInClient(DWORD clientPid,
+                                          ULONGLONG duplicatedHandleValue) {
+    if (!duplicatedHandleValue) {
+        return;
+    }
+
+    HANDLE clientProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, clientPid);
+    if (!clientProcess) {
+        return;
+    }
+
+    HANDLE localCopy = nullptr;
+    if (DuplicateHandle(
+            clientProcess,
+            reinterpret_cast<HANDLE>(
+                static_cast<ULONG_PTR>(duplicatedHandleValue)),
+            GetCurrentProcess(),
+            &localCopy,
+            0,
+            FALSE,
+            DUPLICATE_CLOSE_SOURCE | DUPLICATE_SAME_ACCESS)) {
+        CloseHandle(localCopy);
+    }
+    CloseHandle(clientProcess);
+}
+
 static BOOL CreateProcessAsUserPreservingSystem32W(
     HANDLE token,
     LPCWSTR applicationName,
@@ -1079,30 +1365,23 @@ static bool CreateUIAccessTargetProcessForClient(DWORD clientPid,
         return false;
     }
 
-    LPVOID environment = nullptr;
-    LPVOID environmentToUse = nullptr;
     std::vector<WCHAR> patchedEnvironment;
-    DWORD creationFlags = CREATE_DEFAULT_ERROR_MODE;
-
-    DWORD preservedCreationFlags = request->creationFlags &
-        (CREATE_SUSPENDED | CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP |
-         CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_SEPARATE_WOW_VDM |
-         CREATE_BREAKAWAY_FROM_JOB);
-    creationFlags |= preservedCreationFlags;
-
-    if (g_CreateEnvironmentBlock &&
-        g_CreateEnvironmentBlock(&environment, token, FALSE)) {
-        if (AppendRelaunchMarkerToEnvironment(environment, &patchedEnvironment)) {
-            environmentToUse = patchedEnvironment.data();
-        } else {
-            environmentToUse = environment;
-        }
-
-        creationFlags |= CREATE_UNICODE_ENVIRONMENT;
+    if (!AppendRelaunchMarkerToEnvironment(
+            const_cast<WCHAR*>(request->environment),
+            &patchedEnvironment)) {
+        CloseHandle(token);
+        SetResponseError(response,
+                         L"Could not prepare the client environment.",
+                         ERROR_INVALID_DATA);
+        return false;
     }
+    DWORD creationFlags =
+        (request->creationFlags & kAllowedProxiedCreationFlags) |
+        CREATE_UNICODE_ENVIRONMENT;
 
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
+    startupInfo.lpDesktop = const_cast<LPWSTR>(L"winsta0\\default");
     if (request->startupFlags & STARTF_USESHOWWINDOW) {
         startupInfo.dwFlags |= STARTF_USESHOWWINDOW;
         startupInfo.wShowWindow = request->startupShowWindow;
@@ -1113,6 +1392,20 @@ static bool CreateUIAccessTargetProcessForClient(DWORD clientPid,
         ? request->commandLine
         : std::wstring(L"\"") + request->exe + L"\"";
 
+    DWORD previousErrorMode = 0;
+    bool changedErrorMode =
+        (request->creationFlags & CREATE_DEFAULT_ERROR_MODE) == 0;
+    if (changedErrorMode &&
+        !SetThreadErrorMode(request->errorMode, &previousErrorMode)) {
+        DWORD error = GetLastError();
+        CloseHandle(token);
+        SetResponseError(
+            response,
+            L"SetThreadErrorMode(client mode) failed.",
+            error);
+        return false;
+    }
+
     BOOL created = CreateProcessAsUserPreservingSystem32W(
         token,
         request->exe[0] ? request->exe : nullptr,
@@ -1121,14 +1414,13 @@ static bool CreateUIAccessTargetProcessForClient(DWORD clientPid,
         nullptr,
         FALSE,
         creationFlags,
-        environmentToUse,
+        patchedEnvironment.data(),
         request->currentDirectory[0] ? request->currentDirectory : nullptr,
         &startupInfo,
         &processInfo);
     DWORD createError = GetLastError();
-
-    if (environment && g_DestroyEnvironmentBlock) {
-        g_DestroyEnvironmentBlock(environment);
+    if (changedErrorMode) {
+        SetThreadErrorMode(previousErrorMode, nullptr);
     }
 
     CloseHandle(token);
@@ -1155,6 +1447,8 @@ static bool CreateUIAccessTargetProcessForClient(DWORD clientPid,
                                         response);
 
     if (!duplicatedHandles) {
+        CloseDuplicatedHandleInClient(clientPid, duplicatedProcessHandle);
+        CloseDuplicatedHandleInClient(clientPid, duplicatedThreadHandle);
         TerminateProcess(processInfo.hProcess, ERROR_ACCESS_DENIED);
         CloseHandle(processInfo.hThread);
         CloseHandle(processInfo.hProcess);
@@ -1212,24 +1506,23 @@ static bool CreateUIAccessProcessForClient(DWORD clientPid,
         return false;
     }
 
-    LPVOID environment = nullptr;
-    LPVOID environmentToUse = nullptr;
     std::vector<WCHAR> patchedEnvironment;
-    DWORD creationFlags = CREATE_DEFAULT_ERROR_MODE;
-
-    if (g_CreateEnvironmentBlock &&
-        g_CreateEnvironmentBlock(&environment, token, FALSE)) {
-        if (AppendRelaunchMarkerToEnvironment(environment, &patchedEnvironment)) {
-            environmentToUse = patchedEnvironment.data();
-        } else {
-            environmentToUse = environment;
-        }
-
-        creationFlags |= CREATE_UNICODE_ENVIRONMENT;
+    if (!AppendRelaunchMarkerToEnvironment(
+            const_cast<WCHAR*>(request->environment),
+            &patchedEnvironment)) {
+        CloseHandle(token);
+        SetResponseError(response,
+                         L"Could not prepare the client environment.",
+                         ERROR_INVALID_DATA);
+        return false;
     }
+    DWORD creationFlags =
+        (request->creationFlags & kAllowedProxiedCreationFlags) |
+        CREATE_UNICODE_ENVIRONMENT;
 
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
+    startupInfo.lpDesktop = const_cast<LPWSTR>(L"winsta0\\default");
     startupInfo.dwFlags = STARTF_USESHOWWINDOW;
     startupInfo.wShowWindow = SW_SHOWNORMAL;
 
@@ -1237,6 +1530,20 @@ static bool CreateUIAccessProcessForClient(DWORD clientPid,
     std::wstring commandLine = request->commandLine[0]
         ? request->commandLine
         : std::wstring(L"\"") + request->exe + L"\"";
+
+    DWORD previousErrorMode = 0;
+    bool changedErrorMode =
+        (request->creationFlags & CREATE_DEFAULT_ERROR_MODE) == 0;
+    if (changedErrorMode &&
+        !SetThreadErrorMode(request->errorMode, &previousErrorMode)) {
+        DWORD error = GetLastError();
+        CloseHandle(token);
+        SetResponseError(
+            response,
+            L"SetThreadErrorMode(client mode) failed.",
+            error);
+        return false;
+    }
 
     BOOL created = CreateProcessAsUserPreservingSystem32W(
         token,
@@ -1246,14 +1553,13 @@ static bool CreateUIAccessProcessForClient(DWORD clientPid,
         nullptr,
         FALSE,
         creationFlags,
-        environmentToUse,
+        patchedEnvironment.data(),
         request->currentDirectory[0] ? request->currentDirectory : nullptr,
         &startupInfo,
         &processInfo);
     DWORD createError = GetLastError();
-
-    if (environment && g_DestroyEnvironmentBlock) {
-        g_DestroyEnvironmentBlock(environment);
+    if (changedErrorMode) {
+        SetThreadErrorMode(previousErrorMode, nullptr);
     }
 
     CloseHandle(token);
@@ -1318,6 +1624,133 @@ static HANDLE CreateServerPipe() {
     return pipe;
 }
 
+static bool WaitForPipeIo(HANDLE pipe,
+                          OVERLAPPED* overlapped,
+                          DWORD* transferred,
+                          DWORD timeoutMs,
+                          bool stopAware) {
+    HANDLE waitHandles[2] = {overlapped->hEvent, g_stopEvent};
+    DWORD handleCount = stopAware && g_stopEvent ? 2 : 1;
+    DWORD wait = WaitForMultipleObjects(
+        handleCount,
+        waitHandles,
+        FALSE,
+        timeoutMs);
+    if (wait == WAIT_OBJECT_0) {
+        return !!GetOverlappedResult(
+            pipe,
+            overlapped,
+            transferred,
+            FALSE);
+    }
+
+    DWORD waitError = ERROR_OPERATION_ABORTED;
+    if (wait == WAIT_TIMEOUT) {
+        waitError = ERROR_SEM_TIMEOUT;
+    } else if (wait == WAIT_FAILED) {
+        waitError = GetLastError();
+    }
+    CancelIoEx(pipe, overlapped);
+    DWORD ignored = 0;
+    GetOverlappedResult(pipe, overlapped, &ignored, TRUE);
+    SetLastError(waitError);
+    return false;
+}
+
+static bool PipeReadBounded(HANDLE pipe,
+                            void* buffer,
+                            DWORD bufferBytes,
+                            DWORD* bytesRead,
+                            DWORD timeoutMs,
+                            bool stopAware) {
+    OVERLAPPED overlapped{};
+    overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!overlapped.hEvent) {
+        return false;
+    }
+
+    BOOL read = ReadFile(
+        pipe,
+        buffer,
+        bufferBytes,
+        bytesRead,
+        &overlapped);
+    bool result = false;
+    if (read) {
+        result = true;
+    } else if (GetLastError() == ERROR_IO_PENDING) {
+        result = WaitForPipeIo(
+            pipe,
+            &overlapped,
+            bytesRead,
+            timeoutMs,
+            stopAware);
+    }
+
+    CloseHandle(overlapped.hEvent);
+    return result;
+}
+
+static bool PipeReadWithStop(HANDLE pipe,
+                             void* buffer,
+                             DWORD bufferBytes,
+                             DWORD* bytesRead) {
+    return PipeReadBounded(
+        pipe,
+        buffer,
+        bufferBytes,
+        bytesRead,
+        INFINITE,
+        true);
+}
+
+static bool PipeWriteBounded(HANDLE pipe,
+                             const void* buffer,
+                             DWORD bufferBytes,
+                             DWORD* bytesWritten,
+                             DWORD timeoutMs,
+                             bool stopAware) {
+    OVERLAPPED overlapped{};
+    overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!overlapped.hEvent) {
+        return false;
+    }
+
+    BOOL written = WriteFile(
+        pipe,
+        buffer,
+        bufferBytes,
+        bytesWritten,
+        &overlapped);
+    bool result = false;
+    if (written) {
+        result = true;
+    } else if (GetLastError() == ERROR_IO_PENDING) {
+        result = WaitForPipeIo(
+            pipe,
+            &overlapped,
+            bytesWritten,
+            timeoutMs,
+            stopAware);
+    }
+
+    CloseHandle(overlapped.hEvent);
+    return result;
+}
+
+static bool PipeWriteWithStop(HANDLE pipe,
+                              const void* buffer,
+                              DWORD bufferBytes,
+                              DWORD* bytesWritten) {
+    return PipeWriteBounded(
+        pipe,
+        buffer,
+        bufferBytes,
+        bytesWritten,
+        kPipeTimeoutMs,
+        true);
+}
+
 static bool WaitForPipeClient(HANDLE pipe) {
     OVERLAPPED overlapped{};
     overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -1332,22 +1765,133 @@ static bool WaitForPipeClient(HANDLE pipe) {
     if (connected || error == ERROR_PIPE_CONNECTED) {
         result = true;
     } else if (error == ERROR_IO_PENDING) {
-        HANDLE waitHandles[2] = { overlapped.hEvent, g_stopEvent };
-        DWORD wait = WaitForMultipleObjects(2, waitHandles, FALSE, INFINITE);
-
-        if (wait == WAIT_OBJECT_0) {
-            DWORD transferred = 0;
-            result = !!GetOverlappedResult(pipe,
-                                           &overlapped,
-                                           &transferred,
-                                           FALSE);
-        } else {
-            CancelIo(pipe);
-        }
+        DWORD transferred = 0;
+        result = WaitForPipeIo(
+            pipe,
+            &overlapped,
+            &transferred,
+            INFINITE,
+            true);
     }
 
     CloseHandle(overlapped.hEvent);
     return result;
+}
+
+static bool IsNullTerminated(const WCHAR* value, size_t chars) {
+    return value && chars != 0 && value[chars - 1] == L'\0';
+}
+
+static bool ValidateUIAccessRequest(const UIAccessRequest* request,
+                                    UIAccessResponse* response) {
+    if (request->size != sizeof(*request) ||
+        !IsNullTerminated(request->exe, ARRAYSIZE(request->exe)) ||
+        !IsNullTerminated(
+            request->currentDirectory,
+            ARRAYSIZE(request->currentDirectory)) ||
+        !IsNullTerminated(
+            request->commandLine,
+            ARRAYSIZE(request->commandLine)) ||
+        request->exe[0] == L'\0') {
+        SetResponseError(
+            response,
+            L"Invalid or unterminated pipe request.",
+            ERROR_INVALID_DATA);
+        return false;
+    }
+
+    bool validFlags =
+        request->flags == 0 ||
+        request->flags == kRequestFlagPatchCurrentProcessToken ||
+        request->flags == kRequestFlagPatchTargetProcessToken ||
+        request->flags == kRequestFlagCreateTargetProcess;
+    if (!validFlags) {
+        SetResponseError(
+            response,
+            L"Pipe request contains an unsupported flag combination.",
+            ERROR_INVALID_PARAMETER);
+        return false;
+    }
+
+    if (request->flags == kRequestFlagPatchTargetProcessToken) {
+        if (!request->targetPid) {
+            SetResponseError(
+                response,
+                L"Target PID missing for token patch request.",
+                ERROR_INVALID_PARAMETER);
+            return false;
+        }
+    } else if (request->targetPid) {
+        SetResponseError(
+            response,
+            L"Target PID is only valid for a target-token patch request.",
+            ERROR_INVALID_PARAMETER);
+        return false;
+    }
+
+    bool createsProcess =
+        request->flags == 0 ||
+        request->flags == kRequestFlagCreateTargetProcess;
+    if (createsProcess && !RequestEnvironmentIsValid(request)) {
+        SetResponseError(
+            response,
+            L"Pipe request contains an invalid environment block.",
+            ERROR_INVALID_DATA);
+        return false;
+    }
+
+    if ((request->creationFlags & ~kAllowedProxiedCreationFlags) != 0 ||
+        (request->startupFlags & ~STARTF_USESHOWWINDOW) != 0) {
+        SetResponseError(
+            response,
+            L"Pipe request contains process-creation semantics the broker cannot preserve.",
+            ERROR_NOT_SUPPORTED);
+        return false;
+    }
+
+    return true;
+}
+
+static bool RequestPathMatchesClient(DWORD clientPid,
+                                     PCWSTR requestedPath,
+                                     UIAccessResponse* response) {
+    HANDLE process = OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION,
+        FALSE,
+        clientPid);
+    if (!process) {
+        SetResponseError(
+            response,
+            L"Could not open the pipe client for image-path verification.",
+            GetLastError());
+        return false;
+    }
+
+    std::wstring actualPath;
+    bool queried = QueryProcessPath(process, &actualPath);
+    DWORD queryError = GetLastError();
+    CloseHandle(process);
+    if (!queried) {
+        SetResponseError(
+            response,
+            L"Could not query the pipe client image path.",
+            queryError);
+        return false;
+    }
+
+    std::wstring normalizedActual =
+        NormalizeTargetPathForMatch(actualPath);
+    std::wstring normalizedRequested =
+        NormalizeTargetPathForMatch(requestedPath);
+    if (normalizedActual.empty() || normalizedRequested.empty() ||
+        _wcsicmp(normalizedActual.c_str(), normalizedRequested.c_str()) != 0) {
+        SetResponseError(
+            response,
+            L"Requested path does not match the pipe client image.",
+            ERROR_ACCESS_DENIED);
+        return false;
+    }
+    return true;
 }
 
 static DWORD WINAPI PipeServerThread(LPVOID) {
@@ -1357,7 +1901,7 @@ static DWORD WINAPI PipeServerThread(LPVOID) {
         HANDLE pipe = CreateServerPipe();
         if (pipe == INVALID_HANDLE_VALUE) {
             Wh_Log(L"[Always UIAccess] CreateNamedPipeW failed: %u", GetLastError());
-            Sleep(1000);
+            WaitForSingleObject(g_stopEvent, 1000);
             continue;
         }
 
@@ -1366,62 +1910,104 @@ static DWORD WINAPI PipeServerThread(LPVOID) {
             continue;
         }
 
-        UIAccessRequest request{};
+        auto request = std::make_unique<UIAccessRequest>();
         UIAccessResponse response{};
         response.size = sizeof(response);
 
         DWORD bytesRead = 0;
-        BOOL readOk = ReadFile(pipe,
-                               &request,
-                               sizeof(request),
-                               &bytesRead,
-                               nullptr);
+        BOOL readOk = PipeReadWithStop(
+            pipe,
+            request.get(),
+            sizeof(*request),
+            &bytesRead);
 
         ULONG clientPid = 0;
-        if (readOk &&
-            bytesRead == sizeof(request) &&
-            request.size == sizeof(request) &&
-            g_GetNamedPipeClientProcessId &&
-            g_GetNamedPipeClientProcessId(pipe, &clientPid)) {
-            if (request.flags & kRequestFlagCreateTargetProcess) {
+        bool requestReady = false;
+        if (!readOk) {
+            SetResponseError(
+                &response,
+                L"Could not read the pipe request.",
+                GetLastError());
+        } else if (bytesRead != sizeof(*request)) {
+            SetResponseError(
+                &response,
+                L"Pipe request has an unexpected size.",
+                ERROR_INVALID_DATA);
+        } else if (ValidateUIAccessRequest(request.get(), &response)) {
+            if (!g_GetNamedPipeClientProcessId ||
+                !g_GetNamedPipeClientProcessId(pipe, &clientPid)) {
+                SetResponseError(
+                    &response,
+                    L"Could not identify the pipe client.",
+                    GetLastError());
+            } else {
+                requestReady = true;
+            }
+        }
+
+        if (requestReady) {
+            if (request->flags & kRequestFlagCreateTargetProcess) {
                 Wh_Log(L"[Always UIAccess] Hook-host target creation request from PID %u: %s",
                        clientPid,
-                       request.exe);
-                CreateUIAccessTargetProcessForClient(clientPid, &request, &response);
-            } else if (request.flags & kRequestFlagPatchTargetProcessToken) {
-                DWORD targetPid = request.targetPid;
+                       request->exe);
+                CreateUIAccessTargetProcessForClient(clientPid, request.get(), &response);
+            } else if (request->flags & kRequestFlagPatchTargetProcessToken) {
+                DWORD targetPid = request->targetPid;
                 Wh_Log(L"[Always UIAccess] Early target token patch request from PID %u for PID %u: %s",
                        clientPid,
                        targetPid,
-                       request.exe);
+                       request->exe);
 
                 if (targetPid) {
-                    PatchClientProcessTokenUIAccess(targetPid, request.exe, &response);
+                    PatchClientProcessTokenUIAccess(
+                        targetPid,
+                        request->exe,
+                        &response,
+                        clientPid);
                 } else {
                     SetResponseError(&response,
                                      L"Target PID missing for token patch request.",
                                      ERROR_INVALID_PARAMETER);
                 }
-            } else if (request.flags & kRequestFlagPatchCurrentProcessToken) {
+            } else if (request->flags & kRequestFlagPatchCurrentProcessToken) {
                 Wh_Log(L"[Always UIAccess] In-place token patch request from PID %u: %s",
                        clientPid,
-                       request.exe);
-                PatchClientProcessTokenUIAccess(clientPid, request.exe, &response);
+                       request->exe);
+                PatchClientProcessTokenUIAccess(
+                    clientPid,
+                    request->exe,
+                    &response);
             } else {
                 Wh_Log(L"[Always UIAccess] Relaunch request from PID %u: %s",
                        clientPid,
-                       request.exe);
-                CreateUIAccessProcessForClient(clientPid, &request, &response);
+                       request->exe);
+                if (RequestPathMatchesClient(
+                        clientPid,
+                        request->exe,
+                        &response)) {
+                    CreateUIAccessProcessForClient(
+                        clientPid,
+                        request.get(),
+                        &response);
+                }
             }
-        } else {
-            SetResponseError(&response,
-                             L"Invalid pipe request.",
-                             readOk ? ERROR_INVALID_DATA : GetLastError());
         }
 
         DWORD bytesWritten = 0;
-        WriteFile(pipe, &response, sizeof(response), &bytesWritten, nullptr);
-        FlushFileBuffers(pipe);
+        BOOL writeOk = PipeWriteWithStop(
+            pipe,
+            &response,
+            sizeof(response),
+            &bytesWritten);
+        if ((!writeOk || bytesWritten != sizeof(response)) &&
+            response.success && clientPid) {
+            CloseDuplicatedHandleInClient(
+                clientPid,
+                response.processHandle);
+            CloseDuplicatedHandleInClient(
+                clientPid,
+                response.threadHandle);
+        }
         DisconnectNamedPipe(pipe);
         CloseHandle(pipe);
     }
@@ -1437,100 +2023,217 @@ static bool SendUIAccessRequest(DWORD flags,
                                   const STARTUPINFOW* startupInfo,
                                   LPCWSTR currentDirectoryOverride,
                                   LPCWSTR commandLineOverride,
+                                  LPCWSTR environmentOverride,
                                   UIAccessResponse* response) {
-    UIAccessRequest request{};
-    request.size = sizeof(request);
-    request.flags = flags;
-    request.targetPid = targetPid;
-    request.creationFlags = creationFlags;
+    auto request = std::make_unique<UIAccessRequest>();
+    request->size = sizeof(*request);
+    request->flags = flags;
+    request->targetPid = targetPid;
+    request->creationFlags =
+        creationFlags & ~CREATE_UNICODE_ENVIRONMENT;
+    request->errorMode = GetErrorMode();
     if (startupInfo) {
-        request.startupFlags = startupInfo->dwFlags;
-        request.startupShowWindow = startupInfo->wShowWindow;
+        request->startupFlags = startupInfo->dwFlags;
+        request->startupShowWindow = startupInfo->wShowWindow;
     }
 
     if (targetExeForLog && *targetExeForLog) {
-        wcsncpy_s(request.exe, targetExeForLog, _TRUNCATE);
-    } else if (!QueryCurrentProcessPath(request.exe)) {
-        SetResponseError(response,
-                         L"GetModuleFileNameW failed.",
-                         GetLastError());
-        return false;
+        if (!CopyRequestString(
+                request->exe,
+                ARRAYSIZE(request->exe),
+                targetExeForLog,
+                L"Executable path",
+                response)) {
+            return false;
+        }
+    } else {
+        std::wstring currentProcessPath;
+        if (!QueryCurrentProcessPath(&currentProcessPath) ||
+            !CopyRequestString(
+                request->exe,
+                ARRAYSIZE(request->exe),
+                currentProcessPath.c_str(),
+                L"Executable path",
+                response)) {
+            if (response->win32Error == 0) {
+                SetResponseError(response,
+                                 L"GetModuleFileNameW failed.",
+                                 GetLastError());
+            }
+            return false;
+        }
     }
 
     if (currentDirectoryOverride && *currentDirectoryOverride) {
-        wcsncpy_s(request.currentDirectory, currentDirectoryOverride, _TRUNCATE);
+        if (!CopyRequestString(
+                request->currentDirectory,
+                ARRAYSIZE(request->currentDirectory),
+                currentDirectoryOverride,
+                L"Current directory",
+                response)) {
+            return false;
+        }
     } else {
-        QueryCurrentDirectoryPath(request.currentDirectory);
+        std::wstring currentDirectory;
+        if (!QueryCurrentDirectoryPath(&currentDirectory) ||
+            !CopyRequestString(
+                request->currentDirectory,
+                ARRAYSIZE(request->currentDirectory),
+                currentDirectory.c_str(),
+                L"Current directory",
+                response)) {
+            if (response->win32Error == 0) {
+                SetResponseError(
+                    response,
+                    L"GetCurrentDirectoryW failed.",
+                    GetLastError());
+            }
+            return false;
+        }
     }
 
     if (commandLineOverride) {
-        wcsncpy_s(request.commandLine, commandLineOverride, _TRUNCATE);
+        if (!CopyRequestString(
+                request->commandLine,
+                ARRAYSIZE(request->commandLine),
+                commandLineOverride,
+                L"Command line",
+                response)) {
+            return false;
+        }
     } else if (flags & kRequestFlagCreateTargetProcess) {
-        request.commandLine[0] = L'\0';
+        request->commandLine[0] = L'\0';
     } else {
-        wcsncpy_s(request.commandLine, GetCommandLineW(), _TRUNCATE);
+        if (!CopyRequestString(
+                request->commandLine,
+                ARRAYSIZE(request->commandLine),
+                GetCommandLineW(),
+                L"Command line",
+                response)) {
+            return false;
+        }
+    }
+
+    bool createsProcess =
+        flags == 0 || flags == kRequestFlagCreateTargetProcess;
+    if (createsProcess) {
+        if (environmentOverride &&
+            (creationFlags & CREATE_UNICODE_ENVIRONMENT) == 0) {
+            SetResponseError(
+                response,
+                L"ANSI custom environment blocks cannot be proxied safely.",
+                ERROR_NOT_SUPPORTED);
+            return false;
+        }
+        if (!CopyEnvironmentToRequest(
+                environmentOverride,
+                request.get(),
+                response)) {
+            return false;
+        }
     }
 
     HANDLE pipe = INVALID_HANDLE_VALUE;
+    DWORD pipeOpenError = ERROR_FILE_NOT_FOUND;
+    ULONGLONG pipeOpenStart = GetTickCount64();
 
-    for (int attempt = 0; attempt < 10; ++attempt) {
+    for (;;) {
         pipe = CreateFileW(kPipeName,
                            GENERIC_READ | GENERIC_WRITE,
                            0,
                            nullptr,
                            OPEN_EXISTING,
-                           0,
+                           FILE_FLAG_OVERLAPPED,
                            nullptr);
         if (pipe != INVALID_HANDLE_VALUE) {
             break;
         }
 
-        DWORD error = GetLastError();
-        if (error != ERROR_PIPE_BUSY && error != ERROR_FILE_NOT_FOUND) {
-            SetResponseError(response, L"CreateFileW(pipe) failed.", error);
+        pipeOpenError = GetLastError();
+        if (pipeOpenError != ERROR_PIPE_BUSY &&
+            pipeOpenError != ERROR_FILE_NOT_FOUND) {
+            SetResponseError(response, L"CreateFileW(pipe) failed.", pipeOpenError);
             return false;
         }
 
-        WaitNamedPipeW(kPipeName, kPipeTimeoutMs);
+        ULONGLONG elapsed = GetTickCount64() - pipeOpenStart;
+        if (elapsed >= kPipeTimeoutMs) {
+            pipeOpenError = ERROR_SEM_TIMEOUT;
+            break;
+        }
+
+        DWORD remaining = static_cast<DWORD>(kPipeTimeoutMs - elapsed);
+        if (pipeOpenError == ERROR_PIPE_BUSY) {
+            if (!WaitNamedPipeW(kPipeName, remaining)) {
+                DWORD waitError = GetLastError();
+                if (waitError != ERROR_SEM_TIMEOUT &&
+                    waitError != ERROR_FILE_NOT_FOUND) {
+                    SetResponseError(response, L"WaitNamedPipeW failed.", waitError);
+                    return false;
+                }
+                pipeOpenError = waitError;
+            }
+        } else {
+            Sleep((std::min)(remaining, 50UL));
+        }
     }
 
     if (pipe == INVALID_HANDLE_VALUE) {
         SetResponseError(response,
                          L"The Windhawk Always UIAccess service pipe is unavailable.",
-                         GetLastError());
+                         pipeOpenError);
         return false;
     }
 
     DWORD mode = PIPE_READMODE_MESSAGE;
-    SetNamedPipeHandleState(pipe, &mode, nullptr, nullptr);
+    if (!SetNamedPipeHandleState(pipe, &mode, nullptr, nullptr)) {
+        DWORD error = GetLastError();
+        CloseHandle(pipe);
+        SetResponseError(response, L"SetNamedPipeHandleState failed.", error);
+        return false;
+    }
 
     DWORD bytesWritten = 0;
-    BOOL writeOk = WriteFile(pipe,
-                             &request,
-                             sizeof(request),
-                             &bytesWritten,
-                             nullptr);
+    BOOL writeOk = PipeWriteBounded(
+        pipe,
+        request.get(),
+        sizeof(*request),
+        &bytesWritten,
+        kPipeTimeoutMs,
+        false);
+    DWORD writeError = writeOk ? ERROR_SUCCESS : GetLastError();
 
     DWORD bytesRead = 0;
     BOOL readOk = FALSE;
-    if (writeOk && bytesWritten == sizeof(request)) {
-        readOk = ReadFile(pipe,
-                          response,
-                          sizeof(*response),
-                          &bytesRead,
-                          nullptr);
+    DWORD readError = ERROR_SUCCESS;
+    if (writeOk && bytesWritten == sizeof(*request)) {
+        readOk = PipeReadBounded(
+            pipe,
+            response,
+            sizeof(*response),
+            &bytesRead,
+            kPipeTimeoutMs,
+            false);
+        if (!readOk) {
+            readError = GetLastError();
+        }
     }
 
-    DWORD pipeError = GetLastError();
     CloseHandle(pipe);
 
-    if (!writeOk || bytesWritten != sizeof(request)) {
-        SetResponseError(response, L"WriteFile(pipe) failed.", pipeError);
+    if (!writeOk || bytesWritten != sizeof(*request)) {
+        SetResponseError(
+            response,
+            L"WriteFile(pipe) failed.",
+            writeError == ERROR_SUCCESS ? ERROR_WRITE_FAULT : writeError);
         return false;
     }
 
     if (!readOk || bytesRead != sizeof(*response) || response->size != sizeof(*response)) {
-        SetResponseError(response, L"ReadFile(pipe) failed.", pipeError);
+        SetResponseError(
+            response,
+            L"ReadFile(pipe) failed.",
+            readError == ERROR_SUCCESS ? ERROR_INVALID_DATA : readError);
         return false;
     }
 
@@ -1538,7 +2241,8 @@ static bool SendUIAccessRequest(DWORD flags,
 }
 
 static bool SendRelaunchRequest(UIAccessResponse* response) {
-    return SendUIAccessRequest(0, 0, nullptr, 0, nullptr, nullptr, nullptr, response);
+    return SendUIAccessRequest(
+        0, 0, nullptr, 0, nullptr, nullptr, nullptr, nullptr, response);
 }
 
 static bool SendPatchCurrentProcessTokenRequest(UIAccessResponse* response) {
@@ -1546,6 +2250,7 @@ static bool SendPatchCurrentProcessTokenRequest(UIAccessResponse* response) {
                                0,
                                nullptr,
                                0,
+                               nullptr,
                                nullptr,
                                nullptr,
                                nullptr,
@@ -1562,16 +2267,18 @@ static bool SendPatchTargetProcessTokenRequest(DWORD targetPid,
                                nullptr,
                                nullptr,
                                nullptr,
+                               nullptr,
                                response);
 }
 
 
 static bool SendCreateTargetProcessRequest(PCWSTR targetExe,
                                            DWORD creationFlags,
-                                           const STARTUPINFOW* startupInfo,
-                                           LPCWSTR currentDirectory,
-                                           LPCWSTR commandLine,
-                                           UIAccessResponse* response) {
+                                            const STARTUPINFOW* startupInfo,
+                                            LPCWSTR currentDirectory,
+                                            LPCWSTR commandLine,
+                                            LPVOID environment,
+                                            UIAccessResponse* response) {
     return SendUIAccessRequest(kRequestFlagCreateTargetProcess,
                                0,
                                targetExe,
@@ -1579,6 +2286,7 @@ static bool SendCreateTargetProcessRequest(PCWSTR targetExe,
                                startupInfo,
                                currentDirectory,
                                commandLine,
+                               static_cast<LPCWSTR>(environment),
                                response);
 }
 
@@ -1603,6 +2311,48 @@ static bool CommandLineHasChromiumOrElectronSubprocessSwitch(PCWSTR commandLine)
 
 static bool IsChromiumOrElectronSubprocess() {
     return CommandLineHasChromiumOrElectronSubprocessSwitch(GetCommandLineW());
+}
+
+static bool BrokerCanPreserveCreateProcessRequest(
+    LPSECURITY_ATTRIBUTES processAttributes,
+    LPSECURITY_ATTRIBUTES threadAttributes,
+    BOOL inheritHandles,
+    DWORD creationFlags,
+    LPVOID environment,
+    const STARTUPINFOW* startupInfo,
+    LPPROCESS_INFORMATION processInformation) {
+    if (!processInformation || !startupInfo ||
+        startupInfo->cb != sizeof(STARTUPINFOW) ||
+        processAttributes || threadAttributes || inheritHandles) {
+        return false;
+    }
+
+    if ((creationFlags &
+         ~(kAllowedProxiedCreationFlags | CREATE_UNICODE_ENVIRONMENT)) != 0 ||
+        (startupInfo->dwFlags & ~STARTF_USESHOWWINDOW) != 0) {
+        return false;
+    }
+
+    if (environment &&
+        (creationFlags & CREATE_UNICODE_ENVIRONMENT) == 0) {
+        return false;
+    }
+
+    if (startupInfo->lpReserved || startupInfo->lpDesktop ||
+        startupInfo->lpTitle || startupInfo->cbReserved2 ||
+        startupInfo->lpReserved2) {
+        return false;
+    }
+
+    BOOL inJob = FALSE;
+    if (!IsProcessInJob(GetCurrentProcess(), nullptr, &inJob)) {
+        return false;
+    }
+    if (inJob && (creationFlags & CREATE_BREAKAWAY_FROM_JOB) == 0) {
+        return false;
+    }
+
+    return true;
 }
 
 static BOOL WINAPI CreateProcessW_Hook(
@@ -1630,14 +2380,35 @@ static BOOL WINAPI CreateProcessW_Hook(
         targetIsUiAccessListed = false;
     }
 
-    if (targetIsUiAccessListed && lpProcessInformation &&
-        (dwCreationFlags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS)) == 0) {
+    bool debugCreation =
+        (dwCreationFlags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS)) != 0;
+    bool canUseBrokerCreation =
+        targetIsUiAccessListed && !debugCreation &&
+        BrokerCanPreserveCreateProcessRequest(
+            lpProcessAttributes,
+            lpThreadAttributes,
+            bInheritHandles,
+            dwCreationFlags,
+            lpEnvironment,
+            lpStartupInfo,
+            lpProcessInformation);
+
+    if (canUseBrokerCreation) {
+        DWORD brokerCreationFlags = dwCreationFlags;
+        if ((brokerCreationFlags & kPriorityClassFlags) == 0) {
+            DWORD priorityClass = GetPriorityClass(GetCurrentProcess());
+            if (priorityClass) {
+                brokerCreationFlags |= priorityClass;
+            }
+        }
+
         UIAccessResponse response{};
         if (SendCreateTargetProcessRequest(targetPath.c_str(),
-                                           dwCreationFlags,
+                                           brokerCreationFlags,
                                            lpStartupInfo,
                                            lpCurrentDirectory,
                                            lpCommandLine,
+                                           lpEnvironment,
                                            &response)) {
             lpProcessInformation->hProcess =
                 reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(response.processHandle));
@@ -1657,39 +2428,65 @@ static BOOL WINAPI CreateProcessW_Hook(
                targetPath.c_str(),
                response.message[0] ? response.message : L"unknown error",
                response.win32Error,
-               static_cast<ULONG>(response.ntStatus));
+                static_cast<ULONG>(response.ntStatus));
+    }
+
+    bool forceSuspendedForPatch =
+        targetIsUiAccessListed &&
+        (dwCreationFlags & CREATE_SUSPENDED) == 0;
+    DWORD actualCreationFlags = dwCreationFlags;
+    if (targetIsUiAccessListed) {
+        actualCreationFlags |= CREATE_SUSPENDED;
+        if (!canUseBrokerCreation && !debugCreation) {
+            Wh_Log(L"[Always UIAccess] CreateProcessW request uses semantics the direct broker cannot preserve; creating it suspended in the caller and patching the child token instead: %s",
+                   targetPath.c_str());
+        }
     }
 
     BOOL result = g_CreateProcessW_Original(lpApplicationName,
-                                            lpCommandLine,
-                                            lpProcessAttributes,
-                                            lpThreadAttributes,
-                                            bInheritHandles,
-                                            dwCreationFlags,
-                                            lpEnvironment,
-                                            lpCurrentDirectory,
-                                            lpStartupInfo,
-                                            lpProcessInformation);
+                                             lpCommandLine,
+                                             lpProcessAttributes,
+                                             lpThreadAttributes,
+                                             bInheritHandles,
+                                             actualCreationFlags,
+                                             lpEnvironment,
+                                             lpCurrentDirectory,
+                                             lpStartupInfo,
+                                             lpProcessInformation);
 
-    if (!result || !lpProcessInformation || !g_patchDebugChildrenEarly ||
-        !targetIsUiAccessListed ||
-        (dwCreationFlags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS)) == 0) {
+    if (!result || !lpProcessInformation || !targetIsUiAccessListed) {
         return result;
     }
 
     UIAccessResponse response{};
-    if (SendPatchTargetProcessTokenRequest(lpProcessInformation->dwProcessId,
-                                           targetPath.c_str(),
-                                           &response)) {
-        Wh_Log(L"[Always UIAccess] Patched debug child PID %u before returning from CreateProcessW: %s",
+    bool patchRequested =
+        !debugCreation || g_patchDebugChildrenEarly;
+    if (patchRequested &&
+        SendPatchTargetProcessTokenRequest(
+            lpProcessInformation->dwProcessId,
+            targetPath.c_str(),
+            &response)) {
+        Wh_Log(L"[Always UIAccess] Patched child PID %u before returning from CreateProcessW: %s",
                lpProcessInformation->dwProcessId,
                targetPath.c_str());
-    } else {
-        Wh_Log(L"[Always UIAccess] Failed to patch debug child PID %u before returning from CreateProcessW: %s (win32=%u nt=0x%08X)",
+    } else if (patchRequested) {
+        Wh_Log(L"[Always UIAccess] Failed to patch child PID %u before returning from CreateProcessW: %s (win32=%u nt=0x%08X)",
                lpProcessInformation->dwProcessId,
                response.message[0] ? response.message : L"unknown error",
                response.win32Error,
                static_cast<ULONG>(response.ntStatus));
+    }
+
+    if (forceSuspendedForPatch) {
+        if (ResumeThread(lpProcessInformation->hThread) == static_cast<DWORD>(-1)) {
+            DWORD resumeError = GetLastError();
+            TerminateProcess(lpProcessInformation->hProcess, resumeError);
+            CloseHandle(lpProcessInformation->hThread);
+            CloseHandle(lpProcessInformation->hProcess);
+            ZeroMemory(lpProcessInformation, sizeof(*lpProcessInformation));
+            SetLastError(resumeError);
+            return FALSE;
+        }
     }
 
     return result;
@@ -1759,14 +2556,6 @@ BOOL Wh_ModInit() {
             GetProcAddress(kernel32, "Wow64RevertWow64FsRedirection"));
     }
 
-    HMODULE userenv = LoadLibraryW(L"userenv.dll");
-    if (userenv) {
-        g_CreateEnvironmentBlock = reinterpret_cast<CreateEnvironmentBlock_t>(
-            GetProcAddress(userenv, "CreateEnvironmentBlock"));
-        g_DestroyEnvironmentBlock = reinterpret_cast<DestroyEnvironmentBlock_t>(
-            GetProcAddress(userenv, "DestroyEnvironmentBlock"));
-    }
-
     if (IsWindhawkServiceProcess()) {
         g_stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         if (!g_stopEvent) {
@@ -1787,10 +2576,10 @@ BOOL Wh_ModInit() {
         return FALSE;
     }
 
-    WCHAR currentPath[MAX_PATH]{};
-    bool haveCurrentPath = QueryCurrentProcessPath(currentPath);
+    std::wstring currentPath;
+    bool haveCurrentPath = QueryCurrentProcessPath(&currentPath);
     bool currentProcessIsTarget =
-        haveCurrentPath && IsPathInTargetAllowlist(currentPath);
+        haveCurrentPath && IsPathInTargetAllowlist(currentPath.c_str());
 
     bool hasUIAccess = CurrentProcessHasUIAccess();
     if (hasUIAccess) {
@@ -1870,7 +2659,7 @@ void Wh_ModUninit() {
     StopAutoTopmostThread();
 
     if (g_pipeThread) {
-        WaitForSingleObject(g_pipeThread, 3000);
+        WaitForSingleObject(g_pipeThread, INFINITE);
         CloseHandle(g_pipeThread);
         g_pipeThread = nullptr;
     }

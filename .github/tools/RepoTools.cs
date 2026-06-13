@@ -20,6 +20,7 @@ sealed class Project
     public string[] artifactPaths { get; set; }
     public string smokePath { get; set; }
     public string skipKey { get; set; }
+    public string[] dependencyPaths { get; set; }
 }
 
 sealed class ProcessResult
@@ -185,6 +186,19 @@ static class RepoTools
             if (!Directory.Exists(Path.Combine(root, p.folder)))
                 throw new InvalidOperationException("Project folder does not exist: " + p.folder);
 
+            foreach (string dependencyPath in p.dependencyPaths ?? new string[0])
+            {
+                string fullDependencyPath = Path.Combine(
+                    root,
+                    dependencyPath.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(fullDependencyPath))
+                {
+                    throw new InvalidOperationException(
+                        "Project dependency does not exist for " +
+                        p.key + ": " + dependencyPath);
+                }
+            }
+
             if (!buildScript.Contains(":Build" + p.skipKey) &&
                 !buildScript.Contains("call :IsSkipped " + p.skipKey))
                 throw new InvalidOperationException("Build script does not appear to handle skip key: " + p.skipKey);
@@ -287,12 +301,113 @@ static class RepoTools
             .Select(p => p.key)
             .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var expectedConsumers = new[] { "DesktopStub", "DiscordRPC", "RssLiveTile" };
+        var expectedConsumers = new[]
+        {
+            "CharmTray",
+            "DesktopStub",
+            "DiscordRPC",
+            "NowPlayingTile",
+            "RealTimeNotesDeskband",
+            "RssLiveTile",
+            "SecureDesktopLauncher"
+        };
         if (!commandLineConsumers.SequenceEqual(expectedConsumers.OrderBy(k => k, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Dependency consumer detection for dependencies/command_line.inc returned " + String.Join(", ", commandLineConsumers) + ".");
 
+        var registryServiceConsumers = ProjectsUsingChangedDependencies(
+                root,
+                projects,
+                new List<string> { "dependencies/registry_notification_service.cs" })
+            .Select(p => p.key)
+            .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var expectedRegistryServiceConsumers =
+            new[] { "AllowContentAboveLock", "YourPhoneHideBanner" };
+        if (!registryServiceConsumers.SequenceEqual(
+                expectedRegistryServiceConsumers.OrderBy(
+                    key => key,
+                    StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Dependency consumer detection for registry_notification_service.cs returned " +
+                String.Join(", ", registryServiceConsumers) + ".");
+        }
+
+        ValidateBatchStatusPropagation(root);
+
         Console.WriteLine("Workflow project selector validation passed (" + projects.Count + " projects plus All).");
         return 0;
+    }
+
+    static void ValidateBatchStatusPropagation(string root)
+    {
+        var staleCompoundExit = new Regex(
+            @"\|\|\s*exit\s+/b\s+%errorlevel%",
+            RegexOptions.IgnoreCase);
+        foreach (string file in Directory.EnumerateFiles(root, "*.cmd", SearchOption.AllDirectories))
+        {
+            if (IsExcludedPath(root, file))
+                continue;
+
+            int lineNumber = 0;
+            foreach (string line in File.ReadLines(file))
+            {
+                ++lineNumber;
+                if (staleCompoundExit.IsMatch(line))
+                {
+                    throw new InvalidOperationException(
+                        "Batch command can expand ERRORLEVEL before the preceding command runs: " +
+                        Rel(root, file) + ":" + lineNumber);
+                }
+            }
+        }
+
+        foreach (string relativePath in new[]
+        {
+            "RssLiveTile/BuildRssLiveTile.cmd",
+            "legacy/NowPlayingTile/BuildNowPlayingTile.cmd"
+        })
+        {
+            string script = ReadAll(Path.Combine(
+                root,
+                relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            if (!script.Contains("set \"STATUS=!ERRORLEVEL!\""))
+            {
+                throw new InvalidOperationException(
+                    relativePath +
+                    " check mode must capture compiler failure with delayed expansion.");
+            }
+        }
+
+        string windowsBuild = ReadAll(
+            Path.Combine(root, ".github", "scripts", "build-windows.cmd"));
+        if (!windowsBuild.Contains("if \"!STATUS!\"==\"0\" (") ||
+            !windowsBuild.Contains("set \"STATUS=!ERRORLEVEL!\""))
+        {
+            throw new InvalidOperationException(
+                "SecureDesktopLauncher's two-stage workflow build must propagate the second build failure.");
+        }
+
+        foreach (string relativePath in new[]
+        {
+            "legacy/SecureDesktopLauncher/build_launcher.cmd",
+            "legacy/SecureDesktopLauncher/build_password_launcher.cmd",
+            "legacy/CharmTray/BuildCharmTray.cmd"
+        })
+        {
+            string script = ReadAll(Path.Combine(
+                root,
+                relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            if (Regex.IsMatch(
+                    script,
+                    @"(?is)if\s+/i\s+""%~?1""==""(?:check|new)""\s*\(.*?set\s+""STATUS=%ERRORLEVEL%"""))
+            {
+                throw new InvalidOperationException(
+                    relativePath +
+                    " captures ERRORLEVEL inside a pre-expanded mode block.");
+            }
+        }
     }
 
     static int TestReadmeConsistency(string[] args)
@@ -711,8 +826,17 @@ static class RepoTools
 
     static bool ProjectUsesAnyChangedDependency(string root, Project project, List<string> changed)
     {
-        var dependencies = changed
+        var normalizedChanged = changed
             .Select(p => p.Replace('\\', '/'))
+            .ToList();
+        var declaredDependencies = new HashSet<string>(
+            (project.dependencyPaths ?? new string[0])
+                .Select(path => path.Replace('\\', '/')),
+            StringComparer.OrdinalIgnoreCase);
+        if (normalizedChanged.Any(declaredDependencies.Contains))
+            return true;
+
+        var dependencies = normalizedChanged
             .Where(p => p.StartsWith("dependencies/", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -730,7 +854,7 @@ static class RepoTools
             foreach (string file in Directory.EnumerateFiles(dependencyRoot, "*", SearchOption.AllDirectories))
             {
                 string ext = Path.GetExtension(file);
-                if (!new[] { ".h", ".hpp", ".inc" }.Contains(ext, StringComparer.OrdinalIgnoreCase))
+                if (!new[] { ".h", ".hpp", ".inc", ".cs" }.Contains(ext, StringComparer.OrdinalIgnoreCase))
                     continue;
 
                 string fileName = Path.GetFileName(file);
@@ -754,7 +878,7 @@ static class RepoTools
         foreach (string file in Directory.EnumerateFiles(projectRoot, "*", SearchOption.AllDirectories))
         {
             string ext = Path.GetExtension(file);
-            if (!new[] { ".cpp", ".c", ".h", ".hpp", ".inc", ".rc" }.Contains(ext, StringComparer.OrdinalIgnoreCase))
+            if (!new[] { ".cpp", ".c", ".h", ".hpp", ".inc", ".rc", ".cs" }.Contains(ext, StringComparer.OrdinalIgnoreCase))
                 continue;
 
             string text = ReadAll(file);
@@ -1256,6 +1380,7 @@ static class RepoTools
             File.Copy(sourceExe, exe, true);
 
             string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
+            string exitIni = Path.Combine(tempRoot, "ExitSideEffect.ini");
             string invalidIni = Path.Combine(tempRoot, "InvalidSetting.ini");
             string manifestIni = Path.Combine(tempRoot, "Manifest.ini");
             string residentIni = Path.Combine(tempRoot, "Resident.ini");
@@ -1270,6 +1395,15 @@ static class RepoTools
             if (help.Output.IndexOf("RSS Live Tile", StringComparison.Ordinal) < 0)
                 throw new InvalidOperationException("RssLiveTile --help did not write command-line help.");
             AssertFileDoesNotExist(helpIni, "RssLiveTile --help must be side-effect-free");
+
+            SmokeProcess(
+                exe,
+                new[] { "--ini", exitIni, "--exit" },
+                new[] { 2 },
+                10,
+                "RssLiveTile missing resident exit");
+            AssertFileDoesNotExist(exitIni, "RssLiveTile --exit must be side-effect-free");
+            AssertFileDoesNotExist(residentLog, "RssLiveTile --exit must not create the default log");
 
             SmokeProcess(
                 exe,
@@ -1337,6 +1471,14 @@ static class RepoTools
                 try
                 {
                     WaitForFileText(residentLog, "Resident control window ready.", 10000, "RssLiveTile resident startup");
+                    SmokeProcess(
+                        exe,
+                        new[] { "--ini", residentIni, "--interval", "16", "--no-bootstrap", "--no-tray" },
+                        new[] { 0 },
+                        10,
+                        "RssLiveTile resident settings reload");
+                    WaitForFileText(residentLog, "Configuration reloaded.", 10000, "RssLiveTile resident reload delivery");
+                    AssertFileContains(residentIni, "\"UpdateIntervalSeconds\" = \"16\"", "RssLiveTile command-line settings must persist");
                     SmokeProcess(
                         exe,
                         new[] { "--ini", residentIni, "--no-bootstrap", "--no-tray" },

@@ -91,6 +91,18 @@ int wmain()
     Check(
         BuildTileXml(rssSnapshot, unsafeItem).find(L"--open-url") == std::wstring::npos,
         "tile XML rejects non-HTTP activation links");
+    std::wstring activationUrl;
+    Check(
+        TryParseTileActivationArguments(
+            L"--open-url \"https://example.test/article?a=1&b=2\"",
+            activationUrl) &&
+            activationUrl == L"https://example.test/article?a=1&b=2",
+        "chaseable tile arguments recover the article URL");
+    Check(
+        !TryParseTileActivationArguments(
+            L"--open-url \"javascript:alert(1)\"",
+            activationUrl),
+        "chaseable tile arguments reject non-HTTP URLs");
 
     std::wstring error;
     Check(
@@ -112,8 +124,16 @@ int wmain()
         "invalid manifest version is rejected");
     Check(
         std::wstring(WINDOW_CLASS_NAME) != L"" &&
-            WM_RLT_CONTROL != 0,
+            WM_RLT_CONTROL != 0 &&
+            RLT_CONTROL_RELOAD != RLT_CONTROL_REFRESH,
         "resident control window identity is defined");
+    AppOptions writeOptions;
+    writeOptions.writes.push_back(
+        aip::IniSetting{ L"Settings", L"UpdateIntervalSeconds", L"60" });
+    Check(
+        ExistingInstanceRequestForOptions(writeOptions) == RLT_CONTROL_RELOAD &&
+            ExistingInstanceRequestForOptions(AppOptions{}) == RLT_CONTROL_REFRESH,
+        "command-line settings reload an existing resident");
 
     std::string encodedFeed =
         "<?xml version=\"1.0\" encoding=\"windows-1252\"?><rss><title>Caf";
@@ -125,6 +145,11 @@ int wmain()
         DecodeFeedBytes(encodedBytes, L"application/rss+xml", decodedFeed) &&
             decodedFeed.find(L"Caf\u00e9") != std::wstring::npos,
         "XML-declared legacy feed encoding is decoded");
+    std::wstring systemDirectory = aip::GetSystemDirectoryPath();
+    Check(
+        !systemDirectory.empty() &&
+            DefaultPowerShellExe().rfind(systemDirectory, 0) == 0,
+        "PowerShell discovery uses the growable shared system-directory helper");
 
     if (g_failures != 0)
     {

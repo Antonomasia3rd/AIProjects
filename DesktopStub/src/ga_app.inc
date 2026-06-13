@@ -260,9 +260,8 @@ static bool StartUnpackagedRelaunchViaCmdBroker(const std::wstring& arguments, D
     if (errorOut)
         *errorOut = ERROR_SUCCESS;
 
-    wchar_t systemDir[MAX_PATH]{};
-    UINT n = GetSystemDirectoryW(systemDir, _countof(systemDir));
-    if (n == 0 || n >= _countof(systemDir))
+    std::wstring systemDir = aip::GetSystemDirectoryPath();
+    if (systemDir.empty())
     {
         DWORD err = GetLastError();
         if (errorOut)
@@ -270,7 +269,7 @@ static bool StartUnpackagedRelaunchViaCmdBroker(const std::wstring& arguments, D
         return false;
     }
 
-    std::wstring cmdPath = std::wstring(systemDir) + L"\\cmd.exe";
+    std::wstring cmdPath = systemDir + L"\\cmd.exe";
     std::wstring commandLine = QuoteCommandLineArg(cmdPath) + L" /d /c start \"\" " +
         QuoteCommandLineArg(g_exePath);
     if (!arguments.empty())
@@ -613,15 +612,26 @@ static bool QueryProcessImagePath(DWORD pid, std::wstring& path)
     if (!h)
         return false;
 
-    wchar_t buf[MAX_PATH * 4]{};
-    DWORD len = _countof(buf);
-    BOOL ok = QueryFullProcessImageNameW(h, 0, buf, &len);
+    std::vector<wchar_t> buffer(512);
+    bool ok = false;
+    for (;;)
+    {
+        DWORD len = static_cast<DWORD>(buffer.size());
+        if (QueryFullProcessImageNameW(h, 0, buffer.data(), &len))
+        {
+            if (len != 0)
+            {
+                path.assign(buffer.data(), len);
+                ok = true;
+            }
+            break;
+        }
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || buffer.size() >= 32768)
+            break;
+        buffer.resize((std::min)(buffer.size() * 2, static_cast<size_t>(32768)));
+    }
     CloseHandle(h);
-    if (!ok || len == 0)
-        return false;
-
-    path.assign(buf, len);
-    return true;
+    return ok;
 }
 
 static bool IsNormalHostProcessRunningForAppxActivation(const std::wstring& hostPath)
@@ -648,11 +658,9 @@ static bool IsNormalHostProcessRunningForAppxActivation(const std::wstring& host
             continue;
 
         std::wstring imagePath;
-        if (QueryProcessImagePath(pe.th32ProcessID, imagePath))
-        {
-            if (!SamePathI(imagePath, hostPath))
-                continue;
-        }
+        if (!QueryProcessImagePath(pe.th32ProcessID, imagePath) ||
+            !SamePathI(imagePath, hostPath))
+            continue;
 
         AppxActivationTrace(L"normal host process detected, pid=" + std::to_wstring(pe.th32ProcessID));
         found = true;
@@ -763,9 +771,8 @@ static bool CmdStartNormalInstanceAfterAppxActivation(const std::wstring& hostPa
     if (errorOut)
         *errorOut = ERROR_SUCCESS;
 
-    wchar_t systemDir[MAX_PATH]{};
-    UINT n = GetSystemDirectoryW(systemDir, _countof(systemDir));
-    if (n == 0 || n >= _countof(systemDir))
+    std::wstring systemDir = aip::GetSystemDirectoryPath();
+    if (systemDir.empty())
     {
         DWORD err = GetLastError();
         if (errorOut)
@@ -773,7 +780,7 @@ static bool CmdStartNormalInstanceAfterAppxActivation(const std::wstring& hostPa
         return false;
     }
 
-    std::wstring cmdPath = std::wstring(systemDir) + L"\\cmd.exe";
+    std::wstring cmdPath = systemDir + L"\\cmd.exe";
     std::wstring commandLine = QuoteCommandLineArg(cmdPath) + L" /d /c start \"\" " +
         QuoteCommandLineArg(hostPath) + L" --launched-from-appx-stub";
     std::wstring workingDir = GetExeDir();
@@ -1304,9 +1311,12 @@ static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) noexcept
     {
         g_consoleControlShutdownPending = true;
         HWND h = g_shutdownWindow.load();
-        if (h)
-            PostMessageW(h, WM_APP_REQUEST_SHUTDOWN, ctrlType, 0);
-        return TRUE;
+        if (!h)
+            return TRUE;
+        if (PostMessageW(h, WM_APP_REQUEST_SHUTDOWN, ctrlType, 0))
+            return TRUE;
+        g_consoleControlShutdownPending = false;
+        return FALSE;
     }
     default:
         return FALSE;
@@ -1794,9 +1804,24 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         }
     }
 
-    MSG msg;
-    while (GetMessageW(&msg,nullptr,0,0))
-    { TranslateMessage(&msg); DispatchMessageW(&msg); }
+    MSG msg = {};
+    int messageLoopExitCode = 0;
+    for (;;)
+    {
+        BOOL messageResult = GetMessageW(&msg, nullptr, 0, 0);
+        if (messageResult == 0)
+        {
+            break;
+        }
+        if (messageResult == -1)
+        {
+            LogWin32Failure(L"GetMessageW", GetLastError());
+            messageLoopExitCode = 1;
+            break;
+        }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
 
     KillTimer(g_hwnd, APPX_ACTIVATION_REQUEST_TIMER_ID);
     g_running=false;
@@ -1811,6 +1836,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     ShutdownGdiPlusForExit();
     ReleaseSingleInstanceMutex();
     ExecutePendingRelaunchAfterExit();
-    return 0;
+    return messageLoopExitCode;
 }
 

@@ -59,6 +59,8 @@ Build all Windows binary artifacts:
 
 `legacy/WindhawkMods` contains source-only `.wh.cpp` files that are imported, compiled,
 and loaded by Windhawk. They are not built by the repository Windows workflow.
+An installed Windhawk compiler can validate both x64 and x86 sources with
+`legacy\WindhawkMods\TestWindhawkMods.cmd`.
 
 Useful build options:
 
@@ -77,6 +79,8 @@ Run repository validation and smoke checks:
 
 ```cmd
 tools\TestSharedBaseline.cmd
+tools\TestLegacyUtilities.cmd
+tools\TestRegistryNotificationServices.cmd
 .github\scripts\Validate-ProjectMap.cmd
 .github\scripts\Test-WorkflowProjectSelection.cmd
 .github\scripts\Invoke-PolicyWarnings.cmd
