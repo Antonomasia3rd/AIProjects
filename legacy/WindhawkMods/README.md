@@ -26,12 +26,26 @@ These files are compiled and loaded by Windhawk. They are not part of
 `.github\scripts\build-windows.cmd` and are intentionally absent from
 `.github\project-map.json`.
 
+When Windhawk is installed, run the local x64 and x86 syntax checks with:
+
+```cmd
+TestWindhawkMods.cmd
+```
+
+Set `WINDHAWK_COMPILER` to the full path of Windhawk's `clang++.exe` when it is not installed under a standard location.
+
 ## Safety
 
 These mods hook Windows or application process behavior. Enable them one at a
 time and verify the target process list in Windhawk before broad use.
 
 `always-uiaccess` expects Windhawk to be running as a service so the service
-process can use `SeTcbPrivilege` to set `TokenUIAccess`. `appsfolder-unhide-hidden-apps`
-hooks shell AppsFolder enumeration in Explorer and shell hosts. `snipping-tool-border-fix`
-hooks `DwmGetWindowAttribute` in the target process.
+process can use `SeTcbPrivilege` to set `TokenUIAccess`. Requests are bound to
+the requesting process and actual child image, and unsupported CreateProcess
+semantics fall back to suspended in-process creation before token patching.
+Its service-broker path still cannot perfectly reproduce every caller-owned
+console, affinity, or job relationship, so test each allowlisted application.
+
+`appsfolder-unhide-hidden-apps` hooks shell AppsFolder enumeration in Explorer
+and shell hosts. `snipping-tool-border-fix` limits itself to `SnippingTool.exe`
+and uses extended frame bounds when available.

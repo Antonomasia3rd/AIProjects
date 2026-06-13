@@ -23,8 +23,8 @@ if errorlevel 1 goto PickTemp
 set "TMP_OUT=%TMP_DIR%\RepoTools.exe"
 
 "%CSC%" /nologo /optimize+ /warn:4 /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /out:"%TMP_OUT%" "%SRC%"
-if errorlevel 1 (
-  set "STATUS=%ERRORLEVEL%"
+set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
   rmdir "%TMP_DIR%" >nul 2>nul
   exit /b %STATUS%
 )

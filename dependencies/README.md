@@ -1,4 +1,6 @@
-# Shared C++ baseline
+# Shared baselines
+
+## C++ desktop applications
 
 New resident desktop projects should compose these modules instead of copying a
 product implementation:
@@ -76,3 +78,12 @@ indefinitely while trying to save settings.
 `aip::RecentLogBuffer` is the shared in-memory tray/diagnostic log model.
 Products may keep their own timestamp and UI failure text, but should use this
 buffer instead of open-coded vector trimming when preserving recent log lines.
+
+## C# registry notification services
+
+`registry_notification_service.cs` is the reusable `ServiceBase` engine for
+services that monitor per-user notification settings under `HKEY_USERS`.
+Products provide only registry-entry policy by overriding `ProcessAllKeys`.
+The shared engine owns loaded-user discovery, key recreation watching, worker
+exception containment, one bounded aggregate stop deadline, sidecar logging,
+and strict logging-boolean parsing.

@@ -11,7 +11,10 @@ static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType)
         HWND hwnd = g_runtimeWindow.load();
         if (hwnd != nullptr)
         {
-            PostMessageW(hwnd, WM_DRPC_REQUEST_SHUTDOWN, ctrlType, 0);
+            if (!PostMessageW(hwnd, WM_DRPC_REQUEST_SHUTDOWN, ctrlType, 0))
+            {
+                g_stopRequested = true;
+            }
         }
         else
         {
@@ -299,6 +302,11 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
     RuntimeContext ctx;
     ctx.trayEnabled = trayEnabled;
     g_taskbarCreatedMessage = aip::RegisterTaskbarCreatedMessage();
+    if (g_taskbarCreatedMessage == 0)
+    {
+        LogError(L"Could not register the TaskbarCreated message: " +
+            GetLastErrorText(GetLastError()));
+    }
     HWND hwnd = CreateRuntimeWindow(&ctx);
     if (hwnd == nullptr)
     {
@@ -316,7 +324,7 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
         ctx.worker = std::thread([&ctx, &options]() {
             ctx.workerExitCode = RunPresenceLoop(options.once, &ctx);
             ctx.shutdown.MarkWorkComplete();
-            PostMessageW(ctx.hwnd, WM_DRPC_WORKER_FINISHED, 0, 0);
+            SendMessageW(ctx.hwnd, WM_DRPC_WORKER_FINISHED, 0, 0);
         });
     }
     catch (const std::exception& ex)
@@ -333,8 +341,20 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
     }
 
     MSG msg = {};
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0)
+    bool messageLoopFailed = false;
+    for (;;)
     {
+        BOOL messageResult = GetMessageW(&msg, nullptr, 0, 0);
+        if (messageResult == 0)
+        {
+            break;
+        }
+        if (messageResult == -1)
+        {
+            LogError(L"GetMessageW failed: " + GetLastErrorText(GetLastError()));
+            messageLoopFailed = true;
+            break;
+        }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
@@ -346,7 +366,7 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
         ctx.worker.join();
     }
 
-    return static_cast<int>(ctx.workerExitCode);
+    return messageLoopFailed ? 1 : static_cast<int>(ctx.workerExitCode);
 }
 
 static int RunApplication(const AppOptions& options)

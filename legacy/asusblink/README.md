@@ -28,13 +28,13 @@ The repository build script uses the same compiler and writes `build\asusblink.e
 
 ## Run
 
-Show built-in help:
+Show built-in help without creating an INI or opening hardware:
 
 ```cmd
-build\asusblink.exe
+build\asusblink.exe --help
 ```
 
-On first launch, the app creates `asusblink.ini` beside the executable. Option names in `[Options]` match the command-line names without the leading `--`, and command-line arguments override INI values. The default log path is `asusblink.log` beside the executable; if the executable is renamed, the default INI/log names follow the renamed executable.
+Running with no configured events also prints help. On first operational launch, the app creates `asusblink.ini` beside the executable. Option names in `[Options]` match the command-line names without the leading `--`, and command-line arguments override INI values. The default log path is `asusblink.log` beside the executable; if the executable is renamed, the default INI/log names follow the renamed executable. Unknown options, missing values, malformed times/states, and unsupported state ranges are rejected.
 
 Examples:
 
@@ -55,7 +55,6 @@ build\asusblink.exe --event1-hdd-state 128,129,130,131,131 --event1-hdd-interval
 - `--mic-state <csv>`: mic LED states, usually `0` or `1`.
 - `--mic-interval <csv>`: per-state intervals. Supports `ms`, `s`, `m`, `h`, and `d` suffixes.
 - `--mic-duration <time>`: total duration. `0` means infinite; omitted means one cycle.
-- `--mic-check`: check current state and apply only when different.
 - `--keyboard-state <csv>`: keyboard state values, commonly `128..131`.
 - `--keyboard-interval <csv>`: per-state intervals.
 - `--keyboard-duration <time>`: total duration. `0` means infinite; omitted means one cycle.
@@ -75,7 +74,9 @@ If a high-priority event has infinite duration, lower-priority events for the sa
 
 By default the app creates a tray icon. The tray menu shows running task details, pause/resume, startup shortcut toggle, log path controls, and exit.
 
-The startup shortcut preserves the command-line arguments of the running tray instance. A startup shortcut created from `build\asusblink.exe --keyboard-state 130 --keyboard-duration 0` will relaunch with those arguments at sign-in instead of starting with no work to do.
+The startup shortcut preserves the command-line arguments of the running tray instance. A startup shortcut created from `build\asusblink.exe --keyboard-state 130 --keyboard-duration 0` will relaunch with those arguments at sign-in instead of starting with no work to do. Shortcut names are scoped to the executable path and their actual target is checked, so stale or separately installed copies are not reported as the current app's startup entry. A legacy same-name shortcut is migrated or removed only when it points to the current executable.
+
+Shutdown is cooperative: worker tasks are cancelled and drained before synchronized ACPI cleanup. Device writes are serialized by target, firmware return codes are checked, and worker faults cause a nonzero process result.
 
 ## Generated Files
 

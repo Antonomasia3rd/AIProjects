@@ -48,8 +48,8 @@ if errorlevel 1 (
 )
 
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\SecureDesktopLauncherSourceCheck.cpp /Fe:build\SecureDesktopLauncherSourceCheck.exe /Fo:build\obj\SecureDesktopLauncherSourceCheck.obj
-if errorlevel 1 (
-  set "STATUS=%ERRORLEVEL%"
+set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
   popd
   exit /b %STATUS%
 )

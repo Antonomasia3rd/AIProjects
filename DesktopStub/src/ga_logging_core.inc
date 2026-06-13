@@ -124,13 +124,18 @@ void LogText(const std::wstring& text)
     Log(L"%ls", text.c_str());
 }
 
-static void BindConsoleStreams()
+static errno_t BindConsoleStreams()
 {
     FILE* f = nullptr;
-    freopen_s(&f, "CONOUT$", "w", stdout);
-    freopen_s(&f, "CONOUT$", "w", stderr);
-    freopen_s(&f, "CONIN$", "r", stdin);
+    errno_t firstError = freopen_s(&f, "CONOUT$", "w", stdout);
+    errno_t error = freopen_s(&f, "CONOUT$", "w", stderr);
+    if (firstError == 0)
+        firstError = error;
+    error = freopen_s(&f, "CONIN$", "r", stdin);
+    if (firstError == 0)
+        firstError = error;
     ConfigureConsoleCP();
+    return firstError;
 }
 
 static void ReplayLogBufferToConsole()
@@ -199,15 +204,16 @@ static void ApplyConsoleSetting(bool enable, bool writeIni, bool logState)
                         return;
                     return;
                 }
-                attached = true;
             }
 
             if (!SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE))
                 LogWin32FailureText(L"SetConsoleCtrlHandler", GetLastError());
-            BindConsoleStreams();
+            errno_t streamBindError = BindConsoleStreams();
             g_consoleAttached = true;
             g_console = true;
             ReplayLogBufferToConsole();
+            if (streamBindError != 0)
+                Log(L"[w] One or more CRT console streams could not be rebound (errno=%d).", static_cast<int>(streamBindError));
             LogText(g_ui.consoleAllocated);
         }
     }

@@ -73,6 +73,36 @@ static bool FileExists(const std::wstring& path)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
+static std::wstring BuildTemporarySiblingPath(const std::wstring& path)
+{
+    static std::atomic<unsigned long> counter{ 0 };
+    return path +
+        L".tmp." + std::to_wstring(GetCurrentProcessId()) +
+        L"." + std::to_wstring(GetCurrentThreadId()) +
+        L"." + std::to_wstring(GetTickCount64()) +
+        L"." + std::to_wstring(++counter);
+}
+
+static bool CommitTemporaryFile(
+    const std::wstring& temporaryPath,
+    const std::wstring& destinationPath)
+{
+    if (MoveFileExW(
+            temporaryPath.c_str(),
+            destinationPath.c_str(),
+            MOVEFILE_REPLACE_EXISTING |
+                MOVEFILE_COPY_ALLOWED |
+                MOVEFILE_WRITE_THROUGH) != FALSE)
+    {
+        return true;
+    }
+
+    DWORD error = GetLastError();
+    DeleteFileW(temporaryPath.c_str());
+    SetLastError(error);
+    return false;
+}
+
 static std::wstring PathJoin(const std::wstring& left, const std::wstring& right)
 {
     if (left.empty())
@@ -107,46 +137,93 @@ static std::wstring GetDirectoryName(const std::wstring& path)
     return path.substr(0, slash);
 }
 
-static std::wstring GetFileBaseName(const std::wstring& path)
-{
-    size_t slash = path.find_last_of(L"\\/");
-    size_t start = slash == std::wstring::npos ? 0 : slash + 1;
-    size_t dot = path.find_last_of(L'.');
-    if (dot == std::wstring::npos || dot < start)
-    {
-        dot = path.size();
-    }
-    return path.substr(start, dot - start);
-}
-
 static void InitPaths()
 {
-    wchar_t buffer[MAX_PATH] = {};
-    DWORD length = GetModuleFileNameW(nullptr, buffer, ARRAYSIZE(buffer));
-    if (length == 0 || length >= ARRAYSIZE(buffer))
+    aip::SidecarPaths paths = aip::BuildCurrentProcessSidecarPaths(APP_NAME);
+    g_exePath = paths.exePath;
+    g_exeDir = paths.exeDir;
+    g_exeBaseName = paths.exeBaseName;
+    g_iniPath = paths.configPath;
+    g_logPath = paths.defaultLogPath;
+    g_instanceIdentity = aip::BuildPathScopedInstanceIdentity(
+        L"NowPlayingTile.App",
+        L"NowPlayingTile.RestoreRunningInstance",
+        WINDOW_CLASS_NAME,
+        APP_NAME,
+        g_iniPath);
+
+    aip::Utf8LoggerOptions loggerOptions;
+    loggerOptions.filePath = g_logPath;
+    loggerOptions.lockWaitMs = 5000;
+    g_logger.Configure(loggerOptions);
+}
+
+static bool QueryProcessImagePath(DWORD processId, std::wstring* path)
+{
+    path->clear();
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (process == nullptr)
     {
-        g_exePath = APP_NAME;
-        g_exeDir = L".";
-        g_exeBaseName = APP_NAME;
-    }
-    else
-    {
-        g_exePath = buffer;
-        g_exeDir = GetDirectoryName(g_exePath);
-        g_exeBaseName = GetFileBaseName(g_exePath);
-        if (g_exeBaseName.empty())
-        {
-            g_exeBaseName = APP_NAME;
-        }
+        return false;
     }
 
-    g_iniPath = PathJoin(g_exeDir, g_exeBaseName + L".ini");
-    g_logPath = PathJoin(g_exeDir, g_exeBaseName + L".log");
+    std::vector<wchar_t> buffer(512);
+    bool success = false;
+    for (;;)
+    {
+        DWORD length = static_cast<DWORD>(buffer.size());
+        if (QueryFullProcessImageNameW(process, 0, buffer.data(), &length) != FALSE)
+        {
+            if (length != 0)
+            {
+                path->assign(buffer.data(), length);
+                success = true;
+            }
+            break;
+        }
+
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || buffer.size() >= 32768)
+        {
+            break;
+        }
+        buffer.resize((std::min)(buffer.size() * 2, static_cast<size_t>(32768)));
+    }
+
+    CloseHandle(process);
+    return success;
+}
+
+static HWND FindWindowForCurrentExecutable(const wchar_t* windowClass, int retries, int delayMs)
+{
+    retries = (std::max)(retries, 0);
+    delayMs = (std::max)(delayMs, 0);
+    for (int attempt = 0; attempt <= retries; ++attempt)
+    {
+        HWND candidate = nullptr;
+        while ((candidate = FindWindowExW(nullptr, candidate, windowClass, nullptr)) != nullptr)
+        {
+            DWORD processId = 0;
+            GetWindowThreadProcessId(candidate, &processId);
+            std::wstring candidatePath;
+            if (processId != 0 &&
+                QueryProcessImagePath(processId, &candidatePath) &&
+                _wcsicmp(candidatePath.c_str(), g_exePath.c_str()) == 0)
+            {
+                return candidate;
+            }
+        }
+
+        if (attempt < retries && delayMs > 0)
+        {
+            Sleep(static_cast<DWORD>(delayMs));
+        }
+    }
+    return nullptr;
 }
 
 static void Log(const wchar_t* fmt, ...)
 {
-    if (g_logPath.empty() || fmt == nullptr)
+    if (fmt == nullptr)
     {
         return;
     }
@@ -156,41 +233,7 @@ static void Log(const wchar_t* fmt, ...)
     va_start(args, fmt);
     _vsnwprintf_s(message, ARRAYSIZE(message), _TRUNCATE, fmt, args);
     va_end(args);
-
-    SYSTEMTIME st = {};
-    GetLocalTime(&st);
-
-    wchar_t prefix[64] = {};
-    swprintf_s(prefix,
-        L"%04u-%02u-%02u %02u:%02u:%02u  ",
-        st.wYear,
-        st.wMonth,
-        st.wDay,
-        st.wHour,
-        st.wMinute,
-        st.wSecond);
-
-    std::wstring line = prefix;
-    line += message;
-    line += L"\r\n";
-
-    EnsureDirectory(GetDirectoryName(g_logPath));
-    HANDLE file = CreateFileW(g_logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE)
-    {
-        return;
-    }
-
-    int utf8Length = WideCharToMultiByte(CP_UTF8, 0, line.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    if (utf8Length > 1)
-    {
-        std::vector<char> bytes(static_cast<size_t>(utf8Length));
-        WideCharToMultiByte(CP_UTF8, 0, line.c_str(), -1, bytes.data(), utf8Length, nullptr, nullptr);
-        DWORD written = 0;
-        WriteFile(file, bytes.data(), static_cast<DWORD>(utf8Length - 1), &written, nullptr);
-    }
-
-    CloseHandle(file);
+    g_logger.Write(L"info", message);
 }
 
 static std::wstring XmlEscape(const std::wstring& value)

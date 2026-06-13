@@ -1,59 +1,46 @@
-static const wchar_t* DEFAULT_SETTINGS_TEXT =
+static const wchar_t* DEFAULT_SETTINGS_HEADER =
     L"# NowPlayingTile settings\r\n"
-    L"# TileLayout: Text (artwork/combined layouts temporarily disabled)\r\n"
-    L"[Settings]\r\n"
-    L"TileLayout=Text\r\n"
-    L"UpdateIntervalSeconds=2\r\n"
-    L"TileRefreshSeconds=60\r\n"
-    L"ShowTrayIcon=false\r\n";
+    L"# TileLayout is retained for forward compatibility; current builds render text.\r\n";
 
-static void EnsureDefaultSettingsFile()
+static bool EnsureDefaultSettingsFile()
 {
-    if (FileExists(g_iniPath))
+    static const aip::IniDefaultValue defaults[] =
     {
-        return;
-    }
+        { L"Settings", L"TileLayout", L"Text" },
+        { L"Settings", L"UpdateIntervalSeconds", L"2" },
+        { L"Settings", L"TileRefreshSeconds", L"60" },
+        { L"Settings", L"ShowTrayIcon", L"false" },
+    };
 
-    EnsureDirectory(GetDirectoryName(g_iniPath));
-    HANDLE file = CreateFileW(g_iniPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE)
+    aip::IniConfigStore store(g_iniPath, DEFAULT_SETTINGS_HEADER, 5000);
+    if (!store.EnsureDefaults(defaults, ARRAYSIZE(defaults)))
     {
-        Log(L"Could not create default settings: %s", GetLastErrorText(GetLastError()).c_str());
-        return;
+        Log(L"Could not create or repair default settings: %s",
+            GetLastErrorText(GetLastError()).c_str());
+        return false;
     }
-
-    int bytesNeeded = WideCharToMultiByte(CP_UTF8, 0, DEFAULT_SETTINGS_TEXT, -1, nullptr, 0, nullptr, nullptr);
-    if (bytesNeeded > 1)
-    {
-        std::vector<char> bytes(static_cast<size_t>(bytesNeeded));
-        WideCharToMultiByte(CP_UTF8, 0, DEFAULT_SETTINGS_TEXT, -1, bytes.data(), bytesNeeded, nullptr, nullptr);
-        DWORD written = 0;
-        WriteFile(file, bytes.data(), static_cast<DWORD>(bytesNeeded - 1), &written, nullptr);
-    }
-
-    CloseHandle(file);
+    return true;
 }
 
 static std::wstring ReadIniString(const wchar_t* key, const wchar_t* fallback)
 {
-    EnsureDefaultSettingsFile();
-    wchar_t buffer[512] = {};
-    DWORD count = GetPrivateProfileStringW(L"Settings", key, fallback, buffer, ARRAYSIZE(buffer), g_iniPath.c_str());
-    if (count == 0 && fallback != nullptr)
-    {
-        return fallback;
-    }
-    return buffer;
+    return aip::IniConfigStore(g_iniPath).ReadRaw(L"Settings", key, fallback);
 }
 
 static int ReadIniInt(const wchar_t* key, int fallback, int minValue, int maxValue)
 {
-    std::wstring value = ReadIniString(key, L"");
-    wchar_t* end = nullptr;
-    long parsed = wcstol(value.c_str(), &end, 10);
-    if (end == value.c_str())
+    std::wstring value = Trim(ReadIniString(key, L""));
+    if (value.empty())
     {
-        parsed = fallback;
+        return fallback;
+    }
+
+    errno = 0;
+    wchar_t* end = nullptr;
+    long long parsed = wcstoll(value.c_str(), &end, 10);
+    if (end == value.c_str() || *end != L'\0' || errno == ERANGE)
+    {
+        return fallback;
     }
     if (parsed < minValue)
     {
@@ -95,7 +82,7 @@ static TileLayout ParseTileLayout(const std::wstring& value)
     {
         return TileLayout::Combined;
     }
-    return TileLayout::Cycle;
+    return TileLayout::Text;
 }
 
 static const wchar_t* TileLayoutName(TileLayout layout)
@@ -112,10 +99,11 @@ static const wchar_t* TileLayoutName(TileLayout layout)
 
 static AppSettings LoadSettings()
 {
+    EnsureDefaultSettingsFile();
     AppSettings settings;
     settings.updateIntervalSeconds = ReadIniInt(L"UpdateIntervalSeconds", 2, 1, 60);
     settings.tileRefreshSeconds = ReadIniInt(L"TileRefreshSeconds", 60, 1, 300);
-    settings.tileLayout = ParseTileLayout(ReadIniString(L"TileLayout", L"Cycle"));
+    settings.tileLayout = ParseTileLayout(ReadIniString(L"TileLayout", L"Text"));
     settings.showTrayIcon = ReadIniBool(L"ShowTrayIcon", false);
     return settings;
 }

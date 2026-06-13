@@ -3,6 +3,94 @@
 
 namespace aip
 {
+class CriticalSectionLock
+{
+public:
+    explicit CriticalSectionLock(CRITICAL_SECTION& section) noexcept
+        : section_(&section)
+    {
+        EnterCriticalSection(section_);
+    }
+
+    ~CriticalSectionLock()
+    {
+        LeaveCriticalSection(section_);
+    }
+
+    CriticalSectionLock(const CriticalSectionLock&) = delete;
+    CriticalSectionLock& operator=(const CriticalSectionLock&) = delete;
+
+private:
+    CRITICAL_SECTION* section_;
+};
+
+class UniqueKernelHandle
+{
+public:
+    UniqueKernelHandle() noexcept = default;
+
+    explicit UniqueKernelHandle(HANDLE handle) noexcept
+        : handle_(handle)
+    {
+    }
+
+    ~UniqueKernelHandle()
+    {
+        Reset();
+    }
+
+    UniqueKernelHandle(const UniqueKernelHandle&) = delete;
+    UniqueKernelHandle& operator=(const UniqueKernelHandle&) = delete;
+
+    UniqueKernelHandle(UniqueKernelHandle&& other) noexcept
+        : handle_(other.Release())
+    {
+    }
+
+    UniqueKernelHandle& operator=(UniqueKernelHandle&& other) noexcept
+    {
+        if (this != &other)
+        {
+            Reset(other.Release());
+        }
+        return *this;
+    }
+
+    HANDLE Get() const noexcept
+    {
+        return handle_;
+    }
+
+    explicit operator bool() const noexcept
+    {
+        return IsValid(handle_);
+    }
+
+    HANDLE Release() noexcept
+    {
+        HANDLE handle = handle_;
+        handle_ = nullptr;
+        return handle;
+    }
+
+    void Reset(HANDLE handle = nullptr) noexcept
+    {
+        if (IsValid(handle_))
+        {
+            CloseHandle(handle_);
+        }
+        handle_ = handle;
+    }
+
+private:
+    static bool IsValid(HANDLE handle) noexcept
+    {
+        return handle != nullptr && handle != INVALID_HANDLE_VALUE;
+    }
+
+    HANDLE handle_ = nullptr;
+};
+
 inline std::wstring Trim(std::wstring value)
 {
     size_t first = 0;
@@ -124,6 +212,52 @@ inline std::wstring PathJoin(const std::wstring& left, const std::wstring& right
     }
     result += right;
     return result;
+}
+
+inline std::wstring GetTemporaryDirectoryPath()
+{
+    std::vector<wchar_t> buffer(512);
+    for (;;)
+    {
+        DWORD length = GetTempPathW(static_cast<DWORD>(buffer.size()), buffer.data());
+        if (length == 0)
+        {
+            return L"";
+        }
+        if (length < buffer.size())
+        {
+            return std::wstring(buffer.data(), length);
+        }
+        if (length >= 32768)
+        {
+            SetLastError(ERROR_BUFFER_OVERFLOW);
+            return L"";
+        }
+        buffer.resize(static_cast<size_t>(length) + 1);
+    }
+}
+
+inline std::wstring GetSystemDirectoryPath()
+{
+    std::vector<wchar_t> buffer(256);
+    for (;;)
+    {
+        UINT length = GetSystemDirectoryW(buffer.data(), static_cast<UINT>(buffer.size()));
+        if (length == 0)
+        {
+            return L"";
+        }
+        if (length < buffer.size())
+        {
+            return std::wstring(buffer.data(), length);
+        }
+        if (length > 32768)
+        {
+            SetLastError(ERROR_FILENAME_EXCED_RANGE);
+            return L"";
+        }
+        buffer.resize(length);
+    }
 }
 
 inline void EnsureDirectory(const std::wstring& path)

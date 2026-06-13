@@ -66,6 +66,7 @@ Useful command-line paths:
 
 - `[general] client_id` must be a valid Discord application ID.
 - `[general] transport_mode` can be `ipc`, `gateway`, or `auto`. `auto` tries IPC first, then falls back to Gateway.
+- **Account risk:** Gateway mode automates a normal Discord user token. Discord explicitly forbids self-bots and warns that detected accounts can be terminated. Prefer the local IPC transport; use Gateway only if you accept that risk.
 - Gateway tokens are configured only through the INI-backed token fields: DPAPI `[general] token_protected`, or legacy plaintext `[general] token` before migration.
 - Plaintext `[general] token` values are migrated to `token_protected=dpapi:<hex>` for the current Windows user and then cleared. If a plaintext token is supplied later, it replaces the existing protected token instead of being discarded.
 - `[general] details_template` and `state_template` support tokens such as `{win_title}`, `{cpu}`, `{ram_used}`, `{ram_total}`, `{ram_pct}`, `{uptime}`, `{battery_pct}`, `{time}`, `{date}`, `{username}`, and `{computer}`.

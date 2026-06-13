@@ -66,12 +66,12 @@ if errorlevel 1 (
     exit /b %errorlevel%
 )
 
-if not defined DESKTOPSTUB_VERSION if not defined DESKTOPSTUB_RELEASE_TAG call :RefreshDesktopStubTags
+if /i "%DESKTOPSTUB_REFRESH_TAGS%"=="1" if not defined DESKTOPSTUB_VERSION if not defined DESKTOPSTUB_RELEASE_TAG call :RefreshDesktopStubTags
 call :ResolveDesktopStubVersion
 if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+    set "STATUS=!ERRORLEVEL!"
     popd
-    exit /b %STATUS%
+    exit /b !STATUS!
 )
 set "VERSION_DEFINES=/DDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /DDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /DDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /DDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
 set "RC_VERSION_DEFINES=/dDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /dDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /dDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /dDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
@@ -81,21 +81,21 @@ set "RC_HOST_DEFINES_FILE=build\obj\DesktopStubHostResourceDefines.rc.inc"
 set "RC_BROKER_DEFINES_FILE=build\obj\DesktopStubBrokerResourceDefines.rc.inc"
 call :WriteCppVersionDefines "%CPP_VERSION_DEFINES_FILE%" "%DESKTOPSTUB_RELEASE_TAG%"
 if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+    set "STATUS=!ERRORLEVEL!"
     popd
-    exit /b %STATUS%
+    exit /b !STATUS!
 )
 call :WriteRcDefines "%RC_HOST_DEFINES_FILE%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_HOST_EXE_NAME%" "%DESKTOPSTUB_HOST_EXE_NAME%"
 if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+    set "STATUS=!ERRORLEVEL!"
     popd
-    exit /b %STATUS%
+    exit /b !STATUS!
 )
 call :WriteRcDefines "%RC_BROKER_DEFINES_FILE%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_BROKER_EXE_NAME%" "%DESKTOPSTUB_BROKER_EXE_NAME%"
 if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+    set "STATUS=!ERRORLEVEL!"
     popd
-    exit /b %STATUS%
+    exit /b !STATUS!
 )
 set "RC_INCLUDE_DEFINES=/ibuild\obj"
 echo %DESKTOPSTUB_PRODUCT_NAME% version: %DESKTOPSTUB_RELEASE_TAG% (%DESKTOPSTUB_VERSION%)
@@ -130,56 +130,56 @@ set "BROKER_RES=build\obj\LiveTileBroker.res"
 echo Building packaged Live Tile broker...
 rc /nologo %RC_VERSION_DEFINES% %RC_INCLUDE_DEFINES% /fo"%BROKER_RES%" LiveTileBroker.rc
 if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+    set "STATUS=!ERRORLEVEL!"
     popd
-    exit /b %STATUS%
+    exit /b !STATUS!
 )
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% LiveTileBroker.cpp "%BROKER_RES%" /Fe"%BROKER_EXE%" /Fo"%BROKER_OBJ%" /link windowsapp.lib runtimeobject.lib ole32.lib /SUBSYSTEM:WINDOWS
 if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+    set "STATUS=!ERRORLEVEL!"
     popd
-    exit /b %STATUS%
+    exit /b !STATUS!
 )
 if exist "%BROKER_EXE%.manifest" (
     echo Embedding packaged Live Tile broker manifest...
     mt /nologo -manifest "%BROKER_EXE%.manifest" -outputresource:"%BROKER_EXE%;#1"
     if errorlevel 1 (
-        set "STATUS=%ERRORLEVEL%"
+        set "STATUS=!ERRORLEVEL!"
         popd
-        exit /b %STATUS%
+        exit /b !STATUS!
     )
 )
 
 echo Building main DesktopStub host...
 rc /nologo %RC_VERSION_DEFINES% %RC_INCLUDE_DEFINES% /fo"%RES_FILE%" DesktopStub.rc
 if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+    set "STATUS=!ERRORLEVEL!"
     popd
-    exit /b %STATUS%
+    exit /b !STATUS!
 )
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
-set "STATUS=%ERRORLEVEL%"
-if not "%STATUS%"=="0" (
+set "STATUS=!ERRORLEVEL!"
+if not "!STATUS!"=="0" (
     popd
-    exit /b %STATUS%
+    exit /b !STATUS!
 )
 if exist "%OUT_EXE%.manifest" (
     echo Embedding main DesktopStub host manifest...
     mt /nologo -manifest "%OUT_EXE%.manifest" -outputresource:"%OUT_EXE%;#1"
     if errorlevel 1 (
-        set "STATUS=%ERRORLEVEL%"
+        set "STATUS=!ERRORLEVEL!"
         popd
-        exit /b %STATUS%
+        exit /b !STATUS!
     )
 )
 popd
 
-exit /b %STATUS%
+exit /b !STATUS!
 
 :ValidateBuildValue
 setlocal DisableDelayedExpansion
 set "BUILD_VALUE_NAME=%~1"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$n=$env:BUILD_VALUE_NAME; $v=[Environment]::GetEnvironmentVariable($n, 'Process'); if ([string]::IsNullOrEmpty($v)) { Write-Host ('ERROR: {0} cannot be empty.' -f $n); [Environment]::Exit(1) }; $bad=$false; foreach ($c in @(37,38,124,60,62,94,33,34)) { if ($v.Contains([char]$c)) { $bad=$true } }; if ($bad) { Write-Host ('ERROR: {0} contains command-shell metacharacters or quotes that are not supported: {1}' -f $n, $v); [Environment]::Exit(1) }; if ($n -eq 'DESKTOPSTUB_HOST_EXE_NAME' -or $n -eq 'DESKTOPSTUB_BROKER_EXE_NAME') { foreach ($c in @(47,58,92)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} must be a file name, not a path: {1}' -f $n, $v); [Environment]::Exit(1) } } }; if ($n -eq 'DESKTOPSTUB_RELEASE_TAG_PREFIX') { foreach ($c in @(9,10,13,32)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} cannot contain whitespace because it is embedded in compiler defines: {1}' -f $n, $v); [Environment]::Exit(1) } } }; [Environment]::Exit(0)"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$n=$env:BUILD_VALUE_NAME; $v=[Environment]::GetEnvironmentVariable($n, 'Process'); if ([string]::IsNullOrEmpty($v)) { Write-Host ('ERROR: {0} cannot be empty.' -f $n); [Environment]::Exit(1) }; $bad=$false; foreach ($c in @(0,10,13,33,34,37,38,40,41,60,62,94,124)) { if ($v.Contains([char]$c)) { $bad=$true } }; if ($bad) { Write-Host ('ERROR: {0} contains command-shell metacharacters, control characters, or quotes that are not supported: {1}' -f $n, $v); [Environment]::Exit(1) }; if ($n -eq 'DESKTOPSTUB_HOST_EXE_NAME' -or $n -eq 'DESKTOPSTUB_BROKER_EXE_NAME') { foreach ($c in @(42,47,58,63,92)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} must be a valid file name, not a path or wildcard: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($v.EndsWith(' ') -or $v.EndsWith('.') -or $v -eq '.' -or $v -eq '..') { Write-Host ('ERROR: {0} must not end in a space/dot or use a relative-directory name: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($n -eq 'DESKTOPSTUB_RELEASE_TAG_PREFIX') { foreach ($c in @(9,10,13,32,42,63,91,92,126)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} contains whitespace or characters that are invalid in a Git tag prefix: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($v.Contains('..') -or $v.Contains('@{') -or $v.EndsWith('.') -or $v.EndsWith('/')) { Write-Host ('ERROR: {0} is not a valid Git tag prefix: {1}' -f $n, $v); [Environment]::Exit(1) } }; [Environment]::Exit(0)"
 set "STATUS=%ERRORLEVEL%"
 endlocal & exit /b %STATUS%
 
@@ -200,14 +200,13 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 exit /b 0
 
 :RefreshDesktopStubTags
-if /i "%DESKTOPSTUB_SKIP_TAG_REFRESH%"=="1" exit /b 0
 where git.exe >nul 2>nul
 if errorlevel 1 exit /b 0
 git rev-parse --is-inside-work-tree >nul 2>nul
 if errorlevel 1 exit /b 0
 git remote get-url origin >nul 2>nul
 if errorlevel 1 exit /b 0
-git fetch --quiet --force --tags --prune --prune-tags origin
+git fetch --quiet --tags origin
 if errorlevel 1 echo [!] Could not refresh DesktopStub release tags from origin; continuing with local tags.
 exit /b 0
 
@@ -218,14 +217,14 @@ set "DESKTOPSTUB_VERSION_BUILD="
 set "DESKTOPSTUB_VERSION_REVISION="
 if defined DESKTOPSTUB_VERSION (
     call :ParseDesktopStubVersion "%DESKTOPSTUB_VERSION%"
-    if errorlevel 1 exit /b %ERRORLEVEL%
-    if not defined DESKTOPSTUB_RELEASE_TAG set "DESKTOPSTUB_RELEASE_TAG=%DESKTOPSTUB_RELEASE_TAG_PREFIX%%DESKTOPSTUB_VERSION_MAJOR%"
+    if errorlevel 1 exit /b !ERRORLEVEL!
+    if not defined DESKTOPSTUB_RELEASE_TAG set "DESKTOPSTUB_RELEASE_TAG=!DESKTOPSTUB_RELEASE_TAG_PREFIX!!DESKTOPSTUB_VERSION_MAJOR!"
     exit /b 0
 )
 
 if defined DESKTOPSTUB_RELEASE_TAG (
     call :VersionFromDesktopStubReleaseTag "%DESKTOPSTUB_RELEASE_TAG%"
-    if errorlevel 1 exit /b %ERRORLEVEL%
+    if errorlevel 1 exit /b !ERRORLEVEL!
     exit /b 0
 )
 
@@ -240,12 +239,12 @@ for /f "delims=" %%T in ('git tag --points-at HEAD --list "%DESKTOPSTUB_RELEASE_
 )
 
 if defined LATEST_DESKTOPSTUB_TAG (
-    set "DESKTOPSTUB_RELEASE_TAG=%LATEST_DESKTOPSTUB_TAG%"
-    set "DESKTOPSTUB_VERSION_MAJOR=%LATEST_DESKTOPSTUB_TAG_NUMBER%"
+    set "DESKTOPSTUB_RELEASE_TAG=!LATEST_DESKTOPSTUB_TAG!"
+    set "DESKTOPSTUB_VERSION_MAJOR=!LATEST_DESKTOPSTUB_TAG_NUMBER!"
     set "DESKTOPSTUB_VERSION_MINOR=0"
     set "DESKTOPSTUB_VERSION_BUILD=0"
     set "DESKTOPSTUB_VERSION_REVISION=0"
-    set "DESKTOPSTUB_VERSION=%DESKTOPSTUB_VERSION_MAJOR%.0.0.0"
+    set "DESKTOPSTUB_VERSION=!DESKTOPSTUB_VERSION_MAJOR!.0.0.0"
     exit /b 0
 )
 

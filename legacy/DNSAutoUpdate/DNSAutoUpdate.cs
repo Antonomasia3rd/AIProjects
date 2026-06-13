@@ -28,6 +28,7 @@ static class DNSAutoUpdate
         public bool IncludeUnpreferred;
         public bool WhatIf;
         public bool Confirm;
+        public bool Once;
         public bool Help;
     }
 
@@ -41,8 +42,7 @@ static class DNSAutoUpdate
                 Usage();
                 return 0;
             }
-            Run(options);
-            return 0;
+            return Run(options);
         }
         catch (Exception ex)
         {
@@ -63,23 +63,25 @@ static class DNSAutoUpdate
             if (Is(a, "-IncludeUnpreferred") || Is(a, "--include-unpreferred")) { o.IncludeUnpreferred = true; continue; }
             if (Is(a, "-WhatIf") || Is(a, "--what-if")) { o.WhatIf = true; continue; }
             if (Is(a, "-Confirm") || Is(a, "--confirm")) { o.Confirm = true; continue; }
+            if (Is(a, "-Once") || Is(a, "--once")) { o.Once = true; continue; }
 
-            string value = i + 1 < args.Length ? args[++i] : "";
-            if (Is(a, "-ZoneName") || Is(a, "--zone-name")) o.ZoneName = value;
-            else if (Is(a, "-SubFolder") || Is(a, "--sub-folder")) { AddList(o.SubFolder, value); subFolderProvided = true; }
-            else if (Is(a, "-ManagedRecordName") || Is(a, "--managed-record-name")) AddList(o.ManagedRecordName, value);
-            else if (Is(a, "-LogFile") || Is(a, "--log-file")) o.LogFile = value;
-            else if (Is(a, "-MaxLogMegabytes") || Is(a, "--max-log-megabytes")) o.MaxLogMegabytes = Clamp(ParseInt(value, a), 0, 1048576);
-            else if (Is(a, "-LogRetentionCount") || Is(a, "--log-retention-count")) o.LogRetentionCount = Clamp(ParseInt(value, a), 0, 100);
-            else if (Is(a, "-SleepSeconds") || Is(a, "--sleep-seconds")) o.SleepSeconds = Clamp(ParseInt(value, a), 1, 86400);
-            else if (Is(a, "-IncludeInterfaceAlias") || Is(a, "--include-interface-alias")) AddList(o.IncludeInterfaceAlias, value);
-            else if (Is(a, "-ExcludeInterfaceAlias") || Is(a, "--exclude-interface-alias")) { o.ExcludeInterfaceAlias.Clear(); AddList(o.ExcludeInterfaceAlias, value); }
-            else if (Is(a, "-IncludeIPAddress") || Is(a, "--include-ip-address")) AddList(o.IncludeIPAddress, value);
+            if (Is(a, "-ZoneName") || Is(a, "--zone-name")) o.ZoneName = RequireValue(args, ref i, a);
+            else if (Is(a, "-SubFolder") || Is(a, "--sub-folder")) { AddList(o.SubFolder, RequireValue(args, ref i, a)); subFolderProvided = true; }
+            else if (Is(a, "-ManagedRecordName") || Is(a, "--managed-record-name")) AddList(o.ManagedRecordName, RequireValue(args, ref i, a));
+            else if (Is(a, "-LogFile") || Is(a, "--log-file")) o.LogFile = RequireValue(args, ref i, a);
+            else if (Is(a, "-MaxLogMegabytes") || Is(a, "--max-log-megabytes")) o.MaxLogMegabytes = ParseIntInRange(RequireValue(args, ref i, a), a, 0, 1048576);
+            else if (Is(a, "-LogRetentionCount") || Is(a, "--log-retention-count")) o.LogRetentionCount = ParseIntInRange(RequireValue(args, ref i, a), a, 0, 100);
+            else if (Is(a, "-SleepSeconds") || Is(a, "--sleep-seconds")) o.SleepSeconds = ParseIntInRange(RequireValue(args, ref i, a), a, 1, 86400);
+            else if (Is(a, "-IncludeInterfaceAlias") || Is(a, "--include-interface-alias")) AddList(o.IncludeInterfaceAlias, RequireValue(args, ref i, a));
+            else if (Is(a, "-ExcludeInterfaceAlias") || Is(a, "--exclude-interface-alias")) { o.ExcludeInterfaceAlias.Clear(); AddList(o.ExcludeInterfaceAlias, RequireValue(args, ref i, a)); }
+            else if (Is(a, "-IncludeIPAddress") || Is(a, "--include-ip-address")) AddList(o.IncludeIPAddress, RequireValue(args, ref i, a));
             else throw new ArgumentException("Unknown argument: " + a);
         }
 
         if (!subFolderProvided)
             o.SubFolder.Add("");
+
+        ValidateDnsToken(o.ZoneName, "-ZoneName", false);
 
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
         if (String.IsNullOrWhiteSpace(o.LogFile))
@@ -92,15 +94,17 @@ static class DNSAutoUpdate
     static void Usage()
     {
         Console.WriteLine("Usage:");
-        Console.WriteLine("  DNSAutoUpdate.exe -ZoneName server.local [-ManagedRecordName @,app] [-SleepSeconds 60] [-WhatIf]");
+        Console.WriteLine("  DNSAutoUpdate.exe -ZoneName server.local [-ManagedRecordName @,app] [-SleepSeconds 60] [-WhatIf] [-Once]");
         Console.WriteLine("Requires dnscmd.exe and permission to update the DNS zone.");
     }
 
-    static void Run(Options o)
+    static int Run(Options o)
     {
         var managed = BuildManagedRecordNames(o);
         if (managed.Count == 0)
             throw new InvalidOperationException("No managed DNS owner names were selected. Remove -NoRootRecord, pass -SubFolder, or pass -ManagedRecordName.");
+        foreach (string recordName in managed)
+            ValidateDnsToken(recordName, "managed record name", true);
 
         Log(o, "=============================================");
         Log(o, " DNS Auto-Update Background Service Starting ");
@@ -109,22 +113,31 @@ static class DNSAutoUpdate
         Log(o, " Records outside this allowlist are ignored.");
         Log(o, "=============================================");
 
-        while (true)
+        do
         {
             Log(o, "Starting scan cycle...");
-            var serverIps = GetEligibleServerIPv4(o);
-            if (serverIps.Count == 0)
-            {
-                Log(o, "No eligible server IPv4 addresses detected; skipping DNS changes this cycle.");
-                Sleep(o);
-                continue;
-            }
-
-            Log(o, "Eligible server IPs detected: " + String.Join(", ", serverIps));
-            foreach (string recordName in managed)
-                SyncARecords(o, recordName, serverIps);
+            bool cycleSucceeded = RunCycle(o, managed);
+            if (o.Once)
+                return cycleSucceeded ? 0 : 3;
             Sleep(o);
         }
+        while (true);
+    }
+
+    static bool RunCycle(Options o, List<string> managed)
+    {
+        var serverIps = GetEligibleServerIPv4(o);
+        if (serverIps.Count == 0)
+        {
+            Log(o, "No eligible server IPv4 addresses detected; skipping DNS changes this cycle.");
+            return false;
+        }
+
+        bool succeeded = true;
+        Log(o, "Eligible server IPs detected: " + String.Join(", ", serverIps));
+        foreach (string recordName in managed)
+            succeeded = SyncARecords(o, recordName, serverIps) && succeeded;
+        return succeeded;
     }
 
     static List<string> BuildManagedRecordNames(Options o)
@@ -145,8 +158,9 @@ static class DNSAutoUpdate
         return set.ToList();
     }
 
-    static void SyncARecords(Options o, string recordName, List<string> serverIps)
+    static bool SyncARecords(Options o, string recordName, List<string> serverIps)
     {
+        bool succeeded = true;
         List<string> existing;
         try
         {
@@ -155,7 +169,7 @@ static class DNSAutoUpdate
         catch (Exception ex)
         {
             Log(o, "ERROR reading A records for '" + recordName + "'; skipping this owner name this cycle: " + ex.Message);
-            return;
+            return false;
         }
 
         Log(o, "Found " + existing.Count + " A records for '" + recordName + "'");
@@ -166,7 +180,7 @@ static class DNSAutoUpdate
             {
                 Log(o, "   OUTDATED IP detected, removing " + ip);
                 if (ShouldApply(o, o.ZoneName + "/" + recordName + " " + ip, "Remove stale A record"))
-                    RunDnsCmd(o, "/RecordDelete " + Quote(o.ZoneName) + " " + Quote(recordName) + " A " + Quote(ip) + " /f", "   Removed successfully.");
+                    succeeded = RunDnsCmd(o, "/RecordDelete " + Quote(o.ZoneName) + " " + Quote(recordName) + " A " + Quote(ip) + " /f", "   Removed successfully.") && succeeded;
                 else
                     Log(o, "   Removal skipped.");
             }
@@ -183,7 +197,7 @@ static class DNSAutoUpdate
         catch (Exception ex)
         {
             Log(o, "ERROR re-reading A records for '" + recordName + "' after removals; skipping additions this cycle: " + ex.Message);
-            return;
+            return false;
         }
 
         Log(o, "Ensuring correct IP set for '" + recordName + "'");
@@ -193,11 +207,12 @@ static class DNSAutoUpdate
             {
                 Log(o, "   Adding missing IP " + ip);
                 if (ShouldApply(o, o.ZoneName + "/" + recordName + " " + ip, "Add missing A record"))
-                    RunDnsCmd(o, "/RecordAdd " + Quote(o.ZoneName) + " " + Quote(recordName) + " A " + Quote(ip), "   Added successfully.");
+                    succeeded = RunDnsCmd(o, "/RecordAdd " + Quote(o.ZoneName) + " " + Quote(recordName) + " A " + Quote(ip), "   Added successfully.") && succeeded;
                 else
                     Log(o, "   Add skipped.");
             }
         }
+        return succeeded;
     }
 
     static List<string> GetExactARecords(Options o, string recordName)
@@ -211,24 +226,47 @@ static class DNSAutoUpdate
             throw new InvalidOperationException(combined.Trim());
         }
 
+        return ParseExactARecords(result.Output);
+    }
+
+    static List<string> ParseExactARecords(string output)
+    {
         var set = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (Match m in Regex.Matches(combined, @"\b(?:\d{1,3}\.){3}\d{1,3}\b"))
+        using (var reader = new StringReader(output ?? ""))
         {
-            string ip = NormalizeIP(m.Value);
-            IPAddress parsed;
-            if (IPAddress.TryParse(ip, out parsed))
-                set.Add(ip);
+            string line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (!Regex.IsMatch(line, @"(?:^|\s)A(?:\s|$)", RegexOptions.IgnoreCase))
+                    continue;
+                foreach (Match m in Regex.Matches(line, @"\b(?:\d{1,3}\.){3}\d{1,3}\b"))
+                {
+                    string ip = NormalizeIP(m.Value);
+                    IPAddress parsed;
+                    if (IPAddress.TryParse(ip, out parsed) &&
+                        parsed.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        set.Add(parsed.ToString());
+                    }
+                }
+            }
         }
         return set.ToList();
     }
 
-    static void RunDnsCmd(Options o, string args, string success)
+    static bool RunDnsCmd(Options o, string args, string success)
     {
         var result = RunProcess("dnscmd.exe", ". " + args, 60000);
         if (result.ExitCode == 0)
+        {
             Log(o, success);
+            return true;
+        }
         else
+        {
             Log(o, "   ERROR: " + (result.Output + " " + result.Error).Trim());
+            return false;
+        }
     }
 
     static List<string> GetEligibleServerIPv4(Options o)
@@ -373,10 +411,11 @@ static class DNSAutoUpdate
             if (!p.WaitForExit(timeoutMs))
             {
                 try { p.Kill(); } catch { }
+                try { p.WaitForExit(5000); } catch { }
                 throw new TimeoutException(file + " timed out.");
             }
-            outputComplete.WaitOne(5000);
-            errorComplete.WaitOne(5000);
+            if (!outputComplete.WaitOne(5000) || !errorComplete.WaitOne(5000))
+                throw new TimeoutException(file + " output did not finish draining.");
             return new ProcessResult { ExitCode = p.ExitCode, Output = output.ToString(), Error = error.ToString() };
         }
     }
@@ -407,9 +446,54 @@ static class DNSAutoUpdate
     }
     static bool WildcardAny(string value, List<string> patterns) { return patterns.Any(p => Wildcard(value, p)); }
     static bool Wildcard(string value, string pattern) { return Regex.IsMatch(value ?? "", "^" + Regex.Escape(pattern ?? "").Replace("\\*", ".*").Replace("\\?", ".") + "$", RegexOptions.IgnoreCase); }
-    static string Quote(string value) { return "\"" + (value ?? "").Replace("\"", "\\\"") + "\""; }
+    static string Quote(string value)
+    {
+        if (value == null || value.IndexOf('"') >= 0 || value.IndexOf('\0') >= 0 ||
+            value.IndexOf('\r') >= 0 || value.IndexOf('\n') >= 0)
+        {
+            throw new ArgumentException("DNS command argument contains unsupported characters.");
+        }
+        return "\"" + value + "\"";
+    }
     static bool Is(string a, string b) { return String.Equals(a, b, StringComparison.OrdinalIgnoreCase); }
     static int ParseInt(string value, string name) { int n; if (!Int32.TryParse(value, out n)) throw new ArgumentException("Invalid integer for " + name + ": " + value); return n; }
-    static int Clamp(int value, int min, int max) { return Math.Max(min, Math.Min(max, value)); }
+    static int ParseIntInRange(string value, string name, int min, int max)
+    {
+        int parsed = ParseInt(value, name);
+        if (parsed < min || parsed > max)
+            throw new ArgumentOutOfRangeException(name, value, "Value must be between " + min + " and " + max + ".");
+        return parsed;
+    }
+    static string RequireValue(string[] args, ref int index, string option)
+    {
+        if (index + 1 >= args.Length || IsKnownOption(args[index + 1]))
+            throw new ArgumentException("Missing value for " + option + ".");
+        return args[++index];
+    }
+    static bool IsKnownOption(string value)
+    {
+        string[] options =
+        {
+            "-h", "--help", "/?", "-NoRootRecord", "--no-root-record",
+            "-IncludeUnpreferred", "--include-unpreferred", "-WhatIf", "--what-if",
+            "-Confirm", "--confirm", "-Once", "--once", "-ZoneName", "--zone-name",
+            "-SubFolder", "--sub-folder", "-ManagedRecordName", "--managed-record-name",
+            "-LogFile", "--log-file", "-MaxLogMegabytes", "--max-log-megabytes",
+            "-LogRetentionCount", "--log-retention-count", "-SleepSeconds", "--sleep-seconds",
+            "-IncludeInterfaceAlias", "--include-interface-alias", "-ExcludeInterfaceAlias",
+            "--exclude-interface-alias", "-IncludeIPAddress", "--include-ip-address"
+        };
+        return options.Any(option => Is(value, option));
+    }
+    static void ValidateDnsToken(string value, string name, bool allowRoot)
+    {
+        string token = (value ?? "").Trim();
+        if (token.Length == 0)
+            throw new ArgumentException(name + " cannot be empty.");
+        if (allowRoot && token == "@")
+            return;
+        if (token.Any(ch => Char.IsWhiteSpace(ch) || Char.IsControl(ch) || ch == '"' || ch == '/' || ch == '\\'))
+            throw new ArgumentException(name + " contains unsupported characters: " + value);
+    }
     static void AddList(List<string> list, string value) { foreach (string item in (value ?? "").Split(',')) if (!String.IsNullOrWhiteSpace(item)) list.Add(item.Trim()); }
 }

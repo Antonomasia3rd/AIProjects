@@ -345,6 +345,11 @@ private:
         {
             throw std::runtime_error("Discord IPC pipe is not connected.");
         }
+        if (payload.size() > 1024 * 1024)
+        {
+            throw std::runtime_error(
+                "Discord IPC outbound frame exceeds the 1 MiB safety limit.");
+        }
 
         uint32_t header[2] = { opcode, static_cast<uint32_t>(payload.size()) };
         WriteExact(header, sizeof(header), static_cast<DWORD>(options_.responseTimeoutMs));

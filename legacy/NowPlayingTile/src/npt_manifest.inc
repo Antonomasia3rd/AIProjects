@@ -79,11 +79,10 @@ static std::wstring PowerShellEncodedCommand(const std::wstring& command)
 
 static std::wstring DefaultPowerShellPath()
 {
-    wchar_t systemDirectory[MAX_PATH] = {};
-    UINT length = GetSystemDirectoryW(systemDirectory, ARRAYSIZE(systemDirectory));
-    if (length > 0 && length < ARRAYSIZE(systemDirectory))
+    std::wstring systemDirectory = aip::GetSystemDirectoryPath();
+    if (!systemDirectory.empty())
     {
-        return std::wstring(systemDirectory) + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
+        return systemDirectory + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
     }
     return L"powershell.exe";
 }
@@ -183,6 +182,7 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring* outp
     }
 
     std::vector<BYTE> bytes;
+    bool outputTruncated = false;
     BYTE buffer[4096] = {};
     auto drainPipe = [&]()
     {
@@ -200,7 +200,18 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring* outp
             {
                 break;
             }
-            bytes.insert(bytes.end(), buffer, buffer + read);
+            size_t remaining = bytes.size() < POWERSHELL_OUTPUT_LIMIT_BYTES
+                ? POWERSHELL_OUTPUT_LIMIT_BYTES - bytes.size()
+                : 0;
+            size_t keep = std::min<size_t>(remaining, read);
+            if (keep > 0)
+            {
+                bytes.insert(bytes.end(), buffer, buffer + keep);
+            }
+            if (keep < read)
+            {
+                outputTruncated = true;
+            }
         }
     };
 
@@ -288,6 +299,15 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring* outp
         *exitCode = code;
     }
     DecodeUtf8Bytes(bytes, output);
+    if (outputTruncated && output != nullptr)
+    {
+        if (!output->empty())
+        {
+            *output += L"\r\n";
+        }
+        *output += L"PowerShell output was truncated after " +
+            std::to_wstring(POWERSHELL_OUTPUT_LIMIT_BYTES) + L" bytes.";
+    }
     if (timedOut && output != nullptr)
     {
         if (!output->empty())
@@ -302,28 +322,12 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring* outp
 
 static bool WriteUtf8File(const std::wstring& path, const std::wstring& text)
 {
-    EnsureDirectory(GetDirectoryName(path));
-
-    int byteCount = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    if (byteCount <= 1)
-    {
-        return false;
-    }
-
-    std::vector<char> bytes(static_cast<size_t>(byteCount));
-    WideCharToMultiByte(CP_UTF8, 0, text.c_str(), -1, bytes.data(), byteCount, nullptr, nullptr);
-
-    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE)
+    if (!aip::WriteTextFileUtf8Bom(path, text))
     {
         Log(L"Could not write %s: %s", path.c_str(), GetLastErrorText(GetLastError()).c_str());
         return false;
     }
-
-    DWORD written = 0;
-    BOOL ok = WriteFile(file, bytes.data(), static_cast<DWORD>(byteCount - 1), &written, nullptr);
-    CloseHandle(file);
-    return ok && written == static_cast<DWORD>(byteCount - 1);
+    return true;
 }
 
 static bool GetPngEncoderClsid(CLSID* clsid)
@@ -357,10 +361,7 @@ static bool GetPngEncoderClsid(CLSID* clsid)
 
 static bool SaveLogoPng(const std::wstring& path, int width, int height)
 {
-    if (!FileExists(path))
-    {
-        EnsureDirectory(GetDirectoryName(path));
-    }
+    EnsureDirectory(GetDirectoryName(path));
 
     Bitmap bitmap(width, height, PixelFormat32bppARGB);
     Graphics graphics(&bitmap);
@@ -399,11 +400,20 @@ static bool SaveLogoPng(const std::wstring& path, int width, int height)
         return false;
     }
 
-    DeleteFileW(path.c_str());
-    Status status = bitmap.Save(path.c_str(), &pngClsid, nullptr);
+    std::wstring temporaryPath = BuildTemporarySiblingPath(path);
+    DeleteFileW(temporaryPath.c_str());
+    Status status = bitmap.Save(temporaryPath.c_str(), &pngClsid, nullptr);
     if (status != Ok)
     {
+        DeleteFileW(temporaryPath.c_str());
         Log(L"Could not save %s as PNG. GDI+ status=%d", path.c_str(), static_cast<int>(status));
+        return false;
+    }
+    if (!CommitTemporaryFile(temporaryPath, path))
+    {
+        Log(L"Could not replace %s after rendering: %s",
+            path.c_str(),
+            GetLastErrorText(GetLastError()).c_str());
         return false;
     }
     return true;
@@ -572,28 +582,126 @@ static int UnregisterDevelopmentPackage(bool quiet)
     return ShowPowerShellResult(L"NowPlayingTile unregistration", started, exitCode, output);
 }
 
-static int LaunchPackagedInstance(bool quiet)
+static std::wstring PackagedLaunchArguments(const AppOptions& options)
+{
+    std::wstring arguments;
+    auto append = [&](const wchar_t* value)
+    {
+        if (!arguments.empty())
+        {
+            arguments.push_back(L' ');
+        }
+        arguments += value;
+    };
+
+    if (options.updateOnce)
+    {
+        append(L"--once");
+    }
+    if (options.forceTray)
+    {
+        append(L"--tray");
+    }
+    else if (options.forceNoTray)
+    {
+        append(L"--no-tray");
+    }
+    if (options.allowMultiple)
+    {
+        append(L"--allow-multiple");
+    }
+    return arguments;
+}
+
+static int LaunchPackagedInstance(bool quiet, const std::wstring& arguments)
 {
     std::wstring command =
         L"$pkg = Get-AppxPackage -Name " + QuotePowerShellLiteral(PACKAGE_NAME) + L"; "
         L"if ($null -eq $pkg) { throw 'NowPlayingTile.App is not registered. Run NowPlayingTile.exe --register first.' }; "
-        L"$target = 'shell:AppsFolder\\' + $pkg.PackageFamilyName + '!App'; "
-        L"Start-Process $target; "
-        L"'Launched: ' + $target";
+        L"$pkg.PackageFamilyName + '!App'";
 
     std::wstring output;
     DWORD exitCode = 1;
     bool started = RunPowerShellCommand(command, &output, &exitCode);
-    Log(L"LaunchPackagedInstance exit=%lu output=%s", exitCode, output.c_str());
-    if (quiet)
+    std::wstring appUserModelId = Trim(output);
+    if (!started || exitCode != 0 || appUserModelId.empty())
     {
-        return started && exitCode == 0 ? 0 : static_cast<int>(exitCode == 0 ? 1 : exitCode);
+        Log(L"Resolve packaged AUMID exit=%lu output=%s", exitCode, output.c_str());
+        if (quiet)
+        {
+            return started && exitCode != 0 ? static_cast<int>(exitCode) : 1;
+        }
+        return ShowPowerShellResult(L"NowPlayingTile launch", started, exitCode == 0 ? 1 : exitCode, output);
     }
-    return ShowPowerShellResult(L"NowPlayingTile launch", started, exitCode, output);
+
+    HRESULT apartmentResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninitializeApartment = SUCCEEDED(apartmentResult);
+    if (FAILED(apartmentResult) && apartmentResult != RPC_E_CHANGED_MODE)
+    {
+        Log(L"CoInitializeEx(packaged activation) failed: 0x%08X", static_cast<unsigned int>(apartmentResult));
+        return static_cast<int>(apartmentResult);
+    }
+
+    IApplicationActivationManager* activationManager = nullptr;
+    HRESULT activationResult = CoCreateInstance(
+        CLSID_ApplicationActivationManager,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&activationManager));
+    DWORD processId = 0;
+    if (SUCCEEDED(activationResult))
+    {
+        activationResult = activationManager->ActivateApplication(
+            appUserModelId.c_str(),
+            arguments.empty() ? nullptr : arguments.c_str(),
+            AO_NONE,
+            &processId);
+        activationManager->Release();
+    }
+
+    if (uninitializeApartment)
+    {
+        CoUninitialize();
+    }
+
+    Log(L"LaunchPackagedInstance AUMID=%s arguments=%s result=0x%08X pid=%lu",
+        appUserModelId.c_str(),
+        arguments.c_str(),
+        static_cast<unsigned int>(activationResult),
+        processId);
+    if (FAILED(activationResult))
+    {
+        if (!quiet)
+        {
+            wchar_t resultText[16] = {};
+            swprintf_s(resultText, L"%08X", static_cast<unsigned int>(activationResult));
+            std::wstring message =
+                L"Packaged activation failed with HRESULT 0x" +
+                std::wstring(resultText) +
+                L". See NowPlayingTile.log for details.";
+            MessageBoxW(nullptr, message.c_str(), L"NowPlayingTile launch", MB_OK | MB_ICONERROR);
+        }
+        return static_cast<int>(activationResult);
+    }
+
+    if (!quiet)
+    {
+        std::wstring message = L"Launched packaged instance";
+        if (!arguments.empty())
+        {
+            message += L" with arguments: " + arguments;
+        }
+        MessageBoxW(nullptr, message.c_str(), L"NowPlayingTile launch", MB_OK | MB_ICONINFORMATION);
+    }
+    return 0;
 }
 
-static bool AutoRegisterAndLaunchIfNeeded(const AppOptions& options)
+static bool AutoRegisterAndLaunchIfNeeded(const AppOptions& options, int* exitCode)
 {
+    if (exitCode != nullptr)
+    {
+        *exitCode = 0;
+    }
     if (HasPackageIdentity())
     {
         return false;
@@ -622,10 +730,14 @@ static bool AutoRegisterAndLaunchIfNeeded(const AppOptions& options)
             L"See NowPlayingTile.log for the AppX deployment error.",
             APP_DISPLAY_NAME,
             MB_OK | MB_ICONERROR);
+        if (exitCode != nullptr)
+        {
+            *exitCode = registerRc;
+        }
         return true;
     }
 
-    int launchRc = LaunchPackagedInstance(true);
+    int launchRc = LaunchPackagedInstance(true, PackagedLaunchArguments(options));
     if (launchRc != 0)
     {
         Log(L"Automatic packaged launch failed: %d", launchRc);
@@ -635,6 +747,10 @@ static bool AutoRegisterAndLaunchIfNeeded(const AppOptions& options)
             L"See NowPlayingTile.log for details.",
             APP_DISPLAY_NAME,
             MB_OK | MB_ICONERROR);
+        if (exitCode != nullptr)
+        {
+            *exitCode = launchRc;
+        }
         return true;
     }
 

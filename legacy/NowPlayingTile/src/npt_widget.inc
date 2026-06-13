@@ -136,7 +136,6 @@ static LRESULT CALLBACK WidgetWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
     case WM_CREATE:
         if (ctx != nullptr)
         {
-            SetTimer(hwnd, UPDATE_TIMER_ID, static_cast<UINT>(std::max(1, ctx->runtime.settings.updateIntervalSeconds) * 1000), nullptr);
             BeginUpdate(&ctx->runtime);
         }
         return 0;
@@ -157,7 +156,7 @@ static LRESULT CALLBACK WidgetWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
             {
                 ctx->runtime.updateThread.join();
             }
-            ctx->runtime.updateRunning = false;
+            ctx->runtime.updateRunning.store(false);
             ctx->runtime.current = *snapshot;
             MaybeUpdateLiveTile(&ctx->runtime, *snapshot);
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -263,7 +262,11 @@ static int RunWidget(const AppOptions& options)
     wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
-    RegisterClassExW(&wc);
+    if (RegisterClassExW(&wc) == 0)
+    {
+        Log(L"Could not register widget window class: %s", GetLastErrorText(GetLastError()).c_str());
+        return 1;
+    }
 
     HWND hwnd = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
@@ -289,11 +292,19 @@ static int RunWidget(const AppOptions& options)
     UpdateWindow(hwnd);
 
     MSG msg = {};
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0)
+    for (;;)
     {
+        BOOL result = GetMessageW(&msg, nullptr, 0, 0);
+        if (result == 0)
+        {
+            return static_cast<int>(msg.wParam);
+        }
+        if (result == -1)
+        {
+            Log(L"GetMessageW(widget window) failed: %s", GetLastErrorText(GetLastError()).c_str());
+            return 1;
+        }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
-
-    return static_cast<int>(msg.wParam);
 }

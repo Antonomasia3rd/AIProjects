@@ -48,12 +48,7 @@ if errorlevel 1 (
     exit /b %errorlevel%
 )
 
-if /I "%~1"=="check" (
-    cl /nologo /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 /Zs CharmTray.cpp
-    set "STATUS=%ERRORLEVEL%"
-    popd
-    exit /b %STATUS%
-)
+if /I "%~1"=="check" goto Check
 
 set "OUT_EXE=build\CharmTray.exe"
 set "OBJ_FILE=build\obj\CharmTray.obj"
@@ -62,4 +57,10 @@ cl /nologo /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x06
 set "STATUS=%ERRORLEVEL%"
 popd
 
+exit /b %STATUS%
+
+:Check
+cl /nologo /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 /Zs CharmTray.cpp
+set "STATUS=%ERRORLEVEL%"
+popd
 exit /b %STATUS%

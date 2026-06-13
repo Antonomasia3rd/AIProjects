@@ -2,7 +2,7 @@
 // @id              appsfolder-unhide-hidden-apps
 // @name            AppsFolder Unhide Hidden Apps
 // @description     Adds selected hidden AppUserModelIDs to shell:AppsFolder enumeration.
-// @version         0.9
+// @version         1.0
 // @author          Antonomasia
 // @include         explorer.exe
 // @include         powershell.exe
@@ -13,6 +13,7 @@
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <strsafe.h>
+#include <new>
 #include <vector>
 
 using EnumObjects_t = HRESULT(STDMETHODCALLTYPE*)(
@@ -36,6 +37,7 @@ SHBindToObject_t SHBindToObject_Original = nullptr;
 void* g_enumObjectsPtr = nullptr;
 bool g_enumHookInstalled = false;
 bool g_bindHookInstalled = false;
+SRWLOCK g_enumHookLock = SRWLOCK_INIT;
 
 static const GUID IID_IUnknown_Local =
     {0x00000000, 0x0000, 0x0000, {0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
@@ -67,23 +69,56 @@ private:
     std::vector<LPITEMIDLIST> m_extras;
     size_t m_extraIndex = 0;
     bool m_innerDone = false;
+    bool m_valid = true;
 
 public:
     EnumIDListWithExtras(IEnumIDList* inner, const std::vector<LPITEMIDLIST>& extras)
         : m_inner(inner)
     {
+        try
+        {
+            m_extras.reserve(extras.size());
+            for (auto pidl : extras)
+            {
+                if (!pidl)
+                {
+                    continue;
+                }
+
+                LPITEMIDLIST clone = ILClone(pidl);
+                if (!clone)
+                {
+                    m_valid = false;
+                    break;
+                }
+                m_extras.push_back(clone);
+            }
+        }
+        catch (...)
+        {
+            m_valid = false;
+        }
+
+        if (!m_valid)
+        {
+            for (auto pidl : m_extras)
+            {
+                ILFree(pidl);
+            }
+            m_extras.clear();
+            m_inner = nullptr;
+            return;
+        }
+
         if (m_inner)
         {
             m_inner->AddRef();
         }
+    }
 
-        for (auto pidl : extras)
-        {
-            if (pidl)
-            {
-                m_extras.push_back(ILClone(pidl));
-            }
-        }
+    bool IsValid() const
+    {
+        return m_valid;
     }
 
     ~EnumIDListWithExtras()
@@ -141,9 +176,13 @@ public:
         LPITEMIDLIST* rgelt,
         ULONG* pceltFetched) override
     {
-        if (!rgelt)
+        if (!rgelt || (celt != 1 && !pceltFetched))
         {
             return E_POINTER;
+        }
+        if (pceltFetched)
+        {
+            *pceltFetched = 0;
         }
 
         ULONG fetched = 0;
@@ -258,11 +297,16 @@ public:
             }
         }
 
-        auto clone = new EnumIDListWithExtras(clonedInner, m_extras);
+        auto clone = new (std::nothrow) EnumIDListWithExtras(clonedInner, m_extras);
 
         if (clonedInner)
         {
             clonedInner->Release();
+        }
+        if (!clone || !clone->IsValid())
+        {
+            delete clone;
+            return E_OUTOFMEMORY;
         }
 
         clone->m_extraIndex = m_extraIndex;
@@ -319,7 +363,21 @@ static std::vector<LPITEMIDLIST> BuildExtraPidls(IShellFolder* appsFolder)
         if (SUCCEEDED(hr) && childPidl)
         {
             Wh_Log(L"Parsed hidden AppsFolder item: %s", aumid);
-            result.push_back(childPidl);
+            try
+            {
+                result.push_back(childPidl);
+            }
+            catch (...)
+            {
+                ILFree(childPidl);
+                for (auto pidl : result)
+                {
+                    ILFree(pidl);
+                }
+                result.clear();
+                Wh_Log(L"Out of memory while collecting hidden AppsFolder items.");
+                break;
+            }
         }
         else
         {
@@ -415,18 +473,21 @@ HRESULT STDMETHODCALLTYPE EnumObjects_Hook(
     }
 
     IEnumIDList* originalEnum = *ppenumIDList;
-
-    *ppenumIDList = new EnumIDListWithExtras(
-        originalEnum,
-        extras
-    );
-
-    originalEnum->Release();
+    auto wrapper = new (std::nothrow) EnumIDListWithExtras(originalEnum, extras);
 
     for (auto pidl : extras)
     {
         ILFree(pidl);
     }
+    if (!wrapper || !wrapper->IsValid())
+    {
+        delete wrapper;
+        Wh_Log(L"Could not allocate AppsFolder enumeration wrapper.");
+        return hr;
+    }
+
+    *ppenumIDList = wrapper;
+    originalEnum->Release();
 
     Wh_Log(
         L"Real AppsFolder enumeration wrapped with %u extra item(s)",
@@ -443,8 +504,10 @@ static bool InstallEnumObjectsHookFromFolder(IShellFolder* appsFolder)
         return false;
     }
 
+    AcquireSRWLockExclusive(&g_enumHookLock);
     if (g_enumHookInstalled)
     {
+        ReleaseSRWLockExclusive(&g_enumHookLock);
         return true;
     }
 
@@ -461,6 +524,7 @@ static bool InstallEnumObjectsHookFromFolder(IShellFolder* appsFolder)
     if (!enumObjectsPtr)
     {
         Wh_Log(L"EnumObjects pointer is null");
+        ReleaseSRWLockExclusive(&g_enumHookLock);
         return false;
     }
 
@@ -471,13 +535,24 @@ static bool InstallEnumObjectsHookFromFolder(IShellFolder* appsFolder)
         enumObjectsPtr
     );
 
-    Wh_SetFunctionHook(
-        enumObjectsPtr,
-        reinterpret_cast<void*>(EnumObjects_Hook),
-        reinterpret_cast<void**>(&EnumObjects_Original)
-    );
+    if (!Wh_SetFunctionHook(
+            enumObjectsPtr,
+            reinterpret_cast<void*>(EnumObjects_Hook),
+            reinterpret_cast<void**>(&EnumObjects_Original)))
+    {
+        Wh_Log(L"Wh_SetFunctionHook(EnumObjects) failed.");
+        ReleaseSRWLockExclusive(&g_enumHookLock);
+        return false;
+    }
+    if (!Wh_ApplyHookOperations())
+    {
+        Wh_Log(L"Wh_ApplyHookOperations(EnumObjects) failed.");
+        ReleaseSRWLockExclusive(&g_enumHookLock);
+        return false;
+    }
 
     g_enumHookInstalled = true;
+    ReleaseSRWLockExclusive(&g_enumHookLock);
 
     Wh_Log(L"Real AppsFolder EnumObjects hook installed");
     return true;
@@ -586,52 +661,16 @@ public:
         DWORD grfFlags,
         IEnumIDList** ppenumIDList) override
     {
-        InstallEnumObjectsHookFromFolder(m_inner);
+        if (!InstallEnumObjectsHookFromFolder(m_inner))
+        {
+            Wh_Log(L"Proxy could not install the real AppsFolder EnumObjects hook.");
+        }
 
-        HRESULT hr = m_inner->EnumObjects(
+        return m_inner->EnumObjects(
             hwnd,
             grfFlags,
             ppenumIDList
         );
-
-        Wh_Log(
-            L"Proxy EnumObjects called, hr=0x%08X, grfFlags=0x%08X",
-            hr,
-            grfFlags
-        );
-
-        if (FAILED(hr) || !ppenumIDList || !*ppenumIDList)
-        {
-            return hr;
-        }
-
-        auto extras = BuildExtraPidls(m_inner);
-
-        if (extras.empty())
-        {
-            return hr;
-        }
-
-        IEnumIDList* originalEnum = *ppenumIDList;
-
-        *ppenumIDList = new EnumIDListWithExtras(
-            originalEnum,
-            extras
-        );
-
-        originalEnum->Release();
-
-        for (auto pidl : extras)
-        {
-            ILFree(pidl);
-        }
-
-        Wh_Log(
-            L"Proxy wrapped AppsFolder enumeration with %u extra item(s)",
-            (UINT)extras.size()
-        );
-
-        return hr;
     }
 
     HRESULT STDMETHODCALLTYPE BindToObject(
@@ -879,20 +918,27 @@ HRESULT WINAPI SHBindToObject_Hook(
         {
             Wh_Log(L"SHBindToObject returned AppsFolder; installing real hook and replacing with proxy");
 
-            InstallEnumObjectsHookFromFolder(folder);
-
-            AppsFolderShellFolderWrapper* wrapper =
-                new AppsFolderShellFolderWrapper(folder);
-
-            folder->Release();
-
-            if (GuidEqual(riid, IID_IShellFolder2_Local))
+            if (InstallEnumObjectsHookFromFolder(folder))
             {
-                *ppv = static_cast<IShellFolder2*>(wrapper);
-            }
-            else
-            {
-                *ppv = static_cast<IShellFolder*>(wrapper);
+                AppsFolderShellFolderWrapper* wrapper =
+                    new (std::nothrow) AppsFolderShellFolderWrapper(folder);
+                if (wrapper)
+                {
+                    folder->Release();
+
+                    if (GuidEqual(riid, IID_IShellFolder2_Local))
+                    {
+                        *ppv = static_cast<IShellFolder2*>(wrapper);
+                    }
+                    else
+                    {
+                        *ppv = static_cast<IShellFolder*>(wrapper);
+                    }
+                }
+                else
+                {
+                    Wh_Log(L"Could not allocate AppsFolder proxy.");
+                }
             }
         }
     }
@@ -930,11 +976,14 @@ static bool InstallSHBindToObjectHook()
         return false;
     }
 
-    Wh_SetFunctionHook(
-        target,
-        reinterpret_cast<void*>(SHBindToObject_Hook),
-        reinterpret_cast<void**>(&SHBindToObject_Original)
-    );
+    if (!Wh_SetFunctionHook(
+            target,
+            reinterpret_cast<void*>(SHBindToObject_Hook),
+            reinterpret_cast<void**>(&SHBindToObject_Original)))
+    {
+        Wh_Log(L"Wh_SetFunctionHook(SHBindToObject) failed.");
+        return false;
+    }
 
     g_bindHookInstalled = true;
 
@@ -946,9 +995,7 @@ BOOL Wh_ModInit()
 {
     Wh_Log(L"Init");
 
-    InstallSHBindToObjectHook();
-
-    return TRUE;
+    return InstallSHBindToObjectHook() ? TRUE : FALSE;
 }
 
 void Wh_ModUninit()

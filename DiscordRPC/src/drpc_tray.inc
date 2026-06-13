@@ -35,7 +35,11 @@ static void ShowTrayBalloon(RuntimeContext* ctx, const std::wstring& title, cons
         return;
     }
 
-    aip::ShowTrayBalloon(ctx->nid, title, message, icon);
+    if (!aip::ShowTrayBalloon(ctx->nid, title, message, icon))
+    {
+        LogError(L"Could not show tray notification: " +
+            GetLastErrorText(GetLastError()));
+    }
 }
 
 static void QueueTrayBalloon(RuntimeContext* ctx, const std::wstring& title, const std::wstring& message, DWORD icon)
@@ -58,6 +62,8 @@ static void QueueTrayBalloon(RuntimeContext* ctx, const std::wstring& title, con
     {
         std::lock_guard<std::mutex> lock(ctx->notificationMutex);
         ctx->pendingNotifications.clear();
+        LogError(L"Could not queue tray notification: " +
+            GetLastErrorText(GetLastError()));
     }
 }
 
@@ -79,11 +85,11 @@ static void ShowPendingTrayBalloons(RuntimeContext* ctx)
     }
 }
 
-static void CreateTrayIcon(RuntimeContext* ctx)
+static bool CreateTrayIcon(RuntimeContext* ctx)
 {
     if (ctx == nullptr || ctx->trayCreated)
     {
-        return;
+        return ctx != nullptr && ctx->trayCreated;
     }
 
     ctx->nid = {};
@@ -96,11 +102,20 @@ static void CreateTrayIcon(RuntimeContext* ctx)
     wcsncpy_s(ctx->nid.szTip, ARRAYSIZE(ctx->nid.szTip), GetUiString(L"tray_tip", APP_DISPLAY_NAME).c_str(), _TRUNCATE);
 
     ctx->trayCreated = Shell_NotifyIconW(NIM_ADD, &ctx->nid) != FALSE;
-    if (ctx->trayCreated)
+    if (!ctx->trayCreated)
     {
-        ctx->nid.uVersion = NOTIFYICON_VERSION_4;
-        Shell_NotifyIconW(NIM_SETVERSION, &ctx->nid);
+        LogError(L"Could not create tray icon: " +
+            GetLastErrorText(GetLastError()));
+        return false;
     }
+
+    ctx->nid.uVersion = NOTIFYICON_VERSION_4;
+    if (!Shell_NotifyIconW(NIM_SETVERSION, &ctx->nid))
+    {
+        LogError(L"Could not enable tray icon version 4 behavior: " +
+            GetLastErrorText(GetLastError()));
+    }
+    return true;
 }
 
 static void DestroyTrayIcon(RuntimeContext* ctx)
@@ -296,9 +311,28 @@ static void SetIntervalSetting(int seconds)
     SetTraySetting(L"general", L"update_interval", std::to_wstring(seconds));
 }
 
+static bool OpenShellPath(const std::wstring& path, const wchar_t* workingDirectory)
+{
+    HINSTANCE result = ShellExecuteW(
+        nullptr,
+        L"open",
+        path.c_str(),
+        nullptr,
+        workingDirectory,
+        SW_SHOWNORMAL);
+    INT_PTR status = reinterpret_cast<INT_PTR>(result);
+    if (status <= 32)
+    {
+        LogError(L"Could not open shell path \"" + path +
+            L"\" (ShellExecute=" + std::to_wstring(status) + L").");
+        return false;
+    }
+    return true;
+}
+
 static void OpenConfigFile()
 {
-    ShellExecuteW(nullptr, L"open", g_iniPath.c_str(), nullptr, g_exeDir.c_str(), SW_SHOWNORMAL);
+    OpenShellPath(g_iniPath, g_exeDir.c_str());
 }
 
 static void OpenLogFolder()
@@ -309,7 +343,7 @@ static void OpenLogFolder()
         logPath = g_effectiveLogPath.empty() ? g_defaultLogPath : g_effectiveLogPath;
     }
     std::wstring folder = GetDirectoryName(logPath);
-    ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    OpenShellPath(folder, nullptr);
 }
 
 static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -526,7 +560,11 @@ static HWND CreateRuntimeWindow(RuntimeContext* ctx)
     wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.lpszClassName = WINDOW_CLASS_NAME;
-    RegisterClassExW(&wc);
+    if (RegisterClassExW(&wc) == 0 &&
+        GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+    {
+        return nullptr;
+    }
 
     return CreateWindowExW(
         0,

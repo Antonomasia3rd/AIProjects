@@ -22,6 +22,7 @@ using System.Runtime.Serialization.Json;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Diagnostics.PerformanceData;
+using System.Text.RegularExpressions;
 
 public enum AsusFan { CPU = 0, GPU = 1, Mid = 2, XGM = 3 }
 public enum AsusMode { Balanced = 0, Turbo = 1, Silent = 2 }
@@ -181,11 +182,13 @@ public class AsusACPI
 
         if (handle == new IntPtr(-1))
         {
-            throw new Exception("Can't connect to ACPI");
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Can't connect to the ASUS ATKACPI device");
         }
     }
 
-    public void Control(uint dwIoControlCode, byte[] lpInBuffer, byte[] lpOutBuffer)
+    public uint Control(uint dwIoControlCode, byte[] lpInBuffer, byte[] lpOutBuffer)
     {
         uint lpBytesReturned = 0;
         bool ok = DeviceIoControl(
@@ -203,6 +206,7 @@ public class AsusACPI
             int error = Marshal.GetLastWin32Error();
             throw new Win32Exception(error, "ACPI DeviceIoControl failed");
         }
+        return lpBytesReturned;
     }
 
     protected byte[] CallMethod(uint MethodID, byte[] args)
@@ -214,7 +218,10 @@ public class AsusACPI
         BitConverter.GetBytes((uint)args.Length).CopyTo(acpiBuf, 4);
         Array.Copy(args, 0, acpiBuf, 8, args.Length);
 
-        Control(CONTROL_CODE, acpiBuf, outBuffer);
+        uint bytesReturned = Control(CONTROL_CODE, acpiBuf, outBuffer);
+        if (bytesReturned < sizeof(int))
+            throw new InvalidDataException(
+                "ACPI returned a truncated response (" + bytesReturned + " bytes).");
 
         return outBuffer;
     }
@@ -267,8 +274,10 @@ public class AsusACPI
     {
         if (handle != IntPtr.Zero && handle != new IntPtr(-1))
         {
-            CloseHandle(handle);
+            IntPtr closingHandle = handle;
             handle = IntPtr.Zero;
+            if (!CloseHandle(closingHandle))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "CloseHandle(ATKACPI) failed");
         }
     }
 
@@ -292,11 +301,13 @@ class Program
 
     static AsusACPI acpi;
     static readonly object acpiLock = new object();
-    static TextWriter logWriter = Console.Out;
-    static object logLock = new object();
+    static readonly object logLock = new object();
 
     static volatile bool paused = false;
     static volatile bool exiting = false;
+    static int processExitCode = 0;
+    static Mutex instanceMutex = null;
+    static bool ownsInstanceMutex = false;
 
     static int errorRetryTimes = 3;
     static string errorLogPath = null;
@@ -347,31 +358,63 @@ class Program
             {
                 try
                 {
+                    string directory = Path.GetDirectoryName(errorLogPath);
+                    if (!string.IsNullOrEmpty(directory))
+                        Directory.CreateDirectory(directory);
                     File.AppendAllText(errorLogPath, line + Environment.NewLine);
                 }
-                catch { /* ignore logging error */ }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("WARNING: Could not write asusblink log: " + ex.Message);
+                }
             }
             Console.WriteLine(line);
         }
     }
 
-    static long ParseTimeMs(string s)
+    static long ParseTimeMs(string s, string optionName)
     {
-        if (string.IsNullOrWhiteSpace(s)) return -1;
+        if (string.IsNullOrWhiteSpace(s))
+            throw new ArgumentException("Missing time value for " + optionName + ".");
         s = s.Trim().ToLowerInvariant();
-        try
+        double multiplier = 1;
+        string number = s;
+        if (s.EndsWith("ms"))
         {
-            if (s.EndsWith("ms")) return (long)double.Parse(s.Substring(0, s.Length - 2), CultureInfo.InvariantCulture);
-            if (s.EndsWith("s")) return (long)(double.Parse(s.Substring(0, s.Length - 1), CultureInfo.InvariantCulture) * 1000);
-            if (s.EndsWith("m")) return (long)(double.Parse(s.Substring(0, s.Length - 1), CultureInfo.InvariantCulture) * 60 * 1000);
-            if (s.EndsWith("h")) return (long)(double.Parse(s.Substring(0, s.Length - 1), CultureInfo.InvariantCulture) * 3600 * 1000);
-            if (s.EndsWith("d")) return (long)(double.Parse(s.Substring(0, s.Length - 1), CultureInfo.InvariantCulture) * 24 * 3600 * 1000);
-            return (long)double.Parse(s, CultureInfo.InvariantCulture);
+            number = s.Substring(0, s.Length - 2);
         }
-        catch
+        else if (s.EndsWith("s"))
         {
-            return -1;
+            number = s.Substring(0, s.Length - 1);
+            multiplier = 1000;
         }
+        else if (s.EndsWith("m"))
+        {
+            number = s.Substring(0, s.Length - 1);
+            multiplier = 60 * 1000;
+        }
+        else if (s.EndsWith("h"))
+        {
+            number = s.Substring(0, s.Length - 1);
+            multiplier = 3600 * 1000;
+        }
+        else if (s.EndsWith("d"))
+        {
+            number = s.Substring(0, s.Length - 1);
+            multiplier = 24 * 3600 * 1000;
+        }
+
+        double parsed;
+        if (!double.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) ||
+            double.IsNaN(parsed) || double.IsInfinity(parsed) || parsed < 0)
+        {
+            throw new ArgumentException("Invalid time for " + optionName + ": " + s);
+        }
+
+        double milliseconds = parsed * multiplier;
+        if (milliseconds > Int64.MaxValue)
+            throw new ArgumentOutOfRangeException(optionName, s, "Time value is too large.");
+        return checked((long)milliseconds);
     }
 
     static string[] SplitComma(string s)
@@ -389,11 +432,23 @@ class Program
             {
                 if (device == "mic")
                 {
-                    acpi.SetMicLed(state);
+                    lock (acpiLock)
+                    {
+                        if (acpi == null)
+                            throw new InvalidOperationException("ACPI interface is closed.");
+                        if (acpi.SetMicLed(state) != 1)
+                            throw new InvalidOperationException("ASUS firmware rejected the mic LED state.");
+                    }
                 }
                 else if (device == "keyboard")
                 {
-                    acpi.SetKeyboardState(state);
+                    lock (acpiLock)
+                    {
+                        if (acpi == null)
+                            throw new InvalidOperationException("ACPI interface is closed.");
+                        if (acpi.SetKeyboardState(state) != 1)
+                            throw new InvalidOperationException("ASUS firmware rejected the keyboard state.");
+                    }
                 }
                 else
                 {
@@ -406,19 +461,9 @@ class Program
             {
                 tries++;
                 Log("Error applying {0}={1}: {2}", device, state, ex.Message);
-                if (errorActions.Contains("log"))
-                {
-                    try
-                    {
-                        if (!string.IsNullOrEmpty(errorLogPath) && errorLogPath != "off")
-                        {
-                            File.AppendAllText(errorLogPath, string.Format("[{0}] Error applying {1}={2}: {3}\n", DateTime.Now.ToString("o"), device, state, ex.ToString()));
-                        }
-                    }
-                    catch { }
-                }
                 if (tries > errorRetryTimes)
                 {
+                    processExitCode = 1;
                     if (errorActions.Contains("pause"))
                     {
                         paused = true;
@@ -427,7 +472,9 @@ class Program
                     if (errorActions.Contains("exit"))
                     {
                         Log("Exiting due to error-action exit.");
-                        Environment.Exit(1);
+                        processExitCode = 1;
+                        RequestExit();
+                        return false;
                     }
                     if (errorActions.Contains("crash"))
                     {
@@ -435,21 +482,45 @@ class Program
                     }
                     return false;
                 }
-                Thread.Sleep(500);
+                for (int i = 0; i < 5 && !exiting; ++i)
+                    Thread.Sleep(100);
+                if (exiting)
+                    return false;
             }
         }
     }
 
-    static void SleepWithCancel(long ms, CancellationToken token)
+    static bool WaitWhilePaused(
+        CancellationToken token,
+        Stopwatch activeTimer)
+    {
+        if (!paused)
+            return !token.IsCancellationRequested;
+
+        if (activeTimer != null)
+            activeTimer.Stop();
+        while (paused && !token.IsCancellationRequested)
+            token.WaitHandle.WaitOne(200);
+        if (activeTimer != null && !token.IsCancellationRequested)
+            activeTimer.Start();
+        return !token.IsCancellationRequested;
+    }
+
+    static void SleepWithCancel(
+        long ms,
+        CancellationToken token,
+        Stopwatch activeTimer = null)
     {
         if (ms <= 0) return;
         int step = 100;
         long waited = 0;
         while (waited < ms && !token.IsCancellationRequested)
         {
-            while (paused && !token.IsCancellationRequested) Thread.Sleep(200);
+            if (!WaitWhilePaused(token, activeTimer))
+                break;
             int toSleep = (int)Math.Min(step, ms - waited);
-            Thread.Sleep(toSleep);
+            if (token.WaitHandle.WaitOne(toSleep))
+                break;
             waited += toSleep;
         }
     }
@@ -474,13 +545,31 @@ class Program
         }
 
         Directory.CreateDirectory(executableDirectory);
-        File.WriteAllText(iniPath,
+        string contents =
             "[Options]" + Environment.NewLine +
             "; Command-line option names can be used here without the leading --." + Environment.NewLine +
             "; Example: error-log=off" + Environment.NewLine +
             "; Example: mic-state=0,1" + Environment.NewLine +
-            "error-log=" + Path.GetFileName(defaultLogPath) + Environment.NewLine,
-            Encoding.UTF8);
+            "error-log=" + Path.GetFileName(defaultLogPath) + Environment.NewLine;
+        string temporaryPath = iniPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporaryPath, contents, Encoding.UTF8);
+            try
+            {
+                File.Move(temporaryPath, iniPath);
+            }
+            catch (IOException)
+            {
+                if (!File.Exists(iniPath))
+                    throw;
+            }
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
     }
 
     static Dictionary<string, string> LoadIniOptions()
@@ -513,11 +602,10 @@ class Program
 
             string key = line.Substring(0, equals).Trim();
             string value = line.Substring(equals + 1).Trim();
-            if (key.Length > 0 && value.Length > 0)
-            {
+            if (key.Length > 0)
                 dict[key] = value;
-            }
         }
+        ValidateOptions(dict, "INI");
         return dict;
     }
 
@@ -538,13 +626,18 @@ class Program
             return false;
         }
         if (string.IsNullOrWhiteSpace(value))
-        {
             return true;
-        }
-        return value == "1" ||
+        if (value == "1" ||
             value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("on", StringComparison.OrdinalIgnoreCase);
+            value.Equals("on", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (value == "0" ||
+            value.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("no", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("off", StringComparison.OrdinalIgnoreCase))
+            return false;
+        throw new ArgumentException("Invalid boolean for " + key + ": " + value);
     }
 
     static Dictionary<string, string> ParseArgs(string[] args)
@@ -553,17 +646,66 @@ class Program
         for (int i = 0; i < args.Length; i++)
         {
             string a = args[i];
-            if (!a.StartsWith("--")) continue;
-            string key = a.Substring(2);
+            if (!a.StartsWith("--", StringComparison.Ordinal))
+                throw new ArgumentException("Unknown argument: " + a);
+
+            string keyValue = a.Substring(2);
+            int equals = keyValue.IndexOf('=');
+            string key = equals >= 0 ? keyValue.Substring(0, equals) : keyValue;
             string val = null;
-            if (i + 1 < args.Length && !args[i + 1].StartsWith("--"))
+            if (!IsKnownOptionName(key))
+                throw new ArgumentException("Unknown option: --" + key);
+
+            if (equals >= 0)
             {
-                val = args[i + 1];
-                i++;
+                val = keyValue.Substring(equals + 1);
+            }
+            else if (IsFlagOption(key))
+            {
+                val = "true";
+            }
+            else
+            {
+                if (i + 1 >= args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    throw new ArgumentException("Missing value for --" + key + ".");
+                val = args[++i];
             }
             dict[key] = val;
         }
+        ValidateOptions(dict, "command line");
         return dict;
+    }
+
+    static bool IsFlagOption(string key)
+    {
+        return key.Equals("no-tray", StringComparison.OrdinalIgnoreCase);
+    }
+
+    static bool IsKnownOptionName(string key)
+    {
+        if (key.Equals("error-log", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("error-retry", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("error-action", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("no-tray", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return Regex.IsMatch(
+            key ?? "",
+            @"^(?:mic|keyboard)-(?:state|interval|duration)$|^event[0-9]+-(?:mic|keyboard|hdd)-(?:state|interval|duration)$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    static void ValidateOptions(
+        Dictionary<string, string> options,
+        string sourceName)
+    {
+        foreach (var option in options)
+        {
+            if (!IsKnownOptionName(option.Key))
+                throw new ArgumentException("Unknown " + sourceName + " option: " + option.Key);
+            if (!IsFlagOption(option.Key) && string.IsNullOrWhiteSpace(option.Value))
+                throw new ArgumentException("Missing value for " + sourceName + " option " + option.Key + ".");
+        }
     }
 
     static string QuoteShortcutArgument(string argument)
@@ -618,26 +760,37 @@ class Program
             foreach (var part in SplitComma(s))
             {
                 int val;
-                if (int.TryParse(part, out val)) ev.States.Add(val);
+                int max = name == "mic" ? 1 : 255;
+                if (!int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out val) ||
+                    val < 0 || val > max)
+                {
+                    throw new ArgumentException(
+                        "Invalid " + name + " state '" + part +
+                        "'. Expected 0.." + max + ".");
+                }
+                ev.States.Add(val);
             }
+            if (ev.States.Count == 0)
+                throw new ArgumentException(name + "-state must contain at least one state.");
         }
 
         string iv = null;
         if (options.TryGetValue(name + "-interval", out iv) || options.TryGetValue(name + "_interval", out iv))
         {
+            if (ev.States.Count == 0)
+                throw new ArgumentException(name + "-interval requires " + name + "-state.");
             foreach (var part in SplitComma(iv))
-            {
-                long ms = ParseTimeMs(part);
-                if (ms < 0) ms = 0;
-                ev.IntervalsMs.Add(ms);
-            }
+                ev.IntervalsMs.Add(ParseTimeMs(part, name + "-interval"));
+            if (ev.IntervalsMs.Count == 0)
+                throw new ArgumentException(name + "-interval must contain at least one time.");
         }
 
         string du = null;
         if (options.TryGetValue(name + "-duration", out du) || options.TryGetValue(name + "_duration", out du))
         {
-            long ms = ParseTimeMs(du);
-            if (ms < 0) ev.DurationMs = -1; else ev.DurationMs = ms;
+            if (ev.States.Count == 0)
+                throw new ArgumentException(name + "-duration requires " + name + "-state.");
+            ev.DurationMs = ParseTimeMs(du, name + "-duration");
         }
 
         if (ev.States.Count > 0 && ev.IntervalsMs.Count == 0)
@@ -687,56 +840,165 @@ class Program
         }
     }
 
-    static bool IsStartupInstalled()
+    static string GetStartupDirectory()
     {
-        string startup = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-        string exe = Assembly.GetEntryAssembly().Location;
-        string linkPath = Path.Combine(startup, Path.GetFileNameWithoutExtension(exe) + ".lnk");
-        return File.Exists(linkPath);
+        return Environment.GetFolderPath(Environment.SpecialFolder.Startup);
     }
 
-    static void InstallStartupShortcut(bool install)
+    static string GetScopedStartupShortcutPath()
     {
+        return Path.Combine(
+            GetStartupDirectory(),
+            executableBaseName + "-" + StableHash(executablePath) + ".lnk");
+    }
+
+    static string GetLegacyStartupShortcutPath()
+    {
+        return Path.Combine(GetStartupDirectory(), executableBaseName + ".lnk");
+    }
+
+    static string ReadShortcutTarget(string linkPath)
+    {
+        if (!File.Exists(linkPath))
+            return null;
+
+        object shell = null;
+        object shortcut = null;
         try
         {
-            string startup = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-            string exe = Assembly.GetEntryAssembly().Location;
-            string linkPath = Path.Combine(startup, Path.GetFileNameWithoutExtension(exe) + ".lnk");
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null)
+                return null;
+            shell = Activator.CreateInstance(shellType);
+            shortcut = shellType.InvokeMember(
+                "CreateShortcut",
+                BindingFlags.InvokeMethod,
+                null,
+                shell,
+                new object[] { linkPath });
+            return Convert.ToString(shortcut.GetType().InvokeMember(
+                "TargetPath",
+                BindingFlags.GetProperty,
+                null,
+                shortcut,
+                new object[] { }),
+                CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex)
+        {
+            Log("Could not inspect startup shortcut '{0}': {1}", linkPath, ex.Message);
+            return null;
+        }
+        finally
+        {
+            ReleaseComObject(shortcut);
+            ReleaseComObject(shell);
+        }
+    }
+
+    static void ReleaseComObject(object value)
+    {
+        if (value == null || !Marshal.IsComObject(value))
+            return;
+        try
+        {
+            Marshal.FinalReleaseComObject(value);
+        }
+        catch
+        {
+        }
+    }
+
+    static bool ShortcutTargetsCurrentExecutable(string linkPath)
+    {
+        string target = ReadShortcutTarget(linkPath);
+        if (string.IsNullOrWhiteSpace(target))
+            return false;
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(target),
+                Path.GetFullPath(executablePath),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool IsStartupInstalled()
+    {
+        return ShortcutTargetsCurrentExecutable(GetScopedStartupShortcutPath()) ||
+            ShortcutTargetsCurrentExecutable(GetLegacyStartupShortcutPath());
+    }
+
+    static bool InstallStartupShortcut(bool install)
+    {
+        object shell = null;
+        object shortcut = null;
+        try
+        {
+            string linkPath = GetScopedStartupShortcutPath();
+            string legacyLinkPath = GetLegacyStartupShortcutPath();
 
             Type t = Type.GetTypeFromProgID("WScript.Shell");
-            object shell = Activator.CreateInstance(t);
-            object shortcut = null;
+            if (t == null)
+                throw new InvalidOperationException("WScript.Shell is unavailable.");
+            shell = Activator.CreateInstance(t);
 
             if (install)
             {
                 shortcut = t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { linkPath });
                 Type scType = shortcut.GetType();
-                scType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { exe });
-                scType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { Path.GetDirectoryName(exe) });
+                scType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { executablePath });
+                scType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { executableDirectory });
                 scType.InvokeMember("Arguments", BindingFlags.SetProperty, null, shortcut, new object[] { startupArguments });
                 scType.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, new object[] { });
                 Log("Installed startup shortcut: " + linkPath);
+                if (!legacyLinkPath.Equals(linkPath, StringComparison.OrdinalIgnoreCase) &&
+                    ShortcutTargetsCurrentExecutable(legacyLinkPath))
+                {
+                    File.Delete(legacyLinkPath);
+                    Log("Removed legacy startup shortcut: " + legacyLinkPath);
+                }
             }
             else
             {
-                if (File.Exists(linkPath)) File.Delete(linkPath);
-                Log("Removed startup shortcut: " + linkPath);
+                if (ShortcutTargetsCurrentExecutable(linkPath))
+                {
+                    File.Delete(linkPath);
+                    Log("Removed startup shortcut: " + linkPath);
+                }
+                if (!legacyLinkPath.Equals(linkPath, StringComparison.OrdinalIgnoreCase) &&
+                    ShortcutTargetsCurrentExecutable(legacyLinkPath))
+                {
+                    File.Delete(legacyLinkPath);
+                    Log("Removed legacy startup shortcut: " + legacyLinkPath);
+                }
             }
+            return IsStartupInstalled() == install;
         }
         catch (Exception ex)
         {
             Log("InstallStartupShortcut error: " + ex.Message);
+            return false;
+        }
+        finally
+        {
+            ReleaseComObject(shortcut);
+            ReleaseComObject(shell);
         }
     }
 
     // Build and show the tray (minimal creation, detailed items are filled/updated by RefreshTray)
-    static void CreateTray()
+    static bool CreateTray()
     {
         try
         {
             lock (trayLock)
             {
-                if (tray != null) return;
+                if (tray != null) return true;
 
                 tray = new NotifyIcon();
                 tray.Icon = SystemIcons.Application;
@@ -767,8 +1029,9 @@ class Program
                 miStartup.Click += (s, e) =>
                 {
                     bool want = !miStartup.Checked;
-                    InstallStartupShortcut(want);
-                    miStartup.Checked = want;
+                    miStartup.Checked = InstallStartupShortcut(want)
+                        ? want
+                        : IsStartupInstalled();
                 };
                 cm.MenuItems.Add(miStartup);
 
@@ -776,17 +1039,19 @@ class Program
                 miChangeLog = new MenuItem("Change log path");
                 miChangeLog.Click += (s, e) =>
                 {
-                    SaveFileDialog sd = new SaveFileDialog();
-                    sd.Title = "Select log file path (or Cancel to disable logging)";
-                    sd.Filter = "Log files (*.log)|*.log|All files (*.*)|*.*";
-                    sd.InitialDirectory = executableDirectory;
-                    sd.FileName = Path.GetFileName(defaultLogPath);
-                    DialogResult dr = sd.ShowDialog();
-                    if (dr == DialogResult.OK)
+                    using (SaveFileDialog sd = new SaveFileDialog())
                     {
-                        errorLogPath = sd.FileName;
-                        Log("Log path changed to: {0}", errorLogPath);
-                        RefreshTrayItems(); // reflect path in show dialog
+                        sd.Title = "Select log file path";
+                        sd.Filter = "Log files (*.log)|*.log|All files (*.*)|*.*";
+                        sd.InitialDirectory = executableDirectory;
+                        sd.FileName = Path.GetFileName(defaultLogPath);
+                        DialogResult dr = sd.ShowDialog();
+                        if (dr == DialogResult.OK)
+                        {
+                            errorLogPath = sd.FileName;
+                            Log("Log path changed to: {0}", errorLogPath);
+                            RefreshTrayItems();
+                        }
                     }
                 };
                 cm.MenuItems.Add(miChangeLog);
@@ -816,8 +1081,7 @@ class Program
                 {
                     RequestExit();
                     try { tray.Visible = false; } catch { }
-                    Application.Exit();
-                    Environment.Exit(0);
+                    Application.ExitThread();
                 };
                 cm.MenuItems.Add(miExit);
 
@@ -842,10 +1106,13 @@ class Program
                 trayRefreshTimer.Tick += (s, e) => { RefreshTrayItems(); };
                 trayRefreshTimer.Start();
             }
+            return true;
         }
         catch (Exception ex)
         {
             Log("Tray create error: " + ex.Message);
+            DisposeTray();
+            return false;
         }
     }
 
@@ -855,6 +1122,35 @@ class Program
         miPause.Checked = paused;
         if (paused) miPause.Text = "Resume";
         else miPause.Text = "Pause";
+        if (miOperationHeader != null)
+            miOperationHeader.Text = paused ? "Operation: Paused" : "Operation: Running";
+    }
+
+    static void DisposeTray()
+    {
+        lock (trayLock)
+        {
+            if (trayRefreshTimer != null)
+            {
+                trayRefreshTimer.Stop();
+                trayRefreshTimer.Dispose();
+                trayRefreshTimer = null;
+            }
+            if (tray != null)
+            {
+                tray.Visible = false;
+                if (tray.ContextMenu != null)
+                    tray.ContextMenu.Dispose();
+                tray.Dispose();
+                tray = null;
+            }
+            miPause = null;
+            miStartup = null;
+            miChangeLog = null;
+            miShowLog = null;
+            miOperationHeader = null;
+            miRunningHeader = null;
+        }
     }
 
     // Build human-friendly description of a DeviceEvent
@@ -890,29 +1186,14 @@ class Program
             // keep the header itself, so remove at idx+1 onwards
             while (tray.ContextMenu.MenuItems.Count > idx + 1)
             {
+                MenuItem removed = tray.ContextMenu.MenuItems[idx + 1];
                 tray.ContextMenu.MenuItems.RemoveAt(idx + 1);
+                removed.Dispose();
             }
 
-            // Add a summary operation info (unclickable)
-            var opSummary = new MenuItem("Operation:");
-            opSummary.Enabled = false;
-            tray.ContextMenu.MenuItems.Add(opSummary);
-
-            var miPauseState = new MenuItem(string.Format("Paused: {0}", paused ? "Yes" : "No")) { Enabled = false };
-            tray.ContextMenu.MenuItems.Add(miPauseState);
-
-            var miStartupState = new MenuItem(string.Format("Run at startup: {0}", IsStartupInstalled() ? "Yes" : "No")) { Enabled = false };
-            tray.ContextMenu.MenuItems.Add(miStartupState);
-
-            var miLogState = new MenuItem("Log path: " + (string.IsNullOrEmpty(errorLogPath) ? "(none)" : errorLogPath)) { Enabled = false };
-            tray.ContextMenu.MenuItems.Add(miLogState);
-
-            tray.ContextMenu.MenuItems.Add("-");
-
-            // Add Running Tasks header (again)
-            var runningHdr = new MenuItem("Running Tasks:");
-            runningHdr.Enabled = false;
-            tray.ContextMenu.MenuItems.Add(runningHdr);
+            UpdatePauseMenu();
+            if (miStartup != null)
+                miStartup.Checked = IsStartupInstalled();
 
             // Populate configuredEvents (the ones we started)
             lock (runningLock)
@@ -948,26 +1229,120 @@ class Program
             lock (runningLock)
             {
                 activeCount = runningTasks.Count(t => !t.IsCompleted && !t.IsCanceled);
+                if (runningTasks.Any(task => task.IsFaulted))
+                {
+                    processExitCode = 1;
+                    RequestExit();
+                    Application.ExitThread();
+                }
             }
             tray.ContextMenu.MenuItems.Add(new MenuItem("Active tasks: " + activeCount) { Enabled = false });
         }
     }
 
+    static bool IsHelpRequest(string[] args)
+    {
+        return args.Any(arg =>
+            string.Equals(arg, "--help", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "-h", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "/?", StringComparison.OrdinalIgnoreCase));
+    }
+
+    static string StableHash(string value)
+    {
+        UInt32 hash = 2166136261;
+        foreach (char ch in (value ?? "").ToUpperInvariant())
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return hash.ToString("X8", CultureInfo.InvariantCulture);
+    }
+
+    static void AcquireInstanceMutex()
+    {
+        instanceMutex = new Mutex(
+            false,
+            @"Local\asusblink-" + StableHash(executablePath));
+        try
+        {
+            ownsInstanceMutex = instanceMutex.WaitOne(0);
+        }
+        catch (AbandonedMutexException)
+        {
+            ownsInstanceMutex = true;
+        }
+        if (!ownsInstanceMutex)
+            throw new InvalidOperationException("Another asusblink instance is already running from this executable path.");
+    }
+
+    static void ReleaseInstanceMutex()
+    {
+        if (ownsInstanceMutex)
+        {
+            try { instanceMutex.ReleaseMutex(); }
+            catch (ApplicationException) { }
+            ownsInstanceMutex = false;
+        }
+        if (instanceMutex != null)
+        {
+            instanceMutex.Dispose();
+            instanceMutex = null;
+        }
+    }
+
     [STAThread]
-    static void Main(string[] args)
+    static int Main(string[] args)
+    {
+        if (IsHelpRequest(args))
+        {
+            PrintHelp();
+            return 0;
+        }
+
+        int result;
+        try
+        {
+            result = RunApplication(args);
+        }
+        catch (Exception ex)
+        {
+            processExitCode = 1;
+            Log("Fatal error: {0}", ex);
+            Console.Error.WriteLine("ERROR: " + ex.Message);
+            result = 1;
+        }
+        finally
+        {
+            RequestExit();
+            if (!WaitForRunningTasks(Timeout.Infinite))
+                processExitCode = 1;
+            DisposeTray();
+            CloseAcpi();
+            ReleaseInstanceMutex();
+        }
+        return Math.Max(result, processExitCode);
+    }
+
+    static int RunApplication(string[] args)
     {
         Console.CancelKeyPress += (sender, e) =>
         {
             e.Cancel = true;
             RequestExit();
         };
-        AppDomain.CurrentDomain.ProcessExit += (sender, e) => CloseAcpi();
+        AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
+        {
+            RequestExit();
+            CloseAcpi();
+        };
 
         startupArguments = BuildShortcutArguments(args);
 
         errorLogPath = defaultLogPath;
+        var commandLineOptions = ParseArgs(args);
         var opts = LoadIniOptions();
-        foreach (var kv in ParseArgs(args))
+        foreach (var kv in commandLineOptions)
         {
             opts[kv.Key] = kv.Value;
         }
@@ -975,34 +1350,42 @@ class Program
         string er;
         if (opts.TryGetValue("error-retry", out er))
         {
-            int.TryParse(er, out errorRetryTimes);
-            if (errorRetryTimes < 0) errorRetryTimes = 0;
+            if (!int.TryParse(er, NumberStyles.Integer, CultureInfo.InvariantCulture, out errorRetryTimes) ||
+                errorRetryTimes < 0 || errorRetryTimes > 100)
+            {
+                throw new ArgumentException("error-retry must be an integer from 0 to 100.");
+            }
         }
         string el;
         if (opts.TryGetValue("error-log", out el))
         {
             if (!string.IsNullOrEmpty(el))
             {
-                errorLogPath = el == "off" ? "off" : ResolveModuleLocalPath(el);
+                errorLogPath = el.Equals("off", StringComparison.OrdinalIgnoreCase)
+                    ? "off"
+                    : ResolveModuleLocalPath(el);
             }
         }
         string ea;
         if (opts.TryGetValue("error-action", out ea))
         {
-            errorActions = SplitComma(ea).ToList();
-        }
-
-        try
-        {
-            acpi = new AsusACPI();
-        }
-        catch (Exception ex)
-        {
-            Log("Failed to open ACPI interface: " + ex.Message);
-            return;
+            var allowedActions = new HashSet<string>(
+                new[] { "exit", "continue", "pause", "crash", "log" },
+                StringComparer.OrdinalIgnoreCase);
+            errorActions = SplitComma(ea)
+                .Select(action => action.ToLowerInvariant())
+                .ToList();
+            if (errorActions.Count == 0 ||
+                errorActions.Any(action => !allowedActions.Contains(action)))
+            {
+                throw new ArgumentException(
+                    "error-action must contain only exit, continue, pause, crash, or log.");
+            }
         }
 
         bool noTray = OptionEnabled(opts, "no-tray");
+        if (noTray && errorActions.Contains("pause"))
+            throw new ArgumentException("error-action pause requires the tray UI so execution can be resumed.");
 
         // Build events (same as before)
         var micEvent = BuildEventFromOptions("mic", opts);
@@ -1066,14 +1449,18 @@ class Program
         if (!toRun.Any())
         {
             PrintHelp();
-            return;
+            return 0;
         }
+
+        AcquireInstanceMutex();
+        acpi = new AsusACPI();
 
         // Create tray early so user sees it — the dynamic contents will populate shortly
         if (!noTray)
         {
             Application.EnableVisualStyles();
-            CreateTray();
+            if (!CreateTray())
+                throw new InvalidOperationException("Could not create the tray UI.");
             RefreshTrayItems();
         }
 
@@ -1127,7 +1514,9 @@ class Program
                 }
                 catch (AggregateException ae)
                 {
-                    foreach (var ex in ae.InnerExceptions) Log("Task exception: {0}", ex.Message);
+                    processExitCode = 1;
+                    foreach (var ex in ae.Flatten().InnerExceptions)
+                        Log("Task exception: {0}", ex);
                 }
                 Log("All one-shot events finished — exiting.");
             }
@@ -1136,12 +1525,21 @@ class Program
                 Log("Console mode, long-running events present. Press Ctrl-C to exit.");
                 while (!exiting)
                 {
+                    bool taskFaulted;
+                    lock (runningLock)
+                        taskFaulted = runningTasks.Any(task => task.IsFaulted);
+                    if (taskFaulted)
+                    {
+                        processExitCode = 1;
+                        RequestExit();
+                        break;
+                    }
                     Thread.Sleep(500);
                 }
             }
         }
 
-        CloseAcpi();
+        return processExitCode;
     }
 
     static void RequestExit()
@@ -1157,6 +1555,51 @@ class Program
         }
     }
 
+    static bool WaitForRunningTasks(int timeoutMs)
+    {
+        Task[] tasks;
+        CancellationTokenSource[] cancellationSources;
+        lock (runningLock)
+        {
+            tasks = runningTasks.ToArray();
+            cancellationSources = runningCts.ToArray();
+        }
+
+        bool succeeded = true;
+        if (tasks.Length > 0)
+        {
+            try
+            {
+                if (!Task.WaitAll(tasks, timeoutMs))
+                {
+                    Log("Timed out waiting for {0} worker task(s) to stop.", tasks.Length);
+                    succeeded = false;
+                }
+            }
+            catch (AggregateException ex)
+            {
+                succeeded = false;
+                foreach (Exception inner in ex.Flatten().InnerExceptions)
+                    Log("Task exception: {0}", inner);
+            }
+
+            foreach (Task task in tasks)
+            {
+                if (task.IsFaulted || task.IsCanceled)
+                    succeeded = false;
+            }
+        }
+
+        foreach (CancellationTokenSource source in cancellationSources)
+            source.Dispose();
+        lock (runningLock)
+        {
+            runningCts.Clear();
+            runningTasks.Clear();
+        }
+        return succeeded;
+    }
+
     static void CloseAcpi()
     {
         lock (acpiLock)
@@ -1170,7 +1613,11 @@ class Program
             {
                 acpi.Close();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                processExitCode = 1;
+                Log("ACPI cleanup error: {0}", ex.Message);
+            }
             acpi = null;
         }
     }
@@ -1216,7 +1663,8 @@ class Program
         {
             for (int idx = 0; idx < sCount && !token.IsCancellationRequested; idx++)
             {
-                while (paused && !token.IsCancellationRequested) Thread.Sleep(200);
+                if (!WaitWhilePaused(token, null))
+                    break;
                 int state = ev.States[idx];
                 long interval = ev.IntervalsMs.Count > 0 ? ev.IntervalsMs[idx % ev.IntervalsMs.Count] : 0;
                 ApplyDeviceState(device, state);
@@ -1230,10 +1678,11 @@ class Program
         }
 
         int pos = 0;
-        long loopStart = Environment.TickCount;
+        Stopwatch elapsedTimer = Stopwatch.StartNew();
         while (!token.IsCancellationRequested)
         {
-            while (paused && !token.IsCancellationRequested) Thread.Sleep(200);
+            if (!WaitWhilePaused(token, elapsedTimer))
+                break;
             int state = ev.States[pos % sCount];
             long interval = ev.IntervalsMs.Count > 0 ? ev.IntervalsMs[pos % ev.IntervalsMs.Count] : 0;
 
@@ -1243,21 +1692,26 @@ class Program
             {
                 while (!token.IsCancellationRequested)
                 {
-                    while (paused && !token.IsCancellationRequested) Thread.Sleep(200);
+                    if (!WaitWhilePaused(token, null))
+                        break;
                     ApplyDeviceState(device, state);
-                    Thread.Sleep(200);
+                    if (token.WaitHandle.WaitOne(200))
+                        break;
                 }
             }
 
             if (interval > 0)
             {
-                SleepWithCancel(interval, token);
+                SleepWithCancel(interval, token, elapsedTimer);
+            }
+            else if (!infinite)
+            {
+                SleepWithCancel(200, token, elapsedTimer);
             }
 
             if (!infinite && durationMs > 0)
             {
-                long elapsed = Environment.TickCount - loopStart;
-                if (elapsed >= durationMs) break;
+                if (elapsedTimer.ElapsedMilliseconds >= durationMs) break;
             }
 
             pos++;
@@ -1286,19 +1740,19 @@ class Program
         }
 
         bool infinite = ev.DurationMs == 0;
-        long loopStart = Environment.TickCount;
+        Stopwatch elapsedTimer = Stopwatch.StartNew();
         while (!token.IsCancellationRequested)
         {
-            while (paused && !token.IsCancellationRequested) Thread.Sleep(200);
+            if (!WaitWhilePaused(token, elapsedTimer))
+                break;
             ApplyDeviceState(device, StateForHddActivity(ev));
 
             if (!infinite && ev.DurationMs > 0)
             {
-                long elapsed = Environment.TickCount - loopStart;
-                if (elapsed >= ev.DurationMs) break;
+                if (elapsedTimer.ElapsedMilliseconds >= ev.DurationMs) break;
             }
 
-            SleepWithCancel(pollInterval, token);
+            SleepWithCancel(pollInterval, token, elapsedTimer);
         }
 
         Log("Event {0} ended", ev.Name);
@@ -1316,7 +1770,6 @@ class Program
         Console.WriteLine("  --mic-state <csv of ints>         : mic states (0/1)");
         Console.WriteLine("  --mic-interval <csv of times>     : intervals in ms/s/m/h/d (wraps)");
         Console.WriteLine("  --mic-duration <time>             : total duration (0 = infinite)");
-        Console.WriteLine("  --mic-check                       : check current state and apply if different");
         Console.WriteLine("  --keyboard-state <csv of ints>    : keyboard levels (128..131)");
         Console.WriteLine("  --keyboard-interval <csv>         : intervals (wraps)");
         Console.WriteLine("  --keyboard-duration <time>        : duration");

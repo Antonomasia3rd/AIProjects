@@ -9,16 +9,27 @@ class CapsLockLight
 {
     const string DefaultKeyboardTargetPath = "\\Device\\KeyboardClass0";
     static volatile bool exiting = false;
+    static readonly ManualResetEvent exitEvent = new ManualResetEvent(false);
     static readonly string executablePath = Assembly.GetEntryAssembly().Location;
     static readonly string executableDirectory = GetExecutableDirectory();
     static readonly string executableBaseName = GetExecutableBaseName();
     static readonly string iniPath = Path.Combine(executableDirectory, executableBaseName + ".ini");
     static readonly string logPath = Path.Combine(executableDirectory, executableBaseName + ".log");
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "DefineDosDeviceW",
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true,
+        SetLastError = true)]
     public static extern Boolean DefineDosDevice(UInt32 flags, String deviceName, String targetPath);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "CreateFileW",
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true,
+        SetLastError = true)]
     public static extern IntPtr CreateFile(String fileName,
                        UInt32 desiredAccess, UInt32 shareMode, IntPtr securityAttributes,
                        UInt32 creationDisposition, UInt32 flagsAndAttributes, IntPtr templateFile
@@ -58,25 +69,55 @@ class CapsLockLight
 
     const int VK_CAPITAL = 0x14;
 
-    static void Main(string[] args)
+    static int Main(string[] args)
     {
+        if (args.Length != 0)
+        {
+            if (args.Length == 1 && IsHelpOption(args[0]))
+            {
+                Usage();
+                return 0;
+            }
+            Console.Error.WriteLine("ERROR: Unknown argument: " + args[0]);
+            Usage();
+            return 2;
+        }
+
         UInt32 bytesReturned = 0;
         IntPtr device = Flags.INVALID_HANDLE_VALUE;
         bool mappingDefined = false;
+        Mutex instanceMutex = null;
+        bool ownsInstanceMutex = false;
         string deviceName = "capsblinkKBD_" + System.Diagnostics.Process.GetCurrentProcess().Id.ToString();
         string keyboardTargetPath = DefaultKeyboardTargetPath;
         int blinkIntervalMs = 500;
         KEYBOARD_INDICATOR_PARAMETERS KIPbuf = new KEYBOARD_INDICATOR_PARAMETERS { unitID = 0, LEDflags = 0 };
+        int exitCode = 0;
 
         try
         {
             EnsureIniFile();
             keyboardTargetPath = ReadIniString("Settings", "KeyboardTargetPath", DefaultKeyboardTargetPath);
             blinkIntervalMs = ReadIniInt("Settings", "BlinkIntervalMs", 500);
-            if (blinkIntervalMs < 50)
+            if (String.IsNullOrWhiteSpace(keyboardTargetPath) ||
+                keyboardTargetPath.IndexOfAny(new[] { '\r', '\n', '\0' }) >= 0 ||
+                !keyboardTargetPath.StartsWith("\\Device\\KeyboardClass", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException(
+                    "KeyboardTargetPath must name a keyboard class device such as \\Device\\KeyboardClass0.");
+            if (blinkIntervalMs < 50 || blinkIntervalMs > 86400000)
+                throw new InvalidDataException("BlinkIntervalMs must be from 50 through 86400000.");
+
+            instanceMutex = new Mutex(false, @"Local\capsblink-" + StableHash(keyboardTargetPath));
+            try
             {
-                blinkIntervalMs = 50;
+                ownsInstanceMutex = instanceMutex.WaitOne(0);
             }
+            catch (AbandonedMutexException)
+            {
+                ownsInstanceMutex = true;
+            }
+            if (!ownsInstanceMutex)
+                throw new InvalidOperationException("Another capsblink instance is already controlling " + keyboardTargetPath + ".");
 
             Log("Starting with keyboard target " + keyboardTargetPath);
             if (!DefineDosDevice(Flags.DDD_RAW_TARGET_PATH, deviceName, keyboardTargetPath))
@@ -97,6 +138,7 @@ class CapsLockLight
             {
                 e.Cancel = true;
                 exiting = true;
+                exitEvent.Set();
             };
 
             while (!exiting)
@@ -120,26 +162,114 @@ class CapsLockLight
                     }
                 }
 
-                Thread.Sleep(blinkIntervalMs);
+                if (exitEvent.WaitOne(blinkIntervalMs))
+                    break;
             }
         }
         catch (Exception ex)
         {
             Log("Error: " + ex);
-            throw;
+            Console.Error.WriteLine("ERROR: " + ex.Message);
+            exitCode = 1;
         }
         finally
         {
             if (device != Flags.INVALID_HANDLE_VALUE)
             {
-                CloseHandle(device);
+                try
+                {
+                    SynchronizeCapsIndicator(device, ref KIPbuf, ref bytesReturned);
+                }
+                catch (Exception ex)
+                {
+                    Log("Could not restore Caps Lock indicator state: " + ex.Message);
+                    exitCode = 1;
+                }
+                if (!CloseHandle(device))
+                {
+                    Log("CloseHandle failed: " + new Win32Exception(Marshal.GetLastWin32Error()).Message);
+                    exitCode = 1;
+                }
             }
             if (mappingDefined)
             {
-                DefineDosDevice(Flags.DDD_REMOVE_DEFINITION | Flags.DDD_EXACT_MATCH_ON_REMOVE, deviceName, keyboardTargetPath);
+                if (!DefineDosDevice(
+                    Flags.DDD_REMOVE_DEFINITION |
+                    Flags.DDD_EXACT_MATCH_ON_REMOVE |
+                    Flags.DDD_RAW_TARGET_PATH,
+                    deviceName,
+                    keyboardTargetPath))
+                {
+                    Log("DefineDosDevice cleanup failed: " + new Win32Exception(Marshal.GetLastWin32Error()).Message);
+                    exitCode = 1;
+                }
+            }
+            if (ownsInstanceMutex)
+            {
+                try
+                {
+                    instanceMutex.ReleaseMutex();
+                }
+                catch (ApplicationException)
+                {
+                }
+            }
+            if (instanceMutex != null)
+            {
+                instanceMutex.Dispose();
             }
             Log("Stopped");
         }
+        return exitCode;
+    }
+
+    static void SynchronizeCapsIndicator(
+        IntPtr device,
+        ref KEYBOARD_INDICATOR_PARAMETERS indicators,
+        ref UInt32 bytesReturned)
+    {
+        if (!DeviceIoControl(
+            device,
+            Flags.IOCTL_KEYBOARD_QUERY_INDICATORS,
+            IntPtr.Zero,
+            0,
+            ref indicators,
+            (UInt32)Marshal.SizeOf(indicators),
+            ref bytesReturned,
+            IntPtr.Zero))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        bool capsLockOn = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+        if (capsLockOn)
+            indicators.LEDflags = (UInt16)(indicators.LEDflags | Flags.KEYBOARD_CAPS_LOCK_ON);
+        else
+            indicators.LEDflags = (UInt16)(indicators.LEDflags & ~Flags.KEYBOARD_CAPS_LOCK_ON);
+
+        if (!DeviceIoControl(
+            device,
+            Flags.IOCTL_KEYBOARD_SET_INDICATORS,
+            ref indicators,
+            (UInt32)Marshal.SizeOf(indicators),
+            IntPtr.Zero,
+            0,
+            ref bytesReturned,
+            IntPtr.Zero))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+    }
+
+    static string StableHash(string value)
+    {
+        UInt32 hash = 2166136261;
+        foreach (char ch in (value ?? "").ToUpperInvariant())
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return hash.ToString("X8");
     }
 
     static string GetExecutableDirectory()
@@ -162,10 +292,28 @@ class CapsLockLight
         }
 
         Directory.CreateDirectory(executableDirectory);
-        File.WriteAllText(iniPath,
-            "[Settings]" + Environment.NewLine +
-            "KeyboardTargetPath=" + DefaultKeyboardTargetPath + Environment.NewLine +
-            "BlinkIntervalMs=500" + Environment.NewLine);
+        string temporaryPath = iniPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporaryPath,
+                "[Settings]" + Environment.NewLine +
+                "KeyboardTargetPath=" + DefaultKeyboardTargetPath + Environment.NewLine +
+                "BlinkIntervalMs=500" + Environment.NewLine);
+            try
+            {
+                File.Move(temporaryPath, iniPath);
+            }
+            catch (IOException)
+            {
+                if (!File.Exists(iniPath))
+                    throw;
+            }
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
     }
 
     static string ReadIniString(string section, string key, string fallback)
@@ -201,16 +349,39 @@ class CapsLockLight
                 }
             }
         }
-        catch
+        catch (IOException)
         {
+            throw;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            throw;
         }
         return fallback;
     }
 
     static int ReadIniInt(string section, string key, int fallback)
     {
+        string raw = ReadIniString(section, key, "");
+        if (raw.Length == 0)
+            return fallback;
         int value;
-        return int.TryParse(ReadIniString(section, key, ""), out value) ? value : fallback;
+        if (!int.TryParse(raw, out value))
+            throw new InvalidDataException(key + " must be an integer.");
+        return value;
+    }
+
+    static bool IsHelpOption(string value)
+    {
+        return String.Equals(value, "--help", StringComparison.OrdinalIgnoreCase) ||
+            String.Equals(value, "-h", StringComparison.OrdinalIgnoreCase) ||
+            String.Equals(value, "/?", StringComparison.OrdinalIgnoreCase);
+    }
+
+    static void Usage()
+    {
+        Console.WriteLine("Usage: capsblink.exe");
+        Console.WriteLine("Settings are read from " + iniPath);
     }
 
     static void Log(string message)

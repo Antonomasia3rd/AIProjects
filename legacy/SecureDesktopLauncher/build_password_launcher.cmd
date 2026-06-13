@@ -27,23 +27,26 @@ if not defined VCVARS (
 )
 
 echo Using "%VCVARS%"
-call "%VCVARS%" || exit /b %errorlevel%
+call "%VCVARS%"
+if errorlevel 1 exit /b %ERRORLEVEL%
 pushd "%ROOT%" || exit /b 1
-if /i "%1"=="check" (
-  cl /nologo /Zs /EHsc /W4 SecureDesktopPasswordLauncher.cpp
-  set "STATUS=%ERRORLEVEL%"
-  popd
-  exit /b %STATUS%
-)
-if /i "%1"=="new" (
-  if not exist build mkdir build
-  cl /nologo /EHsc /W4 /Fo.\build\SecureDesktopPasswordLauncher.new.obj /Fe.\build\SecureDesktopPasswordLauncher.new.exe SecureDesktopPasswordLauncher.cpp bcrypt.lib advapi32.lib shell32.lib user32.lib gdi32.lib comctl32.lib version.lib /link /SUBSYSTEM:WINDOWS
-  set "STATUS=%ERRORLEVEL%"
-  popd
-  exit /b %STATUS%
-)
+if /i "%~1"=="check" goto Check
+if /i "%~1"=="new" goto New
 if not exist build mkdir build
-cl /nologo /EHsc /W4 /Fo.\build\SecureDesktopPasswordLauncher.obj /Fe.\build\SecureDesktopPasswordLauncher.exe SecureDesktopPasswordLauncher.cpp bcrypt.lib advapi32.lib shell32.lib user32.lib gdi32.lib comctl32.lib version.lib /link /SUBSYSTEM:WINDOWS
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /Fo.\build\SecureDesktopPasswordLauncher.obj /Fe.\build\SecureDesktopPasswordLauncher.exe SecureDesktopPasswordLauncher.cpp bcrypt.lib advapi32.lib shell32.lib user32.lib gdi32.lib comctl32.lib version.lib /link /SUBSYSTEM:WINDOWS
+set "STATUS=%ERRORLEVEL%"
+popd
+exit /b %STATUS%
+
+:Check
+cl /nologo /utf-8 /std:c++17 /Zs /EHsc /W4 SecureDesktopPasswordLauncher.cpp
+set "STATUS=%ERRORLEVEL%"
+popd
+exit /b %STATUS%
+
+:New
+if not exist build mkdir build
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /Fo.\build\SecureDesktopPasswordLauncher.new.obj /Fe.\build\SecureDesktopPasswordLauncher.new.exe SecureDesktopPasswordLauncher.cpp bcrypt.lib advapi32.lib shell32.lib user32.lib gdi32.lib comctl32.lib version.lib /link /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 exit /b %STATUS%

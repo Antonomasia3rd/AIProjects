@@ -10,6 +10,7 @@
 #include <shellapi.h>
 #include <windowsx.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 #include <appmodel.h>
 #include <stdio.h>
 #include <string>
@@ -25,6 +26,9 @@
 #include <initializer_list>
 #include <cstdarg>
 #include <limits>
+#include <cerrno>
+
+#include "../../dependencies/desktop_app_baseline.h"
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
@@ -45,8 +49,6 @@ static constexpr const wchar_t* APP_NAME = L"NowPlayingTile";
 static constexpr const wchar_t* APP_DISPLAY_NAME = L"Now Playing Tile";
 static constexpr const wchar_t* WINDOW_CLASS_NAME = L"NowPlayingTileTrayWnd";
 static constexpr const wchar_t* WIDGET_CLASS_NAME = L"NowPlayingTileWidgetWnd";
-static constexpr const wchar_t* SINGLE_INSTANCE_MUTEX_NAME = L"Local\\NowPlayingTile.App";
-static constexpr const wchar_t* RESTORE_MESSAGE_NAME = L"NowPlayingTile.RestoreRunningInstance";
 static constexpr const wchar_t* PACKAGE_NAME = L"NowPlayingTile.App";
 static constexpr const wchar_t* PACKAGE_PUBLISHER = L"CN=NowPlayingTile";
 static constexpr UINT WM_NPT_UPDATE_DONE = WM_APP + 42;
@@ -54,6 +56,7 @@ static constexpr UINT_PTR UPDATE_TIMER_ID = 1;
 static constexpr DWORD POWERSHELL_COMMAND_TIMEOUT_MS = 120000;
 static constexpr DWORD POWERSHELL_POLL_MS = 50;
 static constexpr DWORD POWERSHELL_TERMINATE_WAIT_MS = 5000;
+static constexpr size_t POWERSHELL_OUTPUT_LIMIT_BYTES = 4u * 1024u * 1024u;
 
 static HINSTANCE g_hInst = nullptr;
 static ULONG_PTR g_gdiplusToken = 0;
@@ -62,7 +65,10 @@ static std::wstring g_exeDir;
 static std::wstring g_exeBaseName;
 static std::wstring g_iniPath;
 static std::wstring g_logPath;
+static aip::InstanceIdentity g_instanceIdentity;
 static UINT g_restoreMessage = 0;
+static UINT g_taskbarCreatedMessage = 0;
+static aip::Utf8Logger g_logger;
 
 struct MediaSnapshot
 {
@@ -101,7 +107,7 @@ struct AppSettings
 {
     int updateIntervalSeconds = 2;
     int tileRefreshSeconds = 60;
-    TileLayout tileLayout = TileLayout::Cycle;
+    TileLayout tileLayout = TileLayout::Text;
     bool showTrayIcon = false;
 };
 
@@ -118,6 +124,7 @@ struct AppOptions
     bool showHelp = false;
     bool forceTray = false;
     bool forceNoTray = false;
+    std::wstring commandLineError;
 };
 
 struct RuntimeContext
@@ -125,7 +132,7 @@ struct RuntimeContext
     HWND hwnd = nullptr;
     NOTIFYICONDATAW nid = {};
     bool trayCreated = false;
-    bool updateRunning = false;
+    std::atomic<bool> updateRunning{ false };
     std::atomic<bool> closing{ false };
     std::thread updateThread;
     AppSettings settings;
@@ -143,8 +150,11 @@ static std::wstring QuotePowerShellLiteral(const std::wstring& value);
 static bool RunPowerShellCommand(const std::wstring& command, std::wstring* output, DWORD* exitCode);
 static bool FileExists(const std::wstring& path);
 static void EnsureDirectory(const std::wstring& path);
+static std::wstring BuildTemporarySiblingPath(const std::wstring& path);
+static bool CommitTemporaryFile(const std::wstring& temporaryPath, const std::wstring& destinationPath);
 static void InitPaths();
-static void EnsureDefaultSettingsFile();
+static HWND FindWindowForCurrentExecutable(const wchar_t* windowClass, int retries = 0, int delayMs = 0);
+static bool EnsureDefaultSettingsFile();
 static AppSettings LoadSettings();
 static AppOptions ParseCommandLine();
 static MediaSnapshot ReadMediaSnapshot();
@@ -156,12 +166,12 @@ static void BeginUpdate(RuntimeContext* ctx);
 static void StopUpdates(RuntimeContext* ctx);
 static void MaybeUpdateLiveTile(RuntimeContext* ctx, const MediaSnapshot& snapshot);
 static void ShowHelpMessage();
-static void SignalExistingInstanceToExit();
+static bool SignalExistingInstanceToExit();
 static bool EnsurePackageFiles(bool forceRewrite);
 static int RegisterDevelopmentPackage(bool quiet = false);
 static int UnregisterDevelopmentPackage(bool quiet = false);
-static int LaunchPackagedInstance(bool quiet = false);
-static bool AutoRegisterAndLaunchIfNeeded(const AppOptions& options);
+static int LaunchPackagedInstance(bool quiet = false, const std::wstring& arguments = L"");
+static bool AutoRegisterAndLaunchIfNeeded(const AppOptions& options, int* exitCode);
 
 #include "src/npt_core.inc"
 #include "src/npt_config_defaults.inc"

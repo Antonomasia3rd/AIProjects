@@ -32,6 +32,14 @@ if errorlevel 1 (
   goto Fail
 )
 
+call :Section "Test shared registry notification service"
+call "%REPO%\tools\TestRegistryNotificationServices.cmd"
+if errorlevel 1 goto Fail
+
+call :Section "Test legacy utility guardrails"
+call "%REPO%\tools\TestLegacyUtilities.cmd"
+if errorlevel 1 goto Fail
+
 call :BuildAllowContentAboveLock || goto Fail
 call :BuildAsusBlink || goto Fail
 call :BuildCapsBlink || goto Fail
@@ -66,7 +74,7 @@ call :Section "Build AllowContentAboveLock"
 call :RequireCsc
 if errorlevel 1 exit /b %ERRORLEVEL%
 if not exist "%LEGACY%\AllowContentAboveLock\build" mkdir "%LEGACY%\AllowContentAboveLock\build"
-call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\AllowContentAboveLock\build\AllowContentAboveLock.exe" "%LEGACY%\AllowContentAboveLock\AllowContentAboveLock.cs"
+call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\AllowContentAboveLock\build\AllowContentAboveLock.exe" "%REPO%\dependencies\registry_notification_service.cs" "%LEGACY%\AllowContentAboveLock\AllowContentAboveLock.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\AllowContentAboveLock\build\AllowContentAboveLock.exe"
 exit /b %ERRORLEVEL%
@@ -102,7 +110,7 @@ call :Section "Build YourPhoneHideBanner"
 call :RequireCsc
 if errorlevel 1 exit /b %ERRORLEVEL%
 if not exist "%LEGACY%\YourPhoneHideBanner\build" mkdir "%LEGACY%\YourPhoneHideBanner\build"
-call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\YourPhoneHideBanner\build\YourPhoneHideBanner.exe" "%LEGACY%\YourPhoneHideBanner\YourPhoneHideBanner.cs"
+call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\YourPhoneHideBanner\build\YourPhoneHideBanner.exe" "%REPO%\dependencies\registry_notification_service.cs" "%LEGACY%\YourPhoneHideBanner\YourPhoneHideBanner.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\YourPhoneHideBanner\build\YourPhoneHideBanner.exe"
 exit /b %ERRORLEVEL%
@@ -209,6 +217,12 @@ call :IsSkipped CharmTray
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build CharmTray"
 pushd "%LEGACY%\CharmTray" || exit /b 1
+call :Run cmd.exe /d /c TestCharmTraySource.cmd
+if errorlevel 1 (
+  set "STATUS=%ERRORLEVEL%"
+  popd
+  exit /b !STATUS!
+)
 call :Run cmd.exe /d /c BuildCharmTray.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
@@ -229,9 +243,9 @@ if errorlevel 1 (
 )
 call :Run cmd.exe /d /c build_launcher.cmd
 set "STATUS=%ERRORLEVEL%"
-if "%STATUS%"=="0" (
+if "!STATUS!"=="0" (
   call :Run cmd.exe /d /c build_password_launcher.cmd
-  set "STATUS=%ERRORLEVEL%"
+  set "STATUS=!ERRORLEVEL!"
 )
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%

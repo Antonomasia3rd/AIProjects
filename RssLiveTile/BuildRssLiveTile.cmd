@@ -50,7 +50,7 @@ if errorlevel 1 (
 
 if /I "%~1"=="check" (
     cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /Zs RssLiveTile.cpp
-    set "STATUS=%ERRORLEVEL%"
+    set "STATUS=!ERRORLEVEL!"
     if "!STATUS!"=="0" call TestRssLiveTileSource.cmd
     if "!STATUS!"=="0" set "STATUS=!ERRORLEVEL!"
     popd

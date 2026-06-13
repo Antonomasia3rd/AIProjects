@@ -48,8 +48,8 @@ if errorlevel 1 (
 )
 
 cl /nologo /std:c++17 /EHsc /W4 tools\DiscordRPCSourceCheck.cpp /Fe:build\DiscordRPCSourceCheck.exe /Fo:build\obj\DiscordRPCSourceCheck.obj
-if errorlevel 1 (
-    set "STATUS=%ERRORLEVEL%"
+set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
     popd
     exit /b %STATUS%
 )

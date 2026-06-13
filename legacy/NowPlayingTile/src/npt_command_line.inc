@@ -6,6 +6,7 @@ static AppOptions ParseCommandLine()
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv == nullptr)
     {
+        options.commandLineError = L"Windows could not parse the command line.";
         return options;
     }
 
@@ -58,9 +59,31 @@ static AppOptions ParseCommandLine()
         {
             options.showHelp = true;
         }
+        else
+        {
+            options.commandLineError = L"Unknown option: " + arg;
+            break;
+        }
     }
 
     LocalFree(argv);
+    if (options.commandLineError.empty() && !options.showHelp)
+    {
+        int primaryModes =
+            (options.showWidget ? 1 : 0) +
+            (options.updateOnce ? 1 : 0) +
+            (options.requestExit ? 1 : 0) +
+            (options.registerPackage ? 1 : 0) +
+            (options.unregisterPackage ? 1 : 0) +
+            (options.launchPackaged ? 1 : 0) +
+            (options.regenerateManifest ? 1 : 0);
+        if (primaryModes > 1)
+        {
+            options.commandLineError =
+                L"Choose only one primary mode: --once, --widget, --exit, --register, "
+                L"--unregister, --launch-packaged, or --regenerate-manifest.";
+        }
+    }
     return options;
 }
 
@@ -85,17 +108,24 @@ static void ShowHelpMessage()
         MB_OK | MB_ICONINFORMATION);
 }
 
-static void SignalExistingInstanceToExit()
+static bool SignalExistingInstanceToExit()
 {
-    HWND hwnd = FindWindowW(WINDOW_CLASS_NAME, nullptr);
+    bool signaled = false;
+    HWND hwnd = aip::FindInstanceWindow(
+        WINDOW_CLASS_NAME,
+        g_instanceIdentity.windowTitle.c_str(),
+        20,
+        50,
+        false);
     if (hwnd != nullptr)
     {
-        PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        signaled = PostMessageW(hwnd, WM_CLOSE, 0, 0) != FALSE || signaled;
     }
 
-    HWND widget = FindWindowW(WIDGET_CLASS_NAME, nullptr);
+    HWND widget = FindWindowForCurrentExecutable(WIDGET_CLASS_NAME, 20, 50);
     if (widget != nullptr)
     {
-        PostMessageW(widget, WM_CLOSE, 0, 0);
+        signaled = PostMessageW(widget, WM_CLOSE, 0, 0) != FALSE || signaled;
     }
+    return signaled;
 }

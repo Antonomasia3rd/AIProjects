@@ -7,6 +7,9 @@
     "artifactName": "AllowContentAboveLock",
     "artifactPath": "legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe",
     "skipKey": "AllowContentAboveLock",
+    "dependencyPaths": [
+      "dependencies/registry_notification_service.cs"
+    ],
     "artifactPaths": [
       "legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe"
     ]
@@ -43,6 +46,9 @@
     "artifactName": "YourPhoneHideBanner",
     "artifactPath": "legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe",
     "skipKey": "YourPhoneHideBanner",
+    "dependencyPaths": [
+      "dependencies/registry_notification_service.cs"
+    ],
     "artifactPaths": [
       "legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe"
     ]

@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d "%~dp0"
 
@@ -18,7 +18,9 @@ set "CXXFLAGS=-std=c++17 -O2"
 
 if /i "%~1"=="check" (
     g++ -std=c++17 -Wall -Wextra -c "%SOURCE%" -o NUL
-    exit /b %ERRORLEVEL%
+    if errorlevel 1 exit /b !ERRORLEVEL!
+    call TestRealTimeNotesDeskbandSource.cmd
+    exit /b !ERRORLEVEL!
 )
 
 set "OUTPUT=build\RealTimeNotesDeskband.dll"

@@ -218,7 +218,7 @@ cd /d C:\Program Files\SecureDesktopLauncher
 build\SecureDesktopPasswordLauncher.exe set-password
 ```
 
-`set-password` writes the launcher-local INI and preserves the current launch/UI policy values. New saves use PBKDF2-SHA256 with a random salt and remove the older salted SHA-256 hash by default. If an older config still has only `PasswordHashHex`, the launcher upgrades it after the next successful password verification. Set `KeepLegacySha256Hash=1` only if rollback to an older binary is required.
+`set-password` atomically rewrites the launcher-local INI through the shared configuration layer and preserves the current launch/UI policy values. New saves use PBKDF2-SHA256 with a random salt and remove the older salted SHA-256 hash by default. If an older config still has only `PasswordHashHex`, the launcher upgrades it after the next successful password verification. Set `KeepLegacySha256Hash=1` only if rollback to an older binary is required.
 
 At normal launch, the password launcher checks that the target and working directory exist before each `CreateProcessW` call.
 

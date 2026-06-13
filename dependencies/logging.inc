@@ -18,9 +18,8 @@ class ExclusiveFileRangeLock
 {
 public:
     explicit ExclusiveFileRangeLock(HANDLE file, DWORD waitMs = INFINITE)
-        : file_(file)
+        : file_(file), overlapped_{}
     {
-        overlapped_ = {};
         if (file_ == INVALID_HANDLE_VALUE)
         {
             error_ = ERROR_INVALID_HANDLE;
@@ -181,7 +180,11 @@ inline bool AppendUtf8TextToFile(
         }
     }
 
-    CloseHandle(file);
+    if (!CloseHandle(file) && ok)
+    {
+        ok = false;
+        error = GetLastError();
+    }
     SetLastError(ok ? ERROR_SUCCESS : (error == ERROR_SUCCESS ? ERROR_WRITE_FAULT : error));
     return ok;
 }
@@ -193,6 +196,91 @@ inline bool AppendUtf8LineToFile(
     DWORD lockWaitMs = INFINITE)
 {
     return AppendUtf8TextToFile(filePath, line + L"\r\n", writeUtf8Bom, lockWaitMs);
+}
+
+inline bool AppendUtf16LineToFile(
+    const std::wstring& filePath,
+    const std::wstring& line,
+    bool writeUtf16Bom = false,
+    DWORD lockWaitMs = INFINITE)
+{
+    if (filePath.empty() || line.size() > (MAXDWORD / sizeof(wchar_t)) - 2)
+    {
+        SetLastError(filePath.empty() ? ERROR_INVALID_PARAMETER : ERROR_FILE_TOO_LARGE);
+        return false;
+    }
+
+    std::wstring text = line + L"\r\n";
+    EnsureDirectory(GetDirectoryName(filePath));
+    HANDLE file = CreateFileW(
+        filePath.c_str(),
+        FILE_APPEND_DATA | FILE_WRITE_DATA | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+
+    bool ok = true;
+    DWORD error = ERROR_SUCCESS;
+    {
+        ExclusiveFileRangeLock lock(file, lockWaitMs);
+        if (!lock.IsLocked())
+        {
+            ok = false;
+            error = lock.Error();
+        }
+        else
+        {
+            LARGE_INTEGER size = {};
+            if (!GetFileSizeEx(file, &size))
+            {
+                ok = false;
+                error = GetLastError();
+            }
+
+            if (ok)
+            {
+                LARGE_INTEGER end = {};
+                if (!SetFilePointerEx(file, end, nullptr, FILE_END))
+                {
+                    ok = false;
+                    error = GetLastError();
+                }
+            }
+
+            if (ok && writeUtf16Bom && size.QuadPart == 0)
+            {
+                static const wchar_t bom = 0xFEFF;
+                if (!WriteAllBytes(file, &bom, static_cast<DWORD>(sizeof(bom))))
+                {
+                    ok = false;
+                    error = GetLastError();
+                }
+            }
+
+            if (ok && !WriteAllBytes(
+                    file,
+                    text.data(),
+                    static_cast<DWORD>(text.size() * sizeof(wchar_t))))
+            {
+                ok = false;
+                error = GetLastError();
+            }
+        }
+    }
+
+    if (!CloseHandle(file) && ok)
+    {
+        ok = false;
+        error = GetLastError();
+    }
+    SetLastError(ok ? ERROR_SUCCESS : (error == ERROR_SUCCESS ? ERROR_WRITE_FAULT : error));
+    return ok;
 }
 
 

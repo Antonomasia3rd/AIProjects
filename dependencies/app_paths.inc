@@ -120,7 +120,7 @@ inline bool ConfigFileNameHasInvalidCharacters(const std::wstring& path)
     {
         return true;
     }
-    if (!name.empty() && (name.back() == L' ' || name.back() == L'.'))
+    if (name.back() == L' ' || name.back() == L'.')
     {
         return true;
     }
