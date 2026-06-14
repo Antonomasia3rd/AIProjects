@@ -34,6 +34,10 @@
 #include <winrt/Windows.UI.Notifications.h>
 
 #include "..\dependencies\desktop_app_baseline.h"
+#if __has_include("RssLiveTileVersionDefines.inc")
+#include "RssLiveTileVersionDefines.inc"
+#endif
+#include "..\dependencies\release_version.inc"
 
 #ifndef ARRAYSIZE
 #define ARRAYSIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -89,6 +93,7 @@ struct AppSettings
 struct AppOptions
 {
     bool showHelp = false;
+    bool showVersion = false;
     bool once = false;
     bool requestExit = false;
     bool registerPackage = false;
@@ -860,7 +865,7 @@ static const aip::IniDefaultValue kDefaultSettings[] = {
     { L"Manifest", L"Description", L"RSS feed Live Tile updater" },
     { L"Manifest", L"IdentityName", L"RssLiveTile.App" },
     { L"Manifest", L"Publisher", L"CN=RssLiveTile" },
-    { L"Manifest", L"Version", L"1.0.0.0" },
+    { L"Manifest", L"Version", AIP_VERSION_TEXT_W },
     { L"Manifest", L"BackgroundColor", L"#005A9E" },
 };
 
@@ -922,7 +927,7 @@ static AppSettings LoadSettings()
     settings.manifestDescription = aip::Trim(IniRead(L"Manifest", L"Description", L"RSS feed Live Tile updater"));
     settings.manifestIdentityName = aip::Trim(IniRead(L"Manifest", L"IdentityName", L"RssLiveTile.App"));
     settings.manifestPublisher = aip::Trim(IniRead(L"Manifest", L"Publisher", L"CN=RssLiveTile"));
-    settings.manifestVersion = aip::Trim(IniRead(L"Manifest", L"Version", L"1.0.0.0"));
+    settings.manifestVersion = aip::Trim(IniRead(L"Manifest", L"Version", AIP_VERSION_TEXT_W));
     settings.manifestBackgroundColor = aip::Trim(IniRead(L"Manifest", L"BackgroundColor", L"#005A9E"));
 
     if (settings.userAgent.empty())
@@ -947,7 +952,7 @@ static AppSettings LoadSettings()
     }
     if (settings.manifestVersion.empty())
     {
-        settings.manifestVersion = L"1.0.0.0";
+        settings.manifestVersion = aip::ReleasePackageVersion();
     }
     if (settings.manifestBackgroundColor.empty())
     {
@@ -2552,13 +2557,21 @@ static void ShowTrayMenu(RuntimeContext* ctx)
         status = ctx->latest.status.empty() ? L"Waiting for first update" : ctx->latest.status;
         showMenuAsDropdown = ctx->settings.showMenuAsDropdown;
     }
-    aip::AppendTrayMenuItem(menu, IDM_TOGGLE_MENU_DROPDOWN, L"Show menu as dropdown", showMenuAsDropdown);
-    aip::AppendTrayMenuItem(menu, 0, LimitText(status, 80), false, false);
-    aip::AppendMenuSeparator(menu);
+    if (!aip::AppendBaselineTrayMenuHeader(
+            menu,
+            IDM_TOGGLE_MENU_DROPDOWN,
+            L"Show menu as dropdown",
+            showMenuAsDropdown,
+            IDM_REFRESH,
+            L"Refresh now",
+            L"Version: " + aip::ReleaseVersionDisplayText()))
+    {
+        LogWarn(L"Could not append the baseline tray menu header.");
+    }
 
     aip::TraySectionLayout sectionLayout(menu, showMenuAsDropdown);
     HMENU feedMenu = sectionLayout.Begin(L"Feed:");
-    aip::AppendTrayMenuItem(feedMenu, IDM_REFRESH, L"Refresh now");
+    aip::AppendTrayMenuItem(feedMenu, 0, LimitText(status, 80), false, false);
     bool hasLatestLink = false;
     {
         std::lock_guard<std::mutex> lock(ctx->mutex);
@@ -2706,17 +2719,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (wParam == RLT_CONTROL_EXIT)
         {
             DestroyWindow(hwnd);
-            return 0;
+            return aip::INSTANCE_REQUEST_HANDLED;
         }
         if (wParam == RLT_CONTROL_REFRESH)
         {
             BeginUpdate(ctx, true);
-            return 0;
+            return aip::INSTANCE_REQUEST_HANDLED;
         }
         if (wParam == RLT_CONTROL_RELOAD)
         {
             ReloadRuntimeSettings(ctx);
-            return 0;
+            return aip::INSTANCE_REQUEST_HANDLED;
         }
         break;
     case WM_RLT_UPDATE_DONE:
@@ -2935,6 +2948,10 @@ static AppOptions ParseCommandLine()
         {
             options.showHelp = true;
         }
+        else if (aip::EqualsI(arg, L"--version"))
+        {
+            options.showVersion = true;
+        }
         else if (aip::EqualsI(arg, L"--once"))
         {
             options.once = true;
@@ -3026,7 +3043,7 @@ static AppOptions ParseCommandLine()
         }
     }
 
-    if (options.parseError.empty() && !options.showHelp)
+    if (options.parseError.empty() && !options.showHelp && !options.showVersion)
     {
         if (!options.openUrl.empty() && !IsHttpUrl(options.openUrl))
         {
@@ -3034,7 +3051,7 @@ static AppOptions ParseCommandLine()
         }
     }
 
-    if (options.parseError.empty() && !options.showHelp)
+    if (options.parseError.empty() && !options.showHelp && !options.showVersion)
     {
         int actionCount =
             (options.once ? 1 : 0) +
@@ -3049,7 +3066,7 @@ static AppOptions ParseCommandLine()
         }
     }
 
-    if (options.parseError.empty() && !options.showHelp)
+    if (options.parseError.empty() && !options.showHelp && !options.showVersion)
     {
         for (const auto& setting : options.writes)
         {
@@ -3088,7 +3105,8 @@ static std::wstring BuildHelpText()
         L"  --interval <seconds>  Save a polling interval from 15 to 86400.\r\n"
         L"  --tray | --no-tray    Override tray visibility for this run.\r\n"
         L"  --no-bootstrap        Do not register/relaunch through package identity.\r\n"
-        L"  --allow-multiple      Disable the path-scoped single-instance guard.\r\n\r\n"
+        L"  --allow-multiple      Disable the path-scoped single-instance guard.\r\n"
+        L"  --version             Show the release tag and package version.\r\n\r\n"
         L"Settings and logs stay beside the executable:\r\n"
         L"  " + g_paths.configPath + L"\r\n"
         L"  " + g_paths.defaultLogPath + L"\r\n\r\n"
@@ -3126,13 +3144,14 @@ static bool InitPathsAndLogging(const std::wstring& configOverride)
 
 static bool SignalExistingInstance(WPARAM request)
 {
-    return aip::SignalInstanceWindow(
+    return aip::SendInstanceWindowRequest(
         WINDOW_CLASS_NAME,
         g_identity.windowTitle.c_str(),
         WM_RLT_CONTROL,
         request,
         20,
         100,
+        10000,
         false);
 }
 
@@ -3314,6 +3333,12 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
         return 0;
     }
 
+    if (options.showVersion)
+    {
+        ShowCommandLineMessage(aip::ReleaseVersionDisplayText(), false);
+        return 0;
+    }
+
     if (options.requestExit)
     {
         return SignalExistingInstance(RLT_CONTROL_EXIT) ? 0 : 2;
@@ -3325,6 +3350,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
     }
 
     LogText(std::wstring(L"Starting ") + APP_NAME + L" from " + g_paths.exePath);
+    LogText(std::wstring(L"RssLiveTile version: ") + aip::ReleaseVersionDisplayText());
 
     if (!EnsureDefaultSettingsFile())
     {

@@ -430,6 +430,32 @@ static void TestTrayBehavior()
     Check((separatorState & MF_SEPARATOR) != 0, "tray separator creation");
 
     DestroyMenu(menu);
+
+    HMENU headerMenu = CreatePopupMenu();
+    bool headerAppended = aip::AppendBaselineTrayMenuHeader(
+        headerMenu,
+        200,
+        L"Show menu as dropdown",
+        true,
+        201,
+        L"Refresh now",
+        L"Version: Product-v7 (7.0.0.0)");
+    wchar_t dropdownText[64] = {};
+    GetMenuStringW(headerMenu, 0, dropdownText, ARRAYSIZE(dropdownText), MF_BYPOSITION);
+    wchar_t versionText[64] = {};
+    GetMenuStringW(headerMenu, 2, versionText, ARRAYSIZE(versionText), MF_BYPOSITION);
+    Check(
+        headerAppended &&
+            GetMenuItemCount(headerMenu) == 4 &&
+            std::wstring(dropdownText) == L"Show menu as dropdown" &&
+            GetMenuItemID(headerMenu, 0) == 200 &&
+            (GetMenuState(headerMenu, 0, MF_BYPOSITION) & MF_CHECKED) != 0 &&
+            GetMenuItemID(headerMenu, 1) == 201 &&
+            std::wstring(versionText) == L"Version: Product-v7 (7.0.0.0)" &&
+            (GetMenuState(headerMenu, 2, MF_BYPOSITION) & MF_DISABLED) != 0 &&
+            (GetMenuState(headerMenu, 3, MF_BYPOSITION) & MF_SEPARATOR) != 0,
+        "baseline tray header preserves dropdown, primary action, version, separator order");
+    DestroyMenu(headerMenu);
 }
 
 
@@ -594,6 +620,42 @@ static void TestLoggingBehavior()
         logBytes.size() >= 3 && logBytes[0] == 0xEF && logBytes[1] == 0xBB && logBytes[2] == 0xBF,
         "shared UTF-8 logger writes BOM for new log files");
 
+    std::wstring sharingLogPath = logPath + L".sharing";
+    DeleteFileW(sharingLogPath.c_str());
+    Check(
+        aip::AppendUtf8LineToFile(sharingLogPath, L"initial", true, 1000),
+        "shared UTF-8 logger prepares sharing-retry fixture");
+    HANDLE restrictiveReader = CreateFileW(
+        sharingLogPath.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    bool sharingRetryAppendOk = false;
+    std::thread sharingRetryWriter([&]() {
+        sharingRetryAppendOk =
+            aip::AppendUtf8LineToFile(sharingLogPath, L"after reader", true, 1000);
+    });
+    Sleep(100);
+    if (restrictiveReader != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(restrictiveReader);
+    }
+    sharingRetryWriter.join();
+    std::vector<BYTE> sharingLogBytes;
+    std::wstring sharingLogText;
+    bool sharingLogReadable =
+        aip::ReadWholeFileBytes(sharingLogPath, sharingLogBytes) &&
+        aip::DecodeTextBytes(sharingLogBytes, sharingLogText);
+    Check(
+        restrictiveReader != INVALID_HANDLE_VALUE &&
+            sharingRetryAppendOk &&
+            sharingLogReadable &&
+            sharingLogText.find(L"after reader") != std::wstring::npos,
+        "shared UTF-8 logger retries transient reader sharing violations");
+
     std::wstring utf16LogPath = logPath + L".utf16";
     DeleteFileW(utf16LogPath.c_str());
     std::vector<BYTE> utf16Bytes;
@@ -685,6 +747,7 @@ static void TestLoggingBehavior()
         "shared UTF-8 logger uses bounded append lock wait");
 
     RemoveDirectoryW(badLogPath.c_str());
+    DeleteFileW(sharingLogPath.c_str());
     DeleteFileW(utf16LogPath.c_str());
     DeleteFileW(logPath.c_str());
 }

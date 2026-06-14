@@ -49,6 +49,7 @@ static constexpr UINT WM_DRPC_TRAY = WM_APP + 61;
 static constexpr UINT WM_DRPC_NOTIFY = WM_APP + 62;
 static constexpr UINT WM_DRPC_REQUEST_SHUTDOWN = WM_APP + 63;
 static constexpr UINT WM_DRPC_WORKER_FINISHED = WM_APP + 64;
+static constexpr UINT WM_DRPC_INSTANCE_CONTROL = WM_APP + 65;
 
 static HINSTANCE g_hInst = nullptr;
 static std::wstring g_exePath;
@@ -58,9 +59,7 @@ static std::wstring g_iniPath;
 static std::wstring g_defaultLogPath;
 static std::wstring g_effectiveLogPath;
 static std::wstring g_singleInstanceMutexName;
-static std::wstring g_singleInstanceMessageName;
 static std::wstring g_instanceWindowTitle;
-static UINT g_singleInstanceMessage = 0;
 static UINT g_taskbarCreatedMessage = 0;
 static HANDLE g_singleInstanceMutex = nullptr;
 static std::atomic<HWND> g_runtimeWindow(nullptr);
@@ -79,6 +78,11 @@ static std::mutex g_consoleMutex;
 static bool g_consoleAllocated = false;
 
 #include "..\dependencies\desktop_app_baseline.h"
+
+#if __has_include("DiscordRPCVersionDefines.inc")
+#include "DiscordRPCVersionDefines.inc"
+#endif
+#include "..\dependencies\release_version.inc"
 
 static aip::Utf8Logger g_logger;
 #include "..\dependencies\dpapi.inc"
@@ -122,7 +126,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
     if (options.showVersion)
     {
         // Keep --version side-effect-free as well.
-        PrintLine(L"DiscordRPC C++");
+        PrintLine(aip::ReleaseVersionDisplayText());
         return 0;
     }
 

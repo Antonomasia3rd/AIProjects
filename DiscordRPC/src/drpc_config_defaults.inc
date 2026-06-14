@@ -168,8 +168,8 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"gateway", L"asset_fetch_user_agent", L"DiscordBot (https://github.com, 1)" },
 
     { L"strings", L"tray_tip", L"DiscordRPC" },
-    { L"strings", L"menu_status", L"DiscordRPC" },
     { L"strings", L"menu_refresh", L"Refresh now" },
+    { L"strings", L"menu_version_prefix", L"Version: " },
     { L"strings", L"menu_reload", L"Reload configuration" },
     { L"strings", L"menu_open_config", L"Open config" },
     { L"strings", L"menu_open_log_folder", L"Open log folder" },

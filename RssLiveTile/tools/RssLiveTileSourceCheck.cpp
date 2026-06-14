@@ -173,19 +173,47 @@ int wmain()
         runtimeDefaults.settings.showMenuAsDropdown,
         "tray dropdown layout defaults on");
     const std::string source = ReadSource("RssLiveTile.cpp");
+    Check(
+        source.find("return aip::INSTANCE_REQUEST_HANDLED;") != std::string::npos,
+        "resident control requests return the shared handled marker");
     const size_t togglePosition = source.find(
-        "AppendTrayMenuItem(menu, IDM_TOGGLE_MENU_DROPDOWN");
+        "AppendBaselineTrayMenuHeader");
+    const size_t refreshPosition = source.find(
+        "IDM_REFRESH",
+        togglePosition);
+    const size_t versionPosition = source.find(
+        "ReleaseVersionDisplayText",
+        refreshPosition);
     const size_t layoutPosition = source.find(
         "TraySectionLayout sectionLayout(menu, showMenuAsDropdown)");
     const size_t feedPosition = source.find(
         "HMENU feedMenu = sectionLayout.Begin");
     Check(
         togglePosition != std::string::npos &&
+            refreshPosition != std::string::npos &&
+            versionPosition != std::string::npos &&
             layoutPosition != std::string::npos &&
             feedPosition != std::string::npos &&
-            togglePosition < layoutPosition &&
+            togglePosition < refreshPosition &&
+            refreshPosition < versionPosition &&
+            versionPosition < layoutPosition &&
             layoutPosition < feedPosition,
-        "tray dropdown toggle remains on the root before section layout");
+        "tray root uses dropdown, refresh, version, separator baseline before sections");
+    Check(
+        source.find("AppendTrayMenuItem(feedMenu, 0, LimitText(status, 80), false, false)") != std::string::npos,
+        "dynamic feed status remains inside the Feed section");
+    Check(
+        source.find("showVersion") != std::string::npos &&
+            source.find("ReleaseVersionDisplayText") != std::string::npos &&
+            source.find("AIP_VERSION_TEXT_W") != std::string::npos,
+        "release version is shared by CLI, tray, logging, and default manifest");
+    const std::string buildSource = ReadSource("BuildRssLiveTile.cmd");
+    const std::string resourceSource = ReadSource("RssLiveTile.rc");
+    Check(
+        buildSource.find("resolve_release_version.ps1") != std::string::npos &&
+            buildSource.find("RssLiveTileVersionDefines.inc") != std::string::npos &&
+            resourceSource.find("release_version_resource.rc.inc") != std::string::npos,
+        "build embeds tag-derived runtime and Win32 version metadata");
     Check(
         POWERSHELL_OUTPUT_LIMIT_BYTES == 1024 * 1024,
         "PowerShell output capture is bounded");

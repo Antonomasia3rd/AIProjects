@@ -48,8 +48,41 @@ if errorlevel 1 (
     exit /b %errorlevel%
 )
 
+if /I "%RSSLIVETILE_REFRESH_TAGS%"=="1" if not defined RSSLIVETILE_VERSION if not defined RSSLIVETILE_RELEASE_TAG (
+    git remote get-url origin >nul 2>nul
+    if not errorlevel 1 (
+        git fetch --quiet --tags origin
+        if errorlevel 1 echo [!] Could not refresh RssLiveTile release tags from origin; continuing with local tags.
+    )
+)
+
+set "VERSION_RESULT=build\obj\RssLiveTileVersion.txt"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%..\dependencies\resolve_release_version.ps1" -TagPrefix "RssLiveTile-v" -VersionEnvironment "RSSLIVETILE_VERSION" -ReleaseTagEnvironment "RSSLIVETILE_RELEASE_TAG" > "%VERSION_RESULT%"
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+for /f "usebackq tokens=1,* delims==" %%A in ("%VERSION_RESULT%") do set "AIP_%%A=%%B"
+del /f /q "%VERSION_RESULT%" >nul 2>nul
+if not defined AIP_RELEASE_TAG (
+    echo ERROR: RssLiveTile release version resolver returned no release tag.
+    popd
+    exit /b 1
+)
+
+set "VERSION_DEFINES=/DAIP_VERSION_MAJOR=!AIP_VERSION_MAJOR! /DAIP_VERSION_MINOR=!AIP_VERSION_MINOR! /DAIP_VERSION_BUILD=!AIP_VERSION_BUILD! /DAIP_VERSION_REVISION=!AIP_VERSION_REVISION!"
+set "VERSION_INCLUDE=build\obj\RssLiveTileVersionDefines.inc"
+> "%VERSION_INCLUDE%" echo #define AIP_RELEASE_TAG "!AIP_RELEASE_TAG!"
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+echo RssLiveTile version: !AIP_RELEASE_TAG! (!AIP_VERSION!)
+
 if /I "%~1"=="check" (
-    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /Zs RssLiveTile.cpp
+    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE !VERSION_DEFINES! /Ibuild\obj /Zs RssLiveTile.cpp
     set "STATUS=!ERRORLEVEL!"
     if "!STATUS!"=="0" call TestRssLiveTileSource.cmd
     if "!STATUS!"=="0" set "STATUS=!ERRORLEVEL!"
@@ -59,8 +92,15 @@ if /I "%~1"=="check" (
 
 set "OUT_EXE=build\RssLiveTile.exe"
 set "OBJ_FILE=build\obj\RssLiveTile.obj"
+set "RES_FILE=build\obj\RssLiveTile.res"
 
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE RssLiveTile.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib winhttp.lib gdi32.lib user32.lib shell32.lib shlwapi.lib ole32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+rc /nologo /dAIP_VERSION_MAJOR=!AIP_VERSION_MAJOR! /dAIP_VERSION_MINOR=!AIP_VERSION_MINOR! /dAIP_VERSION_BUILD=!AIP_VERSION_BUILD! /dAIP_VERSION_REVISION=!AIP_VERSION_REVISION! /fo"%RES_FILE%" RssLiveTile.rc
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE !VERSION_DEFINES! /Ibuild\obj RssLiveTile.cpp "%RES_FILE%" /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib winhttp.lib gdi32.lib user32.lib shell32.lib shlwapi.lib ole32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 

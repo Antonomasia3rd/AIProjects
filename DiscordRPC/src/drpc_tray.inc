@@ -212,11 +212,22 @@ static void ShowTrayMenu(RuntimeContext* ctx)
         return;
     }
 
-    aip::AppendTrayMenuItem(menu, ID_TRAY_REFRESH, GetUiString(L"menu_refresh", L"Refresh now"));
-    aip::AppendTrayMenuItem(menu, 0, GetUiString(L"menu_status", APP_DISPLAY_NAME), false, false);
     bool showMenuAsDropdown = IniReadB(L"app", L"show_menu_as_dropdown", true);
-    AppendChecked(menu, ID_TOGGLE_MENU_DROPDOWN, GetUiString(L"menu_dropdown", L"Show menu as dropdown"), showMenuAsDropdown);
-    aip::AppendMenuSeparator(menu);
+    std::wstring versionLine =
+        GetUiString(L"menu_version_prefix", L"Version: ") +
+        aip::ReleaseVersionDisplayText();
+    if (!aip::AppendBaselineTrayMenuHeader(
+            menu,
+            ID_TOGGLE_MENU_DROPDOWN,
+            GetUiString(L"menu_dropdown", L"Show menu as dropdown"),
+            showMenuAsDropdown,
+            ID_TRAY_REFRESH,
+            GetUiString(L"menu_refresh", L"Refresh now"),
+            versionLine))
+    {
+        LogError(L"Could not append the baseline tray menu header: " +
+            GetLastErrorText(GetLastError()));
+    }
 
     aip::TraySectionLayout sectionLayout(menu, showMenuAsDropdown);
     auto beginSection = [&](const std::wstring& title) -> HMENU {
@@ -360,23 +371,24 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         }
     }
 
-    if (g_singleInstanceMessage != 0 && msg == g_singleInstanceMessage)
+    if (msg == WM_DRPC_INSTANCE_CONTROL)
     {
         if (ctx != nullptr)
         {
             if (wParam == DRPC_INSTANCE_EXIT)
             {
                 RequestDiscordShutdown(ctx);
-                return 0;
+                return aip::INSTANCE_REQUEST_HANDLED;
             }
             if (wParam == DRPC_INSTANCE_RELOAD)
             {
                 g_reloadRequested = true;
                 g_refreshRequested = true;
                 ShowTrayBalloon(ctx, GetUiString(L"notification_title", APP_DISPLAY_NAME), GetUiString(L"reload_requested", L"DiscordRPC configuration reload requested."), NIIF_INFO);
-                return 0;
+                return aip::INSTANCE_REQUEST_HANDLED;
             }
             ShowTrayBalloon(ctx, GetUiString(L"notification_title", APP_DISPLAY_NAME), GetUiString(L"already_running", L"DiscordRPC is already running for this config."), NIIF_INFO);
+            return aip::INSTANCE_REQUEST_HANDLED;
         }
         return 0;
     }

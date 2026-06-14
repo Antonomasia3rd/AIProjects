@@ -398,7 +398,7 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
     if (g_singleInstanceMessage && m == g_singleInstanceMessage)
     {
         HandleSingleInstanceRequest(w);
-        return 0;
+        return aip::INSTANCE_REQUEST_HANDLED;
     }
 
     if (g_taskbarCreatedMessage && m == g_taskbarCreatedMessage)
@@ -517,13 +517,14 @@ static bool SignalExistingInstance(WPARAM request = SINGLE_INSTANCE_REQUEST_SHOW
 {
     int retries = IniReadClampedI(L"Settings", L"SingleInstanceSignalRetries", 50, 0, 200);
     int delayMs = IniReadClampedI(L"Settings", L"SingleInstanceSignalDelayMs", 100, 0, 5000);
-    return aip::SignalInstanceWindow(
+    return aip::SendInstanceWindowRequest(
         WINDOW_CLASS_NAME,
         g_instanceWindowTitle.empty() ? nullptr : g_instanceWindowTitle.c_str(),
         g_singleInstanceMessage,
         request,
         retries,
-        delayMs);
+        delayMs,
+        10000);
 }
 
 static bool TryGetAlreadyRunningRequest(WPARAM& request)

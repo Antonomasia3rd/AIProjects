@@ -37,6 +37,29 @@ inline void AppendMenuSeparator(HMENU menu)
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 }
 
+inline bool AppendBaselineTrayMenuHeader(
+    HMENU menu,
+    UINT dropdownCommand,
+    const std::wstring& dropdownText,
+    bool showAsDropdown,
+    UINT primaryCommand,
+    const std::wstring& primaryText,
+    const std::wstring& versionText)
+{
+    bool ok = AppendTrayMenuItem(
+        menu,
+        dropdownCommand,
+        dropdownText,
+        showAsDropdown);
+    ok = AppendTrayMenuItem(menu, primaryCommand, primaryText) && ok;
+    ok = AppendTrayMenuItem(menu, 0, versionText, false, false) && ok;
+    if (!AppendMenuW(menu, MF_SEPARATOR, 0, nullptr))
+    {
+        ok = false;
+    }
+    return ok;
+}
+
 inline HMENU CreateTrayPopupMenu()
 {
     return CreatePopupMenu();

@@ -58,6 +58,8 @@ It then registers `AppxManifest.xml`, launches the packaged `shell:AppsFolder\..
 
 The tray menu exposes refresh, configuration reload, the latest article, settings/log shortcuts, asynchronous package registration/launch actions, and exit. Package maintenance is started through separate command-line helper processes so the resident window remains responsive. Command-line setting changes reload an existing resident automatically.
 
+The tray root follows the DesktopStub baseline: `Show menu as dropdown`, `Refresh now`, a disabled `Version: <tag> (<version>)` row, then the section separator. Dynamic feed status stays inside the `Feed` section so it cannot displace the shared root header.
+
 ## Settings
 
 Settings are stored at:
@@ -86,11 +88,14 @@ Default settings:
 "Description" = "RSS feed Live Tile updater"
 "IdentityName" = "RssLiveTile.App"
 "Publisher" = "CN=RssLiveTile"
-"Version" = "1.0.0.0"
+"Version" = "N.0.0.0"
 "BackgroundColor" = "#005A9E"
 ```
 
 `MaxItems` is capped at 5 because Windows Live Tile notification queues rotate at most five tile notifications per app.
+
+`Manifest.Version` defaults to the executable's four-part `FileVersion`; `N`
+matches the numeric `RssLiveTile-vN` release tag for that build.
 
 `ShowMenuAsDropdown` follows the DesktopStub tray contract. Its checkbox stays on the tray root; enabled mode groups commands into Feed, Application, and Package submenus, while disabled mode renders the same sections inline.
 
@@ -111,6 +116,7 @@ RssLiveTile.exe --exit
 Supported options:
 
 - `--help`, `-h`, `/?`: show help.
+- `--version`: show the release tag and four-part package version without creating sidecar files.
 - `--ini <path>`: use an alternate INI file. Alternate INI instances have separate single-instance scope.
 - `--set Section.Key=Value`: set and save an INI value.
 - `--feed-url <url>`: set and save `[Settings] FeedUrl`.

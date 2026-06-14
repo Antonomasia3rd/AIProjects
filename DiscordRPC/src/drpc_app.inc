@@ -165,6 +165,7 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
     DWORD exitCode = 0;
 
     LogInfo(L"Starting DiscordRPC C++.");
+    LogInfo(L"DiscordRPC version: " + aip::ReleaseVersionDisplayText());
     LogInfo(L"Config: " + MakeAbsolutePath(g_iniPath));
     if (IniReadB(L"state", L"force_shutdown_pending_cleanup", false))
     {
@@ -277,13 +278,14 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
 static bool SignalExistingInstance(WPARAM request)
 {
     ConfigureSingleInstanceIdentity();
-    return aip::SignalInstanceWindow(
+    return aip::SendInstanceWindowRequest(
         WINDOW_CLASS_NAME,
         g_instanceWindowTitle.c_str(),
-        g_singleInstanceMessage,
+        WM_DRPC_INSTANCE_CONTROL,
         request,
         20,
         50,
+        10000,
         false);
 }
 
@@ -318,6 +320,7 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
         return 1;
     }
     g_runtimeWindow = hwnd;
+    LogInfo(L"Resident control window ready.");
 
     try
     {
@@ -390,10 +393,7 @@ static int RunApplication(const AppOptions& options)
             }
         }
 
-        if (g_singleInstanceMessage != 0)
-        {
-            SignalExistingInstance(DRPC_INSTANCE_SHOW);
-        }
+        SignalExistingInstance(DRPC_INSTANCE_SHOW);
 
         PrintLine(GetUiString(L"already_running", L"DiscordRPC is already running for this config."), true);
         ReleaseSingleInstance();

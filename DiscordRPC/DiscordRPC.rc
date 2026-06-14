@@ -1,0 +1,7 @@
+#define AIP_FILE_DESCRIPTION "Discord rich presence tray utility"
+#define AIP_INTERNAL_NAME "DiscordRPC.exe"
+#define AIP_ORIGINAL_FILENAME "DiscordRPC.exe"
+#define AIP_COMPANY_NAME "AIProjects"
+#define AIP_PRODUCT_NAME "DiscordRPC"
+
+#include "..\\dependencies\\release_version_resource.rc.inc"

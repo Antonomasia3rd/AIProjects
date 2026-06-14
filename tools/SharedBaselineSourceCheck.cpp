@@ -96,6 +96,9 @@ int main()
         const std::string dpapi = ReadAll("dependencies/dpapi.inc");
         const std::string logging = ReadAll("dependencies/logging.inc");
         const std::string tray = ReadAll("dependencies/tray.inc");
+        const std::string releaseVersion = ReadAll("dependencies/release_version.inc");
+        const std::string releaseVersionResource = ReadAll("dependencies/release_version_resource.rc.inc");
+        const std::string releaseVersionResolver = ReadAll("dependencies/resolve_release_version.ps1");
         const std::string baselineHeader = ReadAll("dependencies/desktop_app_baseline.h");
         const std::string dependenciesReadme = ReadAll("dependencies/README.md");
         const std::string sharedTests = ReadAll("tools/SharedBaselineTests.cpp");
@@ -197,6 +200,22 @@ int main()
             "dependencies/tray.inc",
             tray,
             "AppendTrayMenuItem");
+        RequireOrderedContains(
+            "shared tray header fixes the DesktopStub root ordering contract",
+            "dependencies/tray.inc",
+            tray,
+            {
+                "AppendBaselineTrayMenuHeader",
+                "dropdownCommand",
+                "primaryCommand",
+                "versionText",
+                "MF_SEPARATOR"
+            });
+        RequireContains(
+            "shared tray header has a runtime content regression test",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "baseline tray header preserves dropdown, primary action, version, separator order");
         RequireContains(
             "shared tray dependency provides submenu primitives",
             "dependencies/tray.inc",
@@ -208,10 +227,40 @@ int main()
             tray,
             "return Shell_NotifyIconW(NIM_MODIFY, &nid) != FALSE;");
         RequireContains(
+            "shared release helper formats tag and four-part version",
+            "dependencies/release_version.inc",
+            releaseVersion,
+            "ReleaseVersionDisplayText");
+        RequireContains(
+            "shared release resource keeps file and product versions aligned",
+            "dependencies/release_version_resource.rc.inc",
+            releaseVersionResource,
+            "PRODUCTVERSION AIP_VERSION_COMMA");
+        RequireContains(
+            "shared release resolver accepts explicit CI version overrides",
+            "dependencies/resolve_release_version.ps1",
+            releaseVersionResolver,
+            "VersionEnvironment");
+        RequireContains(
+            "shared release resolver rejects zero major versions",
+            "dependencies/resolve_release_version.ps1",
+            releaseVersionResolver,
+            "$versionParts[0] -lt 1");
+        RequireContains(
             "shared application baseline exposes reusable subsystem contracts",
             "dependencies/baseline_app.h",
             baselineApp,
             "BuildInstanceIdentity");
+        RequireContains(
+            "shared application baseline supports acknowledged instance requests",
+            "dependencies/baseline_app.h",
+            baselineApp,
+            "SendMessageTimeoutW");
+        RequireContains(
+            "shared application baseline requires an explicit handled result",
+            "dependencies/baseline_app.h",
+            baselineApp,
+            "static_cast<LRESULT>(result) == INSTANCE_REQUEST_HANDLED");
         RequireContains(
             "shared application baseline exposes resident shutdown state",
             "dependencies/baseline_app.h",
@@ -494,6 +543,16 @@ int main()
             logging,
             "FILE_APPEND_DATA | FILE_WRITE_DATA | SYNCHRONIZE");
         RequireContains(
+            "shared logging helper retries transient sharing violations while opening append files",
+            "dependencies/logging.inc",
+            logging,
+            "OpenAppendLogFileWithRetry");
+        RequireContains(
+            "shared logging helper limits append-open retries with the configured wait",
+            "dependencies/logging.inc",
+            logging,
+            "error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION");
+        RequireContains(
             "shared logging helper seeks to EOF after acquiring the append lock",
             "dependencies/logging.inc",
             logging,
@@ -770,6 +829,11 @@ int main()
             "tools/SharedBaselineTests.cpp",
             sharedTests,
             "shared UTF-8 logger allows concurrent appenders");
+        RequireContains(
+            "shared tests lock transient sharing-violation recovery",
+            "tools/SharedBaselineTests.cpp",
+            sharedTests,
+            "shared UTF-8 logger retries transient reader sharing violations");
         RequireContains(
             "shared tests lock UTF-8 BOM logging behavior",
             "tools/SharedBaselineTests.cpp",
