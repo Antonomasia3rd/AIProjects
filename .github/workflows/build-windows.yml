@@ -117,6 +117,15 @@ jobs:
         shell: cmd
         run: tools\TestSharedBaseline.cmd
 
+      - name: Prepare reusable release versions
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-projects.outputs.release_project_list != ''
+        shell: cmd
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PROJECT_LIST: ${{ needs.detect-projects.outputs.release_project_list }}
+          REPO: ${{ github.repository }}
+        run: .github\scripts\Prepare-ReleaseVersions.cmd
+
       - name: Build
         shell: cmd
         run: .github\scripts\build-windows.cmd ${{ needs.detect-projects.outputs.skip_args }}
