@@ -61,6 +61,7 @@
     "artifactName": "DiscordRPC",
     "artifactPath": "DiscordRPC/build/DiscordRPC.exe",
     "skipKey": "DiscordRPC",
+    "releaseTagEnvironment": "DISCORDRPC_RELEASE_TAG",
     "artifactPaths": [
       "DiscordRPC/build/DiscordRPC.exe"
     ]
@@ -111,6 +112,7 @@
     "artifactPath": "DesktopStub/build/DesktopStub.exe",
     "smokePath": "DesktopStub/build/DesktopStub.exe",
     "skipKey": "DesktopStub",
+    "releaseTagEnvironment": "DESKTOPSTUB_RELEASE_TAG",
     "artifactPaths": [
       "DesktopStub/build/DesktopStub.exe",
       "DesktopStub/build/DesktopStubLiveTileBroker.exe"
@@ -125,6 +127,7 @@
     "artifactPath": "RssLiveTile/build/RssLiveTile.exe",
     "smokePath": "RssLiveTile/build/RssLiveTile.exe",
     "skipKey": "RssLiveTile",
+    "releaseTagEnvironment": "RSSLIVETILE_RELEASE_TAG",
     "artifactPaths": [
       "RssLiveTile/build/RssLiveTile.exe",
       "RssLiveTile/README.md"

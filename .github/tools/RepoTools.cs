@@ -21,6 +21,12 @@ sealed class Project
     public string smokePath { get; set; }
     public string skipKey { get; set; }
     public string[] dependencyPaths { get; set; }
+    public string releaseTagEnvironment { get; set; }
+}
+
+sealed class GitHubReleaseAssetInfo
+{
+    public int downloadCount { get; set; }
 }
 
 sealed class ProcessResult
@@ -34,6 +40,7 @@ sealed class GitHubReleaseInfo
 {
     public string tagName { get; set; }
     public bool isDraft { get; set; }
+    public List<GitHubReleaseAssetInfo> assets { get; set; }
 }
 
 static class RepoTools
@@ -58,6 +65,7 @@ static class RepoTools
             if (command == "checksum-summary") return ChecksumSummary(rest);
             if (command == "smoke-windows-build") return SmokeWindowsBuild(rest);
             if (command == "smoke-rss-live-tile") return SmokeRssLiveTile(rest);
+            if (command == "prepare-release-versions") return PrepareReleaseVersions(rest);
             if (command == "publish-project-releases") return PublishProjectReleases(rest);
             if (command == "version")
             {
@@ -85,6 +93,7 @@ static class RepoTools
         Console.WriteLine("  checksum-summary");
         Console.WriteLine("  smoke-windows-build");
         Console.WriteLine("  smoke-rss-live-tile");
+        Console.WriteLine("  prepare-release-versions");
         Console.WriteLine("  publish-project-releases");
     }
 
@@ -181,6 +190,14 @@ static class RepoTools
                 string unique = field + "=" + ProjectField(p, field);
                 if (!seen.Add(unique))
                     throw new InvalidOperationException("Duplicate project map value for " + field + ": " + ProjectField(p, field));
+            }
+
+            if (!String.IsNullOrWhiteSpace(p.releaseTagEnvironment))
+            {
+                if (!Regex.IsMatch(p.releaseTagEnvironment, "^[A-Z][A-Z0-9_]*$"))
+                    throw new InvalidOperationException("Invalid releaseTagEnvironment for " + p.key + ": " + p.releaseTagEnvironment);
+                if (!seen.Add("releaseTagEnvironment=" + p.releaseTagEnvironment))
+                    throw new InvalidOperationException("Duplicate project map releaseTagEnvironment: " + p.releaseTagEnvironment);
             }
 
             if (!Directory.Exists(Path.Combine(root, p.folder)))
@@ -290,12 +307,64 @@ static class RepoTools
             !repoTools.Contains("release create reported failure, but draft release "))
             throw new InvalidOperationException("Automatic release creation must recover if a transient failure still created a draft.");
 
+        if (!repoTools.Contains("prepare-release-versions") ||
+            !repoTools.Contains("FindReplaceableLatestRelease") ||
+            !repoTools.Contains("--cleanup-tag"))
+            throw new InvalidOperationException("Automatic releases must reuse the latest zero-download version before building and clean up its old tag when replacing it.");
+
+        if (!Regex.IsMatch(
+                workflow,
+                @"Prepare reusable release versions.*Prepare-ReleaseVersions\.cmd.*- name: Build",
+                RegexOptions.Singleline))
+        {
+            throw new InvalidOperationException(
+                "The workflow must prepare reusable zero-download release versions before compiling binaries.");
+        }
+
         if (!repoTools.Contains("Release-pending projects also selected for build:"))
             throw new InvalidOperationException("Project selection must build release-pending projects so follow-up CI fixes do not skip previously changed consumers.");
 
         var releaseNames = new[] { "DesktopStub-v2", "DesktopStub-v5", "DesktopStub-v4" };
         if (NextReleaseTag("DesktopStub", releaseNames) != "DesktopStub-v6")
             throw new InvalidOperationException("Release version selection must include draft release names.");
+
+        var zeroDownloadRelease = new GitHubReleaseInfo
+        {
+            tagName = "DesktopStub-v5",
+            assets = new List<GitHubReleaseAssetInfo>
+            {
+                new GitHubReleaseAssetInfo { downloadCount = 0 },
+                new GitHubReleaseAssetInfo { downloadCount = 0 }
+            }
+        };
+        var downloadedRelease = new GitHubReleaseInfo
+        {
+            tagName = "DesktopStub-v5",
+            assets = new List<GitHubReleaseAssetInfo>
+            {
+                new GitHubReleaseAssetInfo { downloadCount = 1 },
+                new GitHubReleaseAssetInfo { downloadCount = 0 }
+            }
+        };
+        var releaseSummaries = new[]
+        {
+            new GitHubReleaseInfo { tagName = "DesktopStub-v4" },
+            new GitHubReleaseInfo { tagName = "DesktopStub-v5" }
+        };
+        if (!IsReplaceableLatestRelease("DesktopStub", releaseSummaries, zeroDownloadRelease))
+            throw new InvalidOperationException("The highest published release with zero aggregate downloads must be replaceable.");
+        if (IsReplaceableLatestRelease("DesktopStub", releaseSummaries, downloadedRelease))
+            throw new InvalidOperationException("A release with any asset download must never be replaced.");
+        if (IsReplaceableLatestRelease(
+                "DesktopStub",
+                releaseSummaries.Concat(new[]
+                {
+                    new GitHubReleaseInfo { tagName = "DesktopStub-v6", isDraft = true }
+                }),
+                zeroDownloadRelease))
+        {
+            throw new InvalidOperationException("A published release must not be replaced while a newer draft version exists.");
+        }
 
         var commandLineConsumers = ProjectsUsingChangedDependencies(root, projects, new List<string> { "dependencies/command_line.inc" })
             .Select(p => p.key)
@@ -1647,6 +1716,64 @@ static class RepoTools
         throw new TimeoutException(name + " timed out waiting for '" + needle + "'.");
     }
 
+    static int PrepareReleaseVersions(string[] args)
+    {
+        string root = RepositoryRoot(args);
+        string repository = Option(args, "--repository", Environment.GetEnvironmentVariable("REPO") ?? "");
+        string releaseProjectList = Option(
+            args,
+            "--release-project-list",
+            Environment.GetEnvironmentVariable("RELEASE_PROJECT_LIST") ?? "");
+        string environmentFile = Option(
+            args,
+            "--environment-file",
+            Environment.GetEnvironmentVariable("GITHUB_ENV") ?? "");
+        if (String.IsNullOrWhiteSpace(releaseProjectList))
+        {
+            Console.WriteLine("No project releases selected for version preparation.");
+            return 0;
+        }
+        if (String.IsNullOrWhiteSpace(repository))
+            throw new InvalidOperationException("Repository was not provided and REPO is empty.");
+        if (String.IsNullOrWhiteSpace(environmentFile))
+            throw new InvalidOperationException("Environment file was not provided and GITHUB_ENV is empty.");
+
+        var projects = LoadProjectMap(root);
+        var selected = ResolveReleaseProjects(projects, releaseProjectList);
+        var releases = ListGitHubReleases(repository, root);
+        var environmentLines = new List<string>();
+        foreach (Project project in selected)
+        {
+            if (String.IsNullOrWhiteSpace(project.releaseTagEnvironment))
+                continue;
+
+            GitHubReleaseInfo replaceable = FindReplaceableLatestRelease(
+                repository,
+                project.key,
+                releases.Where(r => IsReleaseFamilyTag(project.key, r.tagName)),
+                root);
+            if (replaceable == null)
+                continue;
+
+            environmentLines.Add(project.releaseTagEnvironment + "=" + replaceable.tagName);
+            Console.WriteLine(
+                "Reusing zero-download release version for " +
+                project.label + ": " + replaceable.tagName);
+        }
+
+        if (environmentLines.Count == 0)
+        {
+            Console.WriteLine("No zero-download release versions need to be reused.");
+            return 0;
+        }
+
+        File.AppendAllText(
+            environmentFile,
+            String.Join(Environment.NewLine, environmentLines) + Environment.NewLine,
+            new UTF8Encoding(false));
+        return 0;
+    }
+
     static ProcessResult SmokeProcess(string file, string[] args, int[] allowedExitCodes, int timeoutSeconds, string name)
     {
         if (!File.Exists(file))
@@ -1725,19 +1852,9 @@ static class RepoTools
 
         RunRequired("git", "fetch --force --tags", root);
         var projects = LoadProjectMap(root);
-        var releaseLabels = releaseProjectList.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(s => s.Trim())
-            .Where(s => s.Length > 0)
-            .ToList();
-        var releaseKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string label in releaseLabels)
-        {
-            Project p = projects.FirstOrDefault(x => x.label.Equals(label, StringComparison.OrdinalIgnoreCase) ||
-                x.key.Equals(label, StringComparison.OrdinalIgnoreCase));
-            if (p == null)
-                throw new InvalidOperationException("Unknown release project: " + label);
-            releaseKeys.Add(p.key);
-        }
+        var releaseKeys = new HashSet<string>(
+            ResolveReleaseProjects(projects, releaseProjectList).Select(p => p.key),
+            StringComparer.OrdinalIgnoreCase);
         var entries = new List<Tuple<Project, string, List<string>, string>>();
         var missingArtifacts = new List<Project>();
         foreach (var p in projects)
@@ -1794,14 +1911,21 @@ static class RepoTools
             var releases = ListGitHubReleases(repository, root)
                 .Where(r => IsReleaseFamilyTag(releaseBase, r.tagName))
                 .ToList();
+            GitHubReleaseInfo replaceableRelease = FindReplaceableLatestRelease(
+                repository,
+                releaseBase,
+                releases,
+                root);
             string embeddedBinaryTag = EmbeddedBinaryReleaseTag(p, files);
             string tag = null;
+            bool tagPointsAtFullSha = false;
             foreach (string candidate in matchingTags)
             {
                 string sha = RunCaptureRequired("git", "rev-list -n 1 " + QuoteArg(candidate), root).Trim();
                 if (sha == fullSha)
                 {
                     tag = candidate;
+                    tagPointsAtFullSha = true;
                     break;
                 }
             }
@@ -1824,6 +1948,10 @@ static class RepoTools
                     ReleaseVersion(releaseBase, reusableDraft.tagName) > maxPublishedVersion)
                 {
                     tag = reusableDraft.tagName;
+                }
+                else if (replaceableRelease != null)
+                {
+                    tag = replaceableRelease.tagName;
                 }
                 else
                 {
@@ -1889,9 +2017,40 @@ static class RepoTools
                     r => r.tagName.Equals(tag, StringComparison.OrdinalIgnoreCase));
                 if (existingRelease != null && !existingRelease.isDraft)
                 {
-                    Console.WriteLine("Release " + tag + " is already published; leaving it unchanged.");
-                    summary.Add("| " + p.label + " | `" + tag + "` | already published |");
-                    continue;
+                    GitHubReleaseInfo currentReplaceable = FindReplaceableLatestRelease(
+                        repository,
+                        releaseBase,
+                        releases,
+                        root);
+                    if (currentReplaceable != null &&
+                        currentReplaceable.tagName.Equals(tag, StringComparison.OrdinalIgnoreCase))
+                    {
+                        RunRequiredWithRetry(
+                            "gh",
+                            "release delete " + QuoteArg(tag) +
+                            " --repo " + QuoteArg(repository) +
+                            " --yes --cleanup-tag",
+                            root,
+                            120000,
+                            3);
+                        Console.WriteLine(
+                            "Deleted zero-download release " + tag +
+                            " so the version can be republished for " + fullSha + ".");
+                        existingRelease = null;
+                    }
+                    else if (tagPointsAtFullSha)
+                    {
+                        Console.WriteLine("Release " + tag + " is already published; leaving it unchanged.");
+                        summary.Add("| " + p.label + " | `" + tag + "` | already published |");
+                        continue;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            "Release " + tag +
+                            " can no longer be replaced because it is not the latest zero-download release. " +
+                            "Rerun the workflow so the project receives a new version.");
+                    }
                 }
 
                 bool createdDraft = false;
@@ -1916,6 +2075,7 @@ static class RepoTools
                                 throw;
                             }
 
+                            createdDraft = true;
                             Console.Error.WriteLine("WARNING: release create reported failure, but draft release " + tag + " exists; continuing with upload.");
                         }
                     }
@@ -1929,7 +2089,7 @@ static class RepoTools
                     {
                         ProcessResult cleanup = RunCapture(
                             "gh",
-                            "release delete " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --yes",
+                            "release delete " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --yes --cleanup-tag",
                             root,
                             120000);
                         if (cleanup.ExitCode != 0)
@@ -1967,7 +2127,7 @@ static class RepoTools
     {
         ProcessResult result = RunWithRetry(
             "gh",
-            "release view " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --json tagName,isDraft",
+            "release view " + QuoteArg(tag) + " --repo " + QuoteArg(repository) + " --json tagName,isDraft,assets",
             root,
             120000,
             3,
@@ -1986,6 +2146,73 @@ static class RepoTools
         {
             return null;
         }
+    }
+
+    static List<Project> ResolveReleaseProjects(List<Project> projects, string releaseProjectList)
+    {
+        var selected = new List<Project>();
+        var selectedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string label in releaseProjectList
+            .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0))
+        {
+            Project project = projects.FirstOrDefault(
+                p => p.label.Equals(label, StringComparison.OrdinalIgnoreCase) ||
+                    p.key.Equals(label, StringComparison.OrdinalIgnoreCase));
+            if (project == null)
+                throw new InvalidOperationException("Unknown release project: " + label);
+            if (selectedKeys.Add(project.key))
+                selected.Add(project);
+        }
+        return selected;
+    }
+
+    static GitHubReleaseInfo FindReplaceableLatestRelease(
+        string repository,
+        string releaseBase,
+        IEnumerable<GitHubReleaseInfo> releases,
+        string root)
+    {
+        var family = releases
+            .Where(r => IsReleaseFamilyTag(releaseBase, r.tagName))
+            .ToList();
+        GitHubReleaseInfo latestPublished = family
+            .Where(r => !r.isDraft)
+            .OrderByDescending(r => ReleaseVersion(releaseBase, r.tagName))
+            .FirstOrDefault();
+        if (latestPublished == null)
+            return null;
+
+        GitHubReleaseInfo detailed = TryViewGitHubRelease(
+            repository,
+            latestPublished.tagName,
+            root);
+        return IsReplaceableLatestRelease(releaseBase, family, detailed)
+            ? detailed
+            : null;
+    }
+
+    static bool IsReplaceableLatestRelease(
+        string releaseBase,
+        IEnumerable<GitHubReleaseInfo> releases,
+        GitHubReleaseInfo detailedRelease)
+    {
+        if (detailedRelease == null ||
+            detailedRelease.isDraft ||
+            detailedRelease.assets == null)
+        {
+            return false;
+        }
+
+        int version = ReleaseVersion(releaseBase, detailedRelease.tagName);
+        int highestVersion = releases
+            .Select(r => ReleaseVersion(releaseBase, r.tagName))
+            .DefaultIfEmpty(0)
+            .Max();
+        return version > 0 &&
+            version == highestVersion &&
+            detailedRelease.assets.Sum(asset => asset.downloadCount) == 0;
     }
 
     static bool IsReleaseFamilyTag(string releaseBase, string tag)
@@ -2225,7 +2452,7 @@ static class RepoTools
             return false;
         if (!Path.GetFileNameWithoutExtension(file).Equals("gh", StringComparison.OrdinalIgnoreCase))
             return false;
-        if (!Regex.IsMatch(arguments ?? "", @"(^|\s)release\s+(list|edit|upload)\b", RegexOptions.IgnoreCase))
+        if (!Regex.IsMatch(arguments ?? "", @"(^|\s)release\s+(list|view|edit|upload|delete)\b", RegexOptions.IgnoreCase))
             return false;
 
         string text = (result.Output ?? "") + "\n" + (result.Error ?? "");
