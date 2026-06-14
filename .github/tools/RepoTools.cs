@@ -1052,6 +1052,7 @@ static class RepoTools
                     SetDesktopStubManifestIdentity(manifestPath, smokeIdentity);
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", wallpaper, "--once", "--no-tray", "--no-monitor" }, new[] { 0 }, 30, "DesktopStub one-shot generation");
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", Path.Combine(tempRoot, "missing.png"), "--no-tray" }, new[] { 2 }, 30, "DesktopStub invalid wallpaper guard");
+                    VerifyDesktopStubSecondLaunchActions(exe, tempRoot);
                     VerifyDesktopStubConcurrentIniWrites(exe, concurrentIni);
 
                     if (!File.Exists(manifestPath))
@@ -1307,6 +1308,68 @@ static class RepoTools
         }
     }
 
+    static void VerifyDesktopStubSecondLaunchActions(string exe, string tempRoot)
+    {
+        string ini = Path.Combine(tempRoot, "SecondLaunch.ini");
+        string log = Path.Combine(tempRoot, "SecondLaunch.log");
+        string config =
+            "[Settings]\r\n" +
+            "\"TrayIcon\" = \"0\"\r\n" +
+            "\"ShowConsole\" = \"0\"\r\n" +
+            "\"Logging\" = \"1\"\r\n" +
+            "\"LogPath\" = \"" + log.Replace("\\", "\\\\") + "\"\r\n" +
+            "\"NotificationsEnabled\" = \"0\"\r\n" +
+            "\"GenerateOnStartup\" = \"0\"\r\n" +
+            "\"AlreadyRunningAction\" = \"Ignore\"\r\n";
+        File.WriteAllText(ini, config, new UTF8Encoding(true));
+
+        var psi = new ProcessStartInfo(
+            exe,
+            JoinArgs(new[] { "--ini", ini, "--no-tray", "--no-monitor" }))
+        {
+            WorkingDirectory = Path.GetDirectoryName(exe),
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using (var resident = new Process { StartInfo = psi })
+        {
+            if (!resident.Start())
+                throw new InvalidOperationException("Failed to start DesktopStub second-launch resident.");
+
+            try
+            {
+                WaitForFileText(log, "Program starting...", 10000, "DesktopStub second-launch resident startup");
+                SmokeProcess(exe, new[] { "--ini", ini }, new[] { 0 }, 10, "DesktopStub second-launch ignore");
+                if (resident.HasExited)
+                    throw new InvalidOperationException("DesktopStub Ignore second-launch action stopped the resident.");
+
+                SmokeProcess(
+                    exe,
+                    new[] { "--ini", ini, "--set", "Settings.AlreadyRunningAction=ShowConsole" },
+                    new[] { 0 },
+                    10,
+                    "DesktopStub second-launch action reload");
+                SmokeProcess(exe, new[] { "--ini", ini }, new[] { 0 }, 10, "DesktopStub second-launch show console");
+                WaitForFileText(log, "Console on.", 10000, "DesktopStub second-launch console delivery");
+                AssertFileContains(ini, "\"ShowConsole\" = \"0\"", "DesktopStub second-launch console action must remain session-only");
+
+                SmokeProcess(exe, new[] { "--ini", ini, "--exit" }, new[] { 0 }, 10, "DesktopStub explicit exit override");
+                if (!resident.WaitForExit(10000))
+                    throw new TimeoutException("DesktopStub resident did not stop after explicit --exit.");
+                Console.WriteLine("ok - DesktopStub configurable second-launch actions");
+            }
+            finally
+            {
+                if (!resident.HasExited)
+                {
+                    try { resident.Kill(); } catch { }
+                    try { resident.WaitForExit(); } catch { }
+                }
+            }
+        }
+    }
+
     static void VerifyDiscordRpcNoTrayControl(string exe, string tempRoot)
     {
         string ini = Path.Combine(tempRoot, "NoTrayResident.ini");
@@ -1323,7 +1386,10 @@ static class RepoTools
             "\"notifications_enabled\" = \"false\"\r\n" +
             "\"logging_enabled\" = \"true\"\r\n" +
             "\"file_logging_enabled\" = \"true\"\r\n" +
-            "\"log_path\" = \"" + log.Replace("\\", "\\\\") + "\"\r\n";
+            "\"log_path\" = \"" + log.Replace("\\", "\\\\") + "\"\r\n" +
+            "[ipc]\r\n" +
+            "\"connect_timeout_ms\" = \"50\"\r\n" +
+            "\"response_timeout_ms\" = \"250\"\r\n";
         File.WriteAllText(ini, config, new UTF8Encoding(true));
 
         var psi = new ProcessStartInfo(exe, JoinArgs(new[] { "--ini", ini, "--no-tray" }))

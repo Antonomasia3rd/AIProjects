@@ -181,10 +181,7 @@ static std::wstring GetUiString(const wchar_t* key, const std::wstring& fallback
 
 static void PrintLine(const std::wstring& line, bool error = false)
 {
-    FILE* stream = error ? stderr : stdout;
-    std::string utf8 = WideToUtf8(line + L"\n");
-    fwrite(utf8.data(), 1, utf8.size(), stream);
-    fflush(stream);
+    aip::WriteCommandLineText(line, error);
 }
 
 static void ConfigureLoggerFromRuntimeState()
@@ -192,6 +189,7 @@ static void ConfigureLoggerFromRuntimeState()
     aip::Utf8LoggerOptions options;
     options.enabled = g_loggingEnabled.load();
     options.fileEnabled = g_fileLoggingEnabled.load();
+    options.consoleEnabled = g_consoleEnabled.load();
     options.filePath = g_effectiveLogPath;
     options.maxRecentLines = 250;
     options.lockWaitMs = g_logAppendLockWaitMs.load();
@@ -258,25 +256,44 @@ static std::wstring RecentLogText()
     return text;
 }
 
-static bool OwnsConsole()
+static bool SetConsoleVisible(bool visible)
 {
-    DWORD processes[4] = {};
-    DWORD count = GetConsoleProcessList(processes, ARRAYSIZE(processes));
-    return count <= 1;
-}
-
-static void SetConsoleVisible(bool visible, bool safeOnly)
-{
+    std::lock_guard<std::mutex> lock(g_consoleMutex);
     HWND console = GetConsoleWindow();
-    if (console == nullptr)
+    if (visible)
     {
-        return;
+        bool newlyAllocated = false;
+        if (console == nullptr)
+        {
+            if (!AllocConsole())
+            {
+                return false;
+            }
+            g_consoleAllocated = true;
+            newlyAllocated = true;
+            console = GetConsoleWindow();
+        }
+        if (console != nullptr)
+        {
+            ShowWindow(console, SW_SHOW);
+        }
+        errno_t streamError = aip::BindStandardConsoleStreams();
+        if (newlyAllocated && streamError != 0)
+        {
+            aip::WriteCommandLineText(
+                L"WARNING: One or more CRT console streams could not be rebound (errno=" +
+                    std::to_wstring(static_cast<int>(streamError)) + L").",
+                true);
+        }
+        return true;
     }
-    if (safeOnly && !visible && !OwnsConsole())
+
+    if (g_consoleAllocated)
     {
-        return;
+        FreeConsole();
+        g_consoleAllocated = false;
     }
-    ShowWindow(console, visible ? SW_SHOW : SW_HIDE);
+    return false;
 }
 
 using aip::ExtractJsonStringValue;
@@ -545,19 +562,16 @@ static void ConfigureRuntimeFromConfig(const AppOptions& options)
         effectiveLogPath = configuredLog;
     }
     g_effectiveLogPath = std::move(effectiveLogPath);
-    ConfigureLoggerFromRuntimeState();
 
-    if (options.forceShowConsole)
+    bool showConsole = options.forceShowConsole ||
+        (!options.forceHideConsole && IniReadB(L"app", L"show_console", false));
+    bool wasConsoleEnabled = g_consoleEnabled.load();
+    bool consoleEnabled = SetConsoleVisible(showConsole);
+    g_consoleEnabled = consoleEnabled;
+    ConfigureLoggerFromRuntimeState();
+    if (consoleEnabled && !wasConsoleEnabled)
     {
-        SetConsoleVisible(true, false);
-    }
-    else if (options.forceHideConsole)
-    {
-        SetConsoleVisible(false, false);
-    }
-    else
-    {
-        SetConsoleVisible(IniReadB(L"app", L"show_console", false), true);
+        g_logger.ReplayRecentToConsole();
     }
 }
 

@@ -200,6 +200,36 @@ static ErrorAction CurrentSingleInstanceFailureAction()
     return ParseErrorAction(IniReadS(L"Settings", L"SingleInstanceFailureAction", L"Warn"));
 }
 
+static AlreadyRunningAction ParseAlreadyRunningAction(const std::wstring& value)
+{
+    std::wstring v = ToLowerCopy(TrimCopy(value));
+    if (v == L"generate" || v == L"generate now" || v == L"generate_now")
+        return AlreadyRunningAction::Generate;
+    if (v == L"showconsole" || v == L"show console" || v == L"show_console" || v == L"console")
+        return AlreadyRunningAction::ShowConsole;
+    if (v == L"ignore" || v == L"none" || v == L"do nothing" || v == L"do_nothing")
+        return AlreadyRunningAction::Ignore;
+    return AlreadyRunningAction::ShowTray;
+}
+
+static const wchar_t* AlreadyRunningActionName(AlreadyRunningAction action)
+{
+    switch (action)
+    {
+    case AlreadyRunningAction::Generate: return g_ui.alreadyRunningActionGenerate.c_str();
+    case AlreadyRunningAction::ShowConsole: return g_ui.alreadyRunningActionShowConsole.c_str();
+    case AlreadyRunningAction::Ignore: return g_ui.alreadyRunningActionIgnore.c_str();
+    case AlreadyRunningAction::ShowTray:
+    default:
+        return g_ui.alreadyRunningActionShowTray.c_str();
+    }
+}
+
+static AlreadyRunningAction CurrentAlreadyRunningAction()
+{
+    return ParseAlreadyRunningAction(IniReadS(L"Settings", L"AlreadyRunningAction", L"ShowTray"));
+}
+
 static constexpr int SUPPORTED_ASSET_SCALES[] = { 100, 125, 150, 200, 400 };
 
 static int SnapToSupportedScale(int percent)

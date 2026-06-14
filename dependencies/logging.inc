@@ -7,6 +7,7 @@ struct Utf8LoggerOptions
 {
     bool enabled = true;
     bool fileEnabled = true;
+    bool consoleEnabled = false;
     bool writeUtf8Bom = true;
     bool reportFileWriteFailuresToRecent = true;
     DWORD lockWaitMs = 5000;
@@ -346,6 +347,7 @@ public:
             lockWaitMs_ != options.lockWaitMs;
         enabled_ = options.enabled;
         fileEnabled_ = options.fileEnabled;
+        consoleEnabled_ = options.consoleEnabled;
         writeUtf8Bom_ = options.writeUtf8Bom;
         reportFileWriteFailuresToRecent_ = options.reportFileWriteFailuresToRecent;
         lockWaitMs_ = options.lockWaitMs;
@@ -423,7 +425,47 @@ public:
         ResetFileWriteFailureLocked();
     }
 
+    void ReplayRecentToConsole() const
+    {
+        std::vector<std::wstring> lines;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            lines.assign(recent_.begin(), recent_.end());
+        }
+        for (const auto& line : lines)
+        {
+            WriteConsoleLine(line);
+        }
+    }
+
 private:
+    static void WriteConsoleLine(const std::wstring& line)
+    {
+        HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
+        {
+            return;
+        }
+        DWORD mode = 0;
+        if (!GetConsoleMode(handle, &mode))
+        {
+            return;
+        }
+
+        std::wstring output = line + L"\r\n";
+        size_t offset = 0;
+        while (offset < output.size())
+        {
+            DWORD chunk = static_cast<DWORD>((std::min<size_t>)(output.size() - offset, 16384));
+            DWORD written = 0;
+            if (!WriteConsoleW(handle, output.data() + offset, chunk, &written, nullptr) || written == 0)
+            {
+                return;
+            }
+            offset += written;
+        }
+    }
+
     void ResetFileWriteFailureLocked()
     {
         failureReported_ = false;
@@ -435,6 +477,7 @@ private:
     {
         std::wstring filePath;
         bool shouldWriteFile = false;
+        bool shouldWriteConsole = false;
         bool writeUtf8Bom = true;
         bool reportFailure = true;
         DWORD lockWaitMs = INFINITE;
@@ -448,10 +491,16 @@ private:
             recent_.push_back(line);
             TrimRecentLocked();
             shouldWriteFile = fileEnabled_ && !filePath_.empty();
+            shouldWriteConsole = consoleEnabled_;
             filePath = filePath_;
             writeUtf8Bom = writeUtf8Bom_;
             reportFailure = reportFileWriteFailuresToRecent_;
             lockWaitMs = lockWaitMs_;
+        }
+
+        if (shouldWriteConsole)
+        {
+            WriteConsoleLine(line);
         }
 
         if (!shouldWriteFile)
@@ -492,6 +541,7 @@ private:
     mutable std::mutex mutex_;
     bool enabled_ = true;
     bool fileEnabled_ = true;
+    bool consoleEnabled_ = false;
     bool writeUtf8Bom_ = true;
     bool reportFileWriteFailuresToRecent_ = true;
     DWORD lockWaitMs_ = 5000;

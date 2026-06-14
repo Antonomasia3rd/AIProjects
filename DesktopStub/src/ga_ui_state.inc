@@ -616,6 +616,11 @@ struct UiStrings
     std::wstring singleInstanceActionWarn;
     std::wstring singleInstanceActionExit;
     std::wstring singleInstanceActionCrash;
+    std::wstring alreadyRunningActionLabel;
+    std::wstring alreadyRunningActionShowTray;
+    std::wstring alreadyRunningActionGenerate;
+    std::wstring alreadyRunningActionShowConsole;
+    std::wstring alreadyRunningActionIgnore;
     std::wstring unknownError;
 
     std::wstring logFileFilter;

@@ -78,6 +78,14 @@ enum class ErrorAction
     Crash
 };
 
+enum class AlreadyRunningAction
+{
+    ShowTray,
+    Generate,
+    ShowConsole,
+    Ignore
+};
+
 enum class LiveTileUpdateMode
 {
     Registration,

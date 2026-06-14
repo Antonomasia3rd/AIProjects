@@ -2,7 +2,9 @@
 #include "..\RssLiveTile.cpp"
 #undef wWinMain
 
+#include <fstream>
 #include <iostream>
+#include <sstream>
 
 static int g_failures = 0;
 
@@ -15,6 +17,14 @@ static void Check(bool condition, const char* name)
     }
     std::cerr << "not ok - " << name << "\n";
     ++g_failures;
+}
+
+static std::string ReadSource(const char* path)
+{
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream out;
+    out << in.rdbuf();
+    return out.str();
 }
 
 int wmain()
@@ -122,6 +132,15 @@ int wmain()
             aip::IniSetting{ L"Manifest", L"Version", L"1.2.3" },
             error),
         "invalid manifest version is rejected");
+    error.clear();
+    Check(
+        ValidateSetting(
+            aip::IniSetting{ L"Settings", L"ShowMenuAsDropdown", L"0" },
+            error) &&
+            !ValidateSetting(
+                aip::IniSetting{ L"Settings", L"ShowMenuAsDropdown", L"sideways" },
+                error),
+        "tray dropdown setting uses typed boolean validation");
     Check(
         std::wstring(WINDOW_CLASS_NAME) != L"" &&
             WM_RLT_CONTROL != 0 &&
@@ -134,6 +153,42 @@ int wmain()
         ExistingInstanceRequestForOptions(writeOptions) == RLT_CONTROL_RELOAD &&
             ExistingInstanceRequestForOptions(AppOptions{}) == RLT_CONTROL_REFRESH,
         "command-line settings reload an existing resident");
+    AppOptions trayOptions;
+    SetTrayOverride(trayOptions, false);
+    SetTrayOverride(trayOptions, true);
+    Check(
+        trayOptions.forceTray && !trayOptions.forceNoTray,
+        "tray command-line overrides use last-option-wins behavior");
+    AppOptions multipleOptions;
+    multipleOptions.allowMultiple = true;
+    Check(
+        BuildPackagedArguments(multipleOptions).find(L"--allow-multiple") != std::wstring::npos,
+        "packaged bootstrap preserves multi-instance intent");
+    RuntimeContext runtimeDefaults;
+    Check(
+        !runtimeDefaults.updatePending.load() &&
+            !runtimeDefaults.forceUpdatePending.load(),
+        "resident update queue starts empty");
+    Check(
+        runtimeDefaults.settings.showMenuAsDropdown,
+        "tray dropdown layout defaults on");
+    const std::string source = ReadSource("RssLiveTile.cpp");
+    const size_t togglePosition = source.find(
+        "AppendTrayMenuItem(menu, IDM_TOGGLE_MENU_DROPDOWN");
+    const size_t layoutPosition = source.find(
+        "TraySectionLayout sectionLayout(menu, showMenuAsDropdown)");
+    const size_t feedPosition = source.find(
+        "HMENU feedMenu = sectionLayout.Begin");
+    Check(
+        togglePosition != std::string::npos &&
+            layoutPosition != std::string::npos &&
+            feedPosition != std::string::npos &&
+            togglePosition < layoutPosition &&
+            layoutPosition < feedPosition,
+        "tray dropdown toggle remains on the root before section layout");
+    Check(
+        POWERSHELL_OUTPUT_LIMIT_BYTES == 1024 * 1024,
+        "PowerShell output capture is bounded");
 
     std::string encodedFeed =
         "<?xml version=\"1.0\" encoding=\"windows-1252\"?><rss><title>Caf";

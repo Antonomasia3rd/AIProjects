@@ -1,4 +1,4 @@
-﻿// compile command: cl /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DiscordRPC.cpp /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib winhttp.lib crypt32.lib /SUBSYSTEM:CONSOLE
+﻿// compile command: cl /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DiscordRPC.cpp /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib winhttp.lib crypt32.lib /SUBSYSTEM:WINDOWS
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 
@@ -74,6 +74,9 @@ static std::atomic<bool> g_verboseLogging(false);
 static std::atomic<bool> g_notificationsEnabled(true);
 static std::atomic<DWORD> g_logAppendLockWaitMs(5000);
 static std::atomic<DWORD> g_iniWriteLockWaitMs(5000);
+static std::atomic<bool> g_consoleEnabled(false);
+static std::mutex g_consoleMutex;
+static bool g_consoleAllocated = false;
 
 #include "..\dependencies\desktop_app_baseline.h"
 
@@ -89,9 +92,9 @@ static aip::Utf8Logger g_logger;
 #include "src/drpc_tray.inc"
 #include "src/drpc_app.inc"
 
-int wmain()
+int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 {
-    g_hInst = GetModuleHandleW(nullptr);
+    g_hInst = hInstance;
     InitPaths();
 
     AppOptions options;

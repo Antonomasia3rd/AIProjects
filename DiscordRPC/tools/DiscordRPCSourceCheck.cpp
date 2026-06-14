@@ -69,6 +69,28 @@ static void RequireNotContains(const std::string& name, const std::string& sourc
     std::cout << "ok - " << name << "\n";
 }
 
+static void RequireOrderedContains(
+    const std::string& name,
+    const std::string& sourceName,
+    const std::string& source,
+    const std::vector<std::string>& needles)
+{
+    ++g_checks;
+    size_t pos = 0;
+    for (const auto& needle : needles)
+    {
+        size_t found = source.find(needle, pos);
+        if (found == std::string::npos)
+        {
+            std::cerr << "DiscordRPC source regression: " << name << " missing/out-of-order "
+                << needle << " in " << sourceName << "\n";
+            throw std::runtime_error("source regression");
+        }
+        pos = found + needle.size();
+    }
+    std::cout << "ok - " << name << "\n";
+}
+
 int main()
 {
     try
@@ -84,6 +106,7 @@ int main()
         const std::string presence = ReadAll("src\\drpc_presence.inc");
         const std::string tray = ReadAll("src\\drpc_tray.inc");
         const std::string types = ReadAll("src\\drpc_types.inc");
+        const std::string build = ReadAll("build.cmd");
 
         RequireContains(
             "DiscordRPC consumes aggregate desktop baseline",
@@ -162,6 +185,51 @@ int main()
             "DiscordRPC tray/config sources",
             defaults + "\n" + tray,
             "show_menu_as_dropdown");
+        RequireOrderedContains(
+            "DiscordRPC keeps dropdown toggle on the tray root",
+            "src\\drpc_tray.inc",
+            tray,
+            {
+                "AppendChecked(menu, ID_TOGGLE_MENU_DROPDOWN",
+                "aip::TraySectionLayout sectionLayout",
+                "HMENU general = beginSection"
+            });
+        RequireNotContains(
+            "DiscordRPC does not put dropdown toggle inside General",
+            "src\\drpc_tray.inc",
+            tray,
+            "AppendChecked(general, ID_TOGGLE_MENU_DROPDOWN");
+
+        RequireContains(
+            "DiscordRPC uses a GUI-subsystem entry point",
+            "DiscordRPC.cpp",
+            discordMain,
+            "int APIENTRY wWinMain");
+        RequireContains(
+            "DiscordRPC build links the GUI subsystem",
+            "build.cmd",
+            build,
+            "/SUBSYSTEM:WINDOWS");
+        RequireNotContains(
+            "DiscordRPC build no longer creates a startup console",
+            "build.cmd",
+            build,
+            "/SUBSYSTEM:CONSOLE");
+        RequireContains(
+            "DiscordRPC allocates its console only when enabled",
+            "src\\drpc_core.inc",
+            core,
+            "if (!AllocConsole())");
+        RequireContains(
+            "DiscordRPC uses shared command-line output",
+            "src\\drpc_core.inc",
+            core,
+            "aip::WriteCommandLineText(line, error)");
+        RequireContains(
+            "DiscordRPC mirrors logger output to an enabled console",
+            "src\\drpc_core.inc",
+            core,
+            "options.consoleEnabled = g_consoleEnabled.load()");
 
         RequireContains(
             "DiscordRPC force shutdown reports cleanup-state write failures",

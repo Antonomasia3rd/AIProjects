@@ -19,8 +19,8 @@ product implementation:
   buffering for helper/broker processes.
 - `config_ini.inc`: `IniConfigStore`, synchronized INI mutation, encoding, and
   document parsing.
-- `command_line.inc`: option value parsing, INI setting syntax, and boolean
-  aliases.
+- `command_line.inc`: parent-console command output, console stream binding,
+  option value parsing, INI setting syntax, and boolean aliases.
 - `tray.inc`: low-level menu construction, popup ownership, and notifications.
 - `core.inc`: path, text, and JSON primitives. Configuration must stay INI-backed.
 
@@ -78,6 +78,9 @@ indefinitely while trying to save settings.
 `aip::RecentLogBuffer` is the shared in-memory tray/diagnostic log model.
 Products may keep their own timestamp and UI failure text, but should use this
 buffer instead of open-coded vector trimming when preserving recent log lines.
+`aip::Utf8Logger` can also mirror complete formatted log lines to an allocated
+console and replay its bounded recent buffer when a product enables its console
+at runtime.
 
 ## C# registry notification services
 

@@ -715,6 +715,10 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         CycleSingleInstanceFailureActionSetting();
         break;
 
+    case ID_ADV_ALREADY_RUNNING_ACTION:
+        CycleAlreadyRunningActionSetting();
+        break;
+
     case ID_SHOW_MENU_DROPDOWN:
     {
         g_showMenuAsDropdown = !g_showMenuAsDropdown;
@@ -1035,6 +1039,11 @@ static void HandleExistingInstanceRequest()
         ? g_ui.notificationAlreadyRunningTrayPersistent
         : g_ui.notificationAlreadyRunningTraySession;
     NotifyTrayBalloon(g_ui.notificationTitle, message, static_cast<DWORD>(trayPersistsAfterRestart ? NIIF_INFO : NIIF_WARNING), true);
+}
+
+static void HandleExistingInstanceShowConsoleRequest()
+{
+    ApplyConsoleSetting(true, false, true);
 }
 
 static int HandleSingleInstanceMutexFailure(DWORD err)

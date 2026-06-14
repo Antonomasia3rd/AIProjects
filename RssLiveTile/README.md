@@ -75,6 +75,7 @@ Default settings:
 "TileRefreshSeconds" = "900"
 "MaxItems" = "5"
 "ShowTrayIcon" = "1"
+"ShowMenuAsDropdown" = "1"
 "BootstrapPackageOnLaunch" = "1"
 "UserAgent" = "RssLiveTile/1.0"
 "HttpTimeoutSeconds" = "30"
@@ -90,6 +91,8 @@ Default settings:
 ```
 
 `MaxItems` is capped at 5 because Windows Live Tile notification queues rotate at most five tile notifications per app.
+
+`ShowMenuAsDropdown` follows the DesktopStub tray contract. Its checkbox stays on the tray root; enabled mode groups commands into Feed, Application, and Package submenus, while disabled mode renders the same sections inline.
 
 ## Command Line
 
@@ -119,7 +122,8 @@ Supported options:
 - `--regenerate-manifest`: rewrite `AppxManifest.xml` and default logo assets.
 - `--tray` / `--no-tray`: override tray visibility for this invocation.
 - `--no-bootstrap`: run directly without registering/relaunching the packaged entry.
-- `--allow-multiple`: skip the single-instance guard.
+- `--allow-multiple`: skip the single-instance guard, including after the normal
+  unpackaged-to-packaged bootstrap relaunch.
 - `--exit` / `--quit`: ask the running instance to exit.
 
 `--open-url <url>` is used by queued tile activation. Only HTTP(S) links are accepted. Packaged tile launches read chaseable-notification arguments through `AppInstance.GetActivatedEventArgs()`; they are not assumed to appear in the normal process command line.

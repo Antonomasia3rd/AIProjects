@@ -535,6 +535,7 @@ void Menu(HWND h)
     std::wstring savePngReplaceRetriesLine = FormatWide(g_ui.savePngReplaceRetriesLabel.c_str(), IniReadClampedI(L"Settings", L"SavePngReplaceRetries", 3, 0, 20));
     std::wstring savePngReplaceRetryDelayLine = FormatWide(g_ui.savePngReplaceRetryDelayMsLabel.c_str(), IniReadClampedI(L"Settings", L"SavePngReplaceRetryDelayMs", 75, 0, 5000));
     std::wstring singleInstanceLine = FormatWide(g_ui.singleInstanceFailureActionLabel.c_str(), ErrorActionName(CurrentSingleInstanceFailureAction()));
+    std::wstring alreadyRunningLine = FormatWide(g_ui.alreadyRunningActionLabel.c_str(), AlreadyRunningActionName(CurrentAlreadyRunningAction()));
     HMENU advancedTimingMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced timing)");
     addTo(advancedTimingMenu, ID_ADV_POLL_INTERVAL, pollLine);
     addTo(advancedTimingMenu, ID_ADV_CONFIRM_MS, confirmLine);
@@ -583,6 +584,7 @@ void Menu(HWND h)
     HMENU advancedSingleInstanceMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced single instance)");
     addTo(advancedSingleInstanceMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_RETRIES, signalRetriesLine);
     addTo(advancedSingleInstanceMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_DELAY_MS, signalDelayLine);
+    addTo(advancedSingleInstanceMenu, ID_ADV_ALREADY_RUNNING_ACTION, alreadyRunningLine);
     addTo(advancedSingleInstanceMenu, ID_ADV_SINGLE_INSTANCE_FAILURE_ACTION, singleInstanceLine);
     endNestedMenu(advancedMenu, advancedSingleInstanceMenu, g_ui.advancedSingleInstanceTitle);
     endSection(advancedMenu, g_ui.advancedTitle);

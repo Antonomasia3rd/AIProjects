@@ -42,6 +42,7 @@ static constexpr WPARAM SINGLE_INSTANCE_REQUEST_EXIT = 2;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_GENERATE = 3;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_REGENERATE_MANIFEST = 4;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_MESSAGEBOX = 5;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_CONSOLE = 6;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MASK = 0x00FF;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON = 0x0100;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_REGENERATE_MANIFEST = 0x0200;
@@ -1461,52 +1462,9 @@ static std::wstring CommandLineVersionText()
     return DesktopStubVersionDisplayText();
 }
 
-static bool WriteCommandLineTextToHandle(HANDLE h, const std::wstring& output)
-{
-    if (h == INVALID_HANDLE_VALUE || h == nullptr)
-        return false;
-
-    DWORD mode = 0;
-    if (GetConsoleMode(h, &mode))
-    {
-        DWORD written = 0;
-        return WriteConsoleW(h, output.c_str(), static_cast<DWORD>(output.size()), &written, nullptr) != FALSE;
-    }
-
-    std::vector<BYTE> bytes = EncodeUtf8Text(output, false);
-    if (!bytes.empty())
-    {
-        return aip::WriteAllBytes(h, bytes.data(), static_cast<DWORD>(bytes.size()));
-    }
-
-    return output.empty();
-}
-
-static bool WriteCommandLineTextToConsole(const std::wstring& text, bool errorOutput)
-{
-    std::wstring output = text;
-    if (output.empty() || (output.back() != L'\n' && output.back() != L'\r'))
-        output += L"\r\n";
-
-    HANDLE h = GetStdHandle(errorOutput ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
-    if (WriteCommandLineTextToHandle(h, output))
-        return true;
-
-    bool attached = AttachConsole(ATTACH_PARENT_PROCESS) != FALSE;
-    if (!attached && GetLastError() != ERROR_ACCESS_DENIED)
-        return false;
-
-    h = GetStdHandle(errorOutput ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
-    bool ok = WriteCommandLineTextToHandle(h, output);
-
-    if (attached)
-        FreeConsole();
-    return ok;
-}
-
 static void ShowCommandLineMessage(const std::wstring& text, bool error)
 {
-    if (WriteCommandLineTextToConsole(text, error))
+    if (aip::WriteCommandLineText(text, error))
         return;
 
     std::wstring title = error

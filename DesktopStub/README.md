@@ -77,6 +77,8 @@ On first launch the app creates `DesktopStub.ini` next to the executable. The tr
 
 Command-line settings are saved to `DesktopStub.ini`, the same configuration file used by the tray menu. Action-only commands such as `--once`, `--generate`, `--no-monitor`, and `--exit` affect only that invocation.
 
+Ordinary second launches are configurable through `[Settings] AlreadyRunningAction` or **Advanced > Single instance > Second-launch action**. `ShowTray` preserves the default behavior, `Generate` requests a fresh generation in the resident instance, `ShowConsole` opens its diagnostic console for the current session without changing `ShowConsole`, and `Ignore` exits the new process without signaling the resident instance. Explicit command-line requests such as `--generate`, `--exit`, or persistent `--set` changes always take precedence. This is intentionally coordinated single-instance behavior: use a separate `--ini` path for an independently running instance so concurrent copies do not write the same configuration, assets, and package registration.
+
 Live wallpaper capture is configurable from the tray menu, from command-line flags, or from `DesktopStub.ini`:
 
 ```ini

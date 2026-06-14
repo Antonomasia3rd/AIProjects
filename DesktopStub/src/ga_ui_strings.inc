@@ -764,6 +764,11 @@ void LoadUiStrings()
     g_ui.singleInstanceActionWarn = IniReadS(L"Strings", L"SingleInstanceActionWarn", L"Warn");
     g_ui.singleInstanceActionExit = IniReadS(L"Strings", L"SingleInstanceActionExit", L"Exit");
     g_ui.singleInstanceActionCrash = IniReadS(L"Strings", L"SingleInstanceActionCrash", L"Crash");
+    g_ui.alreadyRunningActionLabel = IniReadS(L"Strings", L"AlreadyRunningActionLabel", L"Second-launch action: %s");
+    g_ui.alreadyRunningActionShowTray = IniReadS(L"Strings", L"AlreadyRunningActionShowTray", L"Show tray");
+    g_ui.alreadyRunningActionGenerate = IniReadS(L"Strings", L"AlreadyRunningActionGenerate", L"Generate now");
+    g_ui.alreadyRunningActionShowConsole = IniReadS(L"Strings", L"AlreadyRunningActionShowConsole", L"Show console");
+    g_ui.alreadyRunningActionIgnore = IniReadS(L"Strings", L"AlreadyRunningActionIgnore", L"Do nothing");
     g_ui.unknownError = IniReadS(L"Strings", L"UnknownError", L"Unknown error");
 
     g_ui.logFileFilter = IniReadS(L"Strings", L"LogFileFilter", L"Log files (*.log)|*.log|All files (*.*)|*.*||");
@@ -1053,6 +1058,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.wallpaperDecodePxText, L"WallpaperDecodePxText", { L"%d" });
     RequireFormat(g_ui.wallpaperDetectionMethodLabel, L"WallpaperDetectionMethodLabel", { L"%s" });
     RequireFormat(g_ui.singleInstanceFailureActionLabel, L"SingleInstanceFailureActionLabel", { L"%s" });
+    RequireFormat(g_ui.alreadyRunningActionLabel, L"AlreadyRunningActionLabel", { L"%s" });
     RequireFormat(g_ui.generatedAssetCacheMaxEntriesLabel, L"GeneratedAssetCacheMaxEntriesLabel", { L"%d" });
     RequireFormat(g_ui.generatedAssetPrecacheMaxFilesLabel, L"GeneratedAssetPrecacheMaxFilesLabel", { L"%d" });
     RequireFormat(g_ui.shutdownPendingReason, L"ShutdownPendingReason", { L"%s" });
