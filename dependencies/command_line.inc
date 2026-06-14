@@ -3,6 +3,101 @@
 
 namespace aip
 {
+inline bool WriteCommandLineTextToHandle(HANDLE handle, const std::wstring& output)
+{
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return false;
+    }
+
+    DWORD mode = 0;
+    if (GetConsoleMode(handle, &mode))
+    {
+        size_t offset = 0;
+        while (offset < output.size())
+        {
+            DWORD chunk = static_cast<DWORD>((std::min<size_t>)(output.size() - offset, 16384));
+            DWORD written = 0;
+            if (!WriteConsoleW(handle, output.data() + offset, chunk, &written, nullptr) || written == 0)
+            {
+                if (GetLastError() == ERROR_SUCCESS)
+                {
+                    SetLastError(ERROR_WRITE_FAULT);
+                }
+                return false;
+            }
+            offset += written;
+        }
+        return true;
+    }
+
+    std::string utf8;
+    if (!TryWideToUtf8(output, utf8))
+    {
+        return false;
+    }
+    if (utf8.size() > MAXDWORD)
+    {
+        SetLastError(ERROR_FILE_TOO_LARGE);
+        return false;
+    }
+    return utf8.empty() ||
+        WriteAllBytes(handle, utf8.data(), static_cast<DWORD>(utf8.size()));
+}
+
+inline bool WriteCommandLineText(
+    const std::wstring& text,
+    bool errorOutput = false,
+    bool appendNewline = true)
+{
+    std::wstring output = text;
+    if (appendNewline &&
+        (output.empty() || (output.back() != L'\r' && output.back() != L'\n')))
+    {
+        output += L"\r\n";
+    }
+
+    HANDLE handle = GetStdHandle(errorOutput ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+    if (WriteCommandLineTextToHandle(handle, output))
+    {
+        return true;
+    }
+
+    bool attached = AttachConsole(ATTACH_PARENT_PROCESS) != FALSE;
+    if (!attached && GetLastError() != ERROR_ACCESS_DENIED)
+    {
+        return false;
+    }
+
+    handle = GetStdHandle(errorOutput ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+    bool ok = WriteCommandLineTextToHandle(handle, output);
+    if (attached)
+    {
+        FreeConsole();
+    }
+    return ok;
+}
+
+inline errno_t BindStandardConsoleStreams()
+{
+    FILE* stream = nullptr;
+    errno_t firstError = freopen_s(&stream, "CONOUT$", "w", stdout);
+    errno_t error = freopen_s(&stream, "CONOUT$", "w", stderr);
+    if (firstError == 0)
+    {
+        firstError = error;
+    }
+    error = freopen_s(&stream, "CONIN$", "r", stdin);
+    if (firstError == 0)
+    {
+        firstError = error;
+    }
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    return firstError;
+}
+
 struct IniSetting
 {
     std::wstring section;

@@ -214,9 +214,10 @@ static void ShowTrayMenu(RuntimeContext* ctx)
 
     aip::AppendTrayMenuItem(menu, ID_TRAY_REFRESH, GetUiString(L"menu_refresh", L"Refresh now"));
     aip::AppendTrayMenuItem(menu, 0, GetUiString(L"menu_status", APP_DISPLAY_NAME), false, false);
+    bool showMenuAsDropdown = IniReadB(L"app", L"show_menu_as_dropdown", true);
+    AppendChecked(menu, ID_TOGGLE_MENU_DROPDOWN, GetUiString(L"menu_dropdown", L"Show menu as dropdown"), showMenuAsDropdown);
     aip::AppendMenuSeparator(menu);
 
-    bool showMenuAsDropdown = IniReadB(L"app", L"show_menu_as_dropdown", true);
     aip::TraySectionLayout sectionLayout(menu, showMenuAsDropdown);
     auto beginSection = [&](const std::wstring& title) -> HMENU {
         return sectionLayout.Begin(title);
@@ -227,7 +228,6 @@ static void ShowTrayMenu(RuntimeContext* ctx)
 
     HMENU general = beginSection(GetUiString(L"menu_general", L"General"));
     aip::AppendTrayMenuItem(general, ID_TRAY_RELOAD, GetUiString(L"menu_reload", L"Reload configuration"));
-    AppendChecked(general, ID_TOGGLE_MENU_DROPDOWN, GetUiString(L"menu_dropdown", L"Show menu as dropdown"), showMenuAsDropdown);
 
     HMENU interval = aip::BeginTrayNestedMenu(general);
     int currentInterval = IniReadI(L"general", L"update_interval", 5);

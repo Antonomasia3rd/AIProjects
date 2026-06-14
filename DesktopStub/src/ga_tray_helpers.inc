@@ -150,6 +150,7 @@ enum {
     ID_ADV_SAVE_PNG_REPLACE_RETRIES,
     ID_ADV_SAVE_PNG_REPLACE_RETRY_DELAY_MS,
     ID_ADV_SINGLE_INSTANCE_FAILURE_ACTION,
+    ID_ADV_ALREADY_RUNNING_ACTION,
 
     // Assets
     ID_A1=2001, ID_A2, ID_A3, ID_A4, ID_A5, ID_A6, ID_A7, ID_A8
@@ -343,6 +344,26 @@ static void CycleSingleInstanceFailureActionSetting()
     if (!IniWrite(L"Settings", L"SingleInstanceFailureAction", next))
         return;
     Log(L"[i] Setting changed: [%s] %s = %s", L"Settings", L"SingleInstanceFailureAction", next);
+}
+
+static const wchar_t* NextAlreadyRunningActionName(AlreadyRunningAction current)
+{
+    switch (current)
+    {
+    case AlreadyRunningAction::ShowTray: return L"Generate";
+    case AlreadyRunningAction::Generate: return L"ShowConsole";
+    case AlreadyRunningAction::ShowConsole: return L"Ignore";
+    case AlreadyRunningAction::Ignore:
+    default: return L"ShowTray";
+    }
+}
+
+static void CycleAlreadyRunningActionSetting()
+{
+    const wchar_t* next = NextAlreadyRunningActionName(CurrentAlreadyRunningAction());
+    if (!IniWrite(L"Settings", L"AlreadyRunningAction", next))
+        return;
+    Log(L"[i] Setting changed: [%s] %s = %s", L"Settings", L"AlreadyRunningAction", next);
 }
 
 static void ChoosePowerShellExe(HWND owner)

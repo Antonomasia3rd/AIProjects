@@ -58,7 +58,7 @@ if /I "%~1"=="check" (
 set "OUT_EXE=build\DiscordRPC.exe"
 set "OBJ_FILE=build\obj\DiscordRPC.obj"
 
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DiscordRPC.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib winhttp.lib crypt32.lib /SUBSYSTEM:CONSOLE
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DiscordRPC.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib winhttp.lib crypt32.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 

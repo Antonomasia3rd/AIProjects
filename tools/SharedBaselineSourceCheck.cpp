@@ -158,6 +158,31 @@ int main()
             commandLine,
             "ParseIntValueInRange");
         RequireContains(
+            "shared command-line dependency handles parent-console output",
+            "dependencies/command_line.inc",
+            commandLine,
+            "AttachConsole(ATTACH_PARENT_PROCESS)");
+        RequireContains(
+            "shared command-line dependency loops console writes",
+            "dependencies/command_line.inc",
+            commandLine,
+            "while (offset < output.size())");
+        RequireContains(
+            "shared command-line dependency binds runtime console streams",
+            "dependencies/command_line.inc",
+            commandLine,
+            "BindStandardConsoleStreams");
+        RequireContains(
+            "shared logger supports runtime console mirroring",
+            "dependencies/logging.inc",
+            logging,
+            "options.consoleEnabled");
+        RequireContains(
+            "shared logger can replay recent lines after console allocation",
+            "dependencies/logging.inc",
+            logging,
+            "ReplayRecentToConsole");
+        RequireContains(
             "shared command-line integer parser checks overflow",
             "dependencies/command_line.inc",
             commandLine,

@@ -130,6 +130,10 @@ static void HandleSingleInstanceRequest(WPARAM request)
         HandleExistingInstanceMessageBoxRequest();
         return;
 
+    case SINGLE_INSTANCE_REQUEST_SHOW_CONSOLE:
+        HandleExistingInstanceShowConsoleRequest();
+        return;
+
     case SINGLE_INSTANCE_REQUEST_SHOW:
     default:
         HandleExistingInstanceRequest();
@@ -520,6 +524,25 @@ static bool SignalExistingInstance(WPARAM request = SINGLE_INSTANCE_REQUEST_SHOW
         request,
         retries,
         delayMs);
+}
+
+static bool TryGetAlreadyRunningRequest(WPARAM& request)
+{
+    switch (CurrentAlreadyRunningAction())
+    {
+    case AlreadyRunningAction::Generate:
+        request = SINGLE_INSTANCE_REQUEST_GENERATE;
+        return true;
+    case AlreadyRunningAction::ShowConsole:
+        request = SINGLE_INSTANCE_REQUEST_SHOW_CONSOLE;
+        return true;
+    case AlreadyRunningAction::Ignore:
+        return false;
+    case AlreadyRunningAction::ShowTray:
+    default:
+        request = SINGLE_INSTANCE_REQUEST_SHOW;
+        return true;
+    }
 }
 
 static std::wstring AppxActivationTraceLogPath()
@@ -1416,6 +1439,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     else if (singleInstanceMutexLastError == ERROR_ALREADY_EXISTS)
     {
         WPARAM singleInstanceRequest = SINGLE_INSTANCE_REQUEST_SHOW;
+        bool explicitSingleInstanceRequest = false;
         if (CommandLineShouldExit())
         {
             if (!ApplyCommandLineSettingsForExistingInstance())
@@ -1426,6 +1450,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
                 return 2;
             }
             singleInstanceRequest = SINGLE_INSTANCE_REQUEST_EXIT;
+            explicitSingleInstanceRequest = true;
         }
         else if (CommandLineShouldGenerateNow())
         {
@@ -1437,6 +1462,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
                 return 2;
             }
             singleInstanceRequest = SINGLE_INSTANCE_REQUEST_GENERATE;
+            explicitSingleInstanceRequest = true;
         }
         else if (CommandLineShouldRegenerateManifest())
         {
@@ -1448,6 +1474,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
                 return 2;
             }
             singleInstanceRequest = SINGLE_INSTANCE_REQUEST_REGENERATE_MANIFEST;
+            explicitSingleInstanceRequest = true;
         }
         else if (CommandLineHasPersistentSettings())
         {
@@ -1459,6 +1486,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
                 return 2;
             }
             singleInstanceRequest = SINGLE_INSTANCE_REQUEST_RELOAD_SETTINGS;
+            explicitSingleInstanceRequest = true;
+        }
+        else if (!TryGetAlreadyRunningRequest(singleInstanceRequest))
+        {
+            CloseHandle(g_singleInstanceMutex);
+            g_singleInstanceMutex = nullptr;
+            return 0;
         }
 
         if (CommandLineTrayIconChanged())
@@ -1468,7 +1502,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
         if (!SignalExistingInstance(singleInstanceRequest))
         {
-            if ((singleInstanceRequest & SINGLE_INSTANCE_REQUEST_MASK) != SINGLE_INSTANCE_REQUEST_SHOW)
+            if (explicitSingleInstanceRequest)
             {
                 ShowCommandLineMessage(
                     StartupString(L"CommandLineSignalExistingFailed", L"Failed to signal the running DesktopStub instance."),

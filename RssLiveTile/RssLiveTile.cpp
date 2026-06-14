@@ -56,6 +56,7 @@ static constexpr UINT TRAY_UID = 1;
 static constexpr DWORD POWERSHELL_TIMEOUT_MS = 120000;
 static constexpr DWORD POWERSHELL_POLL_MS = 50;
 static constexpr DWORD POWERSHELL_TERMINATE_WAIT_MS = 5000;
+static constexpr size_t POWERSHELL_OUTPUT_LIMIT_BYTES = 1024 * 1024;
 
 static HINSTANCE g_hInst = nullptr;
 static ULONG_PTR g_gdiplusToken = 0;
@@ -81,6 +82,7 @@ struct AppSettings
     int httpTimeoutSeconds = 30;
     int maxFeedBytes = 1024 * 1024;
     bool showTrayIcon = true;
+    bool showMenuAsDropdown = true;
     bool bootstrapPackageOnLaunch = true;
 };
 
@@ -134,6 +136,8 @@ struct RuntimeContext
     bool trayCreated = false;
     std::atomic<bool> closing{ false };
     std::atomic<bool> updateRunning{ false };
+    std::atomic<bool> updatePending{ false };
+    std::atomic<bool> forceUpdatePending{ false };
     std::atomic<HINTERNET> activeRequest{ nullptr };
     std::thread updateThread;
     std::mutex mutex;
@@ -197,66 +201,9 @@ static void Logf(const wchar_t* fmt, ...)
     va_end(args);
 }
 
-static bool WriteCommandLineTextToHandle(HANDLE handle, const std::wstring& output)
-{
-    if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
-    {
-        return false;
-    }
-
-    DWORD mode = 0;
-    if (GetConsoleMode(handle, &mode))
-    {
-        DWORD written = 0;
-        return WriteConsoleW(
-            handle,
-            output.c_str(),
-            static_cast<DWORD>(output.size()),
-            &written,
-            nullptr) != FALSE;
-    }
-
-    std::string utf8;
-    if (!aip::TryWideToUtf8(output, utf8))
-    {
-        return false;
-    }
-    return utf8.empty() ||
-        aip::WriteAllBytes(handle, utf8.data(), static_cast<DWORD>(utf8.size()));
-}
-
-static bool WriteCommandLineText(const std::wstring& text, bool errorOutput)
-{
-    std::wstring output = text;
-    if (output.empty() || (output.back() != L'\r' && output.back() != L'\n'))
-    {
-        output += L"\r\n";
-    }
-
-    HANDLE handle = GetStdHandle(errorOutput ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
-    if (WriteCommandLineTextToHandle(handle, output))
-    {
-        return true;
-    }
-
-    bool attached = AttachConsole(ATTACH_PARENT_PROCESS) != FALSE;
-    if (!attached && GetLastError() != ERROR_ACCESS_DENIED)
-    {
-        return false;
-    }
-
-    handle = GetStdHandle(errorOutput ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
-    bool ok = WriteCommandLineTextToHandle(handle, output);
-    if (attached)
-    {
-        FreeConsole();
-    }
-    return ok;
-}
-
 static void ShowCommandLineMessage(const std::wstring& text, bool error)
 {
-    if (!WriteCommandLineText(text, error))
+    if (!aip::WriteCommandLineText(text, error))
     {
         MessageBoxW(
             nullptr,
@@ -570,6 +517,7 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring& outp
     }
 
     std::vector<BYTE> outBytes;
+    bool outputLimitExceeded = false;
     auto drainPipe = [&]()
     {
         for (;;)
@@ -587,7 +535,14 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring& outp
             {
                 break;
             }
-            outBytes.insert(outBytes.end(), buffer, buffer + read);
+            size_t remaining = POWERSHELL_OUTPUT_LIMIT_BYTES - outBytes.size();
+            size_t copy = (std::min<size_t>)(remaining, read);
+            outBytes.insert(outBytes.end(), buffer, buffer + copy);
+            if (copy != read)
+            {
+                outputLimitExceeded = true;
+                break;
+            }
         }
     };
 
@@ -599,6 +554,12 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring& outp
     {
         DWORD wait = WaitForSingleObject(pi.hProcess, POWERSHELL_POLL_MS);
         drainPipe();
+        if (outputLimitExceeded)
+        {
+            TerminateProcess(pi.hProcess, ERROR_FILE_TOO_LARGE);
+            WaitForSingleObject(pi.hProcess, POWERSHELL_TERMINATE_WAIT_MS);
+            break;
+        }
         if (wait == WAIT_OBJECT_0)
         {
             break;
@@ -631,6 +592,16 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring& outp
     CloseHandle(readPipe);
 
     output = aip::Trim(DecodeOutputBytes(outBytes));
+    if (outputLimitExceeded)
+    {
+        if (!output.empty())
+        {
+            output += L"\r\n";
+        }
+        output += L"PowerShell output exceeded the 1 MiB capture limit.";
+        SetLastError(ERROR_FILE_TOO_LARGE);
+        return false;
+    }
     if (timedOut)
     {
         if (!output.empty())
@@ -880,6 +851,7 @@ static const aip::IniDefaultValue kDefaultSettings[] = {
     { L"Settings", L"TileRefreshSeconds", L"900" },
     { L"Settings", L"MaxItems", L"5" },
     { L"Settings", L"ShowTrayIcon", L"1" },
+    { L"Settings", L"ShowMenuAsDropdown", L"1" },
     { L"Settings", L"BootstrapPackageOnLaunch", L"1" },
     { L"Settings", L"UserAgent", L"RssLiveTile/1.0" },
     { L"Settings", L"HttpTimeoutSeconds", L"30" },
@@ -941,6 +913,7 @@ static AppSettings LoadSettings()
     settings.tileRefreshSeconds = IniReadInt(L"Settings", L"TileRefreshSeconds", 900, 0, 86400);
     settings.maxItems = IniReadInt(L"Settings", L"MaxItems", 5, 1, 5);
     settings.showTrayIcon = IniReadBool(L"Settings", L"ShowTrayIcon", true);
+    settings.showMenuAsDropdown = IniReadBool(L"Settings", L"ShowMenuAsDropdown", true);
     settings.bootstrapPackageOnLaunch = IniReadBool(L"Settings", L"BootstrapPackageOnLaunch", true);
     settings.userAgent = aip::Trim(IniRead(L"Settings", L"UserAgent", L"RssLiveTile/1.0"));
     settings.httpTimeoutSeconds = IniReadInt(L"Settings", L"HttpTimeoutSeconds", 30, 5, 300);
@@ -1136,6 +1109,7 @@ static bool ValidateSetting(const aip::IniSetting& setting, std::wstring& error)
         return false;
     }
     if ((matches(L"Settings", L"ShowTrayIcon") ||
+            matches(L"Settings", L"ShowMenuAsDropdown") ||
             matches(L"Settings", L"BootstrapPackageOnLaunch")) &&
         !requireBool())
     {
@@ -2267,6 +2241,11 @@ static void BeginUpdate(RuntimeContext* ctx, bool force)
     }
     if (ctx->updateRunning.exchange(true))
     {
+        ctx->updatePending.store(true);
+        if (force)
+        {
+            ctx->forceUpdatePending.store(true);
+        }
         return;
     }
     if (ctx->updateThread.joinable())
@@ -2286,8 +2265,18 @@ static void BeginUpdate(RuntimeContext* ctx, bool force)
             std::unique_ptr<UpdateResult> result(new (std::nothrow) UpdateResult());
             if (!result)
             {
-                ctx->updateRunning.store(false);
                 LogError(L"Could not allocate a feed update result.");
+                if (!ctx->closing.load())
+                {
+                    if (!PostMessageW(ctx->hwnd, WM_RLT_UPDATE_DONE, 0, 0))
+                    {
+                        ctx->updateRunning.store(false);
+                    }
+                }
+                else
+                {
+                    ctx->updateRunning.store(false);
+                }
                 return;
             }
             try
@@ -2327,7 +2316,6 @@ static void BeginUpdate(RuntimeContext* ctx, bool force)
                 result->status = L"Feed update failed with an unknown exception.";
             }
 
-            ctx->updateRunning.store(false);
             if (!ctx->closing.load())
             {
                 {
@@ -2345,7 +2333,12 @@ static void BeginUpdate(RuntimeContext* ctx, bool force)
                         LogError(L"Could not publish the completed feed update: " +
                             aip::GetLastErrorText(GetLastError()));
                     }
+                    ctx->updateRunning.store(false);
                 }
+            }
+            else
+            {
+                ctx->updateRunning.store(false);
             }
         });
     }
@@ -2429,6 +2422,7 @@ enum TrayCommand : UINT
     IDM_REGISTER = 1006,
     IDM_LAUNCH_PACKAGED = 1007,
     IDM_EXIT = 1008,
+    IDM_TOGGLE_MENU_DROPDOWN = 1009,
 };
 
 static bool LaunchSelfAction(const wchar_t* action)
@@ -2552,14 +2546,19 @@ static void ShowTrayMenu(RuntimeContext* ctx)
     }
 
     std::wstring status;
+    bool showMenuAsDropdown = true;
     {
         std::lock_guard<std::mutex> lock(ctx->mutex);
         status = ctx->latest.status.empty() ? L"Waiting for first update" : ctx->latest.status;
+        showMenuAsDropdown = ctx->settings.showMenuAsDropdown;
     }
+    aip::AppendTrayMenuItem(menu, IDM_TOGGLE_MENU_DROPDOWN, L"Show menu as dropdown", showMenuAsDropdown);
     aip::AppendTrayMenuItem(menu, 0, LimitText(status, 80), false, false);
     aip::AppendMenuSeparator(menu);
-    aip::AppendTrayMenuItem(menu, IDM_REFRESH, L"Refresh now");
-    aip::AppendTrayMenuItem(menu, IDM_RELOAD, L"Reload configuration");
+
+    aip::TraySectionLayout sectionLayout(menu, showMenuAsDropdown);
+    HMENU feedMenu = sectionLayout.Begin(L"Feed:");
+    aip::AppendTrayMenuItem(feedMenu, IDM_REFRESH, L"Refresh now");
     bool hasLatestLink = false;
     {
         std::lock_guard<std::mutex> lock(ctx->mutex);
@@ -2567,13 +2566,20 @@ static void ShowTrayMenu(RuntimeContext* ctx)
             !ctx->latest.items.empty() &&
             IsHttpUrl(ctx->latest.items.front().link);
     }
-    aip::AppendTrayMenuItem(menu, IDM_OPEN_LATEST, L"Open latest article", false, hasLatestLink);
-    aip::AppendTrayMenuItem(menu, IDM_OPEN_LOG, L"Open log");
-    aip::AppendTrayMenuItem(menu, IDM_OPEN_INI, L"Open settings");
-    aip::AppendMenuSeparator(menu);
-    aip::AppendTrayMenuItem(menu, IDM_REGISTER, L"Register package");
-    aip::AppendTrayMenuItem(menu, IDM_LAUNCH_PACKAGED, L"Launch packaged entry");
-    aip::AppendMenuSeparator(menu);
+    aip::AppendTrayMenuItem(feedMenu, IDM_OPEN_LATEST, L"Open latest article", false, hasLatestLink);
+    sectionLayout.End(feedMenu, L"Feed:");
+
+    HMENU applicationMenu = sectionLayout.Begin(L"Application:");
+    aip::AppendTrayMenuItem(applicationMenu, IDM_RELOAD, L"Reload configuration");
+    aip::AppendTrayMenuItem(applicationMenu, IDM_OPEN_LOG, L"Open log");
+    aip::AppendTrayMenuItem(applicationMenu, IDM_OPEN_INI, L"Open settings");
+    sectionLayout.End(applicationMenu, L"Application:");
+
+    HMENU packageMenu = sectionLayout.Begin(L"Package:");
+    aip::AppendTrayMenuItem(packageMenu, IDM_REGISTER, L"Register package");
+    aip::AppendTrayMenuItem(packageMenu, IDM_LAUNCH_PACKAGED, L"Launch packaged entry");
+    sectionLayout.End(packageMenu, L"Package:");
+    sectionLayout.AppendFinalSeparator();
     aip::AppendTrayMenuItem(menu, IDM_EXIT, L"Exit");
 
     POINT pt{};
@@ -2624,6 +2630,26 @@ static void HandleTrayCommand(RuntimeContext* ctx, UINT id)
     case IDM_LAUNCH_PACKAGED:
         LaunchSelfAction(L"--launch-packaged");
         break;
+    case IDM_TOGGLE_MENU_DROPDOWN:
+    {
+        bool next = true;
+        {
+            std::lock_guard<std::mutex> lock(ctx->mutex);
+            next = !ctx->settings.showMenuAsDropdown;
+        }
+        if (WriteIniSetting(aip::IniSetting{
+                L"Settings",
+                L"ShowMenuAsDropdown",
+                next ? L"1" : L"0" }))
+        {
+            {
+                std::lock_guard<std::mutex> lock(ctx->mutex);
+                ctx->settings.showMenuAsDropdown = next;
+            }
+            LogText(std::wstring(L"Show menu as dropdown: ") + (next ? L"enabled" : L"disabled"));
+        }
+        break;
+    }
     case IDM_EXIT:
         DestroyWindow(ctx->hwnd);
         break;
@@ -2717,6 +2743,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 LogWarn(result->status);
             }
             UpdateTrayTip(ctx, LimitText(result->status, 120));
+        }
+        if (ctx != nullptr)
+        {
+            ctx->updateRunning.store(false);
+            bool pending = ctx->updatePending.exchange(false);
+            bool forcePending = ctx->forceUpdatePending.exchange(false);
+            if (pending && !ctx->closing.load())
+            {
+                BeginUpdate(ctx, forcePending);
+            }
         }
         return 0;
     }
@@ -2873,6 +2909,12 @@ static void AddWrite(AppOptions& options, const wchar_t* section, const wchar_t*
     options.writes.push_back(aip::IniSetting{ section, key, value });
 }
 
+static void SetTrayOverride(AppOptions& options, bool show)
+{
+    options.forceTray = show;
+    options.forceNoTray = !show;
+}
+
 static AppOptions ParseCommandLine()
 {
     AppOptions options;
@@ -2927,11 +2969,11 @@ static AppOptions ParseCommandLine()
         }
         else if (aip::EqualsI(arg, L"--tray"))
         {
-            options.forceTray = true;
+            SetTrayOverride(options, true);
         }
         else if (aip::EqualsI(arg, L"--no-tray"))
         {
-            options.forceNoTray = true;
+            SetTrayOverride(options, false);
         }
         else if (aip::IsOptionOrInlineValue(arg, L"--ini"))
         {
@@ -3182,6 +3224,10 @@ static std::wstring BuildPackagedArguments(const AppOptions& options)
     if (options.forceNoTray)
     {
         arguments += L" --no-tray";
+    }
+    if (options.allowMultiple)
+    {
+        arguments += L" --allow-multiple";
     }
     return arguments;
 }

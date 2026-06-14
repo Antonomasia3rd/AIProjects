@@ -35,7 +35,12 @@ build\DiscordRPC.exe
 .\build\DiscordRPC.exe
 ```
 
-Normal launches start the tray icon unless `[app] show_tray = false` is set. Right-click the tray icon to refresh, reload, toggle common presence/logging settings, open the config, inspect recent logs, or exit.
+Normal launches start the tray icon unless `[app] show_tray = false` is set. The
+GUI-subsystem process does not create and then hide a console during startup. A
+console is allocated only when `[app] show_console = true`, `--show-console`,
+or the tray setting enables it. Right-click the tray icon to refresh, reload,
+toggle common presence/logging settings, open the config, inspect recent logs,
+or exit.
 
 Exit follows the same graceful-then-force model as DesktopStub. DiscordRPC first
 stops new updates, clears the active presence when possible, and completes IPC
