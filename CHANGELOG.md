@@ -16,6 +16,11 @@ Older releases are intentionally kept when practical so users can compare behavi
 
 - Added shared C++ baseline includes under `dependencies/`.
 - Moved projects that have not adopted the shared baseline under `legacy/` while preserving their project keys and release families.
+- Added shared tray-root and release-version helpers so migrated apps use one
+  fixed dropdown, primary action, disabled version, and separator contract.
+- Made shared sidecar logging retry transient reader sharing violations instead
+  of silently dropping records while a log viewer or smoke check has the file
+  open.
 
 ### DiscordRPC
 
@@ -26,6 +31,11 @@ Older releases are intentionally kept when practical so users can compare behavi
   allocated at runtime and mirror shared logger output.
 - Kept **Show menu as dropdown** on the tray menu root in both flat and dropdown
   layouts.
+- Matched DesktopStub's complete tray-root order and added tag-derived
+  `--version`, startup-log, tray, `FileVersion`, and `ProductVersion` reporting.
+- Aligned resident control with the fixed application-message pattern used by
+  the other migrated apps and made sender success require synchronous message
+  delivery.
 
 ### WindhawkMods
 
@@ -40,6 +50,8 @@ Older releases are intentionally kept when practical so users can compare behavi
 - Added workflow concurrency so newer pushes cancel older in-progress builds on the same ref.
 - Added warning-only repository policy and README consistency scans.
 - Added Windows build smoke tests for generated artifacts.
+- Made automatic release publication reject tags that do not match the
+  executable's embedded major version.
 
 ### DesktopStub
 
@@ -63,3 +75,6 @@ Older releases are intentionally kept when practical so users can compare behavi
   completed update results from being overwritten before the UI consumes them.
 - Bounded PowerShell maintenance-command output capture to 1 MiB.
 - Added DesktopStub-compatible root-level **Show menu as dropdown** behavior with Feed, Application, and Package tray sections.
+- Matched DesktopStub's complete tray-root order, moved dynamic feed status into
+  the Feed section, and added tag-derived CLI, tray, log, binary-resource, and
+  default Appx manifest versioning.

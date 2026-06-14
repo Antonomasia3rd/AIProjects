@@ -1,0 +1,6 @@
+#define AIP_FILE_DESCRIPTION "RSS Live Tile"
+#define AIP_INTERNAL_NAME "RssLiveTile.exe"
+#define AIP_ORIGINAL_FILENAME "RssLiveTile.exe"
+#define AIP_PRODUCT_NAME "RSS Live Tile"
+
+#include "..\dependencies\release_version_resource.rc.inc"

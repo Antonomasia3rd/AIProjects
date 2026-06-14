@@ -96,6 +96,46 @@ private:
     DWORD error_ = ERROR_SUCCESS;
 };
 
+inline HANDLE OpenAppendLogFileWithRetry(const std::wstring& filePath, DWORD waitMs)
+{
+    ULONGLONG start = GetTickCount64();
+    for (;;)
+    {
+        HANDLE file = CreateFileW(
+            filePath.c_str(),
+            FILE_APPEND_DATA | FILE_WRITE_DATA | SYNCHRONIZE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr,
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr);
+        if (file != INVALID_HANDLE_VALUE)
+        {
+            return file;
+        }
+
+        DWORD error = GetLastError();
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION)
+        {
+            return INVALID_HANDLE_VALUE;
+        }
+
+        ULONGLONG elapsed = GetTickCount64() - start;
+        if (waitMs == 0 || (waitMs != INFINITE && elapsed >= waitMs))
+        {
+            SetLastError(error);
+            return INVALID_HANDLE_VALUE;
+        }
+
+        DWORD delay = 25;
+        if (waitMs != INFINITE)
+        {
+            delay = std::min<DWORD>(delay, static_cast<DWORD>(waitMs - elapsed));
+        }
+        Sleep(delay);
+    }
+}
+
 inline bool AppendUtf8TextToFile(
     const std::wstring& filePath,
     const std::wstring& text,
@@ -109,14 +149,7 @@ inline bool AppendUtf8TextToFile(
     }
 
     EnsureDirectory(GetDirectoryName(filePath));
-    HANDLE file = CreateFileW(
-        filePath.c_str(),
-        FILE_APPEND_DATA | FILE_WRITE_DATA | SYNCHRONIZE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr,
-        OPEN_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
+    HANDLE file = OpenAppendLogFileWithRetry(filePath, lockWaitMs);
     if (file == INVALID_HANDLE_VALUE)
     {
         return false;
@@ -213,14 +246,7 @@ inline bool AppendUtf16LineToFile(
 
     std::wstring text = line + L"\r\n";
     EnsureDirectory(GetDirectoryName(filePath));
-    HANDLE file = CreateFileW(
-        filePath.c_str(),
-        FILE_APPEND_DATA | FILE_WRITE_DATA | SYNCHRONIZE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr,
-        OPEN_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
+    HANDLE file = OpenAppendLogFileWithRetry(filePath, lockWaitMs);
     if (file == INVALID_HANDLE_VALUE)
     {
         return false;

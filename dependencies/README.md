@@ -21,7 +21,11 @@ product implementation:
   document parsing.
 - `command_line.inc`: parent-console command output, console stream binding,
   option value parsing, INI setting syntax, and boolean aliases.
-- `tray.inc`: low-level menu construction, popup ownership, and notifications.
+- `tray.inc`: low-level menu construction, the baseline root header contract,
+  popup ownership, and notifications.
+- `release_version.inc`, `release_version_resource.rc.inc`, and
+  `resolve_release_version.ps1`: reusable tag-derived runtime, Win32 resource,
+  and build-script version metadata.
 - `core.inc`: path, text, and JSON primitives. Configuration must stay INI-backed.
 
 Include `desktop_app_baseline.h` from product translation units. That aggregate
@@ -81,6 +85,10 @@ buffer instead of open-coded vector trimming when preserving recent log lines.
 `aip::Utf8Logger` can also mirror complete formatted log lines to an allocated
 console and replay its bounded recent buffer when a product enables its console
 at runtime.
+
+Migrated tray applications should call `aip::AppendBaselineTrayMenuHeader`.
+It keeps the root order stable: **Show menu as dropdown**, the product's primary
+action, a disabled **Version** line, then a separator before product sections.
 
 ## C# registry notification services
 

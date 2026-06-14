@@ -19,6 +19,8 @@
 
 namespace aip
 {
+inline constexpr LRESULT INSTANCE_REQUEST_HANDLED = 0x41504952L;
+
 struct InstanceIdentity
 {
     std::wstring mutexName;
@@ -158,6 +160,44 @@ inline bool SignalInstanceWindow(
         delayMs,
         includeMessageOnlyWindows);
     return existing != nullptr && PostMessageW(existing, message, request, 0) != FALSE;
+}
+
+inline bool SendInstanceWindowRequest(
+    const wchar_t* windowClass,
+    const wchar_t* windowTitle,
+    UINT message,
+    WPARAM request,
+    int retries,
+    int delayMs,
+    DWORD deliveryTimeoutMs,
+    bool includeMessageOnlyWindows = true)
+{
+    if (message == 0)
+    {
+        return false;
+    }
+    HWND existing = FindInstanceWindow(
+        windowClass,
+        windowTitle,
+        retries,
+        delayMs,
+        includeMessageOnlyWindows);
+    if (existing == nullptr)
+    {
+        return false;
+    }
+
+    DWORD_PTR result = 0;
+    LRESULT delivered = SendMessageTimeoutW(
+        existing,
+        message,
+        request,
+        0,
+        SMTO_ABORTIFHUNG | SMTO_BLOCK,
+        deliveryTimeoutMs,
+        &result);
+    return delivered != 0 &&
+        static_cast<LRESULT>(result) == INSTANCE_REQUEST_HANDLED;
 }
 
 inline UINT RegisterTaskbarCreatedMessage()

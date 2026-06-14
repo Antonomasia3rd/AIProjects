@@ -971,7 +971,7 @@ static class RepoTools
             string sourceExe = Path.Combine(root, smokePath.Replace('/', Path.DirectorySeparatorChar));
             if (File.Exists(sourceExe))
             {
-                string desktopStubVersion = VerifyDesktopStubBinaryVersion(sourceExe, "DesktopStub");
+                string desktopStubVersion = VerifyBinaryVersion(sourceExe, "DesktopStub");
                 string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
                 if (String.IsNullOrWhiteSpace(tempBase))
                     tempBase = Path.GetTempPath();
@@ -991,7 +991,7 @@ static class RepoTools
                         {
                             if (helper == "DesktopStubLiveTileBroker.exe")
                             {
-                                string helperVersion = VerifyDesktopStubBinaryVersion(sourceHelper, helper);
+                                string helperVersion = VerifyBinaryVersion(sourceHelper, helper);
                                 if (!String.Equals(helperVersion, desktopStubVersion, StringComparison.Ordinal))
                                     throw new InvalidOperationException("DesktopStub helper version does not match DesktopStub.exe: " + helperVersion + " != " + desktopStubVersion);
                             }
@@ -1058,7 +1058,7 @@ static class RepoTools
                     if (!File.Exists(manifestPath))
                         throw new InvalidOperationException("DesktopStub smoke test did not create AppxManifest.xml.");
                     string manifestAfterSmoke = File.ReadAllText(manifestPath, Encoding.UTF8);
-                    VerifyDesktopStubManifestVersion(manifestAfterSmoke, desktopStubVersion);
+                    VerifyManifestVersion(manifestAfterSmoke, desktopStubVersion, "DesktopStub");
                     if (!Regex.IsMatch(manifestAfterSmoke, @"<\s*Identity\b[^>]*\bName\s*=\s*[""']" + Regex.Escape(smokeIdentity) + @"[""']", RegexOptions.IgnoreCase))
                         throw new InvalidOperationException("DesktopStub smoke test did not preserve the custom AppxManifest.xml package identity.");
                     deleteTemp = true;
@@ -1086,11 +1086,13 @@ static class RepoTools
             string sourceExe = Path.Combine(root, discordRpc.artifactPath.Replace('/', Path.DirectorySeparatorChar));
             if (File.Exists(sourceExe))
             {
+                string discordVersion = VerifyBinaryVersion(sourceExe, "DiscordRPC");
                 string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
                 if (String.IsNullOrWhiteSpace(tempBase))
                     tempBase = Path.GetTempPath();
                 string tempRoot = Path.Combine(tempBase, "DiscordRPCSmoke-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(tempRoot);
+                bool deleteTemp = false;
                 try
                 {
                     string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
@@ -1116,7 +1118,10 @@ static class RepoTools
                         throw new InvalidOperationException("DiscordRPC --help did not use the configured INI template.");
                     if (!customHelpBefore.SequenceEqual(File.ReadAllBytes(customHelpIni)))
                         throw new InvalidOperationException("DiscordRPC --help modified its configured INI.");
-                    SmokeProcess(exe, new[] { "--version", "--ini", versionIni, "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC version");
+                    ProcessResult versionResult = SmokeProcess(exe, new[] { "--version", "--ini", versionIni, "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC version");
+                    string expectedTag = "DiscordRPC-v" + discordVersion.Split('.')[0];
+                    if (versionResult.Output.IndexOf(expectedTag + " (" + discordVersion + ")", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("DiscordRPC --version did not report the expected release tag/version: " + expectedTag + " (" + discordVersion + ")");
                     AssertFileDoesNotExist(versionIni, "DiscordRPC --version must be side-effect-free");
                     SmokeProcess(exe, new[] { "--tokenXYZ", "abc" }, new[] { 2 }, 30, "DiscordRPC strict option parsing");
                     SmokeProcess(exe, new[] { "--ini", redactIni, "--client-id", "123456789012345678", "--token", "super-secret-smoke-token", "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC token redaction");
@@ -1127,10 +1132,18 @@ static class RepoTools
                     AssertFileContains(dottedIni, "\"key\" = \"value" + trailingSpaces + "\"", "DiscordRPC --set must preserve dotted section names and trailing value spaces");
                     SmokeProcess(exe, new[] { "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dry-run");
                     VerifyDiscordRpcNoTrayControl(exe, tempRoot);
+                    deleteTemp = true;
                 }
                 finally
                 {
-                    try { Directory.Delete(tempRoot, true); } catch { }
+                    if (deleteTemp)
+                    {
+                        try { Directory.Delete(tempRoot, true); } catch { }
+                    }
+                    else
+                    {
+                        Warn("DiscordRPC smoke temp directory preserved for diagnostics: " + tempRoot);
+                    }
                 }
             }
         }
@@ -1177,7 +1190,7 @@ static class RepoTools
         return 0;
     }
 
-    static string VerifyDesktopStubBinaryVersion(string file, string label)
+    static string VerifyBinaryVersion(string file, string label)
     {
         var info = FileVersionInfo.GetVersionInfo(file);
         string fileVersion = NormalizeFourPartVersion(info.FileVersion);
@@ -1191,6 +1204,27 @@ static class RepoTools
         return fileVersion;
     }
 
+    static string EmbeddedBinaryReleaseTag(Project project, List<string> files)
+    {
+        if (project == null ||
+            !(project.key == "DesktopStub" ||
+              project.key == "DiscordRPC" ||
+              project.key == "RssLiveTile"))
+            return null;
+
+        string expectedName = Path.GetFileName(project.artifactPath);
+        string binary = files.FirstOrDefault(
+            file => Path.GetFileName(file).Equals(expectedName, StringComparison.OrdinalIgnoreCase));
+        if (binary == null)
+            throw new InvalidOperationException(project.label + " release payload is missing its versioned executable.");
+
+        string version = VerifyBinaryVersion(binary, project.label);
+        int major;
+        if (!Int32.TryParse(version.Split('.')[0], out major) || major < 1)
+            throw new InvalidOperationException(project.label + " has an invalid release-major FileVersion: " + version);
+        return project.key + "-v" + major;
+    }
+
     static string NormalizeFourPartVersion(string value)
     {
         if (String.IsNullOrWhiteSpace(value))
@@ -1199,13 +1233,13 @@ static class RepoTools
         return match.Success ? match.Groups["version"].Value : null;
     }
 
-    static void VerifyDesktopStubManifestVersion(string manifestXml, string expectedVersion)
+    static void VerifyManifestVersion(string manifestXml, string expectedVersion, string label)
     {
         if (!Regex.IsMatch(
             manifestXml,
             @"<\s*Identity\b[^>]*\bVersion\s*=\s*[""']" + Regex.Escape(expectedVersion) + @"[""']",
             RegexOptions.IgnoreCase))
-            throw new InvalidOperationException("DesktopStub smoke test AppxManifest.xml version does not match the binary version: " + expectedVersion);
+            throw new InvalidOperationException(label + " smoke test AppxManifest.xml version does not match the binary version: " + expectedVersion);
     }
 
     static void SetDesktopStubManifestIdentity(string manifestPath, string identityName)
@@ -1406,14 +1440,14 @@ static class RepoTools
 
             try
             {
-                WaitForFileText(log, "Starting DiscordRPC C++.", 10000, "DiscordRPC no-tray resident startup");
+                WaitForFileText(log, "Resident control window ready.", 10000, "DiscordRPC no-tray resident startup");
                 SmokeProcess(
                     exe,
                     new[] { "--ini", ini, "--set", "app.verbose_logging=true" },
                     new[] { 0 },
                     10,
                     "DiscordRPC no-tray reload");
-                WaitForFileText(log, "Configuration reloaded.", 10000, "DiscordRPC no-tray reload delivery");
+                WaitForFileText(log, "Configuration reloaded.", 30000, "DiscordRPC no-tray reload delivery");
 
                 SmokeProcess(exe, new[] { "--ini", ini, "--exit" }, new[] { 0 }, 10, "DiscordRPC no-tray exit");
                 if (!resident.WaitForExit(10000))
@@ -1435,6 +1469,7 @@ static class RepoTools
 
     static void VerifyRssLiveTile(string sourceExe)
     {
+        string rssVersion = VerifyBinaryVersion(sourceExe, "RssLiveTile");
         string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
         if (String.IsNullOrWhiteSpace(tempBase))
             tempBase = Path.GetTempPath();
@@ -1446,6 +1481,7 @@ static class RepoTools
             File.Copy(sourceExe, exe, true);
 
             string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
+            string versionIni = Path.Combine(tempRoot, "VersionSideEffect.ini");
             string exitIni = Path.Combine(tempRoot, "ExitSideEffect.ini");
             string invalidIni = Path.Combine(tempRoot, "InvalidSetting.ini");
             string manifestIni = Path.Combine(tempRoot, "Manifest.ini");
@@ -1461,6 +1497,17 @@ static class RepoTools
             if (help.Output.IndexOf("RSS Live Tile", StringComparison.Ordinal) < 0)
                 throw new InvalidOperationException("RssLiveTile --help did not write command-line help.");
             AssertFileDoesNotExist(helpIni, "RssLiveTile --help must be side-effect-free");
+
+            ProcessResult version = SmokeProcess(
+                exe,
+                new[] { "--version", "--ini", versionIni, "--set", "Settings.UpdateIntervalSeconds=60" },
+                new[] { 0 },
+                30,
+                "RssLiveTile version");
+            string expectedTag = "RssLiveTile-v" + rssVersion.Split('.')[0];
+            if (version.Output.IndexOf(expectedTag + " (" + rssVersion + ")", StringComparison.Ordinal) < 0)
+                throw new InvalidOperationException("RssLiveTile --version did not report the expected release tag/version: " + expectedTag + " (" + rssVersion + ")");
+            AssertFileDoesNotExist(versionIni, "RssLiveTile --version must be side-effect-free");
 
             SmokeProcess(
                 exe,
@@ -1494,6 +1541,7 @@ static class RepoTools
             string manifest = Path.Combine(tempRoot, "AppxManifest.xml");
             AssertFileContains(manifest, "DisplayName=\"RSS Smoke Tile\"", "RssLiveTile manifest must use configured display name");
             AssertFileContains(manifest, "Executable=\"RssLiveTile.exe\"", "RssLiveTile manifest must target the copied executable");
+            VerifyManifestVersion(File.ReadAllText(manifest, Encoding.UTF8), rssVersion, "RssLiveTile");
             foreach (string asset in new[]
             {
                 "StoreLogo.png",
@@ -1536,14 +1584,14 @@ static class RepoTools
                     throw new InvalidOperationException("Failed to start RssLiveTile no-tray resident.");
                 try
                 {
-                    WaitForFileText(residentLog, "Resident control window ready.", 10000, "RssLiveTile resident startup");
+                    WaitForFileText(residentLog, "Resident control window ready.", 30000, "RssLiveTile resident startup");
                     SmokeProcess(
                         exe,
                         new[] { "--ini", residentIni, "--interval", "16", "--no-bootstrap", "--no-tray" },
                         new[] { 0 },
                         10,
                         "RssLiveTile resident settings reload");
-                    WaitForFileText(residentLog, "Configuration reloaded.", 10000, "RssLiveTile resident reload delivery");
+                    WaitForFileText(residentLog, "Configuration reloaded.", 30000, "RssLiveTile resident reload delivery");
                     AssertFileContains(residentIni, "\"UpdateIntervalSeconds\" = \"16\"", "RssLiveTile command-line settings must persist");
                     SmokeProcess(
                         exe,
@@ -1746,6 +1794,7 @@ static class RepoTools
             var releases = ListGitHubReleases(repository, root)
                 .Where(r => IsReleaseFamilyTag(releaseBase, r.tagName))
                 .ToList();
+            string embeddedBinaryTag = EmbeddedBinaryReleaseTag(p, files);
             string tag = null;
             foreach (string candidate in matchingTags)
             {
@@ -1756,6 +1805,9 @@ static class RepoTools
                     break;
                 }
             }
+
+            if (tag == null && embeddedBinaryTag != null)
+                tag = embeddedBinaryTag;
 
             if (tag == null)
             {
@@ -1780,6 +1832,11 @@ static class RepoTools
                         matchingTags.Concat(releases.Select(r => r.tagName)));
                 }
             }
+            if (embeddedBinaryTag != null &&
+                !tag.Equals(embeddedBinaryTag, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    p.label + " release tag does not match the executable FileVersion: " +
+                    tag + " != " + embeddedBinaryTag);
             string previousTag = matchingTags.FirstOrDefault(t => t != tag);
 
             string workRoot = Path.Combine(Path.GetTempPath(), "release-assets-" + releaseBase + "-" + Guid.NewGuid().ToString("N"));

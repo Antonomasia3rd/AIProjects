@@ -589,14 +589,7 @@ static void ConfigureSingleInstanceIdentity()
         L"",
         scope);
     g_singleInstanceMutexName = std::move(identity.mutexName);
-    g_singleInstanceMessageName = std::move(identity.messageName);
     g_instanceWindowTitle = std::move(identity.windowTitle);
-    g_singleInstanceMessage = RegisterWindowMessageW(g_singleInstanceMessageName.c_str());
-    if (g_singleInstanceMessage == 0)
-    {
-        LogError(L"Could not register the single-instance control message: " +
-            GetLastErrorText(GetLastError()));
-    }
 }
 
 static bool AcquireSingleInstance()

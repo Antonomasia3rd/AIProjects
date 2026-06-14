@@ -48,8 +48,41 @@ if errorlevel 1 (
     exit /b %ERRORLEVEL%
 )
 
+if /I "%DISCORDRPC_REFRESH_TAGS%"=="1" if not defined DISCORDRPC_VERSION if not defined DISCORDRPC_RELEASE_TAG (
+    git remote get-url origin >nul 2>nul
+    if not errorlevel 1 (
+        git fetch --quiet --tags origin
+        if errorlevel 1 echo [!] Could not refresh DiscordRPC release tags from origin; continuing with local tags.
+    )
+)
+
+set "VERSION_RESULT=build\obj\DiscordRPCVersion.txt"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%..\dependencies\resolve_release_version.ps1" -TagPrefix "DiscordRPC-v" -VersionEnvironment "DISCORDRPC_VERSION" -ReleaseTagEnvironment "DISCORDRPC_RELEASE_TAG" > "%VERSION_RESULT%"
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+for /f "usebackq tokens=1,* delims==" %%A in ("%VERSION_RESULT%") do set "AIP_%%A=%%B"
+del /f /q "%VERSION_RESULT%" >nul 2>nul
+if not defined AIP_RELEASE_TAG (
+    echo ERROR: DiscordRPC release version resolver returned no release tag.
+    popd
+    exit /b 1
+)
+
+set "VERSION_DEFINES=/DAIP_VERSION_MAJOR=!AIP_VERSION_MAJOR! /DAIP_VERSION_MINOR=!AIP_VERSION_MINOR! /DAIP_VERSION_BUILD=!AIP_VERSION_BUILD! /DAIP_VERSION_REVISION=!AIP_VERSION_REVISION!"
+set "VERSION_INCLUDE=build\obj\DiscordRPCVersionDefines.inc"
+> "%VERSION_INCLUDE%" echo #define AIP_RELEASE_TAG "!AIP_RELEASE_TAG!"
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+echo DiscordRPC version: !AIP_RELEASE_TAG! (!AIP_VERSION!)
+
 if /I "%~1"=="check" (
-    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /Zs DiscordRPC.cpp
+    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE !VERSION_DEFINES! /Ibuild\obj /Zs DiscordRPC.cpp
     set "STATUS=!ERRORLEVEL!"
     popd
     exit /b !STATUS!
@@ -57,8 +90,15 @@ if /I "%~1"=="check" (
 
 set "OUT_EXE=build\DiscordRPC.exe"
 set "OBJ_FILE=build\obj\DiscordRPC.obj"
+set "RES_FILE=build\obj\DiscordRPC.res"
 
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DiscordRPC.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib winhttp.lib crypt32.lib /SUBSYSTEM:WINDOWS
+rc /nologo /dAIP_VERSION_MAJOR=!AIP_VERSION_MAJOR! /dAIP_VERSION_MINOR=!AIP_VERSION_MINOR! /dAIP_VERSION_BUILD=!AIP_VERSION_BUILD! /dAIP_VERSION_REVISION=!AIP_VERSION_REVISION! /fo"%RES_FILE%" DiscordRPC.rc
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE !VERSION_DEFINES! /Ibuild\obj DiscordRPC.cpp "%RES_FILE%" /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib winhttp.lib crypt32.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 

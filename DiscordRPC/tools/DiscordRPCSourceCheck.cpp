@@ -107,6 +107,8 @@ int main()
         const std::string tray = ReadAll("src\\drpc_tray.inc");
         const std::string types = ReadAll("src\\drpc_types.inc");
         const std::string build = ReadAll("build.cmd");
+        const std::string resource = ReadAll("DiscordRPC.rc");
+        const std::string releaseVersion = ReadAll("..\\dependencies\\release_version.inc");
 
         RequireContains(
             "DiscordRPC consumes aggregate desktop baseline",
@@ -186,11 +188,14 @@ int main()
             defaults + "\n" + tray,
             "show_menu_as_dropdown");
         RequireOrderedContains(
-            "DiscordRPC keeps dropdown toggle on the tray root",
+            "DiscordRPC uses the complete DesktopStub root header",
             "src\\drpc_tray.inc",
             tray,
             {
-                "AppendChecked(menu, ID_TOGGLE_MENU_DROPDOWN",
+                "ReleaseVersionDisplayText",
+                "aip::AppendBaselineTrayMenuHeader",
+                "ID_TOGGLE_MENU_DROPDOWN",
+                "ID_TRAY_REFRESH",
                 "aip::TraySectionLayout sectionLayout",
                 "HMENU general = beginSection"
             });
@@ -199,6 +204,36 @@ int main()
             "src\\drpc_tray.inc",
             tray,
             "AppendChecked(general, ID_TOGGLE_MENU_DROPDOWN");
+        RequireNotContains(
+            "DiscordRPC removes its redundant root status row",
+            "src\\drpc_config_defaults.inc",
+            defaults,
+            "menu_status");
+        RequireContains(
+            "DiscordRPC CLI reports the shared release tag and version",
+            "DiscordRPC.cpp",
+            discordMain,
+            "aip::ReleaseVersionDisplayText()");
+        RequireContains(
+            "DiscordRPC startup log reports the shared release tag and version",
+            "src\\drpc_app.inc",
+            app,
+            "DiscordRPC version:");
+        RequireContains(
+            "DiscordRPC embeds a Win32 release version resource",
+            "DiscordRPC.rc",
+            resource,
+            "release_version_resource.rc.inc");
+        RequireContains(
+            "DiscordRPC build resolves tag-derived release metadata",
+            "build.cmd",
+            build,
+            "resolve_release_version.ps1");
+        RequireContains(
+            "DiscordRPC runtime uses the generated release tag",
+            "DiscordRPC.cpp + dependencies/release_version.inc",
+            discordMain + "\n" + releaseVersion,
+            "DiscordRPCVersionDefines.inc");
 
         RequireContains(
             "DiscordRPC uses a GUI-subsystem entry point",
@@ -363,10 +398,10 @@ int main()
             app,
             "if (!PostMessageW(hwnd, WM_DRPC_REQUEST_SHUTDOWN, ctrlType, 0))");
         RequireContains(
-            "DiscordRPC signals running instance through shared primitive",
+            "DiscordRPC sends acknowledged running-instance requests",
             "DiscordRPC app sources",
             app,
-            "aip::SignalInstanceWindow");
+            "aip::SendInstanceWindowRequest");
         RequireContains(
             "DiscordRPC rejects empty --ini paths",
             "src\\drpc_command_line.inc",
@@ -563,10 +598,35 @@ int main()
             core,
             "aip::BuildPathScopedInstanceIdentity");
         RequireContains(
-            "DiscordRPC reports single-instance message registration failures",
+            "DiscordRPC uses a fixed application control message like the shared baseline consumers",
+            "DiscordRPC.cpp",
+            discordMain,
+            "static constexpr UINT WM_DRPC_INSTANCE_CONTROL = WM_APP + 65;");
+        RequireNotContains(
+            "DiscordRPC does not dynamically register its instance control message",
             "src\\drpc_core.inc",
             core,
-            "Could not register the single-instance control message:");
+            "RegisterWindowMessageW");
+        RequireContains(
+            "DiscordRPC sends the fixed instance control message through the acknowledged helper",
+            "src\\drpc_app.inc",
+            app,
+            "WM_DRPC_INSTANCE_CONTROL");
+        RequireContains(
+            "DiscordRPC dispatches the fixed instance control message",
+            "src\\drpc_tray.inc",
+            tray,
+            "if (msg == WM_DRPC_INSTANCE_CONTROL)");
+        RequireContains(
+            "DiscordRPC acknowledges handled instance control requests",
+            "src\\drpc_tray.inc",
+            tray,
+            "return aip::INSTANCE_REQUEST_HANDLED;");
+        RequireContains(
+            "DiscordRPC logs when its resident control window is ready",
+            "src\\drpc_app.inc",
+            app,
+            "Resident control window ready.");
         RequireContains(
             "DiscordRPC exits when single-instance mutex creation fails",
             "src\\drpc_core.inc",

@@ -40,7 +40,9 @@ GUI-subsystem process does not create and then hide a console during startup. A
 console is allocated only when `[app] show_console = true`, `--show-console`,
 or the tray setting enables it. Right-click the tray icon to refresh, reload,
 toggle common presence/logging settings, open the config, inspect recent logs,
-or exit.
+or exit. The tray root follows the DesktopStub baseline order and displays the
+tag-derived build version. `--version` reports the same release tag and four-part
+version stored in the executable's Win32 version resource.
 
 Exit follows the same graceful-then-force model as DesktopStub. DiscordRPC first
 stops new updates, clears the active presence when possible, and completes IPC

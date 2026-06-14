@@ -79,11 +79,18 @@ void Menu(HWND h)
             LogWin32Failure(L"AppendMenuW");
     };
 
-    addTo(m, ID_SHOW_MENU_DROPDOWN, g_ui.showMenuAsDropdown.c_str(), showMenuAsDropdown);
-    addTo(m, ID_GENERATE_NOW, g_ui.generateNow.c_str());
     std::wstring versionLine = FormatWide(g_ui.versionLabel.c_str(), DesktopStubVersionDisplayText().c_str());
-    AppendMenuChecked(m, MF_STRING | MF_DISABLED, 0, versionLine.c_str());
-    AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
+    if (!aip::AppendBaselineTrayMenuHeader(
+            m,
+            ID_SHOW_MENU_DROPDOWN,
+            g_ui.showMenuAsDropdown,
+            showMenuAsDropdown,
+            ID_GENERATE_NOW,
+            g_ui.generateNow,
+            versionLine))
+    {
+        LogWin32Failure(L"AppendBaselineTrayMenuHeader");
+    }
 
     HMENU generalMenu = beginSection(g_ui.generalTitle);
     addTo(generalMenu, ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);

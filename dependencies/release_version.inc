@@ -1,0 +1,55 @@
+#ifndef AIP_DEPENDENCIES_RELEASE_VERSION_INC
+#define AIP_DEPENDENCIES_RELEASE_VERSION_INC
+
+#ifndef AIP_VERSION_MAJOR
+#define AIP_VERSION_MAJOR 1
+#endif
+
+#ifndef AIP_VERSION_MINOR
+#define AIP_VERSION_MINOR 0
+#endif
+
+#ifndef AIP_VERSION_BUILD
+#define AIP_VERSION_BUILD 0
+#endif
+
+#ifndef AIP_VERSION_REVISION
+#define AIP_VERSION_REVISION 0
+#endif
+
+#ifndef AIP_RELEASE_TAG
+#define AIP_RELEASE_TAG ""
+#endif
+
+#define AIP_RELEASE_VERSION_STRINGIZE2(x) #x
+#define AIP_RELEASE_VERSION_STRINGIZE(x) AIP_RELEASE_VERSION_STRINGIZE2(x)
+#define AIP_RELEASE_VERSION_WIDEN2(x) L##x
+#define AIP_RELEASE_VERSION_WIDEN(x) AIP_RELEASE_VERSION_WIDEN2(x)
+
+#define AIP_VERSION_TEXT_W \
+    AIP_RELEASE_VERSION_WIDEN(AIP_RELEASE_VERSION_STRINGIZE(AIP_VERSION_MAJOR)) L"." \
+    AIP_RELEASE_VERSION_WIDEN(AIP_RELEASE_VERSION_STRINGIZE(AIP_VERSION_MINOR)) L"." \
+    AIP_RELEASE_VERSION_WIDEN(AIP_RELEASE_VERSION_STRINGIZE(AIP_VERSION_BUILD)) L"." \
+    AIP_RELEASE_VERSION_WIDEN(AIP_RELEASE_VERSION_STRINGIZE(AIP_VERSION_REVISION))
+
+namespace aip
+{
+inline std::wstring ReleasePackageVersion()
+{
+    return AIP_VERSION_TEXT_W;
+}
+
+inline std::wstring ReleaseTag()
+{
+    return AIP_RELEASE_VERSION_WIDEN(AIP_RELEASE_TAG);
+}
+
+inline std::wstring ReleaseVersionDisplayText()
+{
+    std::wstring tag = ReleaseTag();
+    std::wstring version = ReleasePackageVersion();
+    return tag.empty() ? version : tag + L" (" + version + L")";
+}
+}
+
+#endif
