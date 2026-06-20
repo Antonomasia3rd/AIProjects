@@ -65,7 +65,7 @@ static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::uniqu
     {
         std::wstring message = GetUiString(L"missing_client_id", L"Missing [general] client_id. Create a Discord application and paste its Application ID into the INI.");
         LogError(message);
-        Notify(ctx, L"notification_failed", L"Rich Presence update failed.", NIIF_WARNING, L"notify_on_failure");
+        Notify(ctx, L"missing_client_id", message.c_str(), NIIF_WARNING, L"notify_on_failure");
         return 2;
     }
 
