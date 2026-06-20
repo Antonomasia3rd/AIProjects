@@ -12,4 +12,4 @@
 #define DESKTOPSTUB_ORIGINAL_FILENAME "DesktopStub.exe"
 #endif
 
-#include "src\\DesktopStubVersionResource.rc.inc"
+#include "..\\dependencies\\DesktopStub\\DesktopStubVersionResource.rc.inc"

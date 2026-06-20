@@ -103,7 +103,7 @@ int main()
         const std::string dependenciesReadme = ReadAll("dependencies/README.md");
         const std::string sharedTests = ReadAll("tools/SharedBaselineTests.cpp");
         const std::string discordMain = ReadAll("DiscordRPC/DiscordRPC.cpp");
-        const std::string discordCore = ReadAll("DiscordRPC/src/drpc_core.inc");
+        const std::string discordCore = ReadAll("dependencies/DiscordRPC/drpc_core.inc");
         const std::string desktopMain = ReadAll("DesktopStub/DesktopStub.cpp");
 
         RequireContains(
@@ -897,17 +897,17 @@ int main()
             "dependencies\\desktop_app_baseline.h");
         RequireContains(
             "DiscordRPC uses the shared INI store",
-            "DiscordRPC/src/drpc_core.inc",
+            "dependencies/DiscordRPC/drpc_core.inc",
             discordCore,
             "aip::IniConfigStore");
         RequireNotContains(
             "DiscordRPC does not use Win32 profile INI APIs",
-            "DiscordRPC/src/drpc_core.inc",
+            "dependencies/DiscordRPC/drpc_core.inc",
             discordCore,
             "GetPrivateProfileStringW");
         RequireNotContains(
             "DiscordRPC does not use Win32 profile INI writers",
-            "DiscordRPC/src/drpc_core.inc",
+            "dependencies/DiscordRPC/drpc_core.inc",
             discordCore,
             "WritePrivateProfileStringW");
 

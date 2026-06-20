@@ -36,6 +36,21 @@ file explicitly says so. Optional facilities such as `dpapi.inc` stay separate.
 Product code should keep policy and commands in product modules while using
 these shared contracts for lifecycle, sidecar paths, logging, and persistence behavior.
 
+## Product-owned source subfolders
+
+`dependencies/DesktopStub/` and `dependencies/DiscordRPC/` hold each product's
+own modular implementation fragments (`ga_*.inc` and `drpc_*.inc`
+respectively). These used to live under `DesktopStub\src` and `DiscordRPC\src`;
+they were relocated here so every project's source lives under one top-level
+`dependencies` folder instead of being scattered across per-project `src`
+folders. **This is purely a physical relocation, not a change in ownership or
+sharing policy:** files in these subfolders remain product-specific policy code
+owned by that one product, the same as before the move. They are not "shared
+baseline" the way the root-level files above are, and other products should
+not include from another product's subfolder. If a genuine cross-product need
+emerges, promote the specific helper to a root-level shared module (following
+the pattern above) instead of reaching into another product's subfolder.
+
 ## INI dialect compatibility
 
 The shared INI helpers must stay compatible with DesktopStub's established INI
