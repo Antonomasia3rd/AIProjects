@@ -21,6 +21,16 @@ Older releases are intentionally kept when practical so users can compare behavi
 - Made shared sidecar logging retry transient reader sharing violations instead
   of silently dropping records while a log viewer or smoke check has the file
   open.
+- Moved `DesktopStub/src` to `dependencies/DesktopStub` and `DiscordRPC/src` to
+  `dependencies/DiscordRPC` so every project's source lives under the
+  repository's single `dependencies/` folder instead of being split across
+  per-project `src` folders. This is a physical relocation only: the moved
+  fragments (`ga_*.inc`, `drpc_*.inc`) remain product-owned policy code, not
+  shared baseline modules, and other products should not include from another
+  product's subfolder. Updated every `#include`, source-regression check
+  (`DesktopStubSourceCheck.cpp`, `DiscordRPCSourceCheck.cpp`,
+  `SharedBaselineSourceCheck.cpp`), policy-warning suppression path, and README
+  "Source Layout" section to match.
 
 ### DiscordRPC
 
@@ -36,6 +46,11 @@ Older releases are intentionally kept when practical so users can compare behavi
 - Aligned resident control with the fixed application-message pattern used by
   the other migrated apps and made sender success require synchronous message
   delivery.
+- Fixed the missing-`client_id` tray notification: it now shows the actual
+  "Missing `[general] client_id`..." message (already used for the log entry)
+  instead of the generic "Rich Presence update failed." balloon, so a
+  misconfigured/unset `client_id` is diagnosable from the tray instead of
+  silently logged only to the file.
 
 ### WindhawkMods
 

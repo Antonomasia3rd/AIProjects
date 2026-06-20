@@ -612,8 +612,8 @@ static class RepoTools
         {
             Tuple.Create("README.md", "Profile storage", "If a non-INI configuration format is unavoidable"),
             Tuple.Create("DesktopStub/README.md", "Maintenance marker", "live-wallpaper capture path does not look for a specific process name"),
-            Tuple.Create("DesktopStub/src/ga_app.inc", "Maintenance marker", JoinLiteral("ob", "solete") + " AppX launch-forwarding fallback kept for diagnostics/rollback"),
-            Tuple.Create("DesktopStub/src/ga_livetile_broker_app.inc", "Profile storage", JoinLiteral("Application", "Data::Current().LocalFolder()")),
+            Tuple.Create("dependencies/DesktopStub/ga_app.inc", "Maintenance marker", JoinLiteral("ob", "solete") + " AppX launch-forwarding fallback kept for diagnostics/rollback"),
+            Tuple.Create("dependencies/DesktopStub/ga_livetile_broker_app.inc", "Profile storage", JoinLiteral("Application", "Data::Current().LocalFolder()")),
             Tuple.Create("DesktopStub/tools/DesktopStubSourceCheck.cpp", "Maintenance marker", "INI template does not expose " + JoinLiteral("ob", "solete") + " Manifest section"),
             Tuple.Create("DesktopStub/tools/DesktopStubSourceCheck.cpp", "Maintenance marker", JoinLiteral("Ob", "solete") + " Manifest INI section is preserved but blocked"),
             Tuple.Create("DesktopStub/tools/DesktopStubSourceCheck.cpp", "Maintenance marker", JoinLiteral("Ob", "solete") + " Manifest INI section has no remover"),

@@ -89,14 +89,15 @@ Useful command-line paths:
 
 - `DiscordRPC.cpp`: small translation-unit shell and global app state.
 - `..\dependencies\desktop_app_baseline.h`: stable shared baseline entry point for lifecycle, command-line, tray, and UTF-8/BOM-aware INI persistence using DesktopStub's quoted assignment style (`"Name" = "Value"`).
-- `src/drpc_core.inc`: DiscordRPC path wrappers, logging, console, JSON helpers, and config access glue.
-- `src/drpc_config_defaults.inc`: default INI values and configurable strings.
-- `src/drpc_command_line.inc`: command-line parsing and persisted `--set` writes.
-- `src/drpc_presence.inc`: template tokens and activity JSON generation.
-- `src/drpc_ipc.inc`: Discord named-pipe IPC transport.
-- `src/drpc_gateway.inc`: Discord Gateway websocket transport, heartbeat handling, Gateway activity shaping, asset ID lookup, and DPAPI-token use.
-- `src/drpc_tray.inc`: tray window, menu, notifications.
-- `src/drpc_app.inc`: run loop, single-instance handling, reload/refresh orchestration.
+- DiscordRPC-specific implementation code lives under `..\dependencies\DiscordRPC` (relocated from the old `DiscordRPC\src` so all product source lives under the repository's `dependencies` folder; these fragments remain DiscordRPC-owned, not shared with other products):
+  - `drpc_core.inc`: DiscordRPC path wrappers, logging, console, JSON helpers, and config access glue.
+  - `drpc_config_defaults.inc`: default INI values and configurable strings.
+  - `drpc_command_line.inc`: command-line parsing and persisted `--set` writes.
+  - `drpc_presence.inc`: template tokens and activity JSON generation.
+  - `drpc_ipc.inc`: Discord named-pipe IPC transport.
+  - `drpc_gateway.inc`: Discord Gateway websocket transport, heartbeat handling, Gateway activity shaping, asset ID lookup, and DPAPI-token use.
+  - `drpc_tray.inc`: tray window, menu, notifications.
+  - `drpc_app.inc`: run loop, single-instance handling, reload/refresh orchestration.
 
 ## Generated Files
 

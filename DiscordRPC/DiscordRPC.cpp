@@ -86,15 +86,15 @@ static bool g_consoleAllocated = false;
 
 static aip::Utf8Logger g_logger;
 #include "..\dependencies\dpapi.inc"
-#include "src/drpc_types.inc"
-#include "src/drpc_core.inc"
-#include "src/drpc_config_defaults.inc"
-#include "src/drpc_command_line.inc"
-#include "src/drpc_presence.inc"
-#include "src/drpc_ipc.inc"
-#include "src/drpc_gateway.inc"
-#include "src/drpc_tray.inc"
-#include "src/drpc_app.inc"
+#include "../dependencies/DiscordRPC/drpc_types.inc"
+#include "../dependencies/DiscordRPC/drpc_core.inc"
+#include "../dependencies/DiscordRPC/drpc_config_defaults.inc"
+#include "../dependencies/DiscordRPC/drpc_command_line.inc"
+#include "../dependencies/DiscordRPC/drpc_presence.inc"
+#include "../dependencies/DiscordRPC/drpc_ipc.inc"
+#include "../dependencies/DiscordRPC/drpc_gateway.inc"
+#include "../dependencies/DiscordRPC/drpc_tray.inc"
+#include "../dependencies/DiscordRPC/drpc_app.inc"
 
 int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 {
