@@ -15,6 +15,20 @@
     ]
   },
   {
+    "key": "ADBController",
+    "label": "ADBController",
+    "folder": "legacy/ADBController",
+    "buildOutput": "build_adb_controller",
+    "artifactName": "ADBController",
+    "artifactPath": "legacy/ADBController/build/ADBController.exe",
+    "skipKey": "ADBController",
+    "artifactPaths": [
+      "legacy/ADBController/build/ADBController.exe",
+      "legacy/ADBController/README.md",
+      "legacy/ADBController/ADBController.example.ini"
+    ]
+  },
+  {
     "key": "asusblink",
     "label": "asusblink",
     "folder": "legacy/asusblink",

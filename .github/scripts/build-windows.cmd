@@ -41,6 +41,7 @@ call "%REPO%\tools\TestLegacyUtilities.cmd"
 if errorlevel 1 goto Fail
 
 call :BuildAllowContentAboveLock || goto Fail
+call :BuildADBController || goto Fail
 call :BuildAsusBlink || goto Fail
 call :BuildCapsBlink || goto Fail
 call :BuildYourPhoneHideBanner || goto Fail
@@ -77,6 +78,28 @@ if not exist "%LEGACY%\AllowContentAboveLock\build" mkdir "%LEGACY%\AllowContent
 call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\AllowContentAboveLock\build\AllowContentAboveLock.exe" "%REPO%\dependencies\registry_notification_service.cs" "%LEGACY%\AllowContentAboveLock\AllowContentAboveLock.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\AllowContentAboveLock\build\AllowContentAboveLock.exe"
+exit /b %ERRORLEVEL%
+
+:BuildADBController
+call :IsSkipped ADBController
+if "!SKIP_RESULT!"=="1" exit /b 0
+call :Section "Build ADBController"
+pushd "%LEGACY%\ADBController" || exit /b 1
+call :Run cmd.exe /d /c BuildADBController.cmd check
+if errorlevel 1 (
+  set "STATUS=%ERRORLEVEL%"
+  popd
+  exit /b !STATUS!
+)
+call :Run cmd.exe /d /c BuildADBController.cmd
+set "STATUS=%ERRORLEVEL%"
+popd
+if not "%STATUS%"=="0" exit /b %STATUS%
+call :RecordArtifact "%LEGACY%\ADBController\build\ADBController.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\ADBController\README.md"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\ADBController\ADBController.example.ini"
 exit /b %ERRORLEVEL%
 
 :BuildAsusBlink
