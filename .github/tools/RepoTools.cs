@@ -372,6 +372,7 @@ static class RepoTools
             .ToList();
         var expectedConsumers = new[]
         {
+            "ADBController",
             "CharmTray",
             "DesktopStub",
             "DiscordRPC",

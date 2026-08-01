@@ -7,6 +7,7 @@ Small Windows utility projects and experiments. Active baseline projects live at
 | Folder | Runtime | Purpose |
 | --- | --- | --- |
 | `legacy/AllowContentAboveLock` | C# Windows service | Keeps notification `AllowContentAboveLock` registry values enabled for loaded users. |
+| `legacy/ADBController` | C++ Win32 GUI app | Direct ADB-over-TCP TV controller that keeps the ADB server running while switching selected TVs. |
 | `legacy/asusblink` | C# tray/console app | ASUS ACPI LED controller for mic LED, keyboard backlight states, and HDD-activity keyboard patterns. |
 | `legacy/capsblink` | C# console app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
 | `legacy/CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
@@ -48,6 +49,7 @@ Common prerequisites:
 - Windows 8 or 8.1 for `legacy/CharmTray`.
 - .NET Framework compiler at `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` for C# projects.
 - Visual Studio Build Tools with the C++ workload for MSVC projects.
+- Android Platform Tools for `legacy/ADBController` at runtime (`adb.exe` is not bundled).
 - MinGW-w64 `g++` for `legacy/RealTimeNotesDeskband`.
 - `dnscmd.exe` for `legacy/DNSAutoUpdate` on Windows DNS Server systems.
 

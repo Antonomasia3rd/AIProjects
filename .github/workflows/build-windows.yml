@@ -15,6 +15,7 @@ on:
         options:
           - All
           - AllowContentAboveLock
+          - ADBController
           - asusblink
           - capsblink
           - YourPhoneHideBanner
@@ -47,6 +48,7 @@ jobs:
       release_project_list: ${{ steps.detect.outputs.release_project_list }}
       release_base: ${{ steps.detect.outputs.release_base }}
       build_allow_content_above_lock: ${{ steps.detect.outputs.build_allow_content_above_lock }}
+      build_adb_controller: ${{ steps.detect.outputs.build_adb_controller }}
       build_asusblink: ${{ steps.detect.outputs.build_asusblink }}
       build_capsblink: ${{ steps.detect.outputs.build_capsblink }}
       build_your_phone_hide_banner: ${{ steps.detect.outputs.build_your_phone_hide_banner }}
@@ -144,6 +146,17 @@ jobs:
         with:
           name: AllowContentAboveLock
           path: legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe
+          if-no-files-found: error
+
+      - name: Upload ADBController artifact
+        if: needs.detect-projects.outputs.build_adb_controller == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ADBController
+          path: |
+            legacy/ADBController/build/ADBController.exe
+            legacy/ADBController/README.md
+            legacy/ADBController/ADBController.example.ini
           if-no-files-found: error
 
       - name: Upload asusblink artifact
