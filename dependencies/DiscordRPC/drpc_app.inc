@@ -57,17 +57,27 @@ static void Notify(RuntimeContext* ctx, const wchar_t* stringKey, const wchar_t*
     QueueTrayBalloon(ctx, GetUiString(L"notification_title", APP_DISPLAY_NAME), GetUiString(stringKey, fallback), icon);
 }
 
-static int UpdatePresenceOnce(std::unique_ptr<DiscordIpcClient>& ipc, std::unique_ptr<DiscordGatewayClient>& gateway, bool verbose, RuntimeContext* ctx)
+static int UpdatePresenceOnce(
+    std::unique_ptr<DiscordIpcClient>& ipc,
+    std::unique_ptr<DiscordGatewayClient>& gateway,
+    bool verbose,
+    RuntimeContext* ctx,
+    bool& missingClientIdReported)
 {
     std::wstring transport = NormalizeTransportMode(IniReadS(L"general", L"transport_mode", L"ipc"));
     std::wstring clientId = Trim(IniReadS(L"general", L"client_id", L""));
     if (clientId.empty())
     {
-        std::wstring message = GetUiString(L"missing_client_id", L"Missing [general] client_id. Create a Discord application and paste its Application ID into the INI.");
-        LogError(message);
-        Notify(ctx, L"missing_client_id", message.c_str(), NIIF_WARNING, L"notify_on_failure");
+        if (!missingClientIdReported)
+        {
+            std::wstring message = GetUiString(L"missing_client_id", L"Missing [general] client_id. Create a Discord application and paste its Application ID into the INI.");
+            LogError(message);
+            Notify(ctx, L"missing_client_id", message.c_str(), NIIF_WARNING, L"notify_on_failure");
+            missingClientIdReported = true;
+        }
         return 2;
     }
+    missingClientIdReported = false;
 
     PresencePayload payload = BuildPresencePayload();
     if (verbose)
@@ -163,6 +173,7 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
     bool verbose = g_verboseLogging.load();
     int updateIntervalSeconds = ClampInt(IniReadI(L"general", L"update_interval", 5), 1, 86400);
     DWORD exitCode = 0;
+    bool missingClientIdReported = false;
 
     LogInfo(L"Starting DiscordRPC C++.");
     LogInfo(L"DiscordRPC version: " + aip::ReleaseVersionDisplayText());
@@ -202,7 +213,7 @@ static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
             g_refreshRequested = false;
             try
             {
-                int updateStatus = UpdatePresenceOnce(ipc, gateway, verbose, ctx);
+                int updateStatus = UpdatePresenceOnce(ipc, gateway, verbose, ctx, missingClientIdReported);
                 if (updateStatus != 0)
                 {
                     exitCode = static_cast<DWORD>(updateStatus);
