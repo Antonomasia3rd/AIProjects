@@ -17,6 +17,19 @@ static LiveTileUpdateMode ConfiguredLiveTileUpdateMode()
     }
 }
 
+static ContentSource ConfiguredContentSource()
+{
+    ContentSource source = static_cast<ContentSource>(g_contentSource.load());
+    switch (source)
+    {
+    case ContentSource::Wallpaper:
+    case ContentSource::RssFeed:
+        return source;
+    default:
+        return ContentSource::Wallpaper;
+    }
+}
+
 static LiveTileTemplateStyle ConfiguredLiveTileTemplateStyle()
 {
     LiveTileTemplateStyle style = static_cast<LiveTileTemplateStyle>(g_liveTileTemplateStyle.load());

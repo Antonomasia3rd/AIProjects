@@ -9,6 +9,7 @@ static std::atomic<bool> g_wallpaperDetectionFallbackOnInvalid(true);
 static std::atomic<bool> g_generateOnStartup(true);
 static std::atomic<bool> g_generateOnStartupOnlyWhenChanged(true);
 static std::atomic<int> g_liveTileUpdateMode(static_cast<int>(LiveTileUpdateMode::Auto));
+static std::atomic<int> g_contentSource(static_cast<int>(ContentSource::Wallpaper));
 static std::atomic<int> g_liveTileTemplateStyle(static_cast<int>(LiveTileTemplateStyle::Adaptive));
 static std::atomic<int> g_liveTileBranding(static_cast<int>(LiveTileBranding::Auto));
 static std::atomic<bool> g_liveTileRelaunchOnSwitch(true);

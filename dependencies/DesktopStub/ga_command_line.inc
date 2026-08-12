@@ -107,6 +107,47 @@ static bool IsValidLiveTileUpdateMode(LiveTileUpdateMode mode)
         mode == LiveTileUpdateMode::LiveTile;
 }
 
+static ContentSource ParseContentSourceValue(
+    const std::wstring& rawValue,
+    ContentSource fallback = ContentSource::Wallpaper)
+{
+    std::wstring v = ToLowerCopy(TrimCopy(rawValue));
+    if (v.empty())
+        return fallback;
+
+    if (v == L"wallpaper" || v == L"desktop" || v == L"default")
+        return ContentSource::Wallpaper;
+    if (v == L"rssfeed" || v == L"rss_feed" || v == L"rss-feed" ||
+        v == L"rss" || v == L"feed")
+        return ContentSource::RssFeed;
+
+    return fallback;
+}
+
+static std::wstring ContentSourceIniValue(ContentSource source)
+{
+    switch (source)
+    {
+    case ContentSource::RssFeed:
+        return L"RssFeed";
+    case ContentSource::Wallpaper:
+    default:
+        return L"Wallpaper";
+    }
+}
+
+static const wchar_t* ContentSourceName(ContentSource source)
+{
+    switch (source)
+    {
+    case ContentSource::RssFeed:
+        return L"RSS Feed";
+    case ContentSource::Wallpaper:
+    default:
+        return L"Wallpaper";
+    }
+}
+
 static void AddCommandLineLiveTileModeSetting(LiveTileUpdateMode mode)
 {
     AddCommandLineIniSetting(L"Settings", L"ExperimentalLiveTileUpdate", LiveTileUpdateModeIniValue(mode));
