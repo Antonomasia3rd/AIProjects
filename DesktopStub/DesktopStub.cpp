@@ -137,6 +137,7 @@ static UINT g_taskbarCreatedMessage = 0;
 static HANDLE g_singleInstanceMutex = nullptr;
 
 #include "..\dependencies\desktop_app_baseline.h"
+#include "..\dependencies\powershell_runner.inc"
 #include "../dependencies/DesktopStub/ga_core.inc"
 #if __has_include("DesktopStubVersionDefines.inc")
 #include "DesktopStubVersionDefines.inc"

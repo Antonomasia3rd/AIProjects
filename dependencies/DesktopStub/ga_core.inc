@@ -629,6 +629,10 @@ using aip::FormatIniAssignment;
 using aip::ParseIniName;
 using aip::ReadIniValueFromDoc;
 using aip::TryParseIniSectionHeader;
+// QuoteCommandLineArg moved to the shared dependencies/core.inc; exposed
+// unqualified here since it's called from ga_app.inc, ga_command_line.inc,
+// and ga_registration.inc without an aip:: prefix.
+using aip::QuoteCommandLineArg;
 
 static std::mutex g_iniWriteMutex;
 static std::mutex g_iniCacheMutex;

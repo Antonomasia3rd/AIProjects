@@ -214,6 +214,43 @@ inline std::wstring PathJoin(const std::wstring& left, const std::wstring& right
     return result;
 }
 
+// Quotes a single argument for a Win32 CreateProcess-style command line,
+// following the MSVC C runtime argv parsing rules (backslashes are only
+// special immediately before a literal double quote). Promoted from
+// DesktopStub's ga_command_line.inc, which several products had
+// independently re-implemented under the same name.
+inline std::wstring QuoteCommandLineArg(const std::wstring& arg)
+{
+    std::wstring out = L"\"";
+    size_t slashCount = 0;
+    for (wchar_t ch : arg)
+    {
+        if (ch == L'\\')
+        {
+            ++slashCount;
+            continue;
+        }
+
+        if (ch == L'"')
+        {
+            out.append(slashCount * 2 + 1, L'\\');
+            out.push_back(ch);
+            slashCount = 0;
+            continue;
+        }
+
+        if (slashCount)
+        {
+            out.append(slashCount, L'\\');
+            slashCount = 0;
+        }
+        out.push_back(ch);
+    }
+    out.append(slashCount * 2, L'\\');
+    out.push_back(L'"');
+    return out;
+}
+
 inline std::wstring GetTemporaryDirectoryPath()
 {
     std::vector<wchar_t> buffer(512);

@@ -408,20 +408,8 @@ static bool Appx_Update_LiveTileFromPendingXmlForActivationStub(std::wstring& fa
     return Appx_Update_LiveTileXmlBare(tileXml, failureMessage);
 }
 
-static std::wstring PowerShellSingleQuotedString(const std::wstring& value)
-{
-    std::wstring quoted = L"'";
-    for (wchar_t ch : value)
-    {
-        if (ch == L'\'')
-            quoted += L"''";
-        else
-            quoted.push_back(ch);
-    }
-    quoted += L"'";
-    return quoted;
-}
-
+// PowerShellSingleQuotedString now lives in the shared
+// dependencies/powershell_runner.inc (aip::); see its one call site below.
 
 static std::wstring LiveTileActivationTraceLogPath()
 {
@@ -627,7 +615,7 @@ static bool TryReadRegisteredPackageViaPowerShell(
     packageFullName.clear();
     failureMessage.clear();
 
-    std::wstring identity = PowerShellSingleQuotedString(manifestInfo.identityName);
+    std::wstring identity = aip::PowerShellSingleQuotedString(manifestInfo.identityName);
     std::wstring command =
         L"$p = Get-AppxPackage -Name " + identity + L" | Select-Object -First 1; "
         L"if ($null -ne $p) { Write-Output ($p.PackageFamilyName + '|@|' + $p.PackageFullName) }";

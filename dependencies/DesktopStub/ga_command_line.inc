@@ -301,37 +301,8 @@ static void AddCommandLineManifestTargetSetting(ManifestCompatibilityTarget targ
     AddCommandLineIniSetting(L"Settings", L"AppxManifestTarget", ManifestCompatibilityTargetIniValue(target));
 }
 
-static std::wstring QuoteCommandLineArg(const std::wstring& arg)
-{
-    std::wstring out = L"\"";
-    size_t slashCount = 0;
-    for (wchar_t ch : arg)
-    {
-        if (ch == L'\\')
-        {
-            ++slashCount;
-            continue;
-        }
-
-        if (ch == L'"')
-        {
-            out.append(slashCount * 2 + 1, L'\\');
-            out.push_back(ch);
-            slashCount = 0;
-            continue;
-        }
-
-        if (slashCount)
-        {
-            out.append(slashCount, L'\\');
-            slashCount = 0;
-        }
-        out.push_back(ch);
-    }
-    out.append(slashCount * 2, L'\\');
-    out.push_back(L'"');
-    return out;
-}
+// QuoteCommandLineArg now lives in the shared dependencies/core.inc (aip::),
+// exposed unqualified via the using-declaration in ga_core.inc.
 
 static bool CommandLineTryGetOptionValue(
     int argc,

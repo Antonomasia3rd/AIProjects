@@ -1,4 +1,4 @@
-// compile command: cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE RssLiveTile.cpp /link gdiplus.lib winhttp.lib gdi32.lib user32.lib shell32.lib shlwapi.lib ole32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+﻿// compile command: cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE RssLiveTile.cpp /link gdiplus.lib winhttp.lib gdi32.lib user32.lib shell32.lib shlwapi.lib ole32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 
@@ -34,6 +34,7 @@
 #include <winrt/Windows.UI.Notifications.h>
 
 #include "..\dependencies\desktop_app_baseline.h"
+#include "..\dependencies\powershell_runner.inc"
 #if __has_include("RssLiveTileVersionDefines.inc")
 #include "RssLiveTileVersionDefines.inc"
 #endif
@@ -315,111 +316,12 @@ static std::wstring LimitText(std::wstring value, size_t maxChars)
     return value;
 }
 
-static std::wstring QuoteCommandLineArg(const std::wstring& value)
-{
-    std::wstring out = L"\"";
-    size_t slashCount = 0;
-    for (wchar_t ch : value)
-    {
-        if (ch == L'\\')
-        {
-            ++slashCount;
-            continue;
-        }
-        if (ch == L'"')
-        {
-            out.append(slashCount * 2 + 1, L'\\');
-            out.push_back(ch);
-            slashCount = 0;
-            continue;
-        }
-        out.append(slashCount, L'\\');
-        slashCount = 0;
-        out.push_back(ch);
-    }
-    out.append(slashCount * 2, L'\\');
-    out.push_back(L'"');
-    return out;
-}
-
-static std::wstring PowerShellSingleQuotedString(const std::wstring& value)
-{
-    std::wstring out = L"'";
-    for (wchar_t ch : value)
-    {
-        if (ch == L'\'')
-        {
-            out += L"''";
-        }
-        else
-        {
-            out.push_back(ch);
-        }
-    }
-    out.push_back(L'\'');
-    return out;
-}
-
-static std::wstring Base64EncodeBytes(const BYTE* data, size_t len)
-{
-    static const wchar_t table[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::wstring out;
-    out.reserve(((len + 2) / 3) * 4);
-
-    for (size_t i = 0; i < len; i += 3)
-    {
-        uint32_t b0 = data[i];
-        uint32_t b1 = (i + 1 < len) ? data[i + 1] : 0;
-        uint32_t b2 = (i + 2 < len) ? data[i + 2] : 0;
-        uint32_t triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push_back(table[(triple >> 18) & 0x3F]);
-        out.push_back(table[(triple >> 12) & 0x3F]);
-        out.push_back(i + 1 < len ? table[(triple >> 6) & 0x3F] : L'=');
-        out.push_back(i + 2 < len ? table[triple & 0x3F] : L'=');
-    }
-    return out;
-}
-
-static std::wstring PowerShellEncodedCommand(const std::wstring& command)
-{
-    return Base64EncodeBytes(
-        reinterpret_cast<const BYTE*>(command.data()),
-        command.size() * sizeof(wchar_t));
-}
-
-static std::wstring PowerShellUtf8Preamble()
-{
-    return L"[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); "
-        L"$OutputEncoding = [Console]::OutputEncoding; ";
-}
-
-static std::wstring DefaultPowerShellExe()
-{
-    std::wstring systemDirectory = aip::GetSystemDirectoryPath();
-    if (!systemDirectory.empty())
-    {
-        return systemDirectory + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
-    }
-    return L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-}
-
-static std::wstring DecodeOutputBytes(const std::vector<BYTE>& bytes)
-{
-    std::wstring out;
-    if (bytes.empty())
-    {
-        return out;
-    }
-    if (aip::DecodeCodePageText(CP_UTF8, bytes.data(), bytes.size(), out, 0))
-    {
-        return out;
-    }
-    if (aip::DecodeCodePageText(CP_ACP, bytes.data(), bytes.size(), out, 0))
-    {
-        return out;
-    }
-    return L"";
-}
+// QuoteCommandLineArg, PowerShellSingleQuotedString, Base64EncodeBytes,
+// PowerShellEncodedCommand, PowerShellUtf8Preamble, DefaultPowerShellExe, and
+// the decode-captured-output helper all now live in the shared
+// dependencies/powershell_runner.inc (aip::) instead of being duplicated
+// here -- see RunPowerShellCommand below, which shares the same
+// spawn/timeout/capture primitive DesktopStub uses.
 
 static std::wstring LastNonEmptyLine(const std::wstring& text)
 {
@@ -452,152 +354,28 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring& outp
     output.clear();
     exitCode = 1;
 
-    SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
-    HANDLE readPipe = nullptr;
-    HANDLE writePipe = nullptr;
-    if (!CreatePipe(&readPipe, &writePipe, &sa, 0))
-    {
-        output = L"CreatePipe failed: " + aip::GetLastErrorText(GetLastError());
-        return false;
-    }
-    if (!SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0))
-    {
-        DWORD err = GetLastError();
-        CloseHandle(readPipe);
-        CloseHandle(writePipe);
-        output = L"SetHandleInformation failed: " + aip::GetLastErrorText(err);
-        return false;
-    }
+    aip::PowerShellRunOptions options;
+    options.powerShellExe = aip::DefaultPowerShellExe();
+    options.timeoutMs = POWERSHELL_TIMEOUT_MS;
+    options.pollMs = POWERSHELL_POLL_MS;
+    options.terminateWaitMs = POWERSHELL_TERMINATE_WAIT_MS;
+    options.outputLimitBytes = POWERSHELL_OUTPUT_LIMIT_BYTES;
+    // No onUnresolvedAfterTimeout is set: RssLiveTile has never tracked
+    // processes that survive a timeout beyond closing the handle, so this
+    // preserves that behavior unchanged.
 
-    HANDLE nulIn = CreateFileW(
-        L"NUL",
-        GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        &sa,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (nulIn == INVALID_HANDLE_VALUE)
+    aip::PowerShellRunResult result = aip::RunPowerShellCaptured(command, options);
+
+    if (!result.started)
     {
-        DWORD err = GetLastError();
-        CloseHandle(readPipe);
-        CloseHandle(writePipe);
-        output = L"CreateFileW(NUL) failed: " + aip::GetLastErrorText(err);
+        output = result.failedCall + L" failed: " + aip::GetLastErrorText(result.failedCallError);
         return false;
     }
 
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-    si.hStdInput = nulIn;
-    si.hStdOutput = writePipe;
-    si.hStdError = writePipe;
+    exitCode = result.exitCode;
+    output = aip::Trim(result.rawOutput);
 
-    PROCESS_INFORMATION pi{};
-    std::wstring cmdline = QuoteCommandLineArg(DefaultPowerShellExe()) +
-        L" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " +
-        PowerShellEncodedCommand(PowerShellUtf8Preamble() + command);
-
-    BOOL started = CreateProcessW(
-        nullptr,
-        cmdline.data(),
-        nullptr,
-        nullptr,
-        TRUE,
-        CREATE_NO_WINDOW,
-        nullptr,
-        nullptr,
-        &si,
-        &pi);
-
-    CloseHandle(writePipe);
-    CloseHandle(nulIn);
-    if (!started)
-    {
-        DWORD err = GetLastError();
-        CloseHandle(readPipe);
-        output = L"CreateProcessW(PowerShell) failed: " + aip::GetLastErrorText(err);
-        return false;
-    }
-
-    std::vector<BYTE> outBytes;
-    bool outputLimitExceeded = false;
-    auto drainPipe = [&]()
-    {
-        for (;;)
-        {
-            DWORD available = 0;
-            if (!PeekNamedPipe(readPipe, nullptr, 0, nullptr, &available, nullptr) || available == 0)
-            {
-                break;
-            }
-
-            BYTE buffer[4096];
-            DWORD toRead = std::min<DWORD>(available, static_cast<DWORD>(sizeof(buffer)));
-            DWORD read = 0;
-            if (!ReadFile(readPipe, buffer, toRead, &read, nullptr) || read == 0)
-            {
-                break;
-            }
-            size_t remaining = POWERSHELL_OUTPUT_LIMIT_BYTES - outBytes.size();
-            size_t copy = (std::min<size_t>)(remaining, read);
-            outBytes.insert(outBytes.end(), buffer, buffer + copy);
-            if (copy != read)
-            {
-                outputLimitExceeded = true;
-                break;
-            }
-        }
-    };
-
-    ULONGLONG start = GetTickCount64();
-    bool timedOut = false;
-    bool waitFailed = false;
-    DWORD waitError = ERROR_SUCCESS;
-    for (;;)
-    {
-        DWORD wait = WaitForSingleObject(pi.hProcess, POWERSHELL_POLL_MS);
-        drainPipe();
-        if (outputLimitExceeded)
-        {
-            TerminateProcess(pi.hProcess, ERROR_FILE_TOO_LARGE);
-            WaitForSingleObject(pi.hProcess, POWERSHELL_TERMINATE_WAIT_MS);
-            break;
-        }
-        if (wait == WAIT_OBJECT_0)
-        {
-            break;
-        }
-        if (wait == WAIT_FAILED)
-        {
-            waitFailed = true;
-            waitError = GetLastError();
-            TerminateProcess(pi.hProcess, waitError);
-            WaitForSingleObject(pi.hProcess, POWERSHELL_TERMINATE_WAIT_MS);
-            break;
-        }
-        if (GetTickCount64() - start >= POWERSHELL_TIMEOUT_MS)
-        {
-            timedOut = true;
-            TerminateProcess(pi.hProcess, 1460);
-            WaitForSingleObject(pi.hProcess, POWERSHELL_TERMINATE_WAIT_MS);
-            break;
-        }
-    }
-
-    drainPipe();
-    if (!GetExitCodeProcess(pi.hProcess, &exitCode))
-    {
-        exitCode = 1;
-    }
-
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    CloseHandle(readPipe);
-
-    output = aip::Trim(DecodeOutputBytes(outBytes));
-    if (outputLimitExceeded)
+    if (result.outputLimitExceeded)
     {
         if (!output.empty())
         {
@@ -607,7 +385,7 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring& outp
         SetLastError(ERROR_FILE_TOO_LARGE);
         return false;
     }
-    if (timedOut)
+    if (result.timedOut)
     {
         if (!output.empty())
         {
@@ -616,13 +394,13 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring& outp
         output += L"PowerShell command timed out.";
         return false;
     }
-    if (waitFailed)
+    if (result.waitFailed)
     {
         if (!output.empty())
         {
             output += L"\r\n";
         }
-        output += L"PowerShell process wait failed: " + aip::GetLastErrorText(waitError);
+        output += L"PowerShell process wait failed: " + aip::GetLastErrorText(result.waitError);
         return false;
     }
     return exitCode == 0;
@@ -1227,8 +1005,8 @@ static bool RegisterPackage(std::wstring* packageFamilyName)
     std::wstring identity = LoadSettings().manifestIdentityName;
     std::wstring ps =
         L"$ErrorActionPreference='Stop'; "
-        L"Add-AppxPackage -Register " + PowerShellSingleQuotedString(manifest) + L" -ForceUpdateFromAnyVersion; "
-        L"(Get-AppxPackage -Name " + PowerShellSingleQuotedString(identity) + L" | Select-Object -First 1 -ExpandProperty PackageFamilyName)";
+        L"Add-AppxPackage -Register " + aip::PowerShellSingleQuotedString(manifest) + L" -ForceUpdateFromAnyVersion; "
+        L"(Get-AppxPackage -Name " + aip::PowerShellSingleQuotedString(identity) + L" | Select-Object -First 1 -ExpandProperty PackageFamilyName)";
 
     LogText(L"Registering loose Appx package.");
     bool ok = RunPowerShellCommand(ps, output, exitCode);
@@ -1264,7 +1042,7 @@ static bool LookupPackageFamilyName(std::wstring& packageFamilyName)
     std::wstring identity = LoadSettings().manifestIdentityName;
     std::wstring ps =
         L"$ErrorActionPreference='Stop'; "
-        L"(Get-AppxPackage -Name " + PowerShellSingleQuotedString(identity) + L" | Select-Object -First 1 -ExpandProperty PackageFamilyName)";
+        L"(Get-AppxPackage -Name " + aip::PowerShellSingleQuotedString(identity) + L" | Select-Object -First 1 -ExpandProperty PackageFamilyName)";
 
     if (!RunPowerShellCommand(ps, output, exitCode))
     {
@@ -1287,7 +1065,7 @@ static bool UnregisterPackage()
     std::wstring identity = LoadSettings().manifestIdentityName;
     std::wstring ps =
         L"$ErrorActionPreference='Stop'; "
-        L"$packages = @(Get-AppxPackage -Name " + PowerShellSingleQuotedString(identity) + L"); "
+        L"$packages = @(Get-AppxPackage -Name " + aip::PowerShellSingleQuotedString(identity) + L"); "
         L"foreach ($package in $packages) { Remove-AppxPackage -Package $package.PackageFullName }; "
         L"Write-Output ('Removed {0} package(s).' -f $packages.Count)";
 
@@ -2104,7 +1882,7 @@ static std::wstring BuildTileXml(const FeedSnapshot& snapshot, const FeedItem& i
     if (IsHttpUrl(item.link))
     {
         activationArguments = XmlEscape(
-            L"--open-url " + QuoteCommandLineArg(item.link));
+            L"--open-url " + aip::QuoteCommandLineArg(item.link));
     }
 
     std::wstring xml;
@@ -2433,9 +2211,9 @@ enum TrayCommand : UINT
 static bool LaunchSelfAction(const wchar_t* action)
 {
     std::wstring commandLine =
-        QuoteCommandLineArg(g_paths.exePath) +
+        aip::QuoteCommandLineArg(g_paths.exePath) +
         L" --ini " +
-        QuoteCommandLineArg(g_paths.configPath) +
+        aip::QuoteCommandLineArg(g_paths.configPath) +
         L" " +
         action;
 
@@ -3230,7 +3008,7 @@ static int ActionRegister()
 static std::wstring BuildPackagedArguments(const AppOptions& options)
 {
     std::wstring arguments =
-        L"--ini " + QuoteCommandLineArg(g_paths.configPath) +
+        L"--ini " + aip::QuoteCommandLineArg(g_paths.configPath) +
         L" --no-bootstrap";
     if (options.once)
     {

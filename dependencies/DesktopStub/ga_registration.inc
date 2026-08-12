@@ -3,77 +3,21 @@
 // -----------------------------------------------------------------------------
 static void MarkRegistrationUnresolved(const std::wstring& reason, HANDLE processHandle, DWORD processId);
 
-static std::wstring Base64EncodeBytes(const BYTE* data, size_t len)
-{
-    static const wchar_t alphabet[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::wstring out;
-    out.reserve(((len + 2) / 3) * 4);
-
-    for (size_t i = 0; i < len; i += 3)
-    {
-        DWORD block = ((DWORD)data[i]) << 16;
-        bool have2 = i + 1 < len;
-        bool have3 = i + 2 < len;
-        if (have2) block |= ((DWORD)data[i + 1]) << 8;
-        if (have3) block |= data[i + 2];
-
-        out.push_back(alphabet[(block >> 18) & 0x3F]);
-        out.push_back(alphabet[(block >> 12) & 0x3F]);
-        out.push_back(have2 ? alphabet[(block >> 6) & 0x3F] : L'=');
-        out.push_back(have3 ? alphabet[block & 0x3F] : L'=');
-    }
-
-    return out;
-}
-
-static std::wstring PowerShellEncodedCommand(const std::wstring& command)
-{
-    const BYTE* bytes = reinterpret_cast<const BYTE*>(command.c_str());
-    return Base64EncodeBytes(bytes, command.size() * sizeof(wchar_t));
-}
-
-static std::wstring PowerShellUtf8Preamble()
-{
-    return L"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
-        L"$OutputEncoding = [System.Text.Encoding]::UTF8; "
-        L"$ProgressPreference = 'SilentlyContinue'; ";
-}
-
-static std::wstring DefaultPowerShellExe()
-{
-    std::wstring systemDirectory = aip::GetSystemDirectoryPath();
-    if (!systemDirectory.empty())
-        return systemDirectory + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
-
-    return L"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-}
-
-static bool IsLocalAbsoluteFilePath(const std::wstring& path)
-{
-    std::wstring trimmed = TrimCopy(path);
-    if (trimmed.rfind(L"\\\\?\\", 0) == 0)
-        trimmed.erase(0, 4);
-
-    return trimmed.size() >= 3 &&
-        iswalpha(trimmed[0]) &&
-        trimmed[1] == L':' &&
-        (trimmed[2] == L'\\' || trimmed[2] == L'/');
-}
+// Base64EncodeBytes / PowerShellEncodedCommand / PowerShellUtf8Preamble /
+// DefaultPowerShellExe / IsLocalAbsoluteFilePath / ResolveConfiguredPowerShellExe
+// now live in the shared dependencies/powershell_runner.inc (aip::), exposed
+// unqualified here via the `using aip::...;` declarations in ga_core.inc.
+// RssLiveTile shares the same implementations instead of maintaining its own
+// independent copies.
 
 static std::wstring ReadPowerShellExe()
 {
-    std::wstring fallback = DefaultPowerShellExe();
-    std::wstring configured = TrimCopy(IniReadS(L"Settings", L"PowerShellExe", L""));
-    if (configured.empty())
-        return fallback;
+    bool usedInvalidOverride = false;
+    std::wstring resolved = aip::ResolveConfiguredPowerShellExe(IniReadS(L"Settings", L"PowerShellExe", L""), usedInvalidOverride);
+    if (usedInvalidOverride)
+        Log(g_ui.powerShellExeInvalidPath.c_str(), resolved.c_str());
 
-    if (!IsLocalAbsoluteFilePath(configured))
-    {
-        Log(g_ui.powerShellExeInvalidPath.c_str(), fallback.c_str());
-        return fallback;
-    }
-
-    return configured;
+    return resolved;
 }
 
 static bool IsAsciiHexDigit(wchar_t ch)
@@ -197,163 +141,52 @@ bool PS_Run(const std::wstring& cmd)
     Log(g_ui.powerShellCommand.c_str(), cmd.c_str());
     PS_Clear();
 
-    SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
-    HANDLE r=0,w=0;
-    if (!CreatePipe(&r,&w,&sa,0))
+    aip::PowerShellRunOptions options;
+    options.powerShellExe = ReadPowerShellExe();
+    options.timeoutMs = static_cast<DWORD>(IniReadClampedI(L"Settings", L"PowerShellTimeoutMs", 120000, 0, 600000));
+    options.pollMs = static_cast<DWORD>(IniReadClampedI(L"Settings", L"PowerShellPollMs", 50, 10, 1000));
+    options.terminateWaitMs = static_cast<DWORD>(IniReadClampedI(L"Settings", L"PowerShellTerminateWaitMs", 5000, 0, 60000));
+    // Historically unbounded; defaults to a generous 4 MiB cap now so a
+    // runaway/verbose PowerShell invocation can't grow captured output
+    // without limit. Set to 0 to restore the old unbounded behavior.
+    options.outputLimitBytes = static_cast<size_t>(IniReadClampedI(L"Settings", L"PowerShellOutputLimitBytes", 4 * 1024 * 1024, 0, 64 * 1024 * 1024));
+    options.onUnresolvedAfterTimeout = &MarkRegistrationUnresolved;
+    options.unresolvedReason = g_ui.powerShellTimedOut;
+
+    std::wstring timeoutDisplay = TimeoutDisplayText(static_cast<int>(options.timeoutMs));
+    Log(g_ui.powerShellLaunchDetails.c_str(), options.powerShellExe.c_str(), timeoutDisplay.c_str(), static_cast<int>(options.pollMs), static_cast<int>(options.terminateWaitMs));
+
+    aip::PowerShellRunResult psResult = aip::RunPowerShellCaptured(cmd, options);
+
+    if (!psResult.started)
     {
-        LogWin32Failure(L"CreatePipe");
+        LogWin32Failure(psResult.failedCall.c_str(), psResult.failedCallError);
         return false;
     }
-    if (!SetHandleInformation(r, HANDLE_FLAG_INHERIT, 0))
-    {
-        LogWin32Failure(L"SetHandleInformation(pipe read handle)");
-        CloseHandle(r);
-        CloseHandle(w);
-        return false;
-    }
+    Log(g_ui.powerShellProcessStarted.c_str(), psResult.processId);
 
-    HANDLE nulIn = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (nulIn == INVALID_HANDLE_VALUE)
-    {
-        LogWin32Failure(L"CreateFileW(NUL)");
-        CloseHandle(r);
-        CloseHandle(w);
-        return false;
-    }
+    if (psResult.waitFailed)
+        LogWin32Failure(L"WaitForSingleObject", psResult.waitError);
 
-    STARTUPINFOW si{}; si.cb=sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    si.wShowWindow=SW_HIDE; si.hStdInput=nulIn; si.hStdOutput=w; si.hStdError=w;
+    if (psResult.outputLimitExceeded)
+        Log(L"PowerShell output exceeded the configured limit (pid %lu); output was truncated and the process was terminated.", psResult.processId);
 
-    PROCESS_INFORMATION pi{};
-    std::wstring powerShellExe = ReadPowerShellExe();
-    const int timeoutMs = IniReadClampedI(L"Settings", L"PowerShellTimeoutMs", 120000, 0, 600000);
-    const int pollMs = IniReadClampedI(L"Settings", L"PowerShellPollMs", 50, 10, 1000);
-    const int terminateWaitMs = IniReadClampedI(L"Settings", L"PowerShellTerminateWaitMs", 5000, 0, 60000);
-    std::wstring timeoutDisplay = TimeoutDisplayText(timeoutMs);
-    Log(g_ui.powerShellLaunchDetails.c_str(), powerShellExe.c_str(), timeoutDisplay.c_str(), pollMs, terminateWaitMs);
-
-    std::wstring cmdline = QuoteCommandLineArg(powerShellExe) + L" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + PowerShellEncodedCommand(PowerShellUtf8Preamble() + cmd);
-
-    BOOL ok = CreateProcessW(nullptr, &cmdline[0], nullptr,nullptr, TRUE,
-        CREATE_NO_WINDOW, nullptr,nullptr, &si, &pi);
-
-    CloseHandle(w);
-    CloseHandle(nulIn);
-    if (!ok)
-    {
-        LogWin32Failure(L"CreateProcessW");
-        CloseHandle(r);
-        return false;
-    }
-    Log(g_ui.powerShellProcessStarted.c_str(), pi.dwProcessId);
-
-    char buf[2048];
-    std::vector<BYTE> outBytes;
-
-    auto appendOutputBytes = [&](const char* data, DWORD bytes)
-    {
-        outBytes.insert(outBytes.end(), reinterpret_cast<const BYTE*>(data), reinterpret_cast<const BYTE*>(data) + bytes);
-    };
-
-    auto drainPipe = [&]()
-    {
-        for (;;)
-        {
-            DWORD available = 0;
-            if (!PeekNamedPipe(r, nullptr, 0, nullptr, &available, nullptr) || available == 0)
-                break;
-
-            DWORD toRead = std::min<DWORD>(available, sizeof(buf));
-            DWORD n = 0;
-            if (!ReadFile(r, buf, toRead, &n, nullptr) || n == 0)
-                break;
-
-            appendOutputBytes(buf, n);
-        }
-    };
-
-    const auto psStart = steady_clock::now();
-    bool timedOut = false;
-    bool timeoutExitConfirmed = false;
-
-    for (;;)
-    {
-        drainPipe();
-
-        DWORD waitResult = WaitForSingleObject(pi.hProcess, static_cast<DWORD>(pollMs));
-        if (waitResult == WAIT_OBJECT_0)
-        {
-            drainPipe();
-            break;
-        }
-        if (waitResult == WAIT_FAILED)
-        {
-            LogWin32Failure(L"WaitForSingleObject");
-            break;
-        }
-        if (timeoutMs > 0 && ElapsedMs(psStart, steady_clock::now()) >= timeoutMs)
-        {
-            timedOut = true;
-            Log(g_ui.powerShellTerminateRequested.c_str(), pi.dwProcessId);
-            if (!TerminateProcess(pi.hProcess, WAIT_TIMEOUT))
-            {
-                Log(g_ui.powerShellTerminateFailed.c_str(), pi.dwProcessId);
-                LogWin32Failure(L"TerminateProcess");
-            }
-            if (terminateWaitMs > 0)
-            {
-                DWORD terminateWaitResult = WaitForSingleObject(pi.hProcess, static_cast<DWORD>(terminateWaitMs));
-                if (terminateWaitResult == WAIT_OBJECT_0)
-                {
-                    timeoutExitConfirmed = true;
-                    Log(g_ui.powerShellTerminatedAfterTimeout.c_str(), pi.dwProcessId);
-                }
-                else if (terminateWaitResult == WAIT_TIMEOUT)
-                    Log(g_ui.powerShellStillRunningAfterTimeout.c_str(), pi.dwProcessId);
-                else if (terminateWaitResult == WAIT_FAILED)
-                    LogWin32Failure(L"WaitForSingleObject(PowerShell terminate)");
-            }
-            else if (WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0)
-            {
-                timeoutExitConfirmed = true;
-                Log(g_ui.powerShellTerminatedAfterTimeout.c_str(), pi.dwProcessId);
-            }
-            drainPipe();
-            break;
-        }
-    }
-
-    CloseHandle(r);
-    DWORD ec = STILL_ACTIVE;
-    if (!GetExitCodeProcess(pi.hProcess, &ec))
-    {
-        LogWin32Failure(L"GetExitCodeProcess(PowerShell)");
-        ec = 1;
-    }
+    bool timedOut = psResult.timedOut;
     if (timedOut)
-        ec = WAIT_TIMEOUT;
-
-    if (timedOut && !timeoutExitConfirmed)
     {
-        DWORD finalWait = WaitForSingleObject(pi.hProcess, 0);
-        if (finalWait == WAIT_OBJECT_0)
-        {
-            timeoutExitConfirmed = true;
-            Log(g_ui.powerShellTerminatedAfterTimeout.c_str(), pi.dwProcessId);
-        }
+        Log(g_ui.powerShellTerminateRequested.c_str(), psResult.processId);
+        if (psResult.terminateConfirmed)
+            Log(g_ui.powerShellTerminatedAfterTimeout.c_str(), psResult.processId);
         else
-        {
-            MarkRegistrationUnresolved(g_ui.powerShellTimedOut, pi.hProcess, pi.dwProcessId);
-            pi.hProcess = nullptr;
-        }
+            Log(g_ui.powerShellStillRunningAfterTimeout.c_str(), psResult.processId);
+        // aip::RunPowerShellCaptured already invoked MarkRegistrationUnresolved
+        // itself (via options.onUnresolvedAfterTimeout) if the process still
+        // could not be confirmed terminated after every wait window.
     }
 
-    if (pi.hProcess)
-        CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
+    DWORD ec = psResult.exitCode;
 
-    std::wstring out = FormatPowerShellOutput(DecodeProcessOutput(outBytes));
+    std::wstring out = FormatPowerShellOutput(psResult.rawOutput);
     std::wstring psMsg;
     bool psErr = false;
     if (ec == 0 && !timedOut) {
