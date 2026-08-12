@@ -633,6 +633,9 @@ using aip::TryParseIniSectionHeader;
 // unqualified here since it's called from ga_app.inc, ga_command_line.inc,
 // and ga_registration.inc without an aip:: prefix.
 using aip::QuoteCommandLineArg;
+// Same story for XmlEscape: identical to RssLiveTile's own copy, used
+// throughout ga_manifest.inc / ga_live_tile.inc / ga_live_tile_templates.inc.
+using aip::XmlEscape;
 
 static std::mutex g_iniWriteMutex;
 static std::mutex g_iniCacheMutex;

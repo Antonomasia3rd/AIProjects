@@ -702,24 +702,8 @@ static std::wstring EffectiveManifestRestrictedCapability()
     return IsManifestOptionalDottedToken(value) ? value : L"runFullTrust";
 }
 
-static std::wstring XmlEscape(const std::wstring& value)
-{
-    std::wstring out;
-    out.reserve(value.size());
-    for (wchar_t ch : value)
-    {
-        switch (ch)
-        {
-        case L'&': out += L"&amp;"; break;
-        case L'<': out += L"&lt;"; break;
-        case L'>': out += L"&gt;"; break;
-        case L'"': out += L"&quot;"; break;
-        case L'\'': out += L"&apos;"; break;
-        default: out.push_back(ch); break;
-        }
-    }
-    return out;
-}
+// XmlEscape now lives in the shared dependencies/core.inc (aip::), exposed
+// unqualified via the using-declaration in ga_core.inc.
 
 static std::wstring XmlUnescape(std::wstring value)
 {
