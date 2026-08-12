@@ -98,12 +98,8 @@ static std::wstring ManifestCompatibilityTargetSummaryText()
     return ManifestCompatibilityTargetName(ConfiguredManifestCompatibilityTarget());
 }
 
-static bool CurrentProcessHasPackageIdentity()
-{
-    UINT32 length = 0;
-    LONG rc = GetCurrentPackageFullName(&length, nullptr);
-    return rc == ERROR_INSUFFICIENT_BUFFER && length > 0;
-}
+// CurrentProcessHasPackageIdentity now lives in the shared
+// dependencies/core.inc (aip::), exposed unqualified via ga_core.inc.
 
 static LiveTileUpdateMode EffectiveLiveTileUpdateMode()
 {

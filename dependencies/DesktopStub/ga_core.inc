@@ -636,6 +636,7 @@ using aip::QuoteCommandLineArg;
 // Same story for XmlEscape: identical to RssLiveTile's own copy, used
 // throughout ga_manifest.inc / ga_live_tile.inc / ga_live_tile_templates.inc.
 using aip::XmlEscape;
+using aip::CurrentProcessHasPackageIdentity;
 
 static std::mutex g_iniWriteMutex;
 static std::mutex g_iniCacheMutex;
