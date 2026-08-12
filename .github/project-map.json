@@ -75,6 +75,11 @@
     "artifactName": "DiscordRPC",
     "artifactPath": "DiscordRPC/build/DiscordRPC.exe",
     "skipKey": "DiscordRPC",
+    "dependencyPaths": [
+      "dependencies/desktop_app_baseline.h",
+      "dependencies/release_version.inc",
+      "dependencies/dpapi.inc"
+    ],
     "releaseTagEnvironment": "DISCORDRPC_RELEASE_TAG",
     "artifactPaths": [
       "DiscordRPC/build/DiscordRPC.exe"
@@ -126,6 +131,10 @@
     "artifactPath": "DesktopStub/build/DesktopStub.exe",
     "smokePath": "DesktopStub/build/DesktopStub.exe",
     "skipKey": "DesktopStub",
+    "dependencyPaths": [
+      "dependencies/desktop_app_baseline.h",
+      "dependencies/powershell_runner.inc"
+    ],
     "releaseTagEnvironment": "DESKTOPSTUB_RELEASE_TAG",
     "artifactPaths": [
       "DesktopStub/build/DesktopStub.exe",
@@ -141,6 +150,11 @@
     "artifactPath": "RssLiveTile/build/RssLiveTile.exe",
     "smokePath": "RssLiveTile/build/RssLiveTile.exe",
     "skipKey": "RssLiveTile",
+    "dependencyPaths": [
+      "dependencies/desktop_app_baseline.h",
+      "dependencies/powershell_runner.inc",
+      "dependencies/release_version.inc"
+    ],
     "releaseTagEnvironment": "RSSLIVETILE_RELEASE_TAG",
     "artifactPaths": [
       "RssLiveTile/build/RssLiveTile.exe",
