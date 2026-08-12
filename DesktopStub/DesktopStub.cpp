@@ -115,6 +115,17 @@ enum class ManifestCompatibilityTarget
     Windows8
 };
 
+// What drives this instance's Live Tile content. Wallpaper is the original,
+// default behavior (unchanged). RssFeed lets a renamed/reconfigured copy of
+// DesktopStub (its own INI, its own AppX package identity per
+// ManifestDefaultIdentityForExecutable) show feed headlines on its own tile
+// instead -- the capability RssLiveTile used to provide as a separate binary.
+enum class ContentSource
+{
+    Wallpaper,
+    RssFeed
+};
+
 static const wchar_t* StateEnabled(bool v);
 static const wchar_t* StateOn(bool v);
 static int ClampInt(int value, int minValue, int maxValue);
