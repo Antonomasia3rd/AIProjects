@@ -225,24 +225,8 @@ static std::wstring GetFileName(const std::wstring& path)
     return slash == std::wstring::npos ? path : path.substr(slash + 1);
 }
 
-static std::wstring XmlEscape(const std::wstring& value)
-{
-    std::wstring out;
-    out.reserve(value.size());
-    for (wchar_t ch : value)
-    {
-        switch (ch)
-        {
-        case L'&': out += L"&amp;"; break;
-        case L'<': out += L"&lt;"; break;
-        case L'>': out += L"&gt;"; break;
-        case L'"': out += L"&quot;"; break;
-        case L'\'': out += L"&apos;"; break;
-        default: out.push_back(ch); break;
-        }
-    }
-    return out;
-}
+// XmlEscape now lives in the shared dependencies/core.inc (aip::); see call
+// sites below (BuildAppxManifest, BuildTileXml, etc.).
 
 static std::wstring CollapseWhitespace(const std::wstring& value)
 {
@@ -581,13 +565,13 @@ static bool EnsureDefaultAssets(bool force)
 
 static std::wstring BuildAppxManifest(const AppSettings& settings)
 {
-    std::wstring displayName = XmlEscape(settings.manifestDisplayName);
-    std::wstring description = XmlEscape(settings.manifestDescription);
-    std::wstring identity = XmlEscape(settings.manifestIdentityName);
-    std::wstring publisher = XmlEscape(settings.manifestPublisher);
-    std::wstring version = XmlEscape(settings.manifestVersion);
-    std::wstring background = XmlEscape(settings.manifestBackgroundColor);
-    std::wstring executable = XmlEscape(GetFileName(g_paths.exePath));
+    std::wstring displayName = aip::XmlEscape(settings.manifestDisplayName);
+    std::wstring description = aip::XmlEscape(settings.manifestDescription);
+    std::wstring identity = aip::XmlEscape(settings.manifestIdentityName);
+    std::wstring publisher = aip::XmlEscape(settings.manifestPublisher);
+    std::wstring version = aip::XmlEscape(settings.manifestVersion);
+    std::wstring background = aip::XmlEscape(settings.manifestBackgroundColor);
+    std::wstring executable = aip::XmlEscape(GetFileName(g_paths.exePath));
 
     std::wstring manifest;
     manifest += L"<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n";
@@ -1874,14 +1858,14 @@ static FeedSnapshot ReadFeedSnapshot(
 
 static std::wstring BuildTileXml(const FeedSnapshot& snapshot, const FeedItem& item)
 {
-    std::wstring source = XmlEscape(LimitText(snapshot.sourceTitle, 80));
-    std::wstring title = XmlEscape(LimitText(item.title, 160));
-    std::wstring summary = XmlEscape(LimitText(item.summary, 220));
-    std::wstring date = XmlEscape(LimitText(item.date, 80));
+    std::wstring source = aip::XmlEscape(LimitText(snapshot.sourceTitle, 80));
+    std::wstring title = aip::XmlEscape(LimitText(item.title, 160));
+    std::wstring summary = aip::XmlEscape(LimitText(item.summary, 220));
+    std::wstring date = aip::XmlEscape(LimitText(item.date, 80));
     std::wstring activationArguments;
     if (IsHttpUrl(item.link))
     {
-        activationArguments = XmlEscape(
+        activationArguments = aip::XmlEscape(
             L"--open-url " + aip::QuoteCommandLineArg(item.link));
     }
 

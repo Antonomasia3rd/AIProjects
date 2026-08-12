@@ -251,6 +251,29 @@ inline std::wstring QuoteCommandLineArg(const std::wstring& arg)
     return out;
 }
 
+// Escapes a value for safe inclusion as XML element/attribute text.
+// Promoted from DesktopStub's ga_manifest.inc, which RssLiveTile had
+// independently reimplemented byte-for-byte under the same name for its
+// own AppX manifest generation.
+inline std::wstring XmlEscape(const std::wstring& value)
+{
+    std::wstring out;
+    out.reserve(value.size());
+    for (wchar_t ch : value)
+    {
+        switch (ch)
+        {
+        case L'&': out += L"&amp;"; break;
+        case L'<': out += L"&lt;"; break;
+        case L'>': out += L"&gt;"; break;
+        case L'"': out += L"&quot;"; break;
+        case L'\'': out += L"&apos;"; break;
+        default: out.push_back(ch); break;
+        }
+    }
+    return out;
+}
+
 inline std::wstring GetTemporaryDirectoryPath()
 {
     std::vector<wchar_t> buffer(512);
