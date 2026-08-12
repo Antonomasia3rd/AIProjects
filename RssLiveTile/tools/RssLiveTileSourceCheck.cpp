@@ -231,7 +231,7 @@ int wmain()
     std::wstring systemDirectory = aip::GetSystemDirectoryPath();
     Check(
         !systemDirectory.empty() &&
-            DefaultPowerShellExe().rfind(systemDirectory, 0) == 0,
+            aip::DefaultPowerShellExe().rfind(systemDirectory, 0) == 0,
         "PowerShell discovery uses the growable shared system-directory helper");
 
     if (g_failures != 0)
