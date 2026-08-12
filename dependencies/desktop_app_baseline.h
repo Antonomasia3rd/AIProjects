@@ -4,6 +4,7 @@
 #include "baseline_app.h"
 
 #include <shellapi.h>
+#include <appmodel.h>
 
 #include <algorithm>
 #include <cerrno>

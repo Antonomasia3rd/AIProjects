@@ -274,6 +274,19 @@ inline std::wstring XmlEscape(const std::wstring& value)
     return out;
 }
 
+// True when the current process is running with AppX package identity
+// (i.e. it was launched from/as a registered package). Promoted from
+// DesktopStub's ga_runtime_helpers.inc; RssLiveTile had an independent copy
+// missing the defensive length>0 check (harmless in practice, since the
+// Win32 contract guarantees ERROR_INSUFFICIENT_BUFFER implies length>0, but
+// there's no reason for two copies to disagree even on a no-op check).
+inline bool CurrentProcessHasPackageIdentity()
+{
+    UINT32 length = 0;
+    LONG rc = GetCurrentPackageFullName(&length, nullptr);
+    return rc == ERROR_INSUFFICIENT_BUFFER && length > 0;
+}
+
 inline std::wstring GetTemporaryDirectoryPath()
 {
     std::vector<wchar_t> buffer(512);

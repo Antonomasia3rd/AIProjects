@@ -390,12 +390,8 @@ static bool RunPowerShellCommand(const std::wstring& command, std::wstring& outp
     return exitCode == 0;
 }
 
-static bool CurrentProcessHasPackageIdentity()
-{
-    UINT32 length = 0;
-    LONG rc = GetCurrentPackageFullName(&length, nullptr);
-    return rc == ERROR_INSUFFICIENT_BUFFER;
-}
+// CurrentProcessHasPackageIdentity now lives in the shared
+// dependencies/core.inc (aip::); see call sites below.
 
 static std::wstring ManifestPath()
 {
@@ -1156,7 +1152,7 @@ private:
 static bool TryGetTileActivationUrl(std::wstring& openUrl)
 {
     openUrl.clear();
-    if (!CurrentProcessHasPackageIdentity())
+    if (!aip::CurrentProcessHasPackageIdentity())
     {
         return false;
     }
@@ -1922,7 +1918,7 @@ static std::wstring BuildSnapshotKey(const FeedSnapshot& snapshot)
 static bool UpdateLiveTile(const FeedSnapshot& snapshot, std::wstring& failure)
 {
     failure.clear();
-    if (!CurrentProcessHasPackageIdentity())
+    if (!aip::CurrentProcessHasPackageIdentity())
     {
         failure = L"Live Tile update requires package identity. Launch normally so the app can register and relaunch the packaged entry.";
         return false;
@@ -3181,7 +3177,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
         AppSettings settings = LoadSettings();
         if (!options.noBootstrap &&
             settings.bootstrapPackageOnLaunch &&
-            !CurrentProcessHasPackageIdentity())
+            !aip::CurrentProcessHasPackageIdentity())
         {
             exitCode = BootstrapAndLaunchPackaged(options);
         }
