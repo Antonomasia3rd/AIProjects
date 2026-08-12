@@ -36,6 +36,7 @@
 #include <activation.h>
 #include <inspectable.h>
 #include <winstring.h>
+#include <winhttp.h>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -162,5 +163,6 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "../dependencies/DesktopStub/ga_registration.inc"
 #include "../dependencies/DesktopStub/ga_generation.inc"
 #include "../dependencies/DesktopStub/ga_live_tile.inc"
+#include "../dependencies/DesktopStub/ga_rss_feed.inc"
 #include "../dependencies/DesktopStub/ga_tray.inc"
 #include "../dependencies/DesktopStub/ga_app.inc"

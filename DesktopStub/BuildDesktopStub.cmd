@@ -157,7 +157,7 @@ if errorlevel 1 (
     popd
     exit /b !STATUS!
 )
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib winhttp.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 set "STATUS=!ERRORLEVEL!"
 if not "!STATUS!"=="0" (
     popd
