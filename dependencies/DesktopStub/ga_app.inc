@@ -1787,45 +1787,54 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     if (!g_shutdownState.IsRequested() && !queuedLiveTileRuntimeRelaunch && LiveTileModeReregistrationPending())
         queuedPendingLiveTileModeReregistration = QueueLiveTileModeReregistration();
 
-    bool forceStartupGeneration = CommandLineShouldForceStartupGeneration();
-    bool liveTileNeedsStartupRestore = StartupLiveTileClearedStateNeedsGeneration();
-    std::wstring commandLineWallpaper;
-    bool hasCommandLineWallpaper = CommandLineWallpaper(commandLineWallpaper);
-    if (!g_shutdownState.IsRequested() && !queuedLiveTileRuntimeRelaunch && !queuedPendingLiveTileModeReregistration &&
-        (g_generateOnStartup || forceStartupGeneration || liveTileNeedsStartupRestore || hasCommandLineWallpaper))
+    ContentSource contentSource = ConfiguredContentSource();
+
+    if (contentSource == ContentSource::Wallpaper)
     {
-        std::wstring wp = hasCommandLineWallpaper ? commandLineWallpaper : GetWallpaper();
-        if (!wp.empty())
+        bool forceStartupGeneration = CommandLineShouldForceStartupGeneration();
+        bool liveTileNeedsStartupRestore = StartupLiveTileClearedStateNeedsGeneration();
+        std::wstring commandLineWallpaper;
+        bool hasCommandLineWallpaper = CommandLineWallpaper(commandLineWallpaper);
+        if (!g_shutdownState.IsRequested() && !queuedLiveTileRuntimeRelaunch && !queuedPendingLiveTileModeReregistration &&
+            (g_generateOnStartup || forceStartupGeneration || liveTileNeedsStartupRestore || hasCommandLineWallpaper))
         {
-            if (!forceStartupGeneration && !liveTileNeedsStartupRestore && !hasCommandLineWallpaper && StartupGenerationCanSkip(wp))
+            std::wstring wp = hasCommandLineWallpaper ? commandLineWallpaper : GetWallpaper();
+            if (!wp.empty())
             {
-                LogText(g_ui.startupGenerationSkippedUnchanged);
+                if (!forceStartupGeneration && !liveTileNeedsStartupRestore && !hasCommandLineWallpaper && StartupGenerationCanSkip(wp))
+                {
+                    LogText(g_ui.startupGenerationSkippedUnchanged);
+                }
+                else
+                {
+                    LogText(liveTileNeedsStartupRestore
+                        ? g_ui.startupGenerationRestoringClearedLiveTile
+                        : g_ui.startupGenerationEnabled);
+                    QueueGenerate(wp, hasCommandLineWallpaper ? g_ui.commandLineWallpaperReason :
+                        (forceStartupGeneration ? g_ui.commandLineForceGenerateReason :
+                            (liveTileNeedsStartupRestore ? g_ui.startupLiveTileRestoreReason : g_ui.startupGenerationReason)));
+                }
             }
             else
             {
-                LogText(liveTileNeedsStartupRestore
-                    ? g_ui.startupGenerationRestoringClearedLiveTile
-                    : g_ui.startupGenerationEnabled);
-                QueueGenerate(wp, hasCommandLineWallpaper ? g_ui.commandLineWallpaperReason :
-                    (forceStartupGeneration ? g_ui.commandLineForceGenerateReason :
-                        (liveTileNeedsStartupRestore ? g_ui.startupLiveTileRestoreReason : g_ui.startupGenerationReason)));
+                LogText(g_ui.startupGenerationSkippedNoWallpaper);
             }
         }
-        else
-        {
-            LogText(g_ui.startupGenerationSkippedNoWallpaper);
-        }
-    }
 
-    if (!GenerationWorkPending())
-        TrimIdleWorkingSetIfConfigured();
+        if (!GenerationWorkPending())
+            TrimIdleWorkingSetIfConfigured();
+    }
+    else
+    {
+        LogText(L"Content source is RssFeed; skipping wallpaper startup generation.");
+    }
 
     std::thread th;
     if (!g_shutdownState.IsRequested() && !CommandLineShouldSkipMonitor())
     {
         try
         {
-            th = std::thread(PollThread);
+            th = std::thread(contentSource == ContentSource::RssFeed ? RssPollThread : PollThread);
         }
         catch (const std::exception& ex)
         {
