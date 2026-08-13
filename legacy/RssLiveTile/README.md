@@ -1,5 +1,15 @@
 # RssLiveTile
 
+> **Retired.** This capability now lives in `DesktopStub` as
+> `ContentSource=RssFeed` (see the root `README.md` and
+> `dependencies/README.md`). A renamed/reconfigured copy of `DesktopStub.exe`
+> registers its own AppX package identity and Start tile the same way this
+> app did, so a separate binary is no longer needed. This project is kept
+> here for reference and is not built by the repository Windows workflow;
+> its own `BuildRssLiveTile.cmd` / `TestRssLiveTileSource.cmd` still work
+> locally if you want to build it anyway. The content below describes the
+> original standalone app.
+
 `RssLiveTile.exe` is a native Win32 resident app that updates a Windows Start Live Tile from an RSS or Atom feed while the app is running. It polls periodically, queues up to five recent entries, and opens the corresponding HTTP(S) article when Windows activates a queued tile entry.
 
 It follows the shared repository baseline used by `DesktopStub`: the app writes its INI and log beside the executable, generates local Appx package files under `build`, registers a loose Desktop Bridge package, and relaunches itself through the packaged Start identity so `Windows.UI.Notifications.TileUpdateManager` can update the tile.

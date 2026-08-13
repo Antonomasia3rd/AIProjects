@@ -265,6 +265,38 @@ The preset style emits version-4 Windows 10 notification XML with Windows 8 fall
 
 The displayed name comes from `ManifestDisplayName` (`Desktop` by default). Branding does not change the primary, secondary, or badge content configured under `[TileText]`. Windows 8/8.1 manifest targets retain their legacy branding behavior.
 
+## RSS Feed Content Source
+
+By default `DesktopStub.exe` drives its Live Tile from the desktop wallpaper (everything in the section above). Setting `[Settings] ContentSource=RssFeed` in the INI switches this *instance* to an entirely different content source: it polls an RSS or Atom feed instead and shows rotating headlines on the tile. This replaces what used to be a separate `RssLiveTile.exe` binary (`legacy/RssLiveTile`) -- a renamed, separately-configured copy of `DesktopStub.exe` already gets its own AppX package identity (see `ManifestDefaultIdentityForExecutable`) and its own resident instance (see `ConfigureSingleInstanceIdentity`), so it can run as its own independent Start tile the same way the old standalone app did, just without a second codebase to maintain.
+
+To run an RSS-mode instance:
+
+1. Copy `DesktopStub.exe` to a different name in the same folder, e.g. `RssFeedTile.exe`.
+2. Create `RssFeedTile.ini` beside it (same folder) with at least:
+   ```ini
+   [Settings]
+   ContentSource=RssFeed
+
+   [RssFeed]
+   FeedUrl=https://example.com/feed.xml
+   ```
+3. Run `RssFeedTile.exe`. It registers its own package (default identity `dev.local.RssFeedTile`) and starts polling.
+
+`ContentSource` is read once at startup, not hot-reloadable -- switching an existing instance between `Wallpaper` and `RssFeed` needs a restart, since it decides which background thread runs (the wallpaper watcher or the feed poller), not just what gets drawn.
+
+`[RssFeed]` settings (all optional except `FeedUrl`, read fresh on every poll cycle so edits take effect on the next cycle without a restart):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `FeedUrl` | *(required)* | RSS or Atom feed URL. Must be `http://` or `https://`. |
+| `UserAgent` | `Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)` | Sent with the fetch request. |
+| `UpdateIntervalSeconds` | `900` | How often to re-fetch and refresh the tile (60-86400). |
+| `MaxItems` | `5` | Maximum feed entries to queue for Windows to rotate through on the tile (1-20). |
+| `HttpTimeoutSeconds` | `20` | WinHTTP timeout for connect/send/receive (5-120). |
+| `MaxFeedBytes` | `2097152` | Response size cap; the fetch is aborted past this (64 KiB - 16 MiB). |
+
+Manifest customization (`ManifestDisplayName`, `ManifestIdentityName`, logo assets, etc.) works the same way for RSS-mode instances as it does for wallpaper-mode ones -- see the sections above. `ManifestRestrictedCapability` stays `runFullTrust` by default for both content sources; RSS mode does not need `internetClient` or any other capability, since `runFullTrust` apps are not AppContainer-sandboxed and are not subject to capability-gated network access.
+
 ## Tile Text Overlay
 
 `[TileText]` controls optional content for generated tiles. It is disabled by default. In Windows 10 Live Tile mode, DesktopStub adds the configured content to either adaptive XML or native Windows 8.1 preset bindings and leaves its presentation to Windows. Registration/static-image mode and Windows 8/8.1 compatibility Live Tile targets bake the content into generated PNG assets using fixed Windows 8/8.1 template layouts:
