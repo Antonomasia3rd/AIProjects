@@ -704,3 +704,39 @@ static bool RssFeed_Update_Or_Request_LiveTile(std::wstring& failureMessage)
     RssFeedSnapshot snapshot = ReadRssFeedSnapshot(settings);
     return RssFeed_Update_LiveTile(snapshot, failureMessage);
 }
+
+// Runs instead of PollThread (ga_generation.inc) when ConfiguredContentSource()
+// == RssFeed. Reuses the same g_running flag and PollSleepFor/WakePollThread
+// interruptible-sleep primitive as the wallpaper watcher, so shutdown wakes
+// this thread immediately instead of waiting out a potentially long
+// UpdateIntervalSeconds sleep -- both threads are never running at once, so
+// sharing the wake signal is harmless.
+static void RssPollThread()
+{
+    bool lastOk = true; // suppress a redundant failure balloon on the very first cycle if it fails; still logged.
+    while (g_running)
+    {
+        std::wstring failureMessage;
+        bool ok = RssFeed_Update_Or_Request_LiveTile(failureMessage);
+        if (ok)
+        {
+            LogText(L"RSS Live Tile updated.");
+        }
+        else
+        {
+            Log(L"RSS Live Tile update failed: %ls", failureMessage.c_str());
+            if (lastOk)
+            {
+                NotifyTrayBalloon(g_ui.notificationTitle, failureMessage, NIIF_WARNING);
+            }
+        }
+        lastOk = ok;
+
+        if (!g_running)
+            break;
+
+        RssFeedSettings settings = ReadRssFeedSettings();
+        long long intervalMs = static_cast<long long>(settings.updateIntervalSeconds) * 1000;
+        PollSleepFor(milliseconds(intervalMs));
+    }
+}
