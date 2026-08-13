@@ -2498,7 +2498,6 @@ void LayoutWindow(HWND window)
     const int cardGap = ScaleForWindow(window, compact ? 4 : 6);
     const int cardPadding = ScaleForWindow(window, compact ? 3 : 4);
     ContentArea content = GetContentArea(window, client, margin);
-    const int width = content.width;
     const int cardInset = ScaleForWindow(window, compact ? 6 : 10);
     const int innerLeft = content.left + cardInset;
     const int innerRight = content.right - cardInset;
@@ -2745,8 +2744,9 @@ LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
         {
             auto tooltip = reinterpret_cast<NMTTDISPINFOW*>(lParam);
             HWND control = reinterpret_cast<HWND>(tooltip->hdr.idFrom);
-            g_tooltipText = TooltipForAction(GetDlgCtrlID(control));
-            tooltip->lpszText = const_cast<wchar_t*>(g_tooltipText.c_str());
+            auto& text = g_actionTooltipTexts[control];
+            text = TooltipForAction(GetDlgCtrlID(control));
+            tooltip->lpszText = const_cast<wchar_t*>(text.c_str());
             return 0;
         }
         if (notification != nullptr && notification->hwndFrom == g_deviceList &&
