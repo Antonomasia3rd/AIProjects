@@ -24,7 +24,6 @@ on:
           - NowPlayingTile
           - PhotoCollage
           - DesktopStub
-          - RssLiveTile
           - CharmTray
           - SecureDesktopLauncher
           - TaskSchedulerMigration
@@ -225,16 +224,6 @@ jobs:
           path: |
             DesktopStub/build/DesktopStub.exe
             DesktopStub/build/DesktopStubLiveTileBroker.exe
-          if-no-files-found: error
-
-      - name: Upload RssLiveTile artifact
-        if: needs.detect-projects.outputs.build_rss_live_tile == 'true'
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: RssLiveTile
-          path: |
-            RssLiveTile/build/RssLiveTile.exe
-            RssLiveTile/README.md
           if-no-files-found: error
 
       - name: Upload CharmTray artifact

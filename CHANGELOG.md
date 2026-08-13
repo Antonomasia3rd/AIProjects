@@ -80,8 +80,15 @@ Older releases are intentionally kept when practical so users can compare behavi
 - Reworked baked/static tile text to use fixed Windows 8/8.1 medium, wide, and large template layouts. Removed arbitrary font, color, alignment, margin, and small/logo controls that native Live Tiles do not support.
 - Added an optional Windows 8.1 preset-template catalog mode for Windows 10 Live Tile notifications while retaining adaptive XML as the compatibility-preserving default.
 - Added configurable Windows 10 Live Tile branding with style-aware defaults, including restoring the manifest display name in preset-template mode.
+- Added an RSS/Atom feed content source (`[Settings] ContentSource=RssFeed`, `[RssFeed]` section) as an alternative to the default wallpaper source. A renamed/reconfigured copy of `DesktopStub.exe` can now drive its own independent Live Tile from a feed instead of wallpaper, using the multi-instance/multi-identity infrastructure DesktopStub already had. See `DesktopStub/README.md` and `dependencies/README.md`. This supersedes the standalone `RssLiveTile` project (see below).
+
+### DesktopStub / RssLiveTile shared helper promotions
+
+- Promoted several helpers that DesktopStub and RssLiveTile had each independently reimplemented under the same name into `dependencies/` proper: Win32 command-line argument quoting (`QuoteCommandLineArg`), XML text escaping (`XmlEscape`), package-identity detection (`CurrentProcessHasPackageIdentity`), and the PowerShell subprocess runner (previously `PS_Run` and `RunPowerShellCommand` separately) now live in `dependencies/core.inc` and the new `dependencies/powershell_runner.inc`. DesktopStub's behavior was kept as the reference implementation per repository convention; RssLiveTile's output-size cap (missing from DesktopStub) was folded in as a strict improvement. Both products now call the same shared implementation instead of maintaining separate copies that could (and did) drift.
 
 ### RssLiveTile
+
+**Retired and moved to `legacy/RssLiveTile`.** Its capability is now `DesktopStub`'s `ContentSource=RssFeed` (see the DesktopStub section above); it is no longer built by the repository Windows workflow, has no release tag family, and its `project-map.json` entry was removed. History below is kept for reference.
 
 - Added `RssLiveTile`, a shared-baseline Win32 resident app that registers a loose Desktop Bridge package, preserves alternate INI scope across packaged relaunches, polls RSS or Atom feeds, and updates Windows Start with up to five queued text notifications.
 - Added namespace-aware RSS/Atom parsing, declared feed-encoding support, article activation links, live configuration reload, cancellable network shutdown, typed CLI validation, package-file refresh, source regression tests, and no-tray resident smoke coverage.

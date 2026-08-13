@@ -11,13 +11,13 @@ Small Windows utility projects and experiments. Active baseline projects live at
 | `legacy/asusblink` | C# tray/console app | ASUS ACPI LED controller for mic LED, keyboard backlight states, and HDD-activity keyboard patterns. |
 | `legacy/capsblink` | C# console app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
 | `legacy/CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
-| `DesktopStub` | C++ Win32 tray app | Builds `DesktopStub.exe`, a desktop wallpaper tile-asset generator and loose Appx registrar. |
+| `DesktopStub` | C++ Win32 tray app | Builds `DesktopStub.exe`, a Live Tile generator: wallpaper crops by default (`ContentSource=Wallpaper`), or RSS/Atom feed headlines (`ContentSource=RssFeed`) for a renamed/reconfigured copy -- see `dependencies/README.md`. Also a loose Appx registrar. |
 | `DiscordRPC` | C++ Win32 tray/console app | Discord Rich Presence app with Discord IPC, Gateway transport, DPAPI token storage, dynamic placeholders, and a tray config UI. |
 | `legacy/DNSAutoUpdate` | C# DNS updater | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
 | `legacy/NowPlayingTile` | C++ app plus Appx helpers | SMTC-based Windows Start live tile updater with optional widget mode. |
 | `legacy/PhotoCollage` | C# console app | Creates a simple JPEG grid/collage from images in a folder. |
 | `legacy/RealTimeNotesDeskband` | C++ Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes resources. |
-| `RssLiveTile` | C++ Win32 resident app | RSS/Atom feed reader that periodically queues Windows 10 Live Tile entries through a loose Desktop Bridge package. |
+| `legacy/RssLiveTile` | C++ Win32 resident app | Retired -- superseded by DesktopStub's `ContentSource=RssFeed`. Kept for reference, not built by the repository Windows workflow. |
 | `legacy/SecureDesktopLauncher` | C++ service/tools | Launches trusted configured programs on secure desktops, with an optional password-gated launcher. |
 | `legacy/TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
 | `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
@@ -64,6 +64,11 @@ and loaded by Windhawk. They are not built by the repository Windows workflow.
 An installed Windhawk compiler can validate both x64 and x86 sources with
 `legacy\WindhawkMods\TestWindhawkMods.cmd`.
 
+`legacy/RssLiveTile` is retired and likewise not built by the repository Windows
+workflow -- its capability lives on as DesktopStub's `ContentSource=RssFeed`
+(see `dependencies/README.md`). Its own build/test scripts still work locally
+for reference.
+
 Useful build options:
 
 ```cmd
@@ -73,8 +78,8 @@ Useful build options:
 # Skip DesktopStub.
 .github\scripts\build-windows.cmd /skip:DesktopStub
 
-# Skip RssLiveTile.
-.github\scripts\build-windows.cmd /skip:RssLiveTile
+# Skip DiscordRPC.
+.github\scripts\build-windows.cmd /skip:DiscordRPC
 ```
 
 Run repository validation and smoke checks:
