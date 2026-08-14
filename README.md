@@ -17,7 +17,6 @@ Small Windows utility projects and experiments. Active baseline projects live at
 | `legacy/NowPlayingTile` | C++ app plus Appx helpers | SMTC-based Windows Start live tile updater with optional widget mode. |
 | `legacy/PhotoCollage` | C# console app | Creates a simple JPEG grid/collage from images in a folder. |
 | `legacy/RealTimeNotesDeskband` | C++ Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes resources. |
-| `legacy/RssLiveTile` | C++ Win32 resident app | Retired -- superseded by DesktopStub's `ContentSource=RssFeed`. Kept for reference, not built by the repository Windows workflow. |
 | `legacy/SecureDesktopLauncher` | C++ service/tools | Launches trusted configured programs on secure desktops, with an optional password-gated launcher. |
 | `legacy/TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
 | `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
@@ -64,10 +63,9 @@ and loaded by Windhawk. They are not built by the repository Windows workflow.
 An installed Windhawk compiler can validate both x64 and x86 sources with
 `legacy\WindhawkMods\TestWindhawkMods.cmd`.
 
-`legacy/RssLiveTile` is retired and likewise not built by the repository Windows
-workflow -- its capability lives on as DesktopStub's `ContentSource=RssFeed`
-(see `dependencies/README.md`). Its own build/test scripts still work locally
-for reference.
+`legacy/RssLiveTile` no longer exists -- it was retired and removed once its
+capability landed as DesktopStub's `ContentSource=RssFeed` (see
+`dependencies/README.md`); its history is in git, not in the working tree.
 
 Useful build options:
 

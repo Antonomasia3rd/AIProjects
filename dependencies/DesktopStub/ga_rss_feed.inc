@@ -1,6 +1,7 @@
 ﻿// RSS/Atom feed content source for Live Tile updates.
 //
-// Ported from RssLiveTile (see legacy/RssLiveTile) now that a renamed,
+// Ported from RssLiveTile (retired and removed; see CHANGELOG.md for its
+// history) now that a renamed,
 // separately-configured copy of DesktopStub can register its own AppX
 // package identity (ManifestDefaultIdentityForExecutable) and run
 // standalone (ConfigureSingleInstanceIdentity), giving it its own Start

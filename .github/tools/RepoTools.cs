@@ -432,7 +432,6 @@ static class RepoTools
 
         foreach (string relativePath in new[]
         {
-            "legacy/RssLiveTile/BuildRssLiveTile.cmd",
             "legacy/NowPlayingTile/BuildNowPlayingTile.cmd"
         })
         {
