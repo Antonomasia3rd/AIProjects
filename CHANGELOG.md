@@ -88,7 +88,7 @@ Older releases are intentionally kept when practical so users can compare behavi
 
 ### RssLiveTile
 
-**Retired and moved to `legacy/RssLiveTile`.** Its capability is now `DesktopStub`'s `ContentSource=RssFeed` (see the DesktopStub section above); it is no longer built by the repository Windows workflow, has no release tag family, and its `project-map.json` entry was removed. History below is kept for reference.
+**Retired and removed.** Its capability is now `DesktopStub`'s `ContentSource=RssFeed` (see the DesktopStub section above); it was never distributed to end users, so it was deleted outright rather than kept archived under `legacy/`. It is no longer built by the repository Windows workflow and has no release tag family. History below is kept for reference; the code itself is only in git history now, not the working tree.
 
 - Added `RssLiveTile`, a shared-baseline Win32 resident app that registers a loose Desktop Bridge package, preserves alternate INI scope across packaged relaunches, polls RSS or Atom feeds, and updates Windows Start with up to five queued text notifications.
 - Added namespace-aware RSS/Atom parsing, declared feed-encoding support, article activation links, live configuration reload, cancellable network shutdown, typed CLI validation, package-file refresh, source regression tests, and no-tray resident smoke coverage.

@@ -267,7 +267,7 @@ The displayed name comes from `ManifestDisplayName` (`Desktop` by default). Bran
 
 ## RSS Feed Content Source
 
-By default `DesktopStub.exe` drives its Live Tile from the desktop wallpaper (everything in the section above). Setting `[Settings] ContentSource=RssFeed` in the INI switches this *instance* to an entirely different content source: it polls an RSS or Atom feed instead and shows rotating headlines on the tile. This replaces what used to be a separate `RssLiveTile.exe` binary (`legacy/RssLiveTile`) -- a renamed, separately-configured copy of `DesktopStub.exe` already gets its own AppX package identity (see `ManifestDefaultIdentityForExecutable`) and its own resident instance (see `ConfigureSingleInstanceIdentity`), so it can run as its own independent Start tile the same way the old standalone app did, just without a second codebase to maintain.
+By default `DesktopStub.exe` drives its Live Tile from the desktop wallpaper (everything in the section above). Setting `[Settings] ContentSource=RssFeed` in the INI switches this *instance* to an entirely different content source: it polls an RSS or Atom feed instead and shows rotating headlines on the tile. This replaces what used to be a separate `RssLiveTile.exe` binary (retired; see `CHANGELOG.md` for its history) -- a renamed, separately-configured copy of `DesktopStub.exe` already gets its own AppX package identity (see `ManifestDefaultIdentityForExecutable`) and its own resident instance (see `ConfigureSingleInstanceIdentity`), so it can run as its own independent Start tile the same way the old standalone app did, just without a second codebase to maintain.
 
 To run an RSS-mode instance:
 
