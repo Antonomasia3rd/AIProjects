@@ -1,8 +1,8 @@
 # DesktopStub
 
-`DesktopStub.exe` is a tray utility that generates Windows Start tile assets from the current desktop wallpaper and registers a loose Appx manifest for a desktop tile entry.
+`DesktopStub.exe` is a tray utility that generates Windows Start tile content and registers a loose Appx manifest for a desktop tile entry. By default it draws that content from the current desktop wallpaper; setting `ContentSource=RssFeed` switches it to RSS/Atom feed headlines instead (see "RSS Feed Content Source" below) -- a renamed, separately-configured copy of the same executable then runs as its own independent Start tile.
 
-The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale settings, then regenerate assets and re-register the manifest automatically. Most behavior is configurable through the tray menu and generated INI file.
+The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale settings, then regenerate assets and re-register the manifest automatically. Most behavior is configurable through the tray menu and generated INI file. (This paragraph and the sections through "Tile Text Overlay" describe the default wallpaper content source specifically; RSS mode has its own section further down.)
 
 ## Requirements
 
@@ -175,6 +175,7 @@ Supported options:
 - Supports quoted INI values and inline comments.
 - Keeps detailed logs and exposes registration output from the tray.
 - Records forced-shutdown cleanup state and warns on the next startup.
+- Can drive its Live Tile from an RSS/Atom feed instead of wallpaper (`ContentSource=RssFeed`); a renamed, separately-configured copy runs as its own independent Start tile. See "RSS Feed Content Source" below.
 
 ## Source Layout
 
@@ -195,6 +196,7 @@ Supported options:
 - `ga_generation.inc`: asset generation, polling, and shutdown coordination.
 - `ga_live_tile.inc`: Live Tile notification update handling.
 - `ga_live_tile_templates.inc`: Windows 8.1 preset-catalog binding selection and XML fragments.
+- `ga_rss_feed.inc`: RSS/Atom feed fetch, parse, and text-bound tile XML generation for the `ContentSource=RssFeed` content source. Independent of the wallpaper path -- see "RSS Feed Content Source" below.
 - `ga_tray.inc`: tray wrapper that includes smaller helper/menu/dispatch fragments.
 - `ga_tray_helpers.inc`, `ga_tray_menu.inc`, `ga_tray_dispatch.inc`: tray helpers, menu construction, and command dispatch.
 - `ga_app.inc`: window procedure and application startup/shutdown.
@@ -326,16 +328,8 @@ When Live Tile mode disables static manifest assets, DesktopStub does not bake t
 
 Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available. The DesktopStub Windows file/product version and default `AppxManifest.xml` package version are derived from the same `DesktopStub-vN` family used by CI release publishing, so the binary and manifest versions match the release tag. Reused projects can override the local build tag family with `DESKTOPSTUB_RELEASE_TAG_PREFIX`. The repository workflow still publishes the default `DesktopStub` artifact paths; a copied baseline project that changes output names should update `.github/project-map.json`, `.github/workflows/build-windows.yml`, and `.github/scripts/build-windows.cmd` together so CI artifacts and release assets follow the new product names.
 
-## Notes for fix28
+## Additional Behavior Notes
 
-`BuildDesktopStub.cmd` no longer has argument-selected build modes. It always builds the main host and the stable packaged Live Tile broker; any supplied arguments are accepted but ignored.
-
-Live Tile menu additions from the previous fix remain:
-
-- **Relaunch when runtime mismatches**: when enabled, startup and mode changes compare the configured Live Tile mode with the current process state. `LiveTile` mode relaunches an unpackaged Windows 10 process through the registered package entry; `Registration`/disabled mode relaunches a packaged process as the normal unpackaged desktop app before re-registering the manifest. This also repairs the case where a user clicks the tile while no resident instance is running after Live Tile was force-disabled.
 - **Clear Live Tile on shutdown**: enabled by default. Packaged instances clear the live tile during graceful shutdown. Win8/8.1 broker mode can request a package-side clear through the broker.
-
-The wallpaper poller updates its internal baseline after a failed poll-triggered generation attempt. This prevents repeated regeneration of the same wallpaper when the tile/app registration stage fails after assets were generated successfully.
-
-
-DesktopStub intentionally keeps the default log beside the executable even when `--ini` points at another directory. This preserves the pre-shared-baseline portable behavior; an explicit `[Settings] LogPath` still overrides it.
+- The wallpaper poller updates its internal baseline after a failed poll-triggered generation attempt. This prevents repeated regeneration of the same wallpaper when the tile/app registration stage fails after assets were generated successfully.
+- DesktopStub intentionally keeps the default log beside the executable even when `--ini` points at another directory. This preserves the pre-shared-baseline portable behavior; an explicit `[Settings] LogPath` still overrides it.

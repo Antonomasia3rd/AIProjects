@@ -26,13 +26,39 @@ product implementation:
 - `release_version.inc`, `release_version_resource.rc.inc`, and
   `resolve_release_version.ps1`: reusable tag-derived runtime, Win32 resource,
   and build-script version metadata.
-- `core.inc`: path, text, and JSON primitives. Configuration must stay INI-backed.
+- `core.inc`: path, text, and JSON primitives, plus a small set of Win32
+  helpers that don't fit any other module cleanly (Win32 argv quoting via
+  `QuoteCommandLineArg`, XML text escaping via `XmlEscape`, AppX
+  package-identity detection via `CurrentProcessHasPackageIdentity`).
+  Configuration must stay INI-backed.
 
 Include `desktop_app_baseline.h` from product translation units. That aggregate
 header is the supported public entry point for resident desktop apps and owns the
 shared include order. Individual `.inc` modules are include-guarded for focused
 tests and compatibility, but they are not guaranteed to be standalone unless a
-file explicitly says so. Optional facilities such as `dpapi.inc` stay separate.
+file explicitly says so.
+
+Optional facilities are not part of the `desktop_app_baseline.h` aggregate --
+include them explicitly only if a product actually needs them, so products
+that don't need e.g. PowerShell don't pull in `<winhttp.h>`/process-spawning
+code for nothing:
+
+- `dpapi.inc`: DPAPI (`CryptProtectData`/`CryptUnprotectData`) secret
+  encryption for the current Windows user, with an empty-plaintext sentinel
+  worked around at the API boundary. Used by DiscordRPC for token storage.
+- `powershell_runner.inc`: spawn `powershell.exe` with a timeout, an optional
+  output-size cap, and captured stdout/stderr (`aip::RunPowerShellCaptured`),
+  plus the quoting/encoding helpers around building a
+  `-EncodedCommand` invocation (`PowerShellEncodedCommand`,
+  `PowerShellSingleQuotedString`, `PowerShellUtf8Preamble`) and resolving
+  which `powershell.exe` to use (`DefaultPowerShellExe`,
+  `ResolveConfiguredPowerShellExe`). Needs `<appmodel.h>` (already in
+  `desktop_app_baseline.h`) for nothing beyond what `core.inc` already
+  requires, but needs `<winhttp.h>` and `winhttp.lib` in any product that
+  also wants to make HTTP requests -- that part is not this module's
+  responsibility, see DesktopStub's `ga_rss_feed.inc` for an example of a
+  product building its own HTTP fetch on top.
+
 Product code should keep policy and commands in product modules while using
 these shared contracts for lifecycle, sidecar paths, logging, and persistence behavior.
 
@@ -50,6 +76,14 @@ baseline" the way the root-level files above are, and other products should
 not include from another product's subfolder. If a genuine cross-product need
 emerges, promote the specific helper to a root-level shared module (following
 the pattern above) instead of reaching into another product's subfolder.
+
+This has happened in practice, not just as a hypothetical: DesktopStub's
+`PS_Run` and RssLiveTile's independently-written `RunPowerShellCommand` had
+drifted into near-duplicate implementations of the same spawn/timeout/capture
+logic (each missing a feature the other had), and `QuoteCommandLineArg`,
+`XmlEscape`, and `CurrentProcessHasPackageIdentity` were each reimplemented
+under the same name in more than one product. All were promoted to the
+root-level modules described above rather than left duplicated.
 
 ## INI dialect compatibility
 
