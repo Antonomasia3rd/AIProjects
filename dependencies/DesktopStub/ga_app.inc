@@ -1788,6 +1788,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         queuedPendingLiveTileModeReregistration = QueueLiveTileModeReregistration();
 
     ContentSource contentSource = ConfiguredContentSource();
+    Log(L"Content source: %ls", ContentSourceName(contentSource));
 
     if (contentSource == ContentSource::Wallpaper)
     {
