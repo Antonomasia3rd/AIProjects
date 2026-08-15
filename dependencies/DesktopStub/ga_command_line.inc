@@ -124,18 +124,6 @@ static ContentSource ParseContentSourceValue(
     return fallback;
 }
 
-static std::wstring ContentSourceIniValue(ContentSource source)
-{
-    switch (source)
-    {
-    case ContentSource::RssFeed:
-        return L"RssFeed";
-    case ContentSource::Wallpaper:
-    default:
-        return L"Wallpaper";
-    }
-}
-
 static const wchar_t* ContentSourceName(ContentSource source)
 {
     switch (source)
