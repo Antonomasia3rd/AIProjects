@@ -37,13 +37,13 @@ If `build\DesktopStub.exe` or `build\DesktopStubLiveTileBroker.exe` is running, 
 
 ## Developer Checks
 
-`TestDesktopStubSource.cmd` builds and runs a small C++ maintainer regression guard. It does not build or launch `DesktopStub.exe`; it scans the source for safety fixes that should not be accidentally removed.
+`TestDesktopStubSource.cmd` builds and runs two things. First, a small C++ maintainer regression guard that does not build or launch `DesktopStub.exe`; it scans the source for safety fixes that should not be accidentally removed. Second, `TileTextLayoutTests.exe`, which exercises the `[TileText]` overlay's region-selection math (see "Tile Text Overlay" below) -- this one has no Windows dependency and can also be compiled and run directly with any C++17 compiler, without `cl.exe`.
 
 ```cmd
 DesktopStub\TestDesktopStubSource.cmd
 ```
 
-Use `--list` to print the guardrails without running assertions. The helper binary is emitted under `DesktopStub\build` and is not part of the DesktopStub runtime.
+Use `--list` to print the guardrails without running assertions. Both helper binaries are emitted under `DesktopStub\build` and are not part of the DesktopStub runtime.
 
 ## Run
 
@@ -192,6 +192,7 @@ Supported options:
 - `ga_runtime_helpers.inc`: runtime option parsing, DPI scale helpers, cleanup policy, and rename dialog.
 - `ga_wallpaper.inc`: wallpaper and fit/DPI detection.
 - `ga_image.inc`: GDI+ image generation and PNG saving.
+- `tile_text_layout.h`: pure region-selection math for the `[TileText]` overlay (which rectangles get used for which tile size/field combination). Unlike every other file in this list, this one deliberately has zero Windows or GDI+ dependency, so it's testable without a Windows machine -- see "Tile Text Overlay" below and `DesktopStub/tools/TileTextLayoutTests.cpp`. `ga_image.inc` includes it and does the actual GDI+ drawing against the rectangles it returns.
 - `ga_registration.inc`: Appx registration and PowerShell fallback handling.
 - `ga_generation.inc`: asset generation, polling, and shutdown coordination.
 - `ga_live_tile.inc`: Live Tile notification update handling.
@@ -303,11 +304,15 @@ Manifest customization (`ManifestDisplayName`, `ManifestIdentityName`, logo asse
 
 `[TileText]` controls optional content for generated tiles. It is disabled by default. In Windows 10 Live Tile mode, DesktopStub adds the configured content to either adaptive XML or native Windows 8.1 preset bindings and leaves its presentation to Windows. Registration/static-image mode and Windows 8/8.1 compatibility Live Tile targets bake the content into generated PNG assets using fixed Windows 8/8.1 template layouts:
 
-- Medium tiles use a `TileSquareText02`-style heading/body layout, or a block-style layout when badge text is present.
-- Wide tiles use an `ImageAndText01`-style image with a bottom text band, or a block-and-text layout when badge text is present.
+- Medium tiles use a `TileSquareText02`-style heading/body layout, or a `TileSquareBlock`-style layout (badge number over a single caption line) when badge text is present.
+- Wide tiles use an `ImageAndText01`-style image with a bottom text band, or a block-and-text layout loosely modeled on `TileWideBlockAndText02` when badge text is present.
 - Large tiles use an `ImageAndTextOverlay02`-style darkened image with top heading and bottom body text.
 
-Small tiles and logo assets do not support text, matching the native tile templates. Typography, colors, alignment, margins, and line limits are intentionally not configurable because Windows does not apply those settings to native Live Tiles. Presentation keys written by older DesktopStub versions are ignored.
+Small tiles and logo assets do not support text, matching the native tile templates. Typography, colors, alignment, margins, and line limits are intentionally not configurable because Windows does not apply those settings to native Live Tiles -- and for the same reason, there is no authoritative pixel-level specification to match exactly; Microsoft's tile template catalog documents line-wrap counts and image dimensions, not exact text placement, which was always internal to the OS's tile renderer. What DesktopStub's baked layouts are checked against is the catalog's *documented structure* (line counts, which fields exist, wrapping behavior), not pixel coordinates. Presentation keys written by older DesktopStub versions are ignored.
+
+**Known limitation**: the real `TileWideBlockAndText02` template has a short caption line under the badge/block number (a 6th XML text field in the original schema). `[TileText]` only has three content fields (`Text`, `SecondaryText`, `BadgeText`), so DesktopStub's wide-tile badge layout has no text source for that caption slot -- it's simply not drawn. Fixing this would mean adding a fourth `[TileText]` key, which hasn't been done.
+
+**Medium tile badge fix**: earlier versions drew both `Text` and `SecondaryText` as two stacked caption lines under the badge number. The real `TileSquareBlock` template only ever has one caption slot, so this now shows just one line -- `Text` if set, falling back to `SecondaryText` if only that was configured, matching the template's actual capacity instead of silently exceeding it.
 
 Default configuration:
 
@@ -323,6 +328,15 @@ ApplyToLargeTile=1
 ```
 
 When Live Tile mode disables static manifest assets, DesktopStub does not bake text into the generated desktop-icon placeholder assets. This keeps the static icon behind the Live Tile clean.
+
+**Testing**: the region-selection logic (which rectangles get used for which tile size/field combination) lives in `dependencies/DesktopStub/tile_text_layout.h`, deliberately with no Windows or GDI+ dependency, so it can be tested without a Windows machine. `DesktopStub/tools/TileTextLayoutTests.cpp` exercises every primary/secondary/badge combination for all three tile sizes and asserts regions stay in-bounds, never overlap, and that every configured field actually gets drawn somewhere. It compiles and runs the same way on any C++17 compiler:
+
+```sh
+g++ -std=c++17 -Wall -Wextra -I dependencies/DesktopStub -o /tmp/TileTextLayoutTests DesktopStub/tools/TileTextLayoutTests.cpp
+/tmp/TileTextLayoutTests
+```
+
+`TestDesktopStubSource.cmd` also builds and runs it with `cl.exe` as part of the normal Windows check suite. Separately, the Windows smoke test suite (`RepoTools.cs`) generates a tile once with `[TileText]` disabled and once with it enabled against the same wallpaper, then asserts the resulting `Assets\MediumTile.png` actually differs -- confirming the overlay is really drawn by GDI+, not just that the layout math computes sensible rectangles.
 
 ## Release
 

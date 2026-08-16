@@ -649,6 +649,52 @@ static RectF ScaleTileRect(REAL x, REAL y, REAL width, REAL height, double scale
         std::max(1.0f, ScaleTileMetric(height, scale)));
 }
 
+static StringAlignment ToGdiAlignment(tiletext::HorizontalAlign align)
+{
+    return align == tiletext::HorizontalAlign::Far ? StringAlignmentFar : StringAlignmentNear;
+}
+
+static StringTrimming ToGdiTrimming(tiletext::Trimming trim)
+{
+    return trim == tiletext::Trimming::Word ? StringTrimmingEllipsisWord : StringTrimmingEllipsisCharacter;
+}
+
+// Draws every region the portable layout selected for this tile size/input
+// combination, picking the right font by role and the right source string
+// by field index. Returns false (without drawing further regions) on the
+// first GDI+ failure, matching the early-return-on-failure behavior the
+// inline per-tile-size code always had.
+static bool DrawTileTextRegions(
+    Graphics& graphics,
+    tiletext::TileSize size,
+    const tiletext::TileTextInputs& inputs,
+    const std::wstring& primaryText,
+    const std::wstring& secondaryText,
+    const std::wstring& badgeText,
+    Font& titleFont,
+    Font& bodyFont,
+    Font& blockFont,
+    double scale,
+    const wchar_t* operationPrefix)
+{
+    for (const tiletext::TileTextRegion& region : tiletext::ComputeTileTextLayout(size, inputs))
+    {
+        const std::wstring* text = region.sourceField == 0 ? &primaryText
+            : region.sourceField == 1 ? &secondaryText
+            : &badgeText;
+        Font& font = region.role == tiletext::TextRole::Title ? titleFont
+            : region.role == tiletext::TextRole::Badge ? blockFont
+            : bodyFont;
+        std::wstring operation = std::wstring(operationPrefix) + L" region field=" + std::to_wstring(region.sourceField);
+        if (!DrawSystemTileText(graphics, *text, font,
+                ScaleTileRect(static_cast<REAL>(region.x), static_cast<REAL>(region.y),
+                    static_cast<REAL>(region.width), static_cast<REAL>(region.height), scale),
+                ToGdiAlignment(region.align), ToGdiTrimming(region.trim), operation.c_str()))
+            return false;
+    }
+    return true;
+}
+
 static bool RenderMediumTileTextSimulation(
     Graphics& graphics,
     const std::wstring& primaryText,
@@ -671,24 +717,9 @@ static bool RenderMediumTileTextSimulation(
     if (titleFont.GetLastStatus() != Ok || bodyFont.GetLastStatus() != Ok || blockFont.GetLastStatus() != Ok)
         return false;
 
-    if (!badgeText.empty())
-    {
-        if (!DrawSystemTileText(graphics, badgeText, blockFont, ScaleTileRect(10, 7, 130, 67, scale),
-                StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw medium tile block text"))
-            return false;
-        if (!DrawSystemTileText(graphics, primaryText, bodyFont, ScaleTileRect(10, 80, 130, 20, scale),
-                StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw medium tile block label"))
-            return false;
-        return DrawSystemTileText(graphics, secondaryText, bodyFont, ScaleTileRect(10, 103, 130, 37, scale),
-            StringAlignmentNear, StringTrimmingEllipsisWord, L"draw medium tile block detail");
-    }
-
-    REAL secondaryTop = primaryText.empty() ? 10.0f : 44.0f;
-    if (!DrawSystemTileText(graphics, primaryText, titleFont, ScaleTileRect(10, 8, 130, 32, scale),
-            StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw medium tile header"))
-        return false;
-    return DrawSystemTileText(graphics, secondaryText, bodyFont, ScaleTileRect(10, secondaryTop, 130, 96, scale),
-        StringAlignmentNear, StringTrimmingEllipsisWord, L"draw medium tile body");
+    tiletext::TileTextInputs inputs{ !primaryText.empty(), !secondaryText.empty(), !badgeText.empty() };
+    return DrawTileTextRegions(graphics, tiletext::TileSize::Medium, inputs,
+        primaryText, secondaryText, badgeText, titleFont, bodyFont, blockFont, scale, L"draw medium tile text");
 }
 
 static bool RenderWideTileTextSimulation(
@@ -710,32 +741,20 @@ static bool RenderWideTileTextSimulation(
     if (bodyFont.GetLastStatus() != Ok || blockFont.GetLastStatus() != Ok)
         return false;
 
+    tiletext::TileTextInputs inputs{ !primaryText.empty(), !secondaryText.empty(), !badgeText.empty() };
+
     if (!badgeText.empty())
     {
         if (!GdiOk(graphics.FillRectangle(&background, ScaleTileRect(0, 0, 310, 150, scale)), L"fill wide tile block background"))
             return false;
-        if (!DrawSystemTileText(graphics, primaryText, bodyFont, ScaleTileRect(10, 10, 190, 22, scale),
-                StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw wide tile block label"))
-            return false;
-        if (!DrawSystemTileText(graphics, secondaryText, bodyFont, ScaleTileRect(10, 36, 190, 104, scale),
-                StringAlignmentNear, StringTrimmingEllipsisWord, L"draw wide tile block detail"))
-            return false;
-        return DrawSystemTileText(graphics, badgeText, blockFont, ScaleTileRect(210, 27, 90, 76, scale),
-            StringAlignmentFar, StringTrimmingEllipsisCharacter, L"draw wide tile block text");
+        return DrawTileTextRegions(graphics, tiletext::TileSize::Wide, inputs,
+            primaryText, secondaryText, badgeText, bodyFont, bodyFont, blockFont, scale, L"draw wide tile block");
     }
 
     if (!GdiOk(graphics.FillRectangle(&background, ScaleTileRect(0, 100, 310, 50, scale)), L"fill wide tile text band"))
         return false;
-
-    if (secondaryText.empty())
-        return DrawSystemTileText(graphics, primaryText, bodyFont, ScaleTileRect(10, 104, 290, 39, scale),
-            StringAlignmentNear, StringTrimmingEllipsisWord, L"draw wide tile text");
-
-    if (!DrawSystemTileText(graphics, primaryText, bodyFont, ScaleTileRect(10, 103, 290, 20, scale),
-            StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw wide tile first line"))
-        return false;
-    return DrawSystemTileText(graphics, secondaryText, bodyFont, ScaleTileRect(10, 124, 290, 19, scale),
-        StringAlignmentNear, StringTrimmingEllipsisCharacter, L"draw wide tile second line");
+    return DrawTileTextRegions(graphics, tiletext::TileSize::Wide, inputs,
+        primaryText, secondaryText, badgeText, bodyFont, bodyFont, blockFont, scale, L"draw wide tile text");
 }
 
 static bool RenderLargeTileTextSimulation(
@@ -760,15 +779,9 @@ static bool RenderLargeTileTextSimulation(
     if (titleFont.GetLastStatus() != Ok || bodyFont.GetLastStatus() != Ok || blockFont.GetLastStatus() != Ok)
         return false;
 
-    REAL titleWidth = badgeText.empty() ? 270.0f : 170.0f;
-    if (!DrawSystemTileText(graphics, primaryText, titleFont, ScaleTileRect(20, 15, titleWidth, 82, scale),
-            StringAlignmentNear, StringTrimmingEllipsisWord, L"draw large tile header"))
-        return false;
-    if (!DrawSystemTileText(graphics, secondaryText, bodyFont, ScaleTileRect(20, 224, 270, 66, scale),
-            StringAlignmentNear, StringTrimmingEllipsisWord, L"draw large tile body"))
-        return false;
-    return DrawSystemTileText(graphics, badgeText, blockFont, ScaleTileRect(200, 17, 90, 72, scale),
-        StringAlignmentFar, StringTrimmingEllipsisCharacter, L"draw large tile block text");
+    tiletext::TileTextInputs inputs{ !primaryText.empty(), !secondaryText.empty(), !badgeText.empty() };
+    return DrawTileTextRegions(graphics, tiletext::TileSize::Large, inputs,
+        primaryText, secondaryText, badgeText, titleFont, bodyFont, blockFont, scale, L"draw large tile text");
 }
 
 static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int logicalWidth, int logicalHeight)

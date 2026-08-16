@@ -56,5 +56,19 @@ if not "%STATUS%"=="0" (
 
 build\DesktopStubSourceCheck.exe %*
 set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
+    popd
+    exit /b %STATUS%
+)
+
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\TileTextLayoutTests.cpp /Fe:build\TileTextLayoutTests.exe /Fo:build\obj\TileTextLayoutTests.obj
+set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
+    popd
+    exit /b %STATUS%
+)
+
+build\TileTextLayoutTests.exe
+set "STATUS=%ERRORLEVEL%"
 popd
 exit /b %STATUS%

@@ -1117,6 +1117,25 @@ static class RepoTools
                     smokeIdentity = "dev.local.desktopstubsmoke." + Guid.NewGuid().ToString("N").Substring(0, 16);
                     SetDesktopStubManifestIdentity(manifestPath, smokeIdentity);
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", wallpaper, "--once", "--no-tray", "--no-monitor" }, new[] { 0 }, 30, "DesktopStub one-shot generation");
+                    string mediumTileAsset = Path.Combine(Path.GetDirectoryName(exe), "Assets", "MediumTile.png");
+                    if (!File.Exists(mediumTileAsset))
+                        throw new InvalidOperationException("DesktopStub one-shot generation did not create Assets\\MediumTile.png.");
+                    byte[] mediumTileWithoutText = File.ReadAllBytes(mediumTileAsset);
+                    SmokeProcess(exe, new[]
+                        {
+                            "--ini", ini,
+                            "--set", "TileText.Enabled=1",
+                            "--set", "TileText.Text=Smoke Title",
+                            "--set", "TileText.SecondaryText=Smoke secondary line for wrapping",
+                            "--set", "TileText.BadgeText=7",
+                            "--wallpaper", wallpaper,
+                            "--once", "--no-tray", "--no-monitor"
+                        }, new[] { 0 }, 30, "DesktopStub TileText overlay generation");
+                    if (!File.Exists(mediumTileAsset))
+                        throw new InvalidOperationException("DesktopStub TileText overlay generation did not create Assets\\MediumTile.png.");
+                    byte[] mediumTileWithText = File.ReadAllBytes(mediumTileAsset);
+                    if (mediumTileWithoutText.SequenceEqual(mediumTileWithText))
+                        throw new InvalidOperationException("DesktopStub TileText overlay did not change the generated MediumTile.png against the same wallpaper -- the text does not appear to have been drawn.");
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", Path.Combine(tempRoot, "missing.png"), "--no-tray" }, new[] { 2 }, 30, "DesktopStub invalid wallpaper guard");
                     VerifyDesktopStubSecondLaunchActions(exe, tempRoot);
                     VerifyDesktopStubConcurrentIniWrites(exe, concurrentIni);
