@@ -5,6 +5,7 @@ static constexpr UINT ID_TRAY_OPEN_LOG_FOLDER = 3004;
 static constexpr UINT ID_TRAY_RECENT_LOG = 3005;
 static constexpr UINT ID_TRAY_EXIT = 3006;
 static constexpr UINT ID_TRAY_FORCE_EXIT = 3007;
+static constexpr UINT ID_TOGGLE_STARTUP = 3008;
 static constexpr UINT ID_TOGGLE_WINDOW_DETECTION = 3010;
 static constexpr UINT ID_TOGGLE_DETAILS = 3011;
 static constexpr UINT ID_TOGGLE_STATE = 3012;
@@ -92,28 +93,30 @@ static bool CreateTrayIcon(RuntimeContext* ctx)
         return ctx != nullptr && ctx->trayCreated;
     }
 
-    ctx->nid = {};
-    ctx->nid.cbSize = sizeof(ctx->nid);
-    ctx->nid.hWnd = ctx->hwnd;
-    ctx->nid.uID = 1;
-    ctx->nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-    ctx->nid.uCallbackMessage = WM_DRPC_TRAY;
-    ctx->nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-    wcsncpy_s(ctx->nid.szTip, ARRAYSIZE(ctx->nid.szTip), GetUiString(L"tray_tip", APP_DISPLAY_NAME).c_str(), _TRUNCATE);
-
-    ctx->trayCreated = Shell_NotifyIconW(NIM_ADD, &ctx->nid) != FALSE;
+    DWORD addError = ERROR_SUCCESS;
+    DWORD versionError = ERROR_SUCCESS;
+    ctx->trayCreated = aip::RegisterTrayIcon(
+        ctx->nid,
+        ctx->hwnd,
+        1,
+        WM_DRPC_TRAY,
+        LoadIconW(nullptr, IDI_APPLICATION),
+        GetUiString(L"tray_tip", APP_DISPLAY_NAME),
+        APP_DISPLAY_NAME,
+        true,
+        &addError,
+        &versionError);
     if (!ctx->trayCreated)
     {
         LogError(L"Could not create tray icon: " +
-            GetLastErrorText(GetLastError()));
+            GetLastErrorText(addError));
         return false;
     }
 
-    ctx->nid.uVersion = NOTIFYICON_VERSION_4;
-    if (!Shell_NotifyIconW(NIM_SETVERSION, &ctx->nid))
+    if (versionError != ERROR_SUCCESS)
     {
         LogError(L"Could not enable tray icon version 4 behavior: " +
-            GetLastErrorText(GetLastError()));
+            GetLastErrorText(versionError));
     }
     return true;
 }
@@ -122,7 +125,7 @@ static void DestroyTrayIcon(RuntimeContext* ctx)
 {
     if (ctx != nullptr && ctx->trayCreated)
     {
-        Shell_NotifyIconW(NIM_DELETE, &ctx->nid);
+        aip::UnregisterTrayIcon(ctx->nid);
         ctx->trayCreated = false;
     }
 }
@@ -239,6 +242,20 @@ static void ShowTrayMenu(RuntimeContext* ctx)
 
     HMENU general = beginSection(GetUiString(L"menu_general", L"General"));
     aip::AppendTrayMenuItem(general, ID_TRAY_RELOAD, GetUiString(L"menu_reload", L"Reload configuration"));
+    bool startupInstalled = IniReadB(L"app", L"run_at_startup", false);
+    std::wstring startupQueryError;
+    if (!QueryDiscordStartupShortcutInstalled(
+            startupInstalled,
+            startupQueryError))
+    {
+        LogError(L"Could not query this profile's shell:startup shortcut: " +
+            startupQueryError);
+    }
+    AppendChecked(
+        general,
+        ID_TOGGLE_STARTUP,
+        GetUiString(L"menu_run_at_startup", L"Run at startup"),
+        startupInstalled);
 
     HMENU interval = aip::BeginTrayNestedMenu(general);
     int currentInterval = IniReadI(L"general", L"update_interval", 5);
@@ -313,6 +330,45 @@ static void SetTraySetting(const wchar_t* section, const wchar_t* key, const std
         ReportConfigWriteFailure(L"Writing tray setting [" + std::wstring(section) + L"] " + key);
         return;
     }
+    g_reloadRequested = true;
+    g_refreshRequested = true;
+}
+
+static void ToggleStartupSetting(HWND hwnd)
+{
+    bool installed = IniReadB(L"app", L"run_at_startup", false);
+    std::wstring error;
+    if (!QueryDiscordStartupShortcutInstalled(installed, error))
+    {
+        const std::wstring message =
+            L"Could not query this profile's shell:startup shortcut: " + error;
+        LogError(message);
+        MessageBoxW(
+            hwnd,
+            message.c_str(),
+            GetUiString(L"startup_error_title", L"DiscordRPC startup shortcut").c_str(),
+            MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    CommandLineSetting setting;
+    setting.section = L"app";
+    setting.key = L"run_at_startup";
+    setting.value = installed ? L"false" : L"true";
+    if (!PersistDiscordSettingsAtomically({ setting }, error))
+    {
+        LogError(error);
+        MessageBoxW(
+            hwnd,
+            error.c_str(),
+            GetUiString(L"startup_error_title", L"DiscordRPC startup shortcut").c_str(),
+            MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    LogInfo(installed
+        ? L"Startup shortcut disabled for this INI profile."
+        : L"Startup shortcut enabled for this INI profile.");
     g_reloadRequested = true;
     g_refreshRequested = true;
 }
@@ -417,7 +473,8 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         return 0;
 
     case WM_DRPC_TRAY:
-        if (LOWORD(lParam) == WM_CONTEXTMENU || LOWORD(lParam) == WM_RBUTTONUP)
+        if (LOWORD(lParam) == WM_CONTEXTMENU || LOWORD(lParam) == WM_RBUTTONUP ||
+            LOWORD(lParam) == NIN_KEYSELECT)
         {
             ShowTrayMenu(ctx);
         }
@@ -448,6 +505,9 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         case ID_TRAY_RELOAD:
             g_reloadRequested = true;
             g_refreshRequested = true;
+            return 0;
+        case ID_TOGGLE_STARTUP:
+            ToggleStartupSetting(hwnd);
             return 0;
         case ID_TRAY_OPEN_CONFIG:
             OpenConfigFile();

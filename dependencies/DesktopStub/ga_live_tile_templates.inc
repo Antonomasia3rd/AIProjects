@@ -89,17 +89,13 @@ static bool AppendWindows81PresetLiveTileBinding(
     {
         if (!badgeText.empty())
         {
-            std::wstring detailText = primaryText;
-            if (!secondaryText.empty())
-                detailText += (detailText.empty() ? L"" : L"\r\n") + secondaryText;
-
             AppendPresetLiveTileBindingStart(
                 xml,
                 L"TileWide310x150BlockAndText02",
                 L"TileWideBlockAndText02");
-            AppendPresetLiveTileText(xml, 1, detailText);
+            AppendPresetLiveTileText(xml, 1, primaryText);
             AppendPresetLiveTileText(xml, 2, badgeText);
-            AppendPresetLiveTileText(xml, 3, L"");
+            AppendPresetLiveTileText(xml, 3, secondaryText);
         }
         else if (hasText)
         {

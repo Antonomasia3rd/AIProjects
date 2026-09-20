@@ -7,6 +7,10 @@ static void ApplyTrayIconSettingFromIni()
 {
     bool desiredTray = IniReadI(L"Settings", L"TrayIcon", 1) != 0;
     bool trayPresent = TrayIconPresent();
+    // Desired state is independent from whether Explorer accepted the current
+    // shell object. TaskbarCreated must be able to retry a transient add
+    // failure later.
+    g_tray = desiredTray;
 
     if (desiredTray)
     {
@@ -16,11 +20,15 @@ static void ApplyTrayIconSettingFromIni()
             if (!EnsureTrayIcon(&err))
             {
                 LogWin32Failure(L"Shell_NotifyIconW(NIM_ADD)", err);
-                g_tray = false;
                 return;
             }
         }
-        g_tray = true;
+        else
+        {
+            DWORD err = 0;
+            if (!UpdateTrayIconTooltip(&err))
+                LogWin32Failure(L"Shell_NotifyIconW(NIM_MODIFY tooltip)", err);
+        }
     }
     else
     {
@@ -44,8 +52,18 @@ static void ApplySettingsChangedByCommandLine(bool applyTrayIcon)
     LoadUiStrings();
     ValidateFormatStrings();
     NormalizeSeparatorStrings();
+    std::wstring startupError;
+    if (!ReconcileDesktopStubStartupShortcutFromConfig(startupError))
+        Log(L"[!] Could not synchronize the shell:startup shortcut after settings reload: %s", startupError.c_str());
+    QueueDesktopStubPackagedStartupSync();
     if (applyTrayIcon)
         ApplyTrayIconSettingFromIni();
+    else if (TrayIconPresent())
+    {
+        DWORD tooltipError = ERROR_SUCCESS;
+        if (!UpdateTrayIconTooltip(&tooltipError))
+            LogWin32Failure(L"Shell_NotifyIconW(NIM_MODIFY tooltip)", tooltipError);
+    }
 
     if (liveTileBefore != ConfiguredLiveTileUpdateMode())
         QueueLiveTileModeReregistration();
@@ -395,6 +413,11 @@ static void ExecutePendingRelaunchAfterExit()
 
 LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
 {
+    if (m == WM_APP_CONTENT_LOGICAL_CAPS) {
+        return CaptureContentLogicalCapsState();
+    }
+    if (m == WM_CLOSE || m == WM_QUERYENDSESSION || m == WM_APP_REQUEST_SHUTDOWN)
+        CaptureContentLogicalCapsState();
     if (g_singleInstanceMessage && m == g_singleInstanceMessage)
     {
         HandleSingleInstanceRequest(w);
@@ -416,7 +439,10 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
     if (m == WM_APP_SHUTDOWN_READY)
     {
         if (g_shutdownState.IsRequested())
+        {
+            CaptureContentLogicalCapsState();
             PostQuitMessage(0);
+        }
         return 0;
     }
 
@@ -438,6 +464,7 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
         if (!GenerationWorkPending())
         {
             KillTimer(h, SHUTDOWN_NOTICE_TIMER_ID);
+            CaptureContentLogicalCapsState();
             PostQuitMessage(0);
             return 0;
         }
@@ -479,6 +506,7 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
         return 0;
     }
     else if (m==WM_DESTROY){
+        CaptureContentLogicalCapsState();
         g_shutdownWindow = nullptr;
         TrayRemove();
         PostQuitMessage(0);
@@ -1222,6 +1250,22 @@ static int HandleAppxActivationAndExit()
 
     LoadRuntimeSettingsFromIni(false);
 
+    if (CommandLineRequestsLiveTileClearOnly())
+    {
+        LoadUiStrings();
+        ValidateFormatStrings();
+        NormalizeSeparatorStrings();
+        std::wstring clearFailure;
+        if (Appx_Clear_LiveTileBare(clearFailure))
+        {
+            AppxActivationTrace(L"Live Tile cleared under package identity");
+            return 0;
+        }
+
+        AppxActivationTrace(L"Live Tile clear failed under package identity: " + clearFailure);
+        return 1;
+    }
+
     std::wstring failureMessage;
     if (Appx_Update_LiveTileFromPendingXmlForActivationStub(failureMessage))
     {
@@ -1232,6 +1276,34 @@ static int HandleAppxActivationAndExit()
 
     AppxActivationTrace(L"Live Tile update failed under package identity: " + failureMessage);
     return 0;
+}
+
+static int HandlePackagedLiveTileClearOnlyAndExit()
+{
+    if (!CommandLineRequestsLiveTileClearOnly())
+        return -1;
+
+    if (!CurrentProcessHasPackageIdentity())
+    {
+        AppxActivationTrace(L"Live Tile clear request rejected because the helper has no package identity");
+        return 1;
+    }
+
+    LoadUiStrings();
+    ValidateFormatStrings();
+    NormalizeSeparatorStrings();
+    LoadRuntimeSettingsFromIni(false);
+
+    std::wstring failure;
+    if (Appx_Clear_LiveTileBare(failure))
+    {
+        AppxActivationTrace(L"Live Tile cleared under package identity");
+        return 0;
+    }
+
+    AppxActivationTrace(L"Live Tile clear failed under package identity: " +
+        (failure.empty() ? std::wstring(L"unknown error") : failure));
+    return 1;
 }
 
 static std::wstring StartupString(const wchar_t* key, const wchar_t* fallback)
@@ -1379,7 +1451,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
     std::wstring dir = sidecarPaths.exeDir.empty() ? GetExeDir() : sidecarPaths.exeDir;
     ConfigureSingleInstanceIdentity(dir, g_iniPath, g_commandLine.customIniPath);
-    WaitForModeSwitchParentExitIfRequested();
+    if (!g_commandLine.renderOnly && !g_commandLine.configureOnly) WaitForModeSwitchParentExitIfRequested();
 
     if (g_commandLine.helpRequested)
     {
@@ -1393,6 +1465,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         ShowCommandLineMessage(CommandLineVersionText(), false);
         return 0;
     }
+
+    if (g_commandLine.renderOnly || g_commandLine.configureOnly)
+        return RunRenderOnlyCommand();
 
     std::wstring comHelperManifestPath;
     if (CommandLineComRegistrationHelper(comHelperManifestPath))
@@ -1416,6 +1491,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     int appxActivationExitCode = HandleAppxActivationAndExit();
     if (appxActivationExitCode >= 0)
         return appxActivationExitCode;
+
+    int packagedLiveTileClearExitCode = HandlePackagedLiveTileClearOnlyAndExit();
+    if (packagedLiveTileClearExitCode >= 0)
+        return packagedLiveTileClearExitCode;
 
     SetLastError(ERROR_SUCCESS);
     g_singleInstanceMutex = CreateMutexW(nullptr, TRUE, g_singleInstanceMutexName.c_str());
@@ -1573,6 +1652,17 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
     // GDI+ is intentionally started lazily only when bitmap work is needed.
     auto gdiDone = iniDone;
+    std::wstring startupShortcutError;
+    bool shouldReconcileStartupShortcut =
+        !CommandLineShouldGenerateOnce() &&
+        (!CommandLineShouldRegenerateManifest() || CommandLineShouldGenerateNow());
+    if (shouldReconcileStartupShortcut &&
+        !ReconcileDesktopStubStartupShortcutFromConfig(startupShortcutError))
+    {
+        QueueStartupWarning(
+            L"[!] Could not synchronize the shell:startup shortcut: " +
+            startupShortcutError);
+    }
     std::wstring previousForceShutdownCleanupWarning;
     if (ConsumePreviousForceShutdownCleanupWarning(previousForceShutdownCleanupWarning))
         QueueStartupWarning(previousForceShutdownCleanupWarning);
@@ -1637,6 +1727,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.showMenuAsDropdownSummary.c_str(), StateEnabled(g_showMenuAsDropdown));
     Log(g_ui.notificationsSummary.c_str(), StateEnabled(g_notificationsEnabled), StateOn(g_notifyOnStart), StateOn(g_notifyOnSuccess), StateOn(g_notifyOnFailure), StateOn(g_notifyOnBusy), StateOn(g_notifyOnAlreadyRunning), StateOn(g_notifyOnSingleInstanceFailure));
     Log(g_ui.trayIconSummary.c_str(), StateEnabled(g_tray));
+    Log(g_ui.runAtStartupSummary.c_str(), StateEnabled(IniReadI(L"Settings", L"RunAtStartup", 0) != 0));
     Log(g_ui.trimWorkingSetOnIdleSummary.c_str(), StateEnabled(g_trimWorkingSetOnIdle));
     Log(g_ui.idleTrimIntervalMsSummary.c_str(),
         LiveWallpaperOffDisplayText(IniReadClampedI(L"Settings", L"IdleTrimIntervalMs", 60000, 0, 3600000)).c_str());
@@ -1736,7 +1827,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         if (!EnsureTrayIcon(&err))
         {
             LogWin32Failure(L"Shell_NotifyIconW(NIM_ADD)", err);
-            g_tray = false;
         }
     }
 
@@ -1766,16 +1856,21 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
     if (!queuedLiveTileRuntimeRelaunch && CommandLineShouldGenerateOnce())
     {
+        bool contentReady = !CompositionRequested() || ContentEngineTick(true);
         std::wstring wp;
         if (!CommandLineWallpaper(wp))
             wp = GetWallpaper();
 
+        ContentRenderScope contentScope;
+        if (contentScope.snapshot.active) wp = contentScope.snapshot.backgroundPath;
+
         bool ok = false;
-        if (!wp.empty())
+        if (contentReady && !wp.empty())
             ok = Generate(wp.c_str(), g_ui.commandLineOnceReason.c_str());
         else
             LogText(g_ui.startupGenerationSkippedNoWallpaper);
 
+        StopContentProviders();
         JoinGeneratedAssetPrecache();
         TrayRemove();
         ShutdownGdiPlusForExit();
@@ -1790,7 +1885,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     ContentSource contentSource = ConfiguredContentSource();
     Log(L"Content source: %ls", ContentSourceName(contentSource));
 
-    if (contentSource == ContentSource::Wallpaper)
+    if (!CompositionRequested())
     {
         bool forceStartupGeneration = CommandLineShouldForceStartupGeneration();
         bool liveTileNeedsStartupRestore = StartupLiveTileClearedStateNeedsGeneration();
@@ -1827,15 +1922,28 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     }
     else
     {
-        LogText(L"Content source is RssFeed; skipping wallpaper startup generation.");
+        if (!g_shutdownState.IsRequested() && !queuedLiveTileRuntimeRelaunch && !queuedPendingLiveTileModeReregistration)
+        {
+            if (CommandLineShouldSkipMonitor())
+            {
+                if (ContentEngineTick(true))
+                {
+                    ContentRenderScope contentScope;
+                    if (contentScope.snapshot.active)
+                        QueueGenerate(contentScope.snapshot.backgroundPath, L"Content startup generation");
+                }
+            }
+            else ContentEngineTick();
+        }
     }
 
     std::thread th;
+    QueueDesktopStubPackagedStartupSync();
     if (!g_shutdownState.IsRequested() && !CommandLineShouldSkipMonitor())
     {
         try
         {
-            th = std::thread(contentSource == ContentSource::RssFeed ? RssPollThread : PollThread);
+            th = std::thread(PollThread);
         }
         catch (const std::exception& ex)
         {
@@ -1872,6 +1980,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     g_running=false;
     WakePollThread();
     if (th.joinable()) th.join();
+    StopDesktopStubPackagedStartup();
+    StopContentProviders();
     JoinQueuedGenerations();
     JoinGeneratedAssetPrecache();
 

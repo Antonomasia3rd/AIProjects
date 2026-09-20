@@ -118,6 +118,16 @@ static bool ValidateCommandLineSettingValue(const CommandLineSetting& setting, s
             return false;
         }
     }
+    else if (IsKnownBooleanCommandLineSetting(setting.section, setting.key))
+    {
+        bool parsed = false;
+        if (!aip::ParseBoolValue(setting.value, parsed))
+        {
+            error = L"--set [" + setting.section + L"] " + setting.key +
+                L" must be a true/false value.";
+            return false;
+        }
+    }
     return true;
 }
 
@@ -265,6 +275,14 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
         {
             AddSetting(options, L"app", L"logging_enabled", L"false");
         }
+        else if (lower == L"--startup")
+        {
+            AddSetting(options, L"app", L"run_at_startup", L"true");
+        }
+        else if (lower == L"--no-startup")
+        {
+            AddSetting(options, L"app", L"run_at_startup", L"false");
+        }
         else if (lower == L"--file-logging")
         {
             AddSetting(options, L"app", L"file_logging_enabled", L"true");
@@ -325,6 +343,12 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
             }
             if (!sideEffectFreeMode)
             {
+                if (IsKnownBooleanCommandLineSetting(setting.section, setting.key))
+                {
+                    bool parsed = false;
+                    aip::ParseBoolValue(setting.value, parsed);
+                    setting.value = parsed ? L"true" : L"false";
+                }
                 AddSetting(options, setting.section, setting.key, setting.value);
             }
         }
@@ -445,19 +469,118 @@ static bool ParseCommandLine(AppOptions& options, std::wstring& error)
     return true;
 }
 
-static bool ApplyCommandLineSettings(const AppOptions& options)
+static bool FindDiscordStartupPreference(
+    const std::vector<CommandLineSetting>& settings,
+    bool& found,
+    bool& desired,
+    std::wstring& error)
 {
-    for (const auto& setting : options.settings)
+    found = false;
+    desired = false;
+    for (const auto& setting : settings)
     {
-        if (setting.section.empty() || setting.key.empty())
+        if (!EqualsI(setting.section, L"app") ||
+            !EqualsI(setting.key, L"run_at_startup"))
         {
             continue;
         }
-        if (!IniWrite(setting.section.c_str(), setting.key.c_str(), setting.value))
+
+        if (!aip::ParseBoolValue(setting.value, desired))
         {
-            ReportConfigWriteFailure(L"Writing command-line setting [" + setting.section + L"] " + setting.key);
+            error = L"[app] run_at_startup must be a true/false value.";
             return false;
         }
+        found = true;
+    }
+    return true;
+}
+
+static bool PersistDiscordSettingsAtomically(
+    const std::vector<CommandLineSetting>& settings,
+    std::wstring& error)
+{
+    error.clear();
+    if (settings.empty())
+    {
+        return true;
+    }
+
+    bool startupExplicit = false;
+    bool startupDesired = false;
+    if (!FindDiscordStartupPreference(
+            settings,
+            startupExplicit,
+            startupDesired,
+            error))
+    {
+        return false;
+    }
+
+    auto mutateSettings = [&](std::wstring& text)
+    {
+        for (const auto& setting : settings)
+        {
+            if (setting.section.empty() || setting.key.empty())
+            {
+                continue;
+            }
+            if (!aip::WriteIniValueToText(
+                    text,
+                    setting.section.c_str(),
+                    setting.key.c_str(),
+                    EncodeEscapes(setting.value),
+                    DefaultConfigHeader()))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    bool saved = startupExplicit
+        ? aip::CommitStartupShortcutIniState(
+            DiscordStartupShortcutSpec(),
+            g_iniPath,
+            DefaultConfigHeader(),
+            L"app",
+            L"run_at_startup",
+            false,
+            startupDesired,
+            mutateSettings,
+            &error,
+            g_iniWriteLockWaitMs.load())
+        : aip::IniConfigStore(
+            g_iniPath,
+            DefaultConfigHeader(),
+            g_iniWriteLockWaitMs.load()).MutateFresh(mutateSettings);
+    if (!saved)
+    {
+        const DWORD saveError = GetLastError();
+        if (startupExplicit && !error.empty())
+        {
+            error = L"Could not commit settings with this profile's "
+                L"shell:startup shortcut: " + error;
+            return false;
+        }
+        error = L"Could not save settings for " + MakeAbsolutePath(g_iniPath) +
+            L": " + GetLastErrorText(saveError);
+        return false;
+    }
+    return true;
+}
+
+static bool ApplyCommandLineSettings(const AppOptions& options)
+{
+    std::wstring error;
+    if (!PersistDiscordSettingsAtomically(options.settings, error))
+    {
+        LogError(error);
+        PrintLine(L"ERROR: " + error, true);
+        return false;
+    }
+
+    for (const auto& setting : options.settings)
+    {
         LogInfo(L"Command-line setting: [" + setting.section + L"] " + setting.key + L" = " + RedactCommandLineSettingValue(setting));
     }
     return true;

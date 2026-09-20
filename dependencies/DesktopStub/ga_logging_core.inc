@@ -273,14 +273,20 @@ static int IniReadClampedI(const wchar_t* s, const wchar_t* k, int d, int minVal
 
 static std::wstring EffectiveConfiguredLogPath();
 
-static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
+static void LoadRuntimeSettingsFromIni(bool includeTrayIcon, bool allowConsole = true)
 {
     g_logging = IniReadI(L"Settings", L"Logging", 1) != 0;
     if (includeTrayIcon)
+    {
         g_tray = IniReadI(L"Settings", L"TrayIcon", 1) != 0;
+    }
+    // One monitor routes the current profile into wallpaper or composition.
+    g_contentSource = static_cast<int>(ParseContentSourceValue(
+        IniReadS(L"Settings", L"ContentSource", L"Wallpaper")));
     SetLogPathCopy(EffectiveConfiguredLogPath());
 
-    ApplyConsoleSetting(IniReadI(L"Settings", L"ShowConsole", 0) != 0, false, false);
+    if (allowConsole)
+        ApplyConsoleSetting(IniReadI(L"Settings", L"ShowConsole", 0) != 0, false, false);
     g_generateOnStartup = IniReadI(L"Settings", L"GenerateOnStartup", 1) != 0;
     g_generateOnStartupOnlyWhenChanged = IniReadI(L"Settings", L"GenerateOnStartupOnlyWhenChanged", 1) != 0;
     g_liveTileUpdateMode = static_cast<int>(ParseLiveTileUpdateModeValue(
@@ -293,14 +299,6 @@ static void LoadRuntimeSettingsFromIni(bool includeTrayIcon)
     g_clearLiveTileOnShutdown = IniReadI(L"Settings", L"ClearLiveTileOnShutdown", 1) != 0;
     g_manifestCompatibilityTarget = static_cast<int>(ParseManifestCompatibilityTargetValue(
         IniReadS(L"Settings", L"AppxManifestTarget", L"Windows10")));
-    // Which polling loop actually runs (wallpaper watcher vs. RSS feed
-    // watcher) is decided once at startup, not retroactively on a live
-    // reload -- switching content sources needs a restart, the same way
-    // switching AppxManifestTarget needs a fresh Generate() to take visible
-    // effect. Cached here anyway for consistency with every other mode
-    // setting, and so tray/menu code can display the configured value.
-    g_contentSource = static_cast<int>(ParseContentSourceValue(
-        IniReadS(L"Settings", L"ContentSource", L"Wallpaper")));
     g_hideDisabled = IniReadI(L"Settings", L"HideDisabledEntries", 0) != 0;
     g_generateDesktopIconForDisabledEntries = IniReadI(L"Settings", L"GenerateDesktopIconForDisabledEntries", 1) != 0;
     g_deleteDisabledAssets = IniReadI(L"Settings", L"DeleteDisabledAssets", 0) != 0;

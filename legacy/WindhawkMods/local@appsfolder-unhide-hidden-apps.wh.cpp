@@ -2,7 +2,7 @@
 // @id              appsfolder-unhide-hidden-apps
 // @name            AppsFolder Unhide Hidden Apps
 // @description     Adds selected hidden AppUserModelIDs to shell:AppsFolder enumeration.
-// @version         1.0
+// @version         1.1
 // @author          Antonomasia
 // @include         explorer.exe
 // @include         powershell.exe
@@ -13,6 +13,7 @@
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <strsafe.h>
+#include <algorithm>
 #include <new>
 #include <vector>
 
@@ -56,6 +57,21 @@ static bool GuidEqual(REFIID a, REFGUID b)
     return IsEqualGUID(a, b);
 }
 
+static bool PidlsCompareEqual(
+    IShellFolder* folder,
+    PCUIDLIST_RELATIVE first,
+    PCUIDLIST_RELATIVE second)
+{
+    if (!folder || !first || !second)
+    {
+        return false;
+    }
+
+    HRESULT result = folder->CompareIDs(0, first, second);
+    return SUCCEEDED(result) &&
+        static_cast<short>(HRESULT_CODE(result)) == 0;
+}
+
 static const wchar_t* g_extraAumids[] = {
     L"c5e2524a-ea46-4f67-841f-6a9465d9d515_cw5n1h2txyewy!App",
     L"Microsoft.Windows.PrintQueueActionCenter_cw5n1h2txyewy!App",
@@ -65,15 +81,52 @@ class EnumIDListWithExtras final : public IEnumIDList
 {
 private:
     LONG m_ref = 1;
+    IShellFolder* m_folder = nullptr;
     IEnumIDList* m_inner = nullptr;
     std::vector<LPITEMIDLIST> m_extras;
+    std::vector<bool> m_extraSuppressed;
     size_t m_extraIndex = 0;
     bool m_innerDone = false;
     bool m_valid = true;
 
+    void ObserveInnerItems(LPITEMIDLIST* items, ULONG count)
+    {
+        if (!m_folder || !items)
+        {
+            return;
+        }
+
+        for (ULONG itemIndex = 0; itemIndex < count; ++itemIndex)
+        {
+            if (!items[itemIndex])
+            {
+                continue;
+            }
+            for (size_t extraIndex = 0;
+                 extraIndex < m_extras.size();
+                 ++extraIndex)
+            {
+                if (!m_extraSuppressed[extraIndex] &&
+                    PidlsCompareEqual(
+                        m_folder,
+                        items[itemIndex],
+                        m_extras[extraIndex]))
+                {
+                    m_extraSuppressed[extraIndex] = true;
+                    Wh_Log(
+                        L"AppsFolder already returned configured extra item %u; suppressing duplicate.",
+                        static_cast<UINT>(extraIndex));
+                }
+            }
+        }
+    }
+
 public:
-    EnumIDListWithExtras(IEnumIDList* inner, const std::vector<LPITEMIDLIST>& extras)
-        : m_inner(inner)
+    EnumIDListWithExtras(
+        IShellFolder* folder,
+        IEnumIDList* inner,
+        const std::vector<LPITEMIDLIST>& extras)
+        : m_folder(folder), m_inner(inner)
     {
         try
         {
@@ -93,6 +146,7 @@ public:
                 }
                 m_extras.push_back(clone);
             }
+            m_extraSuppressed.assign(m_extras.size(), false);
         }
         catch (...)
         {
@@ -106,10 +160,16 @@ public:
                 ILFree(pidl);
             }
             m_extras.clear();
+            m_extraSuppressed.clear();
+            m_folder = nullptr;
             m_inner = nullptr;
             return;
         }
 
+        if (m_folder)
+        {
+            m_folder->AddRef();
+        }
         if (m_inner)
         {
             m_inner->AddRef();
@@ -123,6 +183,10 @@ public:
 
     ~EnumIDListWithExtras()
     {
+        if (m_folder)
+        {
+            m_folder->Release();
+        }
         if (m_inner)
         {
             m_inner->Release();
@@ -197,6 +261,7 @@ public:
                 &innerFetched
             );
 
+            ObserveInnerItems(rgelt + fetched, innerFetched);
             fetched += innerFetched;
 
             if (FAILED(hr))
@@ -218,13 +283,22 @@ public:
 
         while (fetched < celt && m_extraIndex < m_extras.size())
         {
-            rgelt[fetched] = ILClone(m_extras[m_extraIndex]);
-
-            if (rgelt[fetched])
+            if (m_extraSuppressed[m_extraIndex])
             {
-                fetched++;
+                m_extraIndex++;
+                continue;
             }
 
+            rgelt[fetched] = ILClone(m_extras[m_extraIndex]);
+            if (!rgelt[fetched])
+            {
+                if (pceltFetched)
+                {
+                    *pceltFetched = fetched;
+                }
+                return E_OUTOFMEMORY;
+            }
+            fetched++;
             m_extraIndex++;
         }
 
@@ -267,6 +341,10 @@ public:
     {
         m_extraIndex = 0;
         m_innerDone = false;
+        std::fill(
+            m_extraSuppressed.begin(),
+            m_extraSuppressed.end(),
+            false);
 
         if (m_inner)
         {
@@ -297,7 +375,10 @@ public:
             }
         }
 
-        auto clone = new (std::nothrow) EnumIDListWithExtras(clonedInner, m_extras);
+        auto clone = new (std::nothrow) EnumIDListWithExtras(
+            m_folder,
+            clonedInner,
+            m_extras);
 
         if (clonedInner)
         {
@@ -311,6 +392,15 @@ public:
 
         clone->m_extraIndex = m_extraIndex;
         clone->m_innerDone = m_innerDone;
+        try
+        {
+            clone->m_extraSuppressed = m_extraSuppressed;
+        }
+        catch (...)
+        {
+            delete clone;
+            return E_OUTOFMEMORY;
+        }
 
         *ppenum = clone;
         return S_OK;
@@ -362,6 +452,22 @@ static std::vector<LPITEMIDLIST> BuildExtraPidls(IShellFolder* appsFolder)
 
         if (SUCCEEDED(hr) && childPidl)
         {
+            bool duplicate = false;
+            for (LPITEMIDLIST existing : result)
+            {
+                if (PidlsCompareEqual(appsFolder, existing, childPidl))
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate)
+            {
+                Wh_Log(L"Configured hidden AppsFolder item is duplicated; keeping one: %s", aumid);
+                ILFree(childPidl);
+                continue;
+            }
+
             Wh_Log(L"Parsed hidden AppsFolder item: %s", aumid);
             try
             {
@@ -473,7 +579,10 @@ HRESULT STDMETHODCALLTYPE EnumObjects_Hook(
     }
 
     IEnumIDList* originalEnum = *ppenumIDList;
-    auto wrapper = new (std::nothrow) EnumIDListWithExtras(originalEnum, extras);
+    auto wrapper = new (std::nothrow) EnumIDListWithExtras(
+        self,
+        originalEnum,
+        extras);
 
     for (auto pidl : extras)
     {

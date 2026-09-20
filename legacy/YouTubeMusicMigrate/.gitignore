@@ -1,0 +1,11 @@
+# Browser-auth headers, tokens, cached library state and generated reports are
+# local data. Commit only the scripts and documentation needed to run them.
+/archive/
+/reports/
+/raw_headers.txt
+/youtube_music_tidy_add_library_state.json
+/youtube_music_tidy_cache.json
+/youtube_music_tidy_config.json
+/youtube_music_tidy_library_resolution.json
+/youtube_music_tidy_library_tokens.json
+/youtube_music_tidy_nonmusic_playlists.txt

@@ -1,0 +1,24 @@
+; One input shared by the native and managed INI test suites.
+["Options"] ; quoted section names and header comments
+BarePath=C:\Users\Amiya\Desktop\app.log
+"QuotedPath" = "C:\Users\Amiya\Desktop\app.log"
+"EscapedPath" = "C:\\Users\\Amiya\\Desktop\\app.log"
+"TrailingPath" = "C:\logs\"
+"EscapedUnc" = "\\\\server\\share\\file.txt"
+"Template" = "Line1\nLine2\r\t"
+"UnknownEscape" = "Keep\q"
+"Spaces" = "  keep both ends  "
+"Punctuation" = "#topic;literal=equals" ; real comment
+BareComment=yes ; comment
+BareHashComment=yes#comment
+'SingleQuote' = 'it\'s fine' # comment
+"DoubleQuote" = "say \"hello\""
+"Empty" = ""
+"Unicode" = "café 亚洲 😀"
+"Duplicate" = "old"
+
+[Other]
+Value=unrelated
+
+[options] # duplicate sections merge without changing unrelated sections
+Duplicate=latest

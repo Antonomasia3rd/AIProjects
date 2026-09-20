@@ -53,14 +53,14 @@ if /I "%~1"=="check" goto Check
 set "OUT_EXE=build\CharmTray.exe"
 set "OBJ_FILE=build\obj\CharmTray.obj"
 
-cl /nologo /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 CharmTray.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link user32.lib ole32.lib shell32.lib /SUBSYSTEM:WINDOWS
+cl /nologo /utf-8 /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 CharmTray.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link user32.lib ole32.lib shell32.lib uuid.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 
 exit /b %STATUS%
 
 :Check
-cl /nologo /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 /Zs CharmTray.cpp
+cl /nologo /utf-8 /std:c++17 /EHsc /O2 /W3 /MT /D_UNICODE /DUNICODE /D_WIN32_WINNT=0x0602 /Zs CharmTray.cpp
 set "STATUS=%ERRORLEVEL%"
 popd
 exit /b %STATUS%

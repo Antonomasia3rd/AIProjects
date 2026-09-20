@@ -82,7 +82,7 @@ if errorlevel 1 (
 echo DiscordRPC version: !AIP_RELEASE_TAG! (!AIP_VERSION!)
 
 if /I "%~1"=="check" (
-    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE !VERSION_DEFINES! /Ibuild\obj /Zs DiscordRPC.cpp
+    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE !VERSION_DEFINES! /Ibuild\obj /Zs DiscordRPC.cpp ..\dependencies\DiscordRPC\service.cpp
     set "STATUS=!ERRORLEVEL!"
     popd
     exit /b !STATUS!
@@ -98,7 +98,13 @@ if errorlevel 1 (
     popd
     exit /b !STATUS!
 )
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE !VERSION_DEFINES! /Ibuild\obj DiscordRPC.cpp "%RES_FILE%" /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib winhttp.lib crypt32.lib /SUBSYSTEM:WINDOWS
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE !VERSION_DEFINES! /Ibuild\obj /c ..\dependencies\DiscordRPC\service.cpp /Fo:build\obj\DiscordService.obj
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE !VERSION_DEFINES! /Ibuild\obj DiscordRPC.cpp build\obj\DiscordService.obj "%RES_FILE%" /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib uuid.lib winhttp.lib crypt32.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 

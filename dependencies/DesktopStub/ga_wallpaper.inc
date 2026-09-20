@@ -1063,9 +1063,9 @@ static std::wstring FindWallpaperByFallback(WallpaperDetectionMethod skip)
     return L"";
 }
 
-std::wstring GetWallpaper()
+std::wstring GetWallpaper(bool includeLiveWallpaper = true)
 {
-    std::wstring liveWallpaper = TryGetLiveWallpaperSnapshot();
+    std::wstring liveWallpaper = includeLiveWallpaper ? TryGetLiveWallpaperSnapshot() : L"";
     if (!liveWallpaper.empty())
         return liveWallpaper;
     if (g_liveWallpaperCapturePending)

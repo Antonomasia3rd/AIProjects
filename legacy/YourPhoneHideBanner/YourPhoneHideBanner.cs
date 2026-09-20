@@ -1,74 +1,34 @@
-using Microsoft.Win32;
 using System;
-using System.ServiceProcess;
+using System.Reflection;
 
-public sealed class YourPhoneHideBannerService :
-    RegistryNotificationServiceBase
+[assembly: AssemblyTitle("YourPhoneHideBanner")]
+[assembly: AssemblyProduct("AIProjects YourPhoneHideBanner")]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+
+public static class YourPhoneHideBannerProgram
 {
     private const string PhoneLinkNotificationPrefix =
         "Microsoft.YourPhone_8wekyb3d8bbwe!YourPhoneNotifications_";
+    private static readonly RegistryNotificationPolicy Policy =
+        new RegistryNotificationPolicy(
+            PhoneLinkNotificationPrefix,
+            RegistryNotificationValuePolicy.Dword("ShowBanner", 0),
+            RegistryNotificationValuePolicy.String("SoundFile", ""));
 
-    public YourPhoneHideBannerService()
-        : base(
+    public static int Main(string[] args)
+    {
+        return ManagedPrivilegedServiceHost.Run(
+            args,
             "YourPhoneHideBannerService",
-            "YourPhoneHideBannerService")
-    {
-    }
-
-    protected override void ProcessAllKeys(RegistryKey baseKey, string sid)
-    {
-        foreach (string name in baseKey.GetSubKeyNames())
-        {
-            if (name.StartsWith(
-                PhoneLinkNotificationPrefix,
-                StringComparison.OrdinalIgnoreCase))
+            "Hide Phone Link notification banners",
+            "Suppresses matching Phone Link notification banners and sounds " +
+                "for loaded users.",
+            delegate()
             {
-                ProcessOneKey(baseKey, sid, name);
-            }
-        }
-    }
-
-    private void ProcessOneKey(RegistryKey baseKey, string sid, string name)
-    {
-        try
-        {
-            using (RegistryKey subKey = baseKey.OpenSubKey(name, true))
-            {
-                if (subKey == null)
-                    return;
-
-                object bannerObject = subKey.GetValue("ShowBanner");
-                int bannerValue =
-                    bannerObject == null ? -1 : Convert.ToInt32(bannerObject);
-                if (bannerValue != 0)
-                {
-                    subKey.SetValue(
-                        "ShowBanner",
-                        0,
-                        RegistryValueKind.DWord);
-                    Log("Updated ShowBanner: " + sid + "\\" + name);
-                }
-
-                object soundObject = subKey.GetValue("SoundFile");
-                string soundValue = soundObject as string;
-                if (soundValue == null || soundValue.Length != 0)
-                {
-                    subKey.SetValue(
-                        "SoundFile",
-                        "",
-                        RegistryValueKind.String);
-                    Log("Updated SoundFile: " + sid + "\\" + name);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log("Could not update " + sid + "\\" + name + ": " + ex.Message);
-        }
-    }
-
-    public static void Main()
-    {
-        ServiceBase.Run(new YourPhoneHideBannerService());
+                return new RegistryNotificationPolicyService(
+                    "YourPhoneHideBannerService",
+                    Policy);
+            });
     }
 }

@@ -78,6 +78,7 @@ static bool Appx_Update_Or_Request_LiveTile(
     const ManifestDisplayInfo& manifestInfo,
     const std::vector<LiveTileUpdateAsset>& liveTileAssets,
     std::wstring& failureMessage);
+static bool Appx_Clear_Or_Request_LiveTile(std::wstring& failureMessage);
 static std::wstring ResolveManifestAssetPath(const std::wstring& exeDir, const std::wstring& assetPath);
 static std::wstring ManifestAssetPathForTile(const ManifestDisplayInfo& info, const Tile& tile);
 static bool IsValidGeneratedPng(const std::wstring& path);
@@ -273,6 +274,9 @@ static int GeneratedAssetCacheMaxEntries()
 
 static bool GeneratedAssetPrecacheEnabled()
 {
+    // Precache workers have no selected content snapshot. A content frame is
+    // cached only by the real generation that rendered it.
+    if (CompositionRequested()) return false;
     return GeneratedAssetCacheEnabled() &&
         IniReadI(L"Settings", L"GeneratedAssetPrecache", 0) != 0 &&
         GeneratedAssetCacheMaxEntries() > 0;
@@ -1180,7 +1184,13 @@ static void AppendRectFingerprint(std::wstring& out, const wchar_t* name, const 
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
 {
     std::wstring state;
-    state += L"v=7;";
+    state += L"v=8;";
+    if (g_renderContent)
+    {
+        state += L"contentMode=" + std::to_wstring(static_cast<int>(g_renderContent->textMode)) + L";";
+        for (const auto& field : {g_renderContent->text.primary, g_renderContent->text.secondary, g_renderContent->text.badge, g_renderContent->activationArguments})
+            state += std::to_wstring(field.size()) + L":" + field;
+    }
     state += L"wallpaper=" + FileFingerprint(wallpaperPath) + L";";
     state += L"wallpaperDecodeLowMemory=" + IntToWString(IniReadI(L"Settings", L"WallpaperDecodeLowMemory", 1) ? 1 : 0) + L";";
     state += L"wallpaperDecodeMaxLongEdge=" + IntToWString(IniReadClampedI(L"Settings", L"WallpaperDecodeMaxLongEdge", 0, 0, 32768)) + L";";
@@ -1385,6 +1395,9 @@ static bool ShouldBakeTileTextIntoAssets(bool liveTileUpdateMode)
 {
     if (!TileTextOverlayEnabled())
         return false;
+
+    if (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay)
+        return true;
 
     // Windows 10 Live Tiles can carry text in adaptive or preset-catalog XML.
     // Static/registration tiles and older Live Tiles need it baked into PNGs.
@@ -1938,14 +1951,14 @@ static bool RegisterAppxManifest(const std::wstring& manifestPath, std::wstring&
         }
 
         LogText(g_ui.comRegistrationFailed);
-        std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
+        std::wstring ps = aip::BuildAppxRegistrationScript({manifestPath, true}, aip::PowerShellSingleQuotedString);
         bool ok = PS_Run(ps);
         if (!ok)
             setPowerShellFailureMessage();
         return ok;
     }
 
-    std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
+    std::wstring ps = aip::BuildAppxRegistrationScript({manifestPath, true}, aip::PowerShellSingleQuotedString);
     bool ok = PS_Run(ps);
     if (!ok)
         setPowerShellFailureMessage();
@@ -1974,7 +1987,7 @@ static std::wstring CleanGenerationReasonForSentence(const wchar_t* reason)
     return text.empty() ? g_ui.unspecifiedReason : text;
 }
 
-bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
+bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnly = false)
 {
     auto generationStart = steady_clock::now();
     std::unique_lock<std::mutex> opLock(g_generationMutex, std::defer_lock);
@@ -1986,7 +1999,11 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         return false;
     }
 
-    ReloadRuntimeSettingsFromIni();
+    if (!renderOnly) ReloadRuntimeSettingsFromIni();
+
+    ContentRenderScope contentScope;
+    if (contentScope.snapshot.active)
+        wp = contentScope.snapshot.backgroundPath.c_str();
 
     if (!wp || !*wp)
     {
@@ -2273,6 +2290,17 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
         return false;
     }
 
+    if (renderOnly)
+    {
+        // Offline rendering terminates before manifest registration, package
+        // activation, native TileUpdater operations and their state markers.
+        if (liveTileUpdateMode)
+            CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
+        if (!restoredFromGeneratedAssetCache)
+            SaveGeneratedAssetCache(exeDir, generationStateKey, generatedAssetCacheFiles);
+        return true;
+    }
+
     LogText(liveTileModeReregistrationPending
         ? g_ui.reRegisteringManifestForLiveTileModeChange
         : (useLiveTileUpdateForThisRun ? g_ui.updatingLiveTile : g_ui.reRegisteringManifest));
@@ -2304,8 +2332,34 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr)
     }
     else if (liveTileModeReregistrationPending)
     {
-        appUpdateOk = RegisterAppxManifest(manifestPath, appUpdateFailureMessage);
-        if (appUpdateOk)
+        bool nativeLiveTileClearOk = true;
+        std::wstring nativeLiveTileClearFailure;
+        if (!liveTileUpdateMode)
+        {
+            LogText(g_ui.liveTileClearForRegistration);
+            nativeLiveTileClearOk = Appx_Clear_Or_Request_LiveTile(nativeLiveTileClearFailure);
+            if (nativeLiveTileClearOk)
+                LogText(g_ui.liveTileClearForRegistrationSuccess);
+            else
+                Log(g_ui.liveTileClearForRegistrationFailed.c_str(),
+                    nativeLiveTileClearFailure.empty() ? g_ui.unknownError.c_str() : nativeLiveTileClearFailure.c_str());
+        }
+
+        bool registrationOk = false;
+        if (nativeLiveTileClearOk)
+        {
+            registrationOk = RegisterAppxManifest(manifestPath, appUpdateFailureMessage);
+        }
+        else
+        {
+            appUpdateFailureMessage = nativeLiveTileClearFailure.empty()
+                ? g_ui.liveTileClearForRegistrationFailedUnknown
+                : nativeLiveTileClearFailure;
+            appUpdateFailureIsLiveTile = true;
+        }
+
+        appUpdateOk = registrationOk;
+        if (registrationOk)
         {
             SetLiveTileModeReregistrationPending(false);
             StoreLiveTileModeReregistrationState();
@@ -2547,6 +2601,7 @@ static bool SetShutdownNoticeTimer(HWND h, int delayMs, const wchar_t* operation
 
 static void RequestGracefulShutdown(HWND h)
 {
+    CaptureContentLogicalCapsState();
     if (g_shutdownState.IsRequested())
         return;
 
@@ -2760,6 +2815,7 @@ void PollThread()
     FitMode lastFit = FitMode::Fill;
     int lastDpiScale = 100;
     bool baselineReady = false;
+    bool contentWasActive = false;
     auto lastGen = steady_clock::now() - milliseconds(ClampInt(g_pollInitialDebounceBypassMs.load(), 0, 60000));
     bool emptyWallpaperAlreadyReported = false;
     bool pendingPollGeneration = false;
@@ -2775,6 +2831,27 @@ void PollThread()
         int confirm = IniReadClampedI(L"Settings", L"ConfirmMs", 800, 0, 10000);
         int deb = IniReadClampedI(L"Settings", L"DebounceMinMs", 1200, 0, 60000);
         ReloadRuntimeSettingsFromIni();
+        QueueDesktopStubPackagedStartupSync();
+
+        if (CompositionRequested())
+        {
+            contentWasActive = true;
+            ContentEngineTick();
+            baselineReady = false;
+            pendingPollGeneration = false;
+            PollSleepFor(milliseconds(1000));
+            continue;
+        }
+        if (contentWasActive)
+        {
+            // Reset the composed-frame cache and restore wallpaper immediately;
+            // merely adopting the wallpaper poll baseline would leave RSS visible.
+            ContentEngineTick();
+            PublishContentSnapshot({});
+            const auto wallpaper = GetWallpaper();
+            if (!wallpaper.empty()) QueueGenerate(wallpaper, L"Wallpaper source selected");
+            contentWasActive = false;
+        }
 
         if (pendingPollGeneration)
         {

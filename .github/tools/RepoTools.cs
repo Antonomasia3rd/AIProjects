@@ -1,9 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Threading;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -36,6 +41,24 @@ sealed class ProcessResult
     public string Error = "";
 }
 
+sealed class TileTextSmokeRegion
+{
+    public string Size;
+    public int Mask;
+    public int Source;
+    public double X;
+    public double Y;
+    public double Width;
+    public double Height;
+}
+
+sealed class TilePixelSnapshot
+{
+    public int Width;
+    public int Height;
+    public int[] Pixels;
+}
+
 sealed class GitHubReleaseInfo
 {
     public string tagName { get; set; }
@@ -45,6 +68,130 @@ sealed class GitHubReleaseInfo
 
 static class RepoTools
 {
+    // Intentionally retained until process exit. Closing the last handle kills
+    // this job, including this process, so normal managed disposal is unsuitable.
+    static IntPtr smokeLifetimeJob;
+    static Timer smokeDeadline;
+    static bool allowPackageIntegration;
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct BasicJobLimits {
+        public long ProcessTime, JobTime;
+        public uint Flags;
+        public UIntPtr MinimumWorkingSet, MaximumWorkingSet;
+        public uint ActiveProcesses;
+        public UIntPtr Affinity;
+        public uint Priority, Scheduling;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct JobIoCounters { public ulong ReadOperations, WriteOperations, OtherOperations, ReadBytes, WriteBytes, OtherBytes; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct ExtendedJobLimits {
+        public BasicJobLimits Basic;
+        public JobIoCounters Io;
+        public UIntPtr ProcessMemory, JobMemory, PeakProcessMemory, PeakJobMemory;
+    }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref ExtendedJobLimits info, uint size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+
+    static void InstallSmokeLifetime(int deadlineMs)
+    {
+        if (smokeLifetimeJob != IntPtr.Zero) return;
+        IntPtr job = CreateJobObject(IntPtr.Zero, null); // non-inheritable handle
+        if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot create smoke lifetime job.");
+        var limits = new ExtendedJobLimits();
+        limits.Basic.Flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(limits)) ||
+            !AssignProcessToJobObject(job, GetCurrentProcess())) {
+            int error = Marshal.GetLastWin32Error();
+            CloseHandle(job);
+            throw new Win32Exception(error, "Cannot isolate smoke children; no applications will be launched.");
+        }
+        smokeLifetimeJob = job;
+        // Children inherit membership from birth. Even abrupt parent death
+        // closes the sole job handle and kills descendants without finally.
+        smokeDeadline = new Timer(delegate {
+            Console.Error.WriteLine("Smoke runner exceeded its total deadline.");
+            Environment.Exit(124);
+        }, null, deadlineMs, Timeout.Infinite);
+    }
+
+    static Process StartInertHelper(params string[] args)
+    {
+        string exe = Process.GetCurrentProcess().MainModule.FileName;
+        var process = new Process { StartInfo = new ProcessStartInfo(exe, JoinArgs(args)) {
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe)
+        }};
+        if (!process.Start()) throw new InvalidOperationException("Cannot start inert smoke fixture.");
+        return process;
+    }
+
+    static int SmokeInertChild(string[] args)
+    {
+        string marker = Option(args, "--marker");
+        if (String.IsNullOrWhiteSpace(marker)) return 2;
+        string grandchildMarker = Option(args, "--grandchild");
+        if (!String.IsNullOrWhiteSpace(grandchildMarker))
+            using (StartInertHelper("smoke-inert-child", "--marker", grandchildMarker)) { }
+        File.WriteAllText(marker, "ready:" + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture));
+        Thread.Sleep(20000); // independent upper bound even if launched by hand
+        return 0;
+    }
+
+    static int SmokeCleanupFixture(string[] args)
+    {
+        InstallSmokeLifetime(25000);
+        string root = Option(args, "--fixture-root");
+        if (String.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return 2;
+        using (StartInertHelper("smoke-inert-child", "--marker", Path.Combine(root, "child.pid"),
+            "--grandchild", Path.Combine(root, "grandchild.pid"))) { }
+        WaitForFileText(Path.Combine(root, "release"), "release", 15000, "inert fixture release");
+        return 0;
+    }
+
+    static Process ReadInertProcess(string marker)
+    {
+        WaitForFileText(marker, "ready:", 5000, "inert child marker");
+        int id = Int32.Parse(File.ReadAllText(marker).Substring(6).Trim(), CultureInfo.InvariantCulture);
+        var process = Process.GetProcessById(id);
+        if (!String.Equals(process.MainModule.FileName, Process.GetCurrentProcess().MainModule.FileName, StringComparison.OrdinalIgnoreCase)) {
+            process.Dispose();
+            throw new InvalidOperationException("Inert fixture PID did not identify this helper executable.");
+        }
+        return process;
+    }
+
+    static int SmokeCleanupTests()
+    {
+        InstallSmokeLifetime(60000);
+        string root = Path.Combine(Path.GetTempPath(), "AIProjects-SmokeCleanup-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try {
+            foreach (bool interrupt in new[] { false, true }) {
+                string fixtureRoot = Path.Combine(root, interrupt ? "interrupted" : "normal");
+                Directory.CreateDirectory(fixtureRoot);
+                using (var owner = StartInertHelper("smoke-cleanup-fixture", "--fixture-root", fixtureRoot))
+                using (var child = ReadInertProcess(Path.Combine(fixtureRoot, "child.pid")))
+                using (var grandchild = ReadInertProcess(Path.Combine(fixtureRoot, "grandchild.pid"))) {
+                    if (interrupt) owner.Kill();
+                    else File.WriteAllText(Path.Combine(fixtureRoot, "release"), "release");
+                    if (!owner.WaitForExit(5000) || !child.WaitForExit(5000) || !grandchild.WaitForExit(5000))
+                        throw new InvalidOperationException("Job cleanup left an inert child or grandchild running.");
+                    Console.WriteLine("ok - " + (interrupt ? "forced runner termination" : "normal runner exit") + " reaps child and grandchild");
+                }
+            }
+            return 0;
+        } finally {
+            try { Directory.Delete(root, true); } catch { }
+            GC.KeepAlive(smokeDeadline);
+        }
+    }
     static int Main(string[] args)
     {
         try
@@ -57,6 +204,9 @@ static class RepoTools
 
             string command = args[0].ToLowerInvariant();
             string[] rest = args.Skip(1).ToArray();
+            if (command == "smoke-cleanup-tests") return SmokeCleanupTests();
+            if (command == "smoke-cleanup-fixture") return SmokeCleanupFixture(rest);
+            if (command == "smoke-inert-child") return SmokeInertChild(rest);
             if (command == "validate-project-map") return ValidateProjectMap(rest);
             if (command == "test-workflow-project-selection") return TestWorkflowProjectSelection(rest);
             if (command == "policy-warnings") return InvokePolicyWarnings(rest);
@@ -90,7 +240,9 @@ static class RepoTools
         Console.WriteLine("  readme-consistency");
         Console.WriteLine("  detect-projects");
         Console.WriteLine("  checksum-summary");
-        Console.WriteLine("  smoke-windows-build");
+        Console.WriteLine("  smoke-windows-build [--projects All|Project1,Project2] [--allow-package-integration]");
+        Console.WriteLine("    [--desktopstub-binary path] [--desktopstub-broker path]");
+        Console.WriteLine("  smoke-cleanup-tests (temporary inert processes only)");
         Console.WriteLine("  prepare-release-versions");
         Console.WriteLine("  publish-project-releases");
     }
@@ -203,10 +355,27 @@ static class RepoTools
 
             foreach (string dependencyPath in p.dependencyPaths ?? new string[0])
             {
+                string normalizedDependencyPath =
+                    dependencyPath.Replace('\\', '/');
+                string declaredOwner = ProductOwnedDependencyOwner(
+                    normalizedDependencyPath);
+                if (!IsSharedEngineHostDeclaration(p.key, normalizedDependencyPath) && declaredOwner != null && !declaredOwner.Equals(
+                    p.key,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "Product-owned dependency for " + p.key +
+                        " is declared under another product (" +
+                        declaredOwner + "): " + dependencyPath);
+                }
+
                 string fullDependencyPath = Path.Combine(
                     root,
-                    dependencyPath.Replace('/', Path.DirectorySeparatorChar));
-                if (!File.Exists(fullDependencyPath))
+                    normalizedDependencyPath.Replace(
+                        '/',
+                        Path.DirectorySeparatorChar));
+                if (!File.Exists(fullDependencyPath) &&
+                    !Directory.Exists(fullDependencyPath))
                 {
                     throw new InvalidOperationException(
                         "Project dependency does not exist for " +
@@ -249,8 +418,114 @@ static class RepoTools
                 throw new InvalidOperationException("README project table does not appear to mention folder: " + p.folder);
         }
 
+        string dependencyRoot = Path.Combine(root, "dependencies");
+        foreach (string productDirectory in Directory.EnumerateDirectories(
+            dependencyRoot,
+            "*",
+            SearchOption.TopDirectoryOnly))
+        {
+            string owner = ProductOwnedDependencyOwner("dependencies/" + Path.GetFileName(productDirectory));
+            if (owner == null)
+                continue;
+            Project project = projects.FirstOrDefault(p => p.key.Equals(
+                owner,
+                StringComparison.OrdinalIgnoreCase));
+            if (project == null)
+            {
+                throw new InvalidOperationException(
+                    "Dependency subfolder has no matching project-map owner: dependencies/" +
+                    owner);
+            }
+
+            string expectedPath = "dependencies/" + owner;
+            bool declared = (project.dependencyPaths ?? new string[0]).Any(
+                path => path.Replace('\\', '/').TrimEnd('/').Equals(
+                    expectedPath,
+                    StringComparison.OrdinalIgnoreCase));
+            if (!declared)
+            {
+                throw new InvalidOperationException(
+                    "Product dependency directory must be declared as one owned unit for " +
+                    project.key + ": " + expectedPath);
+            }
+        }
+
+        var mappedBuildOutputs = new HashSet<string>(
+            projects.Select(p => p.buildOutput),
+            StringComparer.OrdinalIgnoreCase);
+        mappedBuildOutputs.Add("build_all");
+        foreach (Match match in Regex.Matches(
+            workflow,
+            @"steps\.detect\.outputs\.(build_[a-z0-9_]+)",
+            RegexOptions.IgnoreCase))
+        {
+            string workflowOutput = match.Groups[1].Value;
+            if (!mappedBuildOutputs.Contains(workflowOutput))
+                throw new InvalidOperationException(
+                    "Workflow exports an unmapped/stale build output: " + workflowOutput);
+        }
+
         Console.WriteLine("Project map validation passed (" + projects.Count + " projects).");
         return 0;
+    }
+
+    static bool IsSharedDiscordServiceFile(string dependencyPath)
+    {
+        string path = dependencyPath.Replace('\\', '/');
+        const string prefix = "dependencies/DiscordRPC/";
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+        return new[] { "service.h", "service.cpp", "service_cancel.h", "drpc_environment.inc", "drpc_types.inc", "drpc_core.inc",
+            "drpc_config_defaults.inc", "drpc_presence.inc", "drpc_ipc.inc", "drpc_gateway.inc" }
+            .Contains(path.Substring(prefix.Length), StringComparer.OrdinalIgnoreCase);
+    }
+
+    static bool IsSharedDiscordHostDeclaration(string project, string dependencyPath)
+    {
+        return project.Equals("DesktopStub", StringComparison.OrdinalIgnoreCase) &&
+            dependencyPath.Replace('\\', '/').TrimEnd('/').Equals("dependencies/DiscordRPC", StringComparison.OrdinalIgnoreCase);
+    }
+
+    static bool IsSharedAsusEngineFile(string dependencyPath)
+    {
+        string path = dependencyPath.Replace('\\', '/');
+        const string prefix = "dependencies/asusblink/";
+        return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+            new[] { "pattern.h", "service.h", "service.cpp", "protocol.h", "native_backend.cpp" }
+                .Contains(path.Substring(prefix.Length), StringComparer.OrdinalIgnoreCase);
+    }
+
+    static bool IsSharedAsusHostDeclaration(string project, string dependencyPath)
+    {
+        return project.Equals("DesktopStub", StringComparison.OrdinalIgnoreCase) &&
+            dependencyPath.Replace('\\', '/').TrimEnd('/').Equals("dependencies/asusblink", StringComparison.OrdinalIgnoreCase);
+    }
+
+    static bool IsSharedEngineHostDeclaration(string project, string dependencyPath)
+    {
+        return IsSharedDiscordHostDeclaration(project, dependencyPath) || IsSharedAsusHostDeclaration(project, dependencyPath);
+    }
+
+    static string ProductOwnedDependencyOwner(string dependencyPath)
+    {
+        if (String.IsNullOrWhiteSpace(dependencyPath))
+            return null;
+        string normalized = dependencyPath.Replace('\\', '/').TrimEnd('/');
+        if (IsSharedDiscordServiceFile(normalized) || IsSharedAsusEngineFile(normalized)) return null;
+        const string prefix = "dependencies/";
+        if (!normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+        string relative = normalized.Substring(prefix.Length);
+        // Providers are reusable across products. A dependency subdirectory
+        // is not necessarily a product overlay.
+        if (relative.Equals("content_sources", StringComparison.OrdinalIgnoreCase) ||
+            relative.StartsWith("content_sources/", StringComparison.OrdinalIgnoreCase) ||
+            relative.Equals("hardware", StringComparison.OrdinalIgnoreCase) ||
+            relative.StartsWith("hardware/", StringComparison.OrdinalIgnoreCase))
+            return null;
+        int separator = relative.IndexOf('/');
+        if (separator > 0)
+            return relative.Substring(0, separator);
+        return separator < 0 && !Path.HasExtension(relative) ? relative : null;
     }
 
     static string ProjectField(Project p, string field)
@@ -402,6 +677,23 @@ static class RepoTools
         }
 
         ValidateBatchStatusPropagation(root);
+        ValidateSmokeProjectSelection(projects);
+        var discordServiceConsumers = ProjectsUsingChangedDependencies(root, projects,
+            new List<string> { "dependencies/DiscordRPC/service.cpp" }).Select(p => p.key).OrderBy(k => k).ToArray();
+        if (!discordServiceConsumers.SequenceEqual(new[] { "DesktopStub", "DiscordRPC" }))
+            throw new InvalidOperationException("Shared Discord service consumers: " + String.Join(", ", discordServiceConsumers));
+        var discordTrayConsumers = ProjectsUsingChangedDependencies(root, projects,
+            new List<string> { "dependencies/DiscordRPC/drpc_tray.inc" }).Select(p => p.key).ToArray();
+        if (discordTrayConsumers.Length != 1 || discordTrayConsumers[0] != "DiscordRPC")
+            throw new InvalidOperationException("Standalone Discord tray changes must stay owned by DiscordRPC.");
+        var asusConsumers = ProjectsUsingChangedDependencies(root, projects,
+            new List<string> { "dependencies/asusblink/service.cpp" }).Select(p => p.key);
+        if (!new HashSet<string>(asusConsumers, StringComparer.OrdinalIgnoreCase).SetEquals(new[] { "DesktopStub", "asusblink" }))
+            throw new InvalidOperationException("Shared ASUS engine consumers are incorrect.");
+        if (ProductOwnedDependencyOwner("dependencies/content_sources") != null ||
+            ProductOwnedDependencyOwner("dependencies/content_sources/smtc.inc") != null ||
+            ProductOwnedDependencyOwner("dependencies/content_sources_other/module.inc") != "content_sources_other")
+            throw new InvalidOperationException("Shared content-source namespace classification is incorrect.");
 
         Console.WriteLine("Workflow project selector validation passed (" + projects.Count + " projects plus All).");
         return 0;
@@ -529,7 +821,9 @@ static class RepoTools
                 "Application" + "Data",
                 "Local" + "Application" + "Data",
                 "Common" + "Application" + "Data",
-                "Special" + "Folder")),
+                "Special" + "Folder.Application" + "Data",
+                "Special" + "Folder.LocalApplication" + "Data",
+                "Special" + "Folder.CommonApplication" + "Data")),
             Tuple.Create("Access-control mutation", LiteralPattern(
                 "SetAccess" + "Control",
                 "File" + "Security",
@@ -614,7 +908,9 @@ static class RepoTools
             Tuple.Create("DesktopStub/tools/DesktopStubSourceCheck.cpp", "Maintenance marker", "INI template does not expose " + JoinLiteral("ob", "solete") + " Manifest section"),
             Tuple.Create("DesktopStub/tools/DesktopStubSourceCheck.cpp", "Maintenance marker", JoinLiteral("Ob", "solete") + " Manifest INI section is preserved but blocked"),
             Tuple.Create("DesktopStub/tools/DesktopStubSourceCheck.cpp", "Maintenance marker", JoinLiteral("Ob", "solete") + " Manifest INI section has no remover"),
-            Tuple.Create("legacy/asusblink/asusblink.cs", "Profile storage", "Environment.GetFolderPath(Environment." + JoinLiteral("Special", "Folder") + ".Startup)")
+            Tuple.Create("dependencies/managed_startup_shortcut.cs", "Profile storage", "Environment.GetFolderPath(Environment." + JoinLiteral("Special", "Folder") + ".Startup)"),
+            Tuple.Create("tools/LegacyUtilitiesTests.cs", "Profile storage", "Environment." + JoinLiteral("Special", "Folder") + ".Startup"),
+            Tuple.Create("tools/SharedBaselineSourceCheck.cpp", "Profile storage", "Environment.GetFolderPath(Environment." + JoinLiteral("Special", "Folder") + ".Startup)")
         };
 
         foreach (var suppression in suppressions)
@@ -890,20 +1186,58 @@ static class RepoTools
         return projects.Where(p => ProjectUsesAnyChangedDependency(root, p, changed)).ToList();
     }
 
+    static bool ContainsDependencyFileName(string text, string name)
+    {
+        if (String.IsNullOrWhiteSpace(name) || text.IndexOf(name, StringComparison.OrdinalIgnoreCase) < 0) return false;
+        // service.cpp must not also match SecureDesktopLauncherService.cpp.
+        return Regex.IsMatch(text, @"(?<![A-Za-z0-9_.-])" + Regex.Escape(name) + @"(?![A-Za-z0-9_.-])", RegexOptions.IgnoreCase);
+    }
+
     static bool ProjectUsesAnyChangedDependency(string root, Project project, List<string> changed)
     {
         var normalizedChanged = changed
             .Select(p => p.Replace('\\', '/'))
             .ToList();
-        var declaredDependencies = new HashSet<string>(
-            (project.dependencyPaths ?? new string[0])
-                .Select(path => path.Replace('\\', '/')),
-            StringComparer.OrdinalIgnoreCase);
-        if (normalizedChanged.Any(declaredDependencies.Contains))
-            return true;
+        foreach (string declaredDependency in
+            project.dependencyPaths ?? new string[0])
+        {
+            string normalizedDependency = declaredDependency
+                .Replace('\\', '/')
+                .TrimEnd('/');
+            string fullDependency = Path.Combine(
+                root,
+                normalizedDependency.Replace(
+                    '/',
+                    Path.DirectorySeparatorChar));
+            bool isDirectory = Directory.Exists(fullDependency);
+            if (IsSharedDiscordHostDeclaration(project.key, normalizedDependency))
+            {
+                if (normalizedChanged.Any(IsSharedDiscordServiceFile)) return true;
+                continue;
+            }
+            if (IsSharedAsusHostDeclaration(project.key, normalizedDependency))
+            {
+                if (normalizedChanged.Any(IsSharedAsusEngineFile)) return true;
+                continue;
+            }
+            if (normalizedChanged.Any(change =>
+                change.Equals(
+                    normalizedDependency,
+                    StringComparison.OrdinalIgnoreCase) ||
+                (isDirectory && change.StartsWith(
+                    normalizedDependency + "/",
+                    StringComparison.OrdinalIgnoreCase))))
+            {
+                return true;
+            }
+        }
 
         var dependencies = normalizedChanged
             .Where(p => p.StartsWith("dependencies/", StringComparison.OrdinalIgnoreCase))
+            // Known engine consumers are declared above. Do not infer another
+            // engine from a same-named service.cpp in a different directory.
+            .Where(p => !IsSharedDiscordServiceFile(p) || project.key == "DiscordRPC" || project.key == "DesktopStub")
+            .Where(p => !IsSharedAsusEngineFile(p) || project.key == "asusblink" || project.key == "DesktopStub")
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (dependencies.Count == 0)
@@ -928,7 +1262,7 @@ static class RepoTools
                     continue;
 
                 string text = ReadAll(file);
-                if (dependencyNames.Any(name => text.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0))
+                if (dependencyNames.Any(name => ContainsDependencyFileName(text, name)))
                 {
                     dependencyNames.Add(fileName);
                     expanded = true;
@@ -953,7 +1287,7 @@ static class RepoTools
 
             foreach (string name in dependencyNames)
             {
-                if (!String.IsNullOrWhiteSpace(name) && text.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (ContainsDependencyFileName(text, name))
                     return true;
             }
         }
@@ -1024,17 +1358,592 @@ static class RepoTools
         return 0;
     }
 
+    static List<Project> SelectSmokeProjects(List<Project> projects, string selection)
+    {
+        if (String.IsNullOrWhiteSpace(selection))
+            throw new InvalidOperationException("--projects requires All or a comma-separated project list.");
+        if (selection.Trim().Equals("All", StringComparison.OrdinalIgnoreCase))
+            return projects.ToList();
+
+        var requested = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string item in selection.Split(','))
+        {
+            string key = item.Trim();
+            if (key.Length == 0 || !projects.Any(p => p.key.Equals(key, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("Unknown smoke-test project: " + item);
+            requested.Add(key);
+        }
+        return projects.Where(p => requested.Contains(p.key)).ToList();
+    }
+
+    static void ValidateSmokeProjectSelection(List<Project> projects)
+    {
+        var selected = SelectSmokeProjects(projects, "desktopstub, DiscordRPC,DesktopStub");
+        if (selected.Count != 2 || !selected.Any(p => p.key == "DesktopStub") ||
+            !selected.Any(p => p.key == "DiscordRPC"))
+            throw new InvalidOperationException("Smoke project selection must trim, deduplicate and match case-insensitively.");
+        if (SelectSmokeProjects(projects, "All").Count != projects.Count)
+            throw new InvalidOperationException("Smoke project selection must support All.");
+        foreach (string invalid in new[] { "", "DoesNotExist", "DesktopStub,", "All,DiscordRPC" })
+        {
+            bool rejected = false;
+            try { SelectSmokeProjects(projects, invalid); }
+            catch (InvalidOperationException) { rejected = true; }
+            if (!rejected)
+                throw new InvalidOperationException("Invalid smoke selection was accepted: " + invalid);
+        }
+    }
+
     static int SmokeWindowsBuild(string[] args)
     {
+        InstallSmokeLifetime(15 * 60 * 1000);
+        allowPackageIntegration = args.Any(arg => arg.Equals("--allow-package-integration", StringComparison.OrdinalIgnoreCase));
+        Console.WriteLine(allowPackageIntegration
+            ? "Explicit package integration enabled: use a disposable Windows test environment."
+            : "Default smoke is local-only: package registration, activation and publishing are disabled.");
         string root = RepositoryRoot(args);
         var projects = LoadProjectMap(root);
+        string desktopStubBinaryOverride = Option(args, "--desktopstub-binary");
+        string desktopStubBrokerOverride = Option(args, "--desktopstub-broker");
+        bool explicitSelection = args.Any(arg => arg.Equals("--projects", StringComparison.OrdinalIgnoreCase) ||
+            arg.StartsWith("--projects=", StringComparison.OrdinalIgnoreCase));
+        if (explicitSelection)
+        {
+            projects = SelectSmokeProjects(projects, Option(args, "--projects"));
+            // Validate the complete selected build before starting any smoke
+            // process. An omitted artifact must not produce a green CI run.
+            foreach (Project project in projects)
+            {
+                if (project.key == "DesktopStub" && !String.IsNullOrWhiteSpace(desktopStubBinaryOverride)) {
+                    if (!File.Exists(desktopStubBinaryOverride) || new FileInfo(desktopStubBinaryOverride).Length == 0)
+                        throw new InvalidOperationException("Selected DesktopStub binary is missing or empty: " + desktopStubBinaryOverride);
+                    continue;
+                }
+                foreach (string artifact in project.artifactPaths ?? new[] { project.artifactPath })
+                {
+                    string fullPath = Path.Combine(root, artifact.Replace('/', Path.DirectorySeparatorChar));
+                    if (!File.Exists(fullPath) || new FileInfo(fullPath).Length == 0)
+                        throw new InvalidOperationException("Selected smoke artifact is missing or empty: " + artifact);
+                }
+            }
+        }
         Console.WriteLine("Running Windows build smoke tests...");
+
+        Project asusBlink = projects.FirstOrDefault(p => p.key == "asusblink");
+        if (asusBlink != null)
+        {
+            string sourceExe = Path.Combine(root, asusBlink.artifactPath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(sourceExe))
+            {
+                VerifyBinaryVersion(sourceExe, "asusblink");
+                string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
+                if (String.IsNullOrWhiteSpace(tempBase))
+                    tempBase = Path.GetTempPath();
+                string tempRoot = Path.Combine(tempBase, "asusblinkSmoke-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempRoot);
+                bool deleteTemp = false;
+                try
+                {
+                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
+                    File.Copy(sourceExe, exe, true);
+                    string ini = Path.Combine(tempRoot, "asusblink.ini");
+
+                    ProcessResult helpResult = SmokeProcess(
+                        exe,
+                        new[] { "--help", "--startup", "--set", "Options.run-at-startup=maybe" },
+                        new[] { 0 },
+                        30,
+                        "asusblink help");
+                    if (helpResult.Output.IndexOf("--startup | --no-startup", StringComparison.Ordinal) < 0 ||
+                        helpResult.Output.IndexOf("--set Settings.Key=Value", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("asusblink --help did not expose the common persistent setting surface.");
+                    AssertFileDoesNotExist(ini, "asusblink --help must be side-effect-free");
+
+                    ProcessResult versionResult = SmokeProcess(
+                        exe,
+                        new[] { "--version", "--startup" },
+                        new[] { 0 },
+                        30,
+                        "asusblink version");
+                    if (versionResult.Output.IndexOf("asusblink 1", StringComparison.OrdinalIgnoreCase) < 0)
+                        throw new InvalidOperationException("asusblink --version did not report version 1.");
+                    AssertFileDoesNotExist(ini, "asusblink --version must be side-effect-free");
+
+                    SmokeProcess(
+                        exe,
+                        new[]
+                        {
+                            "--set", "Settings.ShowTrayIcon=false",
+                            "--set", "Settings.RunAtStartup=maybe"
+                        },
+                        new[] { 2 },
+                        30,
+                        "asusblink invalid Startup boolean batch");
+                    AssertFileDoesNotExist(ini, "asusblink must reject an invalid typed batch before creating an INI or changing Startup state");
+
+                    SmokeProcess(
+                        exe,
+                        new[]
+                        {
+                            "--configure-only",
+                            "--set", "Settings.ShowTrayIcon=false",
+                            "--flat-menu",
+                            "--set", "Settings.ErrorRetry=5"
+                        },
+                        new[] { 0 },
+                        30,
+                        "asusblink typed setting batch");
+                    AssertFileContains(ini, "[Settings]", "asusblink must write the canonical Settings section");
+                    AssertFileContains(ini, "ShowTrayIcon=false", "asusblink must persist the canonical tray setting");
+                    AssertFileContains(ini, "ShowMenuAsDropdown=false", "asusblink must persist the canonical tray layout setting");
+                    AssertFileContains(ini, "ErrorRetry=5", "asusblink must persist a typed retry setting in the same batch");
+
+                    SmokeProcess(
+                        exe,
+                        new[]
+                        {
+                            "--configure-only",
+                            "--tray",
+                            "--set", "Settings.ErrorAction=pause"
+                        },
+                        new[] { 0 },
+                        30,
+                        "asusblink valid cross-setting profile");
+                    string validProfile = File.ReadAllText(ini);
+                    SmokeProcess(
+                        exe,
+                        new[] { "--configure-only", "--no-tray" },
+                        new[] { 1 },
+                        30,
+                        "asusblink rejected cross-setting profile");
+                    if (!String.Equals(validProfile, File.ReadAllText(ini), StringComparison.Ordinal))
+                        throw new InvalidOperationException("asusblink persisted an invalid pause-without-tray profile before rejecting it.");
+
+                    File.WriteAllText(
+                        ini,
+                        "[Options]" + Environment.NewLine +
+                        "error-log=off" + Environment.NewLine +
+                        "error-retry=4" + Environment.NewLine +
+                        "no-tray=" + Environment.NewLine,
+                        new UTF8Encoding(false));
+                    SmokeProcess(
+                        exe,
+                        new[] { "--configure-only" },
+                        new[] { 0 },
+                        30,
+                        "asusblink legacy Options migration");
+                    AssertFileContains(ini, "[Settings]", "asusblink must create the canonical section during legacy migration");
+                    AssertFileContains(ini, "ErrorLog=off", "asusblink must migrate the legacy log setting");
+                    AssertFileContains(ini, "ErrorRetry=4", "asusblink must migrate the legacy retry setting");
+                    AssertFileContains(ini, "ShowTrayIcon=false", "asusblink must preserve the legacy empty no-tray flag");
+                    deleteTemp = true;
+                }
+                finally
+                {
+                    if (deleteTemp)
+                    {
+                        try { Directory.Delete(tempRoot, true); } catch { }
+                    }
+                    else
+                    {
+                        Warn("asusblink smoke temp directory preserved for diagnostics: " + tempRoot);
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine("skip - asusblink command-line smoke tests not run; artifact not built");
+            }
+        }
+
+        if (ProductOwnedDependencyOwner(
+                "dependencies/DNSAutoUpdate/dns_auto_update_app.cs") !=
+                "DNSAutoUpdate" ||
+            ProductOwnedDependencyOwner("dependencies/DNSAutoUpdate") !=
+                "DNSAutoUpdate" ||
+            ProductOwnedDependencyOwner("dependencies/managed_ini.cs") != null)
+        {
+            throw new InvalidOperationException(
+                "Product-owned dependency classification is incorrect.");
+        }
+        foreach (var project in projects)
+        {
+            foreach (string dependencyPath in
+                project.dependencyPaths ?? new string[0])
+            {
+                string owner = ProductOwnedDependencyOwner(dependencyPath);
+                if (!IsSharedEngineHostDeclaration(project.key, dependencyPath) && owner != null && !owner.Equals(
+                    project.key,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "Workflow dependency ownership test found " +
+                        dependencyPath + " under " + project.key + ".");
+                }
+
+                string normalizedDependency = dependencyPath
+                    .Replace('\\', '/')
+                    .TrimEnd('/');
+                string fullDependency = Path.Combine(
+                    root,
+                    normalizedDependency.Replace(
+                        '/',
+                        Path.DirectorySeparatorChar));
+                if (owner != null && Directory.Exists(fullDependency))
+                {
+                    string probeFile = IsSharedEngineHostDeclaration(project.key, dependencyPath)
+                        ? Path.Combine(fullDependency, "service.cpp") : Directory.EnumerateFiles(
+                        fullDependency,
+                        "*",
+                        SearchOption.AllDirectories).FirstOrDefault();
+                    if (probeFile == null)
+                    {
+                        throw new InvalidOperationException(
+                            "Product dependency directory is empty: " +
+                            dependencyPath);
+                    }
+
+                    string changedPath = Rel(root, probeFile)
+                        .Replace('\\', '/');
+                    List<Project> consumers =
+                        ProjectsUsingChangedDependencies(
+                            root,
+                            projects,
+                            new List<string> { changedPath });
+                    var expectedConsumers = projects.Where(p => p.key.Equals(owner, StringComparison.OrdinalIgnoreCase) ||
+                        ((IsSharedDiscordServiceFile(changedPath) || IsSharedAsusEngineFile(changedPath)) && p.key == "DesktopStub"))
+                        .Select(p => p.key).OrderBy(key => key).ToArray();
+                    if (!consumers.Select(p => p.key).OrderBy(key => key).SequenceEqual(expectedConsumers))
+                    {
+                        throw new InvalidOperationException(
+                            "Dependency consumer selection does not match the declared owners for " + project.key + ": " +
+                            dependencyPath);
+                    }
+                }
+            }
+        }
+
+        Project capsBlink = projects.FirstOrDefault(p => p.key == "capsblink");
+        if (capsBlink != null)
+        {
+            string sourceExe = Path.Combine(root, capsBlink.artifactPath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(sourceExe))
+            {
+                VerifyBinaryVersion(sourceExe, "capsblink");
+                string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
+                if (String.IsNullOrWhiteSpace(tempBase))
+                    tempBase = Path.GetTempPath();
+                string tempRoot = Path.Combine(tempBase, "capsblinkSmoke-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempRoot);
+                bool deleteTemp = false;
+                try
+                {
+                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
+                    File.Copy(sourceExe, exe, true);
+                    string ini = Path.Combine(tempRoot, "capsblink.ini");
+                    string log = Path.Combine(tempRoot, "capsblink.log");
+
+                    ProcessResult helpResult = SmokeProcess(
+                        exe,
+                        new[] { "--help", "--startup", "--set", "Settings.BlinkIntervalMs=invalid" },
+                        new[] { 0 },
+                        30,
+                        "capsblink help");
+                    if (helpResult.Output.IndexOf("--set Settings.Key=Value", StringComparison.Ordinal) < 0 ||
+                        helpResult.Output.IndexOf("--configure-only", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("capsblink --help did not expose its persistent setting surface.");
+                    AssertFileDoesNotExist(ini, "capsblink --help must be side-effect-free");
+                    AssertFileDoesNotExist(log, "capsblink --help must not create a log");
+
+                    ProcessResult versionResult = SmokeProcess(
+                        exe,
+                        new[] { "--version", "--startup" },
+                        new[] { 0 },
+                        30,
+                        "capsblink version");
+                    if (versionResult.Output.IndexOf("capsblink 1", StringComparison.OrdinalIgnoreCase) < 0)
+                        throw new InvalidOperationException("capsblink --version did not report version 1.");
+                    AssertFileDoesNotExist(ini, "capsblink --version must be side-effect-free");
+                    AssertFileDoesNotExist(log, "capsblink --version must not create a log");
+
+                    SmokeProcess(
+                        exe,
+                        new[] { "--configure-only", "--no-tray", "--blink-interval-ms", "49" },
+                        new[] { 2 },
+                        30,
+                        "capsblink invalid typed setting batch");
+                    AssertFileDoesNotExist(ini, "capsblink must reject an invalid typed batch before creating its INI");
+                    AssertFileDoesNotExist(log, "capsblink invalid syntax must not create a log");
+
+                    SmokeProcess(
+                        exe,
+                        new[]
+                        {
+                            "--configure-only",
+                            "--no-startup",
+                            "--no-tray",
+                            "--flat-menu",
+                            "--blink-interval-ms", "750"
+                        },
+                        new[] { 0 },
+                        30,
+                        "capsblink configure-only setting batch");
+                    AssertFileContains(ini, "BlinkIntervalMs=750", "capsblink must persist its typed interval");
+                    AssertFileContains(ini, "RunAtStartup=false", "capsblink must persist its Startup preference");
+                    AssertFileContains(ini, "ShowTrayIcon=false", "capsblink must persist its tray preference");
+                    AssertFileContains(ini, "ShowMenuAsDropdown=false", "capsblink must persist its tray layout");
+                    deleteTemp = true;
+                }
+                finally
+                {
+                    if (deleteTemp)
+                    {
+                        try { Directory.Delete(tempRoot, true); } catch { }
+                    }
+                    else
+                    {
+                        Warn("capsblink smoke temp directory preserved for diagnostics: " + tempRoot);
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine("skip - capsblink command-line smoke tests not run; artifact not built");
+            }
+        }
+
+        Project dnsAutoUpdate = projects.FirstOrDefault(p => p.key == "DNSAutoUpdate");
+        if (dnsAutoUpdate != null)
+        {
+            string sourceExe = Path.Combine(root, dnsAutoUpdate.artifactPath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(sourceExe))
+            {
+                VerifyBinaryVersion(sourceExe, "DNSAutoUpdate");
+                string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
+                if (String.IsNullOrWhiteSpace(tempBase))
+                    tempBase = Path.GetTempPath();
+                string tempRoot = Path.Combine(tempBase, "DNSAutoUpdateSmoke-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempRoot);
+                bool deleteTemp = false;
+                Process resident = null;
+                try
+                {
+                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
+                    File.Copy(sourceExe, exe, true);
+                    string ini = Path.Combine(tempRoot, "DNSAutoUpdate.ini");
+                    string log = Path.Combine(tempRoot, "DNSAutoUpdate.log");
+
+                    ProcessResult helpResult = SmokeProcess(
+                        exe,
+                        new[] { "--help", "--enabled", "--set", "Settings.SleepSeconds=invalid" },
+                        new[] { 0 },
+                        30,
+                        "DNSAutoUpdate help");
+                    if (helpResult.Output.IndexOf("--set Settings.Key=Value", StringComparison.Ordinal) < 0 ||
+                        helpResult.Output.IndexOf("--configure-only", StringComparison.Ordinal) < 0 ||
+                        helpResult.Output.IndexOf("shell:startup", StringComparison.OrdinalIgnoreCase) < 0)
+                        throw new InvalidOperationException("DNSAutoUpdate --help did not expose the shared persistent/control surface.");
+                    AssertFileDoesNotExist(ini, "DNSAutoUpdate --help must be side-effect-free");
+                    AssertFileDoesNotExist(log, "DNSAutoUpdate --help must not create a log");
+
+                    ProcessResult versionResult = SmokeProcess(
+                        exe,
+                        new[] { "--version", "--enabled" },
+                        new[] { 0 },
+                        30,
+                        "DNSAutoUpdate version");
+                    if (versionResult.Output.IndexOf("DNSAutoUpdate 1", StringComparison.OrdinalIgnoreCase) < 0)
+                        throw new InvalidOperationException("DNSAutoUpdate --version did not report version 1.");
+                    AssertFileDoesNotExist(ini, "DNSAutoUpdate --version must be side-effect-free");
+
+                    SmokeProcess(
+                        exe,
+                        new[] { "--enabled", "--configure-only" },
+                        new[] { 1 },
+                        30,
+                        "DNSAutoUpdate rejects enabled profile without an owner allowlist");
+                    AssertFileDoesNotExist(ini, "DNSAutoUpdate must reject an unsafe enabled profile before creating its INI");
+                    AssertFileDoesNotExist(log, "DNSAutoUpdate invalid configuration must not create a log");
+
+                    SmokeProcess(
+                        exe,
+                        new[] { "--include-ip-address", "192.168.1", "--configure-only" },
+                        new[] { 2 },
+                        30,
+                        "DNSAutoUpdate rejects non-dotted-decimal IPv4");
+                    AssertFileDoesNotExist(ini, "DNSAutoUpdate must reject invalid IP syntax before creating its INI");
+
+                    SmokeProcess(
+                        exe,
+                        new[]
+                        {
+                            "--zone-name", "example.test",
+                            "--managed-record-name", "@,app",
+                            "--disabled",
+                            "--apply",
+                            "--no-confirm",
+                            "--no-startup",
+                            "--tray",
+                            "--flat-menu",
+                            "--sleep-seconds", "60",
+                            "--configure-only"
+                        },
+                        new[] { 0 },
+                        30,
+                        "DNSAutoUpdate safe configure-only batch");
+                    AssertFileContains(ini, "ZoneName=example.test", "DNSAutoUpdate must persist its zone");
+                    AssertFileContains(ini, "ManagedRecordName=@,app", "DNSAutoUpdate must persist its exact owner allowlist");
+                    AssertFileContains(ini, "Enabled=false", "DNSAutoUpdate smoke profile must remain inert");
+                    AssertFileContains(ini, "ShowTrayIcon=true", "DNSAutoUpdate must persist tray visibility");
+                    AssertFileContains(ini, "ShowMenuAsDropdown=false", "DNSAutoUpdate must persist tray layout");
+                    AssertFileDoesNotExist(log, "DNSAutoUpdate configure-only must not create a log");
+
+                    var psi = new ProcessStartInfo(exe, "")
+                    {
+                        WorkingDirectory = tempRoot,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    resident = new Process { StartInfo = psi };
+                    if (!resident.Start())
+                        throw new InvalidOperationException("Failed to start DNSAutoUpdate inert tray resident.");
+                    WaitForFileText(log, "Resident DNS updater starting", 15000,
+                        "DNSAutoUpdate inert tray resident startup");
+                    if (resident.HasExited)
+                        throw new InvalidOperationException("DNSAutoUpdate inert tray resident exited unexpectedly.");
+                    SmokeProcess(exe, new[] { "--run-now" }, new[] { 0 }, 10,
+                        "DNSAutoUpdate resident run-now control");
+                    SmokeProcess(exe, new[] { "--reload" }, new[] { 0 }, 10,
+                        "DNSAutoUpdate resident reload control");
+                    SmokeProcess(exe, new[] { "--exit" }, new[] { 0 }, 10,
+                        "DNSAutoUpdate resident exit control");
+                    if (!resident.WaitForExit(15000))
+                        throw new TimeoutException("DNSAutoUpdate resident did not stop after --exit.");
+                    if (resident.ExitCode != 0)
+                        throw new InvalidOperationException("DNSAutoUpdate resident exited " + resident.ExitCode + ".");
+                    Console.WriteLine("ok - DNSAutoUpdate inert tray/resident controls without DNS access");
+                    deleteTemp = true;
+                }
+                finally
+                {
+                    if (resident != null)
+                    {
+                        if (!resident.HasExited)
+                        {
+                            try { resident.Kill(); } catch { }
+                            try { resident.WaitForExit(5000); } catch { }
+                        }
+                        resident.Dispose();
+                    }
+                    if (deleteTemp)
+                    {
+                        try { Directory.Delete(tempRoot, true); } catch { }
+                    }
+                    else
+                    {
+                        Warn("DNSAutoUpdate smoke temp directory preserved for diagnostics: " + tempRoot);
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine("skip - DNSAutoUpdate command-line/tray smoke tests not run; artifact not built");
+            }
+        }
+
+        Project nowPlayingTile = projects.FirstOrDefault(p => p.key == "NowPlayingTile");
+        if (nowPlayingTile != null)
+        {
+            string sourceExe = Path.Combine(root, nowPlayingTile.artifactPath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(sourceExe))
+            {
+                string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
+                if (String.IsNullOrWhiteSpace(tempBase))
+                    tempBase = Path.GetTempPath();
+                string tempRoot = Path.Combine(tempBase, "NowPlayingTileSmoke-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempRoot);
+                bool deleteTemp = false;
+                try
+                {
+                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
+                    File.Copy(sourceExe, exe, true);
+                    string ini = Path.Combine(tempRoot, "NowPlayingTile.ini");
+
+                    ProcessResult helpResult = SmokeProcess(
+                        exe,
+                        new[] { "--help", "--startup", "--set", "Settings.TileLayout=invalid" },
+                        new[] { 0 },
+                        30,
+                        "NowPlayingTile help");
+                    if (helpResult.Output.IndexOf("--startup", StringComparison.Ordinal) < 0 ||
+                        helpResult.Output.IndexOf("--set Settings.Key=Value", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("NowPlayingTile --help did not expose the common typed setting surface.");
+                    AssertFileDoesNotExist(ini, "NowPlayingTile --help must be side-effect-free");
+
+                    ProcessResult versionResult = SmokeProcess(
+                        exe,
+                        new[] { "--version", "--startup" },
+                        new[] { 0 },
+                        30,
+                        "NowPlayingTile version");
+                    if (versionResult.Output.IndexOf("NowPlayingTile 1", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("NowPlayingTile --version did not report version 1.");
+                    AssertFileDoesNotExist(ini, "NowPlayingTile --version must be side-effect-free");
+
+                    SmokeProcess(
+                        exe,
+                        new[] { "--set", "Settings.RunAtStartup=maybe", "--exit" },
+                        new[] { 2 },
+                        30,
+                        "NowPlayingTile invalid Startup boolean");
+                    AssertFileDoesNotExist(ini, "NowPlayingTile must reject invalid Startup values before creating an INI or changing StartupTask state");
+
+                    SmokeProcess(
+                        exe,
+                        new[]
+                        {
+                            "--set", "Settings.TileLayout=combined",
+                            "--tray",
+                            "--dropdown",
+                            "--update-interval", "5",
+                            "--tile-refresh", "120",
+                            "--exit"
+                        },
+                        new[] { 2 },
+                        30,
+                        "NowPlayingTile typed setting batch");
+                    AssertFileContains(ini, "\"TileLayout\" = \"Combined\"", "NowPlayingTile must canonicalize and persist TileLayout");
+                    AssertFileContains(ini, "\"ShowTrayIcon\" = \"true\"", "NowPlayingTile --tray must persist the tray setting");
+                    AssertFileContains(ini, "\"ShowMenuAsDropdown\" = \"true\"", "NowPlayingTile --dropdown must persist the tray layout setting");
+                    AssertFileContains(ini, "\"UpdateIntervalSeconds\" = \"5\"", "NowPlayingTile must persist its polling interval");
+                    AssertFileContains(ini, "\"TileRefreshSeconds\" = \"120\"", "NowPlayingTile must persist its tile refresh interval");
+                    deleteTemp = true;
+                }
+                finally
+                {
+                    if (deleteTemp)
+                    {
+                        try { Directory.Delete(tempRoot, true); } catch { }
+                    }
+                    else
+                    {
+                        Warn("NowPlayingTile smoke temp directory preserved for diagnostics: " + tempRoot);
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine("skip - NowPlayingTile command-line smoke tests not run; artifact not built");
+            }
+        }
 
         Project desktopStub = projects.FirstOrDefault(p => p.key == "DesktopStub");
         if (desktopStub != null)
         {
             string smokePath = String.IsNullOrWhiteSpace(desktopStub.smokePath) ? desktopStub.artifactPath : desktopStub.smokePath;
-            string sourceExe = Path.Combine(root, smokePath.Replace('/', Path.DirectorySeparatorChar));
+            string sourceExe = String.IsNullOrWhiteSpace(desktopStubBinaryOverride)
+                ? Path.Combine(root, smokePath.Replace('/', Path.DirectorySeparatorChar))
+                : Path.GetFullPath(desktopStubBinaryOverride);
             if (File.Exists(sourceExe))
             {
                 string desktopStubVersion = VerifyBinaryVersion(sourceExe, "DesktopStub");
@@ -1047,12 +1956,15 @@ static class RepoTools
                 string smokeIdentity = null;
                 try
                 {
-                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
+                    string exe = Path.Combine(tempRoot, "DesktopStub.exe");
                     File.Copy(sourceExe, exe, true);
                     string sourceBuildDir = Path.GetDirectoryName(sourceExe);
+                    // Manifest validation needs the helper files present. Copying
+                    // them is inert; default smoke never starts either helper.
                     foreach (string helper in new[] { "DesktopStubLiveTileBroker.exe", "DesktopStubAppxStub.exe" })
                     {
-                        string sourceHelper = Path.Combine(sourceBuildDir, helper);
+                        string sourceHelper = helper == "DesktopStubLiveTileBroker.exe" && !String.IsNullOrWhiteSpace(desktopStubBrokerOverride)
+                            ? Path.GetFullPath(desktopStubBrokerOverride) : Path.Combine(sourceBuildDir, helper);
                         if (File.Exists(sourceHelper))
                         {
                             if (helper == "DesktopStubLiveTileBroker.exe")
@@ -1070,6 +1982,9 @@ static class RepoTools
                     string customHelpIni = Path.Combine(tempRoot, "CustomHelp.ini");
                     string concurrentIni = Path.Combine(tempRoot, "ConcurrentWrites.ini");
                     string invalidBrandingIni = Path.Combine(tempRoot, "InvalidBranding.ini");
+                    string invalidStartupIni = Path.Combine(tempRoot, "InvalidStartup.ini");
+                    string invalidRssOptionIni = Path.Combine(tempRoot, "InvalidRssOption.ini");
+                    string invalidRssProfileIni = Path.Combine(tempRoot, "InvalidRssProfile.ini");
                     string helperManifestIni = Path.Combine(tempRoot, "HelperManifest.ini");
                     string legacyManifestIni = Path.Combine(tempRoot, "LegacyManifest.ini");
                     string wallpaper = Path.Combine(tempRoot, "wallpaper.bmp");
@@ -1080,8 +1995,17 @@ static class RepoTools
                     string expectedTag = "DesktopStub-v" + desktopStubVersion.Split('.')[0];
                     if (versionResult.Output.IndexOf(expectedTag + " (" + desktopStubVersion + ")", StringComparison.Ordinal) < 0)
                         throw new InvalidOperationException("DesktopStub --version did not report the expected release tag/version: " + expectedTag + " (" + desktopStubVersion + ")");
-                    SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--set", "Settings.TrayIcon=0" }, new[] { 0 }, 30, "DesktopStub help");
+                    ProcessResult helpResult = SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--startup", "--set", "Settings.TrayIcon=0" }, new[] { 0 }, 30, "DesktopStub help");
+                    if (helpResult.Output.IndexOf("--startup", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("DesktopStub --help did not expose the Startup setting.");
+                    if (helpResult.Output.IndexOf("--content-source", StringComparison.Ordinal) < 0 ||
+                        helpResult.Output.IndexOf("--rss-feed-url", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("DesktopStub --help did not expose the RSS content-source settings.");
+                    if (!allowPackageIntegration && (helpResult.Output.IndexOf("--render-only", StringComparison.Ordinal) < 0 ||
+                        helpResult.Output.IndexOf("--configure-only", StringComparison.Ordinal) < 0))
+                        throw new InvalidOperationException("The selected DesktopStub binary lacks the offline smoke entry points; rebuild it first.");
                     AssertFileDoesNotExist(helpIni, "DesktopStub --help must be side-effect-free");
+                    if (!allowPackageIntegration) VerifyDesktopStubOfflineGuards(exe, tempRoot);
                     string customHelpText = "[CommandLineHelp]\r\n\"Template\" = \"CUSTOM_HELP_MARKER {exe}\"\r\n";
                     File.WriteAllText(customHelpIni, customHelpText, new UTF8Encoding(true));
                     byte[] customHelpBefore = File.ReadAllBytes(customHelpIni);
@@ -1101,12 +2025,25 @@ static class RepoTools
                     AssertFileContains(legacyManifestIni, "[Manifest]", "DesktopStub must preserve an existing legacy Manifest section");
                     AssertFileContains(legacyManifestIni, "; Preserve user comments and unknown legacy values.", "DesktopStub must preserve comments in legacy configuration");
                     AssertFileContains(legacyManifestIni, "\"CustomLegacyValue\" = \"keep-me\"", "DesktopStub must preserve unknown legacy configuration values");
-                    SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--live-tile-template", "Windows81Preset", "--live-tile-branding", "NameAndLogo", "--scales", "auto", "--asset", "MediumTile=1", "--set", "Strings.TrayTip=DesktopStub" + trailingSpaces, "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
+                    SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--live-tile-template", "Windows81Preset", "--live-tile-branding", "NameAndLogo", "--rss-feed-url", "https://example.com/feed.xml", "--rss-user-agent", "DesktopStub-Smoke/1.0", "--rss-update-interval", "300", "--rss-max-items", "10", "--rss-http-timeout", "30", "--rss-max-feed-bytes", "1048576", "--scales", "auto", "--asset", "MediumTile=1", "--set", "Strings.TrayTip=DesktopStub" + trailingSpaces, "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
                     AssertFileContains(ini, "\"TrayTip\" = \"DesktopStub" + trailingSpaces + "\"", "DesktopStub --set must preserve trailing value spaces");
                     AssertFileContains(ini, "\"LiveTileTemplateStyle\" = \"Windows81Preset\"", "DesktopStub must persist the selected Windows 10 Live Tile template style");
                     AssertFileContains(ini, "\"LiveTileBranding\" = \"NameAndLogo\"", "DesktopStub must persist the selected Windows 10 Live Tile branding");
+                    AssertFileContains(ini, "\"ContentSource\" = \"Wallpaper\"", "DesktopStub must generate the canonical wallpaper content-source default");
+                    AssertFileContains(ini, "\"FeedUrl\" = \"https://example.com/feed.xml\"", "DesktopStub must persist the dedicated RSS URL option");
+                    AssertFileContains(ini, "\"UpdateIntervalSeconds\" = \"300\"", "DesktopStub must persist typed RSS interval values");
+                    AssertFileContains(ini, "\"MaxFeedBytes\" = \"1048576\"", "DesktopStub must persist typed RSS response limits");
                     SmokeProcess(exe, new[] { "--ini", invalidBrandingIni, "--live-tile-branding", "invalid" }, new[] { 2 }, 30, "DesktopStub invalid Live Tile branding");
                     AssertFileDoesNotExist(invalidBrandingIni, "DesktopStub must reject invalid Live Tile branding without creating an INI");
+                    SmokeProcess(exe, new[] { "--ini", invalidStartupIni, "--set", "Settings.RunAtStartup=maybe" }, new[] { 2 }, 30, "DesktopStub invalid Startup boolean");
+                    AssertFileDoesNotExist(invalidStartupIni, "DesktopStub must reject invalid Settings.RunAtStartup without creating an INI or Startup shortcut");
+                    SmokeProcess(exe, new[] { "--ini", invalidRssOptionIni, "--rss-update-interval", "59" }, new[] { 2 }, 30, "DesktopStub invalid RSS interval");
+                    AssertFileDoesNotExist(invalidRssOptionIni, "DesktopStub must reject invalid typed RSS options before creating an INI");
+                    File.WriteAllText(
+                        invalidRssProfileIni,
+                        "[Settings]\r\nContentSource=RssFeed\r\n[RssFeed]\r\nFeedUrl=ftp://example.com/feed.xml\r\n",
+                        new UTF8Encoding(true));
+                    SmokeProcess(exe, new[] { "--ini", invalidRssProfileIni, "--regenerate-manifest" }, new[] { 2 }, 30, "DesktopStub invalid RSS INI profile");
                     string manifestPath = Path.Combine(Path.GetDirectoryName(exe), "AppxManifest.xml");
                     SmokeProcess(exe, new[] { "--ini", helperManifestIni, "--manifest-win81", "--win8-broker" }, new[] { 0 }, 30, "DesktopStub Win8 broker manifest");
                     AssertFileContains(manifestPath, "DesktopStubLiveTileBroker.exe", "DesktopStub Win8 broker switch must regenerate the manifest with the broker executable");
@@ -1116,28 +2053,23 @@ static class RepoTools
                     AssertFileContains(manifestPath, "windows.activatableClass.outOfProcessServer", "DesktopStub Win8 OOP helper switch must regenerate the manifest extension");
                     smokeIdentity = "dev.local.desktopstubsmoke." + Guid.NewGuid().ToString("N").Substring(0, 16);
                     SetDesktopStubManifestIdentity(manifestPath, smokeIdentity);
-                    SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", wallpaper, "--once", "--no-tray", "--no-monitor" }, new[] { 0 }, 30, "DesktopStub one-shot generation");
-                    string mediumTileAsset = Path.Combine(Path.GetDirectoryName(exe), "Assets", "MediumTile.png");
-                    if (!File.Exists(mediumTileAsset))
-                        throw new InvalidOperationException("DesktopStub one-shot generation did not create Assets\\MediumTile.png.");
-                    byte[] mediumTileWithoutText = File.ReadAllBytes(mediumTileAsset);
                     SmokeProcess(exe, new[]
                         {
                             "--ini", ini,
-                            "--set", "TileText.Enabled=1",
-                            "--set", "TileText.Text=Smoke Title",
-                            "--set", "TileText.SecondaryText=Smoke secondary line for wrapping",
-                            "--set", "TileText.BadgeText=7",
+                            "--no-live-tile",
+                            "--asset", "MediumTile=1",
+                            "--asset", "WideTile=1",
+                            "--asset", "LargeTile=1",
+                            "--set", "TileText.Enabled=0",
                             "--wallpaper", wallpaper,
-                            "--once", "--no-tray", "--no-monitor"
-                        }, new[] { 0 }, 30, "DesktopStub TileText overlay generation");
-                    if (!File.Exists(mediumTileAsset))
-                        throw new InvalidOperationException("DesktopStub TileText overlay generation did not create Assets\\MediumTile.png.");
-                    byte[] mediumTileWithText = File.ReadAllBytes(mediumTileAsset);
-                    if (mediumTileWithoutText.SequenceEqual(mediumTileWithText))
-                        throw new InvalidOperationException("DesktopStub TileText overlay did not change the generated MediumTile.png against the same wallpaper -- the text does not appear to have been drawn.");
+                            allowPackageIntegration ? "--once" : "--render-only", "--no-tray", "--no-monitor"
+                        }, new[] { 0 }, 30, "DesktopStub static-tile generation with Live Tile disabled");
+                    AssertFileContains(ini, "\"ExperimentalLiveTileUpdate\" = \"Registration\"", "DesktopStub --no-live-tile must persist the static Registration mode used by the TileText smoke test");
+                    Dictionary<string, TilePixelSnapshot> tilesWithoutText = CaptureDesktopStubTileAssets(tempRoot, "TileText-disabled baseline");
+                    VerifyDesktopStubTileTextRendering(root, exe, ini, wallpaper, tempRoot, tilesWithoutText);
+                    VerifyDesktopStubComposedContent(exe, ini, wallpaper, tempRoot);
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", Path.Combine(tempRoot, "missing.png"), "--no-tray" }, new[] { 2 }, 30, "DesktopStub invalid wallpaper guard");
-                    VerifyDesktopStubSecondLaunchActions(exe, tempRoot);
+                    if (allowPackageIntegration) VerifyDesktopStubSecondLaunchActions(exe, tempRoot);
                     VerifyDesktopStubConcurrentIniWrites(exe, concurrentIni);
 
                     if (!File.Exists(manifestPath))
@@ -1150,7 +2082,7 @@ static class RepoTools
                 }
                 finally
                 {
-                    if (!String.IsNullOrWhiteSpace(smokeIdentity))
+                    if (allowPackageIntegration && !String.IsNullOrWhiteSpace(smokeIdentity))
                         UnregisterDesktopStubSmokePackage(smokeIdentity, tempRoot);
 
                     if (deleteTemp)
@@ -1162,6 +2094,65 @@ static class RepoTools
                         Warn("DesktopStub smoke temp directory preserved for diagnostics: " + tempRoot);
                     }
                 }
+            }
+            else
+            {
+                Console.WriteLine("skip - DesktopStub UI and command-line smoke tests not run; artifact not built");
+            }
+        }
+
+        Project charmTray = projects.FirstOrDefault(p => p.key == "CharmTray");
+        if (charmTray != null)
+        {
+            string sourceExe = Path.Combine(root, charmTray.artifactPath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(sourceExe))
+            {
+                string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
+                if (String.IsNullOrWhiteSpace(tempBase))
+                    tempBase = Path.GetTempPath();
+                string tempRoot = Path.Combine(tempBase, "CharmTraySmoke-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempRoot);
+                try
+                {
+                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
+                    File.Copy(sourceExe, exe, true);
+                    string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
+                    ProcessResult helpResult = SmokeProcess(
+                        exe,
+                        new[] { "--help", "--ini", helpIni, "--startup" },
+                        new[] { 0 },
+                        30,
+                        "CharmTray help");
+                    if (helpResult.Output.IndexOf("Usage: CharmTray.exe", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("CharmTray --help did not emit its usage text.");
+                    AssertFileDoesNotExist(helpIni, "CharmTray --help must be side-effect-free");
+
+                    ProcessResult versionResult = SmokeProcess(
+                        exe,
+                        new[] { "--version", "--ini", helpIni, "--startup" },
+                        new[] { 0 },
+                        30,
+                        "CharmTray version");
+                    if (versionResult.Output.IndexOf("CharmTray 1", StringComparison.Ordinal) < 0)
+                        throw new InvalidOperationException("CharmTray --version did not report version 1.");
+                    AssertFileDoesNotExist(helpIni, "CharmTray --version must be side-effect-free");
+
+                    SmokeProcess(
+                        exe,
+                        new[] { "--ini", helpIni, "--bool", "Settings.RunAtStartup=maybe" },
+                        new[] { 2 },
+                        30,
+                        "CharmTray typed boolean validation");
+                    AssertFileDoesNotExist(helpIni, "CharmTray must reject invalid booleans before creating an INI");
+                }
+                finally
+                {
+                    try { Directory.Delete(tempRoot, true); } catch { }
+                }
+            }
+            else
+            {
+                Console.WriteLine("skip - CharmTray command-line smoke tests not run; artifact not built");
             }
         }
 
@@ -1188,9 +2179,11 @@ static class RepoTools
                     string redactIni = Path.Combine(tempRoot, "Redact.ini");
                     string redactLog = Path.Combine(tempRoot, "Redact.log");
                     string dottedIni = Path.Combine(tempRoot, "DottedSet.ini");
+                    string typedBooleanIni = Path.Combine(tempRoot, "TypedBoolean.ini");
+                    string invalidBooleanIni = Path.Combine(tempRoot, "InvalidBoolean.ini");
                     string trailingSpaces = new string(' ', 2);
 
-                    SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC help");
+                    SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--startup", "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC help");
                     AssertFileDoesNotExist(helpIni, "DiscordRPC --help must be side-effect-free");
                     File.WriteAllText(
                         customHelpIni,
@@ -1203,7 +2196,7 @@ static class RepoTools
                         throw new InvalidOperationException("DiscordRPC --help did not use the configured INI template.");
                     if (!customHelpBefore.SequenceEqual(File.ReadAllBytes(customHelpIni)))
                         throw new InvalidOperationException("DiscordRPC --help modified its configured INI.");
-                    ProcessResult versionResult = SmokeProcess(exe, new[] { "--version", "--ini", versionIni, "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC version");
+                    ProcessResult versionResult = SmokeProcess(exe, new[] { "--version", "--ini", versionIni, "--startup", "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC version");
                     string expectedTag = "DiscordRPC-v" + discordVersion.Split('.')[0];
                     if (versionResult.Output.IndexOf(expectedTag + " (" + discordVersion + ")", StringComparison.Ordinal) < 0)
                         throw new InvalidOperationException("DiscordRPC --version did not report the expected release tag/version: " + expectedTag + " (" + discordVersion + ")");
@@ -1215,8 +2208,13 @@ static class RepoTools
                     SmokeProcess(exe, new[] { "--ini", dottedIni, "--set", "section.with.dot.key=value" + trailingSpaces, "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dotted --set parsing");
                     AssertFileContains(dottedIni, "[section.with.dot]", "DiscordRPC --set must split Section.Key at the last dot before '='");
                     AssertFileContains(dottedIni, "\"key\" = \"value" + trailingSpaces + "\"", "DiscordRPC --set must preserve dotted section names and trailing value spaces");
+                    SmokeProcess(exe, new[] { "--ini", typedBooleanIni, "--set", "app.show_tray=YES", "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC typed boolean canonicalization");
+                    AssertFileContains(typedBooleanIni, "\"show_tray\" = \"true\"", "DiscordRPC must canonicalize known boolean --set values");
+                    SmokeProcess(exe, new[] { "--ini", invalidBooleanIni, "--set", "app.run_at_startup=maybe", "--dry-run", "--no-tray" }, new[] { 2 }, 30, "DiscordRPC invalid known boolean rejection");
+                    AssertFileDoesNotExist(invalidBooleanIni, "DiscordRPC must reject invalid known booleans before creating an INI or Startup shortcut");
                     SmokeProcess(exe, new[] { "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dry-run");
-                    VerifyDiscordRpcNoTrayControl(exe, tempRoot);
+                    if (allowPackageIntegration) VerifyDiscordRpcNoTrayControl(exe, tempRoot);
+                    else Console.WriteLine("skip - Discord IPC resident integration is excluded from default offline smoke");
                     deleteTemp = true;
                 }
                 finally
@@ -1336,6 +2334,293 @@ static class RepoTools
             Warn("DesktopStub smoke package cleanup failed for " + identityName + ": " + result.Error + result.Output);
     }
 
+    static List<TileTextSmokeRegion> LoadTileTextSmokeRegions(string repositoryRoot)
+    {
+        string specPath = Path.Combine(repositoryRoot, "dependencies", "DesktopStub", "tile_text_layout_spec.inc");
+        if (!File.Exists(specPath))
+            throw new InvalidOperationException("DesktopStub TileText layout specification is missing: " + specPath);
+
+        var rowPattern = new Regex(
+            @"^\s*TILE_TEXT_REGION\(\s*(?<size>Medium|Wide|Large)\s*,\s*(?<mask>[1-7])\s*,\s*(?:Title|Body|Badge)\s*,\s*(?<source>[0-2])\s*,\s*(?<x>[0-9.]+)\s*,\s*(?<y>[0-9.]+)\s*,\s*(?<width>[0-9.]+)\s*,\s*(?<height>[0-9.]+)\s*,\s*(?:Near|Far)\s*,\s*(?:Character|Word)\s*,\s*[1-9][0-9]*\s*\)\s*$",
+            RegexOptions.CultureInvariant);
+        var regions = new List<TileTextSmokeRegion>();
+        int lineNumber = 0;
+        foreach (string line in File.ReadLines(specPath))
+        {
+            ++lineNumber;
+            string trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed.StartsWith("//", StringComparison.Ordinal))
+                continue;
+
+            Match match = rowPattern.Match(line);
+            if (!match.Success)
+                throw new InvalidOperationException("Unrecognized DesktopStub TileText layout row at " + specPath + ":" + lineNumber + ": " + line);
+
+            regions.Add(new TileTextSmokeRegion
+            {
+                Size = match.Groups["size"].Value,
+                Mask = Int32.Parse(match.Groups["mask"].Value, CultureInfo.InvariantCulture),
+                Source = Int32.Parse(match.Groups["source"].Value, CultureInfo.InvariantCulture),
+                X = Double.Parse(match.Groups["x"].Value, CultureInfo.InvariantCulture),
+                Y = Double.Parse(match.Groups["y"].Value, CultureInfo.InvariantCulture),
+                Width = Double.Parse(match.Groups["width"].Value, CultureInfo.InvariantCulture),
+                Height = Double.Parse(match.Groups["height"].Value, CultureInfo.InvariantCulture)
+            });
+        }
+
+        if (regions.Count == 0)
+            throw new InvalidOperationException("DesktopStub TileText layout specification contains no regions: " + specPath);
+        return regions;
+    }
+
+    static Dictionary<string, TilePixelSnapshot> CaptureDesktopStubTileAssets(string tempRoot, string label)
+    {
+        var dimensions = new Dictionary<string, int[]>(StringComparer.Ordinal)
+        {
+            { "Medium", new[] { 150, 150 } },
+            { "Wide", new[] { 310, 150 } },
+            { "Large", new[] { 310, 310 } }
+        };
+        var snapshots = new Dictionary<string, TilePixelSnapshot>(StringComparer.Ordinal);
+        foreach (var entry in dimensions)
+        {
+            string assetPath = Path.Combine(tempRoot, "Assets", entry.Key + "Tile.png");
+            if (!File.Exists(assetPath))
+                throw new InvalidOperationException("DesktopStub " + label + " did not create Assets\\" + entry.Key + "Tile.png.");
+
+            using (var bitmap = new Bitmap(assetPath))
+            {
+                if (bitmap.Width != entry.Value[0] || bitmap.Height != entry.Value[1])
+                    throw new InvalidOperationException("DesktopStub " + label + " generated " + entry.Key + "Tile.png at " + bitmap.Width + "x" + bitmap.Height + "; expected " + entry.Value[0] + "x" + entry.Value[1] + ".");
+
+                int[] pixels = new int[bitmap.Width * bitmap.Height];
+                for (int y = 0; y < bitmap.Height; ++y)
+                {
+                    for (int x = 0; x < bitmap.Width; ++x)
+                        pixels[y * bitmap.Width + x] = bitmap.GetPixel(x, y).ToArgb();
+                }
+                snapshots.Add(entry.Key, new TilePixelSnapshot
+                {
+                    Width = bitmap.Width,
+                    Height = bitmap.Height,
+                    Pixels = pixels
+                });
+            }
+        }
+        return snapshots;
+    }
+
+    static Dictionary<string, TilePixelSnapshot> RenderDesktopStubTileTextVariant(
+        string exe,
+        string ini,
+        string wallpaper,
+        string tempRoot,
+        string label,
+        string primary,
+        string secondary,
+        string badge)
+    {
+        SmokeProcess(exe, new[]
+            {
+                "--ini", ini,
+                // Registration is the explicit "Live Tile disabled" mode. In
+                // this mode TileText must be baked into static PNG assets.
+                "--no-live-tile",
+                "--asset", "MediumTile=1",
+                "--asset", "WideTile=1",
+                "--asset", "LargeTile=1",
+                "--set", "TileText.Enabled=1",
+                "--set", "TileText.ApplyToMediumTile=1",
+                "--set", "TileText.ApplyToWideTile=1",
+                "--set", "TileText.ApplyToLargeTile=1",
+                "--set", "TileText.Text=" + primary,
+                "--set", "TileText.SecondaryText=" + secondary,
+                "--set", "TileText.BadgeText=" + badge,
+                "--wallpaper", wallpaper,
+                allowPackageIntegration ? "--once" : "--render-only", "--no-tray", "--no-monitor"
+            }, new[] { 0 }, 30, "DesktopStub static TileText " + label);
+        return CaptureDesktopStubTileAssets(tempRoot, label);
+    }
+
+    static int CountPixelDifferences(TilePixelSnapshot first, TilePixelSnapshot second)
+    {
+        if (first.Width != second.Width || first.Height != second.Height || first.Pixels.Length != second.Pixels.Length)
+            throw new InvalidOperationException("DesktopStub TileText comparison received mismatched image dimensions.");
+
+        int changed = 0;
+        for (int i = 0; i < first.Pixels.Length; ++i)
+        {
+            if (first.Pixels[i] != second.Pixels[i])
+                ++changed;
+        }
+        return changed;
+    }
+
+    static bool PixelFallsInTileTextRegions(int x, int y, IEnumerable<TileTextSmokeRegion> regions)
+    {
+        // GDI+ can antialias a glyph at a layout edge. Permit a small halo,
+        // while still catching a field routed into the wrong part of a tile.
+        const double padding = 3.0;
+        foreach (TileTextSmokeRegion region in regions)
+        {
+            if (x >= region.X - padding && y >= region.Y - padding &&
+                x < region.X + region.Width + padding && y < region.Y + region.Height + padding)
+                return true;
+        }
+        return false;
+    }
+
+    static void VerifyTileTextFieldPixelDiff(
+        string tileSize,
+        int source,
+        TilePixelSnapshot baseline,
+        TilePixelSnapshot changed,
+        List<TileTextSmokeRegion> allRegions)
+    {
+        List<TileTextSmokeRegion> expectedRegions = allRegions
+            .Where(region => region.Size == tileSize && region.Mask == 7 && region.Source == source)
+            .ToList();
+        int changedPixels = 0;
+        int pixelsOutsideExpectedRegions = 0;
+        for (int y = 0; y < baseline.Height; ++y)
+        {
+            for (int x = 0; x < baseline.Width; ++x)
+            {
+                int index = y * baseline.Width + x;
+                if (baseline.Pixels[index] == changed.Pixels[index])
+                    continue;
+                ++changedPixels;
+                if (!PixelFallsInTileTextRegions(x, y, expectedRegions))
+                    ++pixelsOutsideExpectedRegions;
+            }
+        }
+
+        string fieldName = source == 0 ? "primary" : source == 1 ? "secondary" : "badge";
+        if (expectedRegions.Count == 0)
+        {
+            if (changedPixels != 0)
+                throw new InvalidOperationException("DesktopStub " + tileSize + " TileText pixel output changed after the unsupported " + fieldName + " input changed (" + changedPixels + " pixels). Expected identical output; inspect the saved assets to identify the cause.");
+            Console.WriteLine("ok - DesktopStub " + tileSize + " TileText omits unsupported " + fieldName + " field");
+            return;
+        }
+
+        if (changedPixels == 0)
+            throw new InvalidOperationException("DesktopStub " + tileSize + " TileText did not visibly render the " + fieldName + " field.");
+        if (pixelsOutsideExpectedRegions != 0)
+            throw new InvalidOperationException("DesktopStub " + tileSize + " TileText rendered " + pixelsOutsideExpectedRegions + " of " + changedPixels + " changed " + fieldName + " pixels outside its shared layout region.");
+        Console.WriteLine("ok - DesktopStub " + tileSize + " TileText " + fieldName + " field rendered inside its shared layout region (" + changedPixels + " changed pixels)");
+    }
+
+    static void VerifyDesktopStubTileTextRendering(
+        string repositoryRoot,
+        string exe,
+        string ini,
+        string wallpaper,
+        string tempRoot,
+        Dictionary<string, TilePixelSnapshot> tilesWithoutText)
+    {
+        List<TileTextSmokeRegion> regions = LoadTileTextSmokeRegions(repositoryRoot);
+        Dictionary<string, TilePixelSnapshot> baseline = RenderDesktopStubTileTextVariant(
+            exe, ini, wallpaper, tempRoot, "all-fields baseline", "AAAA", "IIII", "7");
+
+        foreach (string tileSize in new[] { "Medium", "Wide", "Large" })
+        {
+            int changedPixels = CountPixelDifferences(tilesWithoutText[tileSize], baseline[tileSize]);
+            if (changedPixels == 0)
+                throw new InvalidOperationException("DesktopStub static TileText did not change " + tileSize + "Tile.png while Live Tile mode was disabled.");
+            Console.WriteLine("ok - DesktopStub static TileText changes " + tileSize + "Tile.png with Live Tile disabled (" + changedPixels + " pixels)");
+        }
+
+        var variants = new[]
+        {
+            new { Source = 0, Label = "primary-field variant", Primary = "WWWW", Secondary = "IIII", Badge = "7" },
+            new { Source = 1, Label = "secondary-field variant", Primary = "AAAA", Secondary = "MMMM", Badge = "7" },
+            new { Source = 2, Label = "badge-field variant", Primary = "AAAA", Secondary = "IIII", Badge = "8" }
+        };
+        foreach (var variant in variants)
+        {
+            Dictionary<string, TilePixelSnapshot> changed = RenderDesktopStubTileTextVariant(
+                exe, ini, wallpaper, tempRoot, variant.Label, variant.Primary, variant.Secondary, variant.Badge);
+            foreach (string tileSize in new[] { "Medium", "Wide", "Large" })
+                VerifyTileTextFieldPixelDiff(tileSize, variant.Source, baseline[tileSize], changed[tileSize], regions);
+        }
+
+        // Both strings deliberately share a first word that consumes most of
+        // each one-line region. With wrapping enabled, GDI+ moves the differing
+        // second word to a clipped second line and the images become identical.
+        // NoWrap keeps the second word on the visible line, so this comparison
+        // pins the regression where multi-word captions disappeared/wrapped.
+        Dictionary<string, TilePixelSnapshot> noWrapPrimaryA = RenderDesktopStubTileTextVariant(
+            exe, ini, wallpaper, tempRoot, "one-line primary A", "DESKTOPSTUB TEST", "SECONDARY", "8");
+        Dictionary<string, TilePixelSnapshot> noWrapPrimaryB = RenderDesktopStubTileTextVariant(
+            exe, ini, wallpaper, tempRoot, "one-line primary B", "DESKTOPSTUB WIDE", "SECONDARY", "8");
+        foreach (string tileSize in new[] { "Medium", "Large" })
+            VerifyTileTextFieldPixelDiff(tileSize, 0, noWrapPrimaryA[tileSize], noWrapPrimaryB[tileSize], regions);
+    }
+
+    static void VerifyDesktopStubComposedContent(string exe, string ini, string wallpaper, string tempRoot)
+    {
+        Func<string, string, Dictionary<string, TilePixelSnapshot>> render = (mode, text) => {
+            SmokeProcess(exe, new[] {
+                "--ini", ini, "--no-live-tile", "--no-tray", "--no-monitor",
+                "--set", "Content.Count=1", "--set", "Content.CycleEnabled=0",
+                "--set", "Content.1.Background=Image", "--set", "Content.1.ImagePath=" + wallpaper,
+                "--set", "Content.1.TextSources=CustomText", "--set", "Content.1.Text=" + text,
+                "--set", "Content.1.SecondaryText=", "--set", "Content.1.BadgeText=",
+                "--set", "Content.TextMode=" + mode, "--set", "Content.Enabled=true", allowPackageIntegration ? "--once" : "--render-only"
+            }, new[] { 0 }, 30, "DesktopStub composed " + mode + " text=" + text);
+            return CaptureDesktopStubTileAssets(tempRoot, "composition " + mode);
+        };
+        var imageOnly = render("Off", "ALPHA");
+        var alpha = render("Overlay", "ALPHA");
+        var beta = render("Overlay", "BETA");
+        var hidden = render("Off", "BETA");
+        foreach (string size in new[] { "Medium", "Wide", "Large" }) {
+            if (CountPixelDifferences(imageOnly[size], alpha[size]) == 0)
+                throw new InvalidOperationException("Composed overlay is invisible on " + size + ".");
+            if (CountPixelDifferences(alpha[size], beta[size]) == 0)
+                throw new InvalidOperationException("Composed text cache did not invalidate on " + size + ".");
+            if (CountPixelDifferences(imageOnly[size], hidden[size]) != 0)
+                throw new InvalidOperationException("Composed TextMode=Off retained stale text on " + size + ".");
+            Console.WriteLine("ok - DesktopStub composed " + size + " text, changed-text cache and hidden-text restore");
+        }
+        SmokeProcess(exe, new[] { "--ini", ini, "--set", "Content.Enabled=0", "--exit" },
+            new[] { 0 }, 30, "DesktopStub leave composition");
+    }
+
+    static void VerifyDesktopStubOfflineGuards(string exe, string tempRoot)
+    {
+        int index = 0;
+        foreach (string startup in new[] { "--startup", "--no-startup", "--packaged-startup", "--no-packaged-startup" }) {
+            string ini = Path.Combine(tempRoot, "OfflineRejected" + index++ + ".ini");
+            SmokeProcess(exe, new[] { "--ini", ini, "--configure-only", startup }, new[] { 2 }, 10,
+                "DesktopStub offline startup operation rejected");
+            AssertFileDoesNotExist(ini, "Offline startup rejection must precede INI creation");
+        }
+        string external = Path.Combine(tempRoot, "OfflineExternal.ini");
+        SmokeProcess(exe, new[] { "--ini", external, "--render-only", "--set", "Content.Enabled=1",
+            "--set", "Content.1.Background=None", "--set", "Content.1.TextSources=SMTC" }, new[] { 2 }, 10,
+            "DesktopStub offline external provider rejected");
+        AssertFileDoesNotExist(external, "Offline provider rejection must precede INI creation");
+        string missingInput = Path.Combine(tempRoot, "OfflineNoInput.ini");
+        SmokeProcess(exe, new[] { "--ini", missingInput, "--render-only" }, new[] { 2 }, 10,
+            "DesktopStub offline requires an explicit image or None content");
+        AssertFileDoesNotExist(missingInput, "Offline input rejection must precede INI creation");
+        string existing = Path.Combine(tempRoot, "OfflineStartupPreferences.ini");
+        File.WriteAllText(existing, "[Settings]\r\nRunAtStartup=1\r\nRunAtStartupPackaged=1\r\n", new UTF8Encoding(true));
+        SmokeProcess(exe, new[] { "--ini", existing, "--configure-only", "--set", "TileText.Text=Offline" },
+            new[] { 0 }, 10, "DesktopStub offline preserves pre-existing startup preferences without applying them");
+        AssertFileContains(existing, "RunAtStartup=1", "Offline editing must preserve startup preference");
+        AssertFileContains(existing, "RunAtStartupPackaged=1", "Offline editing must preserve packaged startup preference");
+        string blank = Path.Combine(tempRoot, "OfflineNone.ini");
+        SmokeProcess(exe, new[] { "--ini", blank, "--render-only", "--no-live-tile", "--asset", "MediumTile=1",
+            "--asset", "WideTile=1", "--asset", "LargeTile=1", "--set", "Content.Enabled=1",
+            "--set", "Content.1.Background=None", "--set", "Content.1.TextSources=CustomText",
+            "--set", "Content.1.Text=OFFLINE TILE", "--set", "Content.TextMode=Overlay" },
+            new[] { 0 }, 30, "DesktopStub offline None background renders without desktop capture");
+        CaptureDesktopStubTileAssets(tempRoot, "offline None background");
+    }
+
     static void AssertFileDoesNotExist(string file, string reason)
     {
         if (File.Exists(file))
@@ -1370,7 +2655,8 @@ static class RepoTools
             {
                 var psi = new ProcessStartInfo(
                     exe,
-                    JoinArgs(new[] { "--ini", ini, "--set", "Concurrent.Key" + i + "=Value" + i, "--exit" }))
+                    JoinArgs(new[] { "--ini", ini, "--set", "Concurrent.Key" + i + "=Value" + i,
+                        allowPackageIntegration ? "--exit" : "--configure-only" }))
                 {
                     WorkingDirectory = Path.GetDirectoryName(exe),
                     UseShellExecute = false,
@@ -1400,7 +2686,11 @@ static class RepoTools
         finally
         {
             foreach (Process process in processes)
+            {
+                try { if (!process.HasExited) process.Kill(); } catch { }
+                try { process.WaitForExit(5000); } catch { }
                 process.Dispose();
+            }
         }
     }
 
@@ -1435,7 +2725,7 @@ static class RepoTools
 
             try
             {
-                WaitForFileText(log, "Program starting...", 10000, "DesktopStub second-launch resident startup");
+                WaitForFileText(log, "Program starting...", 30000, "DesktopStub second-launch resident startup");
                 SmokeProcess(exe, new[] { "--ini", ini }, new[] { 0 }, 10, "DesktopStub second-launch ignore");
                 if (resident.HasExited)
                     throw new InvalidOperationException("DesktopStub Ignore second-launch action stopped the resident.");
@@ -1460,7 +2750,7 @@ static class RepoTools
                 if (!resident.HasExited)
                 {
                     try { resident.Kill(); } catch { }
-                    try { resident.WaitForExit(); } catch { }
+                    try { resident.WaitForExit(5000); } catch { }
                 }
             }
         }
@@ -1523,7 +2813,7 @@ static class RepoTools
                 if (!resident.HasExited)
                 {
                     try { resident.Kill(); } catch { }
-                    try { resident.WaitForExit(); } catch { }
+                    try { resident.WaitForExit(5000); } catch { }
                 }
             }
         }
@@ -1532,17 +2822,43 @@ static class RepoTools
     static void WaitForFileText(string file, string needle, int timeoutMs, string name)
     {
         Stopwatch timer = Stopwatch.StartNew();
+        Exception lastReadError = null;
         while (timer.ElapsedMilliseconds < timeoutMs)
         {
             if (File.Exists(file))
             {
-                string text = File.ReadAllText(file, Encoding.UTF8);
-                if (text.IndexOf(needle, StringComparison.Ordinal) >= 0)
-                    return;
+                try
+                {
+                    string text;
+                    using (var stream = new FileStream(
+                        file,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete))
+                    using (var reader = new StreamReader(stream, Encoding.UTF8, true))
+                        text = reader.ReadToEnd();
+
+                    if (text.IndexOf(needle, StringComparison.Ordinal) >= 0)
+                        return;
+                    lastReadError = null;
+                }
+                catch (IOException ex)
+                {
+                    // App loggers append concurrently and may briefly deny sharing.
+                    lastReadError = ex;
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    // Antivirus and indexing filters can also make an existing log
+                    // transiently unavailable; the timeout still bounds the retry.
+                    lastReadError = ex;
+                }
             }
             System.Threading.Thread.Sleep(100);
         }
-        throw new TimeoutException(name + " timed out waiting for '" + needle + "'.");
+
+        string detail = lastReadError == null ? "" : " Last read error: " + lastReadError.Message;
+        throw new TimeoutException(name + " timed out waiting for '" + needle + "'." + detail);
     }
 
     static int PrepareReleaseVersions(string[] args)
@@ -1611,6 +2927,17 @@ static class RepoTools
             return new ProcessResult { ExitCode = 0 };
         }
 
+        if (!allowPackageIntegration && Path.GetFileName(file).Equals("DesktopStub.exe", StringComparison.OrdinalIgnoreCase) &&
+            !args.Contains("--help") && !args.Contains("--version") &&
+            !args.Contains("--render-only") && !args.Contains("--configure-only"))
+        {
+            // Every default DesktopStub invocation takes a real offline entry
+            // point. No harmless-looking settings command may reach residency.
+            bool manifest = args.Any(arg => new[] { "--regenerate-manifest", "--manifest-win81", "--win8-broker",
+                "--no-win8-broker", "--win8-oop-helper" }.Contains(arg));
+            args = args.Where(arg => arg != "--exit" && arg != "--once").Concat(
+                manifest ? new[] { "--render-only", "--regenerate-manifest" } : new[] { "--configure-only" }).ToArray();
+        }
         var result = RunCapture(file, JoinArgs(args), Path.GetDirectoryName(file), timeoutSeconds * 1000);
         if (!allowedExitCodes.Contains(result.ExitCode))
             throw new InvalidOperationException("Smoke test failed: " + name + " " + String.Join(" ", args) + " exited " + result.ExitCode + Environment.NewLine + "STDOUT:" + Environment.NewLine + result.Output + Environment.NewLine + "STDERR:" + Environment.NewLine + result.Error);
@@ -2185,18 +3512,25 @@ static class RepoTools
             var error = new StringBuilder();
             var outputLock = new object();
             var errorLock = new object();
+            bool outputComplete = false, errorComplete = false;
 
             process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
             {
                 if (e.Data == null)
+                {
+                    lock (outputLock) { outputComplete = true; Monitor.PulseAll(outputLock); }
                     return;
+                }
                 lock (outputLock)
                     output.AppendLine(e.Data);
             };
             process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
             {
                 if (e.Data == null)
+                {
+                    lock (errorLock) { errorComplete = true; Monitor.PulseAll(errorLock); }
                     return;
+                }
                 lock (errorLock)
                     error.AppendLine(e.Data);
             };
@@ -2209,12 +3543,20 @@ static class RepoTools
             if (!process.WaitForExit(timeoutMs))
             {
                 try { process.Kill(); } catch { }
-                try { process.WaitForExit(); } catch { }
+                try { process.WaitForExit(5000); } catch { }
                 throw new TimeoutException("Process timed out: " + file + " " + arguments);
             }
 
-            process.WaitForExit();
-            return new ProcessResult { ExitCode = process.ExitCode, Output = output.ToString(), Error = error.ToString() };
+            // A descendant may inherit an output pipe after the direct child
+            // exits. Never turn a bounded smoke timeout into an infinite EOF wait.
+            lock (outputLock) if (!outputComplete) Monitor.Wait(outputLock, 2000);
+            lock (errorLock) if (!errorComplete) Monitor.Wait(errorLock, 2000);
+            if (!outputComplete) { try { process.CancelOutputRead(); } catch { } }
+            if (!errorComplete) { try { process.CancelErrorRead(); } catch { } }
+            string capturedOutput, capturedError;
+            lock (outputLock) capturedOutput = output.ToString();
+            lock (errorLock) capturedError = error.ToString();
+            return new ProcessResult { ExitCode = process.ExitCode, Output = capturedOutput, Error = capturedError };
         }
     }
 

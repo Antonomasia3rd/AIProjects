@@ -1,0 +1,10 @@
+const fs=require('node:fs'), path=require('node:path'), assert=require('node:assert/strict');
+const {replayNodes,parseLiveDump}=require('./replay.js');
+const fixture=JSON.parse(fs.readFileSync(path.join(__dirname,'../build/replay-fixture.json'),'utf8'));
+const before=JSON.stringify(fixture.baseline);
+assert.deepEqual(replayNodes(fixture.baseline,fixture.events,Number.MAX_SAFE_INTEGER),fixture.expected);
+assert.equal(JSON.stringify(fixture.baseline),before);
+const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'../build/live-test-manifest.json'),'utf8'));
+const parsed=parseLiveDump(fs.readFileSync(manifest.stream,'utf8'),'runtime-test.jsonl');
+assert.deepEqual(replayNodes(parsed.nodes,parsed.liveEvents,Number.MAX_SAFE_INTEGER),fixture.expected);
+console.log('PASS: browser replay matches Python on actual UWP event output and preserves the baseline');

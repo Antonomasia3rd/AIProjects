@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Lazy GDI+ lifetime
 // -----------------------------------------------------------------------------
 static std::mutex g_gdiPlusMutex;
@@ -544,21 +544,27 @@ static Color ParseTileColor(const std::wstring& raw, Color fallback)
 
 static std::wstring TileTextPrimaryText()
 {
+    if (g_renderContent) return g_renderContent->text.primary;
     return TrimCopy(IniReadS(L"TileText", L"Text", L""));
 }
 
 static std::wstring TileTextSecondaryText()
 {
+    if (g_renderContent) return g_renderContent->text.secondary;
     return TrimCopy(IniReadS(L"TileText", L"SecondaryText", L""));
 }
 
 static std::wstring TileTextBadgeText()
 {
+    if (g_renderContent) return g_renderContent->text.badge;
     return TrimCopy(IniReadS(L"TileText", L"BadgeText", L""));
 }
 
 static bool TileTextOverlayEnabled()
 {
+    if (g_renderContent)
+        return g_renderContent->textMode != aip::content::TextMode::Off &&
+            (!g_renderContent->text.primary.empty() || !g_renderContent->text.secondary.empty() || !g_renderContent->text.badge.empty());
     return IniReadI(L"TileText", L"Enabled", 0) != 0 &&
         (!TileTextPrimaryText().empty() ||
             !TileTextSecondaryText().empty() ||
@@ -597,192 +603,12 @@ static SimulatedTileTextLayout SimulatedTileTextLayoutForName(const wchar_t* til
     return SimulatedTileTextLayout::None;
 }
 
-static std::unique_ptr<FontFamily> CreateSystemTileFontFamily(const wchar_t* preferred)
-{
-    std::unique_ptr<FontFamily> family(new FontFamily(preferred && *preferred ? preferred : L"Segoe UI"));
-    if (!family || family->GetLastStatus() != Ok)
-        family.reset(new FontFamily(L"Segoe UI"));
-    if (!family || family->GetLastStatus() != Ok)
-        family.reset(new FontFamily(L"Arial"));
-    return family;
-}
-
-static bool DrawSystemTileText(
-    Graphics& graphics,
-    const std::wstring& text,
-    Font& font,
-    const RectF& layout,
-    StringAlignment alignment,
-    StringTrimming trimming,
-    const wchar_t* operation)
-{
-    if (text.empty())
-        return true;
-
-    StringFormat format;
-    format.SetAlignment(alignment);
-    format.SetLineAlignment(StringAlignmentNear);
-    format.SetTrimming(trimming);
-    format.SetFormatFlags(StringFormatFlagsLineLimit);
-    SolidBrush brush(Color(255, 255, 255, 255));
-    return GdiOk(
-        graphics.DrawString(text.c_str(), static_cast<INT>(text.size()), &font, layout, &format, &brush),
-        operation);
-}
-
 static Color SimulatedTileBackgroundColor()
 {
     return ParseTileColor(EffectiveManifestBackgroundColor(), Color(255, 0, 120, 215));
 }
 
-static REAL ScaleTileMetric(REAL logicalValue, double scale)
-{
-    return static_cast<REAL>(logicalValue * scale);
-}
-
-static RectF ScaleTileRect(REAL x, REAL y, REAL width, REAL height, double scale)
-{
-    return RectF(
-        ScaleTileMetric(x, scale),
-        ScaleTileMetric(y, scale),
-        std::max(1.0f, ScaleTileMetric(width, scale)),
-        std::max(1.0f, ScaleTileMetric(height, scale)));
-}
-
-static StringAlignment ToGdiAlignment(tiletext::HorizontalAlign align)
-{
-    return align == tiletext::HorizontalAlign::Far ? StringAlignmentFar : StringAlignmentNear;
-}
-
-static StringTrimming ToGdiTrimming(tiletext::Trimming trim)
-{
-    return trim == tiletext::Trimming::Word ? StringTrimmingEllipsisWord : StringTrimmingEllipsisCharacter;
-}
-
-// Draws every region the portable layout selected for this tile size/input
-// combination, picking the right font by role and the right source string
-// by field index. Returns false (without drawing further regions) on the
-// first GDI+ failure, matching the early-return-on-failure behavior the
-// inline per-tile-size code always had.
-static bool DrawTileTextRegions(
-    Graphics& graphics,
-    tiletext::TileSize size,
-    const tiletext::TileTextInputs& inputs,
-    const std::wstring& primaryText,
-    const std::wstring& secondaryText,
-    const std::wstring& badgeText,
-    Font& titleFont,
-    Font& bodyFont,
-    Font& blockFont,
-    double scale,
-    const wchar_t* operationPrefix)
-{
-    for (const tiletext::TileTextRegion& region : tiletext::ComputeTileTextLayout(size, inputs))
-    {
-        const std::wstring* text = region.sourceField == 0 ? &primaryText
-            : region.sourceField == 1 ? &secondaryText
-            : &badgeText;
-        Font& font = region.role == tiletext::TextRole::Title ? titleFont
-            : region.role == tiletext::TextRole::Badge ? blockFont
-            : bodyFont;
-        std::wstring operation = std::wstring(operationPrefix) + L" region field=" + std::to_wstring(region.sourceField);
-        if (!DrawSystemTileText(graphics, *text, font,
-                ScaleTileRect(static_cast<REAL>(region.x), static_cast<REAL>(region.y),
-                    static_cast<REAL>(region.width), static_cast<REAL>(region.height), scale),
-                ToGdiAlignment(region.align), ToGdiTrimming(region.trim), operation.c_str()))
-            return false;
-    }
-    return true;
-}
-
-static bool RenderMediumTileTextSimulation(
-    Graphics& graphics,
-    const std::wstring& primaryText,
-    const std::wstring& secondaryText,
-    const std::wstring& badgeText,
-    double scale)
-{
-    SolidBrush background(SimulatedTileBackgroundColor());
-    if (!GdiOk(graphics.FillRectangle(&background, ScaleTileRect(0, 0, 150, 150, scale)), L"fill medium tile text background"))
-        return false;
-
-    std::unique_ptr<FontFamily> titleFamily = CreateSystemTileFontFamily(L"Segoe UI Light");
-    std::unique_ptr<FontFamily> bodyFamily = CreateSystemTileFontFamily(L"Segoe UI");
-    if (!titleFamily || !bodyFamily)
-        return false;
-
-    Font titleFont(titleFamily.get(), ScaleTileMetric(24, scale), FontStyleRegular, UnitPixel);
-    Font bodyFont(bodyFamily.get(), ScaleTileMetric(15, scale), FontStyleRegular, UnitPixel);
-    Font blockFont(titleFamily.get(), ScaleTileMetric(54, scale), FontStyleRegular, UnitPixel);
-    if (titleFont.GetLastStatus() != Ok || bodyFont.GetLastStatus() != Ok || blockFont.GetLastStatus() != Ok)
-        return false;
-
-    tiletext::TileTextInputs inputs{ !primaryText.empty(), !secondaryText.empty(), !badgeText.empty() };
-    return DrawTileTextRegions(graphics, tiletext::TileSize::Medium, inputs,
-        primaryText, secondaryText, badgeText, titleFont, bodyFont, blockFont, scale, L"draw medium tile text");
-}
-
-static bool RenderWideTileTextSimulation(
-    Graphics& graphics,
-    const std::wstring& primaryText,
-    const std::wstring& secondaryText,
-    const std::wstring& badgeText,
-    double scale)
-{
-    Color backgroundColor = SimulatedTileBackgroundColor();
-    SolidBrush background(backgroundColor);
-    std::unique_ptr<FontFamily> titleFamily = CreateSystemTileFontFamily(L"Segoe UI Light");
-    std::unique_ptr<FontFamily> bodyFamily = CreateSystemTileFontFamily(L"Segoe UI");
-    if (!titleFamily || !bodyFamily)
-        return false;
-
-    Font bodyFont(bodyFamily.get(), ScaleTileMetric(15, scale), FontStyleRegular, UnitPixel);
-    Font blockFont(titleFamily.get(), ScaleTileMetric(54, scale), FontStyleRegular, UnitPixel);
-    if (bodyFont.GetLastStatus() != Ok || blockFont.GetLastStatus() != Ok)
-        return false;
-
-    tiletext::TileTextInputs inputs{ !primaryText.empty(), !secondaryText.empty(), !badgeText.empty() };
-
-    if (!badgeText.empty())
-    {
-        if (!GdiOk(graphics.FillRectangle(&background, ScaleTileRect(0, 0, 310, 150, scale)), L"fill wide tile block background"))
-            return false;
-        return DrawTileTextRegions(graphics, tiletext::TileSize::Wide, inputs,
-            primaryText, secondaryText, badgeText, bodyFont, bodyFont, blockFont, scale, L"draw wide tile block");
-    }
-
-    if (!GdiOk(graphics.FillRectangle(&background, ScaleTileRect(0, 100, 310, 50, scale)), L"fill wide tile text band"))
-        return false;
-    return DrawTileTextRegions(graphics, tiletext::TileSize::Wide, inputs,
-        primaryText, secondaryText, badgeText, bodyFont, bodyFont, blockFont, scale, L"draw wide tile text");
-}
-
-static bool RenderLargeTileTextSimulation(
-    Graphics& graphics,
-    const std::wstring& primaryText,
-    const std::wstring& secondaryText,
-    const std::wstring& badgeText,
-    double scale)
-{
-    SolidBrush imageDarkener(Color(72, 0, 0, 0));
-    if (!GdiOk(graphics.FillRectangle(&imageDarkener, ScaleTileRect(0, 0, 310, 310, scale)), L"darken large tile image"))
-        return false;
-
-    std::unique_ptr<FontFamily> titleFamily = CreateSystemTileFontFamily(L"Segoe UI Light");
-    std::unique_ptr<FontFamily> bodyFamily = CreateSystemTileFontFamily(L"Segoe UI");
-    if (!titleFamily || !bodyFamily)
-        return false;
-
-    Font titleFont(titleFamily.get(), ScaleTileMetric(30, scale), FontStyleRegular, UnitPixel);
-    Font bodyFont(bodyFamily.get(), ScaleTileMetric(15, scale), FontStyleRegular, UnitPixel);
-    Font blockFont(titleFamily.get(), ScaleTileMetric(54, scale), FontStyleRegular, UnitPixel);
-    if (titleFont.GetLastStatus() != Ok || bodyFont.GetLastStatus() != Ok || blockFont.GetLastStatus() != Ok)
-        return false;
-
-    tiletext::TileTextInputs inputs{ !primaryText.empty(), !secondaryText.empty(), !badgeText.empty() };
-    return DrawTileTextRegions(graphics, tiletext::TileSize::Large, inputs,
-        primaryText, secondaryText, badgeText, titleFont, bodyFont, blockFont, scale, L"draw large tile text");
-}
+#include "tile_text_render.inc"
 
 static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int logicalWidth, int logicalHeight)
 {
@@ -814,16 +640,19 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
     if (!GraphicsOk(graphics, L"create tile text graphics"))
         return false;
 
-    graphics.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
-    graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+    if (!ConfigureTileTextGraphics(graphics))
+        return false;
     switch (SimulatedTileTextLayoutForName(tileName))
     {
     case SimulatedTileTextLayout::Medium:
-        return RenderMediumTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale);
+        return RenderMediumTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale,
+            g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
     case SimulatedTileTextLayout::Wide:
-        return RenderWideTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale);
+        return RenderWideTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale,
+            g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
     case SimulatedTileTextLayout::Large:
-        return RenderLargeTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale);
+        return RenderLargeTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale,
+            g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
     case SimulatedTileTextLayout::None:
     default:
         return true;
@@ -832,6 +661,7 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
 
 static std::wstring TileTextXmlText()
 {
+    if (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay) return L"";
     if (!TileTextOverlayEnabled())
         return L"";
     return TileTextPrimaryText();
@@ -839,6 +669,7 @@ static std::wstring TileTextXmlText()
 
 static std::wstring TileTextXmlSecondaryText()
 {
+    if (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay) return L"";
     if (!TileTextOverlayEnabled())
         return L"";
     return TileTextSecondaryText();
@@ -846,6 +677,7 @@ static std::wstring TileTextXmlSecondaryText()
 
 static std::wstring TileTextXmlBadgeText()
 {
+    if (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay) return L"";
     if (!TileTextOverlayEnabled())
         return L"";
     return TileTextBadgeText();

@@ -30,6 +30,7 @@ static constexpr const wchar_t* DEFAULT_HELP_TEMPLATE =
     L"  --once                         Send one IPC update and exit.\\n"
     L"  --verbose                      Enable verbose logging for this run.\\n"
     L"  --logging / --no-logging       Set [app] logging_enabled.\\n"
+    L"  --startup / --no-startup       Add or remove this INI profile's shell:startup shortcut.\\n"
     L"  --file-logging / --no-file-logging Set [app] file_logging_enabled.\\n"
     L"  --log-lock-wait-ms <ms>        Set log append wait from 0 to 60000 ms.\\n"
     L"  --tray / --no-tray             Force tray icon on or off for this run.\\n"
@@ -134,6 +135,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"app", L"show_tray", L"true" },
     { L"app", L"show_menu_as_dropdown", L"true" },
     { L"app", L"single_instance", L"true" },
+    { L"app", L"run_at_startup", L"false" },
     { L"app", L"show_console", L"false" },
     { L"app", L"notifications_enabled", L"true" },
     { L"app", L"notify_on_start", L"false" },
@@ -171,6 +173,8 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"strings", L"menu_refresh", L"Refresh now" },
     { L"strings", L"menu_version_prefix", L"Version: " },
     { L"strings", L"menu_reload", L"Reload configuration" },
+    { L"strings", L"menu_run_at_startup", L"Run at startup" },
+    { L"strings", L"startup_error_title", L"DiscordRPC startup shortcut" },
     { L"strings", L"menu_open_config", L"Open config" },
     { L"strings", L"menu_open_log_folder", L"Open log folder" },
     { L"strings", L"menu_recent_log", L"Recent log" },
@@ -206,6 +210,7 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"strings", L"notification_connected_gateway", L"Rich Presence is active through Discord Gateway." },
     { L"strings", L"notification_failed", L"Rich Presence update failed." },
     { L"strings", L"notification_reloaded", L"Configuration reloaded." },
+    { L"strings", L"notification_startup_failed", L"The shell:startup shortcut could not be synchronized with the INI." },
     { L"strings", L"notification_gateway_missing_token", L"Gateway mode needs DPAPI token_protected. Legacy plaintext token is only read for migration." },
     { L"strings", L"notification_gateway_auto_missing_token", L"Discord IPC update failed. Gateway fallback is enabled by transport_mode=auto, but no DPAPI token_protected is configured. Set transport_mode=ipc to disable Gateway fallback, or protect a token for Gateway mode." },
     { L"strings", L"notification_gateway_unsupported", L"Discord Gateway transport is disabled by [gateway] supported." },

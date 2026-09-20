@@ -6,7 +6,9 @@ int main()
     try
     {
         const std::string sharedCore = ReadAll("..\\dependencies\\core.inc");
-        const std::string discordMain = ReadAll("DiscordRPC.cpp");
+        const std::string discordMain = ReadAll("../dependencies/DiscordRPC/drpc_environment.inc") + ReadAll("DiscordRPC.cpp");
+        const std::string service = ReadAll("../dependencies/DiscordRPC/service.cpp");
+        const std::string serviceHeader = ReadAll("../dependencies/DiscordRPC/service.h");
         const std::string core = ReadAll("..\\dependencies\\DiscordRPC\\drpc_core.inc");
         const std::string commandLine = ReadAll("..\\dependencies\\DiscordRPC\\drpc_command_line.inc");
         const std::string defaults = ReadAll("..\\dependencies\\DiscordRPC\\drpc_config_defaults.inc");
@@ -19,12 +21,44 @@ int main()
         const std::string build = ReadAll("build.cmd");
         const std::string resource = ReadAll("DiscordRPC.rc");
         const std::string releaseVersion = ReadAll("..\\dependencies\\release_version.inc");
+        const std::string startupShortcut = ReadAll("..\\dependencies\\startup_shortcut.inc");
 
         RequireContains(
             "DiscordRPC consumes aggregate desktop baseline",
             "DiscordRPC.cpp",
             discordMain,
-            "dependencies\\desktop_app_baseline.h");
+            "../desktop_app_baseline.h");
+        RequireContains(
+            "DiscordRPC consumes shared Startup shortcut lifecycle",
+            "DiscordRPC.cpp",
+            discordMain,
+            "../startup_shortcut.inc");
+        RequireContains("standalone delegates its presence loop to the embedded service", "drpc_app.inc", app,
+            "aip::discord::Service service;");
+        RequireContains("shared service reuses the actual IPC implementation", "service.cpp", service, "#include \"drpc_ipc.inc\"");
+        RequireContains("shared service reuses the actual Gateway implementation", "service.cpp", service, "#include \"drpc_gateway.inc\"");
+        RequireContains("shared service reuses the actual presence builder", "service.cpp", service, "BuildPresencePayload(current.contextOverride ? &context : nullptr)");
+        RequireContains("embedded sending defaults off", "service.h", serviceHeader, "bool sendEnabled = false;");
+        RequireContains("embedded service clones profile snapshots", "service.cpp", service, "bool PrepareOptions(");
+        RequireContains("embedded transport honors cancellation deadlines", "service.cpp", service, "std::chrono::steady_clock::now() >= deadline");
+        RequireOrderedContains("transport cancellation state outlives client cleanup", "service.cpp", service,
+            { "CancellationRelay cancellation_;", "std::unique_ptr<DiscordIpcClient> ipc_;", "std::unique_ptr<DiscordGatewayClient> gateway_;" });
+        RequireContains("operation deadlines are scoped to Send and Clear", "service.cpp", service, "auto operation = cancellation_.Begin(cancel);");
+        RequireContains("transport callbacks retain relay state", "service.cpp", service, "cancellation_.Callback()");
+        RequireNotContains("transport does not race on a mutable cancellation function", "service.cpp", service, "Cancel cancel_;");
+        RequireNotContains("embedded service does not execute app lifecycle", "service.cpp", service, "RunApplication(");
+        RequireNotContains("embedded service does not migrate tokens", "service.cpp", service, "ProtectDiscordTokenInConfig(");
+        RequireNotContains("embedded service does not modify startup", "service.cpp", service, "ReconcileDiscordStartupShortcutFromConfig(");
+        RequireContains(
+            "DiscordRPC links ShellLink GUID definitions",
+            "build.cmd",
+            build,
+            "uuid.lib");
+        RequireContains(
+            "shared Startup helper targets only the per-user Startup known folder",
+            "..\\dependencies\\startup_shortcut.inc",
+            startupShortcut,
+            "FOLDERID_Startup");
         RequireContains(
             "DiscordRPC uses shared INI config store",
             "..\\dependencies\\DiscordRPC\\drpc_core.inc",
@@ -202,11 +236,15 @@ int main()
             "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
             commandLine,
             "!sideEffectFreeMode && !ValidateCommandLineSettingValue(setting, error)");
-        RequireContains(
+        RequireOrderedContains(
             "DiscordRPC help/version mode does not queue --set writes",
             "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
             commandLine,
-            "if (!sideEffectFreeMode)\n            {\n                AddSetting(options, setting.section, setting.key, setting.value);\n            }");
+            {
+                "!sideEffectFreeMode && !ValidateCommandLineSettingValue(setting, error)",
+                "if (!sideEffectFreeMode)",
+                "AddSetting(options, setting.section, setting.key, setting.value);"
+            });
         RequireContains(
             "DiscordRPC help/version mode does not validate or queue --bool writes",
             "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
@@ -232,6 +270,11 @@ int main()
             "..\\dependencies\\DiscordRPC\\drpc_config_defaults.inc",
             defaults,
             "--logging / --no-logging");
+        RequireContains(
+            "DiscordRPC help documents Startup-folder toggles",
+            "..\\dependencies\\DiscordRPC\\drpc_config_defaults.inc",
+            defaults,
+            "--startup / --no-startup");
         RequireContains(
             "DiscordRPC help documents strict boolean setting helper",
             "..\\dependencies\\DiscordRPC\\drpc_config_defaults.inc",
@@ -277,6 +320,32 @@ int main()
             "..\\dependencies\\DiscordRPC\\drpc_tray.inc",
             tray,
             "Could not enable tray icon version 4 behavior:");
+        RequireContains(
+            "DiscordRPC preserves invocation overrides across configuration reloads",
+            "..\\dependencies\\DiscordRPC\\drpc_app.inc",
+            app,
+            "ConfigureRuntimeFromConfig(invocationOptions);");
+        RequireContains(
+            "DiscordRPC refreshes the resident hover tooltip after reload",
+            "..\\dependencies\\DiscordRPC\\drpc_app.inc",
+            app,
+            "Could not update tray tooltip after configuration reload:");
+        RequireContains(
+            "DiscordRPC keeps the standard hover tooltip in tray version 4",
+            "..\\dependencies\\DiscordRPC\\drpc_tray.inc",
+            tray,
+            "aip::RegisterTrayIcon(");
+        RequireOrderedContains(
+            "DiscordRPC supplies its product fallback for blank hover text",
+            "DiscordRPC tray/reload sources",
+            tray + "\n" + app,
+            {
+                "GetUiString(L\"tray_tip\", APP_DISPLAY_NAME)",
+                "APP_DISPLAY_NAME",
+                "aip::ModifyTrayIconTooltip(",
+                "GetUiString(L\"tray_tip\", APP_DISPLAY_NAME)",
+                "APP_DISPLAY_NAME"
+            });
         RequireContains(
             "DiscordRPC reports tray balloon delivery failures",
             "..\\dependencies\\DiscordRPC\\drpc_tray.inc",
@@ -352,6 +421,11 @@ int main()
             "..\\dependencies\\DiscordRPC\\drpc_core.inc",
             core,
             "return Trim(IniReadS(L\"general\", L\"token\", L\"\"));");
+        RequireContains(
+            "DiscordRPC explicitly identifies its historical UTF-8 DPAPI format",
+            "..\\dependencies\\DiscordRPC\\drpc_core.inc",
+            core,
+            "aip::DpapiLegacyEncoding::Utf8");
         RequireContains(
             "DiscordRPC --bool is restricted to known boolean INI keys",
             "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
@@ -453,6 +527,51 @@ int main()
             commandLine,
             "ValidateCommandLineSettingValue(setting, error)");
         RequireContains(
+            "DiscordRPC validates known boolean --set values",
+            "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
+            commandLine,
+            "IsKnownBooleanCommandLineSetting(setting.section, setting.key)");
+        RequireContains(
+            "DiscordRPC canonicalizes known boolean --set values",
+            "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
+            commandLine,
+            "setting.value = parsed ? L\"true\" : L\"false\"");
+        RequireContains(
+            "DiscordRPC exposes Startup aliases through the same INI setting",
+            "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
+            commandLine,
+            "AddSetting(options, L\"app\", L\"run_at_startup\"");
+        RequireContains(
+            "DiscordRPC commits command-line setting batches atomically",
+            "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
+            commandLine,
+            "PersistDiscordSettingsAtomically");
+        RequireContains(
+            "DiscordRPC delegates coupled Startup and INI commit to the shared transaction",
+            "DiscordRPC startup/config sources",
+            core + "\n" + commandLine,
+            "aip::CommitStartupShortcutIniState(");
+        RequireContains(
+            "DiscordRPC shared Startup transaction holds the INI lock across direction-safe commit",
+            "..\\dependencies\\startup_shortcut.inc",
+            startupShortcut,
+            "ExecuteCrashConsistentLaunchConfigState(");
+        RequireContains(
+            "DiscordRPC uses one fresh INI mutation for a setting batch",
+            "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
+            commandLine,
+            ").MutateFresh(");
+        RequireNotContains(
+            "DiscordRPC no longer persists command-line settings one at a time",
+            "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
+            commandLine,
+            "IniWrite(setting.section.c_str(), setting.key.c_str(), setting.value)");
+        RequireContains(
+            "DiscordRPC shared transaction can restore the prior INI snapshot",
+            "..\\dependencies\\startup_shortcut.inc",
+            startupShortcut,
+            "RestoreIniTextSnapshot(iniPath, previousIni)");
+        RequireContains(
             "DiscordRPC validates client-id command-line values",
             "..\\dependencies\\DiscordRPC\\drpc_command_line.inc",
             commandLine,
@@ -488,15 +607,55 @@ int main()
             tray,
             "static constexpr UINT ID_LOG_LOCK_WAIT_5000");
         RequireContains(
+            "DiscordRPC declares a tray Startup toggle",
+            "..\\dependencies\\DiscordRPC\\drpc_tray.inc",
+            tray,
+            "static constexpr UINT ID_TOGGLE_STARTUP");
+        RequireContains(
+            "DiscordRPC tray displays actual Startup shortcut state",
+            "..\\dependencies\\DiscordRPC\\drpc_tray.inc",
+            tray,
+            "QueryDiscordStartupShortcutInstalled");
+        RequireContains(
+            "DiscordRPC tray routes Startup changes through the atomic settings path",
+            "..\\dependencies\\DiscordRPC\\drpc_tray.inc",
+            tray,
+            "PersistDiscordSettingsAtomically({ setting }, error)");
+        RequireContains(
+            "DiscordRPC default INI exposes run_at_startup",
+            "..\\dependencies\\DiscordRPC\\drpc_config_defaults.inc",
+            defaults,
+            "L\"run_at_startup\", L\"false\"");
+        RequireContains(
+            "DiscordRPC startup identity follows the effective INI path",
+            "..\\dependencies\\DiscordRPC\\drpc_core.inc",
+            core,
+            "spec.identityPath = configPath");
+        RequireContains(
+            "DiscordRPC startup launch preserves its effective INI path",
+            "..\\dependencies\\DiscordRPC\\drpc_core.inc",
+            core,
+            "spec.arguments = L\"--ini \"");
+        RequireContains(
+            "DiscordRPC reconciles manually edited startup configuration",
+            "..\\dependencies\\DiscordRPC\\drpc_app.inc",
+            app,
+            "ReconcileDiscordStartupShortcutFromConfig");
+        RequireContains(
             "DiscordRPC passes bounded lock wait to shared UTF-8 logger",
             "..\\dependencies\\DiscordRPC\\drpc_core.inc",
             core,
             "options.lockWaitMs = g_logAppendLockWaitMs.load()");
         RequireContains(
-            "DiscordRPC resolves relative log paths beside the effective INI profile",
+            "DiscordRPC resolves relative log paths beside the executable",
             "..\\dependencies\\DiscordRPC\\drpc_core.inc",
             core,
-            "std::wstring configDir = GetDirectoryName(MakeAbsolutePath(g_iniPath));");
+            "effectiveLogPath = PathJoin(g_exeDir, configuredLog);");
+        RequireContains(
+            "DiscordRPC keeps its default log beside the executable with custom INI profiles",
+            "..\\dependencies\\DiscordRPC\\drpc_core.inc",
+            core,
+            "aip::DefaultLogPathPolicy::BesideExecutable");
         RequireContains(
             "DiscordRPC single-instance scope follows effective INI path",
             "..\\dependencies\\DiscordRPC\\drpc_core.inc",
@@ -680,8 +839,8 @@ int main()
             "FindJsonObjectStart");
         RequireContains(
             "DiscordRPC implements gateway supported switch",
-            "..\\dependencies\\DiscordRPC\\drpc_app.inc + ..\\dependencies\\DiscordRPC\\drpc_config_defaults.inc",
-            app + "\n" + defaults,
+            "../dependencies/DiscordRPC/service.cpp",
+            service,
             "IniReadB(L\"gateway\", L\"supported\", true)");
         RequireContains(
             "DiscordRPC guards Gateway activity JSON object insertion",

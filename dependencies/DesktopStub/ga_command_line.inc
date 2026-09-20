@@ -10,6 +10,8 @@ struct CommandLineOptions
     bool parseFailed = false;
     bool exitRequested = false;
     bool generateOnce = false;
+    bool renderOnly = false;
+    bool configureOnly = false;
     bool forceGenerateOnStartup = false;
     bool regenerateManifest = false;
     bool noMonitor = false;
@@ -17,6 +19,7 @@ struct CommandLineOptions
     bool wallpaperSpecified = false;
     bool comRegistrationHelper = false;
     bool appxActivationServer = false;
+    bool liveTileClearOnly = false;
     bool launchedFromAppxStub = false;
     bool launchedFromModeSwitch = false;
     DWORD waitForPid = 0;
@@ -35,6 +38,7 @@ static CommandLineOptions g_commandLine;
 void Log(const wchar_t* fmt, ...);
 std::wstring FormatWide(const wchar_t* fmt, ...);
 int IniReadI(const wchar_t* s, const wchar_t* k, int d);
+static bool ValidateDesktopStubPackagedStartupPreference(bool desired, std::wstring& error, const wchar_t* targetOverride = nullptr);
 
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW = 0;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_RELOAD_SETTINGS = 1;
@@ -122,6 +126,17 @@ static ContentSource ParseContentSourceValue(
         return ContentSource::RssFeed;
 
     return fallback;
+}
+
+static bool IsValidContentSource(ContentSource source)
+{
+    return source == ContentSource::Wallpaper ||
+        source == ContentSource::RssFeed;
+}
+
+static std::wstring ContentSourceIniValue(ContentSource source)
+{
+    return source == ContentSource::RssFeed ? L"RssFeed" : L"Wallpaper";
 }
 
 static const wchar_t* ContentSourceName(ContentSource source)
@@ -450,6 +465,190 @@ static bool TryParseCommandLineBoolValue(const std::wstring& rawValue, bool& val
     return aip::ParseBoolValue(rawValue, value);
 }
 
+static bool IsDesktopStubStartupSetting(
+    const std::wstring& section,
+    const std::wstring& key)
+{
+    return IEquals(section, L"Settings") && IEquals(key, L"RunAtStartup");
+}
+
+static bool IsDesktopStubContentSourceSetting(
+    const std::wstring& section,
+    const std::wstring& key)
+{
+    return IEquals(section, L"Settings") && IEquals(key, L"ContentSource");
+}
+
+static bool IsDesktopStubRssFeedSetting(
+    const std::wstring& section,
+    const std::wstring& key)
+{
+    if (!IEquals(section, L"RssFeed"))
+        return false;
+
+    return IEquals(key, L"FeedUrl") ||
+        IEquals(key, L"UserAgent") ||
+        IEquals(key, L"UpdateIntervalSeconds") ||
+        IEquals(key, L"MaxItems") ||
+        IEquals(key, L"HttpTimeoutSeconds") ||
+        IEquals(key, L"MaxFeedBytes");
+}
+
+static bool ValidateRssFeedUrlSetting(
+    const std::wstring& rawValue,
+    bool allowEmpty,
+    std::wstring& normalized,
+    std::wstring& error)
+{
+    normalized = TrimCopy(rawValue);
+    if (normalized.empty())
+    {
+        if (allowEmpty)
+            return true;
+        error = L"RssFeed.FeedUrl is required when Settings.ContentSource=RssFeed.";
+        return false;
+    }
+
+    if (normalized.size() > 2048 ||
+        std::any_of(normalized.begin(), normalized.end(), [](wchar_t ch) { return iswspace(ch) != 0; }))
+    {
+        error = L"RssFeed.FeedUrl must be a valid http or https URL no longer than 2048 characters.";
+        return false;
+    }
+
+    URL_COMPONENTSW components{};
+    components.dwStructSize = sizeof(components);
+    components.dwSchemeLength = static_cast<DWORD>(-1);
+    components.dwHostNameLength = static_cast<DWORD>(-1);
+    components.dwUrlPathLength = static_cast<DWORD>(-1);
+    components.dwExtraInfoLength = static_cast<DWORD>(-1);
+    components.dwUserNameLength = static_cast<DWORD>(-1);
+    components.dwPasswordLength = static_cast<DWORD>(-1);
+    if (!WinHttpCrackUrl(normalized.c_str(), 0, 0, &components) ||
+        (components.nScheme != INTERNET_SCHEME_HTTP &&
+            components.nScheme != INTERNET_SCHEME_HTTPS) ||
+        components.dwHostNameLength == 0 ||
+        components.dwHostNameLength > 255)
+    {
+        error = L"RssFeed.FeedUrl must be a valid http or https URL with a valid host.";
+        return false;
+    }
+    if (components.dwUserNameLength || components.dwPasswordLength)
+    {
+        error = L"RSS URLs with embedded usernames or passwords are not supported.";
+        return false;
+    }
+    return true;
+}
+
+static bool ValidateRssFeedUserAgentSetting(
+    const std::wstring& rawValue,
+    std::wstring& normalized,
+    std::wstring& error)
+{
+    normalized = TrimCopy(rawValue);
+    if (normalized.empty() || normalized.size() > 512 ||
+        normalized.find(L'\r') != std::wstring::npos ||
+        normalized.find(L'\n') != std::wstring::npos)
+    {
+        error = L"RssFeed.UserAgent must contain 1 to 512 characters and no line breaks.";
+        return false;
+    }
+    return true;
+}
+
+static bool RssFeedIntegerRange(
+    const std::wstring& key,
+    int& minValue,
+    int& maxValue)
+{
+    if (IEquals(key, L"UpdateIntervalSeconds"))
+    {
+        minValue = 60;
+        maxValue = 86400;
+        return true;
+    }
+    if (IEquals(key, L"MaxItems"))
+    {
+        minValue = 1;
+        maxValue = 20;
+        return true;
+    }
+    if (IEquals(key, L"HttpTimeoutSeconds"))
+    {
+        minValue = 5;
+        maxValue = 120;
+        return true;
+    }
+    if (IEquals(key, L"MaxFeedBytes"))
+    {
+        minValue = 64 * 1024;
+        maxValue = 16 * 1024 * 1024;
+        return true;
+    }
+    return false;
+}
+
+static bool NormalizeDesktopStubTypedSetting(
+    const std::wstring& section,
+    const std::wstring& key,
+    std::wstring& value,
+    std::wstring& error)
+{
+    if (aip::content::KnownSection(section))
+        return aip::content::NormalizeSetting(section, key, value, error);
+    if (IsDesktopStubStartupSetting(section, key) ||
+        (IEquals(section, L"Settings") && IEquals(key, L"RunAtStartupPackaged")))
+    {
+        bool startup = false;
+        if (!TryParseCommandLineBoolValue(value, startup))
+        {
+            error = L"Settings." + key + L" expects a true/false value.";
+            return false;
+        }
+        value = startup ? L"1" : L"0";
+        return true;
+    }
+
+    if (IsDesktopStubContentSourceSetting(section, key))
+    {
+        ContentSource source = ParseContentSourceValue(
+            value,
+            static_cast<ContentSource>(-1));
+        if (!IsValidContentSource(source))
+        {
+            error = L"Settings.ContentSource expects Wallpaper or RssFeed.";
+            return false;
+        }
+        value = ContentSourceIniValue(source);
+        return true;
+    }
+
+    if (!IsDesktopStubRssFeedSetting(section, key))
+        return true;
+
+    if (IEquals(key, L"FeedUrl"))
+        return ValidateRssFeedUrlSetting(value, true, value, error);
+    if (IEquals(key, L"UserAgent"))
+        return ValidateRssFeedUserAgentSetting(value, value, error);
+
+    int minValue = 0;
+    int maxValue = 0;
+    if (RssFeedIntegerRange(key, minValue, maxValue))
+    {
+        int parsed = 0;
+        if (!aip::ParseIntValueInRange(value, minValue, maxValue, parsed))
+        {
+            error = L"RssFeed." + key + L" expects an integer from " +
+                std::to_wstring(minValue) + L" to " +
+                std::to_wstring(maxValue) + L".";
+            return false;
+        }
+        value = std::to_wstring(parsed);
+    }
+    return true;
+}
+
 static bool TryParseCommandLineOverrideSpec(
     const std::wstring& spec,
     std::wstring& section,
@@ -774,6 +973,11 @@ static bool ParseCommandLineOptions()
             g_commandLine.launchedFromModeSwitch = true;
             continue;
         }
+        if (IEquals(arg, L"tile-clear"))
+        {
+            g_commandLine.liveTileClearOnly = true;
+            continue;
+        }
         if (IsInternalAppActivationActionArgument(arg))
         {
             continue;
@@ -846,6 +1050,8 @@ static bool ParseCommandLineOptions()
             std::wstring overrideValue;
             if (!TryParseCommandLineOverrideSpec(value, section, key, overrideValue, error))
                 return fail(error);
+            if (!NormalizeDesktopStubTypedSetting(section, key, overrideValue, error))
+                return fail(L"--set " + error);
             AddCommandLineIniSetting(section, key, overrideValue);
             continue;
         }
@@ -857,6 +1063,117 @@ static bool ParseCommandLineOptions()
             if (!SetCommandLineWallpaperPath(value, error))
                 return fail(error);
             g_commandLine.forceGenerateOnStartup = true;
+            continue;
+        }
+
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--content-source", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring normalized = value;
+            if (!NormalizeDesktopStubTypedSetting(
+                    L"Settings",
+                    L"ContentSource",
+                    normalized,
+                    error))
+            {
+                return fail(L"--content-source: " + error);
+            }
+            AddCommandLineIniSetting(L"Settings", L"ContentSource", normalized);
+            continue;
+        }
+
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--rss-feed-url", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring normalized;
+            if (!ValidateRssFeedUrlSetting(value, false, normalized, error))
+                return fail(L"--rss-feed-url: " + error);
+            AddCommandLineIniSetting(L"RssFeed", L"FeedUrl", normalized);
+            continue;
+        }
+
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--rss-user-agent", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            std::wstring normalized;
+            if (!ValidateRssFeedUserAgentSetting(value, normalized, error))
+                return fail(L"--rss-user-agent: " + error);
+            AddCommandLineIniSetting(L"RssFeed", L"UserAgent", normalized);
+            continue;
+        }
+
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--rss-update-interval", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            if (!AddCommandLineClampedIntSetting(
+                    L"RssFeed",
+                    L"UpdateIntervalSeconds",
+                    L"--rss-update-interval",
+                    value,
+                    60,
+                    86400,
+                    error))
+            {
+                return fail(error);
+            }
+            continue;
+        }
+
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--rss-max-items", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            if (!AddCommandLineClampedIntSetting(
+                    L"RssFeed",
+                    L"MaxItems",
+                    L"--rss-max-items",
+                    value,
+                    1,
+                    20,
+                    error))
+            {
+                return fail(error);
+            }
+            continue;
+        }
+
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--rss-http-timeout", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            if (!AddCommandLineClampedIntSetting(
+                    L"RssFeed",
+                    L"HttpTimeoutSeconds",
+                    L"--rss-http-timeout",
+                    value,
+                    5,
+                    120,
+                    error))
+            {
+                return fail(error);
+            }
+            continue;
+        }
+
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--rss-max-feed-bytes", value, error, matched))
+            return fail(error);
+        if (matched)
+        {
+            if (!AddCommandLineClampedIntSetting(
+                    L"RssFeed",
+                    L"MaxFeedBytes",
+                    L"--rss-max-feed-bytes",
+                    value,
+                    64 * 1024,
+                    16 * 1024 * 1024,
+                    error))
+            {
+                return fail(error);
+            }
             continue;
         }
 
@@ -1107,6 +1424,18 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (IEquals(arg, L"--configure-only"))
+        {
+            g_commandLine.configureOnly = true;
+            g_commandLine.noMonitor = true;
+            continue;
+        }
+        if (IEquals(arg, L"--render-only"))
+        {
+            g_commandLine.renderOnly = true;
+            g_commandLine.noMonitor = true;
+            continue;
+        }
         if (IEquals(arg, L"--once"))
         {
             g_commandLine.generateOnce = true;
@@ -1138,6 +1467,21 @@ static bool ParseCommandLineOptions()
         if (IEquals(arg, L"--no-startup-generate"))
         {
             AddCommandLineBoolSetting(L"Settings", L"GenerateOnStartup", false);
+            continue;
+        }
+        if (IEquals(arg, L"--startup"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"RunAtStartup", true);
+            continue;
+        }
+        if (IEquals(arg, L"--no-startup"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"RunAtStartup", false);
+            continue;
+        }
+        if (IEquals(arg, L"--packaged-startup") || IEquals(arg, L"--no-packaged-startup"))
+        {
+            AddCommandLineBoolSetting(L"Settings", L"RunAtStartupPackaged", IEquals(arg, L"--packaged-startup"));
             continue;
         }
         if (IEquals(arg, L"--tray"))
@@ -1466,6 +1810,8 @@ static void ShowCommandLineMessage(const std::wstring& text, bool error)
 {
     if (aip::WriteCommandLineText(text, error))
         return;
+    if (g_commandLine.renderOnly || g_commandLine.configureOnly)
+        return; // Offline rendering never opens an interactive message box.
 
     std::wstring title = error
         ? IniReadS(L"Strings", L"CommandLineErrorTitle", L"DesktopStub command line")
@@ -1505,6 +1851,11 @@ static bool CommandLineShouldRegenerateManifest()
 static bool CommandLineLiveTileModeChanged()
 {
     return g_commandLine.liveTileModeChanged;
+}
+
+static bool CommandLineRequestsLiveTileClearOnly()
+{
+    return g_commandLine.liveTileClearOnly;
 }
 
 static bool CommandLineTrayIconChanged()
@@ -1631,12 +1982,223 @@ static bool CommandLineSettingTargetsObsoleteManifestSection(const CommandLineIn
     return IEquals(entry.section, L"Manifest");
 }
 
+static std::wstring DesktopStubContentProfileValue(
+    const wchar_t* section,
+    const wchar_t* key,
+    const wchar_t* fallback,
+    bool includeCommandLineOverrides)
+{
+    std::wstring value = IniReadS(section, key, fallback);
+    if (!includeCommandLineOverrides)
+        return value;
+
+    for (const auto& entry : g_commandLine.settings)
+    {
+        if (IEquals(entry.section, section ? section : L"") &&
+            IEquals(entry.key, key ? key : L""))
+        {
+            value = entry.value;
+        }
+    }
+    return value;
+}
+
+static bool ValidateDesktopStubContentProfileValues(
+    const std::wstring& contentSourceValue,
+    const std::wstring& feedUrlValue,
+    const std::wstring& userAgentValue,
+    const std::wstring& updateIntervalValue,
+    const std::wstring& maxItemsValue,
+    const std::wstring& httpTimeoutValue,
+    const std::wstring& maxFeedBytesValue,
+    std::wstring& error)
+{
+    ContentSource source = ParseContentSourceValue(
+        contentSourceValue,
+        static_cast<ContentSource>(-1));
+    if (!IsValidContentSource(source))
+    {
+        error = L"[Settings] ContentSource expects Wallpaper or RssFeed.";
+        return false;
+    }
+
+    std::wstring normalizedFeedUrl;
+    if (!ValidateRssFeedUrlSetting(
+            feedUrlValue,
+            source != ContentSource::RssFeed,
+            normalizedFeedUrl,
+            error))
+    {
+        return false;
+    }
+
+    std::wstring normalizedUserAgent;
+    if (!ValidateRssFeedUserAgentSetting(
+            userAgentValue,
+            normalizedUserAgent,
+            error))
+    {
+        return false;
+    }
+
+    struct IntegerValue
+    {
+        const wchar_t* key;
+        std::wstring value;
+    };
+    IntegerValue integerValues[] = {
+        {L"UpdateIntervalSeconds", updateIntervalValue},
+        {L"MaxItems", maxItemsValue},
+        {L"HttpTimeoutSeconds", httpTimeoutValue},
+        {L"MaxFeedBytes", maxFeedBytesValue},
+    };
+    for (auto& entry : integerValues)
+    {
+        if (!NormalizeDesktopStubTypedSetting(
+                L"RssFeed",
+                entry.key,
+                entry.value,
+                error))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool ValidateDesktopStubContentProfile(
+    bool includeCommandLineOverrides,
+    std::wstring& error)
+{
+    aip::content::Configuration composition;
+    if (!aip::content::ReadConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
+    }, composition, error)) return false;
+
+    bool usesRss = false;
+    for (const auto& entry : composition.entries)
+        if (composition.enabled && entry.enabled && std::find(entry.sources.begin(), entry.sources.end(), L"RssFeed") != entry.sources.end()) usesRss = true;
+    return ValidateDesktopStubContentProfileValues(
+        usesRss ? L"RssFeed" : composition.enabled ? L"Wallpaper" : DesktopStubContentProfileValue(
+            L"Settings",
+            L"ContentSource",
+            L"Wallpaper",
+            includeCommandLineOverrides),
+        DesktopStubContentProfileValue(
+            L"RssFeed",
+            L"FeedUrl",
+            L"",
+            includeCommandLineOverrides),
+        DesktopStubContentProfileValue(
+            L"RssFeed",
+            L"UserAgent",
+            L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)",
+            includeCommandLineOverrides),
+        DesktopStubContentProfileValue(
+            L"RssFeed",
+            L"UpdateIntervalSeconds",
+            L"900",
+            includeCommandLineOverrides),
+        DesktopStubContentProfileValue(
+            L"RssFeed",
+            L"MaxItems",
+            L"5",
+            includeCommandLineOverrides),
+        DesktopStubContentProfileValue(
+            L"RssFeed",
+            L"HttpTimeoutSeconds",
+            L"20",
+            includeCommandLineOverrides),
+        DesktopStubContentProfileValue(
+            L"RssFeed",
+            L"MaxFeedBytes",
+            L"2097152",
+            includeCommandLineOverrides),
+        error);
+}
+
+static bool ValidateConfiguredRssSettingsForContentSource(
+    ContentSource source,
+    std::wstring& error)
+{
+    if (source == ContentSource::Wallpaper)
+        return true;
+
+    return ValidateDesktopStubContentProfileValues(
+        ContentSourceIniValue(source),
+        IniReadS(L"RssFeed", L"FeedUrl", L""),
+        IniReadS(
+            L"RssFeed",
+            L"UserAgent",
+            L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)"),
+        IniReadS(L"RssFeed", L"UpdateIntervalSeconds", L"900"),
+        IniReadS(L"RssFeed", L"MaxItems", L"5"),
+        IniReadS(L"RssFeed", L"HttpTimeoutSeconds", L"20"),
+        IniReadS(L"RssFeed", L"MaxFeedBytes", L"2097152"),
+        error);
+}
+
+static bool FindDesktopStubStartupPreference(
+    bool& found,
+    bool& desired,
+    std::wstring& error)
+{
+    found = false;
+    desired = false;
+    for (const auto& entry : g_commandLine.settings)
+    {
+        if (!IsDesktopStubStartupSetting(entry.section, entry.key))
+            continue;
+
+        if (!TryParseCommandLineBoolValue(entry.value, desired))
+        {
+            error = L"Settings.RunAtStartup expects a true/false value.";
+            return false;
+        }
+        found = true;
+    }
+    return true;
+}
+
 static bool ApplyCommandLinePersistentSettings()
 {
     g_commandLine.applyError.clear();
     g_commandLine.liveTileModeChanged = false;
     g_commandLine.trayIconChanged = false;
+    if (!ValidateDesktopStubContentProfile(true, g_commandLine.applyError))
+    {
+        g_commandLine.applyError =
+            L"Invalid content-source configuration: " +
+            g_commandLine.applyError;
+        return false;
+    }
+    if (g_commandLine.settings.empty())
+        return true;
 
+    std::wstring packagedStartupTarget = IniReadS(L"Settings", L"AppxManifestTarget", L"Windows10");
+    for (const auto& entry : g_commandLine.settings)
+        if (IEquals(entry.section, L"Settings") && IEquals(entry.key, L"AppxManifestTarget")) packagedStartupTarget = entry.value;
+    for (const auto& entry : g_commandLine.settings)
+    {
+        if (!IEquals(entry.section, L"Settings") || !IEquals(entry.key, L"RunAtStartupPackaged")) continue;
+        bool desired = false;
+        if (!TryParseCommandLineBoolValue(entry.value, desired) ||
+            !ValidateDesktopStubPackagedStartupPreference(desired, g_commandLine.applyError, packagedStartupTarget.c_str())) return false;
+    }
+
+    bool startupExplicit = false;
+    bool startupDesired = false;
+    if (!FindDesktopStubStartupPreference(
+            startupExplicit,
+            startupDesired,
+            g_commandLine.applyError))
+    {
+        return false;
+    }
+
+    bool changesLiveTileMode = false;
+    bool changesTrayIcon = false;
+    bool changesManifest = false;
     for (const auto& entry : g_commandLine.settings)
     {
         if (CommandLineSettingTargetsObsoleteManifestSection(entry))
@@ -1650,27 +2212,63 @@ static bool ApplyCommandLinePersistentSettings()
             return false;
         }
 
-        bool changesLiveTileMode = CommandLineSettingChangesLiveTileMode(entry);
-        bool changesTrayIcon = CommandLineSettingChangesTrayIcon(entry);
-        bool changesManifest = CommandLineSettingChangesManifest(entry);
-        if (!WriteIniValue(entry.section.c_str(), entry.key.c_str(), entry.value.c_str()))
-        {
-            DWORD err = GetLastError();
-            if (err == ERROR_SUCCESS)
-                err = ERROR_WRITE_FAULT;
-            g_commandLine.applyError = L"Failed to write command-line setting [" +
-                entry.section + L"] " + entry.key + L" (error " +
-                std::to_wstring(err) + L").";
-            return false;
-        }
-
-        if (changesLiveTileMode)
-            g_commandLine.liveTileModeChanged = true;
-        if (changesTrayIcon)
-            g_commandLine.trayIconChanged = true;
-        if (changesManifest)
-            g_commandLine.regenerateManifest = true;
+        changesLiveTileMode = changesLiveTileMode ||
+            CommandLineSettingChangesLiveTileMode(entry);
+        changesTrayIcon = changesTrayIcon ||
+            CommandLineSettingChangesTrayIcon(entry);
+        changesManifest = changesManifest ||
+            CommandLineSettingChangesManifest(entry);
     }
 
+    auto mutateSettings = [&](std::wstring& text)
+    {
+        for (const auto& entry : g_commandLine.settings)
+        {
+            const wchar_t* value = entry.value.c_str();
+            if (IsDesktopStubStartupSetting(entry.section, entry.key))
+                value = startupDesired ? L"1" : L"0";
+            if (!WriteIniValueToText(
+                    text,
+                    entry.section.c_str(),
+                    entry.key.c_str(),
+                    value))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    std::wstring startupTransactionError;
+    bool saved = startupExplicit
+        ? CommitDesktopStubStartupIniState(
+            startupDesired,
+            mutateSettings,
+            startupTransactionError)
+        : MutateDesktopStubIniWithWait(
+            mutateSettings,
+            CurrentIniWriteLockWaitMs());
+    if (!saved)
+    {
+        DWORD saveError = GetLastError();
+        if (startupExplicit && !startupTransactionError.empty())
+        {
+            g_commandLine.applyError =
+                L"Failed to commit command-line settings with this profile's "
+                L"shell:startup shortcut: " + startupTransactionError;
+            return false;
+        }
+        if (saveError == ERROR_SUCCESS)
+            saveError = ERROR_WRITE_FAULT;
+        g_commandLine.applyError = L"Failed to save the command-line setting batch (error " +
+            std::to_wstring(saveError) + L": " +
+            aip::GetLastErrorText(saveError) + L").";
+        return false;
+    }
+
+    g_commandLine.liveTileModeChanged = changesLiveTileMode;
+    g_commandLine.trayIconChanged = changesTrayIcon;
+    if (changesManifest)
+        g_commandLine.regenerateManifest = true;
     return true;
 }

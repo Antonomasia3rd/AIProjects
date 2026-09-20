@@ -1,8 +1,8 @@
 # DesktopStub
 
-`DesktopStub.exe` is a tray utility that generates Windows Start tile content and registers a loose Appx manifest for a desktop tile entry. By default it draws that content from the current desktop wallpaper; setting `ContentSource=RssFeed` switches it to RSS/Atom feed headlines instead (see "RSS Feed Content Source" below) -- a renamed, separately-configured copy of the same executable then runs as its own independent Start tile.
+`DesktopStub.exe` generates Windows Start tile content and registers a loose Appx manifest for a desktop tile entry. Wallpaper remains the default. The Content and sources menu can compose wallpaper/custom images with RSS, custom text, SMTC media information and Caps Lock status, with separate refresh and cycle timing. See the [content engine guide](../docs/content-engine.md).
 
-The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale settings, then regenerate assets and re-register the manifest automatically. Most behavior is configurable through the tray menu and generated INI file. (This paragraph and the sections through "Tile Text Overlay" describe the default wallpaper content source specifically; RSS mode has its own section further down.)
+The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale settings, then regenerate assets and re-register the manifest automatically. Most behavior is configurable through the tray menu and generated INI file. The same generation and delivery pipeline now handles composed content.
 
 ## Requirements
 
@@ -37,13 +37,16 @@ If `build\DesktopStub.exe` or `build\DesktopStubLiveTileBroker.exe` is running, 
 
 ## Developer Checks
 
-`TestDesktopStubSource.cmd` builds and runs two things. First, a small C++ maintainer regression guard that does not build or launch `DesktopStub.exe`; it scans the source for safety fixes that should not be accidentally removed. Second, `TileTextLayoutTests.exe`, which exercises the `[TileText]` overlay's region-selection math (see "Tile Text Overlay" below) -- this one has no Windows dependency and can also be compiled and run directly with any C++17 compiler, without `cl.exe`.
+`TestDesktopStubSource.cmd` runs source contracts, portable content scheduling/configuration tests, geometry tests, actual preset XML tests, and the production GDI+ renderer harness. `tools/TestContentRuntime.cmd` also exercises the actual host's content snapshots and Win32 menu dispatch using a temporary INI; it never calls the application entry point or registers a package. The renderer writes a PNG contact sheet under `DesktopStub/build/tile-render-smoke`.
 
 ```cmd
 DesktopStub\TestDesktopStubSource.cmd
+tools\TestContentRuntime.cmd
 ```
 
-Use `--list` to print the guardrails without running assertions. Both helper binaries are emitted under `DesktopStub\build` and are not part of the DesktopStub runtime.
+Portable C++ tests run with CMake on Windows/Linux/macOS without WSL. Windows UI and shell behavior still require Windows. Commands and measured outcomes are in [the audit](../docs/REWORK_AUDIT.md); passing source checks alone is not proof of runtime/UI correctness.
+
+The default binary smoke copies its inputs into a temporary directory and uses offline commands. It does not register packages, publish or clear native tiles, capture the desktop, or start live content providers. A Windows job terminates child processes if the runner is interrupted; temporary diagnostic files can remain. Real package/resident integration is excluded unless `--allow-package-integration` is explicitly supplied, and belongs in a disposable Windows test environment. See [smoke isolation and validation](../docs/audit-smoke-safety.md).
 
 ## Run
 
@@ -75,7 +78,7 @@ On first launch the app creates `DesktopStub.ini` next to the executable. The tr
 - advanced timing/error options;
 - startup/cleanup actions.
 
-Command-line settings are saved to `DesktopStub.ini`, the same configuration file used by the tray menu. Action-only commands such as `--once`, `--generate`, `--no-monitor`, and `--exit` affect only that invocation.
+Command-line settings are saved as one all-or-nothing batch to `DesktopStub.ini`, the same configuration file used by the tray menu. A Startup shortcut change is rolled back if the matching INI commit fails. Action-only commands such as `--once`, `--generate`, `--no-monitor`, and `--exit` affect only that invocation.
 
 Ordinary second launches are configurable through `[Settings] AlreadyRunningAction` or **Advanced > Single instance > Second-launch action**. `ShowTray` preserves the default behavior, `Generate` requests a fresh generation in the resident instance, `ShowConsole` opens its diagnostic console for the current session without changing `ShowConsole`, and `Ignore` exits the new process without signaling the resident instance. Explicit command-line requests such as `--generate`, `--exit`, or persistent `--set` changes always take precedence. This is intentionally coordinated single-instance behavior: use a separate `--ini` path for an independently running instance so concurrent copies do not write the same configuration, assets, and package registration.
 
@@ -121,10 +124,19 @@ Supported options:
 - `--set Section.Key=Value`: set and save an INI value used by the app. Manifest fields are controlled through `[Settings] Manifest*` keys; changing them by command line regenerates `AppxManifest.xml`.
 - `--exit` / `--quit`: ask the running instance to exit gracefully.
 - `--once`: generate once and exit.
+- `--render-only`: render local tile assets and exit before package registration, activation, native tile updates, Startup handling or resident signaling. Supply `--wallpaper`, or use an enabled Image/None content entry containing only CustomText. With `--regenerate-manifest` and no image, it only writes the local manifest/configuration. External providers are rejected.
+- `--configure-only`: validate and save the requested INI settings without starting or signaling the resident. Explicit Startup changes are rejected; existing Startup preferences are preserved without applying them.
 - `--regenerate-manifest`: rewrite `AppxManifest.xml` once from the configured manifest defaults.
 - `--generate` / `--generate-now`: force startup generation and keep running.
 - `--wallpaper <path>` or a bare wallpaper path: generate from that image.
+- `--content-source Wallpaper|RssFeed`: select the legacy wallpaper/RSS preset. The unified monitor applies source changes without a restart; Content.Enabled=1 takes precedence for numbered entries.
+- `--rss-feed-url <http(s)://...>` and `--rss-user-agent <text>`: set the RSS endpoint and HTTP user agent.
+- `--rss-update-interval <60-86400>`, `--rss-max-items <1-20>`, `--rss-http-timeout <5-120>`, and `--rss-max-feed-bytes <65536-16777216>`: set the bounded RSS fetch controls.
 - `--no-monitor`: skip wallpaper/fit/DPI monitoring.
+- `--startup` / `--no-startup`: add or remove this INI profile's shortcut in the current user's `shell:startup` folder. The INI, command line, and tray use the same ownership-checked shared shortcut lifecycle; no Run-registry or scheduled-task entry is used. Startup and the full INI batch commit under shared locks: enable installs before saving `true`, while disable saves `false` before removal, so an interrupted change self-reconciles on the next launch.
+- `--packaged-startup` / `--no-packaged-startup`: save `[Settings] RunAtStartupPackaged=1/0` independently of the Startup-folder shortcut. The tray calls this **Run at sign-in (Windows startup task)**. Windows applies it asynchronously when DesktopStub runs with package identity and the Windows10 manifest target; **Windows startup task status...** reports actual OS state and errors separately from the requested checkbox. The default is off. Custom `--ini` profiles must use the Startup-folder option because a package-wide task launches the default profile. Windows8/Windows81 keep using the Startup-folder option.
+
+Generated Windows10 manifests declare the packaged task initially disabled. Existing custom manifests are preserved. If an older registered package lacks the task, regenerate its Windows10 manifest using the existing manifest command/menu, register the updated package, and relaunch its packaged entry. Save any manual manifest customizations first. Enabling can be refused by Windows if you disabled the app in Task Manager or an administrator policy controls it; DesktopStub reports this and does not override that decision. The Windows task does not create a shortcut or a Run-registry entry. If both startup methods are enabled, Windows can issue two launches; normally choose the one that matches how you run the app.
 - `--tray` / `--no-tray`, `--console` / `--no-console`, `--logging` / `--no-logging`, `--notifications` / `--no-notifications`.
 - `--trim-working-set-on-idle` / `--no-trim-working-set-on-idle`: lower idle Task Manager memory by trimming the working set.
 - `--compact-crt-heap-on-idle` / `--no-compact-crt-heap-on-idle`: release free CRT heap pages after idle work.
@@ -175,7 +187,7 @@ Supported options:
 - Supports quoted INI values and inline comments.
 - Keeps detailed logs and exposes registration output from the tray.
 - Records forced-shutdown cleanup state and warns on the next startup.
-- Can drive its Live Tile from an RSS/Atom feed instead of wallpaper (`ContentSource=RssFeed`); a renamed, separately-configured copy runs as its own independent Start tile. See "RSS Feed Content Source" below.
+- Can compose RSS/Atom headlines over wallpaper or a custom image, alongside custom text, SMTC and Caps Lock status. Separate configured copies can still provide independent Start tiles. See "RSS Feed Content Source" below.
 
 ## Source Layout
 
@@ -197,7 +209,7 @@ Supported options:
 - `ga_generation.inc`: asset generation, polling, and shutdown coordination.
 - `ga_live_tile.inc`: Live Tile notification update handling.
 - `ga_live_tile_templates.inc`: Windows 8.1 preset-catalog binding selection and XML fragments.
-- `ga_rss_feed.inc`: RSS/Atom feed fetch, parse, and text-bound tile XML generation for the `ContentSource=RssFeed` content source. Independent of the wallpaper path -- see "RSS Feed Content Source" below.
+- `ga_rss_feed.inc`: RSS/Atom feed data provider. Rendering and delivery belong to the common content pipeline, not to the feed module.
 - `ga_tray.inc`: tray wrapper that includes smaller helper/menu/dispatch fragments.
 - `ga_tray_helpers.inc`, `ga_tray_menu.inc`, `ga_tray_dispatch.inc`: tray helpers, menu construction, and command dispatch.
 - `ga_app.inc`: window procedure and application startup/shutdown.
@@ -214,6 +226,7 @@ Generated/runtime files live under `DesktopStub\build` and are ignored by git. T
 - `{ProductRuntimeBaseName}LiveTileTask.dll` only if manually built for the disabled background-task experiment
 - `{ProductRuntimeBaseName}.ini`
 - `{ProductRuntimeBaseName}.log`
+- an optional profile-scoped `.lnk` in the current user's `shell:startup` folder
 - `{ProductRuntimeBaseName}.appxactivation.log`
 - `{ProductRuntimeBaseName}.livetile.pending.xml`
 - `{ProductRuntimeBaseName}.livetile.clear`
@@ -270,35 +283,24 @@ The displayed name comes from `ManifestDisplayName` (`Desktop` by default). Bran
 
 ## RSS Feed Content Source
 
-By default `DesktopStub.exe` drives its Live Tile from the desktop wallpaper (everything in the section above). Setting `[Settings] ContentSource=RssFeed` in the INI switches this *instance* to an entirely different content source: it polls an RSS or Atom feed instead and shows rotating headlines on the tile. This replaces what used to be a separate `RssLiveTile.exe` binary (retired; see `CHANGELOG.md` for its history) -- a renamed, separately-configured copy of `DesktopStub.exe` already gets its own AppX package identity (see `ManifestDefaultIdentityForExecutable`) and its own resident instance (see `ConfigureSingleInstanceIdentity`), so it can run as its own independent Start tile the same way the old standalone app did, just without a second codebase to maintain.
+The old `Settings.ContentSource=RssFeed` preset now maps to ordered headline entries in the content engine, with wallpaper behind them. It no longer selects an exclusive notification-publishing worker. The tray exposes both source choices and all RSS values, as well as the new numbered content configuration. See [content composition, examples and timing](../docs/content-engine.md).
 
-To run an RSS-mode instance:
+Use `--content-source Wallpaper|RssFeed` and `--rss-feed-url <http(s)://...>` for legacy profiles, or enable `RssFeed` in an entry's TextSources. Known content/RSS settings use one typed validation contract across INI, CLI and tray. Invalid profiles fail explicitly instead of being silently clamped; resident errors are logged and shown as source status. A command can set the URL and source together:
 
-1. Copy `DesktopStub.exe` to a different name in the same folder, e.g. `RssFeedTile.exe`.
-2. Create `RssFeedTile.ini` beside it (same folder) with at least:
-   ```ini
-   [Settings]
-   ContentSource=RssFeed
+```cmd
+DesktopStub.exe --content-source rss --rss-feed-url https://example.com/feed.xml --rss-update-interval 900
+```
 
-   [RssFeed]
-   FeedUrl=https://example.com/feed.xml
-   ```
-3. Run `RssFeedTile.exe`. It registers its own package (default identity `dev.local.RssFeedTile`) and starts polling.
+| `[RssFeed]` key | Default | Meaning |
+|---|---|---|
+| `FeedUrl` | empty | Required when RSS is enabled; HTTP or HTTPS. |
+| `UserAgent` | DesktopStub RSS user agent | Header sent with the request. |
+| `UpdateIntervalSeconds` | `900` | Fetch interval, 60–86400 seconds; independent of content cycling. |
+| `MaxItems` | `5` | Maximum parsed entries, 1–20. The legacy preset cycles these through the content host. |
+| `HttpTimeoutSeconds` | `20` | Total HTTP request budget, 5–120 seconds. |
+| `MaxFeedBytes` | `2097152` | Response limit, 64 KiB–16 MiB. |
 
-`ContentSource` is read once at startup, not hot-reloadable -- switching an existing instance between `Wallpaper` and `RssFeed` needs a restart, since it decides which background thread runs (the wallpaper watcher or the feed poller), not just what gets drawn.
-
-`[RssFeed]` settings (all optional except `FeedUrl`, read fresh on every poll cycle so edits take effect on the next cycle without a restart):
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `FeedUrl` | *(required)* | RSS or Atom feed URL. Must be `http://` or `https://`. |
-| `UserAgent` | `Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)` | Sent with the fetch request. |
-| `UpdateIntervalSeconds` | `900` | How often to re-fetch and refresh the tile (60-86400). |
-| `MaxItems` | `5` | Maximum feed entries to queue for Windows to rotate through on the tile (1-20). |
-| `HttpTimeoutSeconds` | `20` | WinHTTP timeout for connect/send/receive (5-120). |
-| `MaxFeedBytes` | `2097152` | Response size cap; the fetch is aborted past this (64 KiB - 16 MiB). |
-
-Manifest customization (`ManifestDisplayName`, `ManifestIdentityName`, logo assets, etc.) works the same way for RSS-mode instances as it does for wallpaper-mode ones -- see the sections above. `ManifestRestrictedCapability` stays `runFullTrust` by default for both content sources; RSS mode does not need `internetClient` or any other capability, since `runFullTrust` apps are not AppContainer-sandboxed and are not subject to capability-gated network access.
+RSS is data-only: it uses the same image generation, package registration, delivery mode and Windows compatibility targets as other content. Windows 10 live notifications retain activation of the selected headline's HTTP(S) link. Static registration tiles and older compatibility targets use the normal app activation.
 
 ## Tile Text Overlay
 

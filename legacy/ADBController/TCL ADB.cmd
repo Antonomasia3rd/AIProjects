@@ -3,8 +3,8 @@ setlocal EnableExtensions
 
 set "PROGRAM=%~dp0build\ADBController.exe"
 if exist "%PROGRAM%" (
-    start "" "%PROGRAM%"
-    exit /b 0
+    "%PROGRAM%" %*
+    exit /b %ERRORLEVEL%
 )
 
 echo ADBController.exe has not been built yet.

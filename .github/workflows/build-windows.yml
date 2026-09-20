@@ -37,6 +37,22 @@ permissions:
   contents: read
 
 jobs:
+  test-portable-layout:
+    name: Test portable source contracts and TileText layout
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Configure portable tests
+        run: cmake -S tools -B build/portable -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build portable tests
+        run: cmake --build build/portable --parallel 2
+
+      - name: Run portable tests
+        run: ctest --test-dir build/portable --output-on-failure
+
   detect-projects:
     name: Detect changed projects
     runs-on: windows-2022
@@ -56,7 +72,6 @@ jobs:
       build_now_playing_tile: ${{ steps.detect.outputs.build_now_playing_tile }}
       build_photo_collage: ${{ steps.detect.outputs.build_photo_collage }}
       build_desktop_stub: ${{ steps.detect.outputs.build_desktop_stub }}
-      build_rss_live_tile: ${{ steps.detect.outputs.build_rss_live_tile }}
       build_charm_tray: ${{ steps.detect.outputs.build_charm_tray }}
       build_secure_desktop_launcher: ${{ steps.detect.outputs.build_secure_desktop_launcher }}
       build_task_scheduler_migration: ${{ steps.detect.outputs.build_task_scheduler_migration }}
@@ -98,7 +113,7 @@ jobs:
 
   build-windows:
     name: Build Windows binaries
-    needs: detect-projects
+    needs: [detect-projects, test-portable-layout]
     runs-on: windows-2022
     permissions:
       contents: read
@@ -109,14 +124,37 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Ensure MinGW-w64 for deskband build
-        if: needs.detect-projects.outputs.build_all == 'true' || needs.detect-projects.outputs.build_real_time_notes_deskband == 'true'
-        shell: cmd
-        run: .github\scripts\Ensure-Mingw.cmd
-
       - name: Test shared C++ baseline
         shell: cmd
         run: tools\TestSharedBaseline.cmd
+
+      - name: Test shared media source
+        shell: cmd
+        run: tools\TestSmtcSource.cmd
+
+      - name: Test bounded HTTP fetching on localhost
+        shell: cmd
+        run: tools\TestHttpFetch.cmd
+
+      - name: Test shared notes with synthetic data
+        shell: cmd
+        run: tools\TestNotesSource.cmd
+
+      - name: Test smoke runner interruption cleanup
+        shell: cmd
+        run: .github\scripts\repo-tools.cmd smoke-cleanup-tests
+
+      - name: Test shared Discord service with inert fixtures
+        shell: cmd
+        run: tools\TestDiscordService.cmd
+
+      - name: Test ASUS patterns with native hardware excluded
+        shell: cmd
+        run: tools\TestAsusEngine.cmd
+
+      - name: Test Caps patterns with an inert device backend
+        shell: cmd
+        run: tools\TestCapsBlinkEngine.cmd
 
       - name: Prepare reusable release versions
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-projects.outputs.release_project_list != ''
@@ -137,7 +175,7 @@ jobs:
 
       - name: Run smoke tests
         shell: cmd
-        run: .github\scripts\Smoke-WindowsBuild.cmd
+        run: .github\scripts\Smoke-WindowsBuild.cmd --projects "${{ needs.detect-projects.outputs.project_list }}"
 
       - name: Upload AllowContentAboveLock artifact
         if: needs.detect-projects.outputs.build_allow_content_above_lock == 'true'

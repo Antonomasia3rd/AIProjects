@@ -1,0 +1,10 @@
+includeProperties: 1
+styleRelevantPropertiesOnly: 1
+includeVisualStates: 1
+includeRectangle: 1
+settleDelayMs: 3000
+initialSnapshotDelayMs: 10000
+maxSnapshotWaitMs: 20000
+verificationSnapshotDelayMs: 5000
+maxSnapshots: 4
+logFallback: 0

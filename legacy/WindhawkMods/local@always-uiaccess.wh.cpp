@@ -2,7 +2,7 @@
 // @id              always-uiaccess
 // @name            Always UIAccess
 // @description     Creates or patches allowlisted child processes as UIAccess from hook-host processes selected by Windhawk's own inclusion list.
-// @version         2.4.2
+// @version         2.4.3
 // @author          local
 // @include         windhawk.exe
 // @compilerOptions -ladvapi32 -luser32
@@ -34,6 +34,10 @@ Simplified model:
    Use semicolons if the settings textbox does not allow line breaks.
 
 Runtime flow:
+
+- Settings reloads atomically publish one immutable generation. A launch or
+  broker request already in progress finishes with the generation it started
+  with; later operations use the new settings.
 
 - If a hook host creates an allowlisted non-debug child, the CreateProcessW hook
   asks the Windhawk service to create the child directly as UIAccess. There is no
@@ -83,6 +87,7 @@ No osk.exe token source is used.
 #include <windows.h>
 #include <sddl.h>
 #include <tlhelp32.h>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -145,14 +150,25 @@ static HANDLE g_stopEvent = nullptr;
 static HANDLE g_pipeThread = nullptr;
 static HANDLE g_autoTopmostStopEvent = nullptr;
 static HANDLE g_autoTopmostThread = nullptr;
-static bool g_patchDebugChildrenEarly = true;
 static bool g_createProcessHookInstalled = false;
-static bool g_autoAlwaysOnTop = false;
-static bool g_autoAlwaysOnTopVisibleOnly = true;
-static bool g_skipChromiumElectronSubprocessTargets = true;
-static std::vector<std::wstring> g_uiAccessTargetPatterns;
-static DWORD g_autoAlwaysOnTopDurationMs = 15000;
-static DWORD g_autoAlwaysOnTopIntervalMs = 250;
+
+// Settings are read from the CreateProcess hook and worker threads while
+// Windhawk can reload them on another thread. Publish one immutable generation
+// atomically: readers take a cheap shared_ptr snapshot and keep its strings and
+// vector alive until the complete operation finishes.
+struct Settings {
+    bool patchDebugChildrenEarly = true;
+    bool autoAlwaysOnTop = false;
+    bool autoAlwaysOnTopVisibleOnly = true;
+    bool skipChromiumElectronSubprocessTargets = true;
+    std::vector<std::wstring> uiAccessTargetPatterns;
+    DWORD autoAlwaysOnTopDurationMs = 15000;
+    DWORD autoAlwaysOnTopIntervalMs = 250;
+};
+
+using SettingsSnapshot = std::shared_ptr<const Settings>;
+
+static SettingsSnapshot g_settings = std::make_shared<const Settings>();
 
 #pragma pack(push, 1)
 struct UIAccessRequest {
@@ -361,9 +377,7 @@ static PCWSTR PathBaseName(PCWSTR path) {
     return base ? base + 1 : path;
 }
 
-static void LoadTargetPathAllowlistSetting() {
-    g_uiAccessTargetPatterns.clear();
-
+static void LoadTargetPathAllowlistSetting(Settings* settings) {
     PCWSTR rawAllowlist = Wh_GetStringSetting(L"targetPathAllowlist");
     if (!rawAllowlist) {
         return;
@@ -394,13 +408,13 @@ static void LoadTargetPathAllowlistSetting() {
 
         std::wstring normalized = NormalizeTargetPathForMatch(line);
         if (!normalized.empty()) {
-            g_uiAccessTargetPatterns.push_back(normalized);
+            settings->uiAccessTargetPatterns.push_back(normalized);
         }
     }
 }
 
-static bool IsPathInTargetAllowlist(PCWSTR path) {
-    if (g_uiAccessTargetPatterns.empty()) {
+static bool IsPathInTargetAllowlist(PCWSTR path, const Settings& settings) {
+    if (settings.uiAccessTargetPatterns.empty()) {
         return false;
     }
 
@@ -411,7 +425,7 @@ static bool IsPathInTargetAllowlist(PCWSTR path) {
 
     PCWSTR baseName = PathBaseName(normalizedPath.c_str());
 
-    for (const std::wstring& pattern : g_uiAccessTargetPatterns) {
+    for (const std::wstring& pattern : settings.uiAccessTargetPatterns) {
         if (PatternHasPathPart(pattern.c_str())) {
             if (WildcardMatchInsensitive(pattern.c_str(), normalizedPath.c_str())) {
                 return true;
@@ -514,30 +528,47 @@ static DWORD ClampDword(DWORD value, DWORD minimum, DWORD maximum) {
     return value;
 }
 
-static void LoadSettings() {
-    LoadTargetPathAllowlistSetting();
+static SettingsSnapshot GetSettingsSnapshot() {
+    return std::atomic_load_explicit(&g_settings, std::memory_order_acquire);
+}
 
-    g_patchDebugChildrenEarly = Wh_GetIntSetting(L"patchDebugChildrenEarly") != 0;
-    g_autoAlwaysOnTop = Wh_GetIntSetting(L"autoAlwaysOnTop") != 0;
-    g_autoAlwaysOnTopVisibleOnly = Wh_GetIntSetting(L"autoAlwaysOnTopVisibleOnly") != 0;
-    g_skipChromiumElectronSubprocessTargets =
+static SettingsSnapshot LoadSettings() {
+    auto settings = std::make_shared<Settings>();
+    LoadTargetPathAllowlistSetting(settings.get());
+
+    settings->patchDebugChildrenEarly =
+        Wh_GetIntSetting(L"patchDebugChildrenEarly") != 0;
+    settings->autoAlwaysOnTop =
+        Wh_GetIntSetting(L"autoAlwaysOnTop") != 0;
+    settings->autoAlwaysOnTopVisibleOnly =
+        Wh_GetIntSetting(L"autoAlwaysOnTopVisibleOnly") != 0;
+    settings->skipChromiumElectronSubprocessTargets =
         Wh_GetIntSetting(L"skipChromiumElectronSubprocessTargets") != 0;
 
-    g_autoAlwaysOnTopDurationMs = static_cast<DWORD>(
+    settings->autoAlwaysOnTopDurationMs = static_cast<DWORD>(
         Wh_GetIntSetting(L"autoAlwaysOnTopDurationMs"));
-    if (g_autoAlwaysOnTopDurationMs != 0) {
-        g_autoAlwaysOnTopDurationMs = ClampDword(g_autoAlwaysOnTopDurationMs,
-                                                 500,
-                                                 120000);
+    if (settings->autoAlwaysOnTopDurationMs != 0) {
+        settings->autoAlwaysOnTopDurationMs = ClampDword(
+            settings->autoAlwaysOnTopDurationMs,
+            500,
+            120000);
     }
 
-    g_autoAlwaysOnTopIntervalMs = ClampDword(
+    settings->autoAlwaysOnTopIntervalMs = ClampDword(
         static_cast<DWORD>(Wh_GetIntSetting(L"autoAlwaysOnTopIntervalMs")),
         50,
         5000);
+
+    SettingsSnapshot snapshot = settings;
+    std::atomic_store_explicit(
+        &g_settings,
+        snapshot,
+        std::memory_order_release);
+    return snapshot;
 }
 
-static BOOL CALLBACK AutoTopmostEnumWindowsProc(HWND hwnd, LPARAM) {
+static BOOL CALLBACK AutoTopmostEnumWindowsProc(HWND hwnd, LPARAM context) {
+    const auto* settings = reinterpret_cast<const Settings*>(context);
     DWORD windowPid = 0;
     GetWindowThreadProcessId(hwnd, &windowPid);
     if (windowPid != GetCurrentProcessId()) {
@@ -549,7 +580,7 @@ static BOOL CALLBACK AutoTopmostEnumWindowsProc(HWND hwnd, LPARAM) {
         return TRUE;
     }
 
-    if (g_autoAlwaysOnTopVisibleOnly && !IsWindowVisible(hwnd)) {
+    if (settings->autoAlwaysOnTopVisibleOnly && !IsWindowVisible(hwnd)) {
         return TRUE;
     }
 
@@ -564,28 +595,39 @@ static BOOL CALLBACK AutoTopmostEnumWindowsProc(HWND hwnd, LPARAM) {
     return TRUE;
 }
 
-static void ApplyAutoAlwaysOnTop() {
-    EnumWindows(AutoTopmostEnumWindowsProc, 0);
+static void ApplyAutoAlwaysOnTop(const Settings& settings) {
+    EnumWindows(AutoTopmostEnumWindowsProc,
+                reinterpret_cast<LPARAM>(&settings));
 }
 
-static DWORD WINAPI AutoTopmostThreadProc(LPVOID) {
+struct AutoTopmostThreadContext {
+    SettingsSnapshot settings;
+    HANDLE stopEvent = nullptr;
+};
+
+static DWORD WINAPI AutoTopmostThreadProc(LPVOID parameter) {
+    std::unique_ptr<AutoTopmostThreadContext> context(
+        static_cast<AutoTopmostThreadContext*>(parameter));
+    const Settings& settings = *context->settings;
+
     Wh_Log(L"[Always UIAccess] Auto always-on-top worker started. duration=%u interval=%u visibleOnly=%d",
-           g_autoAlwaysOnTopDurationMs,
-           g_autoAlwaysOnTopIntervalMs,
-           g_autoAlwaysOnTopVisibleOnly ? 1 : 0);
+           settings.autoAlwaysOnTopDurationMs,
+           settings.autoAlwaysOnTopIntervalMs,
+           settings.autoAlwaysOnTopVisibleOnly ? 1 : 0);
 
     const DWORD started = GetTickCount();
 
     for (;;) {
-        ApplyAutoAlwaysOnTop();
+        ApplyAutoAlwaysOnTop(settings);
 
-        if (g_autoAlwaysOnTopDurationMs != 0 &&
-            GetTickCount() - started >= g_autoAlwaysOnTopDurationMs) {
+        if (settings.autoAlwaysOnTopDurationMs != 0 &&
+            GetTickCount() - started >= settings.autoAlwaysOnTopDurationMs) {
             break;
         }
 
-        if (WaitForSingleObject(g_autoTopmostStopEvent,
-                                g_autoAlwaysOnTopIntervalMs) == WAIT_OBJECT_0) {
+        if (WaitForSingleObject(context->stopEvent,
+                                settings.autoAlwaysOnTopIntervalMs) ==
+            WAIT_OBJECT_0) {
             break;
         }
     }
@@ -594,8 +636,9 @@ static DWORD WINAPI AutoTopmostThreadProc(LPVOID) {
     return 0;
 }
 
-static bool StartAutoTopmostThreadIfNeeded() {
-    if (!g_autoAlwaysOnTop || g_autoTopmostThread) {
+static bool StartAutoTopmostThreadIfNeeded(
+    const SettingsSnapshot& settings) {
+    if (!settings->autoAlwaysOnTop || g_autoTopmostThread) {
         return g_autoTopmostThread != nullptr;
     }
 
@@ -606,10 +649,14 @@ static bool StartAutoTopmostThreadIfNeeded() {
         return false;
     }
 
+    auto context = std::make_unique<AutoTopmostThreadContext>();
+    context->settings = settings;
+    context->stopEvent = g_autoTopmostStopEvent;
+
     g_autoTopmostThread = CreateThread(nullptr,
                                        0,
                                        AutoTopmostThreadProc,
-                                       nullptr,
+                                       context.get(),
                                        0,
                                        nullptr);
     if (!g_autoTopmostThread) {
@@ -620,6 +667,7 @@ static bool StartAutoTopmostThreadIfNeeded() {
         return false;
     }
 
+    context.release();
     return true;
 }
 
@@ -640,8 +688,9 @@ static void StopAutoTopmostThread() {
     }
 }
 
-static bool KeepModLoadedForAutoTopmostIfEnabled() {
-    if (!g_autoAlwaysOnTop) {
+static bool KeepModLoadedForAutoTopmostIfEnabled(
+    const SettingsSnapshot& settings) {
+    if (!settings->autoAlwaysOnTop) {
         return false;
     }
 
@@ -650,7 +699,7 @@ static bool KeepModLoadedForAutoTopmostIfEnabled() {
         return false;
     }
 
-    StartAutoTopmostThreadIfNeeded();
+    StartAutoTopmostThreadIfNeeded(settings);
     return g_autoTopmostThread != nullptr;
 }
 
@@ -1073,6 +1122,7 @@ static bool SetTokenUIAccess(HANDLE token, UIAccessResponse* response) {
 
 static bool PatchClientProcessTokenUIAccess(DWORD clientPid,
                                             PCWSTR clientPathForPolicy,
+                                            const Settings& settings,
                                             UIAccessResponse* response,
                                             DWORD expectedParentPid = 0) {
     response->size = sizeof(*response);
@@ -1122,7 +1172,7 @@ static bool PatchClientProcessTokenUIAccess(DWORD clientPid,
         return false;
     }
 
-    if (!IsPathInTargetAllowlist(normalizedActual.c_str())) {
+    if (!IsPathInTargetAllowlist(normalizedActual.c_str(), settings)) {
         CloseHandle(process);
         SetResponseError(response,
                          L"Target process image is not in the UIAccess allowlist.",
@@ -1330,10 +1380,11 @@ static BOOL CreateProcessAsUserPreservingSystem32W(
 
 static bool CreateUIAccessTargetProcessForClient(DWORD clientPid,
                                                  const UIAccessRequest* request,
+                                                 const Settings& settings,
                                                  UIAccessResponse* response) {
     response->size = sizeof(*response);
 
-    if (!IsPathInTargetAllowlist(request->exe)) {
+    if (!IsPathInTargetAllowlist(request->exe, settings)) {
         SetResponseError(response,
                          L"Target path is not in the UIAccess allowlist.",
                          ERROR_ACCESS_DENIED);
@@ -1471,10 +1522,11 @@ static bool CreateUIAccessTargetProcessForClient(DWORD clientPid,
 
 static bool CreateUIAccessProcessForClient(DWORD clientPid,
                                            const UIAccessRequest* request,
+                                           const Settings& settings,
                                            UIAccessResponse* response) {
     response->size = sizeof(*response);
 
-    if (!IsPathInTargetAllowlist(request->exe)) {
+    if (!IsPathInTargetAllowlist(request->exe, settings)) {
         SetResponseError(response,
                          L"Target path is not in the UIAccess allowlist.",
                          ERROR_ACCESS_DENIED);
@@ -1946,11 +1998,16 @@ static DWORD WINAPI PipeServerThread(LPVOID) {
         }
 
         if (requestReady) {
+            SettingsSnapshot settings = GetSettingsSnapshot();
             if (request->flags & kRequestFlagCreateTargetProcess) {
                 Wh_Log(L"[Always UIAccess] Hook-host target creation request from PID %u: %s",
                        clientPid,
                        request->exe);
-                CreateUIAccessTargetProcessForClient(clientPid, request.get(), &response);
+                CreateUIAccessTargetProcessForClient(
+                    clientPid,
+                    request.get(),
+                    *settings,
+                    &response);
             } else if (request->flags & kRequestFlagPatchTargetProcessToken) {
                 DWORD targetPid = request->targetPid;
                 Wh_Log(L"[Always UIAccess] Early target token patch request from PID %u for PID %u: %s",
@@ -1962,6 +2019,7 @@ static DWORD WINAPI PipeServerThread(LPVOID) {
                     PatchClientProcessTokenUIAccess(
                         targetPid,
                         request->exe,
+                        *settings,
                         &response,
                         clientPid);
                 } else {
@@ -1976,6 +2034,7 @@ static DWORD WINAPI PipeServerThread(LPVOID) {
                 PatchClientProcessTokenUIAccess(
                     clientPid,
                     request->exe,
+                    *settings,
                     &response);
             } else {
                 Wh_Log(L"[Always UIAccess] Relaunch request from PID %u: %s",
@@ -1988,6 +2047,7 @@ static DWORD WINAPI PipeServerThread(LPVOID) {
                     CreateUIAccessProcessForClient(
                         clientPid,
                         request.get(),
+                        *settings,
                         &response);
                 }
             }
@@ -2366,14 +2426,16 @@ static BOOL WINAPI CreateProcessW_Hook(
     LPCWSTR lpCurrentDirectory,
     LPSTARTUPINFOW lpStartupInfo,
     LPPROCESS_INFORMATION lpProcessInformation) {
+    SettingsSnapshot settings = GetSettingsSnapshot();
     std::wstring targetPath;
     bool targetIsUiAccessListed =
         ResolveCreateProcessTargetPath(lpApplicationName,
                                        lpCommandLine,
                                        &targetPath) &&
-        IsPathInTargetAllowlist(targetPath.c_str());
+        IsPathInTargetAllowlist(targetPath.c_str(), *settings);
 
-    if (targetIsUiAccessListed && g_skipChromiumElectronSubprocessTargets &&
+    if (targetIsUiAccessListed &&
+        settings->skipChromiumElectronSubprocessTargets &&
         CommandLineHasChromiumOrElectronSubprocessSwitch(lpCommandLine)) {
         Wh_Log(L"[Always UIAccess] Chromium/Electron subprocess target detected in CreateProcessW hook; leaving launch unchanged: %s",
                targetPath.c_str());
@@ -2460,7 +2522,7 @@ static BOOL WINAPI CreateProcessW_Hook(
 
     UIAccessResponse response{};
     bool patchRequested =
-        !debugCreation || g_patchDebugChildrenEarly;
+        !debugCreation || settings->patchDebugChildrenEarly;
     if (patchRequested &&
         SendPatchTargetProcessTokenRequest(
             lpProcessInformation->dwProcessId,
@@ -2492,7 +2554,8 @@ static BOOL WINAPI CreateProcessW_Hook(
     return result;
 }
 
-static bool InstallCreateProcessHookIfNeeded() {
+static bool InstallCreateProcessHookIfNeeded(
+    const SettingsSnapshot& settings) {
     if (g_createProcessHookInstalled) {
         return true;
     }
@@ -2519,18 +2582,19 @@ static bool InstallCreateProcessHookIfNeeded() {
     g_createProcessHookInstalled = true;
     Wh_Log(L"[Always UIAccess] Installed CreateProcessW hook in PID %u. UIAccess target patterns=%u",
            GetCurrentProcessId(),
-           static_cast<unsigned>(g_uiAccessTargetPatterns.size()));
+           static_cast<unsigned>(settings->uiAccessTargetPatterns.size()));
     return true;
 }
 
-static bool KeepModLoadedForHooksOrAutoTopmostIfNeeded() {
+static bool KeepModLoadedForHooksOrAutoTopmostIfNeeded(
+    const SettingsSnapshot& settings) {
     bool keepLoaded = false;
 
-    if (InstallCreateProcessHookIfNeeded()) {
+    if (InstallCreateProcessHookIfNeeded(settings)) {
         keepLoaded = true;
     }
 
-    if (KeepModLoadedForAutoTopmostIfEnabled()) {
+    if (KeepModLoadedForAutoTopmostIfEnabled(settings)) {
         keepLoaded = true;
     }
 
@@ -2538,7 +2602,7 @@ static bool KeepModLoadedForHooksOrAutoTopmostIfNeeded() {
 }
 
 BOOL Wh_ModInit() {
-    LoadSettings();
+    SettingsSnapshot settings = LoadSettings();
 
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if (ntdll) {
@@ -2579,22 +2643,27 @@ BOOL Wh_ModInit() {
     std::wstring currentPath;
     bool haveCurrentPath = QueryCurrentProcessPath(&currentPath);
     bool currentProcessIsTarget =
-        haveCurrentPath && IsPathInTargetAllowlist(currentPath.c_str());
+        haveCurrentPath &&
+        IsPathInTargetAllowlist(currentPath.c_str(), *settings);
 
     bool hasUIAccess = CurrentProcessHasUIAccess();
     if (hasUIAccess) {
         SetEnvironmentVariableW(kRelaunchMarkerName, nullptr);
         Wh_Log(L"[Always UIAccess] Process already has UIAccess.");
-        return KeepModLoadedForHooksOrAutoTopmostIfNeeded() ? TRUE : FALSE;
+        return KeepModLoadedForHooksOrAutoTopmostIfNeeded(settings) ? TRUE
+                                                                    : FALSE;
     }
 
     if (!currentProcessIsTarget) {
-        return KeepModLoadedForHooksOrAutoTopmostIfNeeded() ? TRUE : FALSE;
+        return KeepModLoadedForHooksOrAutoTopmostIfNeeded(settings) ? TRUE
+                                                                    : FALSE;
     }
 
-    if (IsChromiumOrElectronSubprocess()) {
+    if (settings->skipChromiumElectronSubprocessTargets &&
+        IsChromiumOrElectronSubprocess()) {
         Wh_Log(L"[Always UIAccess] Chromium/Electron subprocess target detected; skipping self-relaunch.");
-        return KeepModLoadedForHooksOrAutoTopmostIfNeeded() ? TRUE : FALSE;
+        return KeepModLoadedForHooksOrAutoTopmostIfNeeded(settings) ? TRUE
+                                                                    : FALSE;
     }
 
     if (IsDebuggerPresent()) {
@@ -2607,12 +2676,14 @@ BOOL Wh_ModInit() {
                    response.win32Error,
                    static_cast<ULONG>(response.ntStatus));
         }
-        return KeepModLoadedForHooksOrAutoTopmostIfNeeded() ? TRUE : FALSE;
+        return KeepModLoadedForHooksOrAutoTopmostIfNeeded(settings) ? TRUE
+                                                                    : FALSE;
     }
 
     if (RelaunchMarkerIsSet()) {
         Wh_Log(L"[Always UIAccess] Relaunch marker is set but UIAccess is absent; leaving target process unchanged.");
-        return KeepModLoadedForHooksOrAutoTopmostIfNeeded() ? TRUE : FALSE;
+        return KeepModLoadedForHooksOrAutoTopmostIfNeeded(settings) ? TRUE
+                                                                    : FALSE;
     }
 
     UIAccessResponse response{};
@@ -2626,22 +2697,24 @@ BOOL Wh_ModInit() {
            response.message[0] ? response.message : L"unknown error",
            response.win32Error,
            static_cast<ULONG>(response.ntStatus));
-    return KeepModLoadedForHooksOrAutoTopmostIfNeeded() ? TRUE : FALSE;
+    return KeepModLoadedForHooksOrAutoTopmostIfNeeded(settings) ? TRUE
+                                                                : FALSE;
 }
 
 void Wh_ModSettingsChanged() {
-    LoadSettings();
+    SettingsSnapshot settings = LoadSettings();
 
     if (IsWindhawkProcess()) {
         return;
     }
 
-    InstallCreateProcessHookIfNeeded();
+    InstallCreateProcessHookIfNeeded(settings);
 
-    if (CurrentProcessHasUIAccess() && g_autoAlwaysOnTop) {
-        StartAutoTopmostThreadIfNeeded();
-    } else {
-        StopAutoTopmostThread();
+    // Restart so the worker uses exactly the newly-published duration,
+    // interval, and visibility policy instead of retaining a prior generation.
+    StopAutoTopmostThread();
+    if (CurrentProcessHasUIAccess() && settings->autoAlwaysOnTop) {
+        StartAutoTopmostThreadIfNeeded(settings);
     }
 }
 

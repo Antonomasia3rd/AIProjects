@@ -2,7 +2,7 @@
 
 `NowPlayingTile.exe` is a native Win32/C++ background app that reads the current System Media Transport Controls (SMTC) session and updates a Windows Start Live Tile.
 
-It is intended for Windows 10 Start, including ExplorerPatcher's Windows 10 Start menu on Windows 11. The project is structured like `DesktopStub`: one native entry point, ordered `src\*.inc` fragments, one Visual Studio build command, and generated runtime/package files under `build`.
+It is intended for Windows 10 Start, including ExplorerPatcher's Windows 10 Start menu on Windows 11. The project is structured like `DesktopStub`: one native overlay entry point, ordered product fragments under `dependencies\NowPlayingTile`, one Visual Studio build command, and generated runtime/package files under `build`.
 
 ## Requirements
 
@@ -16,21 +16,25 @@ It is intended for Windows 10 Start, including ExplorerPatcher's Windows 10 Star
 From the repository root:
 
 ```cmd
-NowPlayingTile\BuildNowPlayingTile.cmd
+legacy\NowPlayingTile\BuildNowPlayingTile.cmd
 ```
 
 Syntax and source-regression checks:
 
 ```cmd
-NowPlayingTile\BuildNowPlayingTile.cmd check
+legacy\NowPlayingTile\BuildNowPlayingTile.cmd check
 ```
 
 The source checks cover command-line side effects, shared-baseline integration, initialization failures, strict settings parsing, bounded subprocess output, tray recovery, and window/message-loop error handling.
 
+Package registration now shares `dependencies/appx_registration_script.h` and `dependencies/powershell_runner.inc` with DesktopStub. The startup extension uses `dependencies/packaged_startup_manifest.h`. Product code supplies identity, paths and presentation; it retains its media, artwork and widget behavior. The shared runner enforces the two-minute deadline even under continuous output and stops commands that exceed the 4 MiB capture limit. Registration failures terminate their script before a later package lookup can report misleading success.
+
+`tools\TestAppxSharing.cmd` checks script/XML construction and subprocess bounds using an inert copy of the test executable as its child. It never executes registration scripts or starts NowPlayingTile.
+
 Output:
 
 ```text
-NowPlayingTile\build\NowPlayingTile.exe
+legacy\NowPlayingTile\build\NowPlayingTile.exe
 ```
 
 If `build\NowPlayingTile.exe` is running, close it before rebuilding so the compiler can overwrite the output.
@@ -38,7 +42,7 @@ If `build\NowPlayingTile.exe` is running, close it before rebuilding so the comp
 ## Run
 
 ```cmd
-NowPlayingTile\build\NowPlayingTile.exe
+legacy\NowPlayingTile\build\NowPlayingTile.exe
 ```
 
 On first launch the app creates runtime files next to the executable:
@@ -55,7 +59,7 @@ The manifest and assets are generated files. They are not tracked in the source 
 Live Tile updates need package identity. Normal launch works as the DesktopStub-style bootstrap path:
 
 ```cmd
-NowPlayingTile\build\NowPlayingTile.exe
+legacy\NowPlayingTile\build\NowPlayingTile.exe
 ```
 
 If the executable is started directly from `build`, it generates `AppxManifest.xml` and `Assets`, registers the loose Appx package, launches the packaged `shell:AppsFolder\...!App` identity, then exits the unpackaged bootstrap process.
@@ -63,8 +67,8 @@ If the executable is started directly from `build`, it generates `AppxManifest.x
 Manual registration is still available for troubleshooting:
 
 ```cmd
-NowPlayingTile\build\NowPlayingTile.exe --register
-NowPlayingTile\build\NowPlayingTile.exe --launch-packaged
+legacy\NowPlayingTile\build\NowPlayingTile.exe --register
+legacy\NowPlayingTile\build\NowPlayingTile.exe --launch-packaged
 ```
 
 The registration action prints the current `shell:AppsFolder\...!App` target. Pin that packaged entry to Start if you want the tile visible.
@@ -72,13 +76,13 @@ The registration action prints the current `shell:AppsFolder\...!App` target. Pi
 To remove the registered package:
 
 ```cmd
-NowPlayingTile\build\NowPlayingTile.exe --unregister
+legacy\NowPlayingTile\build\NowPlayingTile.exe --unregister
 ```
 
 To rewrite the generated manifest and default logo assets:
 
 ```cmd
-NowPlayingTile\build\NowPlayingTile.exe --regenerate-manifest
+legacy\NowPlayingTile\build\NowPlayingTile.exe --regenerate-manifest
 ```
 
 ## Optional Widget
@@ -86,7 +90,7 @@ NowPlayingTile\build\NowPlayingTile.exe --regenerate-manifest
 The visible Win32 widget is opt-in:
 
 ```cmd
-NowPlayingTile\build\NowPlayingTile.exe --widget
+legacy\NowPlayingTile\build\NowPlayingTile.exe --widget
 ```
 
 Right-click the widget for refresh, always-on-top, and exit. Drag the window by holding the left mouse button anywhere on the widget.
@@ -98,6 +102,9 @@ NowPlayingTile.exe --once
 NowPlayingTile.exe --widget --allow-multiple
 NowPlayingTile.exe --tray
 NowPlayingTile.exe --no-tray
+NowPlayingTile.exe --startup
+NowPlayingTile.exe --tile-layout Combined --update-interval 5
+NowPlayingTile.exe --set Settings.TileRefreshSeconds=120
 NowPlayingTile.exe --register
 NowPlayingTile.exe --launch-packaged
 NowPlayingTile.exe --unregister
@@ -106,10 +113,17 @@ NowPlayingTile.exe --exit
 
 Supported options:
 
-- `--help`, `-h`, `/?`: show command-line help.
+- `--help`, `-h`, `/?`: show side-effect-free command-line help.
+- `--version`: show the application version without creating or changing files.
 - `--once`: read SMTC once, update the Live Tile, then exit.
 - `--widget` / `--show`: open the optional visible diagnostic widget.
-- `--tray` / `--no-tray`: override `ShowTrayIcon` for this invocation.
+- `--tray` / `--no-tray`: persist `ShowTrayIcon` in the same INI used by the tray.
+- `--startup` / `--no-startup`: persist `RunAtStartup` and enable/disable the packaged `StartupTask`. A Task Manager user-disable or administrator policy is preserved and reported; no Startup-folder shortcut, Run-registry value, or scheduled task is used. Enable commits the launch path before `true`, while disable commits `false` before removal, so an interrupted change self-reconciles on the next launch.
+- `--dropdown` / `--no-dropdown`: persist the flat/dropdown tray-section layout.
+- `--tile-layout <Text|Artwork|Combined|Cycle>`: persist the tile layout.
+- `--update-interval <1..60>`: persist the media polling interval in seconds.
+- `--tile-refresh <1..300>`: persist the minimum tile refresh interval in seconds.
+- `--set Settings.Key=Value`: persist any known typed setting. The complete command-line batch is validated first and committed in one INI mutation; packaged StartupTask and INI state share the same locked, direction-safe transaction and rollback.
 - `--allow-multiple`: skip the single-instance guard.
 - `--register`: generate `AppxManifest.xml` and `Assets`, then register the loose package.
 - `--unregister`: remove the registered loose package.
@@ -137,17 +151,25 @@ Available settings:
 
 ```ini
 # NowPlayingTile settings
-# TileLayout is retained for forward compatibility; current builds render text.
+# TileLayout: Text, Artwork, Combined, or Cycle. Missing artwork falls back to Text.
 [Settings]
 TileLayout=Text
 UpdateIntervalSeconds=2
 TileRefreshSeconds=60
-ShowTrayIcon=false
+ShowTrayIcon=true
+RunAtStartup=false
+ShowMenuAsDropdown=true
 ```
 
-`TileLayout` currently renders the same text payload for every accepted value. The
-setting remains in the file so artwork layouts can return without another
-configuration migration.
+New configurations default `ShowTrayIcon=true`; an existing explicit value is
+preserved. The tray exposes all six functional settings: Startup and tray
+visibility, section layout, tile layout, media polling interval, and tile
+refresh interval. Opening or reloading the menu re-reads the INI and reconciles
+the declared packaged StartupTask.
+
+`TileLayout` selects a text-only tile, artwork-only tile, a combined artwork/text
+tile, or a cycle containing all available variants. Artwork-dependent layouts
+fall back to text when the active media session has no thumbnail.
 
 ## Notes
 
@@ -169,7 +191,7 @@ Running `NowPlayingTile.exe` directly from `build` starts as an unpackaged proce
 
 ## Source Layout
 
-`NowPlayingTile.cpp` is the single translation-unit entry point. Most implementation code is split into ordered fragments under `NowPlayingTile\src`:
+`NowPlayingTile.cpp` is the single translation-unit overlay: it supplies product constants, state declarations, and ordered includes. Product implementation code lives under the repository-level `dependencies\NowPlayingTile` folder:
 
 - `npt_core.inc`: shared sidecar/logging integration plus product-specific string, XML, and file URI helpers.
 - `npt_config_defaults.inc`: generated INI defaults and settings parsing.
@@ -192,6 +214,11 @@ Generated/runtime files live under `NowPlayingTile\build` and are ignored by git
 - `Assets\*`
 - `tile-artwork-*.jpg`
 - compiler object files under `obj\`
+
+The generated manifest declares `desktop:StartupTask` with task id
+`NowPlayingTileStartup`. Existing generated manifests that lack the extension
+are refreshed on disk; run `--register` once after upgrading an already
+registered loose package so Windows registers the new extension metadata.
 
 ## Release
 

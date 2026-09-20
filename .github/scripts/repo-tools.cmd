@@ -15,16 +15,23 @@ if not exist "%CSC%" (
 
 if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
 if errorlevel 1 exit /b %ERRORLEVEL%
+set "TMP_ATTEMPTS=0"
 
 :PickTemp
+set /a TMP_ATTEMPTS+=1 >nul
+if %TMP_ATTEMPTS% GTR 16 (
+  echo ERROR: Could not create a temporary compiler directory under "%OUT_DIR%".
+  exit /b 1
+)
 set "TMP_DIR=%OUT_DIR%\RepoTools.%RANDOM%%RANDOM%.tmp"
 mkdir "%TMP_DIR%" >nul 2>nul
 if errorlevel 1 goto PickTemp
 set "TMP_OUT=%TMP_DIR%\RepoTools.exe"
 
-"%CSC%" /nologo /optimize+ /warn:4 /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /out:"%TMP_OUT%" "%SRC%"
+"%CSC%" /nologo /optimize+ /warn:4 /r:System.Drawing.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /out:"%TMP_OUT%" "%SRC%"
 set "STATUS=%ERRORLEVEL%"
 if not "%STATUS%"=="0" (
+  del /f /q "%TMP_OUT%" >nul 2>nul
   rmdir "%TMP_DIR%" >nul 2>nul
   exit /b %STATUS%
 )
@@ -33,5 +40,6 @@ copy /y "%TMP_OUT%" "%OUT%" >nul 2>nul
 
 "%TMP_OUT%" %* --repository-root "%REPO_ROOT%"
 set "STATUS=%ERRORLEVEL%"
-rmdir /s /q "%TMP_DIR%" >nul 2>nul
+del /f /q "%TMP_OUT%" >nul 2>nul
+rmdir "%TMP_DIR%" >nul 2>nul
 exit /b %STATUS%

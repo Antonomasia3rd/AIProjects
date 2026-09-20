@@ -1,0 +1,16 @@
+BarePath	C:\Users\Amiya\Desktop\app.log
+QuotedPath	C:\Users\Amiya\Desktop\app.log
+EscapedPath	C:\Users\Amiya\Desktop\app.log
+TrailingPath	C:\logs\
+EscapedUnc	\\server\share\file.txt
+Template	Line1\nLine2\r\t
+UnknownEscape	Keep\q
+Spaces	  keep both ends  
+Punctuation	#topic;literal=equals
+BareComment	yes
+BareHashComment	yes
+SingleQuote	it's fine
+DoubleQuote	say "hello"
+Empty	
+Unicode	café 亚洲 😀
+Duplicate	latest

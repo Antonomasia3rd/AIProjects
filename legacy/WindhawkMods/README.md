@@ -7,6 +7,7 @@ Source-only local Windhawk mods copied from `C:\ProgramData\Windhawk\ModsSource`
 | `local@always-uiaccess.wh.cpp` | `always-uiaccess` | Always UIAccess | Relaunches included processes with `TokenUIAccess` set by the Windhawk service. |
 | `local@appsfolder-unhide-hidden-apps.wh.cpp` | `appsfolder-unhide-hidden-apps` | AppsFolder Unhide Hidden Apps | Adds selected hidden AppUserModelIDs to `shell:AppsFolder` enumeration. |
 | `local@snipping-tool-border-fix.wh.cpp` | `snipping-tool-border-fix` | Snipping Tool Border Fix | Hooks Snipping Tool DWM frame-bound queries to avoid the border/crop issue. |
+| `LockScreenWin10/` | — | LockScreenWin10 research | Windows 10 lock-screen styling, XAML capture, and Windhawk investigation sources. |
 
 ## Usage
 
@@ -43,9 +44,16 @@ time and verify the target process list in Windhawk before broad use.
 process can use `SeTcbPrivilege` to set `TokenUIAccess`. Requests are bound to
 the requesting process and actual child image, and unsupported CreateProcess
 semantics fall back to suspended in-process creation before token patching.
+Settings reloads atomically publish immutable snapshots shared by hooks and
+workers, so in-flight operations finish against one coherent generation while
+later operations use the replacement settings.
 Its service-broker path still cannot perfectly reproduce every caller-owned
 console, affinity, or job relationship, so test each allowlisted application.
 
 `appsfolder-unhide-hidden-apps` hooks shell AppsFolder enumeration in Explorer
-and shell hosts. `snipping-tool-border-fix` limits itself to `SnippingTool.exe`
-and uses extended frame bounds when available.
+and shell hosts. It compares configured extra PIDLs through the AppsFolder
+itself and suppresses an extra when Windows already returned the same item, so
+future shell changes do not create duplicate entries. `snipping-tool-border-fix` limits itself to `SnippingTool.exe`
+and deliberately makes `DWMWA_EXTENDED_FRAME_BOUNDS` queries return
+`E_NOTIMPL`, forcing Snipping Tool away from the Smart Crop path that exhibits
+the border issue.

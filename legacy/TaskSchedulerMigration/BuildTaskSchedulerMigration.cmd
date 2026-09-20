@@ -14,7 +14,12 @@ if not exist "%CSC%" (
 if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
-"%CSC%" /nologo /optimize+ /target:exe /r:Microsoft.CSharp.dll /out:"%OUT%" "%ROOT%TaskSchedulerMigration.cs"
+for %%I in ("%ROOT%..\..") do set "REPO=%%~fI"
+
+"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /r:Microsoft.CSharp.dll /out:"%OUT%" "%REPO%\dependencies\TaskSchedulerMigration\task_scheduler_migration_app.cs" "%ROOT%TaskSchedulerMigration.cs"
+if errorlevel 1 exit /b %ERRORLEVEL%
+
+call "%ROOT%TestTaskSchedulerMigration.cmd"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 echo Built "%OUT%"

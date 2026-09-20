@@ -1,5 +1,6 @@
 static void DispatchTrayCommand(HWND h, UINT cmd)
 {
+    if (DispatchContentEngineCommand(h, cmd)) return;
     ManifestDisplayInfo manifestInfo;
     if (cmd >= ID_MANIFEST_EDIT_IDENTITY_NAME &&
         cmd <= ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_NAME)
@@ -220,6 +221,166 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         Log(g_ui.trayIconSummary.c_str(), StateEnabled(g_tray));
     }
     break;
+
+    case ID_RUN_AT_STARTUP:
+    {
+        bool installed = IniReadI(L"Settings", L"RunAtStartup", 0) != 0;
+        std::wstring error;
+        if (!QueryDesktopStubStartupShortcutInstalled(installed, error))
+        {
+            Log(L"[!] Could not query the shell:startup shortcut: %s", error.c_str());
+            MessageBoxW(h, error.c_str(), g_ui.errorTitle.c_str(), MB_OK | MB_ICONERROR);
+            break;
+        }
+
+        bool desired = !installed;
+        if (!PersistDesktopStubStartupPreference(desired, error))
+        {
+            Log(L"[!] Could not change the shell:startup shortcut: %s", error.c_str());
+            MessageBoxW(h, error.c_str(), g_ui.errorTitle.c_str(), MB_OK | MB_ICONERROR);
+            break;
+        }
+        Log(g_ui.runAtStartupSummary.c_str(), StateEnabled(desired));
+    }
+    break;
+
+    case ID_RUN_AT_STARTUP_PACKAGED:
+    {
+        bool current = false;
+        TryParseCommandLineBoolValue(IniReadS(L"Settings", L"RunAtStartupPackaged", L"0"), current);
+        std::wstring error;
+        if (!ValidateDesktopStubPackagedStartupPreference(!current, error)) {
+            MessageBoxW(h, error.c_str(), g_ui.errorTitle.c_str(), MB_OK | MB_ICONWARNING);
+            break;
+        }
+        if (IniWrite(L"Settings", L"RunAtStartupPackaged", current ? L"0" : L"1"))
+            QueueDesktopStubPackagedStartupSync();
+    }
+    break;
+
+    case ID_RUN_AT_STARTUP_PACKAGED_STATUS:
+        MessageBoxW(h, DesktopStubPackagedStartupStatusText().c_str(), L"Windows startup task", MB_OK | MB_ICONINFORMATION);
+        break;
+
+    case ID_CONTENT_SOURCE_WALLPAPER:
+    case ID_CONTENT_SOURCE_RSS_FEED:
+    {
+        ContentSource desiredSource =
+            cmd == ID_CONTENT_SOURCE_RSS_FEED
+                ? ContentSource::RssFeed
+                : ContentSource::Wallpaper;
+        std::wstring error;
+        if (!ValidateConfiguredRssSettingsForContentSource(
+                desiredSource,
+                error))
+        {
+            MessageBoxW(
+                h,
+                error.c_str(),
+                g_ui.errorTitle.c_str(),
+                MB_OK | MB_ICONWARNING);
+            break;
+        }
+
+        ContentSource configuredSource = ParseContentSourceValue(
+            IniReadS(L"Settings", L"ContentSource", L"Wallpaper"),
+            static_cast<ContentSource>(-1));
+        bool layeredContent = false;
+        aip::content::ParseBool(IniReadS(L"Content", L"Enabled", L"0"), layeredContent);
+        if (configuredSource == desiredSource && !layeredContent)
+            break;
+        if (desiredSource == ContentSource::RssFeed)
+        {
+            aip::content::Configuration preset;
+            preset.enabled = true; preset.cycle = true;
+            preset.cycleSeconds = IniReadClampedI(L"Content", L"CycleSeconds", 10, 1, 86400);
+            preset.entries.resize(static_cast<size_t>(IniReadClampedI(L"RssFeed", L"MaxItems", 5, 1, 20)));
+            const auto warning = aip::content::TimingWarning(preset, UseExperimentalLiveTileUpdate());
+            if (!warning.empty() && MessageBoxW(h, (warning + L"\r\n\r\nEnable RSS headline cycling?").c_str(),
+                    L"Content cycling", MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) != IDYES)
+                break;
+        }
+        if (!MutateDesktopStubIniWithWait([&](std::wstring& text) {
+                return WriteIniValueToText(text, L"Settings", L"ContentSource", ContentSourceIniValue(desiredSource).c_str()) &&
+                    WriteIniValueToText(text, L"Content", L"Enabled", L"0");
+            }, CurrentIniWriteLockWaitMs()))
+        {
+            return;
+        }
+
+        Log(
+            g_ui.contentSourceSummary.c_str(),
+            ContentSourceName(desiredSource));
+        WakePollThread();
+    }
+    break;
+
+    case ID_RSS_FEED_URL:
+        PromptRssFeedStringSetting(
+            h,
+            L"FeedUrl",
+            g_ui.rssFeedUrlInputTitle,
+            g_ui.rssFeedUrlInputPrompt,
+            L"");
+        break;
+
+    case ID_RSS_FEED_USER_AGENT:
+        PromptRssFeedStringSetting(
+            h,
+            L"UserAgent",
+            g_ui.rssFeedUserAgentInputTitle,
+            g_ui.rssFeedUserAgentInputPrompt,
+            L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)");
+        break;
+
+    case ID_RSS_FEED_UPDATE_INTERVAL:
+        CycleRssFeedIntPreset(
+            h,
+            L"UpdateIntervalSeconds",
+            900,
+            60,
+            86400,
+            {60, 300, 900, 1800, 3600, 21600, 43200, 86400});
+        break;
+
+    case ID_RSS_FEED_MAX_ITEMS:
+        CycleRssFeedIntPreset(
+            h,
+            L"MaxItems",
+            5,
+            1,
+            20,
+            {1, 3, 5, 10, 15, 20});
+        break;
+
+    case ID_RSS_FEED_HTTP_TIMEOUT:
+        CycleRssFeedIntPreset(
+            h,
+            L"HttpTimeoutSeconds",
+            20,
+            5,
+            120,
+            {5, 10, 20, 30, 60, 120});
+        break;
+
+    case ID_RSS_FEED_MAX_FEED_BYTES:
+        CycleRssFeedIntPreset(
+            h,
+            L"MaxFeedBytes",
+            2 * 1024 * 1024,
+            64 * 1024,
+            16 * 1024 * 1024,
+            {
+                64 * 1024,
+                256 * 1024,
+                512 * 1024,
+                1024 * 1024,
+                2 * 1024 * 1024,
+                4 * 1024 * 1024,
+                8 * 1024 * 1024,
+                16 * 1024 * 1024
+            });
+        break;
 
     case ID_CONSOLE:
     {

@@ -4,9 +4,6 @@ setlocal EnableExtensions
 set "ROOT=%~dp0.."
 set "VCVARS="
 
-where cl.exe >nul 2>nul
-if not errorlevel 1 goto HaveCompiler
-
 if defined VCINSTALLDIR if exist "%VCINSTALLDIR%\Auxiliary\Build\vcvars64.bat" set "VCVARS=%VCINSTALLDIR%\Auxiliary\Build\vcvars64.bat"
 if not defined VCVARS if defined VSINSTALLDIR if exist "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
 
@@ -26,6 +23,8 @@ for %%D in ("%ProgramFiles%" "%ProgramFiles(x86)%" "D:\Program Files" "D:\Progra
 )
 
 if defined VCVARS goto LoadCompiler
+where cl.exe >nul 2>nul
+if not errorlevel 1 goto HaveCompiler
 echo ERROR: cl.exe not found. Install Visual Studio Build Tools with the C++ workload.
 exit /b 1
 
@@ -42,14 +41,14 @@ if errorlevel 1 (
     exit /b %ERRORLEVEL%
 )
 
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\SharedBaselineTests.cpp /Fe:build\SharedBaselineTests.exe /Fo:build\SharedBaselineTests.obj /link user32.lib shell32.lib crypt32.lib /SUBSYSTEM:CONSOLE
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\SharedBaselineTests.cpp /Fe:build\SharedBaselineTests.exe /Fo:build\SharedBaselineTests.obj /link user32.lib shell32.lib ole32.lib uuid.lib crypt32.lib /SUBSYSTEM:CONSOLE
 set "STATUS=%ERRORLEVEL%"
 if not "%STATUS%"=="0" (
     popd
     exit /b %STATUS%
 )
 
-call build\SharedBaselineTests.exe
+call build\SharedBaselineTests.exe %*
 set "STATUS=%ERRORLEVEL%"
 echo SharedBaselineTests exit code: %STATUS%
 if not "%STATUS%"=="0" (

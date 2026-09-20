@@ -14,23 +14,25 @@ Older releases are intentionally kept when practical so users can compare behavi
 
 ### Repository layout
 
-- Added shared C++ baseline includes under `dependencies/`.
-- Moved projects that have not adopted the shared baseline under `legacy/` while preserving their project keys and release families.
+- Added shared native and managed baseline modules under `dependencies/`.
+- Preserved stable project/build folders at the repository root and under
+  `legacy/` while moving maintained implementation bodies into matching
+  product-owned `dependencies/<Product>/` folders. Native projects use thin
+  composition entry points, managed projects use assembly-metadata overlays,
+  and the two registry-notification services declare policy over one shared
+  service engine.
 - Added shared tray-root and release-version helpers so migrated apps use one
   fixed dropdown, primary action, disabled version, and separator contract.
 - Made shared sidecar logging retry transient reader sharing violations instead
   of silently dropping records while a log viewer or smoke check has the file
   open.
-- Moved `DesktopStub/src` to `dependencies/DesktopStub` and `DiscordRPC/src` to
-  `dependencies/DiscordRPC` so every project's source lives under the
-  repository's single `dependencies/` folder instead of being split across
-  per-project `src` folders. This is a physical relocation only: the moved
-  fragments (`ga_*.inc`, `drpc_*.inc`) remain product-owned policy code, not
-  shared baseline modules, and other products should not include from another
-  product's subfolder. Updated every `#include`, source-regression check
-  (`DesktopStubSourceCheck.cpp`, `DiscordRPCSourceCheck.cpp`,
-  `SharedBaselineSourceCheck.cpp`), policy-warning suppression path, and README
-  "Source Layout" section to match.
+- Moved the DesktopStub, DiscordRPC, NowPlayingTile, CharmTray, ADBController,
+  SecureDesktopLauncher, RealTimeNotesDeskband, PhotoCollage,
+  TaskSchedulerMigration, DNSAutoUpdate, capsblink, and asusblink product
+  implementations into their matching dependency folders. These are physical
+  relocations only: product folders remain owned by that product and must not
+  be consumed by another product. Cross-product behavior belongs in a
+  root-level shared module.
 
 ### DiscordRPC
 

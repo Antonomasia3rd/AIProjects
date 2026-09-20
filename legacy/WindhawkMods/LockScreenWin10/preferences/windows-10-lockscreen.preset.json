@@ -1,0 +1,669 @@
+{
+  "win10Spotlight": 1,
+  "syncDismissalFade": 1,
+  "controlStyles": [
+    {
+      "target": "Grid#LockScreenTextContent",
+      "styles": [
+        "RowDefinitions:=<RowDefinitionCollection><RowDefinition Height=\"*\"/><RowDefinition Height=\"Auto\"/></RowDefinitionCollection>"
+      ]
+    },
+    {
+      "target": "Grid#LockScreenTextContent > StackPanel#TimeAndDatePanel",
+      "styles": [
+        "Grid.Row=0",
+        "HorizontalAlignment=Stretch",
+        "VerticalAlignment=Bottom",
+        "Margin=36,0,36,2"
+      ]
+    },
+    {
+      "target": "Grid#LockScreenTextContent > Grid",
+      "styles": [
+        "Grid.Row=1"
+      ]
+    },
+    {
+      "target": "StackPanel#TimePanel",
+      "styles": [
+        "HorizontalAlignment=Left"
+      ]
+    },
+    {
+      "target": "TextBlock#Time",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=128",
+        "FontWeight=Light",
+        "LineHeight=140",
+        "TextAlignment=Left",
+        "OpticalMarginAlignment=TrimSideBearings"
+      ]
+    },
+    {
+      "target": "TextBlock#Date",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=56",
+        "FontWeight=SemiLight",
+        "LineHeight=64",
+        "Margin=0,-20,0,0",
+        "HorizontalAlignment=Left",
+        "TextAlignment=Left",
+        "OpticalMarginAlignment=TrimSideBearings"
+      ]
+    },
+    {
+      "target": "Grid#WidgetCanvasPanel",
+      "styles": [
+        "Height=Auto",
+        "Margin=0,0,0,0",
+        "Grid.Row=0"
+      ]
+    },
+    {
+      "target": "Grid#WidgetCanvasContainer",
+      "styles": [
+        "Height=Auto",
+        "Margin=0,0,0,0"
+      ]
+    },
+    {
+      "target": "StackPanel#WidgetsContainer",
+      "styles": [
+        "Height=Auto",
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top",
+        "Margin=32,30,0,2"
+      ]
+    },
+    {
+      "target": "StackPanel#WidgetGroupPanel",
+      "styles": [
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top",
+        "Margin=4,0,40,0"
+      ]
+    },
+    {
+      "target": "StackPanel#DefaultTitleStackPanel",
+      "styles": [
+        "Margin=0,-3,0,0"
+      ]
+    },
+    {
+      "target": "Grid#MediaControlsContainer",
+      "styles": [
+        "Grid.Row=1",
+        "Width=360",
+        "Height=112",
+        "HorizontalAlignment=Right",
+        "VerticalAlignment=Top",
+        "Margin=0,-114,0,98"
+      ]
+    },
+    {
+      "target": "Grid#MediaTransportControls",
+      "styles": [
+        "Width=360",
+        "Height=112",
+        "Margin=0,0,0,0",
+        "BorderBrush:=<SolidColorBrush Color=\"#00FFFFFF\"/>",
+        "BorderThickness=1",
+        "CornerRadius=0",
+        "Background:=<SolidColorBrush Color=\"#000000\" Opacity=\"$mediaBackdropOpacity\"/>",
+        "ColumnDefinitions:=<ColumnDefinitionCollection><ColumnDefinition Width=\"Auto\"/><ColumnDefinition Width=\"*\"/></ColumnDefinitionCollection>"
+      ]
+    },
+    {
+      "target": "Grid#ThumbnailImageArea",
+      "styles": [
+        "Width=110",
+        "Height=110",
+        "Margin=0,0,0,0",
+        "Grid.Column=0"
+      ]
+    },
+    {
+      "target": "Grid#ThumbnailImageArea > Border",
+      "styles": [
+        "Width=110",
+        "Height=110",
+        "HorizontalAlignment=Center",
+        "VerticalAlignment=Center",
+        "CornerRadius=0"
+      ]
+    },
+    {
+      "target": "Image#ThumbnailImage",
+      "styles": [
+        "Width=110",
+        "Height=110",
+        "HorizontalAlignment=Center",
+        "VerticalAlignment=Center",
+        "Stretch=Uniform"
+      ]
+    },
+    {
+      "target": "Grid#MediaTransportControls > StackPanel[2]",
+      "styles": [
+        "Grid.Column=1",
+        "HorizontalAlignment=Stretch",
+        "VerticalAlignment=Top",
+        "Margin=20,8,12,0"
+      ]
+    },
+    {
+      "target": "Grid#MediaTransportControls > StackPanel[2] > TextBlock[1]",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=20",
+        "FontWeight=Normal"
+      ]
+    },
+    {
+      "target": "Grid#MediaTransportControls > StackPanel[2] > TextBlock[2]",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=15",
+        "FontWeight=Normal"
+      ]
+    },
+    {
+      "target": "Grid#MediaTransportControls > ListView[3]",
+      "styles": [
+        "Grid.Column=1",
+        "Width=180",
+        "Height=48",
+        "HorizontalAlignment=Center",
+        "VerticalAlignment=Bottom",
+        "Margin=0,0,0,2",
+        "Padding=0",
+        "SelectionMode=None",
+        "IsItemClickEnabled=False",
+        "IsSwipeEnabled=False"
+      ]
+    },
+    {
+      "target": "Windows.UI.Xaml.Controls.Primitives.RepeatButton#PreviousButton",
+      "styles": [
+        "Width=48",
+        "Height=48",
+        "MinWidth=48",
+        "MinHeight=48",
+        "Margin=6,0,6,0",
+        "Padding=0",
+        "HorizontalAlignment=Center",
+        "VerticalAlignment=Center",
+        "FontFamily=Segoe MDL2 Assets",
+        "FontSize=20",
+        "Background=Transparent",
+        "BorderBrush=Transparent",
+        "BorderThickness=0",
+        "CornerRadius=0",
+        "Template:=<ControlTemplate TargetType=\"RepeatButton\"><Grid x:Name=\"Win10MediaButtonRoot\" Background=\"Transparent\"><VisualStateManager.VisualStateGroups><VisualStateGroup x:Name=\"CommonStates\"><VisualState x:Name=\"Normal\"/><VisualState x:Name=\"PointerOver\"><VisualState.Setters><Setter Target=\"Backdrop.Background\" Value=\"#1AFFFFFF\"/></VisualState.Setters></VisualState><VisualState x:Name=\"Pressed\"><VisualState.Setters><Setter Target=\"Backdrop.Background\" Value=\"#33FFFFFF\"/></VisualState.Setters></VisualState><VisualState x:Name=\"Disabled\"><VisualState.Setters><Setter Target=\"ContentPresenter.Opacity\" Value=\"0.4\"/></VisualState.Setters></VisualState></VisualStateGroup></VisualStateManager.VisualStateGroups><Border x:Name=\"Backdrop\" Background=\"Transparent\" CornerRadius=\"0\"/><ContentPresenter x:Name=\"ContentPresenter\" Content=\"{TemplateBinding Content}\" ContentTemplate=\"{TemplateBinding ContentTemplate}\" FontFamily=\"{TemplateBinding FontFamily}\" FontSize=\"{TemplateBinding FontSize}\" Foreground=\"{TemplateBinding Foreground}\" HorizontalAlignment=\"Center\" VerticalAlignment=\"Center\"/></Grid></ControlTemplate>",
+        "Content="
+      ]
+    },
+    {
+      "target": "Button#PlayPauseButton",
+      "styles": [
+        "Width=48",
+        "Height=48",
+        "MinWidth=48",
+        "MinHeight=48",
+        "Margin=6,0,6,0",
+        "Padding=0",
+        "HorizontalAlignment=Center",
+        "VerticalAlignment=Center",
+        "FontFamily=Segoe MDL2 Assets",
+        "FontSize=20",
+        "Background=Transparent",
+        "BorderBrush=Transparent",
+        "BorderThickness=0",
+        "CornerRadius=0",
+        "Template:=<ControlTemplate TargetType=\"Button\"><Grid x:Name=\"Win10MediaButtonRoot\" Background=\"Transparent\"><VisualStateManager.VisualStateGroups><VisualStateGroup x:Name=\"CommonStates\"><VisualState x:Name=\"Normal\"/><VisualState x:Name=\"PointerOver\"><VisualState.Setters><Setter Target=\"Backdrop.Background\" Value=\"#1AFFFFFF\"/></VisualState.Setters></VisualState><VisualState x:Name=\"Pressed\"><VisualState.Setters><Setter Target=\"Backdrop.Background\" Value=\"#33FFFFFF\"/></VisualState.Setters></VisualState><VisualState x:Name=\"Disabled\"><VisualState.Setters><Setter Target=\"ContentPresenter.Opacity\" Value=\"0.4\"/></VisualState.Setters></VisualState></VisualStateGroup></VisualStateManager.VisualStateGroups><Border x:Name=\"Backdrop\" Background=\"Transparent\" CornerRadius=\"0\"/><ContentPresenter x:Name=\"ContentPresenter\" Content=\"{TemplateBinding Content}\" ContentTemplate=\"{TemplateBinding ContentTemplate}\" FontFamily=\"{TemplateBinding FontFamily}\" FontSize=\"{TemplateBinding FontSize}\" Foreground=\"{TemplateBinding Foreground}\" HorizontalAlignment=\"Center\" VerticalAlignment=\"Center\"/></Grid></ControlTemplate>"
+      ]
+    },
+    {
+      "target": "Windows.UI.Xaml.Controls.Primitives.RepeatButton#NextButton",
+      "styles": [
+        "Width=48",
+        "Height=48",
+        "MinWidth=48",
+        "MinHeight=48",
+        "Margin=6,0,6,0",
+        "Padding=0",
+        "HorizontalAlignment=Center",
+        "VerticalAlignment=Center",
+        "FontFamily=Segoe MDL2 Assets",
+        "FontSize=20",
+        "Background=Transparent",
+        "BorderBrush=Transparent",
+        "BorderThickness=0",
+        "CornerRadius=0",
+        "Template:=<ControlTemplate TargetType=\"RepeatButton\"><Grid x:Name=\"Win10MediaButtonRoot\" Background=\"Transparent\"><VisualStateManager.VisualStateGroups><VisualStateGroup x:Name=\"CommonStates\"><VisualState x:Name=\"Normal\"/><VisualState x:Name=\"PointerOver\"><VisualState.Setters><Setter Target=\"Backdrop.Background\" Value=\"#1AFFFFFF\"/></VisualState.Setters></VisualState><VisualState x:Name=\"Pressed\"><VisualState.Setters><Setter Target=\"Backdrop.Background\" Value=\"#33FFFFFF\"/></VisualState.Setters></VisualState><VisualState x:Name=\"Disabled\"><VisualState.Setters><Setter Target=\"ContentPresenter.Opacity\" Value=\"0.4\"/></VisualState.Setters></VisualState></VisualStateGroup></VisualStateManager.VisualStateGroups><Border x:Name=\"Backdrop\" Background=\"Transparent\" CornerRadius=\"0\"/><ContentPresenter x:Name=\"ContentPresenter\" Content=\"{TemplateBinding Content}\" ContentTemplate=\"{TemplateBinding ContentTemplate}\" FontFamily=\"{TemplateBinding FontFamily}\" FontSize=\"{TemplateBinding FontSize}\" Foreground=\"{TemplateBinding Foreground}\" HorizontalAlignment=\"Center\" VerticalAlignment=\"Center\"/></Grid></ControlTemplate>",
+        "Content="
+      ]
+    },
+    {
+      "target": "LockApp.CreativeOverlay#LockCreativeOverlay",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=15"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=15"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Image#ExpandoDropShadow",
+      "styles": [
+        "Visibility=Collapsed"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando",
+      "styles": [
+        "Height=Auto",
+        "MinHeight=77",
+        "Padding=0",
+        "Background:=<SolidColorBrush Color=\"#00000000\"/>",
+        "BorderBrush:=<SolidColorBrush Color=\"#00000000\"/>",
+        "BorderThickness=0",
+        "CornerRadius=0",
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando > ContentPresenter",
+      "styles": [
+        "Background:=<SolidColorBrush Color=\"#00000000\"/>",
+        "BorderBrush:=<SolidColorBrush Color=\"#00000000\"/>",
+        "BorderThickness=0"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando > ContentPresenter > Grid > Border#ExpandoBackground",
+      "styles": [
+        "Margin=36,0,0,0",
+        "Background:=<SolidColorBrush Color=\"#99171717\"/>",
+        "BorderBrush:=<SolidColorBrush Color=\"#00000000\"/>",
+        "BorderThickness=0",
+        "CornerRadius=0",
+        "HorizontalAlignment=Stretch",
+        "VerticalAlignment=Stretch"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando > ContentPresenter > Grid > Button#Spot",
+      "styles": [
+        "Width=32",
+        "Height=32",
+        "MinWidth=32",
+        "MinHeight=32",
+        "Margin=0,0,0,0",
+        "Padding=0",
+        "Grid.Row=0",
+        "BorderBrush:=<SolidColorBrush Color=\"#00000000\"/>",
+        "BorderThickness=0",
+        "CornerRadius=16",
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top",
+        "Background=Transparent"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando > ContentPresenter > Grid > Button#Spot > ContentPresenter > Grid",
+      "styles": [
+        "Width=32",
+        "Height=32",
+        "HorizontalAlignment=Center",
+        "VerticalAlignment=Center"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando > ContentPresenter > Grid > Button#Spot > ContentPresenter > Grid > Image#SpotDropShadow",
+      "styles": [
+        "Visibility=Collapsed"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando > ContentPresenter > Grid > Border#Title",
+      "styles": [
+        "Grid.Row=0",
+        "Height=Auto",
+        "MinHeight=77",
+        "MaxWidth=300",
+        "Margin=36,0,0,0",
+        "Padding=12,5,12,12",
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando > ContentPresenter > Grid > Border#Title > StackPanel",
+      "styles": [
+        "Margin=0,0,0,0"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando > ContentPresenter > Grid > Border#Title > StackPanel > TextBlock",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=15",
+        "TextAlignment=Left",
+        "TextWrapping=WrapWholeWords"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot",
+      "styles": [
+        "Width=336",
+        "Margin=0,36,36,0",
+        "HorizontalAlignment=Right",
+        "VerticalAlignment=Top",
+        "FontFamily=Segoe UI",
+        "FontSize=15"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#ExpandoDropShadow",
+      "styles": [
+        "Visibility=Collapsed"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando",
+      "styles": [
+        "Width=336",
+        "Height=Auto",
+        "Margin=0,0,0,0",
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > Border#ExpandoBackground",
+      "styles": [
+        "Width=300",
+        "Margin=36,0,0,0",
+        "HorizontalAlignment=Left",
+        "Background:=<SolidColorBrush Color=\"#99171717\"/>",
+        "BorderBrush:=<SolidColorBrush Color=\"#00000000\"/>",
+        "BorderThickness=0",
+        "CornerRadius=0"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > Button#Title",
+      "styles": [
+        "Width=336",
+        "Height=Auto",
+        "Margin=0,0,0,0",
+        "Padding=0",
+        "Background:=<SolidColorBrush Color=\"#00000000\"/>",
+        "BorderBrush:=<SolidColorBrush Color=\"#00000000\"/>",
+        "BorderThickness=0",
+        "CornerRadius=0",
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top",
+        "MinHeight=37"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > Button#Title > Grid#RootGrid",
+      "styles": [
+        "Width=336",
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > Button#Title > Grid#RootGrid > Border#ButtonBackground",
+      "styles": [
+        "Visibility=Collapsed"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > Button#Title > Grid#RootGrid > StackPanel",
+      "styles": [
+        "Orientation=Horizontal",
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > Button#Title > Grid#RootGrid > StackPanel > ContentPresenter#ContentPresenter",
+      "styles": [
+        "Width=32",
+        "Height=32",
+        "Margin=0,0,16,0",
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > Button#Title > Grid#RootGrid > StackPanel > ContentPresenter#ContentPresenter > Grid > Image#SpotDropShadow",
+      "styles": [
+        "Visibility=Collapsed"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > Button#Title > Grid#RootGrid > StackPanel > ContentPresenter#ContentPresenter > Grid > Grid#Spot",
+      "styles": [
+        "Width=32",
+        "Height=32",
+        "Margin=0,0,0,0",
+        "HorizontalAlignment=Left",
+        "VerticalAlignment=Top"
+      ]
+    },
+    {
+      "target": "TextBlock#TitleText",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=15",
+        "FontWeight=Normal",
+        "LineHeight=20",
+        "TextAlignment=Left",
+        "HorizontalAlignment=Left",
+        "Margin=0",
+        "TextWrapping=Wrap",
+        "Visibility=Collapsed"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > Button#Title > Grid#RootGrid > StackPanel > TextBlock",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=15",
+        "FontWeight=Normal",
+        "LineHeight=20",
+        "Margin=0,5,0,0",
+        "HorizontalAlignment=Left",
+        "TextAlignment=Left",
+        "TextWrapping=NoWrap"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > StackPanel#ExpandedContentParent",
+      "styles": [
+        "Width=300",
+        "MaxWidth=300",
+        "Margin=36,0,0,0",
+        "Padding=12,5,12,12",
+        "HorizontalAlignment=Left"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > StackPanel#ExpandedContentParent > ContentPresenter#FeedbackSpotArea",
+      "styles": [
+        "HorizontalAlignment=Stretch"
+      ]
+    },
+    {
+      "target": "StackPanel#StatusProviderPanel",
+      "styles": [
+        "Grid.Row=1",
+        "Height=24",
+        "HorizontalAlignment=Right",
+        "VerticalAlignment=Top",
+        "Margin=0,36,36,36"
+      ]
+    },
+    {
+      "target": "Grid#NetworkIcon",
+      "styles": [
+        "Width=24",
+        "Height=24",
+        "Margin=32,0,0,0"
+      ]
+    },
+    {
+      "target": "TextBlock#NetworkStatusUnderlayText",
+      "styles": [
+        "FontSize=24",
+        "FontFamily=Segoe MDL2 Assets"
+      ]
+    },
+    {
+      "target": "TextBlock#NetworkStatusBaseText",
+      "styles": [
+        "FontSize=24",
+        "FontFamily=Segoe MDL2 Assets"
+      ]
+    },
+    {
+      "target": "TextBlock#NetworkStatusOverlayText",
+      "styles": [
+        "FontSize=24",
+        "FontFamily=Segoe MDL2 Assets"
+      ]
+    },
+    {
+      "target": "Image#BatteryStatusProvider",
+      "styles": [
+        "Width=24",
+        "Height=24",
+        "Margin=32,0,0,0"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando > ContentPresenter > Grid > Border#Title > StackPanel > Border#ExpandedContentParent > StackPanel > TextBlock",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "TextAlignment=Left"
+      ]
+    },
+    {
+      "target": "LockApp.Hotspot > Grid > Button#Expando > ContentPresenter > Grid > Border#Title > StackPanel > Border#ExpandedContentParent",
+      "styles": [
+        "HorizontalAlignment=Stretch"
+      ]
+    },
+    {
+      "target": "Grid#MediaTransportControls > ListView > ItemsPresenter > StackPanel > ListViewItem > Windows.UI.Xaml.Controls.Primitives.ListViewItemPresenter",
+      "styles": [
+        "PointerOverBackground=Transparent",
+        "PressedBackground=Transparent",
+        "SelectedBackground=Transparent",
+        "SelectedPointerOverBackground=Transparent",
+        "SelectedPressedBackground=Transparent",
+        "SelectionCheckMarkVisualEnabled=False"
+      ]
+    },
+    {
+      "target": "LockApp.LikeDislikeButton > Grid#ButtonRoot > TextBlock",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "TextAlignment=Left"
+      ]
+    },
+    {
+      "target": "LockApp.InfoHotspot#infoHotspot > Grid > Grid#Expando > StackPanel#ExpandedContentParent > StackPanel > TextBlock",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "TextAlignment=Left"
+      ]
+    },
+    {
+      "target": "LockApp.LikeDislikeButton",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=15",
+        "FontWeight=Normal",
+        "Padding=8,4,8,4",
+        "Background=#33FFFFFF",
+        "BorderBrush=Transparent",
+        "CornerRadius=0"
+      ]
+    },
+    {
+      "target": "LockApp.LikeDislikeButton#LikeButton",
+      "styles": [
+        "Margin=0,10,0,4"
+      ]
+    },
+    {
+      "target": "LockApp.LikeDislikeButton#DislikeButton",
+      "styles": [
+        "Margin=0"
+      ]
+    },
+    {
+      "target": "LockApp.LikeDislikeButton > Grid#ButtonRoot > Grid",
+      "styles": [
+        "Width=16",
+        "Height=18",
+        "Margin=0,9,8,0",
+        "HorizontalAlignment=Center",
+        "VerticalAlignment=Top"
+      ]
+    },
+    {
+      "target": "LockApp.LikeDislikeButton > Grid#ButtonRoot > TextBlock[3]",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=15",
+        "FontWeight=Normal",
+        "LineHeight=0",
+        "Margin=0,7,8,2",
+        "TextWrapping=WrapWholeWords",
+        "Foreground=White"
+      ]
+    },
+    {
+      "target": "LockApp.LikeDislikeButton > Grid#ButtonRoot > TextBlock[4]",
+      "styles": [
+        "FontFamily=Segoe UI",
+        "FontSize=12",
+        "FontWeight=Normal",
+        "LineHeight=0",
+        "Margin=0,0,8,8",
+        "TextWrapping=WrapWholeWords",
+        "Foreground=#99FFFFFF"
+      ]
+    },
+    {
+      "target": "LockApp.LikeDislikeButton > Grid#ButtonRoot@CommonStates > Border",
+      "styles": [
+        "CornerRadius=0",
+        "Background@Normal=Transparent",
+        "Background@PointerOver=#33FFFFFF",
+        "Background@Pressed=#33FFFFFF"
+      ]
+    }
+  ],
+  "styleConstants": [
+    "mediaBackdropOpacity=0.6"
+  ],
+  "themeResourceVariables": [
+    ""
+  ]
+}

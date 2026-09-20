@@ -1,51 +1,33 @@
-using Microsoft.Win32;
 using System;
-using System.ServiceProcess;
+using System.Reflection;
 
-public sealed class AllowContentService : RegistryNotificationServiceBase
+[assembly: AssemblyTitle("AllowContentAboveLock")]
+[assembly: AssemblyProduct("AIProjects AllowContentAboveLock")]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+
+public static class AllowContentAboveLockProgram
 {
-    public AllowContentService()
-        : base(
+    private static readonly RegistryNotificationPolicy Policy =
+        new RegistryNotificationPolicy(
+            null,
+            RegistryNotificationValuePolicy.Dword(
+                "AllowContentAboveLock",
+                1));
+
+    public static int Main(string[] args)
+    {
+        return ManagedPrivilegedServiceHost.Run(
+            args,
             "AllowContentAboveLockService",
-            "AllowContentAboveLockService")
-    {
-    }
-
-    protected override void ProcessAllKeys(RegistryKey baseKey, string sid)
-    {
-        foreach (string name in baseKey.GetSubKeyNames())
-            ProcessOneKey(baseKey, sid, name);
-    }
-
-    private void ProcessOneKey(RegistryKey baseKey, string sid, string name)
-    {
-        try
-        {
-            using (RegistryKey subKey = baseKey.OpenSubKey(name, true))
+            "Allow content above the lock screen",
+            "Keeps loaded-user notification entries configured to allow " +
+                "content above the lock screen.",
+            delegate()
             {
-                if (subKey == null)
-                    return;
-
-                object value = subKey.GetValue("AllowContentAboveLock");
-                int current = value == null ? 0 : Convert.ToInt32(value);
-                if (current != 1)
-                {
-                    subKey.SetValue(
-                        "AllowContentAboveLock",
-                        1,
-                        RegistryValueKind.DWord);
-                    Log("Updated: " + sid + "\\" + name);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log("Could not update " + sid + "\\" + name + ": " + ex.Message);
-        }
-    }
-
-    public static void Main()
-    {
-        ServiceBase.Run(new AllowContentService());
+                return new RegistryNotificationPolicyService(
+                    "AllowContentAboveLockService",
+                    Policy);
+            });
     }
 }

@@ -157,7 +157,25 @@ if errorlevel 1 (
     popd
     exit /b !STATUS!
 )
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib winhttp.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\DiscordRPC\service.cpp /Fo"build\obj\DesktopStubDiscordService.obj"
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\asusblink\service.cpp /Fo"build\obj\DesktopStubAsusService.obj"
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\asusblink\native_backend.cpp /Fo"build\obj\DesktopStubAsusBackend.obj"
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" "build\obj\DesktopStubDiscordService.obj" "build\obj\DesktopStubAsusService.obj" "build\obj\DesktopStubAsusBackend.obj" /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib pdh.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 set "STATUS=!ERRORLEVEL!"
 if not "!STATUS!"=="0" (
     popd

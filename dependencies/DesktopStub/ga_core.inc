@@ -638,6 +638,52 @@ using aip::QuoteCommandLineArg;
 using aip::XmlEscape;
 using aip::CurrentProcessHasPackageIdentity;
 
+static aip::StartupShortcutSpec DesktopStubStartupShortcutSpec()
+{
+    const std::wstring executablePath = aip::MakeAbsolutePath(g_exePath);
+    const std::wstring configPath = aip::MakeAbsolutePath(g_iniPath);
+
+    aip::StartupShortcutSpec spec;
+    spec.executablePath = executablePath;
+    spec.identityPath = configPath;
+    spec.fallbackBaseName = L"DesktopStub";
+    spec.arguments = L"--ini " + aip::QuoteCommandLineArg(configPath);
+    spec.workingDirectory = aip::GetDirectoryName(executablePath);
+    spec.description = L"DesktopStub tile and wallpaper resident app";
+    return spec;
+}
+
+static bool QueryDesktopStubStartupShortcutInstalled(
+    bool& installed,
+    std::wstring& error)
+{
+    return aip::QueryStartupShortcutInstalled(
+        DesktopStubStartupShortcutSpec(),
+        installed,
+        &error);
+}
+
+static bool SetDesktopStubStartupShortcutDesired(
+    bool desired,
+    bool& previouslyInstalled,
+    std::wstring& error)
+{
+    return aip::SetStartupShortcutDesired(
+        DesktopStubStartupShortcutSpec(),
+        desired,
+        previouslyInstalled,
+        &error);
+}
+
+static bool ReconcileDesktopStubStartupShortcutFromConfig(std::wstring& error)
+{
+    bool previouslyInstalled = false;
+    return SetDesktopStubStartupShortcutDesired(
+        IniReadI(L"Settings", L"RunAtStartup", 0) != 0,
+        previouslyInstalled,
+        error);
+}
+
 static std::mutex g_iniWriteMutex;
 static std::mutex g_iniCacheMutex;
 static bool g_iniCacheLoaded = false;
@@ -800,7 +846,8 @@ static bool WriteIniValueToText(std::wstring& text, const wchar_t* s, const wcha
     return aip::WriteIniValueToText(text, s, k, v ? v : L"");
 }
 
-static bool WriteIniValueWithWait(const wchar_t* s, const wchar_t* k, const wchar_t* v, DWORD writeMutexWaitMs)
+template <typename Mutator>
+static bool MutateDesktopStubIniWithWait(Mutator&& mutator, DWORD writeMutexWaitMs)
 {
     DesktopStubIniMutationGuard writeLock(writeMutexWaitMs);
     if (!writeLock.IsLocked())
@@ -810,8 +857,13 @@ static bool WriteIniValueWithWait(const wchar_t* s, const wchar_t* k, const wcha
     if (!ReadIniFileForMutation(text))
         return false;
 
-    if (!WriteIniValueToText(text, s, k, v))
+    SetLastError(ERROR_SUCCESS);
+    if (!std::forward<Mutator>(mutator)(text))
+    {
+        if (GetLastError() == ERROR_SUCCESS)
+            SetLastError(ERROR_INVALID_DATA);
         return false;
+    }
 
     if (!WriteUtf8BomTextFile(g_iniPath, text))
         return false;
@@ -823,9 +875,64 @@ static bool WriteIniValueWithWait(const wchar_t* s, const wchar_t* k, const wcha
     return true;
 }
 
+static bool WriteIniValueWithWait(const wchar_t* s, const wchar_t* k, const wchar_t* v, DWORD writeMutexWaitMs)
+{
+    return MutateDesktopStubIniWithWait(
+        [&](std::wstring& text)
+        {
+            return WriteIniValueToText(text, s, k, v);
+        },
+        writeMutexWaitMs);
+}
+
 static bool WriteIniValue(const wchar_t* s, const wchar_t* k, const wchar_t* v)
 {
     return WriteIniValueWithWait(s, k, v, CurrentIniWriteLockWaitMs());
+}
+
+template <typename IniMutator>
+static bool CommitDesktopStubStartupIniState(
+    bool desired,
+    IniMutator&& mutateIni,
+    std::wstring& error)
+{
+    bool committed = aip::CommitStartupShortcutIniState(
+        DesktopStubStartupShortcutSpec(),
+        g_iniPath,
+        L"",
+        L"Settings",
+        L"RunAtStartup",
+        false,
+        desired,
+        std::forward<IniMutator>(mutateIni),
+        &error,
+        CurrentIniWriteLockWaitMs());
+
+    // The shared transaction writes outside DesktopStub's private cache layer.
+    // Invalidate after success or rollback so the next read observes disk.
+    {
+        std::lock_guard<std::mutex> lock(g_iniCacheMutex);
+        g_iniCacheLoaded = false;
+        g_iniCacheLastCheck = {};
+    }
+    return committed;
+}
+
+static bool PersistDesktopStubStartupPreference(
+    bool desired,
+    std::wstring& error)
+{
+    return CommitDesktopStubStartupIniState(
+        desired,
+        [&](std::wstring& text)
+        {
+            return WriteIniValueToText(
+                text,
+                L"Settings",
+                L"RunAtStartup",
+                desired ? L"1" : L"0");
+        },
+        error);
 }
 
 struct IniDefault {

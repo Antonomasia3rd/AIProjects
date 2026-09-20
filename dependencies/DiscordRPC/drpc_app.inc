@@ -57,235 +57,87 @@ static void Notify(RuntimeContext* ctx, const wchar_t* stringKey, const wchar_t*
     QueueTrayBalloon(ctx, GetUiString(L"notification_title", APP_DISPLAY_NAME), GetUiString(stringKey, fallback), icon);
 }
 
-static int UpdatePresenceOnce(
-    std::unique_ptr<DiscordIpcClient>& ipc,
-    std::unique_ptr<DiscordGatewayClient>& gateway,
-    bool verbose,
-    RuntimeContext* ctx,
-    bool& missingClientIdReported)
+static DWORD RunPresenceLoop(const AppOptions& invocationOptions, bool once, RuntimeContext* ctx)
 {
-    std::wstring transport = NormalizeTransportMode(IniReadS(L"general", L"transport_mode", L"ipc"));
-    std::wstring clientId = Trim(IniReadS(L"general", L"client_id", L""));
-    if (clientId.empty())
-    {
-        if (!missingClientIdReported)
-        {
-            std::wstring message = GetUiString(L"missing_client_id", L"Missing [general] client_id. Create a Discord application and paste its Application ID into the INI.");
-            LogError(message);
-            Notify(ctx, L"missing_client_id", message.c_str(), NIIF_WARNING, L"notify_on_failure");
-            missingClientIdReported = true;
-        }
-        return 2;
-    }
-    missingClientIdReported = false;
-
-    PresencePayload payload = BuildPresencePayload();
-    if (verbose)
-    {
-        LogDebug(L"Presence JSON: " + Utf8ToWide(payload.activityJson));
-    }
-
-    auto updateIpc = [&]() -> int
-    {
-        gateway.reset();
-        if (!ipc)
-        {
-            ipc.reset(new DiscordIpcClient(clientId, verbose, LoadIpcOptions(), BackendControlRequested));
-        }
-
-        if (!ipc->IsConnected())
-        {
-            ipc->Connect();
-            Notify(ctx, L"notification_connected", L"Rich Presence is active through Discord IPC.", NIIF_INFO, L"notify_on_success");
-        }
-
-        ipc->SetActivity(payload.activityJson);
-        return 0;
+    aip::discord::Service service;
+    const auto serviceOptions = [&] {
+        aip::discord::Options options;
+        options.profilePath = MakeAbsolutePath(g_iniPath);
+        options.sendEnabled = true; // Standalone normal launch is explicit send intent.
+        options.refreshMs = ClampInt(IniReadI(L"general", L"update_interval", 5), 1, 86400) * 1000;
+        options.operationTimeoutMs = 30000;
+        options.clearOnStop = !once;
+        return options;
     };
-
-    auto updateGateway = [&](bool afterIpcFallback) -> int
-    {
-        ipc.reset();
-        if (!IniReadB(L"gateway", L"supported", true))
-        {
-            std::wstring message = L"Discord Gateway transport is disabled by [gateway] supported.";
-            LogError(message);
-            Notify(ctx, L"notification_gateway_unsupported", message.c_str(), NIIF_WARNING, L"notify_on_failure");
-            return 2;
-        }
-        std::wstring token = ResolveDiscordToken();
-        if (token.empty())
-        {
-            const wchar_t* fallbackMessage = afterIpcFallback
-                ? L"Discord IPC update failed. Gateway fallback is enabled by transport_mode=auto, but no DPAPI token_protected is configured. Set transport_mode=ipc to disable Gateway fallback, or protect a token for Gateway mode."
-                : L"Gateway mode needs DPAPI token_protected. Legacy plaintext token is only read for migration.";
-            const wchar_t* stringKey = afterIpcFallback
-                ? L"notification_gateway_auto_missing_token"
-                : L"notification_gateway_missing_token";
-            std::wstring message = GetUiString(stringKey, fallbackMessage);
-            LogError(message);
-            Notify(ctx, stringKey, fallbackMessage, NIIF_WARNING, L"notify_on_failure");
-            return 2;
-        }
-
-        std::wstring status = NormalizeStatus(IniReadS(L"general", L"status", L"online"));
-        if (!gateway)
-        {
-            gateway.reset(new DiscordGatewayClient(token, clientId, verbose, LoadGatewayOptions(), BackendControlRequested));
-        }
-
-        if (!gateway->IsConnected())
-        {
-            gateway->Connect(payload.activityJson, status);
-            Notify(ctx, L"notification_connected_gateway", L"Rich Presence is active through Discord Gateway.", NIIF_INFO, L"notify_on_success");
-        }
-
-        gateway->SetPresence(payload.activityJson, status);
-        return 0;
-    };
-
-    if (transport == L"gateway")
-    {
-        return updateGateway(false);
-    }
-
-    if (transport == L"auto")
-    {
-        try
-        {
-            return updateIpc();
-        }
-        catch (const std::exception& ex)
-        {
-            LogError(L"Discord IPC update failed; trying Gateway fallback: " + Utf8ToWide(ex.what()));
-            ipc.reset();
-            return updateGateway(true);
-        }
-    }
-
-    return updateIpc();
-}
-
-static DWORD RunPresenceLoop(bool once, RuntimeContext* ctx)
-{
-    std::unique_ptr<DiscordIpcClient> ipc;
-    std::unique_ptr<DiscordGatewayClient> gateway;
-    bool verbose = g_verboseLogging.load();
-    int updateIntervalSeconds = ClampInt(IniReadI(L"general", L"update_interval", 5), 1, 86400);
-    DWORD exitCode = 0;
-    bool missingClientIdReported = false;
-
     LogInfo(L"Starting DiscordRPC C++.");
     LogInfo(L"DiscordRPC version: " + aip::ReleaseVersionDisplayText());
     LogInfo(L"Config: " + MakeAbsolutePath(g_iniPath));
     if (IniReadB(L"state", L"force_shutdown_pending_cleanup", false))
     {
-        std::wstring warning = GetUiString(
-            L"previous_force_shutdown_warning",
-            L"The previous run was force-closed while Discord cleanup was pending. Presence clearing or the Gateway close handshake may not have completed.");
-        LogError(warning);
-        Notify(ctx, L"previous_force_shutdown_warning", warning.c_str(), NIIF_WARNING, L"notify_on_failure");
+        LogError(GetUiString(L"previous_force_shutdown_warning",
+            L"The previous run was force-closed while Discord cleanup was pending."));
         if (!IniWrite(L"state", L"force_shutdown_pending_cleanup", L"false"))
-        {
             ReportConfigWriteFailure(L"Clearing force-shutdown pending cleanup state");
-        }
     }
-
-    try
+    std::wstring serviceError;
+    if (!service.Start(serviceOptions(), serviceError)) { LogError(serviceError); return 2; }
+    DWORD exitCode = 0;
+    std::uint64_t revision = 0;
+    aip::discord::Phase previousPhase = aip::discord::Phase::Stopped;
+    while (!g_stopRequested.load())
     {
-        while (!g_stopRequested.load())
+        bool reload = g_reloadRequested.exchange(false);
+        bool refresh = g_refreshRequested.exchange(false);
+        if (reload)
         {
-            if (g_reloadRequested.exchange(false))
+            // Only the standalone host owns migration, UI and Startup changes.
+            if (!ProtectDiscordTokenInConfig(!Trim(IniReadS(L"general", L"token", L"")).empty()))
+                LogError(L"Configuration reload could not complete Discord token protection.");
+            ConfigureRuntimeFromConfig(invocationOptions);
+            std::wstring startupError;
+            if (!ReconcileDiscordStartupShortcutFromConfig(startupError))
+                LogError(L"Could not synchronize this profile's shell:startup shortcut after reload: " + startupError);
+            if (ctx && ctx->trayCreated)
             {
-                if (!ProtectDiscordTokenInConfig(!Trim(IniReadS(L"general", L"token", L"")).empty()))
-                {
-                    LogError(L"Configuration reload could not complete Discord token protection.");
-                }
-                ConfigureRuntimeFromConfig(AppOptions{});
-                verbose = g_verboseLogging.load();
-                updateIntervalSeconds = ClampInt(IniReadI(L"general", L"update_interval", 5), 1, 86400);
-                ipc.reset();
-                gateway.reset();
-                LogInfo(L"Configuration reloaded.");
-                Notify(ctx, L"notification_reloaded", L"Configuration reloaded.", NIIF_INFO, L"notify_on_reload");
+                DWORD tooltipError = ERROR_SUCCESS;
+                if (!aip::ModifyTrayIconTooltip(ctx->nid, GetUiString(L"tray_tip", APP_DISPLAY_NAME),
+                        APP_DISPLAY_NAME, true, &tooltipError))
+                    LogError(L"Could not update tray tooltip after configuration reload: " + GetLastErrorText(tooltipError));
             }
-
-            g_refreshRequested = false;
-            try
+            Notify(ctx, L"notification_reloaded", L"Configuration reloaded.", NIIF_INFO, L"notify_on_reload");
+        }
+        if ((reload || refresh) && !service.Reload(serviceOptions(), serviceError)) LogError(serviceError);
+        const auto snapshot = service.Read();
+        if (snapshot.revision != revision)
+        {
+            revision = snapshot.revision;
+            if (snapshot.phase == aip::discord::Phase::Error)
             {
-                int updateStatus = UpdatePresenceOnce(ipc, gateway, verbose, ctx, missingClientIdReported);
-                if (updateStatus != 0)
-                {
-                    exitCode = static_cast<DWORD>(updateStatus);
-                    if (once)
-                    {
-                        break;
-                    }
-                }
-                else if (once)
-                {
-                    exitCode = 0;
-                    break;
-                }
-            }
-            catch (const std::exception& ex)
-            {
-                if (BackendControlRequested())
-                {
-                    ipc.reset();
-                    gateway.reset();
-                    if (g_stopRequested.load())
-                    {
-                        break;
-                    }
-                    continue;
-                }
                 exitCode = 1;
-                std::wstring message = Utf8ToWide(ex.what());
-                LogError(L"DiscordRPC update failed: " + message);
-                if (message.find(L"4004") != std::wstring::npos ||
-                    message.find(L"authentication") != std::wstring::npos ||
-                    message.find(L"Authentication") != std::wstring::npos)
-                {
-                    Notify(ctx, L"notification_gateway_auth_failed", L"Discord Gateway authentication failed. Check your token.", NIIF_ERROR, L"notify_on_failure");
-                }
-                else
-                {
-                    Notify(ctx, L"notification_failed", L"Rich Presence update failed.", NIIF_WARNING, L"notify_on_failure");
-                }
-                ipc.reset();
-                gateway.reset();
-                if (once)
-                {
-                    break;
-                }
+                LogError(L"DiscordRPC update failed: " + snapshot.error);
+                Notify(ctx, L"notification_failed", L"Rich Presence update failed.", NIIF_WARNING, L"notify_on_failure");
+                if (once) break;
             }
-
-            if (!SleepInterruptible(updateIntervalSeconds * 1000))
+            else if (snapshot.phase == aip::discord::Phase::Active)
             {
-                continue;
+                exitCode = 0;
+                if (g_verboseLogging.load()) LogDebug(L"Presence JSON: " + Utf8ToWide(snapshot.activityJson));
+                if (previousPhase != aip::discord::Phase::Active)
+                    Notify(ctx, L"notification_connected", L"Rich Presence is active.", NIIF_INFO, L"notify_on_success");
+                if (once) break;
             }
+            previousPhase = snapshot.phase;
         }
-
-        if (!once && ipc && ipc->IsConnected())
-        {
-            ipc->ClearActivity();
-        }
-        if (!once && gateway && gateway->IsConnected())
-        {
-            gateway->ClearPresence(IniReadS(L"general", L"status", L"online"));
-        }
+        SleepInterruptible(50);
     }
-    catch (const std::exception& ex)
+    if (!service.Stop(5000))
     {
-        LogError(L"Fatal DiscordRPC loop error: " + Utf8ToWide(ex.what()));
+        LogError(L"Discord transport cleanup is still pending after its bounded stop wait.");
         exitCode = 1;
     }
-
     LogInfo(L"DiscordRPC stopped.");
     return exitCode;
 }
-
 static bool SignalExistingInstance(WPARAM request)
 {
     ConfigureSingleInstanceIdentity();
@@ -326,7 +178,7 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
         LogError(L"Could not create DiscordRPC control window: " + GetLastErrorText(GetLastError()));
         if (options.once)
         {
-            return static_cast<int>(RunPresenceLoop(true, nullptr));
+            return static_cast<int>(RunPresenceLoop(options, true, nullptr));
         }
         return 1;
     }
@@ -336,7 +188,7 @@ static int RunWithControlWindow(const AppOptions& options, bool trayEnabled)
     try
     {
         ctx.worker = std::thread([&ctx, &options]() {
-            ctx.workerExitCode = RunPresenceLoop(options.once, &ctx);
+            ctx.workerExitCode = RunPresenceLoop(options, options.once, &ctx);
             ctx.shutdown.MarkWorkComplete();
             SendMessageW(ctx.hwnd, WM_DRPC_WORKER_FINISHED, 0, 0);
         });
@@ -409,6 +261,16 @@ static int RunApplication(const AppOptions& options)
         PrintLine(GetUiString(L"already_running", L"DiscordRPC is already running for this config."), true);
         ReleaseSingleInstance();
         return 1;
+    }
+
+    if (!options.once)
+    {
+        std::wstring startupError;
+        if (!ReconcileDiscordStartupShortcutFromConfig(startupError))
+        {
+            LogError(L"Could not synchronize this profile's shell:startup shortcut: " +
+                startupError);
+        }
     }
 
     bool trayEnabled = !options.once && !options.forceNoTray && (options.forceTray || IniReadB(L"app", L"show_tray", true));

@@ -1,16 +1,11 @@
 ﻿// Portable smoke test for dependencies/DesktopStub/tile_text_layout.h.
 //
 // Compiles and runs on any C++17 compiler -- no Windows headers, no GDI+.
-// This is deliberately checked at the repo root's tools/, not under
-// DesktopStub/tools/, since (unlike DesktopStubSourceCheck.cpp) it has
-// nothing DesktopStub-specific about *how* it's built; it only depends on
-// the portable header.
-//
 // Windows CI: TestDesktopStubSource.cmd builds and runs this
 // with cl.exe, same as the rest of the source-check suite.
-// Anywhere else (e.g. this Linux sandbox): compiles directly with g++/clang,
+// Anywhere else: compiles directly with g++/clang,
 // no cl.exe or Windows SDK required:
-//   g++ -std=c++17 -Wall -Wextra -I dependencies/DesktopStub -o /tmp/TileTextLayoutTests tools/TileTextLayoutTests.cpp
+//   g++ -std=c++17 -Wall -Wextra -o /tmp/TileTextLayoutTests DesktopStub/tools/TileTextLayoutTests.cpp
 //   /tmp/TileTextLayoutTests
 
 #include "../../dependencies/DesktopStub/tile_text_layout.h"
@@ -70,6 +65,8 @@ static void CheckLayout(TileSize size, const char* sizeName, const TileTextInput
         : LargeFontSizes();
 
     std::vector<TileTextRegion> regions = ComputeTileTextLayout(size, in);
+    const unsigned mask = TileTextInputMask(in);
+    Check(regions.empty() == (mask == 0), std::string(sizeName) + " " + label + ": empty inputs produce no regions");
 
     for (size_t i = 0; i < regions.size(); ++i)
     {
@@ -78,7 +75,11 @@ static void CheckLayout(TileSize size, const char* sizeName, const TileTextInput
 
         std::snprintf(desc, sizeof(desc), "%s %s: region %zu (field=%d) is within tile bounds",
             sizeName, label.c_str(), i, r.sourceField);
-        Check(r.x >= 0 && r.y >= 0 && r.x + r.width <= tileWidth && r.y + r.height <= tileHeight, desc);
+        Check(r.width > 0 && r.height > 0 && r.x >= 0 && r.y >= 0 && r.x + r.width <= tileWidth && r.y + r.height <= tileHeight, desc);
+        Check(r.sourceField >= 0 && r.sourceField <= 2 && (mask & (1u << r.sourceField)) != 0,
+            std::string(sizeName) + " " + label + ": region references a configured field");
+        Check(r.documentedMaxLines > 0 && r.documentedMaxLines <= 4,
+            std::string(sizeName) + " " + label + ": region has a supported line limit");
 
         std::snprintf(desc, sizeof(desc), "%s %s: region %zu (field=%d) fits at least one line of its font size",
             sizeName, label.c_str(), i, r.sourceField);
@@ -89,11 +90,14 @@ static void CheckLayout(TileSize size, const char* sizeName, const TileTextInput
             std::snprintf(desc, sizeof(desc), "%s %s: region %zu (field=%d) does not overlap region %zu (field=%d)",
                 sizeName, label.c_str(), i, r.sourceField, j, regions[j].sourceField);
             Check(!RegionsOverlap(r, regions[j]), desc);
+            Check(r.sourceField != regions[j].sourceField,
+                std::string(sizeName) + " " + label + ": a field is not drawn twice");
         }
     }
 
-    // Every field the caller says is present should be routed to at least
-    // one region -- catches "silently dropped this text field" bugs.
+    // Every representable field should be routed to a region. TileSquareBlock
+    // has only a block and one caption slot, so Medium primary+secondary+badge
+    // deliberately gives the caption to primary and cannot show secondary.
     auto hasFieldRegion = [&](int field)
     {
         for (const auto& r : regions)
@@ -109,24 +113,31 @@ static void CheckLayout(TileSize size, const char* sizeName, const TileTextInput
         std::snprintf(desc, sizeof(desc), "%s %s: primary text (field 0) is routed to a region", sizeName, label.c_str());
         Check(hasFieldRegion(0), desc);
     }
+    if (in.hasSecondary)
+    {
+        bool mediumBlockHasOnlyOneCaption = size == TileSize::Medium &&
+            in.hasPrimary && in.hasBadge;
+        if (!mediumBlockHasOnlyOneCaption)
+        {
+            char desc[256];
+            std::snprintf(desc, sizeof(desc), "%s %s: secondary text (field 1) is routed to a region", sizeName, label.c_str());
+            Check(hasFieldRegion(1), desc);
+        }
+    }
     if (in.hasBadge)
     {
         char desc[256];
         std::snprintf(desc, sizeof(desc), "%s %s: badge text (field 2) is routed to a region", sizeName, label.c_str());
         Check(hasFieldRegion(2), desc);
     }
-    // Secondary text is intentionally NOT checked here: Medium's badge mode
-    // drops secondary in favor of primary as the single caption line (the
-    // fix this test suite exists to pin -- see the dedicated regression
-    // check below), so "secondary is always routed" isn't true in general.
 }
 
 static void RunAllCombinationsFor(TileSize size, const char* sizeName)
 {
-    // ApplyTileTextOverlay only calls into a size's render function when at
-    // least one of the three fields is non-empty, so the all-false case is
-    // deliberately excluded here -- it's not a real input this code sees.
+    // Include empty input so disabling text cannot accidentally select a
+    // stale/default region during future composition changes.
     static const TileTextInputs combos[] = {
+        { false, false, false },
         { true, false, false },
         { false, true, false },
         { false, false, true },
@@ -136,6 +147,7 @@ static void RunAllCombinationsFor(TileSize size, const char* sizeName)
         { true, true, true },
     };
     static const char* labels[] = {
+        "empty",
         "primary only", "secondary only", "badge only",
         "primary+secondary", "primary+badge", "secondary+badge",
         "primary+secondary+badge"
@@ -169,6 +181,47 @@ int main()
         }
         Check(!secondaryPresent,
             "Medium badge+primary+secondary: secondary text is not drawn when primary is available for the caption slot");
+    }
+
+    // TileWideBlockAndText02 uses secondary as the short caption beneath the
+    // block value when all three fields are configured.
+    {
+        TileTextInputs in{ true, true, true };
+        auto regions = ComputeWideTileTextLayout(in);
+        bool foundCaption = false;
+        for (const auto& r : regions)
+        {
+            if (r.sourceField == 1 && r.align == HorizontalAlign::Far &&
+                r.trim == Trimming::Character && r.documentedMaxLines == 1)
+                foundCaption = true;
+        }
+        Check(foundCaption,
+            "Wide badge+primary+secondary routes secondary to the one-line right-side caption");
+    }
+
+    // TileSquare310x310BlockAndText02 puts the block first, followed by two
+    // large unwrapped header lines. It does not put the block at upper right
+    // with secondary text at the bottom of the tile.
+    {
+        TileTextInputs in{ true, true, true };
+        auto regions = ComputeLargeTileTextLayout(in);
+        bool badgeAtLeft = false;
+        bool primaryHeader = false;
+        bool secondaryHeader = false;
+        for (const auto& r : regions)
+        {
+            if (r.sourceField == 2 && r.role == TextRole::Badge &&
+                r.align == HorizontalAlign::Near && r.x == 20)
+                badgeAtLeft = true;
+            if (r.sourceField == 0 && r.role == TextRole::Title &&
+                r.trim == Trimming::Character && r.documentedMaxLines == 1)
+                primaryHeader = true;
+            if (r.sourceField == 1 && r.role == TextRole::Title &&
+                r.trim == Trimming::Character && r.documentedMaxLines == 1)
+                secondaryHeader = true;
+        }
+        Check(badgeAtLeft && primaryHeader && secondaryHeader,
+            "Large badge layout matches BlockAndText02 block plus two header lines");
     }
     {
         // Fallback: if only secondary was configured (no primary), it should

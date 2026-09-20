@@ -3,6 +3,192 @@
 
 namespace aip
 {
+inline std::wstring NormalizeTrayTooltip(
+    const std::wstring& tooltip,
+    const std::wstring& fallbackTooltip)
+{
+    // Shell tooltips are NUL-terminated even when their source is a string.
+    // Embedded NULs from dynamic status text must not hide the remaining text.
+    auto visibleText = [](std::wstring text)
+    {
+        std::replace(text.begin(), text.end(), L'\0', L' ');
+        return Trim(text);
+    };
+    std::wstring normalized = visibleText(tooltip);
+    if (normalized.empty())
+    {
+        normalized = visibleText(fallbackTooltip);
+    }
+    if (normalized.empty())
+    {
+        normalized = L"Application";
+    }
+    constexpr size_t tooltipLimit = 127; // NOTIFYICONDATAW::szTip minus NUL.
+    if (normalized.size() > tooltipLimit)
+    {
+        size_t length = tooltipLimit;
+        if (normalized[length - 1] >= 0xD800 && normalized[length - 1] <= 0xDBFF &&
+            normalized[length] >= 0xDC00 && normalized[length] <= 0xDFFF)
+        {
+            --length;
+        }
+        normalized.resize(length);
+    }
+    return normalized;
+}
+
+inline bool RegisterTrayIcon(
+    NOTIFYICONDATAW& nid,
+    HWND window,
+    UINT iconId,
+    UINT callbackMessage,
+    HICON icon,
+    const std::wstring& tooltip,
+    const std::wstring& fallbackTooltip,
+    bool useVersion4,
+    DWORD* addError = nullptr,
+    DWORD* versionError = nullptr)
+{
+    if (addError != nullptr)
+    {
+        *addError = ERROR_SUCCESS;
+    }
+    if (versionError != nullptr)
+    {
+        *versionError = ERROR_SUCCESS;
+    }
+    if (window == nullptr || icon == nullptr)
+    {
+        if (addError != nullptr)
+        {
+            *addError = window == nullptr ? ERROR_INVALID_WINDOW_HANDLE : ERROR_INVALID_HANDLE;
+        }
+        return false;
+    }
+
+    NOTIFYICONDATAW candidate = {};
+    candidate.cbSize = sizeof(candidate);
+    candidate.hWnd = window;
+    candidate.uID = iconId;
+    candidate.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    if (useVersion4)
+    {
+        // Version 4 suppresses the standard hover tooltip unless NIF_SHOWTIP is
+        // present. Keep this coupled to version negotiation so callers cannot
+        // accidentally create the silent-hover configuration.
+        candidate.uFlags |= NIF_SHOWTIP;
+    }
+    candidate.uCallbackMessage = callbackMessage;
+    candidate.hIcon = icon;
+    std::wstring normalizedTooltip = NormalizeTrayTooltip(
+        tooltip,
+        fallbackTooltip);
+    wcsncpy_s(
+        candidate.szTip,
+        ARRAYSIZE(candidate.szTip),
+        normalizedTooltip.c_str(),
+        _TRUNCATE);
+
+    SetLastError(ERROR_SUCCESS);
+    if (!Shell_NotifyIconW(NIM_ADD, &candidate))
+    {
+        if (addError != nullptr)
+        {
+            DWORD currentError = GetLastError();
+            *addError = currentError == ERROR_SUCCESS ? ERROR_GEN_FAILURE : currentError;
+        }
+        return false;
+    }
+
+    if (useVersion4)
+    {
+        candidate.uVersion = NOTIFYICON_VERSION_4;
+        SetLastError(ERROR_SUCCESS);
+        if (!Shell_NotifyIconW(NIM_SETVERSION, &candidate) && versionError != nullptr)
+        {
+            DWORD currentError = GetLastError();
+            *versionError = currentError == ERROR_SUCCESS ? ERROR_GEN_FAILURE : currentError;
+        }
+    }
+
+    nid = candidate;
+    return true;
+}
+
+inline bool ModifyTrayIconTooltip(
+    NOTIFYICONDATAW& nid,
+    const std::wstring& tooltip,
+    const std::wstring& fallbackTooltip,
+    bool useVersion4,
+    DWORD* error = nullptr)
+{
+    if (error != nullptr)
+    {
+        *error = ERROR_SUCCESS;
+    }
+    if (nid.hWnd == nullptr)
+    {
+        if (error != nullptr)
+        {
+            *error = ERROR_INVALID_WINDOW_HANDLE;
+        }
+        return false;
+    }
+
+    NOTIFYICONDATAW updated = nid;
+    updated.uFlags = NIF_TIP | (useVersion4 ? NIF_SHOWTIP : 0);
+    std::wstring normalizedTooltip = NormalizeTrayTooltip(
+        tooltip,
+        fallbackTooltip);
+    wcsncpy_s(
+        updated.szTip,
+        ARRAYSIZE(updated.szTip),
+        normalizedTooltip.c_str(),
+        _TRUNCATE);
+    SetLastError(ERROR_SUCCESS);
+    if (!Shell_NotifyIconW(NIM_MODIFY, &updated))
+    {
+        if (error != nullptr)
+        {
+            DWORD currentError = GetLastError();
+            *error = currentError == ERROR_SUCCESS ? ERROR_GEN_FAILURE : currentError;
+        }
+        return false;
+    }
+
+    wcsncpy_s(
+        nid.szTip,
+        ARRAYSIZE(nid.szTip),
+        normalizedTooltip.c_str(),
+        _TRUNCATE);
+    return true;
+}
+
+inline bool UnregisterTrayIcon(const NOTIFYICONDATAW& nid, DWORD* error = nullptr)
+{
+    if (error != nullptr)
+    {
+        *error = ERROR_SUCCESS;
+    }
+    if (nid.hWnd == nullptr)
+    {
+        return true;
+    }
+
+    NOTIFYICONDATAW copy = nid;
+    SetLastError(ERROR_SUCCESS);
+    if (!Shell_NotifyIconW(NIM_DELETE, &copy))
+    {
+        if (error != nullptr)
+        {
+            DWORD currentError = GetLastError();
+            *error = currentError == ERROR_SUCCESS ? ERROR_GEN_FAILURE : currentError;
+        }
+        return false;
+    }
+    return true;
+}
+
 inline std::wstring TrayMenuTitle(const std::wstring& text)
 {
     std::wstring title = Trim(text);
@@ -101,13 +287,56 @@ inline void TrackPostAndDestroyTrayMenu(HMENU menu, HWND hwnd, const POINT& pt, 
     DestroyMenu(menu);
 }
 
-inline bool ShowTrayBalloon(NOTIFYICONDATAW& nid, const std::wstring& title, const std::wstring& message, DWORD icon)
+inline bool ShowTrayBalloon(
+    const NOTIFYICONDATAW& nid,
+    const std::wstring& title,
+    const std::wstring& message,
+    DWORD icon,
+    UINT timeoutMs = 0,
+    DWORD* error = nullptr)
 {
-    nid.uFlags = NIF_INFO;
-    wcsncpy_s(nid.szInfoTitle, ARRAYSIZE(nid.szInfoTitle), title.c_str(), _TRUNCATE);
-    wcsncpy_s(nid.szInfo, ARRAYSIZE(nid.szInfo), message.c_str(), _TRUNCATE);
-    nid.dwInfoFlags = icon;
-    return Shell_NotifyIconW(NIM_MODIFY, &nid) != FALSE;
+    if (error != nullptr)
+    {
+        *error = ERROR_SUCCESS;
+    }
+    if (nid.hWnd == nullptr)
+    {
+        if (error != nullptr)
+        {
+            *error = ERROR_INVALID_WINDOW_HANDLE;
+        }
+        return false;
+    }
+
+    NOTIFYICONDATAW notification = nid;
+    notification.uFlags = NIF_INFO;
+    wcsncpy_s(
+        notification.szInfoTitle,
+        ARRAYSIZE(notification.szInfoTitle),
+        title.c_str(),
+        _TRUNCATE);
+    wcsncpy_s(
+        notification.szInfo,
+        ARRAYSIZE(notification.szInfo),
+        message.c_str(),
+        _TRUNCATE);
+    notification.dwInfoFlags = icon;
+    notification.uTimeout = timeoutMs;
+    SetLastError(ERROR_SUCCESS);
+    if (!Shell_NotifyIconW(NIM_MODIFY, &notification))
+    {
+        DWORD currentError = GetLastError();
+        currentError = currentError == ERROR_SUCCESS
+            ? ERROR_GEN_FAILURE
+            : currentError;
+        SetLastError(currentError);
+        if (error != nullptr)
+        {
+            *error = currentError;
+        }
+        return false;
+    }
+    return true;
 }
 }
 

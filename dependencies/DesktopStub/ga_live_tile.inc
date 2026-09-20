@@ -236,6 +236,14 @@ static std::wstring BuildLiveTileXml(
     else
         xml += L"  <visual>\r\n";
 
+    if (g_renderContent && !g_renderContent->activationArguments.empty() &&
+        ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10)
+    {
+        const auto end = xml.find(L'>', xml.find(L"<visual"));
+        if (end != std::wstring::npos)
+            xml.insert(end, L" arguments=\"" + aip::XmlEscape(g_renderContent->activationArguments) + L"\"");
+    }
+
     for (const auto& asset : liveTileAssets)
     {
         std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file, asset.w, asset.h);
@@ -561,8 +569,43 @@ struct LiveTileSuccessLogWatch
     unsigned long long previousSize = 0;
 };
 
-static bool LiveTileSuccessLogContainsNewSuccess(const LiveTileSuccessLogWatch& watch)
+static bool TryParseLiveTileSuccessPid(
+    const std::wstring& tail,
+    size_t successPosition,
+    DWORD& pidOut)
 {
+    pidOut = 0;
+    size_t lineStart = tail.rfind(L'\n', successPosition);
+    lineStart = lineStart == std::wstring::npos ? 0 : lineStart + 1;
+    size_t pidPosition = tail.find(L"pid=", lineStart);
+    if (pidPosition == std::wstring::npos || pidPosition >= successPosition)
+        return false;
+
+    size_t digit = pidPosition + 4;
+    unsigned long long value = 0;
+    bool foundDigit = false;
+    while (digit < tail.size() && tail[digit] >= L'0' && tail[digit] <= L'9')
+    {
+        foundDigit = true;
+        value = value * 10 + static_cast<unsigned long long>(tail[digit] - L'0');
+        if (value > MAXDWORD)
+            return false;
+        ++digit;
+    }
+
+    if (!foundDigit || value == 0)
+        return false;
+    pidOut = static_cast<DWORD>(value);
+    return true;
+}
+
+static bool LiveTileSuccessLogContainsNewSuccess(
+    const LiveTileSuccessLogWatch& watch,
+    const wchar_t* requiredSuccessText,
+    DWORD* successPid)
+{
+    if (successPid)
+        *successPid = 0;
     if (watch.path.empty())
         return false;
 
@@ -571,21 +614,55 @@ static bool LiveTileSuccessLogContainsNewSuccess(const LiveTileSuccessLogWatch& 
         return false;
 
     std::wstring tail;
-    return ReadUtf8FileTailAsWide(watch.path, watch.previousSize, tail) &&
-        (tail.find(L"Live Tile update completed under package identity") != std::wstring::npos ||
-            tail.find(L"Live Tile cleared under package identity") != std::wstring::npos);
+    if (!ReadUtf8FileTailAsWide(watch.path, watch.previousSize, tail))
+        return false;
+
+    size_t successPosition = std::wstring::npos;
+    if (requiredSuccessText && *requiredSuccessText)
+    {
+        successPosition = tail.find(requiredSuccessText);
+    }
+    else
+    {
+        size_t updatePosition = tail.find(L"Live Tile update completed under package identity");
+        size_t clearPosition = tail.find(L"Live Tile cleared under package identity");
+        if (updatePosition == std::wstring::npos)
+            successPosition = clearPosition;
+        else if (clearPosition == std::wstring::npos)
+            successPosition = updatePosition;
+        else
+            successPosition = (std::min)(updatePosition, clearPosition);
+    }
+
+    if (successPosition == std::wstring::npos)
+        return false;
+
+    if (successPid)
+        TryParseLiveTileSuccessPid(tail, successPosition, *successPid);
+    return true;
 }
 
-static bool WaitForPackagedLiveTileHelperSuccess(const std::vector<LiveTileSuccessLogWatch>& watches, DWORD timeoutMs)
+static bool WaitForPackagedLiveTileHelperSuccess(
+    const std::vector<LiveTileSuccessLogWatch>& watches,
+    DWORD timeoutMs,
+    const wchar_t* requiredSuccessText,
+    DWORD* successPid)
 {
+    if (successPid)
+        *successPid = 0;
     const DWORD stepMs = 100;
     DWORD waited = 0;
     while (waited <= timeoutMs)
     {
         for (const auto& watch : watches)
         {
-            if (LiveTileSuccessLogContainsNewSuccess(watch))
+            DWORD reportedPid = 0;
+            if (LiveTileSuccessLogContainsNewSuccess(watch, requiredSuccessText, &reportedPid))
+            {
+                if (successPid)
+                    *successPid = reportedPid;
                 return true;
+            }
         }
 
         if (waited == timeoutMs)
@@ -598,11 +675,63 @@ static bool WaitForPackagedLiveTileHelperSuccess(const std::vector<LiveTileSucce
     return false;
 }
 
+static bool WaitForPackagedLiveTileHelperSuccess(const std::vector<LiveTileSuccessLogWatch>& watches, DWORD timeoutMs)
+{
+    return WaitForPackagedLiveTileHelperSuccess(watches, timeoutMs, nullptr, nullptr);
+}
+
 static bool WaitForPackagedLiveTileHelperSuccess(unsigned long long previousLogSize, DWORD timeoutMs)
 {
     std::vector<LiveTileSuccessLogWatch> watches;
     watches.push_back({ LiveTileActivationTraceLogPath(), previousLogSize });
     return WaitForPackagedLiveTileHelperSuccess(watches, timeoutMs);
+}
+
+static bool WaitForLiveTileHelperProcessExit(
+    DWORD pid,
+    DWORD timeoutMs,
+    DWORD& waitResult,
+    DWORD& error)
+{
+    waitResult = WAIT_FAILED;
+    error = ERROR_SUCCESS;
+    if (pid == 0)
+    {
+        error = ERROR_INVALID_DATA;
+        return false;
+    }
+
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (!process)
+    {
+        error = GetLastError();
+        // The helper can exit between appending its success line and this
+        // OpenProcess call. A nonexistent PID therefore proves the boundary
+        // required before package re-registration.
+        if (error == ERROR_INVALID_PARAMETER)
+        {
+            waitResult = WAIT_OBJECT_0;
+            error = ERROR_SUCCESS;
+            return true;
+        }
+        if (error == ERROR_SUCCESS)
+            error = ERROR_OPEN_FAILED;
+        return false;
+    }
+
+    waitResult = WaitForSingleObject(process, timeoutMs);
+    if (waitResult == WAIT_FAILED)
+    {
+        error = GetLastError();
+        if (error == ERROR_SUCCESS)
+            error = ERROR_GEN_FAILURE;
+    }
+    else if (waitResult == WAIT_TIMEOUT)
+    {
+        error = ERROR_TIMEOUT;
+    }
+    CloseHandle(process);
+    return waitResult == WAIT_OBJECT_0;
 }
 
 static bool TryReadRegisteredPackageViaPowerShell(
@@ -1128,9 +1257,12 @@ static bool ActivatePackagedLiveTileUpdateOopServer(
 static bool ActivateRegisteredPackageApplication(
     const ManifestDisplayInfo& manifestInfo,
     const wchar_t* arguments,
-    std::wstring& failureMessage)
+    std::wstring& failureMessage,
+    DWORD* activatedPid = nullptr)
 {
     failureMessage.clear();
+    if (activatedPid)
+        *activatedPid = 0;
 
     std::wstring packageFamilyName;
     std::wstring packageFullName;
@@ -1177,6 +1309,8 @@ static bool ActivateRegisteredPackageApplication(
 
     Log(g_ui.liveTileRegisteredPackageActivated.c_str(),
         appUserModelId.c_str(), packageFullName.c_str(), static_cast<unsigned long>(pid));
+    if (activatedPid)
+        *activatedPid = pid;
     return true;
 }
 
@@ -1463,7 +1597,9 @@ static bool Appx_Clear_Or_Request_LiveTile(std::wstring& failureMessage)
         return Appx_Clear_LiveTileBare(failureMessage);
 
     ManifestCompatibilityTarget target = ConfiguredManifestCompatibilityTarget();
-    if (target == ManifestCompatibilityTarget::Windows81 || target == ManifestCompatibilityTarget::Windows8)
+    if (target == ManifestCompatibilityTarget::Windows10 ||
+        target == ManifestCompatibilityTarget::Windows81 ||
+        target == ManifestCompatibilityTarget::Windows8)
     {
         ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
         std::wstring packageFamilyName;
@@ -1471,17 +1607,100 @@ static bool Appx_Clear_Or_Request_LiveTile(std::wstring& failureMessage)
         if (!EnsurePackagedLiveTileUpdateStubRegistered(manifestInfo, packageFamilyName, packageFullName, failureMessage))
             return false;
 
-        WritePendingLiveTileClearRequest();
-
-        std::wstring packageLocalState = PackageLocalStateDir(packageFamilyName);
-        std::wstring packageClear = PackagePendingLiveTileClearPath(packageFamilyName);
-        if (!packageLocalState.empty() && !packageClear.empty())
+        std::vector<LiveTileSuccessLogWatch> successWatches;
+        auto addSuccessWatch = [&](const std::wstring& path)
         {
-            SHCreateDirectoryExW(nullptr, packageLocalState.c_str(), nullptr);
-            WriteUtf8BomTextFile(packageClear, L"clear");
+            if (path.empty())
+                return;
+            unsigned long long size = 0;
+            TryGetFileSize64(path, size);
+            successWatches.push_back({ path, size });
+        };
+        addSuccessWatch(LiveTileActivationTraceLogPath());
+        addSuccessWatch(PackageLiveTileActivationTraceLogPath(packageFamilyName));
+
+        if (target == ManifestCompatibilityTarget::Windows81 || target == ManifestCompatibilityTarget::Windows8)
+        {
+            bool requestWritten = WritePendingLiveTileClearRequest();
+
+            std::wstring packageLocalState = PackageLocalStateDir(packageFamilyName);
+            std::wstring packageClear = PackagePendingLiveTileClearPath(packageFamilyName);
+            bool packageRequestWritten = false;
+            if (!packageLocalState.empty() && !packageClear.empty())
+            {
+                SHCreateDirectoryExW(nullptr, packageLocalState.c_str(), nullptr);
+                packageRequestWritten = WriteUtf8BomTextFile(packageClear, L"clear");
+            }
+
+            if (!requestWritten && !packageRequestWritten)
+            {
+                DWORD err = GetLastError();
+                if (err == ERROR_SUCCESS)
+                    err = ERROR_WRITE_FAULT;
+                failureMessage = FormatWide(
+                    g_ui.liveTileClearRequestWriteFailed.c_str(),
+                    PendingLiveTileClearPath().c_str(),
+                    static_cast<unsigned long>(err));
+                return false;
+            }
         }
 
-        return ActivateRegisteredPackageApplication(manifestInfo, L"tile-clear", failureMessage);
+        DWORD activatedPid = 0;
+        std::wstring activationFailure;
+        bool activated = ActivateRegisteredPackageApplication(
+            manifestInfo,
+            L"tile-clear",
+            activationFailure,
+            &activatedPid);
+
+        DWORD reportedPid = 0;
+        bool helperReportedSuccess = WaitForPackagedLiveTileHelperSuccess(
+            successWatches,
+            5000,
+            L"Live Tile cleared under package identity",
+            &reportedPid);
+
+        if (!helperReportedSuccess)
+        {
+            if (!activated)
+            {
+                failureMessage = activationFailure;
+                return false;
+            }
+
+            std::wstring appUserModelId = packageFamilyName + L"!" + manifestInfo.applicationId;
+            failureMessage = FormatWide(
+                g_ui.liveTileClearHelperNoSuccess.c_str(),
+                appUserModelId.c_str(),
+                packageFullName.c_str(),
+                static_cast<unsigned long>(activatedPid));
+            return false;
+        }
+
+        std::wstring appUserModelId = packageFamilyName + L"!" + manifestInfo.applicationId;
+        auto waitForHelperExit = [&](DWORD pid)
+        {
+            DWORD waitResult = WAIT_FAILED;
+            DWORD waitError = ERROR_SUCCESS;
+            if (WaitForLiveTileHelperProcessExit(pid, 5000, waitResult, waitError))
+                return true;
+
+            failureMessage = FormatWide(
+                g_ui.liveTileClearHelperExitFailed.c_str(),
+                appUserModelId.c_str(),
+                packageFullName.c_str(),
+                static_cast<unsigned long>(pid),
+                static_cast<unsigned long>(waitResult),
+                static_cast<unsigned long>(waitError));
+            return false;
+        };
+
+        DWORD helperPid = reportedPid != 0 ? reportedPid : activatedPid;
+        if (!waitForHelperExit(helperPid))
+            return false;
+        if (activatedPid != 0 && activatedPid != helperPid && !waitForHelperExit(activatedPid))
+            return false;
+        return true;
     }
 
     failureMessage = g_ui.liveTileUpdateRequiresIdentity;

@@ -171,12 +171,13 @@ struct PowerShellRunOptions
     // (DesktopStub) can keep that behavior explicitly; new/updated callers
     // should set a real limit (RssLiveTile uses 1 MiB).
     size_t outputLimitBytes = 0;
-    // Invoked only if, after a timeout and the terminate-wait window, the
-    // process still could not be confirmed to have exited. Receives an
+    // Invoked if, after timeout/output overflow/wait failure and the
+    // terminate-wait window, the process has not confirmed exit. Receives an
     // owning HANDLE the callback becomes responsible for eventually closing.
     // When null, the runner itself closes the handle and drops the case.
     PowerShellUnresolvedHandler onUnresolvedAfterTimeout = nullptr;
-    // Reason text passed to onUnresolvedAfterTimeout. Callers with their own
+    // Reason text passed to onUnresolvedAfterTimeout (the legacy API name is
+    // retained). Callers with their own
     // localized string (e.g. DesktopStub's g_ui.powerShellTimedOut) should
     // set this explicitly; the default only matters for callers that supply
     // onUnresolvedAfterTimeout but not a custom reason.
@@ -206,6 +207,15 @@ struct PowerShellRunResult
 inline PowerShellRunResult RunPowerShellCaptured(const std::wstring& command, const PowerShellRunOptions& options)
 {
     PowerShellRunResult result;
+
+    if (!IsLocalAbsoluteFilePath(options.powerShellExe))
+    {
+        result.started = false;
+        result.failedCall = L"Validate PowerShell executable path";
+        result.failedCallError = ERROR_INVALID_NAME;
+        SetLastError(result.failedCallError);
+        return result;
+    }
 
     SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
     HANDLE r = nullptr;
@@ -251,7 +261,7 @@ inline PowerShellRunResult RunPowerShellCaptured(const std::wstring& command, co
         L" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " +
         PowerShellEncodedCommand(PowerShellUtf8Preamble() + command);
 
-    BOOL started = CreateProcessW(nullptr, &cmdline[0], nullptr, nullptr, TRUE,
+    BOOL started = CreateProcessW(options.powerShellExe.c_str(), &cmdline[0], nullptr, nullptr, TRUE,
         CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
 
     CloseHandle(w);
@@ -273,7 +283,11 @@ inline PowerShellRunResult RunPowerShellCaptured(const std::wstring& command, co
 
     auto drainPipe = [&]()
     {
-        for (;;)
+        // Yield to the timeout/process checks even if a child keeps stdout
+        // continuously readable (including callers with uncapped capture).
+        size_t drainedThisPass = 0;
+        constexpr size_t drainBudgetBytes = 64 * 1024;
+        while (drainedThisPass < drainBudgetBytes)
         {
             DWORD available = 0;
             if (!PeekNamedPipe(r, nullptr, 0, nullptr, &available, nullptr) || available == 0)
@@ -287,6 +301,7 @@ inline PowerShellRunResult RunPowerShellCaptured(const std::wstring& command, co
             {
                 break;
             }
+            drainedThisPass += n;
 
             if (options.outputLimitBytes > 0)
             {
@@ -325,7 +340,7 @@ inline PowerShellRunResult RunPowerShellCaptured(const std::wstring& command, co
             TerminateProcess(pi.hProcess, ERROR_FILE_TOO_LARGE);
             if (options.terminateWaitMs > 0)
             {
-                WaitForSingleObject(pi.hProcess, options.terminateWaitMs);
+                timeoutExitConfirmed = WaitForSingleObject(pi.hProcess, options.terminateWaitMs) == WAIT_OBJECT_0;
             }
             break;
         }
@@ -348,7 +363,7 @@ inline PowerShellRunResult RunPowerShellCaptured(const std::wstring& command, co
             TerminateProcess(pi.hProcess, waitError);
             if (options.terminateWaitMs > 0)
             {
-                WaitForSingleObject(pi.hProcess, options.terminateWaitMs);
+                timeoutExitConfirmed = WaitForSingleObject(pi.hProcess, options.terminateWaitMs) == WAIT_OBJECT_0;
             }
             break;
         }
@@ -387,7 +402,7 @@ inline PowerShellRunResult RunPowerShellCaptured(const std::wstring& command, co
         exitCode = ERROR_FILE_TOO_LARGE;
     }
 
-    if (timedOut && !timeoutExitConfirmed)
+    if ((timedOut || outputLimitExceeded || waitFailed) && !timeoutExitConfirmed)
     {
         DWORD finalWait = WaitForSingleObject(pi.hProcess, 0);
         if (finalWait == WAIT_OBJECT_0)

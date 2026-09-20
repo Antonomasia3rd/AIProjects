@@ -1,7 +1,7 @@
-﻿static ULONGLONG g_lastIdleTime = 0;
-static ULONGLONG g_lastKernelTime = 0;
-static ULONGLONG g_lastUserTime = 0;
-static bool g_haveCpuSample = false;
+static thread_local ULONGLONG g_lastIdleTime = 0;
+static thread_local ULONGLONG g_lastKernelTime = 0;
+static thread_local ULONGLONG g_lastUserTime = 0;
+static thread_local bool g_haveCpuSample = false;
 
 static ULONGLONG FileTimeToUInt64(const FILETIME& ft)
 {
@@ -712,7 +712,8 @@ static AssetInfo ChooseTimedAsset(const wchar_t* rangeSection, const wchar_t* as
 static AssetInfo ChooseSmallAsset(const TemplateContext& ctx)
 {
     int threshold = IniReadI(L"afk", L"idle_threshold", 60);
-    bool lockScreen = EqualsI(ctx.tokens.at(L"win_title"), L"Windows Default Lock Screen");
+    const auto title = ctx.tokens.find(L"win_title");
+    bool lockScreen = title != ctx.tokens.end() && EqualsI(title->second, L"Windows Default Lock Screen");
     if (threshold > 0 && (ctx.idleSeconds >= threshold || lockScreen))
     {
         AssetInfo asset;
@@ -744,10 +745,10 @@ static long long BootUnixTime()
     return static_cast<long long>(std::time(nullptr) - static_cast<time_t>(GetTickCount64() / 1000));
 }
 
-static PresencePayload BuildPresencePayload()
+static PresencePayload BuildPresencePayload(const TemplateContext* suppliedContext = nullptr)
 {
     PresencePayload payload;
-    payload.context = BuildTemplateContext();
+    payload.context = suppliedContext ? *suppliedContext : BuildTemplateContext();
     const TemplateContext& ctx = payload.context;
 
     std::string activity = "{";

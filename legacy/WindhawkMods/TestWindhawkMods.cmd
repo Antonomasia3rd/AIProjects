@@ -11,6 +11,21 @@ if not defined COMPILER (
     exit /b 1
 )
 
+call :RequireUIAccessSource "std::atomic_load_explicit"
+if errorlevel 1 exit /b 1
+call :RequireUIAccessSource "std::atomic_store_explicit"
+if errorlevel 1 exit /b 1
+call :RequireUIAccessSource "SettingsSnapshot settings = GetSettingsSnapshot"
+if errorlevel 1 exit /b 1
+call :ForbidUIAccessSource "g_uiAccessTargetPatterns"
+if errorlevel 1 exit /b 1
+call :RequireAppsFolderSource "PidlsCompareEqual"
+if errorlevel 1 exit /b 1
+call :RequireAppsFolderSource "m_extraSuppressed"
+if errorlevel 1 exit /b 1
+call :RequireAppsFolderSource "folder->CompareIDs"
+if errorlevel 1 exit /b 1
+
 for %%A in (x86_64 i686) do (
     for %%F in (
         "local@always-uiaccess.wh.cpp"
@@ -24,4 +39,28 @@ for %%A in (x86_64 i686) do (
 )
 
 echo Windhawk mod source checks passed for x64 and x86.
+exit /b 0
+
+:RequireUIAccessSource
+%SystemRoot%\System32\findstr.exe /L /C:%1 "%ROOT%local@always-uiaccess.wh.cpp" >nul
+if errorlevel 1 (
+    echo ERROR: Always UIAccess settings snapshot guard is missing required source: %~1
+    exit /b 1
+)
+exit /b 0
+
+:ForbidUIAccessSource
+%SystemRoot%\System32\findstr.exe /L /C:%1 "%ROOT%local@always-uiaccess.wh.cpp" >nul
+if not errorlevel 1 (
+    echo ERROR: Always UIAccess reintroduced unsafe mutable settings source: %~1
+    exit /b 1
+)
+exit /b 0
+
+:RequireAppsFolderSource
+%SystemRoot%\System32\findstr.exe /L /C:%1 "%ROOT%local@appsfolder-unhide-hidden-apps.wh.cpp" >nul
+if errorlevel 1 (
+    echo ERROR: AppsFolder duplicate-suppression guard is missing required source: %~1
+    exit /b 1
+)
 exit /b 0

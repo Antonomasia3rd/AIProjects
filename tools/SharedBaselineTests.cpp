@@ -6,8 +6,10 @@
 #include <thread>
 
 #include "..\dependencies\dpapi.inc"
+#include "..\dependencies\startup_shortcut.inc"
 
 static int g_failures = 0;
+static bool g_allowStartupIntegration = false;
 
 static void Check(bool condition, const char* name)
 {
@@ -88,6 +90,31 @@ static void TestIniBehavior()
         aip::ReadIniValueFromDoc(desktopStubDialect, L"App", L"UnknownEscape", dialectValue) &&
             dialectValue == L"Keep\\q",
         "INI parser preserves unknown backslash escapes");
+
+    std::wstring fixtureText;
+    std::wstring expectedText;
+    bool sharedDialectOk = aip::ReadTextFileUtf8BomAware(
+        L"tools/fixtures/ini-dialect.txt", fixtureText) &&
+        aip::ReadTextFileUtf8BomAware(L"tools/fixtures/ini-dialect.expected", expectedText);
+    auto fixtureDocument = aip::ParseIniDocument(fixtureText);
+    size_t fixtureCount = 0;
+    for (const auto& line : aip::SplitIniLines(expectedText))
+    {
+        if (line.empty()) continue;
+        const auto separator = line.find(L'\t');
+        if (separator == std::wstring::npos || separator == 0)
+        {
+            sharedDialectOk = false;
+            continue;
+        }
+        ++fixtureCount;
+        const auto key = line.substr(0, separator);
+        sharedDialectOk = aip::ReadIniValueFromDoc(
+            fixtureDocument, L"Options", key.c_str(), dialectValue) &&
+            dialectValue == line.substr(separator + 1) && sharedDialectOk;
+    }
+    Check(sharedDialectOk && fixtureCount == 16,
+        "native INI reads the shared managed/native quote/comment/Unicode/path fixture");
 
     text.clear();
     Check(
@@ -366,6 +393,44 @@ static void TestJsonBehavior()
         "JSON lookup rejects leading, repeated, and trailing commas");
 }
 
+static std::wstring ProtectLegacyDpapiBytesForTest(const std::vector<BYTE>& plaintext)
+{
+    DATA_BLOB input = {};
+    input.pbData = plaintext.empty() ? nullptr : const_cast<BYTE*>(plaintext.data());
+    input.cbData = static_cast<DWORD>(plaintext.size());
+
+    DATA_BLOB output = {};
+    if (!CryptProtectData(
+            &input,
+            L"AIProjects legacy DPAPI compatibility test",
+            nullptr,
+            nullptr,
+            nullptr,
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &output))
+    {
+        throw std::runtime_error("Could not create a legacy DPAPI compatibility fixture.");
+    }
+    if (output.cbData == 0 || output.pbData == nullptr)
+    {
+        LocalFree(output.pbData);
+        throw std::runtime_error("Legacy DPAPI compatibility fixture was empty.");
+    }
+
+    std::vector<BYTE> cipher;
+    try
+    {
+        cipher.assign(output.pbData, output.pbData + output.cbData);
+    }
+    catch (...)
+    {
+        LocalFree(output.pbData);
+        throw;
+    }
+    LocalFree(output.pbData);
+    return std::wstring(aip::kDpapiPrefix) + aip::BytesToHex(cipher);
+}
+
 static void TestDpapiBehavior()
 {
     std::wstring invalidSecret;
@@ -382,21 +447,138 @@ static void TestDpapiBehavior()
 
     Check(rejectedInvalidSecret, "DPAPI protect rejects invalid UTF-16 before encrypting");
 
-    bool emptyRoundTripOk = false;
+    bool versionedRoundTripOk = false;
     try
     {
         std::wstring protectedEmpty = aip::ProtectSecretForCurrentUser(L"");
-        emptyRoundTripOk = aip::UnprotectSecretForCurrentUser(protectedEmpty).empty();
+        versionedRoundTripOk =
+            aip::StartsWithI(protectedEmpty, aip::kDpapiV1Utf8Prefix) &&
+            aip::UnprotectSecretForCurrentUser(
+                protectedEmpty,
+                aip::DpapiLegacyEncoding::Utf8).empty();
     }
     catch (const std::exception&)
     {
-        emptyRoundTripOk = false;
+        versionedRoundTripOk = false;
     }
-    Check(emptyRoundTripOk, "DPAPI empty secret round trip is safe");
+    Check(versionedRoundTripOk, "DPAPI writes versioned UTF-8 values and round-trips an empty secret");
+
+    const std::wstring unicodeSecret = L"legacy-\u2603-\U0001f512";
+    bool versionedUnicodeOk = false;
+    try
+    {
+        std::wstring protectedUnicode = aip::ProtectSecretForCurrentUser(unicodeSecret);
+        versionedUnicodeOk = aip::UnprotectSecretForCurrentUser(
+            protectedUnicode,
+            aip::DpapiLegacyEncoding::Utf16LittleEndian) == unicodeSecret;
+    }
+    catch (const std::exception&)
+    {
+        versionedUnicodeOk = false;
+    }
+    Check(versionedUnicodeOk, "DPAPI versioned encoding ignores the legacy policy and round-trips Unicode");
+
+    bool legacyUtf8Ok = false;
+    bool legacyUtf16Ok = false;
+    try
+    {
+        std::string legacyUtf8;
+        if (!aip::TryWideToUtf8(unicodeSecret, legacyUtf8))
+        {
+            throw std::runtime_error("Could not encode legacy UTF-8 fixture.");
+        }
+        std::vector<BYTE> utf8Bytes(legacyUtf8.begin(), legacyUtf8.end());
+        std::wstring legacyUtf8Value = ProtectLegacyDpapiBytesForTest(utf8Bytes);
+        legacyUtf8Ok = aip::UnprotectSecretForCurrentUser(
+            legacyUtf8Value,
+            aip::DpapiLegacyEncoding::Utf8) == unicodeSecret;
+
+        std::vector<BYTE> utf16Bytes;
+        utf16Bytes.reserve(unicodeSecret.size() * 2);
+        for (wchar_t ch : unicodeSecret)
+        {
+            utf16Bytes.push_back(static_cast<BYTE>(ch & 0xff));
+            utf16Bytes.push_back(static_cast<BYTE>((ch >> 8) & 0xff));
+        }
+        std::wstring legacyUtf16Value = ProtectLegacyDpapiBytesForTest(utf16Bytes);
+        legacyUtf16Ok = aip::UnprotectSecretForCurrentUser(
+            legacyUtf16Value,
+            aip::DpapiLegacyEncoding::Utf16LittleEndian) == unicodeSecret;
+
+        if (!legacyUtf8.empty())
+        {
+            SecureZeroMemory(legacyUtf8.data(), legacyUtf8.size());
+        }
+        if (!utf8Bytes.empty())
+        {
+            SecureZeroMemory(utf8Bytes.data(), utf8Bytes.size());
+        }
+        if (!utf16Bytes.empty())
+        {
+            SecureZeroMemory(utf16Bytes.data(), utf16Bytes.size());
+        }
+    }
+    catch (const std::exception&)
+    {
+        legacyUtf8Ok = false;
+        legacyUtf16Ok = false;
+    }
+    Check(legacyUtf8Ok, "DPAPI explicitly decodes DiscordRPC legacy UTF-8 values");
+    Check(legacyUtf16Ok, "DPAPI explicitly decodes deskband legacy UTF-16LE values");
+
+    bool rejectedUnknownVersion = false;
+    try
+    {
+        (void)aip::UnprotectSecretForCurrentUser(
+            L"dpapi:v2:utf8:00",
+            aip::DpapiLegacyEncoding::Utf8);
+    }
+    catch (const std::exception&)
+    {
+        rejectedUnknownVersion = true;
+    }
+    Check(rejectedUnknownVersion, "DPAPI rejects unknown serialization versions before decrypting");
+
+    bool rejectedRelabelledEnvelope = false;
+    try
+    {
+        std::wstring protectedValue = aip::ProtectSecretForCurrentUser(L"prefix-integrity");
+        protectedValue.replace(
+            0,
+            wcslen(aip::kDpapiV1Utf8Prefix),
+            aip::kDpapiPrefix);
+        (void)aip::UnprotectSecretForCurrentUser(
+            protectedValue,
+            aip::DpapiLegacyEncoding::Utf8);
+    }
+    catch (const std::exception&)
+    {
+        rejectedRelabelledEnvelope = true;
+    }
+    Check(rejectedRelabelledEnvelope, "DPAPI rejects a versioned envelope relabelled as legacy data");
 }
 
 static void TestTrayBehavior()
 {
+    Check(
+        aip::NormalizeTrayTooltip(L"  current state  ", L"Product") ==
+            L"current state",
+        "tray tooltip normalization trims visible state text");
+    Check(
+        aip::NormalizeTrayTooltip(L" \t\r\n ", L"  Product Name  ") ==
+            L"Product Name" &&
+            aip::NormalizeTrayTooltip(L"", L"") == L"Application",
+        "tray tooltip normalization rejects blank hover text");
+    Check(
+        aip::NormalizeTrayTooltip(std::wstring(L"\0 state", 7), L"Product") == L"state" &&
+            aip::NormalizeTrayTooltip(std::wstring(1, L'\0'), L"  Product  ") == L"Product",
+        "tray tooltip normalization keeps embedded NULs from hiding status or fallback text");
+    Check(
+        aip::NormalizeTrayTooltip(std::wstring(126, L'x') + L"\xD83D\xDE00", L"Product") ==
+            std::wstring(126, L'x') &&
+            aip::NormalizeTrayTooltip(std::wstring(128, L'x'), L"Product").size() == 127,
+        "tray tooltip truncation respects the shell limit without splitting a Unicode pair");
+
     HMENU menu = aip::CreateTrayPopupMenu();
     Check(menu != nullptr, "tray root menu creation");
     if (menu == nullptr)
@@ -837,8 +1019,560 @@ static void TestApplicationBaseline()
     DestroyMenu(dropdownMenu);
 }
 
-int wmain()
+static void TestStartupShortcutBehavior()
 {
+    Check(
+        aip::SanitizeShortcutBaseName(L"Bad<>:\"/\\|?* Name. ") ==
+            L"Bad_________ Name",
+        "Startup shortcut file names remove invalid characters and trailing dots");
+
+    std::wstring longName(200, L'A');
+    Check(
+        aip::SanitizeShortcutBaseName(longName).size() == 80,
+        "Startup shortcut file names are capped for legacy ShellLink paths");
+
+    wchar_t tempDirectory[MAX_PATH] = {};
+    DWORD length = GetTempPathW(ARRAYSIZE(tempDirectory), tempDirectory);
+    if (length == 0 || length >= ARRAYSIZE(tempDirectory))
+    {
+        Check(false, "Startup shortcut ShellLink round trip");
+        return;
+    }
+
+    std::wstring shortcutPath = std::wstring(tempDirectory) +
+        L"AIP-StartupShortcut-" + std::to_wstring(GetCurrentProcessId()) + L".lnk";
+    DeleteFileW(shortcutPath.c_str());
+
+    aip::StartupShortcutComScope com;
+    std::wstring error;
+    std::wstring stagedShortcut;
+    bool stagingResolved = aip::BuildStartupShortcutTemporaryPath(
+        shortcutPath, stagedShortcut, &error);
+    Check(
+        stagingResolved &&
+            aip::NormalizeShortcutComparisonPath(aip::GetDirectoryName(stagedShortcut)) !=
+                aip::NormalizeShortcutComparisonPath(aip::GetDirectoryName(shortcutPath)) &&
+            aip::NormalizeShortcutComparisonPath(aip::GetDirectoryName(
+                aip::GetDirectoryName(stagedShortcut))) ==
+                aip::NormalizeShortcutComparisonPath(aip::GetDirectoryName(
+                    aip::GetDirectoryName(shortcutPath))) &&
+            GetFileAttributesW(stagedShortcut.c_str()) == INVALID_FILE_ATTRIBUTES,
+        "Startup shortcut staging stays outside the launch folder on the same parent volume");
+    aip::StartupShortcutSpec spec;
+    spec.executablePath = aip::GetCurrentExecutablePath();
+    spec.identityPath = std::wstring(tempDirectory) + L"Profile One.ini";
+    spec.fallbackBaseName = L"SharedBaselineTests";
+    spec.arguments = L"--startup-test \"quoted value\"";
+    spec.workingDirectory = aip::GetDirectoryName(spec.executablePath);
+    spec.description = L"AIProjects shared startup helper test";
+
+    bool wrote = com.Ready() &&
+        aip::WriteStartupShortcut(spec, shortcutPath, &error);
+    std::wstring target;
+    std::wstring arguments;
+    std::wstring workingDirectory;
+    bool loaded = wrote && aip::LoadStartupShortcut(
+        shortcutPath,
+        target,
+        arguments,
+        workingDirectory,
+        &error);
+    Check(
+        loaded &&
+            aip::NormalizeShortcutComparisonPath(target) ==
+                aip::NormalizeShortcutComparisonPath(spec.executablePath) &&
+            arguments == spec.arguments &&
+            aip::NormalizeShortcutComparisonPath(workingDirectory) ==
+                aip::NormalizeShortcutComparisonPath(spec.workingDirectory),
+        "Startup shortcut ShellLink round trip");
+
+    bool installed = false;
+    bool queried = aip::QueryStartupShortcutInstalledAtPath(
+        spec,
+        shortcutPath,
+        installed,
+        &error);
+    aip::StartupShortcutSpec staleArguments = spec;
+    staleArguments.arguments = L"--stale-arguments";
+    bool staleInstalled = true;
+    bool staleQueried = aip::QueryStartupShortcutInstalledAtPath(
+        staleArguments,
+        shortcutPath,
+        staleInstalled,
+        &error);
+    Check(
+        queried && installed && staleQueried && !staleInstalled,
+        "Startup shortcut query detects stale launch metadata");
+
+    Check(
+        !aip::StartupShortcutFileName(spec).empty() &&
+            aip::StartupShortcutFileName(spec).find(L"SharedBaselineTests-") == 0,
+        "Startup shortcut names are path scoped");
+
+    aip::StartupShortcutSpec secondProfile = spec;
+    secondProfile.identityPath = std::wstring(tempDirectory) + L"Profile Two.ini";
+    aip::StartupShortcutSpec requotedProfile = spec;
+    requotedProfile.arguments = L"--startup-test=changed";
+    aip::StartupShortcutSpec renamedExecutable = spec;
+    renamedExecutable.executablePath = aip::PathJoin(
+        aip::GetDirectoryName(spec.executablePath),
+        L"RenamedSharedBaselineTests.exe");
+    Check(
+        aip::StartupShortcutFileName(spec) !=
+            aip::StartupShortcutFileName(secondProfile) &&
+            aip::StartupShortcutFileName(spec) ==
+                aip::StartupShortcutFileName(requotedProfile) &&
+            aip::StartupShortcutFileName(spec) ==
+                aip::StartupShortcutFileName(renamedExecutable),
+        "Startup shortcut identity separates profiles but survives argument and executable-name repairs");
+
+    std::atomic<int> concurrentWrites{ 0 };
+    aip::StartupShortcutSpec concurrentA = spec;
+    concurrentA.arguments = L"--concurrent=A";
+    aip::StartupShortcutSpec concurrentB = spec;
+    concurrentB.arguments = L"--concurrent=B";
+    std::thread writerA([&]() {
+        std::wstring threadError;
+        if (aip::SetStartupShortcutInstalledAtPath(
+            concurrentA,
+            shortcutPath,
+            true,
+            &threadError))
+        {
+            ++concurrentWrites;
+        }
+    });
+    std::thread writerB([&]() {
+        std::wstring threadError;
+        if (aip::SetStartupShortcutInstalledAtPath(
+            concurrentB,
+            shortcutPath,
+            true,
+            &threadError))
+        {
+            ++concurrentWrites;
+        }
+    });
+    writerA.join();
+    writerB.join();
+    target.clear();
+    arguments.clear();
+    workingDirectory.clear();
+    bool concurrentLoaded = aip::LoadStartupShortcut(
+        shortcutPath,
+        target,
+        arguments,
+        workingDirectory,
+        &error);
+    Check(
+        concurrentWrites == 2 && concurrentLoaded &&
+            (arguments == concurrentA.arguments || arguments == concurrentB.arguments),
+        "Startup shortcut replacement is safe under same-process concurrency");
+
+    bool removed = aip::SetStartupShortcutInstalledAtPath(
+        spec,
+        shortcutPath,
+        false,
+        &error);
+    bool removedAgain = aip::SetStartupShortcutInstalledAtPath(
+        spec,
+        shortcutPath,
+        false,
+        &error);
+    Check(
+        removed && removedAgain && !aip::FileExists(shortcutPath),
+        "Startup shortcut removal is target-safe and idempotent");
+
+    bool previousBeforeInstall = true;
+    bool desiredInstall = aip::SetStartupShortcutDesiredAtPath(
+        spec,
+        shortcutPath,
+        true,
+        previousBeforeInstall,
+        &error);
+    bool previousBeforeNoOp = false;
+    bool desiredNoOp = aip::SetStartupShortcutDesiredAtPath(
+        spec,
+        shortcutPath,
+        true,
+        previousBeforeNoOp,
+        &error);
+    bool previousBeforeRemove = false;
+    bool desiredRemove = aip::SetStartupShortcutDesiredAtPath(
+        spec,
+        shortcutPath,
+        false,
+        previousBeforeRemove,
+        &error);
+    Check(
+        desiredInstall && !previousBeforeInstall &&
+            desiredNoOp && previousBeforeNoOp &&
+            desiredRemove && previousBeforeRemove &&
+            !aip::FileExists(shortcutPath),
+        "Startup shortcut desired-state transaction reports and changes previous state atomically");
+
+    wchar_t systemDirectory[MAX_PATH] = {};
+    UINT systemLength = GetSystemDirectoryW(systemDirectory, ARRAYSIZE(systemDirectory));
+    aip::StartupShortcutSpec foreign = spec;
+    if (systemLength > 0 && systemLength < ARRAYSIZE(systemDirectory))
+    {
+        foreign.executablePath = aip::PathJoin(systemDirectory, L"cmd.exe");
+        foreign.workingDirectory = systemDirectory;
+    }
+    bool wroteForeign = aip::WriteStartupShortcut(foreign, shortcutPath, &error);
+    bool refusedForeignInstall = !aip::SetStartupShortcutInstalledAtPath(
+        spec,
+        shortcutPath,
+        true,
+        &error);
+    target.clear();
+    arguments.clear();
+    workingDirectory.clear();
+    bool foreignStillIntact = aip::LoadStartupShortcut(
+        shortcutPath,
+        target,
+        arguments,
+        workingDirectory,
+        &error) &&
+        aip::NormalizeShortcutComparisonPath(target) ==
+            aip::NormalizeShortcutComparisonPath(foreign.executablePath);
+    bool refusedForeignRemoval = !aip::SetStartupShortcutInstalledAtPath(
+        spec,
+        shortcutPath,
+        false,
+        &error);
+    Check(
+        wroteForeign && refusedForeignInstall && foreignStillIntact &&
+            refusedForeignRemoval && aip::FileExists(shortcutPath),
+        "Startup shortcut install and removal refuse a same-name foreign target");
+
+    std::wstring staleDirectory = std::wstring(tempDirectory) +
+        L"AIP-StartupShortcut-Stale-" +
+        std::to_wstring(GetCurrentProcessId());
+    std::wstring staleShortcutPath = shortcutPath + L".stale.lnk";
+    DeleteFileW(staleShortcutPath.c_str());
+    RemoveDirectoryW(staleDirectory.c_str());
+    bool createdStaleDirectory = CreateDirectoryW(staleDirectory.c_str(), nullptr) != FALSE;
+    aip::StartupShortcutSpec staleDirectorySpec = spec;
+    staleDirectorySpec.workingDirectory = staleDirectory;
+    bool wroteStaleDirectory = createdStaleDirectory &&
+        aip::WriteStartupShortcut(
+            staleDirectorySpec,
+            staleShortcutPath,
+            &error);
+    bool removedStaleDirectory = RemoveDirectoryW(staleDirectory.c_str()) != FALSE;
+    bool removedAfterDirectoryDisappeared = removedStaleDirectory &&
+        aip::SetStartupShortcutInstalledAtPath(
+            staleDirectorySpec,
+            staleShortcutPath,
+            false,
+            &error);
+    Check(
+        wroteStaleDirectory && removedAfterDirectoryDisappeared &&
+            !aip::FileExists(staleShortcutPath),
+        "Startup shortcut removal works after its working directory disappears");
+
+    std::wstring targetlessPath = shortcutPath + L".targetless.lnk";
+    DeleteFileW(targetlessPath.c_str());
+    bool wroteTargetless = false;
+    IShellLinkW* targetlessLink = nullptr;
+    HRESULT targetlessResult = CoCreateInstance(
+        CLSID_ShellLink,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&targetlessLink));
+    IPersistFile* targetlessPersist = nullptr;
+    if (SUCCEEDED(targetlessResult) && targetlessLink != nullptr)
+    {
+        targetlessResult = targetlessLink->QueryInterface(
+            IID_PPV_ARGS(&targetlessPersist));
+    }
+    if (SUCCEEDED(targetlessResult) && targetlessPersist != nullptr)
+    {
+        targetlessResult = targetlessPersist->Save(targetlessPath.c_str(), TRUE);
+        wroteTargetless = SUCCEEDED(targetlessResult);
+    }
+    if (targetlessPersist != nullptr)
+    {
+        targetlessPersist->Release();
+    }
+    if (targetlessLink != nullptr)
+    {
+        targetlessLink->Release();
+    }
+    target.clear();
+    arguments.clear();
+    workingDirectory.clear();
+    bool rejectedTargetless = wroteTargetless && !aip::LoadStartupShortcut(
+        targetlessPath,
+        target,
+        arguments,
+        workingDirectory,
+        &error);
+    Check(
+        wroteTargetless && rejectedTargetless,
+        "Startup shortcut loader rejects a targetless ShellLink");
+
+    bool mtaScopeReady = false;
+    std::thread mtaThread([&]() {
+        HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        {
+            aip::StartupShortcutComScope nested;
+            mtaScopeReady = nested.Ready();
+        }
+        if (SUCCEEDED(initialized))
+        {
+            CoUninitialize();
+        }
+    });
+    mtaThread.join();
+    Check(
+        mtaScopeReady,
+        "Startup shortcut COM scope accepts an existing MTA apartment");
+
+    aip::StartupShortcutSpec relative = spec;
+    relative.executablePath = L"relative.exe";
+    Check(
+        !aip::ValidateStartupShortcutSpec(relative, &error),
+        "Startup shortcut helper rejects relative executable paths");
+
+    aip::StartupShortcutSpec tooLong = spec;
+    tooLong.executablePath = L"C:\\" + std::wstring(MAX_PATH, L'X');
+    Check(
+        !aip::ValidateStartupShortcutIdentity(tooLong, &error),
+        "Startup shortcut helper rejects targets ShellLink cannot round-trip");
+
+    DeleteFileW(shortcutPath.c_str());
+    DeleteFileW(staleShortcutPath.c_str());
+    DeleteFileW(targetlessPath.c_str());
+    RemoveDirectoryW(staleDirectory.c_str());
+}
+
+static void TestCrashConsistentLaunchConfigState()
+{
+    std::wstring error;
+    std::vector<std::wstring> order;
+    bool enabled = aip::ExecuteCrashConsistentLaunchConfigState(
+        true,
+        false,
+        [&](bool state, std::wstring&)
+        {
+            order.push_back(state ? L"launch=true" : L"launch=false");
+            return true;
+        },
+        [&](std::wstring&)
+        {
+            order.push_back(L"persist");
+            return true;
+        },
+        [&](std::wstring&)
+        {
+            order.push_back(L"restore");
+            return true;
+        },
+        &error);
+    Check(
+        enabled && error.empty() &&
+            order == std::vector<std::wstring>{ L"launch=true", L"persist" },
+        "Startup/config transaction installs before persisting enabled state");
+
+    order.clear();
+    bool disabled = aip::ExecuteCrashConsistentLaunchConfigState(
+        false,
+        true,
+        [&](bool state, std::wstring&)
+        {
+            order.push_back(state ? L"launch=true" : L"launch=false");
+            return true;
+        },
+        [&](std::wstring&)
+        {
+            order.push_back(L"persist");
+            return true;
+        },
+        [&](std::wstring&)
+        {
+            order.push_back(L"restore");
+            return true;
+        },
+        &error);
+    Check(
+        disabled && error.empty() &&
+            order == std::vector<std::wstring>{ L"persist", L"launch=false" },
+        "Startup/config transaction persists disabled state before removal");
+
+    order.clear();
+    bool rejectedEnable = aip::ExecuteCrashConsistentLaunchConfigState(
+        true,
+        false,
+        [&](bool state, std::wstring&)
+        {
+            order.push_back(state ? L"launch=true" : L"launch=false");
+            return true;
+        },
+        [&](std::wstring& persistenceError)
+        {
+            order.push_back(L"persist");
+            persistenceError = L"injected write failure";
+            return false;
+        },
+        [&](std::wstring&)
+        {
+            order.push_back(L"restore");
+            return true;
+        },
+        &error);
+    Check(
+        !rejectedEnable && !error.empty() &&
+            order == std::vector<std::wstring>{
+                L"launch=true", L"persist", L"launch=false" },
+        "Startup/config transaction rolls back launch after enable persistence failure");
+
+    order.clear();
+    int disableAttempts = 0;
+    bool rejectedDisable = aip::ExecuteCrashConsistentLaunchConfigState(
+        false,
+        true,
+        [&](bool state, std::wstring& launchError)
+        {
+            order.push_back(state ? L"launch=true" : L"launch=false");
+            if (!state && disableAttempts++ == 0)
+            {
+                launchError = L"injected removal failure";
+                return false;
+            }
+            return true;
+        },
+        [&](std::wstring&)
+        {
+            order.push_back(L"persist");
+            return true;
+        },
+        [&](std::wstring&)
+        {
+            order.push_back(L"restore");
+            return true;
+        },
+        &error);
+    Check(
+        !rejectedDisable && !error.empty() &&
+            order == std::vector<std::wstring>{
+                L"persist", L"launch=false", L"launch=true", L"restore" },
+        "Startup/config transaction restores launch before enabled config rollback");
+
+    bool parsed = false;
+    Check(
+        aip::ReadIniBooleanFromText(
+            L"[Settings]\r\nRunAtStartup=yes\r\n",
+            L"Settings",
+            L"RunAtStartup",
+            false,
+            parsed) && parsed &&
+        !aip::ReadIniBooleanFromText(
+            L"[Settings]\r\nRunAtStartup=maybe\r\n",
+            L"Settings",
+            L"RunAtStartup",
+            false,
+            parsed),
+        "Startup/config transaction parses prior boolean state strictly");
+
+    if (!g_allowStartupIntegration)
+    {
+        std::cout << "skip - real Startup-folder integration (explicit --allow-startup-integration only); fake transactions and temporary-directory ShellLinks remain covered\n";
+        return;
+    }
+
+    wchar_t tempDirectory[MAX_PATH] = {};
+    DWORD tempLength = GetTempPathW(ARRAYSIZE(tempDirectory), tempDirectory);
+    bool integrationPassed = false;
+    if (tempLength > 0 && tempLength < ARRAYSIZE(tempDirectory))
+    {
+        std::wstring iniPath = std::wstring(tempDirectory) +
+            L"AIP-CoupledStartup-" + std::to_wstring(GetCurrentProcessId()) + L".ini";
+        DeleteFileW(iniPath.c_str());
+
+        aip::StartupShortcutSpec spec;
+        spec.executablePath = aip::GetCurrentExecutablePath();
+        spec.identityPath = iniPath;
+        spec.fallbackBaseName = L"AIP-CoupledStartupTest";
+        spec.arguments = L"--coupled-startup-test";
+        spec.workingDirectory = aip::GetDirectoryName(spec.executablePath);
+        spec.description = L"Temporary AIProjects coupled Startup/INI test";
+
+        bool initialized = aip::WriteTextFileUtf8Bom(
+            iniPath,
+            L"[Settings]\r\nRunAtStartup=false\r\n");
+        bool committedEnable = initialized && aip::CommitStartupShortcutIniState(
+            spec,
+            iniPath,
+            L"",
+            L"Settings",
+            L"RunAtStartup",
+            false,
+            true,
+            [&](std::wstring& text)
+            {
+                return aip::WriteIniValueToText(
+                    text,
+                    L"Settings",
+                    L"RunAtStartup",
+                    L"true");
+            },
+            &error,
+            5000);
+        bool installed = false;
+        bool enabledState = committedEnable &&
+            aip::QueryStartupShortcutInstalled(spec, installed, &error) &&
+            installed &&
+            aip::IniReadRaw(
+                iniPath,
+                L"Settings",
+                L"RunAtStartup",
+                L"") == L"true";
+        bool committedDisable = enabledState && aip::CommitStartupShortcutIniState(
+            spec,
+            iniPath,
+            L"",
+            L"Settings",
+            L"RunAtStartup",
+            false,
+            false,
+            [&](std::wstring& text)
+            {
+                return aip::WriteIniValueToText(
+                    text,
+                    L"Settings",
+                    L"RunAtStartup",
+                    L"false");
+            },
+            &error,
+            5000);
+        installed = true;
+        integrationPassed = committedDisable &&
+            aip::QueryStartupShortcutInstalled(spec, installed, &error) &&
+            !installed &&
+            aip::IniReadRaw(
+                iniPath,
+                L"Settings",
+                L"RunAtStartup",
+                L"") == L"false";
+
+        std::wstring cleanupError;
+        aip::SetStartupShortcutInstalled(spec, false, &cleanupError);
+        DeleteFileW(iniPath.c_str());
+    }
+    Check(
+        integrationPassed,
+        "shared Startup/INI transaction commits and removes a real profile-scoped ShellLink");
+}
+
+int wmain(int argc, wchar_t** argv)
+{
+    for (int i = 1; i < argc; ++i)
+    {
+        if (wcscmp(argv[i], L"--allow-startup-integration") != 0) return 2;
+        g_allowStartupIntegration = true;
+    }
     TestIniBehavior();
     TestCommandLineBehavior();
     TestJsonBehavior();
@@ -847,6 +1581,8 @@ int wmain()
     TestAppPathBehavior();
     TestLoggingBehavior();
     TestApplicationBaseline();
+    TestCrashConsistentLaunchConfigState();
+    TestStartupShortcutBehavior();
 
     if (g_failures != 0)
     {

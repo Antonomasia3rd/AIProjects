@@ -33,20 +33,20 @@ pushd "%ROOT%" || exit /b 1
 if /i "%~1"=="check" goto Check
 if /i "%~1"=="new" goto New
 if not exist build mkdir build
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /Fo.\build\SecureDesktopLauncher.obj /Fe.\build\SecureDesktopLauncher.exe SecureDesktopLauncherService.cpp advapi32.lib wtsapi32.lib userenv.lib
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /WX /Fo.\build\SecureDesktopLauncher.obj /Fe.\build\SecureDesktopLauncher.exe SecureDesktopLauncherService.cpp advapi32.lib wtsapi32.lib userenv.lib
 set "STATUS=%ERRORLEVEL%"
 popd
 exit /b %STATUS%
 
 :Check
-cl /nologo /utf-8 /std:c++17 /Zs /EHsc /W4 SecureDesktopLauncherService.cpp
+cl /nologo /utf-8 /std:c++17 /Zs /EHsc /W4 /WX SecureDesktopLauncherService.cpp
 set "STATUS=%ERRORLEVEL%"
 popd
 exit /b %STATUS%
 
 :New
 if not exist build mkdir build
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /Fo.\build\SecureDesktopLauncher.new.obj /Fe.\build\SecureDesktopLauncher.new.exe SecureDesktopLauncherService.cpp advapi32.lib wtsapi32.lib userenv.lib
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /WX /Fo.\build\SecureDesktopLauncher.new.obj /Fe.\build\SecureDesktopLauncher.new.exe SecureDesktopLauncherService.cpp advapi32.lib wtsapi32.lib userenv.lib
 set "STATUS=%ERRORLEVEL%"
 popd
 exit /b %STATUS%

@@ -1,6 +1,20 @@
 void Menu(HWND h)
 {
     ReloadRuntimeSettingsFromIni();
+    std::wstring startupReconcileError;
+    if (!ReconcileDesktopStubStartupShortcutFromConfig(startupReconcileError))
+        Log(L"[!] Could not synchronize the shell:startup shortcut: %s", startupReconcileError.c_str());
+    EnsureIniStringDefaults();
+    UpgradeRenamedStringDefaults();
+    LoadUiStrings();
+    ValidateFormatStrings();
+    NormalizeSeparatorStrings();
+    if (TrayIconPresent())
+    {
+        DWORD tooltipError = ERROR_SUCCESS;
+        if (!UpdateTrayIconTooltip(&tooltipError))
+            LogWin32Failure(L"Shell_NotifyIconW(NIM_MODIFY tooltip)", tooltipError);
+    }
 
     POINT pt; GetCursorPos(&pt);
     HMENU m = aip::CreateTrayPopupMenu();
@@ -94,6 +108,78 @@ void Menu(HWND h)
 
     HMENU generalMenu = beginSection(g_ui.generalTitle);
     addTo(generalMenu, ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);
+    bool startupInstalled = IniReadI(L"Settings", L"RunAtStartup", 0) != 0;
+    std::wstring startupQueryError;
+    if (!QueryDesktopStubStartupShortcutInstalled(startupInstalled, startupQueryError))
+        Log(L"[!] Could not query the shell:startup shortcut: %s", startupQueryError.c_str());
+    addTo(generalMenu, ID_RUN_AT_STARTUP, g_ui.runAtStartup.c_str(), startupInstalled);
+    QueueDesktopStubPackagedStartupSync(true);
+    bool packagedStartupDesired = false;
+    TryParseCommandLineBoolValue(IniReadS(L"Settings", L"RunAtStartupPackaged", L"0"), packagedStartupDesired);
+    addTo(generalMenu, ID_RUN_AT_STARTUP_PACKAGED, L"Run at sign-in (Windows startup task)", packagedStartupDesired);
+    addTo(generalMenu, ID_RUN_AT_STARTUP_PACKAGED_STATUS, L"Windows startup task status...");
+
+    HMENU contentSourceMenu = beginSection(L"Content and sources");
+    AppendContentEngineMenu(contentSourceMenu);
+    ContentSource configuredContentSource = ParseContentSourceValue(
+        IniReadS(L"Settings", L"ContentSource", L"Wallpaper"),
+        static_cast<ContentSource>(-1));
+    bool layeredContent = false;
+    aip::content::ParseBool(IniReadS(L"Content", L"Enabled", L"0"), layeredContent);
+    addTo(
+        contentSourceMenu,
+        ID_CONTENT_SOURCE_WALLPAPER,
+        L"Preset: " + g_ui.contentSourceWallpaper,
+        !layeredContent && configuredContentSource == ContentSource::Wallpaper);
+    addTo(
+        contentSourceMenu,
+        ID_CONTENT_SOURCE_RSS_FEED,
+        L"Preset: " + g_ui.contentSourceRssFeed,
+        !layeredContent && configuredContentSource == ContentSource::RssFeed);
+
+    HMENU rssFeedMenu = beginNestedMenu(
+        contentSourceMenu,
+        L"CreatePopupMenu(RSS feed settings)");
+    std::wstring rssFeedUrlLine = FormatWide(
+        g_ui.rssFeedUrlLabel.c_str(),
+        TraySettingDisplayValue(
+            IniReadS(L"RssFeed", L"FeedUrl", L"")).c_str());
+    std::wstring rssFeedUserAgentLine = FormatWide(
+        g_ui.rssFeedUserAgentLabel.c_str(),
+        TraySettingDisplayValue(
+            IniReadS(
+                L"RssFeed",
+                L"UserAgent",
+                L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)")).c_str());
+    std::wstring rssFeedUpdateIntervalLine = FormatWide(
+        g_ui.rssFeedUpdateIntervalLabel.c_str(),
+        IniReadClampedI(L"RssFeed", L"UpdateIntervalSeconds", 900, 60, 86400));
+    std::wstring rssFeedMaxItemsLine = FormatWide(
+        g_ui.rssFeedMaxItemsLabel.c_str(),
+        IniReadClampedI(L"RssFeed", L"MaxItems", 5, 1, 20));
+    std::wstring rssFeedHttpTimeoutLine = FormatWide(
+        g_ui.rssFeedHttpTimeoutLabel.c_str(),
+        IniReadClampedI(L"RssFeed", L"HttpTimeoutSeconds", 20, 5, 120));
+    std::wstring rssFeedMaxFeedBytesLine = FormatWide(
+        g_ui.rssFeedMaxFeedBytesLabel.c_str(),
+        IniReadClampedI(
+            L"RssFeed",
+            L"MaxFeedBytes",
+            2 * 1024 * 1024,
+            64 * 1024,
+            16 * 1024 * 1024));
+    addTo(rssFeedMenu, ID_RSS_FEED_URL, rssFeedUrlLine);
+    addTo(rssFeedMenu, ID_RSS_FEED_USER_AGENT, rssFeedUserAgentLine);
+    addTo(rssFeedMenu, ID_RSS_FEED_UPDATE_INTERVAL, rssFeedUpdateIntervalLine);
+    addTo(rssFeedMenu, ID_RSS_FEED_MAX_ITEMS, rssFeedMaxItemsLine);
+    addTo(rssFeedMenu, ID_RSS_FEED_HTTP_TIMEOUT, rssFeedHttpTimeoutLine);
+    addTo(rssFeedMenu, ID_RSS_FEED_MAX_FEED_BYTES, rssFeedMaxFeedBytesLine);
+    endNestedMenu(
+        contentSourceMenu,
+        rssFeedMenu,
+        g_ui.rssFeedSettingsTitle);
+    endSection(contentSourceMenu, L"Content and sources");
+
     addTo(generalMenu, ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
     addTo(generalMenu, ID_GENERATE_STARTUP_CHANGED_ONLY, g_ui.generateOnStartupOnlyWhenChanged.c_str(), g_generateOnStartupOnlyWhenChanged, g_generateOnStartup);
     addTo(generalMenu, ID_HIDE_DISABLED, g_ui.hideDisabledEntries.c_str(), g_hideDisabled);

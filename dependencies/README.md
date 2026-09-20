@@ -1,6 +1,25 @@
-# Shared baselines
+# Shared dependencies and product overlays
+
+The current consolidation target is an overlay-style codebase: applications
+compose shared implementations using includes and product declarations. Setup
+convenience takes priority; additional DPAPI/path/hash protection is intended to
+be opt-in after functional repairs. Some legacy products still enforce older
+defaults in code; [the audit](../docs/audit-shared.md) tracks those gaps. Existing
+mandatory security behavior described below is a compatibility fact, not a new
+repository rule.
 
 ## C++ desktop applications
+
+The Caps Lock LED action port lives in `hardware/caps_blink_engine.h`, a portable
+pattern/controller with injected device operations and copied status snapshots.
+`hardware/caps_blink_windows.inc` supplies the separately constructed Windows
+backend. Device actions require `actionsEnabled=true`; preview and status reads
+remain inert. Hosts should request stop and poll completion before joining on a
+UI thread, since canceled driver I/O retains target ownership until it settles.
+See [the Caps engine audit](../docs/audit-caps-source.md) for fake-test coverage
+and the retained standalone migration boundary.
+
+DesktopStub and NowPlayingTile now consume `appx_registration_script.h` for typed, literal-safe registration command construction and `packaged_startup_manifest.h` for the initially disabled startup extension. Both execute registration scripts through `powershell_runner.inc`; product fragments supply identity, policy and result presentation. See [the AppX sharing audit](../docs/audit-appx-sharing.md) for validation and the native COM mechanisms that remain separate.
 
 New resident desktop projects should compose these modules instead of copying a
 product implementation:
@@ -21,8 +40,9 @@ product implementation:
   document parsing.
 - `command_line.inc`: parent-console command output, console stream binding,
   option value parsing, INI setting syntax, and boolean aliases.
-- `tray.inc`: low-level menu construction, the baseline root header contract,
-  popup ownership, and notifications.
+- `tray.inc`: notification-area registration/removal, version-aware nonblank
+  hover text, balloon delivery, low-level menu construction, the baseline root
+  header contract, and popup ownership.
 - `release_version.inc`, `release_version_resource.rc.inc`, and
   `resolve_release_version.ps1`: reusable tag-derived runtime, Win32 resource,
   and build-script version metadata.
@@ -44,38 +64,149 @@ that don't need e.g. PowerShell don't pull in `<winhttp.h>`/process-spawning
 code for nothing:
 
 - `dpapi.inc`: DPAPI (`CryptProtectData`/`CryptUnprotectData`) secret
-  encryption for the current Windows user, with an empty-plaintext sentinel
-  worked around at the API boundary. Used by DiscordRPC for token storage.
+  encryption for the current Windows user. New values use the self-identifying
+  `dpapi:v1:utf8:` format; reads of the old ambiguous `dpapi:` format require
+  each product to explicitly select its historical UTF-8 or UTF-16LE encoding.
+  Used by DiscordRPC and RealTimeNotesDeskband for encrypted token storage.
 - `powershell_runner.inc`: spawn `powershell.exe` with a timeout, an optional
   output-size cap, and captured stdout/stderr (`aip::RunPowerShellCaptured`),
   plus the quoting/encoding helpers around building a
   `-EncodedCommand` invocation (`PowerShellEncodedCommand`,
   `PowerShellSingleQuotedString`, `PowerShellUtf8Preamble`) and resolving
   which `powershell.exe` to use (`DefaultPowerShellExe`,
-  `ResolveConfiguredPowerShellExe`). Needs `<appmodel.h>` (already in
+  `ResolveConfiguredPowerShellExe`). Process creation validates and supplies
+  that absolute path as `lpApplicationName`, so a command-line token or working
+  directory cannot redirect the launch. Needs `<appmodel.h>` (already in
   `desktop_app_baseline.h`) for nothing beyond what `core.inc` already
   requires, but needs `<winhttp.h>` and `winhttp.lib` in any product that
   also wants to make HTTP requests -- that part is not this module's
   responsibility, see DesktopStub's `ga_rss_feed.inc` for an example of a
   product building its own HTTP fetch on top.
+- `http_fetch.inc`: worker-facing, asynchronous WinHTTP GET with one monotonic
+  total deadline, cooperative cancellation, a response byte limit, HTTP status
+  errors, and charset metadata. Query parameters are sent intact; fragments
+  are excluded from the request target. User-info credentials in URLs are
+  rejected explicitly because this helper does not implement URL-based auth.
+  Read buffers and callback state stay alive through `HANDLE_CLOSING`, so a
+  canceled request cannot write into a returned function's stack. It closes
+  only asynchronous requests; no other thread closes a synchronous handle.
+  DesktopStub's RSS fetch uses this helper. `tools\TestHttpFetch.cmd` exercises
+  loopback query/empty/error/limit/slow-header/trickle/cancellation behavior and
+  repeated late callbacks, without making external network requests.
+- `startup_shortcut.inc`: create, query, replace, and remove a path-scoped
+  per-user shortcut under the Windows `shell:startup` folder. It validates the
+  shortcut target/arguments/working directory, serializes lifecycle changes
+  across processes, stages a short temporary link outside the enumerated Startup
+  folder on the same parent volume and commits it atomically,
+  and refuses to replace or remove a same-named shortcut that targets another
+  executable. Its desired-state operation holds the path lock across both the
+  previous-state query and mutation. Its INI-coupled commit additionally holds
+  the shared INI mutex across snapshot, mismatch repair, commit, and rollback.
+  Enabling installs the shortcut before persisting `true`; disabling persists
+  `false` before removal. An interrupted commit therefore self-reconciles on
+  the next launch without a journal sidecar, while ordinary failures restore
+  the prior configuration using the same safe ordering. Removal intentionally
+  needs only structural identity validation,
+  so an owned stale link remains removable after its executable or working
+  directory has moved. ShellLink target and working-directory paths at or above
+  `MAX_PATH` are rejected because `IShellLinkW::GetPath` cannot round-trip them
+  reliably.
+- `packaged_startup.inc`: query and change a packaged desktop app's declared
+  `Windows.ApplicationModel.StartupTask` without creating a shortcut, registry
+  value, or scheduled task. It runs WinRT async work on a dedicated MTA worker
+  so synchronous tray/CLI callers do not block an STA async continuation,
+  preserves `DisabledByUser`/policy decisions, and provides the same locked,
+  direction-safe INI-coupled commit through the manifest API. A requested value
+  that already matches an externally enforced OS state may repair the INI, but
+  the helper never claims it overrode a user or administrator decision. The package manifest
+  must declare a matching `desktop:Extension Category="windows.startupTask"`
+  and `desktop:StartupTask TaskId`; this is the startup strategy for packaged
+  apps such as NowPlayingTile.
+- `managed_startup_shortcut.cs`: the equivalent target-safe, profile-scoped,
+  cross-process-serialized Startup-folder shortcut lifecycle for .NET
+  Framework desktop applications. It refuses foreign same-name links,
+  validates target/arguments/working-directory metadata, and atomically
+  replaces owned shortcuts. Temporary links are staged outside the enumerated
+  Startup folder, and legacy-link cleanup failures are reported instead of
+  silently leaving duplicate launch entries. Its shared INI-coupled commit
+  installs before persisting `RunAtStartup=true` and persists `false` before
+  removal. An interrupted commit therefore self-reconciles on the next launch
+  without a separate recovery journal; ordinary failures restore the complete
+  requested setting batch with the same direction-safe ordering. This provides
+  eventual consistency after power loss, not preservation of an in-flight
+  setting change that had not finished committing.
+- `managed_ini.cs`: bounded, cross-process-serialized managed INI reads plus
+  comment/order-preserving batch writes and atomic first-run creation. It
+  rejects malformed target sections, non-round-tripping identifiers, and
+  oversized defaults/results. Duplicate assignments are collapsed so a saved
+  value is always the effective value. It reads DesktopStub's quoted section,
+  name, value, escape, and inline-comment syntax and existing bare assignments;
+  writes use quoted assignments and strict UTF-8 with BOM. Native and managed
+  tests consume the same dialect fixture under `tools/fixtures/`.
+- `managed_logging.cs`: path-scoped, cross-process-serialized UTF-8 sidecar
+  appends for .NET Framework applications. It writes one BOM on a new file,
+  permits concurrent diagnostic readers, reports bounded lock/write failures,
+  and can rotate a configured number of generations under the same mutation
+  lock. asusblink, capsblink, DNSAutoUpdate, and PhotoCollage use this instead
+  of private `File.AppendAllText` implementations.
+- `managed_tray.cs`: WinForms notification-icon construction, the length-safe
+  tooltip policy, baseline product/version header, validated text prompts,
+  tooltip updates, and disposal for managed tray applications. asusblink,
+  capsblink, and DNSAutoUpdate compile this together with the shared managed
+  INI, logging, and Startup sources.
+- `privileged_path_trust.h`: fail-closed path validation for native processes
+  that launch or register code as `LocalSystem`. It accepts only canonical
+  Windows/Program Files roots selected by policy, rejects alternate streams and
+  reparse components, validates each component's owner and write-capable DACL
+  entries, and retains handles with write/delete sharing denied across the
+  privileged operation. SecureDesktopLauncher uses the Program-Files-only
+  policy for its binaries/configuration and the Windows-or-Program-Files policy
+  for configured launch targets.
+- `content_sources/smtc.inc`: read-only SMTC title, artist, source, and playback
+  status provider through `aip::content::ReadSmtcContent(Text&, error, timeout)`.
+  It owns no files, package registration, playback controls, or resident loop.
+  Call on a worker; the helper initializes MTA, rejects an existing STA, and
+  limits the combined asynchronous waits to the supplied timeout (1500 ms by
+  default). Timeout cancellation is cooperative; synchronous Windows COM calls
+  are not a hard process-level deadline. A missing media session returns idle
+  text; unavailable APIs return an error. Build/read-only smoke:
+  `tools\TestSmtcSource.cmd`. The standalone NowPlayingTile app remains until
+  its artwork/widget/delivery features are integrated.
+- `content_sources/notes.inc`: the extracted Real-Time Notes data engine for
+  Genshin resin, Star Rail stamina, and ZZZ charge. Hosts supply explicit account
+  values and cancellation; `Fetch` returns a typed count/recovery/status
+  snapshot plus detail lines. The deskband consumes this implementation after
+  its separate account loader, and DesktopStub can use it without an Explorer
+  host. It uses named headers through `http_fetch.inc`, without logging header
+  contents. `tools\TestNotesSource.cmd` exercises synthetic responses and an
+  injected transport only. Endpoint/auth compatibility with the live service
+  remains unverified; see [the provider audit](../docs/audit-notes-source.md).
 
-Product code should keep policy and commands in product modules while using
-these shared contracts for lifecycle, sidecar paths, logging, and persistence behavior.
+Product declarations select policy and commands while shared modules own
+lifecycle, sidecar paths, logging, and persistence behavior. Reusable source
+providers should expose snapshots/options that multiple products can consume.
 
 ## Product-owned source subfolders
 
-`dependencies/DesktopStub/` and `dependencies/DiscordRPC/` hold each product's
-own modular implementation fragments (`ga_*.inc` and `drpc_*.inc`
-respectively). These used to live under `DesktopStub\src` and `DiscordRPC\src`;
-they were relocated here so every project's source lives under one top-level
-`dependencies` folder instead of being scattered across per-project `src`
-folders. **This is purely a physical relocation, not a change in ownership or
-sharing policy:** files in these subfolders remain product-specific policy code
-owned by that one product, the same as before the move. They are not "shared
-baseline" the way the root-level files above are, and other products should
-not include from another product's subfolder. If a genuine cross-product need
-emerges, promote the specific helper to a root-level shared module (following
-the pattern above) instead of reaching into another product's subfolder.
+Product-specific implementations live under matching subfolders:
+`dependencies/DesktopStub/`, `dependencies/DiscordRPC/`,
+`dependencies/NowPlayingTile/`, `dependencies/CharmTray/`,
+`dependencies/ADBController/`, `dependencies/SecureDesktopLauncher/`,
+`dependencies/RealTimeNotesDeskband/`, `dependencies/PhotoCollage/`,
+`dependencies/TaskSchedulerMigration/`, `dependencies/DNSAutoUpdate/`,
+`dependencies/capsblink/`, and `dependencies/asusblink/`. Their project-local
+source is limited to the includes, composition declarations, assembly metadata,
+or declarative policy needed to combine those implementations with the
+root-level shared modules.
+
+These implementations used to live in project-local source files or `src`
+folders. They were relocated so maintained product implementation bodies have
+one top-level home. Much of this is still physical relocation: nested folders
+contain whole application bodies and globals. That is an intermediate state,
+not the finished overlay architecture. Extract reusable providers and helpers
+behind shared interfaces as products consolidate; avoid importing another
+app's entry point or resident loop. Keep project-map ownership accurate as
+modules move so a shared-provider change selects every affected build in CI.
 
 This has happened in practice, not just as a hypothetical: DesktopStub's
 `PS_Run` and RssLiveTile's independently-written `RunPowerShellCommand` had
@@ -88,7 +219,7 @@ root-level modules described above rather than left duplicated.
 ## INI dialect compatibility
 
 The shared INI helpers must stay compatible with DesktopStub's established INI
-format. This is now the repository baseline for C++ projects:
+format. Native and managed shared helpers now use this value dialect:
 
 - write UTF-8 with BOM;
 - write assignments as `"Name" = "Value"`;
@@ -99,6 +230,13 @@ format. This is now the repository baseline for C++ projects:
 - keep app-level escape decoding separate from raw INI parsing, so templates may
   interpret `\n`, `\r`, and `\t` without making every INI value use those
   escapes.
+
+Bare assignments remain readable. As in DesktopStub, `#` and `;` start an
+inline comment in unquoted values; quote literal comment characters, URLs with
+fragments, and paths containing them. Managed saves preserve quoted whitespace
+and convert UTF-16 input to UTF-8 BOM. Managed apps still reject malformed target
+lines and invalid programmatic setting names rather than silently repairing
+them. See `tools/fixtures/ini-dialect.txt` and its shared expected values.
 
 Do not replace this with `GetPrivateProfileStringW` / `WritePrivateProfileStringW`
 or another parser that changes quoting, comments, order, trailing spaces, or path
@@ -143,7 +281,32 @@ action, a disabled **Version** line, then a separator before product sections.
 
 `registry_notification_service.cs` is the reusable `ServiceBase` engine for
 services that monitor per-user notification settings under `HKEY_USERS`.
-Products provide only registry-entry policy by overriding `ProcessAllKeys`.
+Products provide only a declarative, case-insensitive subkey-prefix filter and
+the desired typed values through `RegistryNotificationPolicy`.
 The shared engine owns loaded-user discovery, key recreation watching, worker
-exception containment, one bounded aggregate stop deadline, sidecar logging,
-and strict logging-boolean parsing.
+exception containment, one bounded aggregate stop deadline, subkey enumeration,
+writable-key lifetime, independent per-value failure handling, exact registry
+value-kind repair, protected installation, and strict logging-boolean
+parsing. Duplicate logging assignments follow the shared INI last-value rule;
+malformed section headers, malformed `[Settings]` assignments, and invalid
+logging booleans fail startup before registry watching begins.
+
+These services run as `LocalSystem`, so the same source also owns their managed
+privileged-path boundary and command host. Install/runtime validation accepts
+only files below canonical Program Files known-folder roots, walks and pins
+every component without following reparse points, checks final handle paths,
+requires a `LocalSystem`/`Administrators`/`TrustedInstaller` owner, and rejects
+dangerous write ACEs for other principals. The executable and sibling INI are
+both validated; service installation does not open the SCM until those checks
+and bounded INI parsing succeed. Runtime additionally requires the current
+`LocalSystem` token and retains both component-handle sets until stop.
+
+`ManagedPrivilegedServiceHost.Run` gives consumers the same strict
+`--help`/`--version`/`--install`/`--uninstall` surface. Installation explicitly
+selects the `LocalSystem` account. A post-creation configuration failure rolls
+the new service registration back and explicitly reports a failed rollback.
+Uninstall verifies the registered executable and account before deletion.
+Privileged diagnostics use `ReportEvent` plus
+debugger output and never write sibling logs or create an Event Log source in
+the registry. The shared base explicitly disables `ServiceBase.AutoLog` so the
+framework cannot silently take a separate registry-backed Event Log path.

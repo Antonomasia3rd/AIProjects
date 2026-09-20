@@ -40,7 +40,7 @@ GUI-subsystem process does not create and then hide a console during startup. A
 console is allocated only when `[app] show_console = true`, `--show-console`,
 or the tray setting enables it. Right-click the tray icon to refresh, reload,
 toggle common presence/logging settings, open the config, inspect recent logs,
-or exit. The tray root follows the DesktopStub baseline order and displays the
+enable the per-profile Startup shortcut, or exit. The tray root follows the DesktopStub baseline order and displays the
 tag-derived build version. `--version` reports the same release tag and four-part
 version stored in the executable's Win32 version resource.
 
@@ -65,6 +65,7 @@ Useful command-line paths:
 .\build\DiscordRPC.exe --dry-run-full
 .\build\DiscordRPC.exe --once --verbose
 .\build\DiscordRPC.exe --no-tray
+.\build\DiscordRPC.exe --startup
 .\build\DiscordRPC.exe --set general.client_id=YOUR_APPLICATION_ID
 .\build\DiscordRPC.exe --transport gateway --token YOUR_DISCORD_TOKEN
 ```
@@ -75,9 +76,20 @@ Useful command-line paths:
 - `[general] transport_mode` can be `ipc`, `gateway`, or `auto`. `auto` tries IPC first, then falls back to Gateway.
 - **Account risk:** Gateway mode automates a normal Discord user token. Discord explicitly forbids self-bots and warns that detected accounts can be terminated. Prefer the local IPC transport; use Gateway only if you accept that risk.
 - Gateway tokens are configured only through the INI-backed token fields: DPAPI `[general] token_protected`, or legacy plaintext `[general] token` before migration.
-- Plaintext `[general] token` values are migrated to `token_protected=dpapi:<hex>` for the current Windows user and then cleared. If a plaintext token is supplied later, it replaces the existing protected token instead of being discarded.
+- Plaintext `[general] token` values are migrated to `token_protected=dpapi:v1:utf8:<hex>` for the current Windows user and then cleared. Existing unversioned `dpapi:<hex>` values from older DiscordRPC builds remain readable as UTF-8. If a plaintext token is supplied later, it replaces the existing protected token instead of being discarded.
+
+The automatic DPAPI migration above is current code behavior, not the new
+repository policy. Making protection opt-in while retaining existing encrypted
+profiles is unfinished work; there is currently no portable plaintext mode.
+Setup convenience takes priority over new security work during consolidation.
+Anyone who can read a plaintext Discord token can use that session, so keep
+tokens and INI files private and out of Git. DPAPI restricts decryption to the
+Windows user but does not stop other code running as that user. See
+[the shared audit](../docs/audit-shared.md).
 - `[general] details_template` and `state_template` support tokens such as `{win_title}`, `{cpu}`, `{ram_used}`, `{ram_total}`, `{ram_pct}`, `{uptime}`, `{battery_pct}`, `{time}`, `{date}`, `{username}`, and `{computer}`.
 - `[layout]` toggles details/state fields, activity images, and buttons.
+- `[app] run_at_startup`, `--startup`/`--no-startup`, `--set`/`--bool`, and the tray toggle all control the same per-profile shortcut in the current user's `shell:startup` folder. No Run-registry or scheduled-task startup entry is used. Alternate `--ini` profiles receive separate stable shortcut names and launch with their absolute INI path.
+- Command-line setting batches are committed to the INI together. Known boolean values are validated and normalized to `true` or `false`. Startup and INI changes hold both shared locks: enable installs before saving `true`, disable saves `false` before removal, ordinary failures roll back safely, and an interrupted change self-reconciles on the next launch.
 - `[large_time_ranges]`, `[small_time_ranges]`, `[large_assets]`, and `[small_assets]` select asset text/image keys by time of day.
 - `[afk]` can switch the small asset/text after Windows idle time passes `idle_threshold`.
 - `[censor_map]` supports `full_replace`, `word_replace`, and `pattern_replace` rules for the foreground title token.
@@ -88,8 +100,11 @@ Useful command-line paths:
 ## Source Layout
 
 - `DiscordRPC.cpp`: small translation-unit shell and global app state.
+- `..\dependencies\DiscordRPC\drpc_environment.inc`: the common build environment and standalone/engine state declarations.
+- `..\dependencies\DiscordRPC\service.h` / `service.cpp`: reusable in-process presence service used by the standalone loop and available to DesktopStub. It compiles the existing presence builder and IPC/Gateway code, reads an explicit immutable profile snapshot, and defaults to preview with sending disabled. Embedded use does not run tray, console, Startup, INI creation or token-migration code. `Stop(timeout)` reports pending cleanup instead of blocking the host indefinitely; the module must remain loaded while cleanup is pending.
 - `..\dependencies\desktop_app_baseline.h`: stable shared baseline entry point for lifecycle, command-line, tray, and UTF-8/BOM-aware INI persistence using DesktopStub's quoted assignment style (`"Name" = "Value"`).
-- DiscordRPC-specific implementation code lives under `..\dependencies\DiscordRPC` (relocated from the old `DiscordRPC\src` so all product source lives under the repository's `dependencies` folder; these fragments remain DiscordRPC-owned, not shared with other products):
+- `..\dependencies\startup_shortcut.inc`: shared, ownership-checked `shell:startup` shortcut lifecycle used by native unpackaged apps.
+- Implementation code lives under `..\dependencies\DiscordRPC`. Other hosts use the public service API and link its translation unit; standalone UI/lifecycle fragments remain product-owned:
   - `drpc_core.inc`: DiscordRPC path wrappers, logging, console, JSON helpers, and config access glue.
   - `drpc_config_defaults.inc`: default INI values and configurable strings.
   - `drpc_command_line.inc`: command-line parsing and persisted `--set` writes.
@@ -105,6 +120,7 @@ Useful command-line paths:
 - `<exe folder>\<exe name>.ini`
 - `<exe folder>\<exe name>.log`
 - optional log file controlled by `[app] log_path`; relative log paths resolve beside the executable
+- optional profile-scoped `.lnk` in the current user's `shell:startup` folder
 
 Generated binaries, runtime configs, and logs should not be committed.
 

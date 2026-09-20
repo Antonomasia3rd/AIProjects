@@ -7,6 +7,17 @@ enum {
     // General
     ID_USE_PS,
     ID_TRAYICON,
+    ID_RUN_AT_STARTUP,
+    ID_RUN_AT_STARTUP_PACKAGED,
+    ID_RUN_AT_STARTUP_PACKAGED_STATUS,
+    ID_CONTENT_SOURCE_WALLPAPER,
+    ID_CONTENT_SOURCE_RSS_FEED,
+    ID_RSS_FEED_URL,
+    ID_RSS_FEED_USER_AGENT,
+    ID_RSS_FEED_UPDATE_INTERVAL,
+    ID_RSS_FEED_MAX_ITEMS,
+    ID_RSS_FEED_HTTP_TIMEOUT,
+    ID_RSS_FEED_MAX_FEED_BYTES,
     ID_CONSOLE,
     ID_LOG,
     ID_LIVE_TILE_MODE_AUTO,
@@ -275,6 +286,88 @@ static void CycleSettingIntPreset(
     WriteSettingInt(key, next);
 }
 
+static std::wstring TraySettingDisplayValue(
+    const std::wstring& rawValue,
+    size_t maxCharacters = 64)
+{
+    std::wstring value = TrimCopy(rawValue);
+    for (wchar_t& ch : value)
+    {
+        if (ch == L'\r' || ch == L'\n' || ch == L'\t')
+            ch = L' ';
+    }
+    if (value.empty())
+        value = L"(not set)";
+    if (value.size() > maxCharacters)
+    {
+        value.resize(maxCharacters > 3 ? maxCharacters - 3 : maxCharacters);
+        value += L"...";
+    }
+
+    size_t pos = 0;
+    while ((pos = value.find(L'&', pos)) != std::wstring::npos)
+    {
+        value.insert(pos, 1, L'&');
+        pos += 2;
+    }
+    return value;
+}
+
+static bool WriteRssFeedSetting(
+    HWND owner,
+    const wchar_t* key,
+    std::wstring value)
+{
+    std::wstring error;
+    if (!NormalizeDesktopStubTypedSetting(L"RssFeed", key ? key : L"", value, error))
+    {
+        MessageBoxW(
+            owner,
+            error.c_str(),
+            g_ui.errorTitle.c_str(),
+            MB_OK | MB_ICONWARNING);
+        return false;
+    }
+    if (!IniWrite(L"RssFeed", key, value.c_str()))
+        return false;
+
+    Log(
+        g_ui.rssFeedSettingChanged.c_str(),
+        key ? key : L"",
+        value.c_str());
+    WakePollThread();
+    return true;
+}
+
+static void CycleRssFeedIntPreset(
+    HWND owner,
+    const wchar_t* key,
+    int fallback,
+    int minValue,
+    int maxValue,
+    std::initializer_list<int> presets)
+{
+    int current = IniReadClampedI(L"RssFeed", key, fallback, minValue, maxValue);
+    int next = ClampInt(
+        NextSettingPreset(current, presets),
+        minValue,
+        maxValue);
+    WriteRssFeedSetting(owner, key, std::to_wstring(next));
+}
+
+static void PromptRssFeedStringSetting(
+    HWND owner,
+    const wchar_t* key,
+    const std::wstring& title,
+    const std::wstring& prompt,
+    const wchar_t* fallback)
+{
+    std::wstring value = IniReadS(L"RssFeed", key, fallback ? fallback : L"");
+    if (ShowTextInputDialog(owner, title, prompt, value, false) != IDOK)
+        return;
+    WriteRssFeedSetting(owner, key, std::move(value));
+}
+
 static void WriteTileTextBool(const wchar_t* key, bool value)
 {
     if (!IniWrite(L"TileText", key, value ? L"1" : L"0"))
@@ -407,23 +500,26 @@ static bool EnsureTrayIcon(DWORD* err = nullptr)
         return false;
     }
 
-    NOTIFYICONDATAW nid{};
-    nid.cbSize=sizeof(nid);
-    nid.hWnd=g_hwnd; nid.uID=1;
-    nid.uFlags= NIF_MESSAGE|NIF_ICON|NIF_TIP;
-    nid.uCallbackMessage=WM_USER+1;
     HICON ic = LoadIconW(nullptr,IDI_APPLICATION);
     if (!ic)
     {
         if (err) *err = GetLastError();
         return false;
     }
-    nid.hIcon=ic;
-    CopyTruncated(nid.szTip, g_ui.trayTip);
-
-    if (!Shell_NotifyIconW(NIM_ADD,&nid))
+    NOTIFYICONDATAW nid{};
+    DWORD addError = ERROR_SUCCESS;
+    if (!aip::RegisterTrayIcon(
+        nid,
+        g_hwnd,
+        1,
+        WM_USER + 1,
+        ic,
+        g_ui.trayTip,
+        L"DesktopStub",
+        false,
+        &addError))
     {
-        if (err) *err = GetLastError();
+        if (err) *err = addError;
         return false;
     }
 
@@ -432,16 +528,34 @@ static bool EnsureTrayIcon(DWORD* err = nullptr)
     return true;
 }
 
+static bool UpdateTrayIconTooltip(DWORD* err = nullptr)
+{
+    if (err) *err = ERROR_SUCCESS;
+
+    std::lock_guard<std::mutex> lk(g_trayMutex);
+    if (!g_nid.hWnd)
+    {
+        if (err) *err = ERROR_INVALID_WINDOW_HANDLE;
+        return false;
+    }
+
+    return aip::ModifyTrayIconTooltip(
+        g_nid,
+        g_ui.trayTip,
+        L"DesktopStub",
+        false,
+        err);
+}
+
 void TrayRemove()
 {
     std::lock_guard<std::mutex> lk(g_trayMutex);
     if (g_nid.hWnd){
-        SetLastError(ERROR_SUCCESS);
-        if (!Shell_NotifyIconW(NIM_DELETE,&g_nid))
+        DWORD err = ERROR_SUCCESS;
+        if (!aip::UnregisterTrayIcon(g_nid, &err))
         {
-            DWORD err = GetLastError();
             if (err != ERROR_SUCCESS)
-                LogWin32Failure(L"Shell_NotifyIconW(NIM_DELETE)", err);
+                LogWin32Failure(L"UnregisterTrayIcon", err);
         }
         g_nid = {};
     }

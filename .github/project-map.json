@@ -22,6 +22,11 @@
     "artifactName": "ADBController",
     "artifactPath": "legacy/ADBController/build/ADBController.exe",
     "skipKey": "ADBController",
+    "dependencyPaths": [
+      "dependencies/desktop_app_baseline.h",
+      "dependencies/startup_shortcut.inc",
+      "dependencies/ADBController"
+    ],
     "artifactPaths": [
       "legacy/ADBController/build/ADBController.exe",
       "legacy/ADBController/README.md",
@@ -36,6 +41,14 @@
     "artifactName": "asusblink",
     "artifactPath": "legacy/asusblink/build/asusblink.exe",
     "skipKey": "asusblink",
+    "dependencyPaths": [
+      "dependencies/managed_named_objects.cs",
+      "dependencies/managed_logging.cs",
+      "dependencies/managed_ini.cs",
+      "dependencies/managed_startup_shortcut.cs",
+      "dependencies/managed_tray.cs",
+      "dependencies/asusblink"
+    ],
     "artifactPaths": [
       "legacy/asusblink/build/asusblink.exe"
     ]
@@ -48,6 +61,14 @@
     "artifactName": "capsblink",
     "artifactPath": "legacy/capsblink/build/capsblink.exe",
     "skipKey": "capsblink",
+    "dependencyPaths": [
+      "dependencies/managed_named_objects.cs",
+      "dependencies/managed_logging.cs",
+      "dependencies/managed_ini.cs",
+      "dependencies/managed_startup_shortcut.cs",
+      "dependencies/managed_tray.cs",
+      "dependencies/capsblink"
+    ],
     "artifactPaths": [
       "legacy/capsblink/build/capsblink.exe"
     ]
@@ -78,7 +99,9 @@
     "dependencyPaths": [
       "dependencies/desktop_app_baseline.h",
       "dependencies/release_version.inc",
-      "dependencies/dpapi.inc"
+      "dependencies/dpapi.inc",
+      "dependencies/startup_shortcut.inc",
+      "dependencies/DiscordRPC"
     ],
     "releaseTagEnvironment": "DISCORDRPC_RELEASE_TAG",
     "artifactPaths": [
@@ -93,6 +116,14 @@
     "artifactName": "DNSAutoUpdate",
     "artifactPath": "legacy/DNSAutoUpdate/build/DNSAutoUpdate.exe",
     "skipKey": "DNSAutoUpdate",
+    "dependencyPaths": [
+      "dependencies/managed_named_objects.cs",
+      "dependencies/managed_logging.cs",
+      "dependencies/managed_ini.cs",
+      "dependencies/managed_startup_shortcut.cs",
+      "dependencies/managed_tray.cs",
+      "dependencies/DNSAutoUpdate"
+    ],
     "artifactPaths": [
       "legacy/DNSAutoUpdate/build/DNSAutoUpdate.exe"
     ]
@@ -105,6 +136,14 @@
     "artifactName": "NowPlayingTile",
     "artifactPath": "legacy/NowPlayingTile/build/NowPlayingTile.exe",
     "skipKey": "NowPlayingTile",
+    "dependencyPaths": [
+      "dependencies/desktop_app_baseline.h",
+      "dependencies/packaged_startup.inc",
+      "dependencies/packaged_startup_manifest.h",
+      "dependencies/appx_registration_script.h",
+      "dependencies/powershell_runner.inc",
+      "dependencies/NowPlayingTile"
+    ],
     "artifactPaths": [
       "legacy/NowPlayingTile/build/NowPlayingTile.exe",
       "legacy/NowPlayingTile/README.md"
@@ -118,6 +157,11 @@
     "artifactName": "PhotoCollage",
     "artifactPath": "legacy/PhotoCollage/build/PhotoCollage.exe",
     "skipKey": "PhotoCollage",
+    "dependencyPaths": [
+      "dependencies/managed_named_objects.cs",
+      "dependencies/managed_logging.cs",
+      "dependencies/PhotoCollage"
+    ],
     "artifactPaths": [
       "legacy/PhotoCollage/build/PhotoCollage.exe"
     ]
@@ -133,7 +177,19 @@
     "skipKey": "DesktopStub",
     "dependencyPaths": [
       "dependencies/desktop_app_baseline.h",
-      "dependencies/powershell_runner.inc"
+      "dependencies/powershell_runner.inc",
+      "dependencies/appx_registration_script.h",
+      "dependencies/packaged_startup_manifest.h",
+      "dependencies/packaged_startup.inc",
+      "dependencies/http_fetch.inc",
+      "dependencies/content_engine.h",
+      "dependencies/content_source_host.h",
+      "dependencies/startup_shortcut.inc",
+      "dependencies/content_sources",
+      "dependencies/hardware",
+      "dependencies/DiscordRPC",
+      "dependencies/asusblink",
+      "dependencies/DesktopStub"
     ],
     "releaseTagEnvironment": "DESKTOPSTUB_RELEASE_TAG",
     "artifactPaths": [
@@ -149,6 +205,11 @@
     "artifactName": "CharmTray",
     "artifactPath": "legacy/CharmTray/build/CharmTray.exe",
     "skipKey": "CharmTray",
+    "dependencyPaths": [
+      "dependencies/desktop_app_baseline.h",
+      "dependencies/startup_shortcut.inc",
+      "dependencies/CharmTray"
+    ],
     "artifactPaths": [
       "legacy/CharmTray/build/CharmTray.exe"
     ]
@@ -161,6 +222,12 @@
     "artifactName": "SecureDesktopLauncher",
     "artifactPath": "legacy/SecureDesktopLauncher/build/SecureDesktopLauncher.exe",
     "skipKey": "SecureDesktopLauncher",
+    "dependencyPaths": [
+      "dependencies/desktop_app_baseline.h",
+      "dependencies/release_version.inc",
+      "dependencies/privileged_path_trust.h",
+      "dependencies/SecureDesktopLauncher"
+    ],
     "artifactPaths": [
       "legacy/SecureDesktopLauncher/build/SecureDesktopLauncher.exe",
       "legacy/SecureDesktopLauncher/build/SecureDesktopPasswordLauncher.exe",
@@ -175,6 +242,9 @@
     "artifactName": "TaskSchedulerMigration",
     "artifactPath": "legacy/TaskSchedulerMigration/build/TaskSchedulerMigration.exe",
     "skipKey": "TaskSchedulerMigration",
+    "dependencyPaths": [
+      "dependencies/TaskSchedulerMigration"
+    ],
     "artifactPaths": [
       "legacy/TaskSchedulerMigration/build/TaskSchedulerMigration.exe"
     ]
@@ -187,6 +257,13 @@
     "artifactName": "RealTimeNotesDeskband",
     "artifactPath": "legacy/RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll",
     "skipKey": "RealTimeNotesDeskband",
+    "dependencyPaths": [
+      "dependencies/desktop_app_baseline.h",
+      "dependencies/http_fetch.inc",
+      "dependencies/content_sources/notes.inc",
+      "dependencies/dpapi.inc",
+      "dependencies/RealTimeNotesDeskband"
+    ],
     "artifactPaths": [
       "legacy/RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll",
       "legacy/RealTimeNotesDeskband/README.md",

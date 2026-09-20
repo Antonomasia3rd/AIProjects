@@ -102,8 +102,63 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"TrayIcon", L"1"},
     {L"Settings", L"TrayIconHiddenDelayMs", L"750"},
     {L"Settings", L"ShowConsole", L"0"},
+    {L"Settings", L"RunAtStartup", L"0"},
+    {L"Settings", L"RunAtStartupPackaged", L"0"},
     {L"Settings", L"GenerateOnStartup", L"1"},
     {L"Settings", L"GenerateOnStartupOnlyWhenChanged", L"1"},
+    {L"Settings", L"ContentSource", L"Wallpaper"},
+    {L"Content", L"Enabled", L"0"},
+    {L"Content", L"Count", L"1"},
+    {L"Content", L"CycleEnabled", L"0"},
+    {L"Content", L"CycleSeconds", L"10"},
+    {L"Content", L"RefreshSeconds", L"2"},
+    {L"Content", L"TextMode", L"Auto"},
+    {L"Content.1", L"Enabled", L"1"},
+    {L"Content.1", L"Name", L"Wallpaper"},
+    {L"Content.1", L"Background", L"Wallpaper"},
+    {L"Content.1", L"ImagePath", L""},
+    {L"Content.1", L"TextSources", L""},
+    {L"Content.1", L"Text", L""},
+    {L"Content.1", L"SecondaryText", L""},
+    {L"Content.1", L"BadgeText", L""},
+    {L"Content.1", L"RssItem", L"1"},
+    {L"Content.1", L"NotesResource", L"Resin"},
+    {L"Notes", L"RefreshSeconds", L"300"},
+    {L"Notes", L"HttpTimeoutSeconds", L"15"},
+    {L"Notes", L"MaximumBytes", L"1048576"},
+    {L"Notes.Resin", L"UID", L""},
+    {L"Notes.Resin", L"LToken", L""},
+    {L"Notes.Resin", L"LTUid", L""},
+    {L"Notes.Stamina", L"UID", L""},
+    {L"Notes.Stamina", L"LToken", L""},
+    {L"Notes.Stamina", L"LTUid", L""},
+    {L"Notes.Charge", L"UID", L""},
+    {L"Notes.Charge", L"LToken", L""},
+    {L"Notes.Charge", L"LTUid", L""},
+    {L"Discord", L"ProfilePath", L""},
+    {L"Discord", L"SendPresence", L"0"},
+    {L"Discord", L"ClientId", L""},
+    {L"Discord", L"Name", L"DesktopStub"},
+    {L"Discord", L"Details", L"{win_title}"},
+    {L"Discord", L"State", L"CPU: {cpu}"},
+    {L"Discord", L"RefreshSeconds", L"5"},
+    {L"Discord", L"OperationTimeoutMs", L"5000"},
+    {L"Discord", L"ClearOnStop", L"1"},
+    {L"CapsBlink", L"HardwareEnabled", L"0"},
+    {L"CapsBlink", L"KeyboardTargetPath", L"\\Device\\KeyboardClass0"},
+    {L"CapsBlink", L"BlinkIntervalMs", L"500"},
+    {L"AsusBlink", L"HardwareEnabled", L"0"},
+    {L"AsusBlink", L"ReadDiskActivity", L"0"},
+    {L"AsusBlink", L"Paused", L"0"},
+    {L"AsusBlink", L"ProfilePath", L""},
+    {L"AsusBlink", L"MicState", L"off"},
+    {L"AsusBlink", L"MicInterval", L"0"},
+    {L"AsusBlink", L"MicDuration", L"once"},
+    {L"AsusBlink", L"KeyboardState", L"off"},
+    {L"AsusBlink", L"KeyboardInterval", L"0"},
+    {L"AsusBlink", L"KeyboardDuration", L"once"},
+    {L"AsusBlink", L"ErrorRetry", L"3"},
+    {L"AsusBlink", L"ErrorAction", L"continue"},
     {L"Settings", L"ListenWallpaper", L"1"},
     {L"Settings", L"WallpaperDetectionMethod", L"TranscodedImageCache"},
     {L"Settings", L"WallpaperDetectionFallbackOnInvalid", L"1"},
@@ -219,6 +274,14 @@ static const IniDefault g_defaults[] = {
     {L"TileText", L"ApplyToWideTile", L"1"},
     {L"TileText", L"ApplyToLargeTile", L"1"},
 
+    // RSS/Atom content source
+    {L"RssFeed", L"FeedUrl", L""},
+    {L"RssFeed", L"UserAgent", L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)"},
+    {L"RssFeed", L"UpdateIntervalSeconds", L"900"},
+    {L"RssFeed", L"MaxItems", L"5"},
+    {L"RssFeed", L"HttpTimeoutSeconds", L"20"},
+    {L"RssFeed", L"MaxFeedBytes", L"2097152"},
+
 };
 
 static const IniDefault g_powerShellErrorMessageDefaults[] = {
@@ -242,11 +305,23 @@ static const IniDefault g_commandLineHelpDefaults[] = {
         L"  --set Section.Key=Value             Set and save any INI value.\\r\\n"
         L"  --exit, --quit                      Ask the running instance to exit.\\r\\n"
         L"  --once                              Generate once, then exit.\\r\\n"
+        L"  --render-only                       Write local tile assets from --wallpaper or Image/None content; no registration, publishing or providers.\\r\\n"
+        L"                                      With --regenerate-manifest and no image: write the local manifest only.\\r\\n"
+        L"  --configure-only                    Validate/write INI only; no resident signaling or Startup changes.\\r\\n"
         L"  --regenerate-manifest               Rewrite AppxManifest.xml once from Settings.Manifest* values.\\r\\n"
         L"  --generate, --generate-now           Force startup generation and keep running.\\r\\n"
         L"  --wallpaper <path>                  Generate from a specific image path.\\r\\n"
+        L"  --content-source <wallpaper|rss>    Select and save the startup content source.\\r\\n"
+        L"  --rss-feed-url <http(s)://...>      Set and save the RSS/Atom feed URL.\\r\\n"
+        L"  --rss-user-agent <text>             Set and save the RSS HTTP user agent.\\r\\n"
+        L"  --rss-update-interval <seconds>     Set RSS refresh interval, 60-86400.\\r\\n"
+        L"  --rss-max-items <count>             Set RSS tile item count, 1-20.\\r\\n"
+        L"  --rss-http-timeout <seconds>        Set RSS HTTP timeout, 5-120.\\r\\n"
+        L"  --rss-max-feed-bytes <bytes>        Set RSS response cap, 65536-16777216.\\r\\n"
         L"  --no-monitor                        Do not start wallpaper/fit/DPI monitoring.\\r\\n"
         L"  --tray | --no-tray                  Set and save tray icon startup visibility.\\r\\n"
+        L"  --startup | --no-startup            Add or remove this INI profile's shell:startup shortcut.\\r\\n"
+        L"  --packaged-startup | --no-packaged-startup  Save the default profile's Windows startup task preference.\\r\\n"
         L"  --console | --no-console            Set and save console visibility.\\r\\n"
         L"  --logging | --no-logging            Set and save file logging.\\r\\n"
         L"  --notifications | --no-notifications Set and save tray notifications.\\r\\n"
@@ -355,6 +430,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileUpdateSummary", L"[i] Live Tile update mode: %s"},
     {L"LiveTileTemplateStyleSummary", L"[i] Windows 10 Live Tile template style: %s"},
     {L"LiveTileBrandingSummary", L"[i] Windows 10 Live Tile branding: %s"},
+    {L"ContentSourceSummary", L"[i] Content source saved as %s; the monitor will apply it."},
+    {L"RssFeedSettingChanged", L"[i] RSS setting changed: %s = %s"},
     {L"ManifestTargetSummary", L"[i] AppxManifest target: %s"},
     {L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s"},
     {L"LiveWallpaperCaptureSummary", L"[i] Live wallpaper capture: %s (delay=%d ms, refresh=%s)"},
@@ -376,6 +453,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"Win8LiveTileBrokerAppState", L"[i] Win8LiveTileBrokerApp = %d"},
     {L"Win8LiveTileBackgroundTaskMissingDll", L"[!] Experimental Win8/8.1 background task helper enabled, but DLL is missing: %s"},
     {L"TrayIconSummary", L"[i] Tray icon: %s"},
+    {L"RunAtStartupSummary", L"[i] Run at startup: %s"},
     {L"ConsoleSummary", L"[i] Console %s."},
     {L"TrimWorkingSetOnIdleSummary", L"[i] Idle working-set trimming: %s"},
     {L"IdleTrimIntervalMsSummary", L"[i] Idle trim interval: %s"},
@@ -590,6 +668,22 @@ static const StringDefault g_stringDefaults[] = {
     {L"GeneratedAssetPrecacheInactive", L"[i] Generated asset pre-cache is configured on but inactive because generated asset cache is disabled or max entries is 0."},
     {L"ListenWallpaper", L"Listen Wallpaper"},
     {L"TrayIcon", L"Tray Icon (this session)"},
+    {L"RunAtStartup", L"Run at sign-in (Startup folder)"},
+    {L"ContentSourceTitle", L"Content and sources"},
+    {L"ContentSourceWallpaper", L"Wallpaper"},
+    {L"ContentSourceRssFeed", L"RSS / Atom feed"},
+    {L"ContentSourceRestartRequired", L"The content source was saved. The monitor applies source changes automatically."},
+    {L"RssFeedSettingsTitle", L"RSS / Atom settings"},
+    {L"RssFeedUrlLabel", L"Feed URL: %s"},
+    {L"RssFeedUserAgentLabel", L"User agent: %s"},
+    {L"RssFeedUpdateIntervalLabel", L"Update interval: %d seconds"},
+    {L"RssFeedMaxItemsLabel", L"Maximum items: %d"},
+    {L"RssFeedHttpTimeoutLabel", L"HTTP timeout: %d seconds"},
+    {L"RssFeedMaxFeedBytesLabel", L"Response limit: %d bytes"},
+    {L"RssFeedUrlInputTitle", L"Edit RSS feed URL"},
+    {L"RssFeedUrlInputPrompt", L"Enter a complete http:// or https:// RSS/Atom feed URL."},
+    {L"RssFeedUserAgentInputTitle", L"Edit RSS user agent"},
+    {L"RssFeedUserAgentInputPrompt", L"Enter the HTTP User-Agent sent when fetching the feed."},
     {L"UsePowerShell", L"PowerShell only"},
     {L"ExperimentalLiveTileUpdate", L"Live Tile update mode"},
     {L"AppxManifestTarget", L"AppxManifest target"},
@@ -626,6 +720,10 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileClearOnShutdown", L"[i] Clearing Live Tile on shutdown."},
     {L"LiveTileClearOnShutdownSkipped", L"[i] Clear Live Tile on shutdown skipped: %s"},
     {L"LiveTileClearOnShutdownSuccess", L"[i] Live Tile cleared on shutdown."},
+    {L"LiveTileClearForRegistration", L"[i] Clearing the previous native Live Tile notification before static registration."},
+    {L"LiveTileClearForRegistrationSuccess", L"[i] Previous native Live Tile notification cleared before static registration."},
+    {L"LiveTileClearForRegistrationFailed", L"[!] Could not clear the previous native Live Tile notification before static registration: %s"},
+    {L"LiveTileClearForRegistrationFailedUnknown", L"Could not clear the previous native Live Tile notification before static registration."},
     {L"TileAppearanceTitle", L"Tile appearance:"},
     {L"TileTextTitle", L"Windows tile text"},
     {L"TileTextEnabled", L"Enable text overlay"},
@@ -815,6 +913,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTilePackagedHelperReportedSuccess", L"[i] Packaged Live Tile helper reported success."},
     {L"LiveTilePackagedBrokerReportedSuccess", L"[i] Packaged WinRT Live Tile broker reported success."},
     {L"LiveTilePackagedHelperNoSuccess", L"Packaged Live Tile helper did not report success after activation: %s (package=%s, pid=%lu)."},
+    {L"LiveTileClearHelperNoSuccess", L"Packaged Live Tile clear helper did not report success after activation: %s (package=%s, pid=%lu)."},
+    {L"LiveTileClearHelperExitFailed", L"Packaged Live Tile clear helper reported success but did not exit safely: %s (package=%s, pid=%lu, wait=%lu, error=%lu)."},
     {L"LiveTileStaticIconRefreshPending", L"[i] Live Tile static icon refresh is pending; relaunching as unpackaged desktop app first."},
     {L"LiveTileRelaunchedUnpackaged", L"[i] Relaunched unpackaged desktop instance after Live Tile mode switch."},
     {L"LiveTileRelaunchedUnpackagedDirectFallback", L"[i] Relaunched desktop instance after Live Tile mode switch using direct fallback."},
@@ -828,6 +928,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileClearRequiresIdentityDetails", L"Live Tile clear requires package identity (GetCurrentPackageFullName failed, error=%lu)."},
     {L"LiveTileClearFailedHresult", L"Live Tile clear failed, hresult=0x%s"},
     {L"LiveTileClearFailedException", L"Live Tile clear failed: %s"},
+    {L"LiveTileClearRequestWriteFailed", L"Failed to write the packaged Live Tile clear request: %s (error=%lu)."},
     {L"LiveTileErrorMessageSuffix", L", message=%s"},
     {L"LiveTileNoPendingXmlOrAssets", L"No pending Live Tile XML and no usable stable live-tile assets were found."},
     {L"PowerShellPackageLookupFailed", L"PowerShell package lookup failed"},
@@ -991,6 +1092,22 @@ static std::wstring BuildInitialIniTemplate()
     lines.push_back(L"; Live wallpaper capture support scans non-icon WorkerW desktop-host");
     lines.push_back(L"; trees and can capture a still frame internally instead of changing");
     lines.push_back(L"; the user's real wallpaper.");
+    lines.push_back(L"");
+    lines.push_back(L"[RssFeed]");
+    lines.push_back(L"; RSS/Atom source settings. FeedUrl is required only when Settings.ContentSource=RssFeed.");
+    for (const auto& d : g_defaults)
+    {
+        if (IEquals(d.section, L"RssFeed"))
+            lines.push_back(FormatIniAssignment(d.key, d.value));
+    }
+    for (const wchar_t* section : {L"Content", L"Content.1", L"Notes", L"Notes.Resin", L"Notes.Stamina", L"Notes.Charge", L"Discord", L"CapsBlink", L"AsusBlink"})
+    {
+        lines.push_back(L"");
+        lines.push_back(L"[" + std::wstring(section) + L"]");
+        lines.push_back(L"; Content entries compose backgrounds and text; see DesktopStub/README.md.");
+        for (const auto& d : g_defaults)
+            if (IEquals(d.section, section)) lines.push_back(FormatIniAssignment(d.key, d.value));
+    }
     lines.push_back(L"");
     lines.push_back(L"[PowerShellErrorMessages]");
     lines.push_back(L"; Optional HRESULT/error-code matches for PowerShell registration failures.");
@@ -1193,6 +1310,7 @@ static void UpgradePowerShellExeDefault()
 
 static void UpgradeRenamedStringDefaults()
 {
+    UpgradeStringDefaultIfUnmodified(L"RunAtStartup", L"Run at startup", L"Run at sign-in (Startup folder)");
     RepairBrokenPowerShellOutputTruncatedDefault();
     UpgradeCommandLineHelpDefaultIfUnmodified();
     UpgradeStringDefaultIfUnmodified(L"UsePowerShell", L"Use PowerShell", L"PowerShell only");

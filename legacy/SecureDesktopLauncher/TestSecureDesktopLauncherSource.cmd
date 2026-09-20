@@ -4,9 +4,6 @@ setlocal EnableExtensions
 set "ROOT=%~dp0"
 set "VCVARS="
 
-where cl.exe >nul 2>nul
-if not errorlevel 1 goto HaveCompiler
-
 if defined VCINSTALLDIR if exist "%VCINSTALLDIR%\Auxiliary\Build\vcvars64.bat" set "VCVARS=%VCINSTALLDIR%\Auxiliary\Build\vcvars64.bat"
 if not defined VCVARS if defined VSINSTALLDIR if exist "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
 
@@ -31,6 +28,8 @@ if defined VCVARS (
   goto HaveCompiler
 )
 
+where cl.exe >nul 2>nul
+if not errorlevel 1 goto HaveCompiler
 echo ERROR: cl.exe not found. Install Visual Studio Build Tools with the C++ workload.
 exit /b 1
 
@@ -47,7 +46,7 @@ if errorlevel 1 (
   exit /b %ERRORLEVEL%
 )
 
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\SecureDesktopLauncherSourceCheck.cpp /Fe:build\SecureDesktopLauncherSourceCheck.exe /Fo:build\obj\SecureDesktopLauncherSourceCheck.obj
+cl /nologo /std:c++17 /EHsc /W4 /WX /DUNICODE /D_UNICODE tools\SecureDesktopLauncherSourceCheck.cpp /Fe:build\SecureDesktopLauncherSourceCheck.exe /Fo:build\obj\SecureDesktopLauncherSourceCheck.obj
 set "STATUS=%ERRORLEVEL%"
 if not "%STATUS%"=="0" (
   popd
@@ -55,6 +54,20 @@ if not "%STATUS%"=="0" (
 )
 
 build\SecureDesktopLauncherSourceCheck.exe %*
+set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
+  popd
+  exit /b %STATUS%
+)
+
+cl /nologo /std:c++17 /EHsc /W4 /WX /DUNICODE /D_UNICODE tools\SecureDesktopPrivilegedPathTests.cpp /Fe:build\SecureDesktopPrivilegedPathTests.exe /Fo:build\obj\SecureDesktopPrivilegedPathTests.obj
+set "STATUS=%ERRORLEVEL%"
+if not "%STATUS%"=="0" (
+  popd
+  exit /b %STATUS%
+)
+
+build\SecureDesktopPrivilegedPathTests.exe
 set "STATUS=%ERRORLEVEL%"
 popd
 exit /b %STATUS%

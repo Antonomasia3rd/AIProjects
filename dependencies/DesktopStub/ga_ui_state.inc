@@ -57,6 +57,22 @@ struct UiStrings
 
     std::wstring listenWallpaper;
     std::wstring trayIcon;
+    std::wstring runAtStartup;
+    std::wstring contentSourceTitle;
+    std::wstring contentSourceWallpaper;
+    std::wstring contentSourceRssFeed;
+    std::wstring contentSourceRestartRequired;
+    std::wstring rssFeedSettingsTitle;
+    std::wstring rssFeedUrlLabel;
+    std::wstring rssFeedUserAgentLabel;
+    std::wstring rssFeedUpdateIntervalLabel;
+    std::wstring rssFeedMaxItemsLabel;
+    std::wstring rssFeedHttpTimeoutLabel;
+    std::wstring rssFeedMaxFeedBytesLabel;
+    std::wstring rssFeedUrlInputTitle;
+    std::wstring rssFeedUrlInputPrompt;
+    std::wstring rssFeedUserAgentInputTitle;
+    std::wstring rssFeedUserAgentInputPrompt;
     std::wstring usePowerShell;
     std::wstring experimentalLiveTileUpdate;
     std::wstring appxManifestTarget;
@@ -96,6 +112,10 @@ struct UiStrings
     std::wstring liveTileClearOnShutdown;
     std::wstring liveTileClearOnShutdownSkipped;
     std::wstring liveTileClearOnShutdownSuccess;
+    std::wstring liveTileClearForRegistration;
+    std::wstring liveTileClearForRegistrationSuccess;
+    std::wstring liveTileClearForRegistrationFailed;
+    std::wstring liveTileClearForRegistrationFailedUnknown;
     std::wstring liveTileStaticIconRefreshPending;
     std::wstring liveTileRelaunchedUnpackaged;
     std::wstring liveTileRelaunchedUnpackagedDirectFallback;
@@ -317,6 +337,8 @@ struct UiStrings
     std::wstring liveTilePackagedHelperReportedSuccess;
     std::wstring liveTilePackagedBrokerReportedSuccess;
     std::wstring liveTilePackagedHelperNoSuccess;
+    std::wstring liveTileClearHelperNoSuccess;
+    std::wstring liveTileClearHelperExitFailed;
     std::wstring liveTileUpdateRequiresIdentityDetails;
     std::wstring liveTileXmlEmpty;
     std::wstring liveTileUpdateFailedHresult;
@@ -324,6 +346,7 @@ struct UiStrings
     std::wstring liveTileClearRequiresIdentityDetails;
     std::wstring liveTileClearFailedHresult;
     std::wstring liveTileClearFailedException;
+    std::wstring liveTileClearRequestWriteFailed;
     std::wstring liveTileErrorMessageSuffix;
     std::wstring liveTileNoPendingXmlOrAssets;
     std::wstring powerShellPackageLookupFailed;
@@ -440,9 +463,12 @@ struct UiStrings
     std::wstring liveTileUpdateSummary;
     std::wstring liveTileTemplateStyleSummary;
     std::wstring liveTileBrandingSummary;
+    std::wstring contentSourceSummary;
+    std::wstring rssFeedSettingChanged;
     std::wstring manifestTargetSummary;
     std::wstring wallpaperDetectionFallbackSummary;
     std::wstring trayIconSummary;
+    std::wstring runAtStartupSummary;
     std::wstring consoleSummary;
     std::wstring loggingSummary;
     std::wstring trimWorkingSetOnIdleSummary;

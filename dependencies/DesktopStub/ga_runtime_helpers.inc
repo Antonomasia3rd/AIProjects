@@ -450,7 +450,8 @@ INT_PTR ShowTextInputDialog(
     const std::wstring& title,
     const std::wstring& prompt,
     std::wstring& value,
-    bool allowEmpty)
+    bool allowEmpty,
+    bool password = false)
 {
     std::wstring dialogTitle = title.empty() ? g_ui.renameDialogTitle : title;
     std::wstring dialogPrompt = prompt.empty() ? dialogTitle : prompt;
@@ -509,7 +510,7 @@ INT_PTR ShowTextInputDialog(
     item = AlignDialogItem(p);
     item->x = 6; item->y = 47; item->cx = 193; item->cy = 12;
     item->id = TEXT_INPUT_EDIT_ID;
-    item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL;
+    item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL | (password ? ES_PASSWORD : 0);
 
     p = (WORD*)(item + 1);
     *p++ = 0xFFFF; *p++ = 0x0081; // EDIT class

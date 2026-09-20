@@ -3,6 +3,12 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include <windows.h>
+#include <algorithm>
+namespace Gdiplus
+{
+using std::max;
+using std::min;
+}
 #include <objidl.h>
 #include <propidl.h>
 #include <gdiplus.h>
@@ -22,7 +28,6 @@
 #include <cwchar>
 #include <cwctype>
 #include <cstdint>
-#include <algorithm>
 #include <initializer_list>
 #include <cstdarg>
 #include <limits>
@@ -33,10 +38,16 @@
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.Data.Xml.Dom.h>
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.UI.Notifications.h>
+
+#include "../../dependencies/packaged_startup.inc"
+#include "../../dependencies/packaged_startup_manifest.h"
+#include "../../dependencies/powershell_runner.inc"
+#include "../../dependencies/appx_registration_script.h"
 
 #ifndef ARRAYSIZE
 #define ARRAYSIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -51,6 +62,8 @@ static constexpr const wchar_t* WINDOW_CLASS_NAME = L"NowPlayingTileTrayWnd";
 static constexpr const wchar_t* WIDGET_CLASS_NAME = L"NowPlayingTileWidgetWnd";
 static constexpr const wchar_t* PACKAGE_NAME = L"NowPlayingTile.App";
 static constexpr const wchar_t* PACKAGE_PUBLISHER = L"CN=NowPlayingTile";
+static constexpr const wchar_t* STARTUP_TASK_ID = L"NowPlayingTileStartup";
+static constexpr const wchar_t* APP_VERSION_TEXT = L"1";
 static constexpr UINT WM_NPT_UPDATE_DONE = WM_APP + 42;
 static constexpr UINT_PTR UPDATE_TIMER_ID = 1;
 static constexpr DWORD POWERSHELL_COMMAND_TIMEOUT_MS = 120000;
@@ -108,7 +121,9 @@ struct AppSettings
     int updateIntervalSeconds = 2;
     int tileRefreshSeconds = 60;
     TileLayout tileLayout = TileLayout::Text;
-    bool showTrayIcon = false;
+    bool showTrayIcon = true;
+    bool runAtStartup = false;
+    bool showMenuAsDropdown = true;
 };
 
 struct AppOptions
@@ -122,9 +137,9 @@ struct AppOptions
     bool launchPackaged = false;
     bool regenerateManifest = false;
     bool showHelp = false;
-    bool forceTray = false;
-    bool forceNoTray = false;
+    bool showVersion = false;
     std::wstring commandLineError;
+    std::vector<aip::IniSetting> settings;
 };
 
 struct RuntimeContext
@@ -173,12 +188,12 @@ static int UnregisterDevelopmentPackage(bool quiet = false);
 static int LaunchPackagedInstance(bool quiet = false, const std::wstring& arguments = L"");
 static bool AutoRegisterAndLaunchIfNeeded(const AppOptions& options, int* exitCode);
 
-#include "src/npt_core.inc"
-#include "src/npt_config_defaults.inc"
-#include "src/npt_command_line.inc"
-#include "src/npt_manifest.inc"
-#include "src/npt_media.inc"
-#include "src/npt_live_tile.inc"
-#include "src/npt_tray.inc"
-#include "src/npt_widget.inc"
-#include "src/npt_app.inc"
+#include "../../dependencies/NowPlayingTile/npt_core.inc"
+#include "../../dependencies/NowPlayingTile/npt_config_defaults.inc"
+#include "../../dependencies/NowPlayingTile/npt_command_line.inc"
+#include "../../dependencies/NowPlayingTile/npt_manifest.inc"
+#include "../../dependencies/NowPlayingTile/npt_media.inc"
+#include "../../dependencies/NowPlayingTile/npt_live_tile.inc"
+#include "../../dependencies/NowPlayingTile/npt_tray.inc"
+#include "../../dependencies/NowPlayingTile/npt_widget.inc"
+#include "../../dependencies/NowPlayingTile/npt_app.inc"

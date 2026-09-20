@@ -36,5 +36,6 @@ static void LogCommandLineSummary()
         Log(g_ui.commandLineParentWaitPid.c_str(), static_cast<unsigned long>(g_commandLine.waitForPid));
 
     for (const auto& entry : g_commandLine.settings)
-        Log(g_ui.commandLineSettingLog.c_str(), entry.section.c_str(), entry.key.c_str(), entry.value.c_str());
+        Log(g_ui.commandLineSettingLog.c_str(), entry.section.c_str(), entry.key.c_str(),
+            aip::content::SensitiveSetting(entry.section, entry.key) ? L"<redacted>" : entry.value.c_str());
 }

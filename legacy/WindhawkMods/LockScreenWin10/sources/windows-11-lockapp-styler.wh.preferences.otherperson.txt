@@ -1,0 +1,250 @@
+controlStyles:
+  - target: Grid#LockScreenTextContent > StackPanel > TextBlock
+    styles:
+      - FontFamily=Segoe UI
+      - FontWeight=Normal
+      - HorizontalAlignment=0
+      - Margin=5,0,0,0
+      - FontSize=55
+      - FontWeight=SemiLight
+  - target: Grid#LockScreenTextContent > StackPanel > StackPanel > TextBlock
+    styles:
+      - FontFamily=Segoe UI
+      - FontWeight=Light
+      - FontSize=109
+      - TextAlignment=0
+  - target: Grid#LockScreenTextContent > StackPanel#TimeAndDatePanel
+    styles:
+      - Margin=30,0,0,98
+      - VerticalAlignment=2
+      - HorizontalAlignment=0
+  - target: Grid#LockScreenTextContent > Grid > Grid#WidgetCanvasPanel
+    styles:
+      - Margin=0,0,0,100
+  - target: Button#Spot > ContentPresenter > Grid > Rectangle
+    styles:
+      - RadiusX=50
+      - RadiusY=50
+  - target: Button#Spot > ContentPresenter > Grid > Image
+    styles:
+      - Visibility=1
+  - target: Border#ExpandoBackground
+    styles:
+      - CornerRadius=0
+      - Background:=<AcrylicBrush TintColor="{ThemeResource SystemAltHighColor}" TintOpacity="0.7" FallbackColor="{ThemeResource SystemChromeMediumColor}" />
+  - target: Grid#NetworkAndBatteryIcon > Border
+    styles:
+      - Background=Transparent
+      - Margin=0,0,20,25
+  - target: Grid#NetworkAndBatteryIcon > Border > Grid > Grid#NetworkIconV2 > TextBlock
+    styles:
+      - FontSize=23
+      - FontFamily=Segoe MDL2 Assets
+  - target: Grid#NetworkAndBatteryIcon > Border > Grid > Grid#NewBatteryIcon > Grid > TextBlock
+    styles:
+      - FontSize=23
+  - target: Grid#NetworkAndBatteryIcon > Border > Grid > Grid#NewBatteryIcon >  TextBlock
+    styles:
+      - FontFamily=Segoe UI
+      - FontSize=20
+  - target: Grid#NetworkIcon > TextBlock
+    styles:
+      - FontSize=25
+      - FontFamily=Segoe MDL2 Assets
+  - target: Image#BatteryStatusProvider
+    styles:
+      - Width=27
+      - Height=27
+  - target: LockCanvas.LockCanvasWidgetFrame > Grid
+    styles:
+      - CornerRadius=0
+      - Background:=<AcrylicBrush TintColor="{ThemeResource SystemAltHighColor}" TintOpacity="0.7" TintLuminosityOpacity="0.7"  FallbackColor="{ThemeResource SystemChromeMediumColor}" />
+  - target: LockCanvas.LockCanvasWidgetFrame > Grid > Grid
+    styles:
+      - Background:=<RevealBorderBrush Color="Transparent" TargetTheme="1" Opacity="0.2" />
+      - CornerRadius=0
+      - BorderBrush:=<RevealBorderBrush Color="Transparent" TargetTheme="1" />
+      - BorderThickness=1
+  - target: Border#SpotRectangle
+    styles:
+      - CornerRadius=50
+  - target: Rectangle#PulseRect
+    styles:
+      - RadiusX=50
+      - RadiusY=50
+  - target: Image#SpotDropShadow
+    styles:
+      - Visibility=1
+  - target: StackPanel > TextBlock
+    styles:
+      - FontFamily=Segoe UI
+  - target: MenuFlyoutPresenter > Border
+    styles:
+      - CornerRadius=0
+      - Background:=<AcrylicBrush TintColor="{ThemeResource SystemAltHighColor}" TintOpacity="0.7" FallbackColor="{ThemeResource SystemChromeMediumColor}" />
+      - 'Transitions:=<TransitionCollection>              <ContentThemeTransition VerticalOffset="60" />           </TransitionCollection> '
+  - target: MenuFlyoutItem
+    styles:
+      - Background:=<RevealBorderBrush Color="Transparent" TargetTheme="1" Opacity="0.4"  />
+      - BorderBrush:=<RevealBorderBrush Color="Transparent" TargetTheme="1" />
+      - BorderThickness=1
+  - target: ToolTip > ContentPresenter
+    styles:
+      - 'Transitions:=<TransitionCollection>              <ContentThemeTransition VerticalOffset="60" />           </TransitionCollection> '
+      - CornerRadius=0
+  - target: Grid#LockScreenTextContent > StackPanel > StackPanel
+    styles:
+      - HorizontalAlignment=0
+      - Margin=7,0,0,-15
+  - target: Button#Expando > ContentPresenter > Grid > Button#Spot
+    styles:
+      - HorizontalAlignment=0
+  - target: Button#Expando > ContentPresenter > Grid > Border#Title
+    styles:
+      - Grid.Row=0
+      - Margin=45,10,0,0
+  - target: Button#Expando > ContentPresenter > Grid > Border#Title > StackPanel > TextBlock
+    styles:
+      - TextAlignment=1
+  - target: Grid#Expando > Button#Title > Grid#RootGrid > StackPanel > ContentPresenter
+    styles:
+      - HorizontalAlignment=0
+  - target: Grid#Expando > Button#Title > Grid#RootGrid > StackPanel > TextBlock
+    styles:
+      - TextAlignment=1
+      - Margin=65,-37,0,0
+      - FontWeight=Normal
+  - target: Grid#Expando > Button#Title > Grid#RootGrid > StackPanel > TextBlock#TitleText
+    styles:
+      - Visibility=1
+  - target: Grid#WidgetErrorMessage > StackPanel > Button#ReloadWidgetButton
+    styles:
+      - CornerRadius=0
+  - target: Grid#WidgetErrorMessage > StackPanel > TextBlock
+    styles:
+      - FontFamily=Segoe UI
+      - FontSize=14
+  - target: Grid#WidgetErrorMessage > StackPanel > Button#ReloadWidgetButton > ContentPresenter@CommonStates
+    styles:
+      - Background@Normal:=<SolidColorBrush Color="{ThemeResource SystemChromeHighColor}" Opacity="0.6" />
+      - Background@PointerOver:=<SolidColorBrush Color="{ThemeResource SystemChromeHighColor}" Opacity="0.9" />
+      - Background@Pressed:=<SolidColorBrush Color="{ThemeResource SystemChromeHighColor}" Opacity="0.4" />
+      - BorderThickness=0
+  - target: TextBlock#SecureGestureText
+    styles:
+      - FontSize=30
+      - Margin=5,0,0,15
+  - target: TextBlock#SecureGestureIcon
+    styles:
+      - FontFamily=Segoe MDL2 Assets
+      - FontSize=40
+      - Visibility=1
+      - Margin=5,0,0,15
+  - target: Grid#MediaControlsContainer
+    styles:
+      - Grid.Row=0
+      - HorizontalAlignment=2
+      - Padding=0,0,0,100
+  - target: Grid#MediaControlsContainer > LockApp.DesktopMediaControlsOverlay > StackPanel > Grid#MediaTransportControls
+    styles:
+      - CornerRadius=0
+      - Width=360
+      - Height=110
+      - Background:=<SolidColorBrush Color="{ThemeResource SystemAltHighColor}" Opacity="0.95" />
+      - Margin=0,0,-1,0
+  - target: Grid#MediaControlsContainer > LockApp.DesktopMediaControlsOverlay > StackPanel > Grid#MediaTransportControls > ListView
+    styles:
+      - Grid.Column=1
+      - Margin=-5,60,0,0
+      - HorizontalAlignment=1
+  - target: Grid#MediaControlsContainer > LockApp.DesktopMediaControlsOverlay > StackPanel > Grid#MediaTransportControls > Grid#ThumbnailImageArea
+    styles:
+      - Width=110
+      - Height=110
+      - CornerRadius=0
+      - Margin=0,0,4,0
+  - target: Grid#MediaControlsContainer > LockApp.DesktopMediaControlsOverlay > StackPanel > Grid#MediaTransportControls > Grid#ThumbnailImageArea > Border
+    styles:
+      - CornerRadius=0
+      - Width=110
+      - Height=110
+  - target: Grid#MediaControlsContainer > LockApp.DesktopMediaControlsOverlay > StackPanel > Grid#MediaTransportControls > StackPanel
+    styles:
+      - Margin=7,-50,0,0
+  - target: Grid#MediaControlsContainer > LockApp.DesktopMediaControlsOverlay > StackPanel > Grid#MediaTransportControls > StackPanel > TextBlock[1]
+    styles:
+      - FontFamily=Segoe UI
+      - FontSize=20
+      - FontWeight=Normal
+  - target: Grid#MediaControlsContainer > LockApp.DesktopMediaControlsOverlay > StackPanel > Grid#MediaTransportControls > StackPanel > TextBlock[2]
+    styles:
+      - FontFamily=Segoe UI
+      - FontSize=15
+      - FontWeight=Normal
+  - target: Grid#MediaTransportControls > ListView > ItemsPresenter > StackPanel > ListViewItem
+    styles:
+      - Margin=1,0,1,0
+  - target: Grid#MediaTransportControls > ListView > ItemsPresenter > StackPanel > ListViewItem > Windows.UI.Xaml.Controls.Primitives.ListViewItemPresenter > Button#PlayPauseButton > ContentPresenter > TextBlock
+    styles:
+      - FontFamily=Segoe MDL2 Assets
+      - FontSize=20
+      - FontWeight=Light
+  - target: Grid#MediaTransportControls > ListView > ItemsPresenter > StackPanel > ListViewItem > Windows.UI.Xaml.Controls.Primitives.ListViewItemPresenter > Windows.UI.Xaml.Controls.Primitives.RepeatButton > ContentPresenter > TextBlock
+    styles:
+      - FontFamily=Segoe MDL2 Assets
+      - FontSize=20
+      - FontWeight=Light
+  - target: Grid#MediaTransportControls > ListView > ItemsPresenter > StackPanel > ListViewItem > Windows.UI.Xaml.Controls.Primitives.ListViewItemPresenter > Windows.UI.Xaml.Controls.Primitives.RepeatButton
+    styles:
+      - Style:=
+      - Height=45
+      - Width=65
+  - target: Grid#MediaTransportControls > ListView > ItemsPresenter > StackPanel > ListViewItem > Windows.UI.Xaml.Controls.Primitives.ListViewItemPresenter > Button#PlayPauseButton
+    styles:
+      - Style:=
+      - Height=45
+      - Width=65
+  - target: Grid#MediaTransportControls > ListView > ItemsPresenter > StackPanel > ListViewItem > Windows.UI.Xaml.Controls.Primitives.ListViewItemPresenter > Windows.UI.Xaml.Controls.Primitives.RepeatButton > ContentPresenter@CommonStates
+    styles:
+      - Background@Normal=Transparent
+      - Background@Disabled=Transparent
+      - BorderBrush@Disabled:=<RevealBorderBrush Color="Transparent" TargetTheme="1" Opacity="0.4" />
+      - BorderBrush@Normal:=<RevealBorderBrush Color="Transparent" TargetTheme="1" Opacity="1" />
+      - BorderBrush@PointerOver:=<RevealBorderBrush Color="Transparent" TargetTheme="1" Opacity="1" />
+      - Background@PointerOver:=<RevealBorderBrush Color="{ThemeResource SystemChromeMediumColor}" TargetTheme="1" Opacity="0.7" />
+      - Background@Pressed:=<RevealBorderBrush Color="{ThemeResource SystemChromeMediumLowColor}" TargetTheme="1" Opacity="0.7" />
+      - CornerRadius=0
+  - target: Grid#MediaTransportControls > ListView > ItemsPresenter > StackPanel > ListViewItem > Windows.UI.Xaml.Controls.Primitives.ListViewItemPresenter > Button#PlayPauseButton > ContentPresenter@CommonStates
+    styles:
+      - Background@Normal=Transparent
+      - Background@Disabled=Transparent
+      - BorderBrush@Disabled:=<RevealBorderBrush Color="Transparent" TargetTheme="1" Opacity="0.4" />
+      - BorderBrush@Normal:=<RevealBorderBrush Color="Transparent" TargetTheme="1" Opacity="1" />
+      - BorderBrush@PointerOver:=<RevealBorderBrush Color="Transparent" TargetTheme="1" Opacity="1" />
+      - Background@PointerOver:=<RevealBorderBrush Color="{ThemeResource SystemChromeMediumColor}" TargetTheme="1" Opacity="0.6" />
+      - Background@Pressed:=<RevealBorderBrush Color="{ThemeResource SystemChromeMediumHighColor}" TargetTheme="1" Opacity="0.3" />
+      - CornerRadius=0
+  - target: Grid#MediaTransportControls > ListView > ItemsPresenter > StackPanel > ListViewItem > Windows.UI.Xaml.Controls.Primitives.ListViewItemPresenter > Windows.UI.Xaml.Controls.Primitives.RepeatButton#PreviousButton > ContentPresenter > TextBlock
+    styles:
+      - Text=
+  - target: Grid#MediaTransportControls > ListView > ItemsPresenter > StackPanel > ListViewItem > Windows.UI.Xaml.Controls.Primitives.ListViewItemPresenter > Windows.UI.Xaml.Controls.Primitives.RepeatButton#NextButton > ContentPresenter > TextBlock
+    styles:
+      - Text=
+  - target: Grid#AlarmsIconPanelPadding
+    styles:
+      - Visibility=1
+  - target: Grid#Expando > Grid#Spot
+    styles:
+      - HorizontalAlignment=0
+  - target: Grid#Expando > Grid#Title
+    styles:
+      - Grid.Row=0
+      - Margin=45,10,0,0
+  - target: Grid#Expando > Grid#Title > StackPanel > TextBlock
+    styles:
+      - HorizontalAlignment=0
+      - Margin=25,-2,0,0
+styleConstants:
+  - ''
+themeResourceVariables:
+  - ''

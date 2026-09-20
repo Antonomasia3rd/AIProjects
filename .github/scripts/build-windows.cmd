@@ -90,7 +90,13 @@ if errorlevel 1 (
   popd
   exit /b !STATUS!
 )
-call :Run cmd.exe /d /c BuildADBController.cmd
+call :Run cmd.exe /d /c BuildADBController.cmd test-inert
+if errorlevel 1 (
+  set "STATUS=%ERRORLEVEL%"
+  popd
+  exit /b !STATUS!
+)
+call :Run cmd.exe /d /c BuildADBController.cmd build-only
 set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
@@ -105,11 +111,11 @@ exit /b %ERRORLEVEL%
 call :IsSkipped asusblink
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build asusblink"
-call :RequireCsc
-if errorlevel 1 exit /b %ERRORLEVEL%
-if not exist "%LEGACY%\asusblink\build" mkdir "%LEGACY%\asusblink\build"
-call :Run "%CSC%" /nologo /optimize+ /target:winexe /r:System.Core.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.Runtime.Serialization.dll /out:"%LEGACY%\asusblink\build\asusblink.exe" "%LEGACY%\asusblink\asusblink.cs"
-if errorlevel 1 exit /b %ERRORLEVEL%
+pushd "%LEGACY%\asusblink" || exit /b 1
+call :Run cmd.exe /d /c BuildAsusBlink.cmd
+set "STATUS=%ERRORLEVEL%"
+popd
+if not "%STATUS%"=="0" exit /b %STATUS%
 call :RecordArtifact "%LEGACY%\asusblink\build\asusblink.exe"
 exit /b %ERRORLEVEL%
 
@@ -117,11 +123,11 @@ exit /b %ERRORLEVEL%
 call :IsSkipped capsblink
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build capsblink"
-call :RequireCsc
-if errorlevel 1 exit /b %ERRORLEVEL%
-if not exist "%LEGACY%\capsblink\build" mkdir "%LEGACY%\capsblink\build"
-call :Run "%CSC%" /nologo /optimize+ /target:exe /out:"%LEGACY%\capsblink\build\capsblink.exe" "%LEGACY%\capsblink\capsblink.cs"
-if errorlevel 1 exit /b %ERRORLEVEL%
+pushd "%LEGACY%\capsblink" || exit /b 1
+call :Run cmd.exe /d /c BuildCapsBlink.cmd
+set "STATUS=%ERRORLEVEL%"
+popd
+if not "%STATUS%"=="0" exit /b %STATUS%
 call :RecordArtifact "%LEGACY%\capsblink\build\capsblink.exe"
 exit /b %ERRORLEVEL%
 
@@ -172,6 +178,12 @@ call :IsSkipped NowPlayingTile
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build NowPlayingTile"
 pushd "%LEGACY%\NowPlayingTile" || exit /b 1
+call :Run cmd.exe /d /c TestNowPlayingTileSource.cmd
+if errorlevel 1 (
+  set "STATUS=!ERRORLEVEL!"
+  popd
+  exit /b !STATUS!
+)
 call :Run cmd.exe /d /c BuildNowPlayingTile.cmd
 set "STATUS=%ERRORLEVEL%"
 popd
@@ -274,12 +286,13 @@ exit /b %ERRORLEVEL%
 call :IsSkipped RealTimeNotesDeskband
 if "!SKIP_RESULT!"=="1" exit /b 0
 call :Section "Build RealTimeNotesDeskband"
-where g++.exe >nul 2>nul
-if errorlevel 1 (
-  echo ERROR: g++.exe is required for RealTimeNotesDeskband.
-  exit /b 1
-)
 pushd "%LEGACY%\RealTimeNotesDeskband" || exit /b 1
+call :Run cmd.exe /d /c TestRealTimeNotesDeskbandSource.cmd
+if errorlevel 1 (
+  set "STATUS=!ERRORLEVEL!"
+  popd
+  exit /b !STATUS!
+)
 call :Run cmd.exe /d /c BuildDeskband.cmd
 set "STATUS=%ERRORLEVEL%"
 popd

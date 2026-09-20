@@ -453,16 +453,18 @@ int main(int argc, char** argv)
     {
         const std::string generation = ReadSource("..\\dependencies\\DesktopStub\\ga_generation.inc");
         const std::string app = ReadSource("..\\dependencies\\DesktopStub\\ga_app.inc");
+        const std::string offline = ReadSource("..\\dependencies\\DesktopStub\\ga_render_only.inc");
         const std::string core = ReadSource("..\\dependencies\\DesktopStub\\ga_core.inc");
         const std::string desktopStub = ReadSource("DesktopStub.cpp");
         const std::string buildScript = ReadSource("BuildDesktopStub.cmd");
         const std::string readme = ReadSource("README.md");
-        const std::string image = ReadSource("..\\dependencies\\DesktopStub\\ga_image.inc");
+        const std::string image = ReadSource("..\\dependencies\\DesktopStub\\ga_image.inc") + "\n" + ReadSource("..\\dependencies\\DesktopStub\\tile_text_render.inc");
         const std::string desktopIcon = ReadSource("..\\dependencies\\DesktopStub\\ga_desktop_icon_png.inc");
         const std::string registration = ReadSource("..\\dependencies\\DesktopStub\\ga_registration.inc");
         const std::string liveTile = ReadSource("..\\dependencies\\DesktopStub\\ga_live_tile.inc");
         const std::string liveTileTemplates = ReadSource("..\\dependencies\\DesktopStub\\ga_live_tile_templates.inc");
         const std::string liveTileSources = liveTile + "\n" + liveTileTemplates;
+        const std::string rssFeed = ReadSource("..\\dependencies\\DesktopStub\\ga_rss_feed.inc");
         const std::string manifest = ReadSource("..\\dependencies\\DesktopStub\\ga_manifest.inc");
         const std::string version = ReadSource("..\\dependencies\\DesktopStub\\ga_version.inc");
         const std::string versionResource = ReadSource("..\\dependencies\\DesktopStub\\DesktopStubVersionResource.rc.inc");
@@ -479,6 +481,7 @@ int main(int argc, char** argv)
         const std::string runtime = ReadSource("..\\dependencies\\DesktopStub\\ga_runtime_helpers.inc");
         const std::string commandLine = ReadSource("..\\dependencies\\DesktopStub\\ga_command_line.inc");
         const std::string defaults = ReadSource("..\\dependencies\\DesktopStub\\ga_config_defaults.inc");
+        const std::string startupShortcut = ReadSource("..\\dependencies\\startup_shortcut.inc");
         const std::string wallpaper = ReadSource("..\\dependencies\\DesktopStub\\ga_wallpaper.inc");
         const std::string loggingCore = ReadSource("..\\dependencies\\DesktopStub\\ga_logging_core.inc");
         const std::string brokerApp = ReadSource("..\\dependencies\\DesktopStub\\ga_livetile_broker_app.inc");
@@ -501,7 +504,27 @@ int main(int argc, char** argv)
         });
 
         std::vector<Check> checks;
+        checks.push_back({"Both DesktopStub PowerShell registration paths use the shared literal builder", "registration orchestration", generation,
+            R"rx(RegisterAppxManifest.*BuildAppxRegistrationScript.*PowerShellSingleQuotedString.*BuildAppxRegistrationScript.*PowerShellSingleQuotedString)rx",
+            "primary and fallback registration scripts must preserve literal manifest paths through the shared builder", false});
+        const std::string packagedStartup = ReadSource("..\\dependencies\\DesktopStub\\ga_packaged_startup.inc");
+        const std::string sharedPackagedStartup = ReadSource("..\\dependencies\\packaged_startup.inc");
+        checks.push_back({"Packaged startup uses queued worker and cached UI status", "packaged startup adapter", packagedStartup,
+            R"rx(struct DesktopStubPackagedStartupWorker.*std::condition_variable.*SetPackagedStartupTaskEnabled.*QueryPackagedStartupTask.*DesktopStubPackagedStartupStatusText)rx",
+            "tray operations must queue Windows API work and read cached status", false});
+        checks.push_back({"Packaged startup protects custom profile scope", "packaged startup adapter", packagedStartup,
+            R"rx(DesktopStubDefaultStartupProfile.*Windows startup tasks launch the default INI only.*Custom profiles may inspect package-wide state, but never change it)rx",
+            "custom INI profiles must not change package-wide startup state", false});
+        checks.push_back({"Packaged startup async waits have deadlines", "shared packaged startup", sharedPackagedStartup,
+            R"rx(AwaitPackagedStartupOperation.*milliseconds\(5000\).*wait_for\(timeout\).*operation.Cancel\(\).*ERROR_TIMEOUT.*operation.GetResults\(\))rx",
+            "shared StartupTask waits must use a bounded deadline", false});
+        checks.push_back({"Packaged startup avoids unbounded async get", "shared packaged startup", sharedPackagedStartup,
+            R"rx(\.get\(\))rx", "StartupTask APIs must not use unbounded get()", true});
+        checks.push_back({"Windows10 manifest declares initially disabled packaged startup via shared builder", "manifest generation", manifest,
+            R"rx(if \(target == ManifestCompatibilityTarget::Windows10\).*DesktopStartupNamespace.*BuildDesktopStartupExtension\(L"DesktopStubStartup".*if \(target == ManifestCompatibilityTarget::Windows81\))rx",
+            "only the Windows10 branch may emit the shared desktop startup extension", false});
 
+        checks.push_back({"DesktopStub imports standard min/max before the SDK 19041 GDI+ headers", "DesktopStub.cpp", desktopStub, R"rx(#include <windows\.h>\s*#include <algorithm>\s*namespace Gdiplus\s*\{\s*using std::max;\s*using std::min;\s*\}\s*#include <gdiplus\.h>)rx", "NOMINMAX removes the Windows macros, so SDK 19041 GDI+ must see std::min and std::max in its namespace before gdiplus.h is parsed", false});
         checks.push_back({"Build script ignores legacy target arguments", "BuildDesktopStub.cmd", buildScript, R"rx(Build policy:.*ignores every argument.*%DESKTOPSTUB_BROKER_EXE_NAME%.*if not "%~1"=="".*One or more arguments were supplied and ignored)rx", "BuildDesktopStub.cmd must accept but ignore old target arguments so every invocation builds the same outputs", false});
         checks.push_back({"Build script always builds host and broker", "BuildDesktopStub.cmd", buildScript, R"rx(echo Building packaged Live Tile broker\.\.\..*LiveTileBroker\.cpp.*echo Building main DesktopStub host\.\.\..*DesktopStub\.cpp)rx", "BuildDesktopStub.cmd must always build both DesktopStub.exe and DesktopStubLiveTileBroker.exe", false});
         checks.push_back({"Local tag refresh is explicit and non-destructive", "BuildDesktopStub.cmd", buildScript, R"rx(DESKTOPSTUB_REFRESH_TAGS.*call :RefreshDesktopStubTags.*:RefreshDesktopStubTags.*git remote get-url origin.*git fetch --quiet --tags origin.*continuing with local tags.*:ResolveDesktopStubVersion)rx", "normal local builds must stay offline and must not force-update or prune local tags; explicit refresh remains available", false});
@@ -578,6 +601,10 @@ int main(int argc, char** argv)
         checks.push_back({"AppX host image-path queries grow beyond MAX_PATH", "..\\dependencies\\DesktopStub\\ga_app.inc", app, R"rx(QueryProcessImagePath.*std::vector<wchar_t> buffer\(512\).*ERROR_INSUFFICIENT_BUFFER.*32768)rx", "long host paths must not be treated as query failures or name-only matches", false});
         checks.push_back({"Command-line reload only applies tray visibility when TrayIcon changed", "command-line/app sources", commandLine + "\n" + app, R"rx(CommandLineSettingChangesTrayIcon.*IEquals\(entry\.section,\s*L"Settings"\).*IEquals\(entry\.key,\s*L"TrayIcon"\).*ApplySettingsChangedByCommandLine\(bool applyTrayIcon\).*if \(applyTrayIcon\)\s*ApplyTrayIconSettingFromIni\(\).*CommandLineTrayIconChanged\(\).*SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON)rx", "command-line settings reloads must not resurrect or hide the session tray icon unless TrayIcon changed", false});
         checks.push_back({"Live Tile mode change forces registration before Live Tile updates", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(LiveTileModeReregistrationPending\(\).*StartupGenerationCanSkip.*LiveTileModeReregistrationPending\(\).*return false.*liveTileModeReregistrationPending.*useLiveTileUpdateForThisRun\s*=\s*liveTileUpdateMode\s*&&\s*!liveTileModeReregistrationPending.*RegisterAppxManifest\(manifestPath,\s*appUpdateFailureMessage\).*SetLiveTileModeReregistrationPending\(false\))rx", "Live Tile setting changes must bypass startup skip, force one registration, and clear the pending flag after registration succeeds", false});
+        checks.push_back({"Registration transition clears stale native Live Tile before static registration", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(else if \(liveTileModeReregistrationPending\).*if \(!liveTileUpdateMode\).*Appx_Clear_Or_Request_LiveTile\(nativeLiveTileClearFailure\).*if \(nativeLiveTileClearOk\).*RegisterAppxManifest\(manifestPath,\s*appUpdateFailureMessage\).*appUpdateFailureIsLiveTile = true.*if \(registrationOk\).*SetLiveTileModeReregistrationPending\(false\))rx", "switching away from native Live Tile mode must clear its notification before static manifest assets can become visible, must not re-register while clearing failed, and must retain the pending transition for retry", false});
+        checks.push_back({"Unpackaged Live Tile clear waits for packaged completion", "..\\dependencies\\DesktopStub\\ga_live_tile.inc", liveTile, R"rx(Appx_Clear_Or_Request_LiveTile.*ManifestCompatibilityTarget::Windows10.*ManifestCompatibilityTarget::Windows81.*LiveTileSuccessLogWatch.*ActivateRegisteredPackageApplication\(.*L"tile-clear".*WaitForPackagedLiveTileHelperSuccess\(.*L"Live Tile cleared under package identity".*reportedPid.*WaitForLiveTileHelperProcessExit)rx", "an unpackaged mode switch must require the clear-specific package-identity success record and the responsible helper process to exit before package re-registration", false});
+        checks.push_back({"Packaged Live Tile helper exit wait is bounded and handle-safe", "..\\dependencies\\DesktopStub\\ga_live_tile.inc", liveTile, R"rx(WaitForLiveTileHelperProcessExit.*OpenProcess\(SYNCHRONIZE,\s*FALSE,\s*pid\).*WaitForSingleObject\(process,\s*timeoutMs\).*CloseHandle\(process\).*return waitResult == WAIT_OBJECT_0)rx", "the native-to-static transition must close its process handle and fail rather than racing a still-running registered-package helper", false});
+        checks.push_back({"Packaged Live Tile clear helper exits before single-instance handling", "command-line/app sources", commandLine + "\n" + app, R"rx(tile-clear.*liveTileClearOnly.*CommandLineRequestsLiveTileClearOnly.*HandlePackagedLiveTileClearOnlyAndExit.*Appx_Clear_LiveTileBare.*HandlePackagedLiveTileClearOnlyAndExit\(\).*CreateMutexW)rx", "Windows 10 must be able to run the registered host as a one-shot package-identity clear helper without colliding with the normal path-scoped instance", false});
         checks.push_back({"Live Tile update requires package identity", "..\\dependencies\\DesktopStub\\ga_live_tile.inc", liveTile, R"rx(GetCurrentPackageFullName.*liveTileUpdateRequiresIdentity)rx", "Live Tile updater must detect missing package identity and report a clear failure", false});
         checks.push_back({"Live Tile mode disables static wallpaper manifest assets", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(staticWallpaperAssetEnabled\s*=\s*!liveTileUpdateMode\s*&&\s*IniReadI\(L"Assets",\s*t\.name,\s*0\)\s*!=\s*0.*g_deleteDisabledAssets\s*\|\|\s*liveTileUpdateMode)rx", "Live Tile mode must treat static manifest assets as disabled and remove stale files when desktop-icon fallback is off", false});
         checks.push_back({"Desktop icon placeholder assets use full tile canvases", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(LoadEmbeddedDesktopIcon\(\).*RenderDesktopIconAsset\(icon\.get\(\),\s*t\.w,\s*t\.h,\s*t\.w,\s*t\.h\).*ScalePixels\(t\.w,\s*scale\).*ScalePixels\(t\.h,\s*scale\).*RenderDesktopIconAsset\(icon\.get\(\),\s*scaledW,\s*scaledH,\s*t\.w,\s*t\.h\))rx", "disabled/static Desktop icon placeholders must be rendered to target tile dimensions instead of saving the raw icon directly", false});
@@ -593,9 +620,21 @@ int main(int argc, char** argv)
         checks.push_back({"Generated asset cache command-line bounds match runtime clamps", "..\\dependencies\\DesktopStub\\ga_command_line.inc", commandLine, R"rx(--generated-asset-cache-max.*0,\s*4096.*--generated-asset-precache-max.*0,\s*256)rx", "cache max command-line bounds must match runtime clamps", false});
         checks.push_back({"Generated asset cache tray presets match runtime clamps", "..\\dependencies\\DesktopStub\\ga_tray.inc", tray, R"rx(CycleSettingIntPreset\(L"GeneratedAssetCacheMaxEntries",\s*32,\s*0,\s*4096.*CycleSettingIntPreset\(L"GeneratedAssetPrecacheMaxFiles",\s*16,\s*0,\s*256)rx", "cache max tray presets must match runtime clamps", false});
         checks.push_back({"Idle trim interval is exposed in config, tray, and CLI", "idle-trim sources", defaults + "\n" + tray + "\n" + commandLine + "\n" + app, R"rx(IdleTrimIntervalMs",\s*L"60000".*ID_ADV_IDLE_TRIM_INTERVAL_MS.*CycleSettingIntPreset\(L"IdleTrimIntervalMs",\s*60000,\s*0,\s*3600000.*--idle-trim-interval.*IniReadClampedI\(L"Settings",\s*L"IdleTrimIntervalMs",\s*60000,\s*0,\s*3600000)rx", "IdleTrimIntervalMs must remain configurable through INI defaults, tray menu, command line, and runtime diagnostics", false});
-        checks.push_back({"DesktopStub smoke runs from a temporary build directory", "..\\.github\\tools\\RepoTools.cs", repoTools, R"rx(DesktopStubSmoke-.*string exe = Path\.Combine\(tempRoot,\s*Path\.GetFileName\(sourceExe\)\).*File\.Copy\(sourceExe,\s*exe,\s*true\).*DesktopStubLiveTileBroker\.exe.*DesktopStubAppxStub\.exe.*Path\.Combine\(Path\.GetDirectoryName\(exe\),\s*"AppxManifest\.xml"\))rx", "DesktopStub smoke tests must run a copied EXE from a temp directory so they cannot mutate build\\Assets, build\\AssetCache, or build\\AppxManifest.xml", false});
-        checks.push_back({"DesktopStub smoke uses unique manifest identity", "..\\.github\\tools\\RepoTools.cs", repoTools, R"rx(dev\.local\.desktopstubsmoke.*SetDesktopStubManifestIdentity.*did not preserve the custom AppxManifest\.xml package identity.*UnregisterDesktopStubSmokePackage.*Remove-AppxPackage)rx", "DesktopStub smoke tests must avoid colliding with a running local DesktopStub package identity, verify custom manifest identity preservation, and clean up the temporary package", false});
+        checks.push_back({"DesktopStub smoke runs from a temporary build directory", "..\\.github\\tools\\RepoTools.cs", repoTools, R"rx(DesktopStubSmoke-.*string exe = Path\.Combine\(tempRoot,\s*"DesktopStub\.exe"\).*File\.Copy\(sourceExe,\s*exe,\s*true\).*DesktopStubLiveTileBroker\.exe.*DesktopStubAppxStub\.exe.*Path\.Combine\(Path\.GetDirectoryName\(exe\),\s*"AppxManifest\.xml"\))rx", "DesktopStub smoke must copy the selected fresh binary into a temporary output directory", false});
+        checks.push_back({"DesktopStub package integration is explicitly gated", "..\\.github\\tools\\RepoTools.cs", repoTools, R"rx(--allow-package-integration.*dev\.local\.desktopstubsmoke.*allowPackageIntegration\s*\?\s*"--once"\s*:\s*"--render-only".*if \(allowPackageIntegration\) VerifyDesktopStubSecondLaunchActions.*allowPackageIntegration && !String\.IsNullOrWhiteSpace\(smokeIdentity\).*UnregisterDesktopStubSmokePackage)rx", "default smoke must not register, activate, clear native tiles or start the normal DesktopStub resident", false});
+        checks.push_back({"Offline commands precede activation and resident handling", "app source", app, R"rx(if \(g_commandLine\.renderOnly \|\| g_commandLine\.configureOnly\).*return RunRenderOnlyCommand\(\).*CommandLineComRegistrationHelper.*HandleAppxActivationAndExit.*CreateMutexW)rx", "offline commands must exit before every helper, activation or existing-instance path", false});
+        checks.push_back({"Offline rendering stops before package updates", "generation source", generation, R"rx(bool Generate\(.*bool renderOnly = false.*if \(renderOnly\).*return true;.*LogText\(liveTileModeReregistrationPending.*RegisterAppxManifest)rx", "offline asset generation must return before registration, native publishing and activation", false});
+        checks.push_back({"Offline settings exclude Startup transactions and providers", "offline source", offline, R"rx(CommitDesktopStubStartup|ApplyCommandLinePersistentSettings|ReconcileDesktopStub|ContentEngineTick|GetWallpaper\(|ReadSmtcContent|RssHttpGetText)rx", "offline entry must not invoke resident settings transactions or live providers", true});
+        checks.push_back({"Offline commands reject explicit startup operations", "offline source", offline, R"rx(RunAtStartup.*RunAtStartupPackaged.*return fail.*MutateDesktopStubIniWithWait)rx", "both startup mechanisms must be rejected before local persistent mutation", false});
+        checks.push_back({"Smoke descendants are lifetime-contained", "repo tools", repoTools, R"rx(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.*AssignProcessToJobObject.*smokeLifetimeJob = job.*SmokeCleanupTests.*forced runner termination.*InstallSmokeLifetime\(15 \* 60 \* 1000\))rx", "the default runner and interruption fixtures must use kill-on-close jobs before spawning children", false});
         checks.push_back({"TileText simulation uses fixed Windows 8 layouts", "..\\dependencies\\DesktopStub\\ga_image.inc", image, R"rx(SimulatedTileTextLayout.*RenderMediumTileTextSimulation.*Segoe UI Light.*RenderWideTileTextSimulation.*fill wide tile text band.*RenderLargeTileTextSimulation.*darken large tile image)rx", "baked tile text must use fixed medium, wide, and large Windows 8/8.1-style template geometry", false});
+        checks.push_back({"TileText one-line fields disable wrapping", "..\\dependencies\\DesktopStub\\ga_image.inc", image, R"rx(maxLines\s*<=\s*1.*StringFormatFlagsNoWrap.*region\.documentedMaxLines)rx", "single-line Windows tile template fields must ellipsize instead of disappearing when a multi-word label would otherwise wrap", false});
+        checks.push_back({"Rendered smoke pins one-line multi-word TileText", "..\\.github\\tools\\RepoTools.cs", repoTools, R"rx(DESKTOPSTUB TEST.*DESKTOPSTUB WIDE.*new\[\]\s*\{\s*"Medium",\s*"Large"\s*\}.*VerifyTileTextFieldPixelDiff)rx", "the Windows bitmap smoke test must compare same-prefix multi-word labels so removing NoWrap makes the rendered assets identical and fails the assertion", false});
+        checks.push_back({"Tray tooltip reload updates an existing icon", "tray sources", tray + "\n" + app, R"rx(UpdateTrayIconTooltip.*aip::ModifyTrayIconTooltip.*ApplyTrayIconSettingFromIni.*UpdateTrayIconTooltip)rx", "changing Strings.TrayTip through INI/command line must update the resident tray icon instead of leaving stale hover text", false});
+        checks.push_back({"Blank tray tooltip uses the product fallback", "tray sources", tray, R"rx(RegisterTrayIcon\(.*g_ui\.trayTip,\s*L"DesktopStub".*ModifyTrayIconTooltip\(\s*g_nid,\s*g_ui\.trayTip,\s*L"DesktopStub")rx", "blank or whitespace-only Strings.TrayTip values must still show a DesktopStub hover label", false});
+        checks.push_back({"Tray desired state survives a transient shell add failure", "app source", app, R"rx(g_tray = desiredTray;.*if \(!EnsureTrayIcon\(&err\)\).*LogWin32Failure.*return;)rx", "TaskbarCreated must retry a desired tray icon after a transient Explorer failure", false});
+        checks.push_back({"Relative log paths resolve beside the executable", "manifest source", manifest, R"rx(EffectiveConfiguredLogPath.*PathIsRelativeW\(configured\.c_str\(\)\).*aip::PathJoin\(GetExeDir\(\), configured\))rx", "an explicit relative LogPath must not depend on the caller's working directory", false});
+        checks.push_back({"Opening the tray reloads strings and refreshes its tooltip", "tray menu", tray, R"rx(Menu\(HWND h\).*LoadUiStrings\(\).*UpdateTrayIconTooltip)rx", "external INI edits to Strings.TrayTip must take effect without restarting", false});
         checks.push_back({"TileText presentation customization stays removed", "TileText sources", defaults + "\n" + commandLine + "\n" + tray + "\n" + image + "\n" + readme, R"rx(--tile-text-font|--tile-text-align|ID_TILE_TEXT_FONT|PromptTileTextStringSetting|CreateTileTextFontFamily|L"TileText",\s*L"Font"|ApplyToSmallTile|ApplyToLogos)rx", "native Live Tiles do not honor arbitrary presentation settings, and baked simulation must remain tied to Windows template layouts", true});
         checks.push_back({"Live Tile mode writes dedicated notification assets", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(g_liveTileAssets.*Assets\\\\LiveMediumTile\.png.*Assets\\\\LiveWideTile\.png.*Assets\\\\LiveLargeTile\.png.*NewLiveTileAssetToken.*VersionedLiveTileAssetPath.*if \(liveTileUpdateMode\).*VersionedLiveTileAssetPath\(t,\s*liveTileToken\).*liveTileUpdateAssets\.push_back)rx", "Live Tile mode must write dedicated versioned Live*.png notification assets instead of relying on manifest logo assets or overwriting the displayed tile image in place", false});
         checks.push_back({"Manifest target can generate Windows 10, 8.1, and 8 manifests", "manifest/command-line sources", manifest + "\n" + commandLine + "\n" + tray, R"rx(appx/2010/manifest.*xmlns:m2=.*2013/manifest.*AppxManifestTarget.*--manifest-target.*ID_MANIFEST_TARGET_WINDOWS10.*ID_MANIFEST_TARGET_WINDOWS81.*ID_MANIFEST_TARGET_WINDOWS8)rx", "manifest target selection must cover Windows 10, Windows 8.1, and Windows 8 from command line and tray", false});
@@ -753,6 +792,196 @@ int main(int argc, char** argv)
                 "WriteIniValueWithWait"
             },
             "DesktopStub INI writes should use the shared bounded mutex wait so tray/CLI writes cannot hang forever on a wedged writer");
+        AssertContainsAll(
+            "DesktopStub consumes the shared Startup shortcut lifecycle",
+            "DesktopStub startup sources",
+            desktopStub + "\n" + buildScript + "\n" + core + "\n" + startupShortcut,
+            {
+                "#include \"..\\dependencies\\startup_shortcut.inc\"",
+                "uuid.lib",
+                "FOLDERID_Startup",
+                "DesktopStubStartupShortcutSpec()",
+                "spec.identityPath = configPath;",
+                "spec.arguments = L\"--ini \" + aip::QuoteCommandLineArg(configPath);",
+                "aip::SetStartupShortcutDesired(",
+                "aip::QueryStartupShortcutInstalled("
+            },
+            "DesktopStub must use the profile-scoped shared ShellLink helper and link the ShellLink GUID library");
+        AssertNotContainsAny(
+            "DesktopStub Startup integration avoids forbidden launch stores",
+            "DesktopStub startup sources",
+            desktopStub + "\n" + core + "\n" + commandLine + "\n" + tray,
+            {
+                "HKEY_CURRENT_USER\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run",
+                "CurrentVersion\\\\Run",
+                "schtasks",
+                "TaskScheduler"
+            },
+            "DesktopStub startup must use only the current user's shell:startup folder, never Run registry or Task Scheduler state");
+        AssertContainsAll(
+            "DesktopStub Startup setting is consistent across defaults, CLI, and tray",
+            "DesktopStub configuration surfaces",
+            defaults + "\n" + commandLine + "\n" + tray,
+            {
+                "{L\"Settings\", L\"RunAtStartup\", L\"0\"}",
+                "--startup | --no-startup",
+                "IEquals(arg, L\"--startup\")",
+                "IEquals(arg, L\"--no-startup\")",
+                "Settings.RunAtStartup expects a true/false value.",
+                "ID_RUN_AT_STARTUP",
+                "QueryDesktopStubStartupShortcutInstalled(installed, error)",
+                "PersistDesktopStubStartupPreference(desired, error)"
+            },
+            "DesktopStub must expose one typed RunAtStartup preference through its INI, command line, and tray menu");
+        AssertContainsAll(
+            "DesktopStub command-line settings commit as one transaction",
+            "DesktopStub command-line/INI sources",
+            commandLine + "\n" + core,
+            {
+                "if (g_commandLine.settings.empty())",
+                "FindDesktopStubStartupPreference(",
+                "CommitDesktopStubStartupIniState(",
+                "aip::CommitStartupShortcutIniState(",
+                "auto mutateSettings =",
+                "MutateDesktopStubIniWithWait(",
+                "for (const auto& entry : g_commandLine.settings)"
+            },
+            "DesktopStub must preflight and commit the full settings batch once through the shared crash-consistent Startup/INI transaction");
+        AssertContainsAll(
+            "DesktopStub shared Startup transaction is direction-safe and lock-coupled",
+            "..\\dependencies\\startup_shortcut.inc",
+            startupShortcut,
+            {
+                "CommitStartupShortcutIniState(",
+                "IniWriteMutexGuard iniLock",
+                "ExecuteCrashConsistentLaunchConfigState("
+            },
+            "DesktopStub Startup changes must hold the shared INI lock and use direction-safe commit ordering");
+        AssertNotContainsAny(
+            "DesktopStub command-line settings do not write entries independently",
+            "ApplyCommandLinePersistentSettings",
+            SliceSource(
+                commandLine,
+                "static bool ApplyCommandLinePersistentSettings()",
+                "static bool CommandLineShouldShowHelp()"),
+            {
+                "WriteIniValue(entry.section.c_str(), entry.key.c_str(), entry.value.c_str())",
+                "IniWrite(entry.section.c_str(), entry.key.c_str(), entry.value.c_str())"
+            },
+            "a multi-setting command must not persist an arbitrary prefix through one write per entry");
+        AssertContainsAll(
+            "DesktopStub reconciles Startup after launch and settings reload",
+            "DesktopStub application sources",
+            app,
+            {
+                "ReconcileDesktopStubStartupShortcutFromConfig(startupError)",
+                "ReconcileDesktopStubStartupShortcutFromConfig(startupShortcutError)",
+                "Could not synchronize the shell:startup shortcut"
+            },
+            "resident DesktopStub instances must repair the effective profile's shortcut after startup and settings reload");
+        AssertContainsAll(
+            "DesktopStub smoke covers Startup help and invalid values without mutation",
+            "..\\.github\\tools\\RepoTools.cs",
+            repoTools,
+            {
+                "\"--help\", \"--ini\", helpIni, \"--startup\"",
+                "DesktopStub --help did not expose the Startup setting.",
+                "AssertFileDoesNotExist(helpIni, \"DesktopStub --help must be side-effect-free\")",
+                "\"Settings.RunAtStartup=maybe\"",
+                "DesktopStub invalid Startup boolean",
+                "AssertFileDoesNotExist(invalidStartupIni"
+            },
+            "Windows smoke must prove that Startup appears in help and invalid typed values fail before creating the INI or touching Startup");
+        AssertContainsAll(
+            "DesktopStub generates a canonical RSS content profile",
+            "DesktopStub defaults",
+            defaults,
+            {
+                "{L\"Settings\", L\"ContentSource\", L\"Wallpaper\"}",
+                "{L\"RssFeed\", L\"FeedUrl\", L\"\"}",
+                "{L\"RssFeed\", L\"UserAgent\", L\"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)\"}",
+                "{L\"RssFeed\", L\"UpdateIntervalSeconds\", L\"900\"}",
+                "{L\"RssFeed\", L\"MaxItems\", L\"5\"}",
+                "{L\"RssFeed\", L\"HttpTimeoutSeconds\", L\"20\"}",
+                "{L\"RssFeed\", L\"MaxFeedBytes\", L\"2097152\"}",
+                "lines.push_back(L\"[RssFeed]\")",
+                "IEquals(d.section, L\"RssFeed\")"
+            },
+            "new profiles must expose every RSS setting instead of relying on hidden read-time fallbacks");
+        AssertContainsAll(
+            "DesktopStub RSS settings have one typed CLI contract",
+            "DesktopStub command line",
+            commandLine,
+            {
+                "NormalizeDesktopStubTypedSetting(",
+                "Settings.ContentSource expects Wallpaper or RssFeed.",
+                "ValidateRssFeedUrlSetting(",
+                "ValidateRssFeedUserAgentSetting(",
+                "RssFeedIntegerRange(",
+                "ValidateDesktopStubContentProfile(true, g_commandLine.applyError)",
+                "Invalid content-source configuration:",
+                "L\"--content-source\"",
+                "L\"--rss-feed-url\"",
+                "L\"--rss-user-agent\"",
+                "L\"--rss-update-interval\"",
+                "L\"--rss-max-items\"",
+                "L\"--rss-http-timeout\"",
+                "L\"--rss-max-feed-bytes\""
+            },
+            "generic --set, dedicated aliases, and direct INI startup validation must share strict URL, enum, string, and range rules");
+        AssertContainsAll(
+            "DesktopStub tray exposes the complete RSS profile",
+            "DesktopStub tray sources",
+            tray,
+            {
+                "ID_CONTENT_SOURCE_WALLPAPER",
+                "ID_CONTENT_SOURCE_RSS_FEED",
+                "ID_RSS_FEED_URL",
+                "ID_RSS_FEED_USER_AGENT",
+                "ID_RSS_FEED_UPDATE_INTERVAL",
+                "ID_RSS_FEED_MAX_ITEMS",
+                "ID_RSS_FEED_HTTP_TIMEOUT",
+                "ID_RSS_FEED_MAX_FEED_BYTES",
+                "ValidateConfiguredRssSettingsForContentSource(",
+                "PromptRssFeedStringSetting(",
+                "CycleRssFeedIntPreset(",
+                "WakePollThread()"
+            },
+            "the tray must configure the same source, URL, user-agent, interval, item, timeout, and response-cap values as INI and CLI");
+        AssertContainsAll(
+            "DesktopStub reloads the source for its unified monitor",
+            "DesktopStub runtime settings",
+            loggingCore,
+            {
+                "if (includeTrayIcon)",
+                "One monitor routes the current profile",
+                "g_contentSource = static_cast<int>(ParseContentSourceValue("
+            },
+            "resident reloads must apply source selection without creating competing workers");
+        AssertContainsAll(
+            "DesktopStub RSS polling rejects invalid live edits",
+            "DesktopStub RSS source",
+            rssFeed + ReadSource("..\\dependencies\\DesktopStub\\ga_content_runtime.inc"),
+            {
+                "bool valid = true;",
+                "std::wstring validationError;",
+                "ValidateDesktopStubContentProfileValues(",
+                "settings.validationError",
+                "settings.valid"
+            },
+            "post-start external INI edits must fail explicitly instead of being silently clamped on the next RSS poll");
+        AssertContainsAll(
+            "DesktopStub RSS parity is documented",
+            "DesktopStub README",
+            readme,
+            {
+                "--content-source Wallpaper|RssFeed",
+                "--rss-feed-url <http(s)://...>",
+                "The tray exposes both source choices and all RSS values",
+                "one typed validation contract",
+                "fail explicitly instead of being silently clamped"
+            },
+            "maintainer documentation must describe defaults, all three configuration surfaces, validation, and restart semantics");
         AssertNotContainsAny(
             "DesktopStub does not use unbounded startup INI mutation locks",
             "DesktopStub source",

@@ -1,6 +1,12 @@
-﻿// compile command: cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub.cpp /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+﻿// compile command: cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub.cpp /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 #define NOMINMAX
 #include <windows.h>
+#include <algorithm>
+namespace Gdiplus
+{
+using std::max;
+using std::min;
+}
 #include <gdiplus.h>
 #include <wincodec.h>
 #include <shlwapi.h>
@@ -22,7 +28,6 @@
 #include <cerrno>
 #include <cstdlib>
 #include <malloc.h>
-#include <algorithm>
 #include <initializer_list>
 #include <utility>
 #include <cstdint>
@@ -149,7 +154,12 @@ static UINT g_taskbarCreatedMessage = 0;
 static HANDLE g_singleInstanceMutex = nullptr;
 
 #include "..\dependencies\desktop_app_baseline.h"
+#include "..\dependencies\startup_shortcut.inc"
+#include "..\dependencies\packaged_startup.inc"
+#include "../dependencies/packaged_startup_manifest.h"
 #include "..\dependencies\powershell_runner.inc"
+#include "../dependencies/appx_registration_script.h"
+#include "../dependencies/content_engine.h"
 #include "../dependencies/DesktopStub/ga_core.inc"
 #if __has_include("DesktopStubVersionDefines.inc")
 #include "DesktopStubVersionDefines.inc"
@@ -158,12 +168,16 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "../dependencies/DesktopStub/ga_config_defaults.inc"
 #include "../dependencies/DesktopStub/ga_command_line.inc"
 #include "../dependencies/DesktopStub/ga_ui_logging.inc"
+#include "../dependencies/DesktopStub/ga_packaged_startup.inc"
 #include "../dependencies/DesktopStub/ga_wallpaper.inc"
+#include "../dependencies/DesktopStub/ga_content_state.inc"
 #include "../dependencies/DesktopStub/tile_text_layout.h"
 #include "../dependencies/DesktopStub/ga_image.inc"
 #include "../dependencies/DesktopStub/ga_registration.inc"
 #include "../dependencies/DesktopStub/ga_generation.inc"
 #include "../dependencies/DesktopStub/ga_live_tile.inc"
 #include "../dependencies/DesktopStub/ga_rss_feed.inc"
+#include "../dependencies/DesktopStub/ga_content_runtime.inc"
 #include "../dependencies/DesktopStub/ga_tray.inc"
+#include "../dependencies/DesktopStub/ga_render_only.inc"
 #include "../dependencies/DesktopStub/ga_app.inc"

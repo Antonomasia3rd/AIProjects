@@ -10,9 +10,8 @@
 //
 // DesktopStubSourceCheck.cpp uses a meaningfully different, regex-driven
 // approach (data-driven Check structs, ordered-alternative extraction from
-// regex patterns) and RssLiveTileSourceCheck.cpp compiles and calls real
-// product functions directly rather than pattern-matching text -- neither
-// is a good fit for this simpler paradigm, so neither was forced onto it.
+// regex patterns), so it retains its own assertion layer. Runtime tests
+// exercise product functions directly and do not use this source scanner.
 //
 // Before including this header, define SOURCE_CHECK_LABEL to a string
 // literal naming the tool for error/summary output, e.g.:

@@ -5,12 +5,21 @@ Windows secure-desktop tooling made of two executables:
 - `SecureDesktopLauncher.exe`: Windows service that launches configured programs as `LocalSystem` on matching sessions/desktops, usually `WinSta0\Winlogon`.
 - `SecureDesktopPasswordLauncher.exe`: password-gated launcher that starts one configured target only after password verification and keeps spawned processes in a kill-on-close Job object.
 
+The current code still enforces protected installation paths and password
+storage policies. These are existing restrictions, not the repository's new
+rule: setup convenience comes first, and extra security is intended to be
+opt-in after functional repair. This privileged integration has not completed
+that migration, and there is no general switch to disable its path checks.
+Writable launch configuration can grant another program `LocalSystem` access;
+protect the current installation and its configured programs. Remaining work
+is tracked in [the shared audit](../../docs/audit-shared.md).
+
 ## Requirements
 
 - Windows.
 - Visual Studio Build Tools with the C++ workload.
 - Administrator rights to install/start the service.
-- Absolute local paths for the service, config files, launch targets, and working directories.
+- A protected install under a Program Files directory. Launch targets may also live under the Windows directory. Both executables refuse user-writable, reparse-point, and alternate-stream paths rather than trying to repair their permissions.
 
 ## Build
 
@@ -41,34 +50,61 @@ build_password_launcher.cmd new
 
 Outputs are written to `build\`.
 
+## Source layout
+
+The two project-local `.cpp` files are intentionally thin entry-point overlays.
+Their product-owned implementations live in
+`dependencies\SecureDesktopLauncher\service_app.inc` and
+`dependencies\SecureDesktopLauncher\password_app.inc`, where they compose the
+root-level shared desktop baseline, release-version, and privileged-path modules.
+Shared consumers should use extracted provider/helper interfaces, without
+starting another application's service loop or importing its globals.
+
 ## Service Install
 
-From an elevated prompt:
+Do not install the service directly from a source checkout, download folder, temporary directory, or user profile. Build it, then copy the executable and its INI to an administrator-controlled directory under Program Files. From an elevated prompt:
 
 ```cmd
-build\SecureDesktopLauncher.exe install
+mkdir "C:\Program Files\SecureDesktopLauncher"
+copy build\SecureDesktopLauncher.exe "C:\Program Files\SecureDesktopLauncher\"
+copy build\SecureDesktopPasswordLauncher.exe "C:\Program Files\SecureDesktopLauncher\"
+rem Create C:\Program Files\SecureDesktopLauncher\SecureDesktopLauncher.ini from the example below.
+"C:\Program Files\SecureDesktopLauncher\SecureDesktopLauncher.exe" install
 sc start SecureDesktopLauncher
 ```
 
 If the service exists, `install` updates the binary path and display name.
 
+Command-line inspection is side-effect free:
+
+```cmd
+SecureDesktopLauncher.exe --help
+SecureDesktopLauncher.exe --version
+SecureDesktopLauncher.exe validate
+```
+
+`validate` checks the protected executable/configuration/target paths and parses
+the configuration without launching anything or changing SCM state. The legacy
+`test` command is now an alias for this dry validation; it no longer reconciles
+sessions or launches configured programs. Unknown commands fail instead of
+falling through to the service dispatcher.
+
 Remove it with:
 
 ```cmd
 sc stop SecureDesktopLauncher
-build\SecureDesktopLauncher.exe uninstall
+"C:\Program Files\SecureDesktopLauncher\SecureDesktopLauncher.exe" uninstall
 ```
 
-## Service Local Files
+## Service Configuration and Diagnostics
 
 The service reads its configuration from the executable directory using the executable base name:
 
 ```text
 <exe folder>\<exe name>.ini
-<exe folder>\<exe name>.log
 ```
 
-For the default build output, those files are `build\SecureDesktopLauncher.ini` and `build\SecureDesktopLauncher.log`. If the executable is renamed, the default INI/log names follow the renamed executable.
+If the executable is renamed, the INI name follows it. The LocalSystem service does not write a sidecar log: warnings go to the Windows Application event log under source `SecureDesktopLauncher` and to debugger output. This avoids turning a file path beside a privileged executable into a reparse-point or hard-link write target.
 
 ## Service Configuration
 
@@ -160,31 +196,40 @@ ExcludeUsers=DOMAIN\test*
 
 ## Path Validation
 
-The service requires configured program paths and working directories to be local absolute paths that already exist.
+Because every configured process receives a `LocalSystem` token, the service applies a fail-closed protected-path policy to its own executable and INI, every launch target, and every working directory.
 
-A valid path must:
+The current validator accepts a path only when it meets these checks:
 
-- be absolute;
-- already exist;
+- be an absolute local path without an alternate data stream;
+- already exist under the Windows, Program Files, or Program Files (x86) directory tree;
+- contain no reparse-point component;
+- be owned by `LocalSystem`, `Administrators`, or `TrustedInstaller`;
+- have no applicable allow ACE that grants write-like access to another principal; protected directories also reject untrusted create-file/create-directory rights so a sibling DLL, plugin, or sidecar cannot be planted beside privileged code.
 
-Install the service, gate, configs, and launched targets wherever the service account can read and execute them.
+The service opens and retains every component from the volume root through each accepted object, inspects security through those handles, keeps the INI chain pinned while parsing it, and reopens/pins executable and working-directory chains immediately before `CreateProcessAsUserW`. The handles deny write and delete sharing during the privileged operation. Service installation and startup fail if the service executable, configuration, or any enabled program section is unsafe; diagnostics go to the Windows Application event log/debug output. Because the project does not install a registry-backed Event Log message resource, Event Viewer may show the standard unregistered-source wording; the warning insertion text remains visible in the event details and debug output.
 
-This project does not change ACLs on service files, config files, target programs, or their parent directories. If future changes add checks for user-writable or otherwise risky locations, those checks must warn only; they must not modify ACLs, ownership, inheritance, integrity labels, or other access-control state.
+This project never changes ACLs, ownership, inheritance, integrity labels, or other access-control state. Move files to a protected install location and configure permissions administratively; the service only inspects and refuses unsafe state.
 
 ## Threat Model Notes
 
 This tool intentionally creates `LocalSystem` processes on interactive desktops. Treat the service executable, password launcher, INI files, launched programs, and their parent directories as privileged code.
 
+Install into a location that is already protected. Retaining validated handles blocks ordinary name-based replacement races, but Windows cannot retroactively revoke dangerous rights on a handle an attacker acquired before the deployment was secured.
+
 `CommandLine` only changes the command-line string passed to `CreateProcessAsUserW`; `Path` is still passed as `lpApplicationName`. Keep `CommandLine` empty unless a target truly needs custom `argv[0]` or unusual quoting.
+
+The service cannot infer the security meaning of arguments. Scripts, plug-ins, response files, and other argument-referenced content consumed by a trusted executable must also be administrator-controlled; the path policy only verifies `Path` and `WorkingDirectory`.
 
 ## Password Gate Config
 
-The password launcher reads and writes local files beside itself using the executable base name:
+The password launcher reads and writes one protected INI beside itself using the executable base name:
 
 ```text
 <exe folder>\<exe name>.ini
-<exe folder>\<exe name>.log
 ```
+
+It does not write a privileged sidecar log. Diagnostics use debugger output and
+the Windows Application event log.
 
 Example:
 
@@ -211,11 +256,14 @@ MaxAttempts=3
 LockoutSeconds=30
 ```
 
+`PasswordAttemptCount` and `LockoutUntilUtcFileTime` are internal state written
+atomically by the launcher. Do not edit them while it is running.
+
 Set or reset the password from a normal desktop:
 
 ```cmd
 cd /d C:\Program Files\SecureDesktopLauncher
-build\SecureDesktopPasswordLauncher.exe set-password
+SecureDesktopPasswordLauncher.exe set-password
 ```
 
 `set-password` atomically rewrites the launcher-local INI through the shared configuration layer and preserves the current launch/UI policy values. New saves use PBKDF2-SHA256 with a random salt and remove the older salted SHA-256 hash by default. If an older config still has only `PasswordHashHex`, the launcher upgrades it after the next successful password verification. Set `KeepLegacySha256Hash=1` only if rollback to an older binary is required.
@@ -229,8 +277,8 @@ Example service section:
 ```ini
 [Program:CommandPromptGate]
 Enabled=1
-Path=C:\Program Files\SecureDesktopLauncher\build\SecureDesktopPasswordLauncher.exe
-WorkingDirectory=C:\Program Files\SecureDesktopLauncher\build
+Path=C:\Program Files\SecureDesktopLauncher\SecureDesktopPasswordLauncher.exe
+WorkingDirectory=C:\Program Files\SecureDesktopLauncher
 Desktop=WinSta0\Winlogon
 IncludeUsers=DOMAIN\UserName
 PreventDuplicate=1
@@ -249,7 +297,12 @@ sc start SecureDesktopLauncher
 - The initial password prompt can start minimized (`StartMinimized=1`) so it does not steal focus from sign-in, UAC, or Ctrl+Alt+Delete.
 - `TopMost=1` makes the prompt/control window topmost.
 - `AutoLockMinutes=0` disables automatic locking. Positive values lock launched programs after that many minutes of Windows input inactivity.
-- `MaxAttempts` controls one prompt batch. Failed batches wait `LockoutSeconds` before another prompt.
+- `MaxAttempts` is a protected, cross-process attempt budget (1 through 100).
+  Each issued password prompt reserves a slot before accepting a guess, so
+  parallel launchers cannot multiply the budget. When the budget is exhausted,
+  the UTC lockout deadline is persisted in the protected INI and therefore
+  survives process restarts. `LockoutSeconds` is clamped to 1 through 3600.
+- Failure to read, reserve, save, or reset protected attempt state denies access.
 - The title bar close button minimizes the gate.
 - The password prompt has no `Cancel` button.
 - `Lock` hides launched windows and returns to the password prompt.
@@ -261,9 +314,7 @@ sc start SecureDesktopLauncher
 The following local files are ignored by git and should not be packaged from a working tree by accident:
 
 - `SecureDesktopLauncher.ini`
-- `SecureDesktopLauncher.log`
 - `SecureDesktopPasswordLauncher.ini`
-- `SecureDesktopPasswordLauncher.log`
 - `build\*`
 
 ## Release

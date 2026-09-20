@@ -48,12 +48,6 @@ std::wstring FormatWide(const wchar_t* fmt, ...)
     return result;
 }
 
-template <size_t N>
-static void CopyTruncated(wchar_t (&dest)[N], const std::wstring& text)
-{
-    wcsncpy_s(dest, N, text.c_str(), _TRUNCATE);
-}
-
 void NotifyTrayBalloon(const std::wstring& title, const std::wstring& msg, DWORD icon = NIIF_INFO, bool force = false)
 {
     NOTIFYICONDATAW nid{};
@@ -63,13 +57,20 @@ void NotifyTrayBalloon(const std::wstring& title, const std::wstring& msg, DWORD
             return;
         nid = g_nid;
     }
-    nid.uFlags = NIF_INFO;
-    CopyTruncated(nid.szInfoTitle, title);
-    CopyTruncated(nid.szInfo, msg);
-    nid.dwInfoFlags = icon;
-    nid.uTimeout = static_cast<UINT>(ClampInt(g_notificationTimeoutMs.load(), 1000, 60000));
-    if (!Shell_NotifyIconW(NIM_MODIFY, &nid))
-        LogWin32Failure(L"Shell_NotifyIconW(NIM_MODIFY)");
+    DWORD error = ERROR_SUCCESS;
+    if (!aip::ShowTrayBalloon(
+        nid,
+        title,
+        msg,
+        icon,
+        static_cast<UINT>(ClampInt(
+            g_notificationTimeoutMs.load(),
+            1000,
+            60000)),
+        &error))
+    {
+        LogWin32Failure(L"ShowTrayBalloon", error);
+    }
 }
 
 static TextNormalizeResult NormalizeIniToUtf8BomIfNeeded()
@@ -206,6 +207,22 @@ void LoadUiStrings()
 
     g_ui.listenWallpaper = IniReadS(L"Strings", L"ListenWallpaper", L"Listen Wallpaper");
     g_ui.trayIcon = IniReadS(L"Strings", L"TrayIcon", L"Tray Icon (this session)");
+    g_ui.runAtStartup = IniReadS(L"Strings", L"RunAtStartup", L"Run at startup");
+    g_ui.contentSourceTitle = IniReadS(L"Strings", L"ContentSourceTitle", L"Content and sources");
+    g_ui.contentSourceWallpaper = IniReadS(L"Strings", L"ContentSourceWallpaper", L"Wallpaper");
+    g_ui.contentSourceRssFeed = IniReadS(L"Strings", L"ContentSourceRssFeed", L"RSS / Atom feed");
+    g_ui.contentSourceRestartRequired = IniReadS(L"Strings", L"ContentSourceRestartRequired", L"The content source was saved. The monitor applies source changes automatically.");
+    g_ui.rssFeedSettingsTitle = IniReadS(L"Strings", L"RssFeedSettingsTitle", L"RSS / Atom settings");
+    g_ui.rssFeedUrlLabel = IniReadS(L"Strings", L"RssFeedUrlLabel", L"Feed URL: %s");
+    g_ui.rssFeedUserAgentLabel = IniReadS(L"Strings", L"RssFeedUserAgentLabel", L"User agent: %s");
+    g_ui.rssFeedUpdateIntervalLabel = IniReadS(L"Strings", L"RssFeedUpdateIntervalLabel", L"Update interval: %d seconds");
+    g_ui.rssFeedMaxItemsLabel = IniReadS(L"Strings", L"RssFeedMaxItemsLabel", L"Maximum items: %d");
+    g_ui.rssFeedHttpTimeoutLabel = IniReadS(L"Strings", L"RssFeedHttpTimeoutLabel", L"HTTP timeout: %d seconds");
+    g_ui.rssFeedMaxFeedBytesLabel = IniReadS(L"Strings", L"RssFeedMaxFeedBytesLabel", L"Response limit: %d bytes");
+    g_ui.rssFeedUrlInputTitle = IniReadS(L"Strings", L"RssFeedUrlInputTitle", L"Edit RSS feed URL");
+    g_ui.rssFeedUrlInputPrompt = IniReadS(L"Strings", L"RssFeedUrlInputPrompt", L"Enter a complete http:// or https:// RSS/Atom feed URL.");
+    g_ui.rssFeedUserAgentInputTitle = IniReadS(L"Strings", L"RssFeedUserAgentInputTitle", L"Edit RSS user agent");
+    g_ui.rssFeedUserAgentInputPrompt = IniReadS(L"Strings", L"RssFeedUserAgentInputPrompt", L"Enter the HTTP User-Agent sent when fetching the feed.");
     g_ui.usePowerShell = IniReadS(L"Strings", L"UsePowerShell", L"PowerShell only");
     g_ui.experimentalLiveTileUpdate = IniReadS(L"Strings", L"ExperimentalLiveTileUpdate", L"Live Tile update mode");
     g_ui.appxManifestTarget = IniReadS(L"Strings", L"AppxManifestTarget", L"AppxManifest target");
@@ -245,6 +262,10 @@ void LoadUiStrings()
     g_ui.liveTileClearOnShutdown = IniReadS(L"Strings", L"LiveTileClearOnShutdown", L"[i] Clearing Live Tile on shutdown.");
     g_ui.liveTileClearOnShutdownSkipped = IniReadS(L"Strings", L"LiveTileClearOnShutdownSkipped", L"[i] Clear Live Tile on shutdown skipped: %s");
     g_ui.liveTileClearOnShutdownSuccess = IniReadS(L"Strings", L"LiveTileClearOnShutdownSuccess", L"[i] Live Tile cleared on shutdown.");
+    g_ui.liveTileClearForRegistration = IniReadS(L"Strings", L"LiveTileClearForRegistration", L"[i] Clearing the previous native Live Tile notification before static registration.");
+    g_ui.liveTileClearForRegistrationSuccess = IniReadS(L"Strings", L"LiveTileClearForRegistrationSuccess", L"[i] Previous native Live Tile notification cleared before static registration.");
+    g_ui.liveTileClearForRegistrationFailed = IniReadS(L"Strings", L"LiveTileClearForRegistrationFailed", L"[!] Could not clear the previous native Live Tile notification before static registration: %s");
+    g_ui.liveTileClearForRegistrationFailedUnknown = IniReadS(L"Strings", L"LiveTileClearForRegistrationFailedUnknown", L"Could not clear the previous native Live Tile notification before static registration.");
     g_ui.liveTileStaticIconRefreshPending = IniReadS(L"Strings", L"LiveTileStaticIconRefreshPending", L"[i] Live Tile static icon refresh is pending; relaunching as unpackaged desktop app first.");
     g_ui.liveTileRelaunchedUnpackaged = IniReadS(L"Strings", L"LiveTileRelaunchedUnpackaged", L"[i] Relaunched unpackaged desktop instance after Live Tile mode switch.");
     g_ui.liveTileRelaunchedUnpackagedDirectFallback = IniReadS(L"Strings", L"LiveTileRelaunchedUnpackagedDirectFallback", L"[i] Relaunched desktop instance after Live Tile mode switch using direct fallback.");
@@ -453,6 +474,8 @@ void LoadUiStrings()
     g_ui.liveTilePackagedHelperReportedSuccess = IniReadS(L"Strings", L"LiveTilePackagedHelperReportedSuccess", L"[i] Packaged Live Tile helper reported success.");
     g_ui.liveTilePackagedBrokerReportedSuccess = IniReadS(L"Strings", L"LiveTilePackagedBrokerReportedSuccess", L"[i] Packaged WinRT Live Tile broker reported success.");
     g_ui.liveTilePackagedHelperNoSuccess = IniReadS(L"Strings", L"LiveTilePackagedHelperNoSuccess", L"Packaged Live Tile helper did not report success after activation: %s (package=%s, pid=%lu).");
+    g_ui.liveTileClearHelperNoSuccess = IniReadS(L"Strings", L"LiveTileClearHelperNoSuccess", L"Packaged Live Tile clear helper did not report success after activation: %s (package=%s, pid=%lu).");
+    g_ui.liveTileClearHelperExitFailed = IniReadS(L"Strings", L"LiveTileClearHelperExitFailed", L"Packaged Live Tile clear helper reported success but did not exit safely: %s (package=%s, pid=%lu, wait=%lu, error=%lu).");
     g_ui.liveTileUpdateRequiresIdentityDetails = IniReadS(L"Strings", L"LiveTileUpdateRequiresIdentityDetails", L"Live Tile update requires package identity (GetCurrentPackageFullName failed, error=%lu).");
     g_ui.liveTileXmlEmpty = IniReadS(L"Strings", L"LiveTileXmlEmpty", L"Live Tile XML is empty.");
     g_ui.liveTileUpdateFailedHresult = IniReadS(L"Strings", L"LiveTileUpdateFailedHresult", L"Live Tile update failed, hresult=0x%s");
@@ -460,6 +483,7 @@ void LoadUiStrings()
     g_ui.liveTileClearRequiresIdentityDetails = IniReadS(L"Strings", L"LiveTileClearRequiresIdentityDetails", L"Live Tile clear requires package identity (GetCurrentPackageFullName failed, error=%lu).");
     g_ui.liveTileClearFailedHresult = IniReadS(L"Strings", L"LiveTileClearFailedHresult", L"Live Tile clear failed, hresult=0x%s");
     g_ui.liveTileClearFailedException = IniReadS(L"Strings", L"LiveTileClearFailedException", L"Live Tile clear failed: %s");
+    g_ui.liveTileClearRequestWriteFailed = IniReadS(L"Strings", L"LiveTileClearRequestWriteFailed", L"Failed to write the packaged Live Tile clear request: %s (error=%lu).");
     g_ui.liveTileErrorMessageSuffix = IniReadS(L"Strings", L"LiveTileErrorMessageSuffix", L", message=%s");
     g_ui.liveTileNoPendingXmlOrAssets = IniReadS(L"Strings", L"LiveTileNoPendingXmlOrAssets", L"No pending Live Tile XML and no usable stable live-tile assets were found.");
     g_ui.powerShellPackageLookupFailed = IniReadS(L"Strings", L"PowerShellPackageLookupFailed", L"PowerShell package lookup failed");
@@ -575,6 +599,8 @@ void LoadUiStrings()
     g_ui.liveTileUpdateSummary = IniReadS(L"Strings", L"LiveTileUpdateSummary", L"[i] Live Tile update mode: %s");
     g_ui.liveTileTemplateStyleSummary = IniReadS(L"Strings", L"LiveTileTemplateStyleSummary", L"[i] Windows 10 Live Tile template style: %s");
     g_ui.liveTileBrandingSummary = IniReadS(L"Strings", L"LiveTileBrandingSummary", L"[i] Windows 10 Live Tile branding: %s");
+    g_ui.contentSourceSummary = IniReadS(L"Strings", L"ContentSourceSummary", L"[i] Content source saved as %s; the monitor will apply it.");
+    g_ui.rssFeedSettingChanged = IniReadS(L"Strings", L"RssFeedSettingChanged", L"[i] RSS setting changed: %s = %s");
     g_ui.manifestTargetSummary = IniReadS(L"Strings", L"ManifestTargetSummary", L"[i] AppxManifest target: %s");
     g_ui.wallpaperDetectionFallbackSummary = IniReadS(L"Strings", L"WallpaperDetectionFallbackSummary", L"[i] Wallpaper detection fallback on invalid path: %s");
     g_ui.liveWallpaperCaptureSummary = IniReadS(L"Strings", L"LiveWallpaperCaptureSummary", L"[i] Live wallpaper capture: %s (delay=%d ms, refresh=%s)");
@@ -592,6 +618,7 @@ void LoadUiStrings()
     g_ui.liveWallpaperCaptureSnapshotRejectedTooSmall = IniReadS(L"Strings", L"LiveWallpaperCaptureSnapshotRejectedTooSmall", L"[!] Live wallpaper snapshot rejected because the candidate window was too small for %s: %d x %d (minimum %d x %d).");
     g_ui.liveWallpaperCaptureSnapshotCaptured = IniReadS(L"Strings", L"LiveWallpaperCaptureSnapshotCaptured", L"[i] Live wallpaper snapshot captured from %s: %s");
     g_ui.trayIconSummary = IniReadS(L"Strings", L"TrayIconSummary", L"[i] Tray icon: %s");
+    g_ui.runAtStartupSummary = IniReadS(L"Strings", L"RunAtStartupSummary", L"[i] Run at startup: %s");
     g_ui.consoleSummary = IniReadS(L"Strings", L"ConsoleSummary", L"[i] Console %s.");
     g_ui.loggingSummary = IniReadS(L"Strings", L"LoggingSummary", L"[i] Logging %s.");
     g_ui.trimWorkingSetOnIdleSummary = IniReadS(L"Strings", L"TrimWorkingSetOnIdleSummary", L"[i] Idle working-set trimming: %s");
@@ -863,11 +890,20 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.liveTileUpdateSummary, L"LiveTileUpdateSummary", { L"%s" });
     RequireFormat(g_ui.liveTileTemplateStyleSummary, L"LiveTileTemplateStyleSummary", { L"%s" });
     RequireFormat(g_ui.liveTileBrandingSummary, L"LiveTileBrandingSummary", { L"%s" });
+    RequireFormat(g_ui.contentSourceSummary, L"ContentSourceSummary", { L"%s" });
+    RequireFormat(g_ui.rssFeedSettingChanged, L"RssFeedSettingChanged", { L"%s", L"%s" });
+    RequireFormat(g_ui.rssFeedUrlLabel, L"RssFeedUrlLabel", { L"%s" });
+    RequireFormat(g_ui.rssFeedUserAgentLabel, L"RssFeedUserAgentLabel", { L"%s" });
+    RequireFormat(g_ui.rssFeedUpdateIntervalLabel, L"RssFeedUpdateIntervalLabel", { L"%d" });
+    RequireFormat(g_ui.rssFeedMaxItemsLabel, L"RssFeedMaxItemsLabel", { L"%d" });
+    RequireFormat(g_ui.rssFeedHttpTimeoutLabel, L"RssFeedHttpTimeoutLabel", { L"%d" });
+    RequireFormat(g_ui.rssFeedMaxFeedBytesLabel, L"RssFeedMaxFeedBytesLabel", { L"%d" });
     RequireFormat(g_ui.wallpaperDetectionFallbackSummary, L"WallpaperDetectionFallbackSummary", { L"%s" });
     RequireFormat(g_ui.win8LiveTileOopHelperState, L"Win8LiveTileOopHelperState", { L"%d" });
     RequireFormat(g_ui.win8LiveTileBackgroundTaskState, L"Win8LiveTileBackgroundTaskState", { L"%d" });
     RequireFormat(g_ui.win8LiveTileBrokerAppState, L"Win8LiveTileBrokerAppState", { L"%d" });
     RequireFormat(g_ui.liveTileClearOnShutdownSkipped, L"LiveTileClearOnShutdownSkipped", { L"%s" });
+    RequireFormat(g_ui.liveTileClearForRegistrationFailed, L"LiveTileClearForRegistrationFailed", { L"%s" });
     RequireFormat(g_ui.liveWallpaperCaptureSummary, L"LiveWallpaperCaptureSummary", { L"%s", L"%d", L"%s" });
     RequireFormat(g_ui.liveWallpaperCaptureDelayState, L"LiveWallpaperCaptureDelayState", { L"%d" });
     RequireFormat(g_ui.liveWallpaperCaptureRefreshState, L"LiveWallpaperCaptureRefreshState", { L"%d" });
@@ -882,6 +918,7 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.liveWallpaperCaptureSnapshotRejectedTooSmall, L"LiveWallpaperCaptureSnapshotRejectedTooSmall", { L"%s", L"%d", L"%d", L"%d", L"%d" });
     RequireFormat(g_ui.liveWallpaperCaptureSnapshotCaptured, L"LiveWallpaperCaptureSnapshotCaptured", { L"%s", L"%s" });
     RequireFormat(g_ui.trayIconSummary, L"TrayIconSummary", { L"%s" });
+    RequireFormat(g_ui.runAtStartupSummary, L"RunAtStartupSummary", { L"%s" });
     RequireFormat(g_ui.consoleSummary, L"ConsoleSummary", { L"%s" });
     RequireFormat(g_ui.loggingSummary, L"LoggingSummary", { L"%s" });
     RequireFormat(g_ui.trimWorkingSetOnIdleSummary, L"TrimWorkingSetOnIdleSummary", { L"%s" });
@@ -916,12 +953,15 @@ static void ValidateFormatStrings()
     RequireFormat(g_ui.liveTileUpdateMessage, L"LiveTileUpdateMessage", { L"%s" });
     RequireFormat(g_ui.liveTilePackageIdentity, L"LiveTilePackageIdentity", { L"%s" });
     RequireFormat(g_ui.liveTilePackagedHelperNoSuccess, L"LiveTilePackagedHelperNoSuccess", { L"%s", L"%s", L"%lu" });
+    RequireFormat(g_ui.liveTileClearHelperNoSuccess, L"LiveTileClearHelperNoSuccess", { L"%s", L"%s", L"%lu" });
+    RequireFormat(g_ui.liveTileClearHelperExitFailed, L"LiveTileClearHelperExitFailed", { L"%s", L"%s", L"%lu", L"%lu", L"%lu" });
     RequireFormat(g_ui.liveTileUpdateRequiresIdentityDetails, L"LiveTileUpdateRequiresIdentityDetails", { L"%lu" });
     RequireFormat(g_ui.liveTileUpdateFailedHresult, L"LiveTileUpdateFailedHresult", { L"%s" });
     RequireFormat(g_ui.liveTileUpdateFailedException, L"LiveTileUpdateFailedException", { L"%s" });
     RequireFormat(g_ui.liveTileClearRequiresIdentityDetails, L"LiveTileClearRequiresIdentityDetails", { L"%lu" });
     RequireFormat(g_ui.liveTileClearFailedHresult, L"LiveTileClearFailedHresult", { L"%s" });
     RequireFormat(g_ui.liveTileClearFailedException, L"LiveTileClearFailedException", { L"%s" });
+    RequireFormat(g_ui.liveTileClearRequestWriteFailed, L"LiveTileClearRequestWriteFailed", { L"%s", L"%lu" });
     RequireFormat(g_ui.liveTileErrorMessageSuffix, L"LiveTileErrorMessageSuffix", { L"%s" });
     RequireFormat(g_ui.powerShellPackageLookupNoPackage, L"PowerShellPackageLookupNoPackage", { L"%s" });
     RequireFormat(g_ui.powerShellPackageLookupIncomplete, L"PowerShellPackageLookupIncomplete", { L"%s" });

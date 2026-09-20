@@ -1,0 +1,142 @@
+[
+  {
+    "sha256": "06319245811A7FC385BED106A8AEDFA35511520AFB773778AC077BDADEBDFDFB",
+    "to": "markdowns/EVIDENCE.md",
+    "from": "EVIDENCE.md"
+  },
+  {
+    "sha256": "365CDF99AD3468F2599D806A94D093986D8DDDA12704376DD359166B156AC8EB",
+    "to": "markdowns/VALIDATION.md",
+    "from": "VALIDATION.md"
+  },
+  {
+    "sha256": "41DDA5E661CAF381A70224358C3B54A9D4D9D42E4139E578B2E4DFAD32586557",
+    "to": "markdowns/CRASH-AND-SPOTLIGHT-FIX.md",
+    "from": "CRASH-AND-SPOTLIGHT-FIX.md"
+  },
+  {
+    "sha256": "643DB50062C44A4A2483FA297EAB97C5186887DA75A27B089A4531FBA17025EE",
+    "to": "markdowns/WINDOWS10-HOVER-MATCH.md",
+    "from": "WINDOWS10-HOVER-MATCH.md"
+  },
+  {
+    "sha256": "21155CA091C2678CF92DA4A73E48D6EE634DDCE1338B568032B36732E274C912",
+    "to": "builds/windows-11-lockapp-styler.wh.cpp",
+    "from": "windows-11-lockapp-styler.wh.cpp"
+  },
+  {
+    "sha256": "FB9074324E5E48A524EECF45FC78A84889FD49DAF9A392072D52C867E6E669C9",
+    "to": "builds/lockapp-xaml-dumper.wh.cpp",
+    "from": "lockapp-xaml-dumper.wh.cpp"
+  },
+  {
+    "sha256": "2D9CA990635B35486CF015A5968B4B916A85F246B31E5F27D9A7DA5DF444F5BE",
+    "to": "preferences/windows-10-lockscreen.advanced-settings.json",
+    "from": "windows-10-lockscreen.advanced-settings.json"
+  },
+  {
+    "sha256": "A916C69A3780F216F2F709469245D734D2FF5A037440D3485651B03C833286FB",
+    "to": "preferences/windows-10-lockscreen.preset.json",
+    "from": "windows-10-lockscreen.preset.json"
+  },
+  {
+    "sha256": "9CF0E12E124BC0EC29F16E9B11B88079C22C9AB1A09D06FB7069480E3ACA06B4",
+    "to": "preferences/lockapp-xaml-dumper.capture.advanced-settings.json",
+    "from": "lockapp-xaml-dumper.capture.advanced-settings.json"
+  },
+  {
+    "sha256": "9CF0E12E124BC0EC29F16E9B11B88079C22C9AB1A09D06FB7069480E3ACA06B4",
+    "to": "preferences/lockapp-xaml-dumper.capture.preset.json",
+    "from": "lockapp-xaml-dumper.capture.preset.json"
+  },
+  {
+    "sha256": "53A02DE3318731E803482A40251B28D63F6ACD813B39CDAC6A4008E39EE9130A",
+    "to": "preferences/windows-10-lockscreen.wh.preferences.yaml",
+    "from": "windows-10-lockscreen.wh.preferences.yaml"
+  },
+  {
+    "sha256": "53A02DE3318731E803482A40251B28D63F6ACD813B39CDAC6A4008E39EE9130A",
+    "to": "preferences/windows-10-lockscreen.wh.preferences.txt",
+    "from": "windows-10-lockscreen.wh.preferences.txt"
+  },
+  {
+    "sha256": "200975E168DB61F7D63D8D02D0F27BCA353344B770E081D47CC0D668F54F358D",
+    "to": "preferences/lockapp-xaml-dumper.capture.preferences.yaml",
+    "from": "lockapp-xaml-dumper.capture.preferences.yaml"
+  },
+  {
+    "sha256": "200975E168DB61F7D63D8D02D0F27BCA353344B770E081D47CC0D668F54F358D",
+    "to": "preferences/lockapp-xaml-dumper.capture.preferences.txt",
+    "from": "lockapp-xaml-dumper.capture.preferences.txt"
+  },
+  {
+    "sha256": "D09854B9B41AFB55018D88E429688AEE76F243B278DE809EF65A9AB11685657D",
+    "to": "reports/comparison.html",
+    "from": "comparison.html"
+  },
+  {
+    "sha256": "14C379ABEE1C3BABF1C24D965F3195D7BD94DBC309FE837CDB54E83F811344AD",
+    "to": "reports/comparison.audit.json",
+    "from": "comparison.audit.json"
+  },
+  {
+    "sha256": "68938C2430272FEF5C6C72270DF9541C6241293090FBCD0BA878B6FD852482A8",
+    "to": "reports/dump-explorer.html",
+    "from": "dump-explorer.html"
+  },
+  {
+    "sha256": "E819A871DCD56F02D146C75206691199C4FB5C49A93C8E59C43D73EB814CD6F7",
+    "to": "releases/archive/Windows10-LockScreen-Candidate1.zip",
+    "from": "Windows10-LockScreen-Candidate1.zip"
+  },
+  {
+    "sha256": "F08019B7CEAF9CCBE9ECF0A14AEB190E2932BB2988A9277D629602F847163FFE",
+    "to": "releases/archive/Windows10-LockScreen-Candidate2.zip",
+    "from": "Windows10-LockScreen-Candidate2.zip"
+  },
+  {
+    "sha256": "025A16218FC09B1BC3C26B03363A6FE13726601FBE5BD722860C2FB6028FB7AA",
+    "to": "releases/archive/Windows10-LockScreen-Candidate3.zip",
+    "from": "Windows10-LockScreen-Candidate3.zip"
+  },
+  {
+    "sha256": "3B780F9D36AAE892C1B7CD315E6D4DD4EC93F22C33B1AD48538F87F6EC6515A5",
+    "to": "dumps/windows-10-22h2-stock-initial.jsonl",
+    "from": "sources/LockApp-XamlDump-20260911-155106-pid9088.22h2.jsonl"
+  },
+  {
+    "sha256": "3E68FB584FB1B96F6E4036F89022CA120C322C7EE4CCC7C3CFD18BB547637CEA",
+    "to": "dumps/windows-11-25h2-stock-initial.jsonl",
+    "from": "sources/LockApp-XamlDump-20260911-155251-pid9980.25h2.jsonl"
+  },
+  {
+    "sha256": "72A580A75873B0A60C581338C8A153C675446DD282C642E9233C81BEFD696CB7",
+    "to": "dumps/windows-10-22h2-feedback-submitted.jsonl",
+    "from": "sources/LockApp-XamlDump-20260913-110739-pid7464.jsonl"
+  },
+  {
+    "sha256": "0608219BB62F700F5738A8DFB474CE3FD074E6A010374C952AC6499691247482",
+    "to": "dumps/windows-10-22h2-spotlight-expanded.jsonl",
+    "from": "LockApp-XamlDump-20260913-152627-pid6728.jsonl"
+  },
+  {
+    "sha256": "41879A5B0420FB8207E7B92FF0426491E6CA7DE8EB5B319B0E41FCE669429AC7",
+    "to": "screenshots/windows-10-22h2-stock-initial.png",
+    "from": "sources/LockApp-XamlDump-20260911-155106-pid9088.22h2.png"
+  },
+  {
+    "sha256": "0382E92B5416225A9A558F27871785B585B9303B58DBECF70B6C467B0BA281D2",
+    "to": "screenshots/windows-11-25h2-stock-initial.png",
+    "from": "sources/LockApp-XamlDump-20260911-155251-pid9980.25h2.png"
+  },
+  {
+    "sha256": "8CC7BEC228E96FB6166FA4A5E6B01EA259BF83B79BDE012A0BDE81D3F864C506",
+    "to": "screenshots/other-person-preset.png",
+    "from": "sources/LockApp-XamlDump-20260911-155106-pid9088.otherperson.png"
+  },
+  {
+    "sha256": "D99BF2672FE65646BDD26853600C826363E52D81574D44C37A76D78FEF7353DC",
+    "to": "screenshots/original-user-preset.png",
+    "from": "sources/windows-11-lockapp-styler.wh.preferences.mine.png"
+  }
+]

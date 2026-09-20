@@ -28,7 +28,10 @@ static std::string NormalizeNewlines(std::string text)
 
 static std::string ReadAll(const std::string& path)
 {
-    std::ifstream in(path, std::ios::binary);
+    std::string portablePath = path;
+    for (char& ch : portablePath)
+        if (ch == '\\') ch = '/';
+    std::ifstream in(portablePath, std::ios::binary);
     if (!in)
         throw std::runtime_error("missing source file: " + path);
     return NormalizeNewlines(std::string(
@@ -71,19 +74,39 @@ static void RequireBefore(
     std::cout << "ok - " << name << "\n";
 }
 
+static void RequireNotContains(
+    const std::string& name,
+    const std::string& sourceName,
+    const std::string& source,
+    const std::string& needle)
+{
+    ++g_checks;
+    if (source.find(needle) != std::string::npos)
+    {
+        std::cerr << "NowPlayingTile source regression: " << name << " found forbidden "
+            << needle << " in " << sourceName << "\n";
+        throw std::runtime_error("source regression");
+    }
+    std::cout << "ok - " << name << "\n";
+}
+
 int main()
 {
     try
     {
         const std::string mainSource = ReadAll("NowPlayingTile.cpp");
-        const std::string app = ReadAll("src\\npt_app.inc");
-        const std::string commandLine = ReadAll("src\\npt_command_line.inc");
-        const std::string config = ReadAll("src\\npt_config_defaults.inc");
-        const std::string core = ReadAll("src\\npt_core.inc");
-        const std::string manifest = ReadAll("src\\npt_manifest.inc");
-        const std::string media = ReadAll("src\\npt_media.inc");
-        const std::string tray = ReadAll("src\\npt_tray.inc");
-        const std::string widget = ReadAll("src\\npt_widget.inc");
+        const std::string app = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_app.inc");
+        const std::string commandLine = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_command_line.inc");
+        const std::string config = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_config_defaults.inc");
+        const std::string core = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_core.inc");
+        const std::string manifest = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_manifest.inc");
+        const std::string media = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_media.inc");
+        const std::string liveTile = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_live_tile.inc");
+        const std::string tray = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_tray.inc");
+        const std::string widget = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_widget.inc");
+        const std::string packagedStartup = ReadAll("..\\..\\dependencies\\packaged_startup.inc");
+        const std::string sharedPowerShell = ReadAll("..\\..\\dependencies\\powershell_runner.inc");
+        const std::string startupManifest = ReadAll("..\\..\\dependencies\\packaged_startup_manifest.h");
 
         RequireBefore(
             "command line is parsed before GDI+ initialization",
@@ -108,6 +131,16 @@ int main()
             mainSource,
             "../../dependencies/desktop_app_baseline.h");
         RequireContains(
+            "product implementation is consumed from the dependency overlay",
+            "NowPlayingTile.cpp",
+            mainSource,
+            "../../dependencies/NowPlayingTile/npt_core.inc");
+        RequireNotContains(
+            "project-local source fragments are not retained",
+            "NowPlayingTile.cpp",
+            mainSource,
+            "#include \"src/");
+        RequireContains(
             "sidecar paths use the shared growable module-path helper",
             "src\\npt_core.inc",
             core,
@@ -116,7 +149,17 @@ int main()
             "PowerShell discovery uses the growable shared system-directory helper",
             "src\\npt_manifest.inc",
             manifest,
-            "aip::GetSystemDirectoryPath()");
+            "aip::DefaultPowerShellExe()");
+        RequireContains(
+            "PowerShell process creation pins the resolved executable",
+            "src\\npt_manifest.inc",
+            sharedPowerShell,
+            "CreateProcessW(options.powerShellExe.c_str()");
+        RequireNotContains(
+            "PowerShell process creation does not rely on first-token resolution",
+            "src\\npt_manifest.inc",
+            manifest,
+            "CreateProcessW(nullptr");
         RequireContains(
             "single-instance identity is scoped by the effective sidecar config",
             "src\\npt_core.inc",
@@ -176,7 +219,7 @@ int main()
             "integer settings reject trailing junk",
             "src\\npt_config_defaults.inc",
             config,
-            "*end != L'\\0' || errno == ERANGE");
+            "aip::ParseIntValue(value, parsed)");
         RequireContains(
             "default settings use the shared synchronized atomic INI store",
             "src\\npt_config_defaults.inc",
@@ -207,6 +250,31 @@ int main()
             "src\\npt_media.inc",
             media,
             "CommitTemporaryFile(temporaryPath, path)");
+        RequireContains(
+            "artwork layout emits an artwork tile instead of silently rendering text",
+            "src\\npt_live_tile.inc",
+            liveTile,
+            "case TileLayout::Artwork:");
+        RequireContains(
+            "combined layout emits overlaid artwork and text",
+            "src\\npt_live_tile.inc",
+            liveTile,
+            "BuildCombinedTileXml(snapshot)");
+        RequireContains(
+            "cycle layout queues distinct tile payloads",
+            "src\\npt_live_tile.inc",
+            liveTile,
+            "updater.EnableNotificationQueue(payloads.size() > 1);");
+        RequireContains(
+            "missing artwork has a deterministic text fallback",
+            "src\\npt_live_tile.inc",
+            liveTile,
+            "hasArtwork ? BuildArtworkTileXml(snapshot) : BuildTextTileXml(snapshot)");
+        RequireContains(
+            "Cycle is accepted by the INI parser",
+            "src\\npt_config_defaults.inc",
+            config,
+            "EqualsIgnoreCase(value, L\"Cycle\")");
         RequireContains(
             "tray-launched actions report ShellExecute failures",
             "src\\npt_tray.inc",
@@ -248,6 +316,21 @@ int main()
             tray,
             "msg == g_taskbarCreatedMessage");
         RequireContains(
+            "tray visibility is a persisted typed setting",
+            "src\\npt_command_line.inc",
+            commandLine,
+            "AddNowPlayingCommandLineSetting(options, L\"Settings\", L\"ShowTrayIcon\"");
+        RequireContains(
+            "Explorer restart restores the last dynamic media tooltip",
+            "src\\npt_tray.inc",
+            tray,
+            "SetTrayTip(ctx, ctx->current.title);");
+        RequireContains(
+            "tray version 4 keeps and updates the standard hover tooltip",
+            "src\\npt_tray.inc",
+            tray,
+            "aip::ModifyTrayIconTooltip(");
+        RequireContains(
             "tray construction uses shared menu primitives",
             "src\\npt_tray.inc",
             tray,
@@ -267,6 +350,105 @@ int main()
             "src\\npt_widget.inc",
             widget,
             "if (result == -1)");
+        RequireContains(
+            "packaged StartupTask dependency is consumed",
+            "NowPlayingTile.cpp",
+            mainSource,
+            "../../dependencies/packaged_startup.inc");
+        RequireContains(
+            "manifest declares the desktop StartupTask extension",
+            "src\\npt_manifest.inc",
+            startupManifest,
+            "Category=\\\"windows.startupTask\\\"");
+        RequireContains("NPT consumes shared startup XML", "NPT manifest", manifest, "aip::BuildDesktopStartupExtension(STARTUP_TASK_ID");
+        RequireContains("NPT consumes shared registration scripts", "NPT manifest", manifest, "aip::BuildAppxRegistrationScript({manifest, true}");
+        RequireContains("NPT consumes shared PowerShell runner", "NPT manifest", manifest, "aip::RunPowerShellCaptured(");
+        RequireNotContains("NPT does not keep a second PowerShell process loop", "NPT manifest", manifest, "CreateProcessW(");
+        RequireContains(
+            "manifest StartupTask id matches runtime",
+            "NowPlayingTile sources",
+            mainSource + manifest,
+            "NowPlayingTileStartup");
+        RequireContains(
+            "packaged Startup uses an MTA worker for synchronous callers",
+            "dependencies\\packaged_startup.inc",
+            packagedStartup,
+            "RunPackagedStartupOperationOnMta");
+        RequireContains(
+            "packaged Startup preserves user-disabled state",
+            "dependencies\\packaged_startup.inc",
+            packagedStartup,
+            "Re-enable it manually in Task Manager's Startup apps page.");
+        RequireNotContains(
+            "packaged app does not use a Startup-folder shortcut",
+            "NowPlayingTile product sources",
+            mainSource + config + commandLine + manifest + tray + app,
+            "FOLDERID_Startup");
+        RequireContains(
+            "Startup setting is present in the generated INI",
+            "src\\npt_config_defaults.inc",
+            config,
+            "{ L\"Settings\", L\"RunAtStartup\", L\"false\" }");
+        RequireContains(
+            "Startup setting has command-line aliases",
+            "src\\npt_command_line.inc",
+            commandLine,
+            "EqualsIgnoreCase(arg, L\"--startup\") || EqualsIgnoreCase(arg, L\"--no-startup\")");
+        RequireContains(
+            "Startup setting is exposed in the tray",
+            "src\\npt_tray.inc",
+            tray,
+            "ID_TOGGLE_STARTUP, L\"Run at startup\"");
+        RequireContains(
+            "known settings are validated before mutation",
+            "src\\npt_config_defaults.inc",
+            config,
+            "NormalizeNowPlayingSetting");
+        RequireContains(
+            "command-line settings commit in one INI mutation",
+            "src\\npt_config_defaults.inc",
+            config,
+            "PersistNowPlayingSettingsAtomically");
+        RequireContains(
+            "command-line setting batch uses one fresh mutation",
+            "src\\npt_config_defaults.inc",
+            config,
+            ").MutateFresh(");
+        RequireContains(
+            "packaged Startup and INI use the shared coupled transaction",
+            "src\\npt_config_defaults.inc",
+            config,
+            "aip::CommitPackagedStartupTaskIniState(");
+        RequireContains(
+            "packaged Startup transaction uses direction-safe commit and rollback",
+            "..\\..\\dependencies\\packaged_startup.inc",
+            packagedStartup,
+            "ExecuteCrashConsistentLaunchConfigState(");
+        RequireContains(
+            "packaged bootstrap forwards persistent settings",
+            "src\\npt_manifest.inc",
+            manifest,
+            "setting.section + L\".\" + setting.key + L\"=\" + setting.value");
+        RequireContains(
+            "help and version use shared command-line output",
+            "src\\npt_command_line.inc",
+            commandLine,
+            "aip::WriteCommandLineText(text, error)");
+        RequireContains(
+            "tray uses the shared baseline header",
+            "src\\npt_tray.inc",
+            tray,
+            "aip::AppendBaselineTrayMenuHeader(");
+        RequireContains(
+            "tray exposes every functional INI setting",
+            "src\\npt_tray.inc",
+            tray,
+            "ID_TILE_REFRESH_120");
+        RequireContains(
+            "settings reload reconciles the packaged StartupTask",
+            "src\\npt_tray.inc",
+            tray,
+            "ReconcileNowPlayingStartupFromConfig(startupError)");
 
         std::cout << "NowPlayingTile source checks passed (" << g_checks << " checks).\n";
         return 0;

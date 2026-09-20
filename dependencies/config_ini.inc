@@ -724,6 +724,266 @@ inline bool LoadIniText(const std::wstring& path, std::wstring& text)
     return false;
 }
 
+struct IniTextSnapshot
+{
+    bool existed = false;
+    std::wstring text;
+};
+
+// The caller must hold IniWriteMutexGuard for the same path. Keeping snapshot,
+// mutation, and restoration under one named mutex prevents another cooperative
+// writer from being overwritten by a rollback from a coupled operation.
+inline bool CaptureIniTextSnapshot(
+    const std::wstring& path,
+    IniTextSnapshot& snapshot)
+{
+    snapshot = {};
+    DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES)
+    {
+        DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND ||
+            error == ERROR_PATH_NOT_FOUND ||
+            error == ERROR_INVALID_NAME)
+        {
+            SetLastError(ERROR_SUCCESS);
+            return true;
+        }
+        SetLastError(error);
+        return false;
+    }
+    if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return false;
+    }
+
+    snapshot.existed = true;
+    return LoadIniText(path, snapshot.text);
+}
+
+// The caller must hold IniWriteMutexGuard for the same path.
+inline bool RestoreIniTextSnapshot(
+    const std::wstring& path,
+    const IniTextSnapshot& snapshot)
+{
+    if (snapshot.existed)
+    {
+        return WriteTextFileUtf8Bom(path, snapshot.text);
+    }
+
+    SetLastError(ERROR_SUCCESS);
+    if (DeleteFileW(path.c_str()))
+    {
+        return true;
+    }
+    DWORD error = GetLastError();
+    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+    {
+        SetLastError(ERROR_SUCCESS);
+        return true;
+    }
+    SetLastError(error);
+    return false;
+}
+
+inline bool ReadIniBooleanFromText(
+    const std::wstring& text,
+    const wchar_t* section,
+    const wchar_t* key,
+    bool fallback,
+    bool& value)
+{
+    std::wstring raw;
+    if (!ReadIniValueFromDoc(ParseIniDocument(text), section, key, raw))
+    {
+        value = fallback;
+        return true;
+    }
+
+    raw = ToLower(Trim(raw));
+    if (raw == L"1" || raw == L"true" || raw == L"yes" || raw == L"on")
+    {
+        value = true;
+        return true;
+    }
+    if (raw == L"0" || raw == L"false" || raw == L"no" || raw == L"off")
+    {
+        value = false;
+        return true;
+    }
+    SetLastError(ERROR_INVALID_DATA);
+    return false;
+}
+
+inline std::wstring AppendCoupledStateRollbackError(
+    const std::wstring& primary,
+    const std::wstring& rollback)
+{
+    if (rollback.empty())
+    {
+        return primary;
+    }
+    if (primary.empty())
+    {
+        return rollback;
+    }
+    return primary + L" Rollback also failed: " + rollback;
+}
+
+// Orders a launch-path mutation and an atomic settings mutation so a process
+// stop or power loss cannot create a mismatch that survives the next launch.
+// Enable: launch path first, then config=true. Disable: config=false first,
+// then launch path removal. The application's normal startup reconciliation
+// completes either interrupted direction without a journal sidecar.
+template <typename LaunchMutation, typename PersistenceMutation, typename RestoreMutation>
+inline bool ExecuteCrashConsistentLaunchConfigState(
+    bool desired,
+    bool previousConfigured,
+    LaunchMutation&& mutateLaunch,
+    PersistenceMutation&& persistDesired,
+    RestoreMutation&& restorePrevious,
+    std::wstring* error = nullptr)
+{
+    if (error != nullptr)
+    {
+        error->clear();
+    }
+
+    auto launch = [&](bool state, const wchar_t* label, std::wstring& result)
+    {
+        std::wstring detail;
+        if (mutateLaunch(state, detail))
+        {
+            result.clear();
+            return true;
+        }
+        result = label;
+        if (!detail.empty())
+        {
+            result += L": " + detail;
+        }
+        return false;
+    };
+    auto persist = [&](auto&& operation, const wchar_t* label, std::wstring& result)
+    {
+        std::wstring detail;
+        if (operation(detail))
+        {
+            result.clear();
+            return true;
+        }
+        result = label;
+        if (!detail.empty())
+        {
+            result += L": " + detail;
+        }
+        return false;
+    };
+
+    std::wstring operationError;
+    if (desired)
+    {
+        if (!launch(true, L"Could not enable Startup", operationError))
+        {
+            std::wstring rollbackError;
+            launch(
+                previousConfigured,
+                L"Could not restore the previous Startup state",
+                rollbackError);
+            if (error != nullptr)
+            {
+                *error = AppendCoupledStateRollbackError(operationError, rollbackError);
+            }
+            return false;
+        }
+
+        if (persist(
+                std::forward<PersistenceMutation>(persistDesired),
+                L"Could not persist the desired settings",
+                operationError))
+        {
+            return true;
+        }
+
+        std::wstring rollbackError;
+        launch(
+            previousConfigured,
+            L"Could not restore the previous Startup state",
+            rollbackError);
+        if (error != nullptr)
+        {
+            *error = AppendCoupledStateRollbackError(operationError, rollbackError);
+        }
+        return false;
+    }
+
+    if (!persist(
+            std::forward<PersistenceMutation>(persistDesired),
+            L"Could not persist the desired settings",
+            operationError))
+    {
+        if (error != nullptr)
+        {
+            *error = operationError;
+        }
+        return false;
+    }
+
+    if (launch(false, L"Could not disable Startup", operationError))
+    {
+        return true;
+    }
+
+    // Roll back using the same safe direction: never restore config=true
+    // before a launchable entry exists.
+    std::wstring rollbackError;
+    if (previousConfigured)
+    {
+        std::wstring launchRollbackError;
+        if (!launch(
+                true,
+                L"Could not restore the previous Startup state",
+                launchRollbackError))
+        {
+            if (error != nullptr)
+            {
+                *error = AppendCoupledStateRollbackError(
+                    operationError,
+                    launchRollbackError);
+            }
+            return false;
+        }
+        persist(
+            std::forward<RestoreMutation>(restorePrevious),
+            L"Could not restore the previous settings",
+            rollbackError);
+    }
+    else
+    {
+        persist(
+            std::forward<RestoreMutation>(restorePrevious),
+            L"Could not restore the previous settings",
+            rollbackError);
+        std::wstring launchRollbackError;
+        if (!launch(
+                false,
+                L"Could not restore the previous Startup state",
+                launchRollbackError))
+        {
+            rollbackError = AppendCoupledStateRollbackError(
+                rollbackError,
+                launchRollbackError);
+        }
+    }
+
+    if (error != nullptr)
+    {
+        *error = AppendCoupledStateRollbackError(operationError, rollbackError);
+    }
+    return false;
+}
+
 inline bool LoadIniDocument(const std::wstring& path, std::vector<IniSectionData>& doc)
 {
     std::wstring text;

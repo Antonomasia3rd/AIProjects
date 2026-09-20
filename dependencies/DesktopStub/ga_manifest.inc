@@ -141,7 +141,11 @@ static std::wstring DefaultLogPath()
 static std::wstring EffectiveConfiguredLogPath()
 {
     std::wstring configured = TrimCopy(IniReadS(L"Settings", L"LogPath", L""));
-    return configured.empty() ? DefaultLogPath() : configured;
+    if (configured.empty())
+        return DefaultLogPath();
+    if (PathIsRelativeW(configured.c_str()))
+        return aip::PathJoin(GetExeDir(), configured);
+    return configured;
 }
 
 static std::wstring ManifestSetting(const wchar_t* key, const wchar_t* fallback, const wchar_t* legacySettingsKey = nullptr)
@@ -1290,8 +1294,9 @@ static std::wstring BuildDefaultAppxManifest()
         manifest += L"<Package\r\n";
         manifest += L"  xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\"\r\n";
         manifest += L"  xmlns:uap=\"http://schemas.microsoft.com/appx/manifest/uap/windows10\"\r\n";
+        manifest += L"  xmlns:desktop=\"" + std::wstring(aip::DesktopStartupNamespace) + L"\"\r\n";
         manifest += L"  xmlns:rescap=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities\"\r\n";
-        manifest += L"  IgnorableNamespaces=\"uap rescap\">\r\n\r\n";
+        manifest += L"  IgnorableNamespaces=\"uap desktop rescap\">\r\n\r\n";
         manifest += L"  <Identity\r\n";
         manifest += L"    Name=\"" + identity + L"\"\r\n";
         manifest += L"    Publisher=\"" + publisher + L"\"\r\n";
@@ -1332,6 +1337,10 @@ static std::wstring BuildDefaultAppxManifest()
         }
         manifest += L"        </uap:DefaultTile>\r\n\r\n";
         manifest += L"      </uap:VisualElements>\r\n";
+        manifest += L"      <Extensions>\r\n";
+        manifest += aip::BuildDesktopStartupExtension(L"DesktopStubStartup", ManifestHostExecutableName(),
+            EffectiveManifestDisplayName(), [](const std::wstring& value) { return XmlEscape(value); });
+        manifest += L"      </Extensions>\r\n";
         manifest += L"    </Application>\r\n";
         manifest += L"  </Applications>\r\n\r\n";
         if (!restrictedCapability.empty())

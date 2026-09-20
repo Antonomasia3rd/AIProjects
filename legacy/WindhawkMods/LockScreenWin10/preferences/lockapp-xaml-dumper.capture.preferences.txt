@@ -1,0 +1,14 @@
+includeProperties: 1
+styleRelevantPropertiesOnly: 1
+includeVisualStates: 1
+includeRectangle: 1
+settleDelayMs: 3000
+initialSnapshotDelayMs: 10000
+maxSnapshotWaitMs: 20000
+verificationSnapshotDelayMs: 0
+maxSnapshots: 1
+interactionTraceSeconds: 0
+interactionTraceIntervalMs: 100
+periodicSnapshotIntervalMs: 0
+continuousCapture: 1
+maxFileSizeMB: 256

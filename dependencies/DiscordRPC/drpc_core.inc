@@ -75,7 +75,13 @@ static void ApplyConfiguredIniPath(const std::wstring& configPath)
 {
     aip::SidecarPaths paths;
     std::wstring error;
-    if (aip::TryBuildSidecarPathsFromExecutable(g_exePath, APP_NAME, configPath, paths, &error))
+    if (aip::TryBuildSidecarPathsFromExecutable(
+        g_exePath,
+        APP_NAME,
+        configPath,
+        paths,
+        &error,
+        aip::DefaultLogPathPolicy::BesideExecutable))
     {
         ApplySidecarPaths(paths);
         return;
@@ -86,6 +92,41 @@ static void ApplyConfiguredIniPath(const std::wstring& configPath)
     ApplySidecarPaths(aip::BuildSidecarPathsFromExecutable(g_exePath, APP_NAME));
 }
 
+static aip::StartupShortcutSpec DiscordStartupShortcutSpec()
+{
+    const std::wstring configPath = MakeAbsolutePath(g_iniPath);
+
+    aip::StartupShortcutSpec spec;
+    spec.executablePath = MakeAbsolutePath(g_exePath);
+    spec.identityPath = configPath;
+    spec.fallbackBaseName = APP_NAME;
+    spec.arguments = L"--ini " + aip::QuoteCommandLineArg(configPath);
+    spec.workingDirectory = MakeAbsolutePath(g_exeDir);
+    spec.description = L"DiscordRPC resident Rich Presence client";
+    return spec;
+}
+
+static bool QueryDiscordStartupShortcutInstalled(
+    bool& installed,
+    std::wstring& error)
+{
+    return aip::QueryStartupShortcutInstalled(
+        DiscordStartupShortcutSpec(),
+        installed,
+        &error);
+}
+
+static bool SetDiscordStartupShortcutDesired(
+    bool desired,
+    bool& previousInstalled,
+    std::wstring& error)
+{
+    return aip::SetStartupShortcutDesired(
+        DiscordStartupShortcutSpec(),
+        desired,
+        previousInstalled,
+        &error);
+}
 
 static std::wstring EncodeEscapes(const std::wstring& value)
 {
@@ -115,6 +156,14 @@ static std::wstring EncodeEscapes(const std::wstring& value)
 
 static std::wstring IniReadRaw(const wchar_t* section, const wchar_t* key, const wchar_t* fallback)
 {
+#ifdef AIP_DISCORD_ENGINE_CONTEXT
+    if (g_embeddedOptions && g_embeddedOptions->profileOverride)
+    {
+        const auto& values = g_embeddedOptions->profileOverride->values;
+        const auto found = values.find({ToLower(section), ToLower(key)});
+        return found == values.end() ? std::wstring(fallback) : found->second;
+    }
+#endif
     return aip::IniConfigStore(g_iniPath).ReadRaw(section, key, fallback);
 }
 
@@ -144,6 +193,15 @@ static bool IniReadB(const wchar_t* section, const wchar_t* key, bool fallback)
     }
     bool parsed = false;
     return aip::ParseBoolValue(raw, parsed) ? parsed : fallback;
+}
+
+static bool ReconcileDiscordStartupShortcutFromConfig(std::wstring& error)
+{
+    bool previousInstalled = false;
+    return SetDiscordStartupShortcutDesired(
+        IniReadB(L"app", L"run_at_startup", false),
+        previousInstalled,
+        error);
 }
 
 static std::wstring DefaultConfigHeader()
@@ -377,7 +435,9 @@ static std::wstring ResolveDiscordToken()
 
     try
     {
-        return Trim(aip::UnprotectSecretForCurrentUser(protectedToken));
+        return Trim(aip::UnprotectSecretForCurrentUser(
+            protectedToken,
+            aip::DpapiLegacyEncoding::Utf8));
     }
     catch (const std::exception& ex)
     {
@@ -552,10 +612,7 @@ static void ConfigureRuntimeFromConfig(const AppOptions& options)
     }
     else if (PathIsRelativeW(configuredLog.c_str()))
     {
-        // A relative log path belongs to the selected INI profile, not to the
-        // executable folder. This keeps --ini profile bundles self-contained.
-        std::wstring configDir = GetDirectoryName(MakeAbsolutePath(g_iniPath));
-        effectiveLogPath = PathJoin(configDir.empty() ? g_exeDir : configDir, configuredLog);
+        effectiveLogPath = PathJoin(g_exeDir, configuredLog);
     }
     else
     {

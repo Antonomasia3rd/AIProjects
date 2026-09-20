@@ -52,12 +52,20 @@ int main()
 {
     try
     {
-        const std::string source = ReadAll("CharmTray.cpp");
+        const std::string wrapper = ReadAll("CharmTray.cpp");
+        const std::string source = ReadAll("../../dependencies/CharmTray/charm_app.inc");
+        const std::string tray = ReadAll("../../dependencies/tray.inc");
+        const std::string startup = ReadAll("../../dependencies/startup_shortcut.inc");
+        const std::string build = ReadAll("BuildCharmTray.cmd");
 
+        RequireContains(
+            "project entry point is a dependency overlay",
+            wrapper,
+            "../../dependencies/CharmTray/charm_app.inc");
         RequireContains(
             "shared desktop baseline is used",
             source,
-            "../../dependencies/desktop_app_baseline.h");
+            "../desktop_app_baseline.h");
         RequireContains(
             "settings are created through the synchronized INI store",
             source,
@@ -65,15 +73,71 @@ int main()
         RequireContains(
             "invalid logging booleans are rejected",
             source,
-            "aip::ParseBoolValue(raw, loggingEnabled)");
+            "aip::ParseBoolValue(rawLogging, loggingEnabled)");
+        RequireContains(
+            "startup setting is shared by INI command line and tray",
+            source,
+            "L\"RunAtStartup\"");
         RequireContains(
             "logging uses the shared UTF-8 logger",
             source,
             "aip::Utf8LoggerOptions options;");
         RequireContains(
-            "the singleton is scoped to the executable path",
+            "the shared Startup-folder helper is consumed",
+            source,
+            "../startup_shortcut.inc");
+        RequireContains(
+            "startup ownership follows the effective INI profile",
+            source,
+            "spec.identityPath = g_paths.configPath;");
+        RequireContains(
+            "startup launches preserve the effective INI profile",
+            source,
+            "spec.arguments = L\"--ini \" + aip::QuoteCommandLineArg(g_paths.configPath);");
+        RequireContains(
+            "custom INI paths retain executable-side logging",
+            source,
+            "aip::DefaultLogPathPolicy::BesideExecutable");
+        RequireContains(
+            "custom INI paths are validated",
+            source,
+            "aip::TryResolveConfigFilePath");
+        RequireContains(
+            "command-line settings use one fresh atomic mutation",
+            source,
+            "ConfigStore().MutateFresh");
+        RequireContains(
+            "Startup and INI changes use the shared cross-resource transaction",
+            source,
+            "aip::CommitStartupShortcutIniState(");
+        RequireContains(
+            "shared Startup transaction uses direction-safe commit and rollback",
+            startup,
+            "ExecuteCrashConsistentLaunchConfigState(");
+        RequireContains(
+            "the singleton uses a stable shared path-scoped identity",
             source,
             "aip::BuildPathScopedInstanceIdentity(");
+        RequireContains(
+            "the singleton is scoped by the effective INI path",
+            source,
+            "g_paths.configPath);");
+        RequireContains(
+            "secondary instances receive acknowledged requests",
+            source,
+            "aip::SendInstanceWindowRequest(");
+        RequireContains(
+            "the tray exposes Startup preference",
+            source,
+            "L\"Run at startup\"");
+        RequireContains(
+            "the tray exposes file logging preference",
+            source,
+            "L\"File logging\"");
+        RequireContains(
+            "help works through shared command-line output",
+            source,
+            "aip::WriteCommandLineText");
         RequireContains(
             "unsupported Windows versions are rejected",
             source,
@@ -92,8 +156,12 @@ int main()
             "ICharmFlyout::Show");
         RequireContains(
             "modern tray notification version is selected",
-            source,
+            tray,
             "NOTIFYICON_VERSION_4");
+        RequireContains(
+            "tray version 4 keeps the standard hover tooltip",
+            source,
+            "aip::RegisterTrayIcon(");
         RequireContains(
             "Explorer restart restores the tray icon",
             source,
@@ -114,6 +182,22 @@ int main()
             "Win32 profile API settings were removed",
             source,
             "WritePrivateProfileStringW");
+        RequireNotContains(
+            "registry startup writes are forbidden",
+            source,
+            "RegSetValue");
+        RequireNotContains(
+            "Task Scheduler startup is forbidden",
+            source,
+            "schtasks");
+        RequireContains(
+            "Startup helper uses only the per-user Startup known folder",
+            startup,
+            "FOLDERID_Startup");
+        RequireContains(
+            "CharmTray links ShellLink GUID definitions",
+            build,
+            "uuid.lib");
 
         std::cout << "CharmTray source checks passed (" << g_checks << " checks).\n";
         return 0;

@@ -1,0 +1,15 @@
+# Local investigation output and packaged binaries. The source, preferences,
+# tooling, and written findings remain versioned.
+/analysis/crashes/
+/analysis/logs/
+/dumps/
+/releases/
+/reports/
+/screenshots/
+/sources/*.zip
+/tools/__pycache__/
+/build/
+*.dll
+*.exe
+*.pdb
+*.whl

@@ -1,6 +1,10 @@
 # AIProjects
 
-Small Windows utility projects and experiments. Active baseline projects live at the repository root and share the reusable C++ entry point `dependencies/desktop_app_baseline.h`. Older projects that have not moved onto that shared baseline live under `legacy/` but keep their original project/release names.
+Small Windows utility projects and experiments. Stable project/build folders live
+at the repository root and under `legacy/`, preserving their existing product
+and release names. Reusable modules and product implementation bodies live under
+`dependencies/`; project-local source composes them through includes, metadata,
+or declarative policy.
 
 ## Projects
 
@@ -9,9 +13,10 @@ Small Windows utility projects and experiments. Active baseline projects live at
 | `legacy/AllowContentAboveLock` | C# Windows service | Keeps notification `AllowContentAboveLock` registry values enabled for loaded users. |
 | `legacy/ADBController` | C++ Win32 GUI app | Direct ADB-over-TCP TV controller that keeps the ADB server running while switching selected TVs. |
 | `legacy/asusblink` | C# tray/console app | ASUS ACPI LED controller for mic LED, keyboard backlight states, and HDD-activity keyboard patterns. |
-| `legacy/capsblink` | C# console app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
+| `legacy/capsblink` | C# tray app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
 | `legacy/CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
-| `DesktopStub` | C++ Win32 tray app | Builds `DesktopStub.exe`, a Live Tile generator: wallpaper crops by default (`ContentSource=Wallpaper`), or RSS/Atom feed headlines (`ContentSource=RssFeed`) for a renamed/reconfigured copy -- see `dependencies/README.md`. Also a loose Appx registrar. |
+| `legacy/ChromeProfileCounter` | PowerShell utility | Inspects and repairs Chrome's local profile counter. |
+| `DesktopStub` | C++ Win32 tray app | Builds `DesktopStub.exe`, a Live Tile generator: wallpaper by default, or ordered content with image/wallpaper backgrounds and RSS/custom/SMTC/Caps Lock text; see `docs/content-engine.md`. Also a loose Appx registrar. |
 | `DiscordRPC` | C++ Win32 tray/console app | Discord Rich Presence app with Discord IPC, Gateway transport, DPAPI token storage, dynamic placeholders, and a tray config UI. |
 | `legacy/DNSAutoUpdate` | C# DNS updater | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
 | `legacy/NowPlayingTile` | C++ app plus Appx helpers | SMTC-based Windows Start live tile updater with optional widget mode. |
@@ -20,7 +25,9 @@ Small Windows utility projects and experiments. Active baseline projects live at
 | `legacy/SecureDesktopLauncher` | C++ service/tools | Launches trusted configured programs on secure desktops, with an optional password-gated launcher. |
 | `legacy/TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
 | `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
+| `legacy/WindhawkMods/LockScreenWin10` | Windhawk research mod | Windows 10 lock-screen styling and XAML investigation sources. |
 | `legacy/YourPhoneHideBanner` | C# Windows service | Suppresses Phone Link notification banners and sounds for loaded users. |
+| `legacy/YouTubeMusicMigrate` | PowerShell utility | Local YouTube Music library and playlist tidy/migration tooling. |
 
 ## Prebuilt Releases
 
@@ -49,7 +56,7 @@ Common prerequisites:
 - .NET Framework compiler at `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` for C# projects.
 - Visual Studio Build Tools with the C++ workload for MSVC projects.
 - Android Platform Tools for `legacy/ADBController` at runtime (`adb.exe` is not bundled).
-- MinGW-w64 `g++` for `legacy/RealTimeNotesDeskband`.
+- Visual Studio 2019/2022 Build Tools or MinGW-w64 `g++` for `legacy/RealTimeNotesDeskband`.
 - `dnscmd.exe` for `legacy/DNSAutoUpdate` on Windows DNS Server systems.
 
 Build all Windows binary artifacts:
@@ -70,13 +77,13 @@ capability landed as DesktopStub's `ContentSource=RssFeed` (see
 Useful build options:
 
 ```cmd
-# Skip one or more projects.
+rem Skip one or more projects.
 .github\scripts\build-windows.cmd /skip:asusblink,RealTimeNotesDeskband
 
-# Skip DesktopStub.
+rem Skip DesktopStub.
 .github\scripts\build-windows.cmd /skip:DesktopStub
 
-# Skip DiscordRPC.
+rem Skip DiscordRPC.
 .github\scripts\build-windows.cmd /skip:DiscordRPC
 ```
 
@@ -101,7 +108,7 @@ Each project README also lists direct build commands for that project. Generated
 
 Several tools intentionally modify system state:
 
-- services write user-hive notification settings and local `.log` files beside their executables;
+- registry-notification services write user-hive settings and report diagnostics through the Windows Event Log/debug output; privileged services do not create sidecar logs;
 - `legacy/DNSAutoUpdate` adds and removes exact DNS A records in its managed allowlist;
 - `legacy/SecureDesktopLauncher` can launch processes as `LocalSystem` on secure desktops;
 - `legacy/TaskSchedulerMigration` re-registers matching scheduled tasks;
@@ -109,28 +116,17 @@ Several tools intentionally modify system state:
 
 Read the project README before running a tool, use an elevated shell where documented, and use `-WhatIf` or `--what-if` for tools that support preview mode.
 
-## Repository Policy
+## Repository direction and current gaps
 
-Tracked files are source, build scripts, templates/manifests, and documentation. Local configs, logs, generated assets, binaries, object files, and generated release archives are ignored.
+Implementation belongs in `dependencies/`; project folders should supply entry points, resources and values. DesktopStub is the reference implementation, with defects fixed before its behavior is shared. Moving entire app bodies into product-named includes is only an intermediate migration step.
 
-Shared C++ projects must use the repository baseline INI dialect from `dependencies\config_ini.inc`: UTF-8 with BOM, quoted assignments like `"Name" = "Value"`, comment/order preservation where practical, and raw Windows path backslashes preserved on read. DesktopStub's INI style is the compatibility standard; new shared helpers must not drift to a different config dialect.
+Every app should expose consistent INI, CLI and tray settings. Ordinary startup must use the current user's `shell:startup` folder. Packaged startup may use Windows StartupTask and needs its own clearly named control. These requirements are not yet met by every service, deskband, foreground utility and mod; the [persistent audit](docs/REWORK_AUDIT.md) lists concrete gaps and validation evidence.
 
-Runtime configuration and logs must stay local to each program. By default, every binary must use `.ini` and `.log` files beside itself with the same base name as the binary:
+Ease of setup takes priority. Additional DPAPI, path/hash checks and other security enforcement should be opt-in, after functional issues are resolved. Some existing programs still enforce protection automatically; their READMEs identify that current behavior instead of presenting it as the desired rule. Review privileged tools carefully: writable executable/configuration locations can let another process control code run with elevated rights, and portable plaintext credentials can be read by anyone with file access. Use existing protection where suitable, restrict access to sensitive files, and avoid running privileged features you do not need.
 
-```text
-<binary directory>\<binary name>.ini
-<binary directory>\<binary name>.log
-```
+DesktopStub-style quoted INI assignments are the shared compatibility format, and native/managed parsers now share dialect fixtures. Sidecar configuration/logs remain common defaults; this is not a blanket prohibition on other explicitly configured storage. Preserve existing data and explain migration behavior. Earlier generated rules requiring a maintainer pause for every format/storage/OS integration change were retired by the maintainer on 2026-09-08.
 
-If a non-INI configuration format is unavoidable, it must still default to the same directory and base name as the binary. Helper utilities should keep their generated logs and state beside the helper executable or project wrapper by default. Do not use the registry, `%APPDATA%`, `%LOCALAPPDATA%`, `%PROGRAMDATA%`, the process working directory, or other global/user profile locations for app-owned configuration or logs. Registry writes are acceptable only for OS integration that is the explicit purpose of the tool, such as service registration, COM/deskband registration, scheduled-task migration, or Windows settings the tool is designed to manage.
-
-Do not change file or directory ACLs from these tools, installers, build scripts, or migration helpers. Past ACL-hardening attempts caused Windows integration failures in specific placements, including Start Menu related cases. Security checks may detect and warn about risky writable locations, but they must not modify ACLs, ownership, inheritance, integrity labels, or other access-control state.
-
-Use `DesktopStub` / `DesktopStub.exe` as the reference behavior pattern for new fixes: create and normalize the INI next to the executable, preserve user-edited values/comments/order where practical, write INI assignments in the DesktopStub style (`"Name" = "Value"`), write the log next to the executable by default, expose path changes through the INI/UI when needed, and report write failures clearly. Shared helpers in `dependencies/` should be preferred for new projects so DesktopStub-specific code does not get copied as a second framework. When changing another program, follow that implementation style for local config/log handling unless the maintainer explicitly approves a different pattern.
-
-Stop for maintainer input before making a decision that changes storage location, config/log format, migration behavior, compatibility guarantees, ACL/security enforcement, or OS integration behavior. When changing an existing program that already has registry/profile-based state, preserve or migrate existing user values where practical and do not choose a compatibility-breaking migration without maintainer approval.
-
-GitHub Actions builds Windows binaries on hosted runners. Workflow artifacts and release attachments are generated from the workflow run so published binaries are tied to a commit.
+Tracked files are source, build scripts, templates/manifests and documentation. Generated files remain ignored. GitHub Actions builds Windows binaries and portable C++ tests; local results and OS-specific test limitations are in the audit.
 
 ## License
 
