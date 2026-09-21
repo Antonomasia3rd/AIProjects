@@ -31,6 +31,15 @@ The build embeds one version into both EXEs, the generated AppX manifest, startu
 
 For template reuse, the build names are parameterized without changing the default outputs. Set `DESKTOPSTUB_PRODUCT_NAME`, `DESKTOPSTUB_HOST_EXE_NAME`, `DESKTOPSTUB_BROKER_EXE_NAME`, or `DESKTOPSTUB_RELEASE_TAG_PREFIX` before running the script to reuse the baseline for another project while keeping the same source layout. Ordinary spaces are supported in the product/output names; the default release tag prefix removes spaces from `DESKTOPSTUB_PRODUCT_NAME`, and an explicitly supplied `DESKTOPSTUB_RELEASE_TAG_PREFIX` must not contain whitespace. Command-shell metacharacters, `%`, `!`, and quotes are rejected so the generated compiler/resource commands stay deterministic. Host and broker executable names must be plain file names, not paths.
 
+The normal build includes the optional `CapsBlink` and `AsusBlink` source providers. A developer can make a host that excludes those raw-hardware providers entirely by setting a build flag before compiling:
+
+~~~cmd
+set DESKTOPSTUB_ENABLE_HARDWARE_SOURCES=0
+DesktopStub\BuildDesktopStub.cmd
+~~~
+
+That host keeps the same INI, CLI, and tray source choices, but reports a clear unavailable-source status if either hardware source is selected. No INI value can turn the omitted code back on; build with `DESKTOPSTUB_ENABLE_HARDWARE_SOURCES=1` (the default) to restore the full provider set.
+
 The experimental background-task DLL remains in the source tree for research, but it is intentionally not part of the normal one-command build.
 
 If `build\DesktopStub.exe` or `build\DesktopStubLiveTileBroker.exe` is running, close it before rebuilding so the compiler can overwrite the output.

@@ -455,6 +455,9 @@ int main(int argc, char** argv)
         const std::string app = ReadSource("..\\dependencies\\DesktopStub\\ga_app.inc");
         const std::string offline = ReadSource("..\\dependencies\\DesktopStub\\ga_render_only.inc");
         const std::string core = ReadSource("..\\dependencies\\DesktopStub\\ga_core.inc");
+        const std::string contentRuntime = ReadSource("..\\dependencies\\DesktopStub\\ga_content_runtime.inc");
+        const std::string contentHardware = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware.inc");
+        const std::string contentHardwareUnavailable = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware_unavailable.inc");
         const std::string desktopStub = ReadSource("DesktopStub.cpp");
         const std::string buildScript = ReadSource("BuildDesktopStub.cmd");
         const std::string readme = ReadSource("README.md");
@@ -1028,6 +1031,51 @@ int main(int argc, char** argv)
                 "contains command-shell metacharacters, control characters, or quotes"
             },
             "BuildDesktopStub.cmd must reject command-shell metacharacters and line breaks in configurable product/output names while allowing ordinary spaces");
+        AssertContainsAll(
+            "DesktopStub optional hardware sources have a separate host boundary",
+            "DesktopStub content source providers",
+            contentRuntime + "\n" + contentHardware + "\n" + contentHardwareUnavailable,
+            {
+                "#define DESKTOPSTUB_ENABLE_HARDWARE_SOURCES 1",
+                "#include \"ga_content_hardware.inc\"",
+                "#include \"ga_content_hardware_unavailable.inc\"",
+                "This DesktopStub build excludes optional hardware sources."
+            },
+            "the runtime must choose a full or unavailable provider implementation instead of compiling raw hardware access directly into its general source file");
+        AssertNotContainsAny(
+            "DesktopStub general content runtime does not directly include raw hardware providers",
+            "..\\dependencies\\DesktopStub\\ga_content_runtime.inc",
+            contentRuntime,
+            {
+                "caps_blink_windows.inc",
+                "content_sources/asus.h"
+            },
+            "raw keyboard and ASUS provider includes belong behind the optional hardware-source boundary");
+        AssertContainsAll(
+            "Unavailable hardware providers preserve tray restart compatibility",
+            "..\\dependencies\\DesktopStub\\ga_content_hardware_unavailable.inc",
+            contentHardwareUnavailable,
+            {
+                "std::atomic<bool> restart{false};",
+                "void Refresh(const aip::caps::Config&) { restart = false; }",
+                "void Refresh(const aip::content::AsusConfiguration&) { restart = false; }"
+            },
+            "the shared tray's restart commands must compile and remain harmless in a host that omits raw hardware providers");
+        AssertContainsAll(
+            "Build script can omit optional hardware sources",
+            "BuildDesktopStub.cmd",
+            buildScript,
+            {
+                "DESKTOPSTUB_ENABLE_HARDWARE_SOURCES=1",
+                "call :ValidateBuildBoolean \"%DESKTOPSTUB_ENABLE_HARDWARE_SOURCES%\"",
+                "CPP_FEATURE_DEFINES=/DDESKTOPSTUB_ENABLE_HARDWARE_SOURCES=%DESKTOPSTUB_ENABLE_HARDWARE_SOURCES%",
+                "if \"%DESKTOPSTUB_ENABLE_HARDWARE_SOURCES%\"==\"1\"",
+                "HARDWARE_OBJECTS=",
+                "HARDWARE_LINK_LIBRARIES=",
+                "native_backend.cpp",
+                "Optional hardware sources are excluded from this host build."
+            },
+            "a no-hardware host build must skip the ASUS objects and Pdh import rather than merely disabling their configuration values");
         AssertContainsAll(
             "Build script writes generated string define includes",
             "Build/resource scripts",

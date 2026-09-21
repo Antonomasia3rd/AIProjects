@@ -42,6 +42,19 @@ prevents `$`, backticks, quotes, and spaces in paths/package names from changing
 the PowerShell command. Source-level checks verify those paths; the affected
 binary is not rebuilt on this machine while the detection remains unresolved.
 
+## Source-only provider boundary
+
+The 2026-09-21 continuation moves the CapsBlink and AsusBlink host wrappers
+behind `DESKTOPSTUB_ENABLE_HARDWARE_SOURCES`. The default remains `1` so the
+existing DesktopStub build behavior is unchanged. Setting it to `0` makes the
+build script omit the ASUS service, native ACPI backend, and PDH import, while
+the host reports that a selected hardware source was omitted. Configuration
+cannot silently re-enable code that was excluded at build time.
+
+This is a source-architecture and least-capability boundary. It does not
+identify the detection cause, establish that either build is safe, or make a
+false-positive claim. No binary was rebuilt or executed to validate this change.
+
 ## Current operating rule
 
 - Do not rebuild, execute, restore, exclude, or allow the detected validation
@@ -58,9 +71,8 @@ Microsoft also documents false-positive handling for endpoint detections:
 
 ## Remaining engineering decision
 
-If the user wants the default DesktopStub executable to have a smaller security
-and detection surface, split raw keyboard/ASUS hardware providers and optional
-package-registration helpers into separately built, explicitly launched
-providers. That would be an architectural change and requires a user choice
-about installation and user experience. It must not be framed as antivirus
-evasion; its purpose is least capability and clearer trust boundaries.
+The optional hardware build boundary is now in place. A future separate-process
+provider model, or a split for the optional package-registration helpers, would
+still be a larger installation and user-experience decision. It must not be
+framed as antivirus evasion; its purpose would be least capability and clearer
+trust boundaries.

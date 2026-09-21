@@ -7,6 +7,7 @@ set "VCVARS="
 if not defined DESKTOPSTUB_PRODUCT_NAME set "DESKTOPSTUB_PRODUCT_NAME=DesktopStub"
 if not defined DESKTOPSTUB_HOST_EXE_NAME set "DESKTOPSTUB_HOST_EXE_NAME=%DESKTOPSTUB_PRODUCT_NAME%.exe"
 if not defined DESKTOPSTUB_BROKER_EXE_NAME set "DESKTOPSTUB_BROKER_EXE_NAME=%DESKTOPSTUB_PRODUCT_NAME%LiveTileBroker.exe"
+if not defined DESKTOPSTUB_ENABLE_HARDWARE_SOURCES set "DESKTOPSTUB_ENABLE_HARDWARE_SOURCES=1"
 if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX set "DESKTOPSTUB_RELEASE_TAG_PRODUCT=!DESKTOPSTUB_PRODUCT_NAME: =!"
 if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX if not defined DESKTOPSTUB_RELEASE_TAG_PRODUCT set "DESKTOPSTUB_RELEASE_TAG_PRODUCT=DesktopStub"
 if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX set "DESKTOPSTUB_RELEASE_TAG_PREFIX=!DESKTOPSTUB_RELEASE_TAG_PRODUCT!-v"
@@ -15,6 +16,10 @@ if errorlevel 1 exit /b 1
 call :ValidateBuildValue "DESKTOPSTUB_HOST_EXE_NAME"
 if errorlevel 1 exit /b 1
 call :ValidateBuildValue "DESKTOPSTUB_BROKER_EXE_NAME"
+if errorlevel 1 exit /b 1
+call :ValidateBuildValue "DESKTOPSTUB_ENABLE_HARDWARE_SOURCES"
+if errorlevel 1 exit /b 1
+call :ValidateBuildBoolean "%DESKTOPSTUB_ENABLE_HARDWARE_SOURCES%"
 if errorlevel 1 exit /b 1
 call :ValidateBuildValue "DESKTOPSTUB_RELEASE_TAG_PREFIX"
 if errorlevel 1 exit /b 1
@@ -76,6 +81,7 @@ if errorlevel 1 (
 set "VERSION_DEFINES=/DDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /DDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /DDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /DDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
 set "RC_VERSION_DEFINES=/dDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /dDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /dDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /dDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
 set "CPP_INCLUDE_DEFINES=/Ibuild\obj"
+set "CPP_FEATURE_DEFINES=/DDESKTOPSTUB_ENABLE_HARDWARE_SOURCES=%DESKTOPSTUB_ENABLE_HARDWARE_SOURCES%"
 set "CPP_VERSION_DEFINES_FILE=build\obj\DesktopStubVersionDefines.inc"
 set "RC_HOST_DEFINES_FILE=build\obj\DesktopStubHostResourceDefines.rc.inc"
 set "RC_BROKER_DEFINES_FILE=build\obj\DesktopStubBrokerResourceDefines.rc.inc"
@@ -163,19 +169,28 @@ if errorlevel 1 (
     popd
     exit /b !STATUS!
 )
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\asusblink\service.cpp /Fo"build\obj\DesktopStubAsusService.obj"
-if errorlevel 1 (
-    set "STATUS=!ERRORLEVEL!"
-    popd
-    exit /b !STATUS!
+set "HARDWARE_OBJECTS="
+set "HARDWARE_LINK_LIBRARIES="
+if "%DESKTOPSTUB_ENABLE_HARDWARE_SOURCES%"=="1" (
+    echo Building optional hardware source support...
+    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\asusblink\service.cpp /Fo"build\obj\DesktopStubAsusService.obj"
+    if errorlevel 1 (
+        set "STATUS=!ERRORLEVEL!"
+        popd
+        exit /b !STATUS!
+    )
+    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\asusblink\native_backend.cpp /Fo"build\obj\DesktopStubAsusBackend.obj"
+    if errorlevel 1 (
+        set "STATUS=!ERRORLEVEL!"
+        popd
+        exit /b !STATUS!
+    )
+    set "HARDWARE_OBJECTS=build\obj\DesktopStubAsusService.obj build\obj\DesktopStubAsusBackend.obj"
+    set "HARDWARE_LINK_LIBRARIES=pdh.lib"
+) else (
+    echo [i] Optional hardware sources are excluded from this host build.
 )
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\asusblink\native_backend.cpp /Fo"build\obj\DesktopStubAsusBackend.obj"
-if errorlevel 1 (
-    set "STATUS=!ERRORLEVEL!"
-    popd
-    exit /b !STATUS!
-)
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" "build\obj\DesktopStubDiscordService.obj" "build\obj\DesktopStubAsusService.obj" "build\obj\DesktopStubAsusBackend.obj" /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib pdh.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_FEATURE_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" "build\obj\DesktopStubDiscordService.obj" %HARDWARE_OBJECTS% /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib %HARDWARE_LINK_LIBRARIES% windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 set "STATUS=!ERRORLEVEL!"
 if not "!STATUS!"=="0" (
     popd
@@ -200,6 +215,12 @@ set "BUILD_VALUE_NAME=%~1"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$n=$env:BUILD_VALUE_NAME; $v=[Environment]::GetEnvironmentVariable($n, 'Process'); if ([string]::IsNullOrEmpty($v)) { Write-Host ('ERROR: {0} cannot be empty.' -f $n); [Environment]::Exit(1) }; $bad=$false; foreach ($c in @(0,10,13,33,34,37,38,40,41,60,62,94,124)) { if ($v.Contains([char]$c)) { $bad=$true } }; if ($bad) { Write-Host ('ERROR: {0} contains command-shell metacharacters, control characters, or quotes that are not supported: {1}' -f $n, $v); [Environment]::Exit(1) }; if ($n -eq 'DESKTOPSTUB_HOST_EXE_NAME' -or $n -eq 'DESKTOPSTUB_BROKER_EXE_NAME') { foreach ($c in @(42,47,58,63,92)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} must be a valid file name, not a path or wildcard: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($v.EndsWith(' ') -or $v.EndsWith('.') -or $v -eq '.' -or $v -eq '..') { Write-Host ('ERROR: {0} must not end in a space/dot or use a relative-directory name: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($n -eq 'DESKTOPSTUB_RELEASE_TAG_PREFIX') { foreach ($c in @(9,10,13,32,42,63,91,92,126)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} contains whitespace or characters that are invalid in a Git tag prefix: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($v.Contains('..') -or $v.Contains('@{') -or $v.EndsWith('.') -or $v.EndsWith('/')) { Write-Host ('ERROR: {0} is not a valid Git tag prefix: {1}' -f $n, $v); [Environment]::Exit(1) } }; [Environment]::Exit(0)"
 set "STATUS=%ERRORLEVEL%"
 endlocal & exit /b %STATUS%
+
+:ValidateBuildBoolean
+if "%~1"=="0" exit /b 0
+if "%~1"=="1" exit /b 0
+echo ERROR: DESKTOPSTUB_ENABLE_HARDWARE_SOURCES must be 0 or 1.
+exit /b 1
 
 :WriteRcDefines
 > "%~1" echo #define DESKTOPSTUB_PRODUCT_NAME "%~2"

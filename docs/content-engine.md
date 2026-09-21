@@ -93,6 +93,8 @@ For existing advanced configuration, set `[Discord] ProfilePath` to a DiscordRPC
 
 `CapsLock` only displays the logical toggle state. `CapsBlink` exposes the legacy physical-indicator pattern and its status. Select CapsBlink on an enabled content entry, then use **Caps indicator settings** in the tray. Selecting the source alone does not access a keyboard device.
 
+The normal DesktopStub build includes the CapsBlink and AsusBlink providers. A build made with `DESKTOPSTUB_ENABLE_HARDWARE_SOURCES=0` removes their raw device backends rather than merely changing `HardwareEnabled`; selecting either source then shows that the provider was omitted. Rebuild with the default value `1` when those sources are required.
+
 | `[CapsBlink]` key | Default | Meaning |
 |---|---|---|
 | `HardwareEnabled` | `0` | Explicitly enable physical indicator control. |

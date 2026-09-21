@@ -215,6 +215,21 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   registration paths. This is source-only verified pending a safe external or
   clean-environment binary review.
 
+### Source-only hardware-boundary continuation — 2026-09-21
+
+- Static tracing showed that the normal host linked the raw keyboard and ASUS
+  backends even though their INI activity flags default to off. The provider
+  wrappers now live behind `DESKTOPSTUB_ENABLE_HARDWARE_SOURCES`; the existing
+  full build remains the default (`1`) for compatibility.
+- A `0` build omits the ASUS service/native backend objects and PDH link input,
+  retains the unified source configuration surface, and reports an omitted
+  hardware source instead of silently producing blank content. The build flag,
+  boundary files, source contracts, README, and content guide are all updated.
+- No executable, compiler, package, Startup, hardware, network, or resident
+  process was launched for this source-only change because Defender quarantine
+  remains unresolved. This boundary is not evidence about the detection cause
+  or file safety.
+
 ### Account-expiry handoff and stopped work — 2026-09-20
 
 - User requested stopping tasks, cleaning temporary/permanent task artifacts and Codex memory, and a Desktop handoff. They explicitly chose to keep the edited project source. Development/validation stopped; both unfinished subagents were interrupted, and no task-created test processes remained at the final check.
