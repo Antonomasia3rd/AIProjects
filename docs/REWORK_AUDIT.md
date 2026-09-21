@@ -229,6 +229,22 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   with raw providers omitted. It checks the selected-source status and the
   existing tray restart interface, but it is intentionally not built or run on
   this laptop while the quarantine is unresolved.
+
+### Bounded shared-surface audit — 2026-09-21
+
+- A read-only scan found no remaining direct Win32 profile-INI calls outside
+  source-check fixtures. It also found no direct Run-registry implementation
+  in the resident products; TaskSchedulerMigration is an expected migration
+  utility rather than a resident-startup path.
+- NowPlayingTile owns its `NOTIFYICONDATAW` state but is not a tooltip
+  exception: its product tray implementation calls the shared
+  `RegisterTrayIcon`/`ModifyTrayIconTooltip` helpers, which carry `NIF_SHOWTIP`
+  with notification-icon version 4 and restore the current media title after
+  Explorer restart. Its source check covers this contract.
+- The scan remains an inventory, not proof of behavior. ADBController,
+  CharmTray, and DiscordRPC still own notification-icon state in their product
+  implementations and should receive the same targeted review before any
+  claim that every app has identical tray behavior.
 - No executable, compiler, package, Startup, hardware, network, or resident
   process was launched for this source-only change because Defender quarantine
   remains unresolved. This boundary is not evidence about the detection cause
