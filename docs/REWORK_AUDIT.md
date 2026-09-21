@@ -251,6 +251,12 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   mapping is correct: primary wraps at left, badge occupies the numeric block,
   and secondary is the short caption at right. The user-readable description
   now matches the implementation and Microsoft template catalog.
+- The content-cycle timing warning was reviewed against Microsoft's tile
+  notification guidance. The code accepts 1–86400 seconds but warns for every
+  registration-mode cycle because each cycle can render/register assets. Native
+  Live Tile cycles below 10 seconds receive an explicit advisory warning, not
+  a claim that 10 seconds is a Windows minimum. The portable policy test and
+  content guide preserve that distinction.
 - No executable, compiler, package, Startup, hardware, network, or resident
   process was launched for this source-only change because Defender quarantine
   remains unresolved. This boundary is not evidence about the detection cause
