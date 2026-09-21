@@ -53,7 +53,8 @@ cannot silently re-enable code that was excluded at build time.
 
 This is a source-architecture and least-capability boundary. It does not
 identify the detection cause, establish that either build is safe, or make a
-false-positive claim. No binary was rebuilt or executed to validate this change.
+false-positive claim. An inert no-hardware host test is now staged for a later
+clean environment, but no binary was rebuilt or executed to validate this change.
 
 ## Current operating rule
 

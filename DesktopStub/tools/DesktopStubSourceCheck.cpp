@@ -458,6 +458,8 @@ int main(int argc, char** argv)
         const std::string contentRuntime = ReadSource("..\\dependencies\\DesktopStub\\ga_content_runtime.inc");
         const std::string contentHardware = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware.inc");
         const std::string contentHardwareUnavailable = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware_unavailable.inc");
+        const std::string contentRuntimeNoHardware = ReadSource("tools\\ContentRuntimeNoHardwareTests.cpp");
+        const std::string contentRuntimeTestScript = ReadSource("..\\tools\\TestContentRuntime.cmd");
         const std::string desktopStub = ReadSource("DesktopStub.cpp");
         const std::string buildScript = ReadSource("BuildDesktopStub.cmd");
         const std::string readme = ReadSource("README.md");
@@ -1061,6 +1063,18 @@ int main(int argc, char** argv)
                 "void Refresh(const aip::content::AsusConfiguration&) { restart = false; }"
             },
             "the shared tray's restart commands must compile and remain harmless in a host that omits raw hardware providers");
+        AssertContainsAll(
+            "Inert host checks cover the no-hardware build flavor",
+            "ContentRuntimeNoHardwareTests.cpp + TestContentRuntime.cmd",
+            contentRuntimeNoHardware + "\n" + contentRuntimeTestScript,
+            {
+                "#define DESKTOPSTUB_ENABLE_HARDWARE_SOURCES 0",
+                "excludes optional hardware sources",
+                "ContentRuntimeNoHardwareTests.cpp",
+                "ContentRuntimeNoHardwareTests.exe",
+                "never enters DesktopStub's app path"
+            },
+            "the Windows host suite must compile the omitted-provider flavor and verify its tray-facing status without calling the application entry point");
         AssertContainsAll(
             "Build script can omit optional hardware sources",
             "BuildDesktopStub.cmd",

@@ -46,7 +46,7 @@ If `build\DesktopStub.exe` or `build\DesktopStubLiveTileBroker.exe` is running, 
 
 ## Developer Checks
 
-`TestDesktopStubSource.cmd` runs source contracts, portable content scheduling/configuration tests, geometry tests, actual preset XML tests, and the production GDI+ renderer harness. `tools/TestContentRuntime.cmd` also exercises the actual host's content snapshots and Win32 menu dispatch using a temporary INI; it never calls the application entry point or registers a package. The renderer writes a PNG contact sheet under `DesktopStub/build/tile-render-smoke`.
+`TestDesktopStubSource.cmd` runs source contracts, portable content scheduling/configuration tests, geometry tests, actual preset XML tests, and the production GDI+ renderer harness. `tools/TestContentRuntime.cmd` also exercises the actual host's content snapshots and Win32 menu dispatch using a temporary INI; it never calls the application entry point or registers a package. It first compiles an inert host flavor with `DESKTOPSTUB_ENABLE_HARDWARE_SOURCES=0` and checks that omitted CapsBlink/AsusBlink providers retain tray compatibility and give a clear status. The renderer writes a PNG contact sheet under `DesktopStub/build/tile-render-smoke`.
 
 ```cmd
 DesktopStub\TestDesktopStubSource.cmd

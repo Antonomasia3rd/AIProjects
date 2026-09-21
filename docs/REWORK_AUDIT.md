@@ -225,6 +225,10 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   retains the unified source configuration surface, and reports an omitted
   hardware source instead of silently producing blank content. The build flag,
   boundary files, source contracts, README, and content guide are all updated.
+- `ContentRuntimeNoHardwareTests.cpp` adds the second inert host compile flavor
+  with raw providers omitted. It checks the selected-source status and the
+  existing tray restart interface, but it is intentionally not built or run on
+  this laptop while the quarantine is unresolved.
 - No executable, compiler, package, Startup, hardware, network, or resident
   process was launched for this source-only change because Defender quarantine
   remains unresolved. This boundary is not evidence about the detection cause
