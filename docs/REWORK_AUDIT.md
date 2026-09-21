@@ -198,6 +198,23 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
 - Review of embedded Discord ActualTransport confirmed its mutable cancellation callback could be read by Gateway background/cleanup threads while reassigned, and was destroyed before clients that referenced it. Repo validation is replacing it with an operation-scoped shared relay of immutable callbacks, with inert concurrent/lifetime/timeout regressions. Completed-operation deadlines must not poison idle/later operations.
 - New hardware/model setup documentation is saved in `docs/content-engine.md`. Runtime wrapper fixes and the fresh build/smoke remain in progress; consult individual ledgers rather than treating this checkpoint as a completed repository migration.
 
+### Defender quarantine — 2026-09-21
+
+- Windows Defender detected `Trojan:Win32/Bearfoos.A!ml` in the fresh
+  `DesktopStubValidation.exe` and its temporary offline-smoke copy, then
+  quarantined both. The threat record reports no execution and no active
+  remaining instance. All binary builds, smoke runs, restoration, exclusions,
+  allow actions, and external submissions are paused.
+- A source-only review found the host combines AppX registration/PowerShell,
+  relaunch/activation, network providers, Discord, raw keyboard I/O and ASUS
+  ACPI access. That can affect generic ML classification but does not establish
+  a false positive or identify a single cause. Full evidence and operating
+  rules are in [the Defender incident record](audit-defender-detection.md).
+- The review independently hardened legacy Live Tile helper registration:
+  manifest/package values now use the shared literal PowerShell builder on all
+  registration paths. This is source-only verified pending a safe external or
+  clean-environment binary review.
+
 ### Account-expiry handoff and stopped work — 2026-09-20
 
 - User requested stopping tasks, cleaning temporary/permanent task artifacts and Codex memory, and a Desktop handoff. They explicitly chose to keep the edited project source. Development/validation stopped; both unfinished subagents were interrupted, and no task-created test processes remained at the final check.

@@ -41,6 +41,14 @@ int wmain(int argc, wchar_t** argv)
     try { aip::BuildAppxRegistrationScript({std::wstring(L"x\0y", 3), true}, aip::PowerShellSingleQuotedString); } catch (const std::invalid_argument&) { rejected = true; }
     Check(rejected, "embedded NUL is rejected before any execution");
     Check(aip::PowerShellSingleQuotedString(L"a'b$()`\"") == L"'a''b$()`\"'", "literal formatter only doubles apostrophes");
+    const std::wstring package = L"Vendor.Package$`Name'withquote";
+    const std::wstring retry =
+        L"Remove-AppxPackage -Package " + aip::PowerShellSingleQuotedString(package) +
+        L" -ErrorAction SilentlyContinue; " +
+        aip::BuildAppxRegistrationScript({paths[1], true}, aip::PowerShellSingleQuotedString);
+    Check(retry.find(aip::PowerShellSingleQuotedString(package)) != std::wstring::npos &&
+        retry.find(aip::PowerShellSingleQuotedString(paths[1])) != std::wstring::npos,
+        "retry command quotes both package and manifest literals");
     for (const auto& task : { L"DesktopStubStartup", L"NowPlayingTileStartup" }) {
         const auto xml = aip::BuildDesktopStartupExtension(task, L"Tile&App.exe", L"Tile <Name>",
             [](const std::wstring& s) { return aip::XmlEscape(s); });

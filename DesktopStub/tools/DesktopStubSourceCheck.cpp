@@ -507,6 +507,12 @@ int main(int argc, char** argv)
         checks.push_back({"Both DesktopStub PowerShell registration paths use the shared literal builder", "registration orchestration", generation,
             R"rx(RegisterAppxManifest.*BuildAppxRegistrationScript.*PowerShellSingleQuotedString.*BuildAppxRegistrationScript.*PowerShellSingleQuotedString)rx",
             "primary and fallback registration scripts must preserve literal manifest paths through the shared builder", false});
+        checks.push_back({"Live Tile helper registration uses shared literal paths", "live tile helper registration", liveTile,
+            R"rx(BuildAppxRegistrationScript.*PowerShellSingleQuotedString.*Remove-AppxPackage -Package.*PowerShellSingleQuotedString.*BuildAppxRegistrationScript.*PowerShellSingleQuotedString)rx",
+            "legacy helper registration and retry paths must quote manifest and package names through the shared builder", false});
+        checks.push_back({"Live Tile helper registration has no interpolated Add-AppxPackage path", "live tile helper registration", liveTile,
+            R"rx(Add-AppxPackage -Register \\")rx",
+            "literal command fragments must not interpolate paths through PowerShell double quotes", true});
         const std::string packagedStartup = ReadSource("..\\dependencies\\DesktopStub\\ga_packaged_startup.inc");
         const std::string sharedPackagedStartup = ReadSource("..\\dependencies\\packaged_startup.inc");
         checks.push_back({"Packaged startup uses queued worker and cached UI status", "packaged startup adapter", packagedStartup,

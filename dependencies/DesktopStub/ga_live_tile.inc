@@ -978,7 +978,9 @@ static bool EnsurePackagedLiveTileUpdateStubRegistered(
             std::lock_guard<std::mutex> lk(g_psMutex);
             registrationFailure = g_psMsg.empty() ? g_ui.powerShellRegistrationFailed : g_psMsg;
         };
-        std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
+        std::wstring ps = aip::BuildAppxRegistrationScript(
+            {manifestPath, true},
+            aip::PowerShellSingleQuotedString);
         registrationOk = PS_Run(ps);
         if (!registrationOk)
         {
@@ -993,9 +995,13 @@ static bool EnsurePackagedLiveTileUpdateStubRegistered(
             {
                 Log(g_ui.liveTileRegistrationBlockedRemoving.c_str(),
                     existingPackageFullName.c_str());
-                std::wstring retryPs = L"Remove-AppxPackage -Package \"" + existingPackageFullName +
-                    L"\" -ErrorAction SilentlyContinue; Add-AppxPackage -Register \"" + manifestPath +
-                    L"\" -ForceUpdateFromAnyVersion";
+                std::wstring retryPs =
+                    L"Remove-AppxPackage -Package " +
+                    aip::PowerShellSingleQuotedString(existingPackageFullName) +
+                    L" -ErrorAction SilentlyContinue; " +
+                    aip::BuildAppxRegistrationScript(
+                        {manifestPath, true},
+                        aip::PowerShellSingleQuotedString);
                 registrationOk = PS_Run(retryPs);
                 if (!registrationOk)
                     setPowerShellFailureMessage();
@@ -1065,7 +1071,9 @@ static bool ForceRegisterWin8HelperManifestForBackgroundTask(
     if (!refreshedThisProcess)
     {
         LogText(g_ui.liveTileRegisteringBackgroundTaskManifest);
-        std::wstring ps = L"Add-AppxPackage -Register \"" + manifestPath + L"\" -ForceUpdateFromAnyVersion";
+        std::wstring ps = aip::BuildAppxRegistrationScript(
+            {manifestPath, true},
+            aip::PowerShellSingleQuotedString);
         if (!PS_Run(ps))
         {
             std::lock_guard<std::mutex> lk(g_psMutex);
