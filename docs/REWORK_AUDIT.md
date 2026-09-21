@@ -245,6 +245,12 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   CharmTray, and DiscordRPC still own notification-icon state in their product
   implementations and should receive the same targeted review before any
   claim that every app has identical tray behavior.
+- The DesktopStub README also contained a stale claim that wide
+  `TileWideBlockAndText02` needed a fourth text field for its caption. Source
+  inspection and the portable XML/layout tests show the existing three-field
+  mapping is correct: primary wraps at left, badge occupies the numeric block,
+  and secondary is the short caption at right. The user-readable description
+  now matches the implementation and Microsoft template catalog.
 - No executable, compiler, package, Startup, hardware, network, or resident
   process was launched for this source-only change because Defender quarantine
   remains unresolved. This boundary is not evidence about the detection cause
