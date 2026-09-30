@@ -28,7 +28,7 @@ All of these use the shared tooltip policy. Native apps call `RegisterTrayIcon` 
 | PhotoCollage | One-shot image utility | CLI, shared logging, and a managed INI profile | A tray/startup surface requires a resident host and should not automatically run image jobs at sign-in. |
 | TaskSchedulerMigration | One-shot Task Scheduler utility | CLI, shared managed INI profile, and local validation | A tray/startup surface requires a resident host; automatically rerunning a migration at sign-in would be unsafe and confusing. |
 | ChromeProfileCounter | One-shot PowerShell script | Dependency-backed legacy wrapper and interactive menu | Needs an explicit profile and a companion before it can share the common desktop surface; it must not edit Chrome data at sign-in. |
-| YouTubeMusicMigrate | One-shot PowerShell utility | Script parameters and local files | Needs a product wrapper or companion before it can share the common desktop surface. |
+| YouTubeMusicMigrate | One-shot PowerShell utility | Script parameters plus script-root auth/config/cache files | Needs an explicit data-root migration before dependency extraction or a companion; it must not move browser-auth state or run unattended. |
 | WindhawkMods and LockScreenWin10 | Windhawk host modules | Windhawk settings and lifecycle | Windhawk owns loading and startup. A separate interactive companion or DesktopStub source would be needed for the common surface. |
 
 The rows above are open migration work. They do not authorize registry Run keys, scheduled tasks, per-machine startup, or hidden destructive login actions. Any new resident companion must use the existing per-user `shell:startup` helper, and packaged companions may expose the separately named StartupTask control.
