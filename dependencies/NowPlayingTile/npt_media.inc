@@ -105,7 +105,8 @@ static bool TryLoadArtworkUri(
     const winrt::Windows::Storage::Streams::IRandomAccessStreamReference& thumbnail,
     std::wstring& artworkHash,
     std::wstring& artworkUri,
-    std::wstring& artworkPath)
+    std::wstring& artworkPath,
+    aip::content::smtc_detail::Clock::time_point deadline)
 {
     artworkHash.clear();
     artworkUri.clear();
@@ -118,7 +119,7 @@ static bool TryLoadArtworkUri(
 
     try
     {
-        auto stream = thumbnail.OpenReadAsync().get();
+        auto stream = aip::content::smtc_detail::Await(thumbnail.OpenReadAsync(), deadline);
         if (stream == nullptr || stream.Size() == 0 || stream.Size() > 10ull * 1024ull * 1024ull)
         {
             return false;
@@ -126,7 +127,7 @@ static bool TryLoadArtworkUri(
 
         uint32_t size = static_cast<uint32_t>(stream.Size());
         winrt::Windows::Storage::Streams::DataReader reader(stream.GetInputStreamAt(0));
-        uint32_t loaded = reader.LoadAsync(size).get();
+        uint32_t loaded = aip::content::smtc_detail::Await(reader.LoadAsync(size), deadline);
         if (loaded == 0)
         {
             return false;
@@ -213,14 +214,17 @@ static MediaSnapshot ReadMediaSnapshot()
 
     try
     {
-        auto manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+        const auto deadline = aip::content::smtc_detail::Clock::now() +
+            std::chrono::milliseconds(SMTC_OPERATION_TIMEOUT_MS);
+        auto manager = aip::content::smtc_detail::Await(
+            GlobalSystemMediaTransportControlsSessionManager::RequestAsync(), deadline);
         auto session = manager.GetCurrentSession();
         if (session == nullptr)
         {
             return MediaSnapshot::Empty(L"No current SMTC session");
         }
 
-        auto props = session.TryGetMediaPropertiesAsync().get();
+        auto props = aip::content::smtc_detail::Await(session.TryGetMediaPropertiesAsync(), deadline);
         auto playback = session.GetPlaybackInfo();
 
         std::wstring sourceApp = session.SourceAppUserModelId().c_str();
@@ -244,7 +248,7 @@ static MediaSnapshot ReadMediaSnapshot()
         snapshot.status = PlaybackStatusText(playback.PlaybackStatus());
         snapshot.lastUpdated = MediaSnapshot::FormatClockTime();
 
-        TryLoadArtworkUri(props.Thumbnail(), snapshot.artworkHash, snapshot.artworkUri, snapshot.artworkPath);
+        TryLoadArtworkUri(props.Thumbnail(), snapshot.artworkHash, snapshot.artworkUri, snapshot.artworkPath, deadline);
         return snapshot;
     }
     catch (const winrt::hresult_error& ex)

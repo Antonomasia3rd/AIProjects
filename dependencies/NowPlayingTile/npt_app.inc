@@ -127,7 +127,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 
     try
     {
-        winrt::init_apartment(winrt::apartment_type::single_threaded);
+        // --once does no UI work. Use MTA so the bounded SMTC waits share the
+        // same worker-compatible apartment contract as the resident updater.
+        winrt::init_apartment(options.updateOnce
+            ? winrt::apartment_type::multi_threaded
+            : winrt::apartment_type::single_threaded);
     }
     catch (const winrt::hresult_error& ex)
     {

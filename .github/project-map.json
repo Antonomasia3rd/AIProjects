@@ -138,6 +138,7 @@
     "skipKey": "NowPlayingTile",
     "dependencyPaths": [
       "dependencies/desktop_app_baseline.h",
+      "dependencies/content_sources/smtc.inc",
       "dependencies/packaged_startup.inc",
       "dependencies/packaged_startup_manifest.h",
       "dependencies/appx_registration_script.h",

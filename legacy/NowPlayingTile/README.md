@@ -25,7 +25,7 @@ Syntax and source-regression checks:
 legacy\NowPlayingTile\BuildNowPlayingTile.cmd check
 ```
 
-The source checks cover command-line side effects, shared-baseline integration, initialization failures, strict settings parsing, bounded subprocess output, tray recovery, and window/message-loop error handling.
+The source checks cover command-line side effects, shared-baseline integration, initialization failures, strict settings parsing, bounded subprocess output, bounded SMTC metadata/artwork reads, tray recovery, and window/message-loop error handling.
 
 Package registration now shares `dependencies/appx_registration_script.h` and `dependencies/powershell_runner.inc` with DesktopStub. The startup extension uses `dependencies/packaged_startup_manifest.h`. Product code supplies identity, paths and presentation; it retains its media, artwork and widget behavior. The shared runner enforces the two-minute deadline even under continuous output and stops commands that exceed the 4 MiB capture limit. Registration failures terminate their script before a later package lookup can report misleading success.
 
@@ -178,6 +178,8 @@ SMTC access uses:
 ```text
 Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager
 ```
+
+Each metadata and artwork update has one five-second total deadline. A timeout or artwork-read failure keeps the text snapshot when possible and falls back from artwork/combined layouts to text; it does not leave the update worker waiting indefinitely.
 
 Windows 11 blocks these UWP/WinRT APIs in non-interactive service-like sessions. If the app displays `The specified service does not exist as an installed service`, launch it normally from Explorer, Start, or an interactive terminal.
 

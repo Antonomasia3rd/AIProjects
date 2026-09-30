@@ -170,8 +170,10 @@ code for nothing:
   default). Timeout cancellation is cooperative; synchronous Windows COM calls
   are not a hard process-level deadline. A missing media session returns idle
   text; unavailable APIs return an error. Build/read-only smoke:
-  `tools\TestSmtcSource.cmd`. The standalone NowPlayingTile app remains until
-  its artwork/widget/delivery features are integrated.
+  `tools\TestSmtcSource.cmd`. DesktopStub uses the provider directly, and
+  NowPlayingTile reuses its bounded asynchronous wait helper while retaining
+  artwork/widget/delivery behavior. The standalone app remains until that
+  feature set is integrated.
 - `content_engine.h`: platform-neutral composition policy and the canonical
   built-in source catalog used by DesktopStub configuration, tray source
   selection, provider dispatch, and offline render-only validation. Add a

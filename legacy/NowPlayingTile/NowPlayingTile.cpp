@@ -34,6 +34,7 @@ using std::min;
 #include <cerrno>
 
 #include "../../dependencies/desktop_app_baseline.h"
+#include "../../dependencies/content_sources/smtc.inc"
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
@@ -70,6 +71,7 @@ static constexpr DWORD POWERSHELL_COMMAND_TIMEOUT_MS = 120000;
 static constexpr DWORD POWERSHELL_POLL_MS = 50;
 static constexpr DWORD POWERSHELL_TERMINATE_WAIT_MS = 5000;
 static constexpr size_t POWERSHELL_OUTPUT_LIMIT_BYTES = 4u * 1024u * 1024u;
+static constexpr DWORD SMTC_OPERATION_TIMEOUT_MS = 5000;
 
 static HINSTANCE g_hInst = nullptr;
 static ULONG_PTR g_gdiplusToken = 0;

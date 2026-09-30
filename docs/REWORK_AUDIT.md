@@ -271,6 +271,13 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   or DiscordRPC entry could keep its provider active across cycles. The host
   now cancels those providers on an inactive slot while retaining RSS/SMTC/Notes
   cache warming for a responsive cycle.
+- NowPlayingTile had retained separate unbounded `.get()` waits for SMTC
+  manager/properties and thumbnail stream/read operations. It now consumes
+  the shared bounded `smtc_detail::Await` helper under one five-second budget,
+  including artwork extraction. The background worker was already MTA;
+  one-shot mode now initializes MTA as well. A failed artwork read falls back
+  to text rather than preventing a media snapshot. Source checks and the
+  project dependency map record this shared dependency; no binary was built.
 - No executable, compiler, package, Startup, hardware, network, or resident
   process was launched for this source-only change because Defender quarantine
   remains unresolved. This boundary is not evidence about the detection cause

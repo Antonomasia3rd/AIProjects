@@ -105,6 +105,7 @@ int main()
         const std::string tray = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_tray.inc");
         const std::string widget = ReadAll("..\\..\\dependencies\\NowPlayingTile\\npt_widget.inc");
         const std::string packagedStartup = ReadAll("..\\..\\dependencies\\packaged_startup.inc");
+        const std::string sharedSmtc = ReadAll("..\\..\\dependencies\\content_sources\\smtc.inc");
         const std::string sharedPowerShell = ReadAll("..\\..\\dependencies\\powershell_runner.inc");
         const std::string startupManifest = ReadAll("..\\..\\dependencies\\packaged_startup_manifest.h");
 
@@ -130,6 +131,41 @@ int main()
             "NowPlayingTile.cpp",
             mainSource,
             "../../dependencies/desktop_app_baseline.h");
+        RequireContains(
+            "shared bounded SMTC helper is consumed",
+            "NowPlayingTile.cpp + npt_media.inc",
+            mainSource + media,
+            "../../dependencies/content_sources/smtc.inc");
+        RequireContains(
+            "shared SMTC helper keeps timeout cancellation",
+            "dependencies/content_sources/smtc.inc",
+            sharedSmtc,
+            "operation.Cancel()");
+        RequireContains(
+            "SMTC metadata and artwork use the shared deadline helper",
+            "npt_media.inc",
+            media,
+            "aip::content::smtc_detail::Await(");
+        RequireContains(
+            "SMTC reads use one total deadline",
+            "NowPlayingTile sources",
+            mainSource + media,
+            "SMTC_OPERATION_TIMEOUT_MS");
+        RequireContains(
+            "one-shot SMTC runs from an MTA apartment",
+            "npt_app.inc",
+            app,
+            "options.updateOnce\n            ? winrt::apartment_type::multi_threaded");
+        RequireNotContains(
+            "NowPlayingTile SMTC source avoids unbounded WinRT get calls",
+            "npt_media.inc",
+            media,
+            ".get()");
+        RequireContains(
+            "NowPlayingTile links the WinRT runtime used by shared SMTC waits",
+            "BuildNowPlayingTile.cmd",
+            ReadAll("BuildNowPlayingTile.cmd"),
+            "runtimeobject.lib");
         RequireContains(
             "product implementation is consumed from the dependency overlay",
             "NowPlayingTile.cpp",
