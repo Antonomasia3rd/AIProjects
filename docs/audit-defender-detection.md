@@ -58,10 +58,15 @@ clean environment, but no binary was rebuilt or executed to validate this change
 
 ## Current operating rule
 
-- Do not rebuild, execute, restore, exclude, or allow the detected validation
-  binary on this shared laptop.
-- Continue only with source inspection and non-executable checks unless the
-  user explicitly changes that decision.
+- On 2026-09-30 the user explicitly authorized pushing the review branch and
+  resuming tests step-by-step, with Defender scanning before execution where
+  possible. Fresh builds and bounded inert tests are therefore permitted.
+- Scan new test/product outputs before execution. A detection, failed scan,
+  or missing/changed output blocks that stage. Do not restore old quarantined
+  files, add exclusions, or use Allow on device.
+- Package, Startup, account/network, real hardware and resident integrations
+  remain outside the default test path. A scan without detections is not proof
+  that a binary is safe or that the earlier detection was a false positive.
 - Do not submit a binary to Microsoft without the user's specific approval:
   submissions disclose the file externally.
 
@@ -69,6 +74,12 @@ Microsoft provides a developer workflow to submit a suspected false positive
 for analysis: [Submit files for analysis](https://learn.microsoft.com/en-us/unified-secops/submission-guide).
 Microsoft also documents false-positive handling for endpoint detections:
 [Address false positives and false negatives](https://learn.microsoft.com/en-us/defender-endpoint/defender-endpoint-false-positives-negatives).
+
+Custom file scans use `MpCmdRun -Scan -ScanType 3 -File <path>` without launching
+the target. Remediation remains enabled. Exit 0 alone is insufficient because
+it can mean successful remediation; the validation gate also checks fresh
+detection records, file presence and an unchanged SHA-256. See [Microsoft's
+command-line documentation](https://learn.microsoft.com/en-us/defender-endpoint/command-line-arguments-microsoft-defender-antivirus).
 
 ## Remaining engineering decision
 

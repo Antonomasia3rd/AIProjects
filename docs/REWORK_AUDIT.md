@@ -461,3 +461,11 @@ script product; 609 string defaults contain no raw CR/LF; whitespace checks
 pass. These are non-executing checks, not compilation or runtime passes. Work
 is on `codex/review-original-requirements`, separate from the automatic release
 branch. No application, hardware, account, service or Startup integration ran.
+
+The user subsequently authorized push-first and staged executable tests with
+pre-execution Defender scans. The review branch was pushed, then managed
+fixtures/products, RepoTools, Chrome synthetic fixtures, content model, and
+tile layout/XML/GDI+ suites compiled/scanned/passed as recorded in
+[the new validation ledger](VALIDATION_2026-09-30.md). Real integration remains
+disabled. The full host/menu and separate-process offline smoke still require
+their own outcomes; old evidence must not stand in for those runs.
