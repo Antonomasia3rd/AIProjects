@@ -17,7 +17,7 @@ Work log: 2026-09-07 onward. Findings come from the current working tree, which 
 | capsblink | C#/.NET Framework, WinForms/device I/O | Metadata wrapper plus `dependencies/capsblink`; consumes shared managed baseline. |
 | DNSAutoUpdate | C#/.NET Framework resident utility | Metadata wrapper plus `dependencies/DNSAutoUpdate`; consumes shared managed baseline. |
 | PhotoCollage | C#/.NET Framework/System.Drawing CLI | Metadata wrapper plus `dependencies/PhotoCollage`; shared managed INI profile and CLI overrides, but no resident tray/startup host. |
-| TaskSchedulerMigration | C#/.NET Framework/Task Scheduler COM CLI | Wrapper plus `dependencies/TaskSchedulerMigration`; no common resident tray/startup settings contract yet. |
+| TaskSchedulerMigration | C#/.NET Framework/Task Scheduler COM CLI | Wrapper plus `dependencies/TaskSchedulerMigration`; shared managed INI profile and CLI overrides, but no resident tray/startup host. |
 | AllowContentAboveLock | C#/.NET Framework Windows service | Declarative policy overlay over `dependencies/registry_notification_service.cs`. |
 | YourPhoneHideBanner | C#/.NET Framework Windows service | Declarative policy overlay over the same service engine. |
 | WindhawkMods (three mods) | C++23, Windhawk's Clang/MinGW SDK | Host-specific mods remain outside the 14-product release map and shared application lifecycle. |

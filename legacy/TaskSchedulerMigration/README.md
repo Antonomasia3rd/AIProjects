@@ -27,7 +27,8 @@ build\TaskSchedulerMigration.exe
 `TaskSchedulerMigration.cs` is intentionally only the product assembly-metadata
 overlay. The product-owned implementation is compiled from
 `dependencies\TaskSchedulerMigration\task_scheduler_migration_app.cs`; the
-project-local test file continues to exercise that implementation directly.
+project-local test file continues to exercise that implementation directly. It
+uses the shared managed INI and named-object dependencies for profile storage.
 
 The build also compiles and runs `TaskSchedulerMigrationLocalTests.cs`. To run those source and unit guardrails directly:
 
@@ -59,6 +60,29 @@ Preview changes:
 TaskSchedulerMigration.cmd -OldSID "S-1-5-21-..." -NewUser "DOMAIN\User" -WhatIf
 ```
 
+## Persistent Profile
+
+Direct commands retain the existing behavior: supplying `-OldSID` and
+`-NewUser` runs the requested migration unless `-WhatIf` is supplied. A profile
+is explicit through `--ini`; its first generated settings default to
+`WhatIf=1` and `Confirm=1`, so reviewing a saved migration does not immediately
+re-register tasks.
+
+Create or update a profile without opening Task Scheduler:
+
+```cmd
+TaskSchedulerMigration.cmd --ini "D:\Profiles\account-move.ini" --set Settings.OldSID="S-1-5-21-..." --set Settings.NewUser="DOMAIN\User" --configure-only
+TaskSchedulerMigration.cmd --ini "D:\Profiles\account-move.ini" --show-config
+```
+
+After reviewing the output, run the profile in preview mode with `--ini`. To
+apply it for one run, add `--apply`; `--no-confirm` skips per-task prompts only
+for that invocation. To make those choices persistent, set `Settings.WhatIf=0`
+or `Settings.Confirm=0` with `--configure-only`.
+
+`--set` is intentionally rejected unless `--configure-only` is also present.
+Changing a profile therefore cannot also begin a migration.
+
 ## Parameters
 
 - `-OldSID`: SID text to replace. Required.
@@ -68,6 +92,12 @@ TaskSchedulerMigration.cmd -OldSID "S-1-5-21-..." -NewUser "DOMAIN\User" -WhatIf
 - `-IncludeCredentialSensitiveTasks`: opt in to S4U tasks after reviewing their restricted-token behavior. `Password` and `InteractiveOrPassword` tasks remain blocked because Task Scheduler does not expose the stored password, so this utility cannot preserve their credentials safely.
 - `-WhatIf`: preview re-registration without changing tasks.
 - `-Confirm`: prompt before each matching task is re-registered.
+- `--apply` / `--no-what-if`: allow task registration for the current invocation.
+- `--no-confirm`: skip per-task prompts for the current invocation.
+- `--ini`: use a persistent profile. Relative paths resolve from the helper executable; paths stored inside the profile resolve from the profile directory.
+- `--set Settings.Key=Value`: persist `OldSID`, `NewUser`, `BackupDirectory`, `TaskPath`, `IncludeCredentialSensitiveTasks`, `WhatIf`, or `Confirm`. Requires `--configure-only`.
+- `--configure-only`: create, validate, and optionally update a profile without Task Scheduler access.
+- `--show-config`: print effective profile values without Task Scheduler access.
 - `--help`: print usage and exit before strict parsing, filesystem access, or Task Scheduler access.
 - `--version`: print the executable version and exit before strict parsing, filesystem access, or Task Scheduler access.
 
@@ -90,3 +120,4 @@ TaskSchedulerMigration.cmd -OldSID "S-1-5-21-..." -NewUser "DOMAIN\User" -WhatIf
 ## Generated Files
 
 - XML backups under `TaskSchedulerMigrationBackup` beside the compiled helper executable unless `-BackupDirectory` is changed.
+- `TaskSchedulerMigration.ini` beside the compiled helper executable when using the default profile path, or the file supplied through `--ini`.

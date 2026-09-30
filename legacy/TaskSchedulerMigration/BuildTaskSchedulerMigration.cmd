@@ -16,7 +16,11 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 
 for %%I in ("%ROOT%..\..") do set "REPO=%%~fI"
 
-"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /r:Microsoft.CSharp.dll /out:"%OUT%" "%REPO%\dependencies\TaskSchedulerMigration\task_scheduler_migration_app.cs" "%ROOT%TaskSchedulerMigration.cs"
+"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /r:Microsoft.CSharp.dll /out:"%OUT%" ^
+  "%REPO%\dependencies\managed_named_objects.cs" ^
+  "%REPO%\dependencies\managed_ini.cs" ^
+  "%REPO%\dependencies\TaskSchedulerMigration\task_scheduler_migration_app.cs" ^
+  "%ROOT%TaskSchedulerMigration.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 call "%ROOT%TestTaskSchedulerMigration.cmd"

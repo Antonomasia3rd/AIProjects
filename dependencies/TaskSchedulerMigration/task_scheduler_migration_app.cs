@@ -9,6 +9,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
+using AIProjects.Dependencies;
 
 static class TaskSchedulerMigration
 {
@@ -25,6 +26,16 @@ static class TaskSchedulerMigration
     const int TASK_LOGON_SERVICE_ACCOUNT = 5;
     const int TASK_LOGON_INTERACTIVE_TOKEN_OR_PASSWORD = 6;
 
+    const string SettingsSection = "Settings";
+    const string OldSidKey = "OldSID";
+    const string NewUserKey = "NewUser";
+    const string BackupDirectoryKey = "BackupDirectory";
+    const string TaskPathKey = "TaskPath";
+    const string IncludeCredentialSensitiveTasksKey = "IncludeCredentialSensitiveTasks";
+    const string WhatIfKey = "WhatIf";
+    const string ConfirmKey = "Confirm";
+    const string DefaultBackupDirectoryName = "TaskSchedulerMigrationBackup";
+
     sealed class Options
     {
         public string OldSID;
@@ -36,6 +47,19 @@ static class TaskSchedulerMigration
         public bool Confirm;
         public bool Help;
         public bool Version;
+        public string IniPath;
+    }
+
+    sealed class ParsedCommand
+    {
+        public string IniPath;
+        public bool ProfileMode;
+        public readonly Dictionary<string, string> DirectSettings =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public readonly Dictionary<string, string> PersistentSettings =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public bool ConfigureOnly;
+        public bool ShowConfiguration;
     }
 
     static int Main(string[] args)
@@ -56,7 +80,18 @@ static class TaskSchedulerMigration
 
         try
         {
-            var options = ParseArgs(args);
+            ParsedCommand command = ParseCommandLine(args);
+            Options options = BuildOptions(command);
+            if (command.ConfigureOnly)
+            {
+                Console.WriteLine("Configuration is valid: " + options.IniPath);
+                return 0;
+            }
+            if (command.ShowConfiguration)
+            {
+                PrintConfiguration(options);
+                return 0;
+            }
             if (String.IsNullOrWhiteSpace(options.OldSID) || String.IsNullOrWhiteSpace(options.NewUser))
             {
                 Usage();
@@ -73,59 +108,385 @@ static class TaskSchedulerMigration
 
     static Options ParseArgs(string[] args)
     {
-        var o = new Options();
+        return BuildOptions(ParseCommandLine(args));
+    }
+
+    static ParsedCommand ParseCommandLine(string[] args)
+    {
+        var parsed = new ParsedCommand();
+        if (args == null)
+            args = new string[0];
         for (int i = 0; i < args.Length; ++i)
         {
             string a = args[i];
-            if (IsHelpOption(a)) { o.Help = true; continue; }
-            if (IsVersionOption(a)) { o.Version = true; continue; }
-            if (Is(a, "-IncludeCredentialSensitiveTasks") || Is(a, "--include-credential-sensitive-tasks")) { o.IncludeCredentialSensitiveTasks = true; continue; }
-            if (Is(a, "-WhatIf") || Is(a, "--what-if")) { o.WhatIf = true; continue; }
-            if (Is(a, "-Confirm") || Is(a, "--confirm")) { o.Confirm = true; continue; }
-
-            if (Is(a, "-OldSID") || Is(a, "--old-sid")) o.OldSID = RequireValue(args, ref i, a);
-            else if (Is(a, "-NewUser") || Is(a, "--new-user")) o.NewUser = RequireValue(args, ref i, a);
-            else if (Is(a, "-BackupDirectory") || Is(a, "--backup-directory")) o.BackupDirectory = RequireValue(args, ref i, a);
-            else if (Is(a, "-TaskPath") || Is(a, "--task-path")) o.TaskPath = RequireValue(args, ref i, a);
+            if (IsHelpOption(a) || IsVersionOption(a)) continue;
+            if (Is(a, "-IncludeCredentialSensitiveTasks") || Is(a, "--include-credential-sensitive-tasks"))
+                SetDirectSetting(parsed, IncludeCredentialSensitiveTasksKey, "1");
+            else if (Is(a, "--no-include-credential-sensitive-tasks"))
+                SetDirectSetting(parsed, IncludeCredentialSensitiveTasksKey, "0");
+            else if (Is(a, "-WhatIf") || Is(a, "--what-if"))
+                SetDirectSetting(parsed, WhatIfKey, "1");
+            else if (Is(a, "--apply") || Is(a, "--no-what-if"))
+                SetDirectSetting(parsed, WhatIfKey, "0");
+            else if (Is(a, "-Confirm") || Is(a, "--confirm"))
+                SetDirectSetting(parsed, ConfirmKey, "1");
+            else if (Is(a, "--no-confirm"))
+                SetDirectSetting(parsed, ConfirmKey, "0");
+            else if (Is(a, "-OldSID") || Is(a, "--old-sid"))
+                SetDirectSetting(parsed, OldSidKey, RequireValue(args, ref i, a));
+            else if (Is(a, "-NewUser") || Is(a, "--new-user"))
+                SetDirectSetting(parsed, NewUserKey, RequireValue(args, ref i, a));
+            else if (Is(a, "-BackupDirectory") || Is(a, "--backup-directory"))
+                SetDirectSetting(parsed, BackupDirectoryKey, RequireValue(args, ref i, a));
+            else if (Is(a, "-TaskPath") || Is(a, "--task-path"))
+                SetDirectSetting(parsed, TaskPathKey, RequireValue(args, ref i, a));
+            else if (Is(a, "--ini") || Is(a, "-IniFile"))
+                parsed.IniPath = RequireValue(args, ref i, a);
+            else if (Is(a, "--set"))
+                SetPersistentSetting(parsed, RequireValue(args, ref i, a));
+            else if (Is(a, "--configure-only"))
+                parsed.ConfigureOnly = true;
+            else if (Is(a, "--show-config") || Is(a, "--print-config"))
+                parsed.ShowConfiguration = true;
             else throw new ArgumentException("Unknown argument: " + a);
         }
 
-        if (!String.IsNullOrWhiteSpace(o.OldSID))
+        parsed.ProfileMode = parsed.IniPath != null ||
+            parsed.PersistentSettings.Count != 0 ||
+            parsed.ConfigureOnly ||
+            parsed.ShowConfiguration;
+        if (parsed.ConfigureOnly && parsed.DirectSettings.Count != 0)
+            throw new ArgumentException("--configure-only accepts persistent --set values, not one-run migration options.");
+        if (parsed.PersistentSettings.Count != 0 && !parsed.ConfigureOnly)
+            throw new ArgumentException("--set requires --configure-only so a configuration change cannot also start a migration.");
+        return parsed;
+    }
+
+    static void SetDirectSetting(ParsedCommand parsed, string key, string value)
+    {
+        parsed.DirectSettings[key] = NormalizeSettingValue(key, value);
+    }
+
+    static void SetPersistentSetting(ParsedCommand parsed, string assignment)
+    {
+        int equals = assignment.IndexOf('=');
+        if (equals <= 0)
+            throw new ArgumentException("--set requires Settings.Key=Value.");
+        string key = assignment.Substring(0, equals).Trim();
+        int sectionSeparator = key.IndexOf('.');
+        if (sectionSeparator >= 0)
         {
-            try
-            {
-                o.OldSID = new SecurityIdentifier(o.OldSID).Value;
-            }
-            catch (ArgumentException)
-            {
-                throw new ArgumentException("-OldSID is not a valid Windows SID: " + o.OldSID);
-            }
+            string section = key.Substring(0, sectionSeparator);
+            if (!section.Equals(SettingsSection, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("--set supports only the [Settings] section.");
+            key = key.Substring(sectionSeparator + 1);
         }
-        if (!String.IsNullOrWhiteSpace(o.NewUser) &&
-            o.NewUser.Any(ch => Char.IsControl(ch)))
+        key = CanonicalSettingName(key);
+        if (key == null)
+            throw new ArgumentException("Unknown setting: " + assignment.Substring(0, equals).Trim());
+        parsed.PersistentSettings[key] = NormalizeSettingValue(
+            key,
+            assignment.Substring(equals + 1));
+    }
+
+    static Options BuildOptions(ParsedCommand command)
+    {
+        if (!command.ProfileMode)
         {
-            throw new ArgumentException("-NewUser contains control characters.");
+            Options directOptions = OptionsFromSettings(
+                DefaultSettingValues(false),
+                AppDomain.CurrentDomain.BaseDirectory);
+            ApplyDirectSettings(directOptions, command.DirectSettings);
+            ValidateOptions(directOptions);
+            return directOptions;
         }
 
-        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        if (String.IsNullOrWhiteSpace(o.BackupDirectory))
-            o.BackupDirectory = Path.Combine(baseDir, "TaskSchedulerMigrationBackup");
-        else if (!Path.IsPathRooted(o.BackupDirectory))
-            o.BackupDirectory = Path.Combine(baseDir, o.BackupDirectory);
-        return o;
+        string iniPath = ResolveIniPath(command.IniPath);
+        ManagedIniFileSpec iniFile = BuildIniFileSpec(iniPath);
+        Dictionary<string, string> values = LoadEffectiveSettings(iniFile);
+        foreach (KeyValuePair<string, string> setting in command.PersistentSettings)
+            values[setting.Key] = setting.Value;
+
+        Options options = OptionsFromSettings(values, Path.GetDirectoryName(iniPath));
+        options.IniPath = iniPath;
+        ValidateOptions(options);
+        if (command.PersistentSettings.Count != 0)
+        {
+            string error;
+            if (!ManagedIniFile.SaveSectionBatch(iniFile, command.PersistentSettings, out error))
+                throw new IOException("Could not save TaskSchedulerMigration configuration: " + error);
+        }
+        ApplyDirectSettings(options, command.DirectSettings);
+        ValidateOptions(options);
+        return options;
+    }
+
+    static Dictionary<string, string> LoadEffectiveSettings(ManagedIniFileSpec iniFile)
+    {
+        Dictionary<string, string> values = DefaultSettingValues(true);
+        foreach (KeyValuePair<string, string> rawSetting in ManagedIniFile.LoadSection(iniFile))
+        {
+            string key = CanonicalSettingName(rawSetting.Key);
+            if (key == null)
+                throw new InvalidDataException("Unknown [Settings] key: " + rawSetting.Key);
+            try
+            {
+                values[key] = NormalizeSettingValue(key, rawSetting.Value);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException("Invalid [Settings] " + rawSetting.Key + ": " + ex.Message, ex);
+            }
+        }
+        return values;
+    }
+
+    static Dictionary<string, string> DefaultSettingValues(bool profileDefaults)
+    {
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { OldSidKey, "" },
+            { NewUserKey, "" },
+            { BackupDirectoryKey, DefaultBackupDirectoryName },
+            { TaskPathKey, "" },
+            { IncludeCredentialSensitiveTasksKey, "0" },
+            { WhatIfKey, profileDefaults ? "1" : "0" },
+            { ConfirmKey, profileDefaults ? "1" : "0" }
+        };
+    }
+
+    static Options OptionsFromSettings(Dictionary<string, string> values, string profileDirectory)
+    {
+        return new Options
+        {
+            OldSID = values[OldSidKey],
+            NewUser = values[NewUserKey],
+            BackupDirectory = ResolveProfilePath(
+                profileDirectory,
+                String.IsNullOrWhiteSpace(values[BackupDirectoryKey])
+                    ? DefaultBackupDirectoryName
+                    : values[BackupDirectoryKey]),
+            TaskPath = values[TaskPathKey],
+            IncludeCredentialSensitiveTasks = ParseBoolean(
+                values[IncludeCredentialSensitiveTasksKey],
+                IncludeCredentialSensitiveTasksKey),
+            WhatIf = ParseBoolean(values[WhatIfKey], WhatIfKey),
+            Confirm = ParseBoolean(values[ConfirmKey], ConfirmKey)
+        };
+    }
+
+    static void ApplyDirectSettings(Options options, Dictionary<string, string> values)
+    {
+        string value;
+        if (values.TryGetValue(OldSidKey, out value)) options.OldSID = value;
+        if (values.TryGetValue(NewUserKey, out value)) options.NewUser = value;
+        if (values.TryGetValue(BackupDirectoryKey, out value))
+            options.BackupDirectory = ResolveExecutableDirectoryPath(
+                String.IsNullOrWhiteSpace(value) ? DefaultBackupDirectoryName : value);
+        if (values.TryGetValue(TaskPathKey, out value)) options.TaskPath = value;
+        if (values.TryGetValue(IncludeCredentialSensitiveTasksKey, out value))
+            options.IncludeCredentialSensitiveTasks = ParseBoolean(value, IncludeCredentialSensitiveTasksKey);
+        if (values.TryGetValue(WhatIfKey, out value)) options.WhatIf = ParseBoolean(value, WhatIfKey);
+        if (values.TryGetValue(ConfirmKey, out value)) options.Confirm = ParseBoolean(value, ConfirmKey);
+    }
+
+    static void ValidateOptions(Options options)
+    {
+        options.OldSID = NormalizeOldSid(options.OldSID);
+        options.NewUser = NormalizeNewUser(options.NewUser);
+        options.TaskPath = NormalizeTaskPath(options.TaskPath);
+        if (String.IsNullOrEmpty(options.BackupDirectory))
+            throw new InvalidDataException("BackupDirectory must not be empty.");
+    }
+
+    static void PrintConfiguration(Options options)
+    {
+        Console.WriteLine("Configuration: " + options.IniPath);
+        Console.WriteLine("OldSID = " + (options.OldSID ?? ""));
+        Console.WriteLine("NewUser = " + (options.NewUser ?? ""));
+        Console.WriteLine("BackupDirectory = " + options.BackupDirectory);
+        Console.WriteLine("TaskPath = " + (options.TaskPath ?? ""));
+        Console.WriteLine("IncludeCredentialSensitiveTasks = " + options.IncludeCredentialSensitiveTasks.ToString().ToLowerInvariant());
+        Console.WriteLine("WhatIf = " + options.WhatIf.ToString().ToLowerInvariant());
+        Console.WriteLine("Confirm = " + options.Confirm.ToString().ToLowerInvariant());
+    }
+
+    static ManagedIniFileSpec BuildIniFileSpec(string iniPath)
+    {
+        return new ManagedIniFileSpec
+        {
+            FilePath = iniPath,
+            SectionName = SettingsSection,
+            DefaultContents =
+                "[Settings]" + Environment.NewLine +
+                "; Profile runs default to preview and confirmation. Direct CLI use keeps its legacy behavior." + Environment.NewLine +
+                OldSidKey + "=" + Environment.NewLine +
+                NewUserKey + "=" + Environment.NewLine +
+                BackupDirectoryKey + "=" + DefaultBackupDirectoryName + Environment.NewLine +
+                TaskPathKey + "=" + Environment.NewLine +
+                IncludeCredentialSensitiveTasksKey + "=0" + Environment.NewLine +
+                WhatIfKey + "=1" + Environment.NewLine +
+                ConfirmKey + "=1" + Environment.NewLine,
+            Log = delegate(string message)
+            {
+                Console.Error.WriteLine("TaskSchedulerMigration configuration: " + message);
+            }
+        };
+    }
+
+    static string ResolveIniPath(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TaskSchedulerMigration.ini");
+        return ResolveExecutableDirectoryPath(value);
+    }
+
+    static string ResolveProfilePath(string profileDirectory, string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return null;
+        try
+        {
+            return Path.GetFullPath(
+                Path.IsPathRooted(value) ? value : Path.Combine(profileDirectory, value));
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException("Invalid profile path '" + value + "': " + ex.Message, ex);
+        }
+    }
+
+    static string ResolveExecutableDirectoryPath(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("A file path must not be empty.");
+        try
+        {
+            string path = Path.IsPathRooted(value)
+                ? value
+                : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, value);
+            return Path.GetFullPath(path);
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException("Invalid file path '" + value + "': " + ex.Message, ex);
+        }
+    }
+
+    static string CanonicalSettingName(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return null;
+        string key = value.Trim();
+        if (key.Equals(OldSidKey, StringComparison.OrdinalIgnoreCase)) return OldSidKey;
+        if (key.Equals(NewUserKey, StringComparison.OrdinalIgnoreCase)) return NewUserKey;
+        if (key.Equals(BackupDirectoryKey, StringComparison.OrdinalIgnoreCase)) return BackupDirectoryKey;
+        if (key.Equals(TaskPathKey, StringComparison.OrdinalIgnoreCase)) return TaskPathKey;
+        if (key.Equals(IncludeCredentialSensitiveTasksKey, StringComparison.OrdinalIgnoreCase)) return IncludeCredentialSensitiveTasksKey;
+        if (key.Equals(WhatIfKey, StringComparison.OrdinalIgnoreCase)) return WhatIfKey;
+        if (key.Equals(ConfirmKey, StringComparison.OrdinalIgnoreCase)) return ConfirmKey;
+        return null;
+    }
+
+    static string NormalizeSettingValue(string key, string value)
+    {
+        if (value == null || value.IndexOfAny(new[] { '\r', '\n', '\0' }) >= 0)
+            throw new ArgumentException("The setting value is invalid.");
+        if (key.Equals(OldSidKey, StringComparison.OrdinalIgnoreCase))
+            return NormalizeOldSid(value);
+        if (key.Equals(NewUserKey, StringComparison.OrdinalIgnoreCase))
+            return NormalizeNewUser(value);
+        if (key.Equals(BackupDirectoryKey, StringComparison.OrdinalIgnoreCase))
+        {
+            if (String.IsNullOrWhiteSpace(value)) return "";
+            ValidatePath(value, BackupDirectoryKey);
+            return value;
+        }
+        if (key.Equals(TaskPathKey, StringComparison.OrdinalIgnoreCase))
+            return NormalizeTaskPath(value);
+        if (key.Equals(IncludeCredentialSensitiveTasksKey, StringComparison.OrdinalIgnoreCase) ||
+            key.Equals(WhatIfKey, StringComparison.OrdinalIgnoreCase) ||
+            key.Equals(ConfirmKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseBoolean(value, key) ? "1" : "0";
+        }
+        throw new ArgumentException("Unknown setting: " + key);
+    }
+
+    static string NormalizeOldSid(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return "";
+        try
+        {
+            return new SecurityIdentifier(value).Value;
+        }
+        catch (ArgumentException)
+        {
+            throw new ArgumentException("OldSID is not a valid Windows SID: " + value);
+        }
+    }
+
+    static string NormalizeNewUser(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return "";
+        if (value.Any(ch => Char.IsControl(ch)))
+            throw new ArgumentException("NewUser contains control characters.");
+        return value;
+    }
+
+    static string NormalizeTaskPath(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return "";
+        if (value.Any(ch => Char.IsControl(ch)))
+            throw new ArgumentException("TaskPath contains control characters.");
+        return value;
+    }
+
+    static bool ParseBoolean(string value, string settingName)
+    {
+        string normalized = (value ?? "").Trim().ToLowerInvariant();
+        if (normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on")
+            return true;
+        if (normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off")
+            return false;
+        throw new ArgumentException(settingName + " expects a boolean value.");
+    }
+
+    static void ValidatePath(string value, string settingName)
+    {
+        try
+        {
+            Path.GetFullPath(value);
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException("Invalid " + settingName + " path: " + ex.Message, ex);
+        }
     }
 
     static void Usage()
     {
         Console.WriteLine("Usage:");
-        Console.WriteLine("  TaskSchedulerMigration.exe -OldSID S-1-5-21-... -NewUser DOMAIN\\User [options]");
+        Console.WriteLine("  TaskSchedulerMigration.exe [-OldSID S-1-5-21-... -NewUser DOMAIN\\User] [options]");
         Console.WriteLine();
-        Console.WriteLine("Options:");
+        Console.WriteLine("One-run migration options:");
         Console.WriteLine("  -TaskPath \\Folder\\                 scan only one task folder");
         Console.WriteLine("  -BackupDirectory PATH              choose the XML backup directory");
         Console.WriteLine("  -IncludeCredentialSensitiveTasks   allow S4U tasks (password modes remain blocked)");
-        Console.WriteLine("  -WhatIf                            preview without backups or registration");
-        Console.WriteLine("  -Confirm                           prompt before each registration");
+        Console.WriteLine("  -WhatIf | --what-if                preview without backups or registration");
+        Console.WriteLine("  --apply | --no-what-if             allow registration for this invocation");
+        Console.WriteLine("  -Confirm | --confirm               prompt before each registration");
+        Console.WriteLine("  --no-confirm                       skip prompts for this invocation");
+        Console.WriteLine();
+        Console.WriteLine("Persistent profile:");
+        Console.WriteLine("  --ini PATH                         use a profile (default profile values preview and confirm)");
+        Console.WriteLine("  --set Settings.Key=Value           persist OldSID, NewUser, BackupDirectory, TaskPath,");
+        Console.WriteLine("                                     IncludeCredentialSensitiveTasks, WhatIf, or Confirm");
+        Console.WriteLine("  --configure-only                   validate/create the profile and save --set values without Task Scheduler access");
+        Console.WriteLine("  --show-config                      print effective profile values without Task Scheduler access");
         Console.WriteLine("  --help                             show help without side effects");
         Console.WriteLine("  --version                          show version without side effects");
     }
@@ -681,9 +1042,11 @@ static class TaskSchedulerMigration
             "-h", "--help", "/?", "-v", "--version", "-Version",
             "-IncludeCredentialSensitiveTasks",
             "--include-credential-sensitive-tasks", "-WhatIf", "--what-if",
-            "-Confirm", "--confirm", "-OldSID", "--old-sid", "-NewUser",
+            "--no-include-credential-sensitive-tasks", "--apply", "--no-what-if",
+            "-Confirm", "--confirm", "--no-confirm", "-OldSID", "--old-sid", "-NewUser",
             "--new-user", "-BackupDirectory", "--backup-directory", "-TaskPath",
-            "--task-path"
+            "--task-path", "--ini", "-IniFile", "--set", "--configure-only",
+            "--show-config", "--print-config"
         };
         return options.Any(option => Is(value, option));
     }

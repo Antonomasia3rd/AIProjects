@@ -245,6 +245,8 @@
     "artifactPath": "legacy/TaskSchedulerMigration/build/TaskSchedulerMigration.exe",
     "skipKey": "TaskSchedulerMigration",
     "dependencyPaths": [
+      "dependencies/managed_named_objects.cs",
+      "dependencies/managed_ini.cs",
       "dependencies/TaskSchedulerMigration"
     ],
     "artifactPaths": [

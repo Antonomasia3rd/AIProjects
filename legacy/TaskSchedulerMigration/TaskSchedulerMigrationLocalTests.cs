@@ -18,6 +18,7 @@ static class TaskSchedulerMigrationLocalTests
         TestLogonPolicy();
         TestWhatIfGate(sourcePath);
         TestAtomicBackupWrite(sourcePath);
+        TestProfileConfiguration();
         TestInformationalOptions();
 
         if (failures != 0)
@@ -153,6 +154,111 @@ static class TaskSchedulerMigrationLocalTests
         }
     }
 
+    static void TestProfileConfiguration()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "AIProjects-TaskSchedulerMigrationProfileTests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string profile = Path.Combine(root, "migration.ini");
+            int result;
+            string output = CaptureMain(
+                PrivateMethod("Main"),
+                new[]
+                {
+                    "--ini", profile,
+                    "--set", "Settings.OldSID=S-1-5-18",
+                    "--set", "Settings.NewUser=DOMAIN\\MigratedUser",
+                    "--set", "Settings.TaskPath=\\Migration",
+                    "--configure-only"
+                },
+                out result);
+            Check(
+                result == 0 && File.Exists(profile) &&
+                output.Contains("Configuration is valid:"),
+                "profile configuration saves without activating Task Scheduler");
+
+            object profileOptions = PrivateMethod("ParseArgs").Invoke(
+                null,
+                new object[] { new[] { "--ini", profile } });
+            Check(
+                (string)GetField(profileOptions, "OldSID") == "S-1-5-18" &&
+                (string)GetField(profileOptions, "NewUser") == "DOMAIN\\MigratedUser" &&
+                (string)GetField(profileOptions, "BackupDirectory") == Path.Combine(
+                    root,
+                    "TaskSchedulerMigrationBackup") &&
+                (bool)GetField(profileOptions, "WhatIf") &&
+                (bool)GetField(profileOptions, "Confirm"),
+                "explicit profiles default to preview and confirmation with paths relative to the profile");
+
+            output = CaptureMain(
+                PrivateMethod("Main"),
+                new[] { "--ini", profile, "--show-config" },
+                out result);
+            Check(
+                result == 0 && output.Contains("WhatIf = true") &&
+                output.Contains("Confirm = true"),
+                "profile inspection does not activate Task Scheduler");
+
+            object oneRunProfileOptions = PrivateMethod("ParseArgs").Invoke(
+                null,
+                new object[] { new[] { "--ini", profile, "--apply", "--no-confirm" } });
+            Check(
+                !(bool)GetField(oneRunProfileOptions, "WhatIf") &&
+                !(bool)GetField(oneRunProfileOptions, "Confirm"),
+                "profile preview and confirmation defaults accept explicit one-run overrides");
+
+            string beforeInvalidUpdate = File.ReadAllText(profile);
+            output = CaptureMain(
+                PrivateMethod("Main"),
+                new[]
+                {
+                    "--ini", profile,
+                    "--set", "Settings.WhatIf=not-a-boolean",
+                    "--configure-only"
+                },
+                out result);
+            Check(
+                result == 1 && output.Contains("WhatIf expects a boolean value") &&
+                File.ReadAllText(profile) == beforeInvalidUpdate,
+                "invalid profile changes do not alter the saved migration configuration");
+
+            output = CaptureMain(
+                PrivateMethod("Main"),
+                new[] { "--ini", profile, "--set", "Settings.Confirm=0" },
+                out result);
+            Check(
+                result == 1 && output.Contains("requires --configure-only"),
+                "persistent migration settings require an explicit non-running configuration command");
+
+            output = CaptureMain(
+                PrivateMethod("Main"),
+                new[] { "--ini", profile, "--old-sid", "S-1-5-18", "--configure-only" },
+                out result);
+            Check(
+                result == 1 && output.Contains("persistent --set values"),
+                "one-run migration options stay separate from profile mutation");
+
+            object directOptions = PrivateMethod("ParseArgs").Invoke(
+                null,
+                new object[]
+                {
+                    new[] { "--old-sid", "S-1-5-18", "--new-user", "DOMAIN\\DirectUser" }
+                });
+            Check(
+                !(bool)GetField(directOptions, "WhatIf") &&
+                !(bool)GetField(directOptions, "Confirm") &&
+                GetField(directOptions, "IniPath") == null,
+                "direct migration commands retain their pre-profile apply-without-confirm defaults");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
     static void TestInformationalOptions()
     {
         MethodInfo main = PrivateMethod("Main");
@@ -215,6 +321,16 @@ static class TaskSchedulerMigrationLocalTests
         if (method == null)
             throw new MissingMethodException(typeof(TaskSchedulerMigration).FullName, name);
         return method;
+    }
+
+    static object GetField(object target, string name)
+    {
+        FieldInfo field = target.GetType().GetField(
+            name,
+            BindingFlags.Public | BindingFlags.Instance);
+        if (field == null)
+            throw new MissingFieldException(target.GetType().FullName, name);
+        return field.GetValue(target);
     }
 
     static void Check(bool condition, string description)

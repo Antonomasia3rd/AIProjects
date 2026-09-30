@@ -354,8 +354,8 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   WhatIf/Confirm gate ordering. It has not been compiled or run because the
   Defender quarantine restriction remains in force. No Task Scheduler COM call
   or task registration occurred during this review.
-- This remains a one-shot migration utility. Its missing profile/tray/startup
-  surface is recorded in `PRODUCT_SURFACES.md`; a future profile must not turn a
+- This remains a one-shot migration utility. Its tray/startup surface is still
+  recorded in `PRODUCT_SURFACES.md`; the profile follow-up below does not turn a
   saved SID migration into an unattended sign-in action.
 
 ### Source-only DesktopStub legacy-preset parity follow-up — 2026-09-30
@@ -392,3 +392,20 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   `PRODUCT_SURFACES.md`: services/deskband/Windhawk need a companion or source
   migration; PhotoCollage has a safe profile but no resident host; and
   TaskSchedulerMigration must not become an unattended sign-in operation.
+
+### Source-only TaskSchedulerMigration profile follow-up — 2026-09-30
+
+- TaskSchedulerMigration now has an explicit shared managed-INI profile mode.
+  Direct `-OldSID`/`-NewUser` commands retain their existing behavior and do not
+  create a profile. `--ini`, `--show-config`, or `--configure-only` selects the
+  profile path.
+- New profiles default to `WhatIf=1` and `Confirm=1`. The profile must be
+  explicitly invoked, and `--set` requires `--configure-only`, so saving a SID
+  migration cannot also begin it. `--apply`/`--no-what-if` and `--no-confirm`
+  provide one-run overrides after a review.
+- The source/test wiring now compiles the shared managed named-object and INI
+  dependencies. New inert local tests cover profile creation, relative backup
+  paths, safe default preview/confirmation, inspection, invalid-update
+  preservation, configuration-only enforcement, and direct-command backward
+  compatibility. They were not compiled or run; no Task Scheduler COM service,
+  task backup, or registration action occurred on this laptop.
