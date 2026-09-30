@@ -42,8 +42,9 @@ PhotoCollage.cmd -InputFolder "C:\Photos" -OutputFile "C:\Photos\collage.jpg" -C
 
 ## Persistent Profile
 
-The executable creates `PhotoCollage.ini` beside itself when it first reads a
-normal command or configuration command. The profile stores defaults in its
+`--configure-only` creates `PhotoCollage.ini` beside the executable or at the
+selected `--ini` path. Normal runs and `--show-config` read an existing profile
+or use defaults without creating one. The profile stores defaults in its
 `[Settings]` section. Relative profile paths resolve from the profile's folder,
 which makes a copied profile self-contained.
 
@@ -66,14 +67,14 @@ options remain one-run overrides and do not modify the profile.
 
 ## Parameters
 
-- `-InputFolder`: folder to scan recursively. Required.
-- `-OutputFile`: output path ending in `.jpg`, `.jpeg`, `.png`, or `.bmp`. Required.
+- `-InputFolder`: folder to scan recursively. Supply it here or in the INI for image jobs.
+- `-OutputFile`: output path ending in `.jpg`, `.jpeg`, `.png`, or `.bmp`. Supply it here or in the INI for image jobs.
 - `-Cols`: number of columns. Default: `5`.
 - `-MaxImages`: maximum number of images to include. Default: `25`.
 - `-JpegQuality`: JPEG quality from 1 to 100 when writing `.jpg` or `.jpeg`. Default: `80`.
 - `-MaxCanvasMegapixels`: hard limit for the calculated canvas size. Default: `100`; range: `1` through `1024`.
 - `-LogFile`: optional log path. Default: `PhotoCollage.log` beside the compiled helper executable. Relative paths resolve from the helper directory; an empty value restores that default.
-- `--ini`: optional profile path. Relative paths resolve from the helper directory; the default is `PhotoCollage.ini` beside it.
+- `--ini`: optional profile path. Explicit relative paths resolve from the working directory, like DesktopStub; the default is `PhotoCollage.ini` beside the executable.
 - `--set Settings.Key=Value`: persist a `[Settings]` value. Supported keys are `InputFolder`, `OutputFile`, `Cols`, `MaxImages`, `JpegQuality`, `MaxCanvasMegapixels`, and `LogFile`. Requires `--configure-only`.
 - `--configure-only`: create, validate, and optionally update the profile without reading images or creating output.
 - `--show-config`: print the effective profile values without reading images or creating output.
@@ -94,6 +95,13 @@ options remain one-run overrides and do not modify the profile.
 
 ## Generated Files
 
-The app creates the requested `-OutputFile`, its `PhotoCollage.ini` profile, and
-`PhotoCollage.log` beside the compiled helper executable by default. Log appends
+Image jobs create the requested output and write the configured log. The default
+log is beside the selected INI; `-LogFile` keeps its executable-relative behavior.
+Only `--configure-only` creates or updates the INI. Log appends
 use the shared cross-process UTF-8 dependency and report persistence failures.
+
+Both this tool and TaskSchedulerMigration consume `managed_profile.cs` for
+assignments, paths and final-value validation. `--set` can repair an invalid
+saved value. An empty `--ini` is rejected, and output/log/INI file paths must be
+distinct to avoid corrupting one another. Read-only inspection never starts an
+image job. Tray and Startup controls remain unfinished requirements.

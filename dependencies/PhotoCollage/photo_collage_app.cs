@@ -45,6 +45,7 @@ static class PhotoCollage
             Options options = BuildOptions(command);
             if (command.ConfigureOnly)
             {
+                if (command.ShowConfiguration) PrintConfiguration(options);
                 Console.WriteLine("Configuration is valid: " + options.IniPath);
                 return 0;
             }
@@ -143,66 +144,37 @@ static class PhotoCollage
 
     static void SetPersistentSetting(ParsedCommand parsed, string assignment)
     {
-        int equals = assignment.IndexOf('=');
-        if (equals <= 0)
-            throw new ArgumentException("--set requires Settings.Key=Value.");
-        string key = assignment.Substring(0, equals).Trim();
-        int sectionSeparator = key.IndexOf('.');
-        if (sectionSeparator >= 0)
-        {
-            string section = key.Substring(0, sectionSeparator);
-            if (!section.Equals(SettingsSection, StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("--set supports only the [Settings] section.");
-            key = key.Substring(sectionSeparator + 1);
-        }
-        key = CanonicalSettingName(key);
-        if (key == null)
-            throw new ArgumentException("Unknown setting: " + assignment.Substring(0, equals).Trim());
-        parsed.PersistentSettings[key] = NormalizeSettingValue(
-            key,
-            assignment.Substring(equals + 1));
+        ManagedProfile.SetAssignment(parsed.PersistentSettings, assignment,
+            SettingsSection, CanonicalSettingName, NormalizeSettingValue);
     }
 
     static Options BuildOptions(ParsedCommand command)
     {
         string iniPath = ResolveIniPath(command.IniPath);
         ManagedIniFileSpec iniFile = BuildIniFileSpec(iniPath);
-        Dictionary<string, string> values = LoadEffectiveSettings(iniFile);
-        foreach (KeyValuePair<string, string> setting in command.PersistentSettings)
-            values[setting.Key] = setting.Value;
-
+        var overrides = new Dictionary<string, string>(command.PersistentSettings, StringComparer.OrdinalIgnoreCase);
+        foreach (var setting in command.DirectSettings) overrides[setting.Key] = setting.Value;
+        var values = ManagedProfile.ResolveSettings(DefaultSettingValues(),
+            ManagedIniFile.LoadSection(iniFile, false), overrides, CanonicalSettingName, NormalizeSettingValue);
         Options options = OptionsFromSettings(values, Path.GetDirectoryName(iniPath));
         options.IniPath = iniPath;
-        ValidateConfiguration(options);
-        if (command.PersistentSettings.Count != 0)
-        {
-            string error;
-            if (!ManagedIniFile.SaveSectionBatch(iniFile, command.PersistentSettings, out error))
-                throw new IOException("Could not save PhotoCollage configuration: " + error);
-        }
         ApplyDirectSettings(options, command.DirectSettings);
         ValidateConfiguration(options);
-        return options;
-    }
-
-    static Dictionary<string, string> LoadEffectiveSettings(ManagedIniFileSpec iniFile)
-    {
-        Dictionary<string, string> values = DefaultSettingValues();
-        foreach (KeyValuePair<string, string> rawSetting in ManagedIniFile.LoadSection(iniFile))
+        if (command.ConfigureOnly)
         {
-            string key = CanonicalSettingName(rawSetting.Key);
-            if (key == null)
-                throw new InvalidDataException("Unknown [Settings] key: " + rawSetting.Key);
-            try
+            string error;
+            if (!ManagedIniFile.SaveSectionBatch(iniFile, command.PersistentSettings, prospective =>
             {
-                values[key] = NormalizeSettingValue(key, rawSetting.Value);
-            }
-            catch (ArgumentException ex)
-            {
-                throw new InvalidDataException("Invalid [Settings] " + rawSetting.Key + ": " + ex.Message, ex);
-            }
+                var fresh = ManagedProfile.ResolveSettings(DefaultSettingValues(), prospective,
+                    new Dictionary<string, string>(), CanonicalSettingName, NormalizeSettingValue);
+                var validated = OptionsFromSettings(fresh, Path.GetDirectoryName(iniPath));
+                validated.IniPath = iniPath;
+                ValidateConfiguration(validated);
+                options = validated;
+            }, out error))
+                throw new IOException("Could not save PhotoCollage configuration: " + error);
         }
-        return values;
+        return options;
     }
 
     static Dictionary<string, string> DefaultSettingValues()
@@ -267,6 +239,11 @@ static class PhotoCollage
             ValidateOutputExtension(options.OutputFile);
         if (String.IsNullOrEmpty(options.LogFile))
             throw new InvalidDataException("LogFile must not be empty.");
+        if (String.Equals(options.OutputFile, options.LogFile, StringComparison.OrdinalIgnoreCase) ||
+            String.Equals(options.LogFile, options.IniPath, StringComparison.OrdinalIgnoreCase) ||
+            (!String.IsNullOrEmpty(options.OutputFile) &&
+             String.Equals(options.OutputFile, options.IniPath, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException("The output image, log, and INI must use different file paths.");
     }
 
     static void PrintConfiguration(Options options)
@@ -306,54 +283,22 @@ static class PhotoCollage
 
     static string ResolveIniPath(string value)
     {
-        if (String.IsNullOrWhiteSpace(value))
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "PhotoCollage.ini");
-        return ResolveExecutableDirectoryPath(value);
+        return ManagedProfile.ResolveIniPath(value, AppDomain.CurrentDomain.BaseDirectory, "PhotoCollage.ini");
     }
 
     static string ResolveProfilePath(string profileDirectory, string value)
     {
-        if (String.IsNullOrWhiteSpace(value))
-            return null;
-        try
-        {
-            return Path.GetFullPath(Path.IsPathRooted(value) ? value : Path.Combine(profileDirectory, value));
-        }
-        catch (Exception ex)
-        {
-            throw new ArgumentException("Invalid profile path '" + value + "': " + ex.Message, ex);
-        }
+        return ManagedProfile.ResolvePath(profileDirectory, value);
     }
 
     static string ResolveWorkingDirectoryPath(string value)
     {
-        if (String.IsNullOrWhiteSpace(value))
-            return null;
-        try
-        {
-            return Path.GetFullPath(value);
-        }
-        catch (Exception ex)
-        {
-            throw new ArgumentException("Invalid command-line path '" + value + "': " + ex.Message, ex);
-        }
+        return ManagedProfile.ResolvePath(Directory.GetCurrentDirectory(), value);
     }
 
     static string ResolveExecutableDirectoryPath(string value)
     {
-        if (String.IsNullOrWhiteSpace(value))
-            throw new ArgumentException("A file path must not be empty.");
-        try
-        {
-            string path = Path.IsPathRooted(value)
-                ? value
-                : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, value);
-            return Path.GetFullPath(path);
-        }
-        catch (Exception ex)
-        {
-            throw new ArgumentException("Invalid file path '" + value + "': " + ex.Message, ex);
-        }
+        return ManagedProfile.ResolvePath(AppDomain.CurrentDomain.BaseDirectory, value);
     }
 
     static string CanonicalSettingName(string value)
@@ -403,14 +348,7 @@ static class PhotoCollage
 
     static void ValidatePath(string value, string settingName)
     {
-        try
-        {
-            Path.GetFullPath(value);
-        }
-        catch (Exception ex)
-        {
-            throw new ArgumentException("Invalid " + settingName + " path: " + ex.Message, ex);
-        }
+        ManagedProfile.ValidatePath(value, settingName);
     }
 
     static void Usage()
@@ -727,8 +665,8 @@ static class PhotoCollage
     }
 
     static bool Is(string a, string b) { return String.Equals(a, b, StringComparison.OrdinalIgnoreCase); }
-    static int ParseInt(string value, string name) { int n; if (!Int32.TryParse(value, out n)) throw new ArgumentException("Invalid integer for " + name + ": " + value); return n; }
-    static long ParseLong(string value, string name) { long n; if (!Int64.TryParse(value, out n)) throw new ArgumentException("Invalid integer for " + name + ": " + value); return n; }
+    static int ParseInt(string value, string name) { int n; if (!Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out n)) throw new ArgumentException("Invalid integer for " + name + ": " + value); return n; }
+    static long ParseLong(string value, string name) { long n; if (!Int64.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out n)) throw new ArgumentException("Invalid integer for " + name + ": " + value); return n; }
     static int ParseIntInRange(string value, string name, int min, int max)
     {
         int parsed = ParseInt(value, name);

@@ -23,6 +23,7 @@ static class LegacyUtilitiesTests
         TestDnsRecordParsing();
         TestDnsSafetyDefaults(repositoryRoot);
         TestStrictArgumentParsing();
+        TestManagedProfiles();
         TestPhotoCollageAtomicOutput(repositoryRoot);
         TestTaskXmlHardening(repositoryRoot);
         TestCapsBlinkIdentity(repositoryRoot);
@@ -92,6 +93,66 @@ static class LegacyUtilitiesTests
                     new object[] { new[] { "--old-sid", "not-a-sid", "--new-user", "User" } });
             },
             "TaskSchedulerMigration validates the source SID");
+    }
+
+    static void TestManagedProfiles()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "AIProjects-ProfileReview-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            Check(AIProjects.Dependencies.ManagedProfile.ResolveIniPath("relative.ini", root, "default.ini") ==
+                Path.Combine(Directory.GetCurrentDirectory(), "relative.ini"),
+                "explicit relative INI paths match DesktopStub working-directory resolution");
+            foreach (Type product in new[] { typeof(PhotoCollage), typeof(TaskSchedulerMigration) })
+            {
+                string profile = Path.Combine(root, product.Name + ".ini");
+                string output;
+                int result = InvokeMainAndCapture(product, new[] { "--ini", profile, "--show-config" }, out output);
+                Check(result == 0 && !File.Exists(profile), product.Name + " inspection of missing profile has no write side effect");
+                result = InvokeMainAndCapture(product, new[] { "--ini", "", "--show-config" }, out output);
+                Check(result == 1, product.Name + " rejects an explicitly empty INI override");
+                result = InvokeMainAndCapture(product, new[] { "--ini", root, "--show-config" }, out output);
+                Check(result == 1, product.Name + " rejects an INI directory");
+                string key = product == typeof(PhotoCollage) ? "Cols" : "WhatIf";
+                string valid = product == typeof(PhotoCollage) ? "3" : "1";
+                File.WriteAllText(profile, "[Settings]\n" + key + "=invalid\n");
+                result = InvokeMainAndCapture(product, new[] {
+                    "--ini", profile, "--set", "Settings." + key + "=" + valid,
+                    "--configure-only", "--show-config" }, out output);
+                Check(result == 0 && output.Contains("Configuration:") &&
+                    File.ReadAllText(profile).Contains("\"" + key + "\" = \"" + valid + "\""),
+                    product.Name + " repairs a bad saved value before validation and prints the saved profile");
+            }
+            string photoIni = Path.Combine(root, "PhotoCollage.ini");
+            string text;
+            int collision = InvokeMainAndCapture(typeof(PhotoCollage), new[] {
+                "--ini", photoIni, "--output-file", Path.Combine(root, "same.png"),
+                "--log-file", Path.Combine(root, "same.png"), "--show-config" }, out text);
+            Check(collision == 1, "PhotoCollage prevents the log from corrupting the output image");
+
+            var spec = new AIProjects.Dependencies.ManagedIniFileSpec {
+                FilePath = Path.Combine(root, "transaction.ini"), SectionName = "Settings",
+                DefaultContents = "[Settings]\nCols=5\n"
+            };
+            string error;
+            bool saved = AIProjects.Dependencies.ManagedIniFile.SaveSectionBatch(spec,
+                new Dictionary<string, string> { { "Cols", "0" } },
+                delegate(IDictionary<string, string> prospective) {
+                    if (prospective["Cols"] == "0") throw new ArgumentException("Rejected fixture");
+                }, out error);
+            Check(!saved && !File.Exists(spec.FilePath), "prospective INI validation rejects a new file before creating it");
+            File.WriteAllText(spec.FilePath, "[Settings]\nCols=8\nUnknown=bad\n");
+            string before = File.ReadAllText(spec.FilePath);
+            saved = AIProjects.Dependencies.ManagedIniFile.SaveSectionBatch(spec,
+                new Dictionary<string, string> { { "Cols", "2" } },
+                delegate(IDictionary<string, string> prospective) {
+                    if (prospective.ContainsKey("Unknown")) throw new ArgumentException("Concurrent invalid field");
+                }, out error);
+            Check(!saved && File.ReadAllText(spec.FilePath) == before,
+                "INI validation sees fresh stored fields and leaves rejected updates intact");
+        }
+        finally { Directory.Delete(root, true); }
     }
 
     static void TestPhotoCollageAtomicOutput(string repositoryRoot)
@@ -264,7 +325,7 @@ static class LegacyUtilitiesTests
                 "PhotoCollage",
                 "BuildPhotoCollage.cmd"));
             Check(
-                source.Contains("ManagedIniFile.LoadSection(iniFile)") &&
+                source.Contains("ManagedIniFile.LoadSection(iniFile, false)") &&
                 source.Contains("ManagedIniFile.SaveSectionBatch(iniFile,") &&
                 source.Contains("--set requires --configure-only") &&
                 buildSource.Contains("dependencies\\managed_ini.cs"),

@@ -61,7 +61,7 @@ struct UiStrings
     std::wstring contentSourceTitle;
     std::wstring contentSourceWallpaper;
     std::wstring contentSourceRssFeed;
-    std::wstring contentSourceRestartRequired;
+    std::wstring contentPresetSwitchPrompt;
     std::wstring rssFeedSettingsTitle;
     std::wstring rssFeedUrlLabel;
     std::wstring rssFeedUserAgentLabel;

@@ -53,4 +53,9 @@ if(POWERSHELL_EXECUTABLE)
     set_tests_properties(ChromeProfileCounterSourceCheck PROPERTIES
         WORKING_DIRECTORY "${REPOSITORY_ROOT}"
         TIMEOUT 90)
+    add_test(NAME ChromeProfileCounterTests
+        COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -File
+            "${REPOSITORY_ROOT}/legacy/ChromeProfileCounter/tools/ChromeProfileCounterTests.ps1"
+            -RepositoryRoot "${REPOSITORY_ROOT}")
+    set_tests_properties(ChromeProfileCounterTests PROPERTIES TIMEOUT 30)
 endif()

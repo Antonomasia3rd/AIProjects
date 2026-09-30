@@ -44,6 +44,13 @@ namespace AIProjects.Dependencies
 
         public static Dictionary<string, string> LoadSection(ManagedIniFileSpec spec)
         {
+            return LoadSection(spec, true);
+        }
+
+        // Inspection and one-shot commands can read defaults without requiring
+        // a writable install directory or creating an INI as a side effect.
+        public static Dictionary<string, string> LoadSection(ManagedIniFileSpec spec, bool createIfMissing)
+        {
             string error;
             if (!ValidateSpec(spec, out error))
                 throw new ArgumentException(error, "spec");
@@ -52,8 +59,10 @@ namespace AIProjects.Dependencies
                 bool ownsMutex = WaitForMutex(mutationMutex, spec.MutationWaitMilliseconds);
                 try
                 {
-                    EnsureExistsUnderLock(spec);
-                    List<string> lines = ReadLinesUnderLock(spec);
+                    if (createIfMissing) EnsureExistsUnderLock(spec);
+                    List<string> lines = File.Exists(spec.FilePath)
+                        ? ReadLinesUnderLock(spec)
+                        : SplitLines(spec.DefaultContents ?? "");
                     return ParseTargetSection(spec, lines);
                 }
                 finally
@@ -69,6 +78,15 @@ namespace AIProjects.Dependencies
             IDictionary<string, string> settings,
             out string error)
         {
+            return SaveSectionBatch(spec, settings, null, out error);
+        }
+
+        public static bool SaveSectionBatch(
+            ManagedIniFileSpec spec,
+            IDictionary<string, string> settings,
+            Action<IDictionary<string, string>> validateProspective,
+            out string error)
+        {
             error = null;
             string validationError;
             if (!ValidateSpec(spec, out validationError))
@@ -76,7 +94,7 @@ namespace AIProjects.Dependencies
                 error = validationError;
                 return false;
             }
-            if (settings == null || settings.Count == 0)
+            if ((settings == null || settings.Count == 0) && validateProspective == null)
             {
                 try
                 {
@@ -90,7 +108,7 @@ namespace AIProjects.Dependencies
                     return false;
                 }
             }
-            foreach (KeyValuePair<string, string> setting in settings)
+            foreach (KeyValuePair<string, string> setting in settings ?? new Dictionary<string, string>())
             {
                 if (!IsValidKey(setting.Key) || setting.Value == null ||
                     setting.Value.IndexOfAny(new[] { '\r', '\n', '\0' }) >= 0)
@@ -107,9 +125,19 @@ namespace AIProjects.Dependencies
                     bool ownsMutex = WaitForMutex(mutationMutex, spec.MutationWaitMilliseconds);
                     try
                     {
-                        EnsureExistsUnderLock(spec);
+                        if (validateProspective != null)
+                        {
+                            var prospective = ParseTargetSection(spec, File.Exists(spec.FilePath)
+                                ? ReadLinesUnderLock(spec) : SplitLines(spec.DefaultContents ?? ""));
+                            foreach (var setting in settings ?? new Dictionary<string, string>())
+                                prospective[setting.Key] = setting.Value;
+                            validateProspective(prospective);
+                        }
                         GuardFileSize(spec);
-                        SaveSectionBatchUnderLock(spec, settings);
+                        if (settings != null && settings.Count != 0)
+                            SaveSectionBatchUnderLock(spec, settings);
+                        else
+                            EnsureExistsUnderLock(spec);
                         return true;
                     }
                     finally
@@ -170,7 +198,8 @@ namespace AIProjects.Dependencies
             ManagedIniFileSpec spec,
             IDictionary<string, string> settings)
         {
-            var lines = ReadLinesUnderLock(spec);
+            var lines = File.Exists(spec.FilePath)
+                ? ReadLinesUnderLock(spec) : SplitLines(spec.DefaultContents ?? "");
             // A managed save never papers over a malformed target section. The
             // caller must repair invalid configuration before mutation.
             ParseTargetSection(spec, lines);
@@ -228,6 +257,7 @@ namespace AIProjects.Dependencies
             }
 
             string directory = Path.GetDirectoryName(spec.FilePath);
+            Directory.CreateDirectory(directory);
             string temporaryPath = Path.Combine(
                 directory,
                 ".AIProjects-" + Guid.NewGuid().ToString("N") + ".tmp");

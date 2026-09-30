@@ -102,6 +102,10 @@ tools\TestRegistryNotificationServices.cmd
 
 The Windows workflow project metadata lives in `.github/project-map.json`. Keep that map, `.github/workflows/build-windows.yml`, `.github/scripts/build-windows.cmd`, and this README in sync when adding or removing projects that produce Windows artifacts. Validation checks selector options, upload conditions, artifact names, declared artifact payload paths, and build-script artifact recording before building.
 
+`.github/source-project-map.json` separately records dependency ownership and
+check paths for script products without Windows binary releases. They remain
+subject to the repository's configuration and consolidation requirements.
+
 Each project README also lists direct build commands for that project. Generated outputs belong in project `build` folders and are ignored by git. If a compiler cannot overwrite a running EXE, close that program and rerun the build.
 
 ## Safety

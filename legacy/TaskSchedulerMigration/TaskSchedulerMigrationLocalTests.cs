@@ -124,6 +124,10 @@ static class TaskSchedulerMigrationLocalTests
         Directory.CreateDirectory(root);
         try
         {
+            string longBackupDirectory = Path.Combine(Path.GetPathRoot(root), new string('d', 150));
+            string boundedPath = (string)PrivateMethod("BuildBackupPath").Invoke(
+                null, new object[] { longBackupDirectory, "\\Folder\\" + new string('n', 150) });
+            Check(boundedPath.Length < 260, "nonce backup names stay within the Framework path limit");
             string xml = "<Task><Principals><Principal><UserId>S-1-5-21-1</UserId></Principal></Principals></Task>";
             string first = (string)PrivateMethod("SaveBackupAtomically").Invoke(
                 null,

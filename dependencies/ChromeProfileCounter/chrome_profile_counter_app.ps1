@@ -10,55 +10,63 @@ function Pause-Menu {
 }
 
 function Get-StateText {
-    if (!(Test-Path $LocalState)) {
+    if (!(Test-Path -LiteralPath $LocalState -PathType Leaf)) {
         throw "Local State not found:`n$LocalState"
     }
     return [IO.File]::ReadAllText($LocalState)
 }
 
-function Get-Counter {
-    $text = Get-StateText
-    $m = [regex]::Match(
-        $text,
-        '"profiles_created"\s*:\s*(\d+)'
-    )
-
-    if (!$m.Success) {
-        throw "profile.profiles_created was not found in Local State."
+function Get-CounterMatch([string]$Text) {
+    $state = $Text | ConvertFrom-Json -ErrorAction Stop
+    $matches = [regex]::Matches($Text, '"profiles_created"\s*:\s*(\d+)(?=\s*[,}])')
+    $counter = 0
+    if ($null -eq $state.profile -or $null -eq $state.profile.profiles_created -or
+        $matches.Count -ne 1 -or
+        -not [int]::TryParse($matches[0].Groups[1].Value, [ref]$counter) -or
+        $state.profile.profiles_created -ne $counter) {
+        throw "Local State must contain one unambiguous integer profile.profiles_created value."
     }
+    return $matches[0]
+}
 
-    return [int]$m.Groups[1].Value
+function Get-Counter {
+    return [int](Get-CounterMatch (Get-StateText)).Groups[1].Value
+}
+
+function Set-CounterInText([string]$Text, [int]$NewValue) {
+    if ($NewValue -lt 1) { throw "Counter must be 1 or greater." }
+    $digits = (Get-CounterMatch $Text).Groups[1]
+    return $Text.Substring(0, $digits.Index) +
+        $NewValue.ToString([Globalization.CultureInfo]::InvariantCulture) +
+        $Text.Substring($digits.Index + $digits.Length)
 }
 
 function Get-DiskProfiles {
     $result = @{}
 
-    Get-ChildItem $UserData -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match '^Profile (\d+)$' } |
-        ForEach-Object {
-            $n = [int]$Matches[1]
-            $result[$n] = $_.FullName
+    foreach ($directory in Get-ChildItem -LiteralPath $UserData -Directory -ErrorAction Stop) {
+        $match = [regex]::Match($directory.Name, '^Profile (\d+)$')
+        $number = 0
+        if ($match.Success -and [int]::TryParse($match.Groups[1].Value, [ref]$number)) {
+            $result[$number] = $directory.FullName
         }
+    }
 
     return $result
 }
 
-function Get-RegisteredProfiles {
+function Get-RegisteredProfiles([string]$Text = (Get-StateText)) {
     $result = @{}
 
-    try {
-        $obj = (Get-StateText) | ConvertFrom-Json
+    $obj = $Text | ConvertFrom-Json -ErrorAction Stop
+    if ($null -eq $obj.profile) { throw "Local State has no readable profile object." }
 
-        if ($null -ne $obj.profile.info_cache) {
-            foreach ($prop in $obj.profile.info_cache.PSObject.Properties) {
-                if ($prop.Name -match '^Profile (\d+)$') {
-                    $result[[int]$Matches[1]] = $prop.Name
-                }
+    if ($null -ne $obj.profile.info_cache) {
+        foreach ($prop in $obj.profile.info_cache.PSObject.Properties) {
+            if ($prop.Name -match '^Profile (\d+)$') {
+                $result[[int]$Matches[1]] = $prop.Name
             }
         }
-    }
-    catch {
-        Write-Host "WARNING: Could not parse profile.info_cache." -ForegroundColor Yellow
     }
 
     return $result
@@ -71,6 +79,7 @@ function Get-FirstSafeNumber {
     $n = 1
 
     while ($disk.ContainsKey($n) -or $registered.ContainsKey($n)) {
+        if ($n -eq [int]::MaxValue) { throw "No available numbered profile fits the counter range." }
         $n++
     }
 
@@ -81,51 +90,60 @@ function Test-ChromeRunning {
     return $null -ne (Get-Process chrome -ErrorAction SilentlyContinue)
 }
 
-function Backup-LocalState {
+function New-LocalStateBackupPath {
     [IO.Directory]::CreateDirectory($BackupDir) | Out-Null
     $stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss-fff"
     $nonce = [Guid]::NewGuid().ToString("N")
     $destination = Join-Path $BackupDir "Local State.$stamp.$nonce.backup"
-    $temporary = Join-Path $BackupDir ".Local State.$nonce.tmp"
-
-    try {
-        [IO.File]::Copy($LocalState, $temporary, $false)
-        # Both paths are in the backup directory. Move refuses to overwrite a
-        # destination and publishes a complete backup through one rename.
-        [IO.File]::Move($temporary, $destination)
-        return $destination
-    }
-    finally {
-        if (Test-Path -LiteralPath $temporary) {
-            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
-        }
-    }
+    if (Test-Path -LiteralPath $destination) { throw "Backup filename already exists; retry the change." }
+    return $destination
 }
 
-function Write-LocalStateAtomically([string]$Text) {
+function Write-LocalStateAtomically([string]$Text, [string]$ExpectedText) {
     if (Test-ChromeRunning) {
         throw "Chrome started while the counter change was being prepared. Local State was left unchanged."
     }
 
     $directory = [IO.Path]::GetDirectoryName($LocalState)
     $temporary = Join-Path $directory (".Local State." + [Guid]::NewGuid().ToString("N") + ".tmp")
+    $sha = [Security.Cryptography.SHA256]::Create()
     try {
+        $identity = [BitConverter]::ToString($sha.ComputeHash(
+            [Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($LocalState).ToUpperInvariant()))).Replace('-', '')
+    } finally { $sha.Dispose() }
+    # Serialize this tool's own writers; Chrome does not participate in this lock.
+    $mutex = New-Object Threading.Mutex($false, ("Global\AIProjects.ChromeProfileCounter." + $identity))
+    $locked = $false
+    try {
+        try { $locked = $mutex.WaitOne(5000) }
+        catch [Threading.AbandonedMutexException] { $locked = $true }
+        if (-not $locked) { throw "Another counter edit is still running. Try again later." }
         [IO.File]::WriteAllText(
             $temporary,
             $Text,
-            (New-Object Text.UTF8Encoding($false))
+            (New-Object Text.UTF8Encoding($false, $true))
         )
         if (Test-ChromeRunning) {
             throw "Chrome started before Local State could be replaced. Local State was left unchanged."
         }
-        # The source and target live in the same Chrome data directory.
-        # File.Replace preserves the old Local State until the rename succeeds.
-        [IO.File]::Replace($temporary, $LocalState, $null)
+        if ((Get-StateText) -cne $ExpectedText) {
+            throw "Local State changed after review. Nothing was replaced; review the new state and retry."
+        }
+        $newValue = [int](Get-CounterMatch $Text).Groups[1].Value
+        if ((Get-DiskProfiles).ContainsKey($newValue) -or (Get-RegisteredProfiles $ExpectedText).ContainsKey($newValue)) {
+            throw "The selected profile number is now in use. Review the current state and retry."
+        }
+        $backup = New-LocalStateBackupPath
+        # Capture the exact replaced file, not an earlier independently read copy.
+        [IO.File]::Replace($temporary, $LocalState, $backup)
+        return $backup
     }
     finally {
         if (Test-Path -LiteralPath $temporary) {
             Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
         }
+        if ($locked) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
     }
 }
 
@@ -142,8 +160,9 @@ function Set-Counter([int]$NewValue) {
         return
     }
 
+    $text = Get-StateText
     $disk = Get-DiskProfiles
-    $registered = Get-RegisteredProfiles
+    $registered = Get-RegisteredProfiles $text
 
     if ($disk.ContainsKey($NewValue)) {
         Write-Host
@@ -157,7 +176,7 @@ function Set-Counter([int]$NewValue) {
         return
     }
 
-    $oldValue = Get-Counter
+    $oldValue = [int](Get-CounterMatch $text).Groups[1].Value
 
     Write-Host
     Write-Host "Current counter : $oldValue"
@@ -172,18 +191,8 @@ function Set-Counter([int]$NewValue) {
         return
     }
 
-    $backup = Backup-LocalState
-
-    $text = Get-StateText
-
-    $newText = [regex]::Replace(
-        $text,
-        '("profiles_created"\s*:\s*)\d+',
-        '${1}' + $NewValue,
-        1
-    )
-
-    Write-LocalStateAtomically $newText
+    $newText = Set-CounterInText $text $NewValue
+    $backup = Write-LocalStateAtomically $newText $text
 
     $verify = Get-Counter
 
@@ -240,7 +249,7 @@ function Show-Status {
     }
 }
 
-while ($true) {
+:ChromeMenu while ($true) {
     Clear-Host
 
     Write-Host "============================================" -ForegroundColor Cyan
@@ -305,8 +314,9 @@ while ($true) {
 
             $inputValue = Read-Host "Enter desired next Profile number"
 
-            if ($inputValue -match '^\d+$') {
-                Set-Counter ([int]$inputValue)
+            $manualValue = 0
+            if ([int]::TryParse($inputValue, [ref]$manualValue) -and $manualValue -ge 1) {
+                Set-Counter $manualValue
             }
             else {
                 Write-Host "Invalid number." -ForegroundColor Red
@@ -316,11 +326,11 @@ while ($true) {
         }
 
         "4" {
-            Start-Process explorer.exe $UserData
+            Start-Process explorer.exe -ArgumentList ('"{0}"' -f $UserData)
         }
 
         "Q" {
-            break
+            break ChromeMenu
         }
 
         default {

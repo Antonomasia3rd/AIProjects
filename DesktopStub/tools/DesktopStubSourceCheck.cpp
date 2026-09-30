@@ -483,6 +483,7 @@ int main(int argc, char** argv)
         const std::string tray = JoinSource({
             "..\\dependencies\\DesktopStub\\ga_tray.inc",
             "..\\dependencies\\DesktopStub\\ga_tray_helpers.inc",
+            "..\\dependencies\\DesktopStub\\ga_content_tray.inc",
             "..\\dependencies\\DesktopStub\\ga_tray_menu.inc",
             "..\\dependencies\\DesktopStub\\ga_tray_dispatch.inc"
         });
@@ -569,7 +570,7 @@ int main(int argc, char** argv)
         checks.push_back({"DesktopStub single-instance identity uses shared path-scoped helper", "..\\dependencies\\DesktopStub\\ga_app.inc", app, R"rx(aip::BuildPathScopedInstanceIdentity\()rx", "DesktopStub single-instance naming must use the shared path-scoped identity helper", false});
         checks.push_back({"DesktopStub log appends use shared UTF-8 append primitive", "..\\dependencies\\DesktopStub\\ga_core.inc", core, R"rx(aip::AppendUtf8TextToFile\(path, text, true, lockWaitMs\))rx", "DesktopStub log append compatibility must be provided by the shared logging helper", false});
         checks.push_back({"DesktopStub tray log buffer uses shared recent-log model", "DesktopStub logging sources", ReadSource("..\\dependencies\\DesktopStub\\ga_ui_state.inc") + "\n" + loggingCore, R"rx(aip::RecentLogBuffer\s+g_logBuf.*g_logBuf\.SetMaxLines.*g_logBuf\.Push.*g_logBuf\.Snapshot\(\))rx", "DesktopStub should use the shared recent-log buffer while keeping product-specific logging text and console behavior", false});
-        checks.push_back({"DesktopStub tray wrapper splits helpers, menu, and dispatch", "..\\dependencies\\DesktopStub\\ga_tray.inc", trayWrapper, R"rx(#include "ga_tray_helpers\.inc"\s*#include "ga_tray_menu\.inc"\s*#include "ga_tray_dispatch\.inc")rx", "DesktopStub tray should be split into helper/menu/dispatch modules instead of one monolithic file", false});
+        checks.push_back({"DesktopStub tray wrapper splits helpers, content, menu, and dispatch", "..\\dependencies\\DesktopStub\\ga_tray.inc", trayWrapper, R"rx(#include "ga_tray_helpers\.inc"\s*#include "ga_content_tray\.inc"\s*#include "ga_tray_menu\.inc"\s*#include "ga_tray_dispatch\.inc")rx", "DesktopStub tray should compose the content menu with the shared helpers and host dispatch", false});
         checks.push_back({"Live Tile preset catalog is split from transport code", "..\\dependencies\\DesktopStub\\ga_live_tile.inc", liveTile, R"rx(#include "ga_live_tile_templates\.inc")rx", "preset catalog selection should remain isolated from package activation and update transport code", false});
         checks.push_back({"DesktopStub uses shared tray menu primitives", "DesktopStub tray sources", tray, R"rx(aip::AppendTrayMenuItem.*aip::BeginTrayNestedMenu.*aip::EndTrayNestedMenu.*aip::AppendBaselineTrayMenuHeader)rx", "DesktopStub must consume the shared root header, item, and submenu helpers while retaining its product-specific sections", false});
         checks.push_back({"DesktopStub tray presentation is separated from command dispatch", "..\\dependencies\\DesktopStub\\ga_tray.inc", tray, R"rx(static void DispatchTrayCommand\(HWND h, UINT cmd\);.*void Menu\(HWND h\).*DispatchTrayCommand\(h, cmd\);\s*\}\s*static void DispatchTrayCommand\(HWND h, UINT cmd\)\s*\{.*ID_MANIFEST_EDIT_IDENTITY_NAME.*ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_NAME.*CurrentManifestDisplayInfo\(\).*switch\(cmd\))rx", "DesktopStub Menu must build and display the tray while a dedicated dispatcher owns command behavior and its own manifest state", false});
@@ -966,8 +967,8 @@ int main(int argc, char** argv)
                 "ID_RSS_FEED_MAX_FEED_BYTES",
                 "ValidateConfiguredRssSettingsForContentSource(",
                 "Legacy preset: ",
-                "contentSourceRestartRequired",
-                "DESKTOPSTUB_TRAY_MESSAGEBOX(",
+                "contentPresetSwitchPrompt",
+                "DESKTOPSTUB_CONTENT_MESSAGEBOX(",
                 "PromptRssFeedStringSetting(",
                 "CycleRssFeedIntPreset(",
                 "WakePollThread()"

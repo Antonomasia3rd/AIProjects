@@ -14,7 +14,6 @@ static int ContentTestMessageBox(HWND, LPCWSTR text, LPCWSTR, UINT flags)
     return (flags & MB_YESNO) ? contentDialogResponse : IDOK;
 }
 #define DESKTOPSTUB_CONTENT_MESSAGEBOX ContentTestMessageBox
-#define DESKTOPSTUB_TRAY_MESSAGEBOX ContentTestMessageBox
 #define DESKTOPSTUB_INERT_HARDWARE
 static int contentLogicalCaps = 0, contentLogicalSamples = 0;
 static int ContentTestLogicalCaps() { ++contentLogicalSamples; return contentLogicalCaps; }
@@ -262,6 +261,24 @@ int wmain()
         L"[Content.2]\r\nEnabled=false\r\nName=Second\r\nBackground=None\r\nTextSources=CustomText\r\nText=gamma\r\n";
     Check(WriteUtf8BomTextFile(ini, config), "temporary INI fixture");
     LoadUiStrings();
+    {
+        const auto defaults = aip::ParseIniDocument(BuildInitialIniTemplate());
+        std::wstring prompt;
+        Check(aip::ReadIniValueFromDoc(defaults, L"Strings", L"ContentPresetSwitchPrompt", prompt) &&
+            prompt == g_ui.contentPresetSwitchPrompt,
+            "new preset prompt round-trips through the generated INI without raw line breaks");
+        const auto oldStrings = config + L"[Strings]\r\nContentSourceRestartRequired=The content source was saved.\r\n"
+            L"ContentSourceRssFeed=RSS / Atom feed\r\nContentSourceWallpaper=My custom wallpaper label\r\n";
+        Check(WriteUtf8BomTextFile(ini, oldStrings), "old preset string fixture");
+        UpgradeRenamedStringDefaults();
+        LoadUiStrings();
+        Check(g_ui.contentPresetSwitchPrompt.find(L"Numbered entries stay saved") != std::wstring::npos &&
+            g_ui.contentSourceRssFeed == L"RSS / Atom over wallpaper" &&
+            g_ui.contentSourceWallpaper == L"My custom wallpaper label",
+            "old profiles receive the new preset warning and retain custom labels");
+        Check(WriteUtf8BomTextFile(ini, config), "preset string regression restores test profile");
+        LoadUiStrings();
+    }
     Check(CompositionRequested(), "direct INI boolean agrees with typed config");
     Check(ContentEngineTick(true), "compose without generation or provider network");
     {
@@ -305,6 +322,7 @@ int wmain()
     Check(SaveContentMenuSettings(nullptr, {{L"Notes.Stamina", L"UID", L"600000001"}, {L"Notes.Stamina", L"LToken", L"fixture-only"}}), "synthetic notes account saves locally without fetch");
     Check(aip::content::SensitiveSetting(L"Notes.Stamina", L"LToken"), "notes credential is classified for log redaction");
     Check(IniReadS(L"Discord", L"SendPresence", L"0") == L"0", "Discord sending defaults off");
+    Check(contentDialogs == 0, "routine settings do not produce modal prompts before preset tests");
     contentDialogs = 0;
     contentDialogText.clear();
     contentDialogResponse = IDNO;
@@ -318,7 +336,9 @@ int wmain()
     DispatchTrayCommand(nullptr, ID_CONTENT_SOURCE_WALLPAPER);
     Check(
         IniReadS(L"Content", L"Enabled", L"") == L"0" &&
-        IniReadS(L"Settings", L"ContentSource", L"") == L"Wallpaper",
+        IniReadS(L"Settings", L"ContentSource", L"") == L"Wallpaper" &&
+        IniReadS(L"Content.1", L"Text", L"") == L"alpha" &&
+        IniReadS(L"Content.2", L"Text", L"") == L"gamma",
         "accepted legacy preset disables layered content while retaining its saved entries");
     Check(WriteUtf8BomTextFile(ini, config), "legacy preset regression restores layered test profile");
     LoadUiStrings();

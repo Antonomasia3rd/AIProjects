@@ -311,7 +311,7 @@ static const IniDefault g_commandLineHelpDefaults[] = {
         L"  --regenerate-manifest               Rewrite AppxManifest.xml once from Settings.Manifest* values.\\r\\n"
         L"  --generate, --generate-now           Force startup generation and keep running.\\r\\n"
         L"  --wallpaper <path>                  Generate from a specific image path.\\r\\n"
-        L"  --content-source <wallpaper|rss>    Select and save the startup content source.\\r\\n"
+        L"  --content-source <wallpaper|rss>    Select a legacy preset; disable layered content but keep its entries.\\r\\n"
         L"  --rss-feed-url <http(s)://...>      Set and save the RSS/Atom feed URL.\\r\\n"
         L"  --rss-user-agent <text>             Set and save the RSS HTTP user agent.\\r\\n"
         L"  --rss-update-interval <seconds>     Set RSS refresh interval, 60-86400.\\r\\n"
@@ -672,7 +672,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"ContentSourceTitle", L"Content and sources"},
     {L"ContentSourceWallpaper", L"Wallpaper only"},
     {L"ContentSourceRssFeed", L"RSS / Atom over wallpaper"},
-    {L"ContentSourceRestartRequired", L"Switching to a legacy preset turns off layered content. Numbered entries stay saved and can be re-enabled later. The RSS preset displays headlines over the wallpaper background.\r\n\r\nContinue?"},
+    {L"ContentPresetSwitchPrompt", L"Switching to a legacy preset turns off layered content. Numbered entries stay saved and can be re-enabled later. The RSS preset uses wallpaper as its background; the selected text layout determines whether it remains visible."},
     {L"RssFeedSettingsTitle", L"RSS / Atom settings"},
     {L"RssFeedUrlLabel", L"Feed URL: %s"},
     {L"RssFeedUserAgentLabel", L"User agent: %s"},
@@ -1214,6 +1214,19 @@ static void UpgradeCommandLineHelpDefaultIfUnmodified()
     if (current.empty() || current == g_commandLineHelpDefaults[0].value)
         return;
 
+    std::wstring previousPresetHelp = g_commandLineHelpDefaults[0].value;
+    const std::wstring newPresetHelp = L"Select a legacy preset; disable layered content but keep its entries.";
+    const auto presetHelpPosition = previousPresetHelp.find(newPresetHelp);
+    if (presetHelpPosition != std::wstring::npos)
+    {
+        previousPresetHelp.replace(presetHelpPosition, newPresetHelp.size(), L"Select and save the startup content source.");
+        if (current == previousPresetHelp)
+        {
+            IniWrite(COMMAND_LINE_HELP_SECTION, COMMAND_LINE_HELP_TEMPLATE_KEY, g_commandLineHelpDefaults[0].value);
+            return;
+        }
+    }
+
     std::wstring hash = aip::StableHashHex64(current, false);
     for (const auto& managedDefault : managedDefaults)
     {
@@ -1310,6 +1323,8 @@ static void UpgradePowerShellExeDefault()
 
 static void UpgradeRenamedStringDefaults()
 {
+    UpgradeStringDefaultIfUnmodified(L"ContentSourceWallpaper", L"Wallpaper", L"Wallpaper only");
+    UpgradeStringDefaultIfUnmodified(L"ContentSourceRssFeed", L"RSS / Atom feed", L"RSS / Atom over wallpaper");
     UpgradeStringDefaultIfUnmodified(L"RunAtStartup", L"Run at startup", L"Run at sign-in (Startup folder)");
     RepairBrokenPowerShellOutputTruncatedDefault();
     UpgradeCommandLineHelpDefaultIfUnmodified();

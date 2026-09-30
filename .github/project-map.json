@@ -162,6 +162,7 @@
       "dependencies/managed_named_objects.cs",
       "dependencies/managed_logging.cs",
       "dependencies/managed_ini.cs",
+      "dependencies/managed_profile.cs",
       "dependencies/PhotoCollage"
     ],
     "artifactPaths": [
@@ -247,6 +248,7 @@
     "dependencyPaths": [
       "dependencies/managed_named_objects.cs",
       "dependencies/managed_ini.cs",
+      "dependencies/managed_profile.cs",
       "dependencies/TaskSchedulerMigration"
     ],
     "artifactPaths": [

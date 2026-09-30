@@ -211,7 +211,7 @@ void LoadUiStrings()
     g_ui.contentSourceTitle = IniReadS(L"Strings", L"ContentSourceTitle", L"Content and sources");
     g_ui.contentSourceWallpaper = IniReadS(L"Strings", L"ContentSourceWallpaper", L"Wallpaper only");
     g_ui.contentSourceRssFeed = IniReadS(L"Strings", L"ContentSourceRssFeed", L"RSS / Atom over wallpaper");
-    g_ui.contentSourceRestartRequired = IniReadS(L"Strings", L"ContentSourceRestartRequired", L"Switching to a legacy preset turns off layered content. Numbered entries stay saved and can be re-enabled later. The RSS preset displays headlines over the wallpaper background.\r\n\r\nContinue?");
+    g_ui.contentPresetSwitchPrompt = IniReadS(L"Strings", L"ContentPresetSwitchPrompt", L"Switching to a legacy preset turns off layered content. Numbered entries stay saved and can be re-enabled later. The RSS preset uses wallpaper as its background; the selected text layout determines whether it remains visible.");
     g_ui.rssFeedSettingsTitle = IniReadS(L"Strings", L"RssFeedSettingsTitle", L"RSS / Atom settings");
     g_ui.rssFeedUrlLabel = IniReadS(L"Strings", L"RssFeedUrlLabel", L"Feed URL: %s");
     g_ui.rssFeedUserAgentLabel = IniReadS(L"Strings", L"RssFeedUserAgentLabel", L"User agent: %s");

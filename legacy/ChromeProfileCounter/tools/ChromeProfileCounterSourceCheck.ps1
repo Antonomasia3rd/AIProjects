@@ -25,10 +25,11 @@ foreach ($path in @($sourcePath, $wrapperPath)) {
 $source = Get-Content -LiteralPath $sourcePath -Raw
 $wrapper = Get-Content -LiteralPath $wrapperPath -Raw
 $required = @(
-    "function Backup-LocalState",
+    "function New-LocalStateBackupPath",
     "function Write-LocalStateAtomically",
-    "[IO.File]::Move(`$temporary, `$destination)",
-    "[IO.File]::Replace(`$temporary, `$LocalState, `$null)",
+    "[IO.File]::Replace(`$temporary, `$LocalState, `$backup)",
+    "function Set-CounterInText",
+    "break ChromeMenu",
     "Chrome started before Local State could be replaced"
 )
 foreach ($text in $required) {

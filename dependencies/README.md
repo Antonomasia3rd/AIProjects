@@ -199,6 +199,11 @@ providers should expose snapshots/options that multiple products can consume.
 
 ## Product-owned source subfolders
 
+`managed_profile.cs` shares managed assignment parsing, profile path validation,
+and effective-setting normalization. PhotoCollage and TaskSchedulerMigration
+use it with `managed_ini.cs`; read-only loads do not create files, and saved
+profiles are revalidated under the INI mutation lock.
+
 Product-specific implementations live under matching subfolders:
 `dependencies/DesktopStub/`, `dependencies/DiscordRPC/`,
 `dependencies/NowPlayingTile/`, `dependencies/CharmTray/`,

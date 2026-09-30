@@ -85,8 +85,8 @@ Changing a profile therefore cannot also begin a migration.
 
 ## Parameters
 
-- `-OldSID`: SID text to replace. Required.
-- `-NewUser`: replacement user/account value. Required.
+- `-OldSID`: SID text to replace. Supply it here or in the INI for migration runs.
+- `-NewUser`: replacement user/account value. Supply it here or in the INI for migration runs.
 - `-BackupDirectory`: folder for exported task XML backups. Default: `TaskSchedulerMigrationBackup` beside the compiled helper executable. Relative paths resolve from the helper directory.
 - `-TaskPath`: optional scheduled-task folder filter.
 - `-IncludeCredentialSensitiveTasks`: opt in to S4U tasks after reviewing their restricted-token behavior. `Password` and `InteractiveOrPassword` tasks remain blocked because Task Scheduler does not expose the stored password, so this utility cannot preserve their credentials safely.
@@ -94,7 +94,7 @@ Changing a profile therefore cannot also begin a migration.
 - `-Confirm`: prompt before each matching task is re-registered.
 - `--apply` / `--no-what-if`: allow task registration for the current invocation.
 - `--no-confirm`: skip per-task prompts for the current invocation.
-- `--ini`: use a persistent profile. Relative paths resolve from the helper executable; paths stored inside the profile resolve from the profile directory.
+- `--ini`: use a persistent profile. Explicit relative paths resolve from the working directory, like DesktopStub; paths stored inside the profile resolve from the profile directory.
 - `--set Settings.Key=Value`: persist `OldSID`, `NewUser`, `BackupDirectory`, `TaskPath`, `IncludeCredentialSensitiveTasks`, `WhatIf`, or `Confirm`. Requires `--configure-only`.
 - `--configure-only`: create, validate, and optionally update a profile without Task Scheduler access.
 - `--show-config`: print effective profile values without Task Scheduler access.
@@ -121,3 +121,9 @@ Changing a profile therefore cannot also begin a migration.
 
 - XML backups under `TaskSchedulerMigrationBackup` beside the compiled helper executable unless `-BackupDirectory` is changed.
 - `TaskSchedulerMigration.ini` beside the compiled helper executable when using the default profile path, or the file supplied through `--ini`.
+
+Only `--configure-only` creates or updates the profile; `--show-config` reads it
+or displays defaults without creating a file. Assignment parsing, path checks,
+and effective-value validation are shared with PhotoCollage through
+`managed_profile.cs`. An empty `--ini` is rejected, and `--set` can repair a bad
+saved value. These profiles do not complete the requested tray/Startup surface.

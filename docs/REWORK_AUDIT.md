@@ -436,7 +436,28 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   token caches, reports, checkpoints, and cleanup paths from `$PSScriptRoot`.
   A mechanical move into `dependencies` would redirect existing local state and
   can break or expose a user's browser-auth workflow.
-- Its README and `.gitignore` already identify those files as local, uncommitted
-  credentials/state. No script, header, cache, or network action was executed
-  or read during this audit. A future dependency extraction needs an explicit
-  data-root argument and migration plan before a compatibility wrapper is safe.
+- Its README and `.gitignore` identify those files as local credentials/state.
+  Script source was read; credential/cache contents were not. No script or
+  network action was executed. A future extraction can use a data-root argument
+  and a compatibility wrapper that preserves existing paths without reading or
+  moving credentials. This is unfinished work, not an authorization barrier.
+
+### Review of the continuation against the original requirements — 2026-09-30
+
+The [requirements review](REVIEW_2026-09-30.md) supersedes broad claims that the
+recent continuation is complete or release-ready. It records CI ownership and
+source-check failures, malformed/stale preset prompt text, a C# warning-as-error
+regression, duplicated/incorrect managed profile handling, image/log collisions,
+and retained Chrome regex/quit/concurrent-write defects. Corrective source and
+meaningful fixture cases are now written. Required tray/startup surfaces,
+standalone retirement, optional-security migration, language parity and target
+Windows UI/stress validation remain open. New runtime cases have not run under
+the Defender restriction; previous pass counts must not be reused as evidence
+for the changed source.
+
+Review validation checkpoint: seven C# files parsed using C# 5 rules; four
+PowerShell ASTs parsed; dependency ownership covers 14 artifact products and one
+script product; 609 string defaults contain no raw CR/LF; whitespace checks
+pass. These are non-executing checks, not compilation or runtime passes. Work
+is on `codex/review-original-requirements`, separate from the automatic release
+branch. No application, hardware, account, service or Startup integration ran.

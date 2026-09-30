@@ -1,7 +1,3 @@
-#ifndef DESKTOPSTUB_TRAY_MESSAGEBOX
-#define DESKTOPSTUB_TRAY_MESSAGEBOX MessageBoxW
-#endif
-
 static void DispatchTrayCommand(HWND h, UINT cmd)
 {
     if (DispatchContentEngineCommand(h, cmd)) return;
@@ -269,6 +265,13 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     case ID_CONTENT_SOURCE_WALLPAPER:
     case ID_CONTENT_SOURCE_RSS_FEED:
     {
+        std::wstring original;
+        if (!ReadIniFileForMutation(original))
+        {
+            DESKTOPSTUB_CONTENT_MESSAGEBOX(h, L"The configuration could not be read.",
+                L"Content and sources", MB_OK | MB_ICONERROR);
+            break;
+        }
         ContentSource desiredSource =
             cmd == ID_CONTENT_SOURCE_RSS_FEED
                 ? ContentSource::RssFeed
@@ -278,7 +281,7 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
                 desiredSource,
                 error))
         {
-            MessageBoxW(
+            DESKTOPSTUB_CONTENT_MESSAGEBOX(
                 h,
                 error.c_str(),
                 g_ui.errorTitle.c_str(),
@@ -293,15 +296,7 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         aip::content::ParseBool(IniReadS(L"Content", L"Enabled", L"0"), layeredContent);
         if (configuredSource == desiredSource && !layeredContent)
             break;
-        if (layeredContent &&
-            DESKTOPSTUB_TRAY_MESSAGEBOX(
-                h,
-                g_ui.contentSourceRestartRequired.c_str(),
-                L"Legacy content preset",
-                MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) != IDYES)
-        {
-            break;
-        }
+        std::wstring prompt = layeredContent ? g_ui.contentPresetSwitchPrompt : L"";
         if (desiredSource == ContentSource::RssFeed)
         {
             aip::content::Configuration preset;
@@ -309,15 +304,25 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
             preset.cycleSeconds = IniReadClampedI(L"Content", L"CycleSeconds", 10, 1, 86400);
             preset.entries.resize(static_cast<size_t>(IniReadClampedI(L"RssFeed", L"MaxItems", 5, 1, 20)));
             const auto warning = aip::content::TimingWarning(preset, UseExperimentalLiveTileUpdate());
-            if (!warning.empty() && MessageBoxW(h, (warning + L"\r\n\r\nEnable RSS headline cycling?").c_str(),
-                    L"Content cycling", MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) != IDYES)
-                break;
+            if (!warning.empty())
+            {
+                if (!prompt.empty()) prompt += L"\r\n\r\n";
+                prompt += warning;
+            }
         }
+        if (!prompt.empty() && DESKTOPSTUB_CONTENT_MESSAGEBOX(h,
+                (prompt + L"\r\n\r\nApply this preset?").c_str(), L"Legacy content preset",
+                MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) != IDYES)
+            break;
         if (!MutateDesktopStubIniWithWait([&](std::wstring& text) {
+                if (text != original) { SetLastError(ERROR_RETRY); return false; }
                 return WriteIniValueToText(text, L"Settings", L"ContentSource", ContentSourceIniValue(desiredSource).c_str()) &&
                     WriteIniValueToText(text, L"Content", L"Enabled", L"0");
             }, CurrentIniWriteLockWaitMs()))
         {
+            DESKTOPSTUB_CONTENT_MESSAGEBOX(h,
+                L"The configuration could not be saved, or another writer changed it. Reopen the menu and try again.",
+                L"Content and sources", MB_OK | MB_ICONWARNING);
             return;
         }
 

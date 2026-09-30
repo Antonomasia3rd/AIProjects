@@ -1,0 +1,8 @@
+[
+  {
+    "key": "ChromeProfileCounter",
+    "folder": "legacy/ChromeProfileCounter",
+    "dependencyPaths": ["dependencies/ChromeProfileCounter"],
+    "sourceCheck": "legacy/ChromeProfileCounter/tools/ChromeProfileCounterSourceCheck.ps1"
+  }
+]

@@ -27,6 +27,7 @@ sealed class Project
     public string skipKey { get; set; }
     public string[] dependencyPaths { get; set; }
     public string releaseTagEnvironment { get; set; }
+    public string sourceCheck { get; set; }
 }
 
 sealed class GitHubReleaseAssetInfo
@@ -418,6 +419,34 @@ static class RepoTools
                 throw new InvalidOperationException("README project table does not appear to mention folder: " + p.folder);
         }
 
+        // Script products have source checks but no Windows binary/release.
+        // Keep explicit ownership for them instead of exempting unknown folders.
+        var sourceProjects = new JavaScriptSerializer().Deserialize<List<Project>>(
+            ReadAll(Path.Combine(root, ".github", "source-project-map.json")));
+        if (sourceProjects == null)
+            throw new InvalidOperationException("Source project map must be an array.");
+        var allOwners = new List<Project>(projects);
+        foreach (var sourceProject in sourceProjects)
+        {
+            if (String.IsNullOrWhiteSpace(sourceProject.key) ||
+                String.IsNullOrWhiteSpace(sourceProject.folder) ||
+                String.IsNullOrWhiteSpace(sourceProject.sourceCheck) ||
+                allOwners.Any(p => p.key.Equals(sourceProject.key, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("Invalid or duplicate source project owner.");
+            if (!Directory.Exists(Path.Combine(root, sourceProject.folder)) ||
+                !File.Exists(Path.Combine(root, sourceProject.sourceCheck)))
+                throw new InvalidOperationException("Missing source product folder/check: " + sourceProject.key);
+            foreach (string dependency in sourceProject.dependencyPaths ?? new string[0])
+            {
+                string owner = ProductOwnedDependencyOwner(dependency);
+                string path = Path.Combine(root, dependency.Replace('/', Path.DirectorySeparatorChar));
+                if ((owner != null && !owner.Equals(sourceProject.key, StringComparison.OrdinalIgnoreCase)) ||
+                    (!File.Exists(path) && !Directory.Exists(path)))
+                    throw new InvalidOperationException("Invalid source product dependency: " + dependency);
+            }
+            allOwners.Add(sourceProject);
+        }
+
         string dependencyRoot = Path.Combine(root, "dependencies");
         foreach (string productDirectory in Directory.EnumerateDirectories(
             dependencyRoot,
@@ -427,7 +456,7 @@ static class RepoTools
             string owner = ProductOwnedDependencyOwner("dependencies/" + Path.GetFileName(productDirectory));
             if (owner == null)
                 continue;
-            Project project = projects.FirstOrDefault(p => p.key.Equals(
+            Project project = allOwners.FirstOrDefault(p => p.key.Equals(
                 owner,
                 StringComparison.OrdinalIgnoreCase));
             if (project == null)
@@ -2612,6 +2641,15 @@ static class RepoTools
             new[] { 0 }, 10, "DesktopStub offline preserves pre-existing startup preferences without applying them");
         AssertFileContains(existing, "RunAtStartup=1", "Offline editing must preserve startup preference");
         AssertFileContains(existing, "RunAtStartupPackaged=1", "Offline editing must preserve packaged startup preference");
+        string preset = Path.Combine(tempRoot, "OfflinePresetParity.ini");
+        File.WriteAllText(preset, "[Content]\r\nEnabled=1\r\n[Content.1]\r\nBackground=None\r\nTextSources=CustomText\r\nText=keep me\r\n", new UTF8Encoding(true));
+        SmokeProcess(exe, new[] { "--ini", preset, "--configure-only", "--content-source", "Wallpaper" },
+            new[] { 0 }, 10, "DesktopStub CLI legacy preset disables layered content without removing entries");
+        AssertFileContains(preset, "\"Enabled\" = \"0\"", "Dedicated preset must disable layered content");
+        AssertFileContains(preset, "Text=keep me", "Dedicated preset must preserve numbered entries");
+        SmokeProcess(exe, new[] { "--ini", preset, "--configure-only", "--content-source", "Wallpaper", "--set", "Content.Enabled=1" },
+            new[] { 0 }, 10, "DesktopStub explicit later setting restores layered content");
+        AssertFileContains(preset, "\"Enabled\" = \"1\"", "Later explicit layered setting must take precedence");
         string blank = Path.Combine(tempRoot, "OfflineNone.ini");
         SmokeProcess(exe, new[] { "--ini", blank, "--render-only", "--no-live-tile", "--asset", "MediumTile=1",
             "--asset", "WideTile=1", "--asset", "LargeTile=1", "--set", "Content.Enabled=1",

@@ -45,8 +45,6 @@ static class TaskSchedulerMigration
         public bool IncludeCredentialSensitiveTasks;
         public bool WhatIf;
         public bool Confirm;
-        public bool Help;
-        public bool Version;
         public string IniPath;
     }
 
@@ -84,6 +82,7 @@ static class TaskSchedulerMigration
             Options options = BuildOptions(command);
             if (command.ConfigureOnly)
             {
+                if (command.ShowConfiguration) PrintConfiguration(options);
                 Console.WriteLine("Configuration is valid: " + options.IniPath);
                 return 0;
             }
@@ -169,76 +168,45 @@ static class TaskSchedulerMigration
 
     static void SetPersistentSetting(ParsedCommand parsed, string assignment)
     {
-        int equals = assignment.IndexOf('=');
-        if (equals <= 0)
-            throw new ArgumentException("--set requires Settings.Key=Value.");
-        string key = assignment.Substring(0, equals).Trim();
-        int sectionSeparator = key.IndexOf('.');
-        if (sectionSeparator >= 0)
-        {
-            string section = key.Substring(0, sectionSeparator);
-            if (!section.Equals(SettingsSection, StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("--set supports only the [Settings] section.");
-            key = key.Substring(sectionSeparator + 1);
-        }
-        key = CanonicalSettingName(key);
-        if (key == null)
-            throw new ArgumentException("Unknown setting: " + assignment.Substring(0, equals).Trim());
-        parsed.PersistentSettings[key] = NormalizeSettingValue(
-            key,
-            assignment.Substring(equals + 1));
+        ManagedProfile.SetAssignment(parsed.PersistentSettings, assignment,
+            SettingsSection, CanonicalSettingName, NormalizeSettingValue);
     }
 
     static Options BuildOptions(ParsedCommand command)
     {
         if (!command.ProfileMode)
         {
-            Options directOptions = OptionsFromSettings(
-                DefaultSettingValues(false),
-                AppDomain.CurrentDomain.BaseDirectory);
-            ApplyDirectSettings(directOptions, command.DirectSettings);
-            ValidateOptions(directOptions);
-            return directOptions;
+            Options direct = OptionsFromSettings(DefaultSettingValues(false), AppDomain.CurrentDomain.BaseDirectory);
+            ApplyDirectSettings(direct, command.DirectSettings);
+            ValidateOptions(direct);
+            return direct;
         }
 
         string iniPath = ResolveIniPath(command.IniPath);
         ManagedIniFileSpec iniFile = BuildIniFileSpec(iniPath);
-        Dictionary<string, string> values = LoadEffectiveSettings(iniFile);
-        foreach (KeyValuePair<string, string> setting in command.PersistentSettings)
-            values[setting.Key] = setting.Value;
-
+        var overrides = new Dictionary<string, string>(command.PersistentSettings, StringComparer.OrdinalIgnoreCase);
+        foreach (var setting in command.DirectSettings) overrides[setting.Key] = setting.Value;
+        var values = ManagedProfile.ResolveSettings(DefaultSettingValues(true),
+            ManagedIniFile.LoadSection(iniFile, false), overrides, CanonicalSettingName, NormalizeSettingValue);
         Options options = OptionsFromSettings(values, Path.GetDirectoryName(iniPath));
         options.IniPath = iniPath;
-        ValidateOptions(options);
-        if (command.PersistentSettings.Count != 0)
-        {
-            string error;
-            if (!ManagedIniFile.SaveSectionBatch(iniFile, command.PersistentSettings, out error))
-                throw new IOException("Could not save TaskSchedulerMigration configuration: " + error);
-        }
         ApplyDirectSettings(options, command.DirectSettings);
         ValidateOptions(options);
-        return options;
-    }
-
-    static Dictionary<string, string> LoadEffectiveSettings(ManagedIniFileSpec iniFile)
-    {
-        Dictionary<string, string> values = DefaultSettingValues(true);
-        foreach (KeyValuePair<string, string> rawSetting in ManagedIniFile.LoadSection(iniFile))
+        if (command.ConfigureOnly)
         {
-            string key = CanonicalSettingName(rawSetting.Key);
-            if (key == null)
-                throw new InvalidDataException("Unknown [Settings] key: " + rawSetting.Key);
-            try
+            string error;
+            if (!ManagedIniFile.SaveSectionBatch(iniFile, command.PersistentSettings, prospective =>
             {
-                values[key] = NormalizeSettingValue(key, rawSetting.Value);
-            }
-            catch (ArgumentException ex)
-            {
-                throw new InvalidDataException("Invalid [Settings] " + rawSetting.Key + ": " + ex.Message, ex);
-            }
+                var fresh = ManagedProfile.ResolveSettings(DefaultSettingValues(true), prospective,
+                    new Dictionary<string, string>(), CanonicalSettingName, NormalizeSettingValue);
+                var validated = OptionsFromSettings(fresh, Path.GetDirectoryName(iniPath));
+                validated.IniPath = iniPath;
+                ValidateOptions(validated);
+                options = validated;
+            }, out error))
+                throw new IOException("Could not save TaskSchedulerMigration configuration: " + error);
         }
-        return values;
+        return options;
     }
 
     static Dictionary<string, string> DefaultSettingValues(bool profileDefaults)
@@ -336,41 +304,17 @@ static class TaskSchedulerMigration
 
     static string ResolveIniPath(string value)
     {
-        if (String.IsNullOrWhiteSpace(value))
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TaskSchedulerMigration.ini");
-        return ResolveExecutableDirectoryPath(value);
+        return ManagedProfile.ResolveIniPath(value, AppDomain.CurrentDomain.BaseDirectory, "TaskSchedulerMigration.ini");
     }
 
     static string ResolveProfilePath(string profileDirectory, string value)
     {
-        if (String.IsNullOrWhiteSpace(value))
-            return null;
-        try
-        {
-            return Path.GetFullPath(
-                Path.IsPathRooted(value) ? value : Path.Combine(profileDirectory, value));
-        }
-        catch (Exception ex)
-        {
-            throw new ArgumentException("Invalid profile path '" + value + "': " + ex.Message, ex);
-        }
+        return ManagedProfile.ResolvePath(profileDirectory, value);
     }
 
     static string ResolveExecutableDirectoryPath(string value)
     {
-        if (String.IsNullOrWhiteSpace(value))
-            throw new ArgumentException("A file path must not be empty.");
-        try
-        {
-            string path = Path.IsPathRooted(value)
-                ? value
-                : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, value);
-            return Path.GetFullPath(path);
-        }
-        catch (Exception ex)
-        {
-            throw new ArgumentException("Invalid file path '" + value + "': " + ex.Message, ex);
-        }
+        return ManagedProfile.ResolvePath(AppDomain.CurrentDomain.BaseDirectory, value);
     }
 
     static string CanonicalSettingName(string value)
@@ -457,14 +401,7 @@ static class TaskSchedulerMigration
 
     static void ValidatePath(string value, string settingName)
     {
-        try
-        {
-            Path.GetFullPath(value);
-        }
-        catch (Exception ex)
-        {
-            throw new ArgumentException("Invalid " + settingName + " path: " + ex.Message, ex);
-        }
+        ManagedProfile.ValidatePath(value, settingName);
     }
 
     static void Usage()
@@ -963,9 +900,16 @@ static class TaskSchedulerMigration
 
         string timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmssfff");
         string nonce = Guid.NewGuid().ToString("N");
-        return Path.Combine(
-            backupDirectory,
-            leaf + "-" + hash + "-" + timestamp + "-" + nonce + ".xml");
+        string directory = Path.GetFullPath(backupDirectory);
+        string suffix = "-" + hash + "-" + timestamp + "-" + nonce + ".xml";
+        // The .NET Framework build does not opt into extended-length paths.
+        // Adding a nonce must not make long task names exceed MAX_PATH.
+        int maximumLeaf = Math.Min(80, 259 - directory.TrimEnd('\\', '/').Length - 1 - suffix.Length);
+        if (maximumLeaf < 1) throw new PathTooLongException("Choose a shorter task-backup directory.");
+        if (leaf.Length > maximumLeaf) leaf = leaf.Substring(0, maximumLeaf);
+        if (Char.IsHighSurrogate(leaf[leaf.Length - 1])) leaf = leaf.Substring(0, leaf.Length - 1);
+        if (leaf.Length == 0) leaf = "t";
+        return Path.Combine(directory, leaf + suffix);
     }
 
     static string SaveBackupAtomically(
