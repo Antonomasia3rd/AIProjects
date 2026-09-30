@@ -41,6 +41,19 @@ int main()
     catch (const winrt::hresult_error& ex) { timedOut = ex.code().value == HRESULT_FROM_WIN32(ERROR_TIMEOUT); }
     Check(timedOut && timeout.waits == 1 && timeout.cancels == 1 && timeout.results == 0 && timeout.timeoutMs == 7,
         "timeout cancels once and never reads unfinished results");
+    FakeAsync genericTimeout;
+    genericTimeout.initial = genericTimeout.afterWait = FakeAsync::State::Started;
+    bool genericTimedOut = false;
+    try {
+        aip::AwaitWinrtOperation(genericTimeout, std::chrono::milliseconds(9),
+            L"Synthetic generic timeout.");
+    } catch (const winrt::hresult_error& ex) {
+        genericTimedOut = ex.code().value == HRESULT_FROM_WIN32(ERROR_TIMEOUT) &&
+            std::wstring(ex.message().c_str()) == L"Synthetic generic timeout.";
+    }
+    Check(genericTimedOut && genericTimeout.waits == 1 && genericTimeout.cancels == 1 &&
+            genericTimeout.results == 0 && genericTimeout.timeoutMs == 9,
+        "generic WinRT await preserves the supplied timeout message and cancellation behavior");
     FakeAsync noWait;
     noWait.initial = noWait.afterWait = FakeAsync::State::Started;
     try { aip::AwaitPackagedStartupOperation(noWait, std::chrono::milliseconds(0)); } catch (...) {}

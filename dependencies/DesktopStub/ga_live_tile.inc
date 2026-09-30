@@ -1132,7 +1132,11 @@ static bool TriggerPackagedLiveTileBackgroundTask(
         WinrtApartmentGuard apartment(winrt::apartment_type::single_threaded);
         using namespace winrt::Windows::ApplicationModel::Background;
 
-        BackgroundAccessStatus access = BackgroundExecutionManager::RequestAccessAsync().get();
+        const auto backgroundTaskTimeout = std::chrono::milliseconds(5000);
+        BackgroundAccessStatus access = aip::AwaitWinrtOperation(
+            BackgroundExecutionManager::RequestAccessAsync(),
+            backgroundTaskTimeout,
+            L"Background task access request timed out.");
         Log(g_ui.liveTileBackgroundAccessRequestReturned.c_str(),
             BackgroundAccessStatusText(access).c_str(), static_cast<int>(access));
 
@@ -1158,7 +1162,10 @@ static bool TriggerPackagedLiveTileBackgroundTask(
         Log(g_ui.liveTileBackgroundTaskRegistered.c_str(),
             std::wstring(registration.Name().c_str()).c_str(), entryPoint.c_str());
 
-        ApplicationTriggerResult result = trigger.RequestAsync().get();
+        ApplicationTriggerResult result = aip::AwaitWinrtOperation(
+            trigger.RequestAsync(),
+            backgroundTaskTimeout,
+            L"Background task activation request timed out.");
         Log(g_ui.liveTileBackgroundTaskRequestReturned.c_str(),
             ApplicationTriggerResultName(result), static_cast<int>(result));
 

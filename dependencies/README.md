@@ -114,8 +114,10 @@ code for nothing:
 - `packaged_startup.inc`: query and change a packaged desktop app's declared
   `Windows.ApplicationModel.StartupTask` without creating a shortcut, registry
   value, or scheduled task. It runs WinRT async work on a dedicated MTA worker
-  so synchronous tray/CLI callers do not block an STA async continuation,
-  preserves `DisabledByUser`/policy decisions, and provides the same locked,
+  so synchronous tray/CLI callers do not block an STA async continuation.
+  `AwaitWinrtOperation` exposes the same bounded cancellation behavior to
+  other package-scoped helpers. The StartupTask API preserves
+  `DisabledByUser`/policy decisions and provides the same locked,
   direction-safe INI-coupled commit through the manifest API. A requested value
   that already matches an externally enforced OS state may repair the INI, but
   the helper never claims it overrode a user or administrator decision. The package manifest

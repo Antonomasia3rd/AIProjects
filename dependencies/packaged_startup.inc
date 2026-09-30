@@ -18,9 +18,10 @@ namespace aip
 // The caller must still use a background worker for UI responsiveness. These
 // deadlines bound the asynchronous OS waits; they do not terminate COM/RPC calls.
 template <typename AsyncOperation>
-inline auto AwaitPackagedStartupOperation(
+inline auto AwaitWinrtOperation(
     const AsyncOperation& operation,
-    std::chrono::milliseconds timeout = std::chrono::milliseconds(5000))
+    std::chrono::milliseconds timeout,
+    const wchar_t* timeoutMessage)
 {
     using winrt::Windows::Foundation::AsyncStatus;
     auto state = operation.Status();
@@ -32,9 +33,20 @@ inline auto AwaitPackagedStartupOperation(
         // retry an enable whose final OS state is still unknown after timeout.
         try { operation.Cancel(); } catch (...) {}
         throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_TIMEOUT),
-            L"The Windows startup task did not respond before the timeout. Refresh its state before retrying.");
+            timeoutMessage && *timeoutMessage ? timeoutMessage :
+                L"The Windows asynchronous operation did not respond before the timeout.");
     }
     return operation.GetResults();
+}
+template <typename AsyncOperation>
+inline auto AwaitPackagedStartupOperation(
+    const AsyncOperation& operation,
+    std::chrono::milliseconds timeout = std::chrono::milliseconds(5000))
+{
+    return AwaitWinrtOperation(
+        operation,
+        timeout,
+        L"The Windows startup task did not respond before the timeout. Refresh its state before retrying.");
 }
 
 enum class PackagedStartupState

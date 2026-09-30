@@ -278,6 +278,10 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   one-shot mode now initializes MTA as well. A failed artwork read falls back
   to text rather than preventing a media snapshot. Source checks and the
   project dependency map record this shared dependency; no binary was built.
+- `AwaitWinrtOperation` now exposes the packaged StartupTask helper's bounded
+  WinRT wait/cancel behavior to other package-scoped code. The disabled
+  experimental Win8/8.1 background-task path uses it for access and trigger
+  requests with a five-second deadline, rather than unbounded `.get()` calls.
 - No executable, compiler, package, Startup, hardware, network, or resident
   process was launched for this source-only change because Defender quarantine
   remains unresolved. This boundary is not evidence about the detection cause

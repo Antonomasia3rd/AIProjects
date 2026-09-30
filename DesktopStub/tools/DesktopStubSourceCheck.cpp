@@ -530,10 +530,16 @@ int main(int argc, char** argv)
             R"rx(DesktopStubDefaultStartupProfile.*Windows startup tasks launch the default INI only.*Custom profiles may inspect package-wide state, but never change it)rx",
             "custom INI profiles must not change package-wide startup state", false});
         checks.push_back({"Packaged startup async waits have deadlines", "shared packaged startup", sharedPackagedStartup,
-            R"rx(AwaitPackagedStartupOperation.*milliseconds\(5000\).*wait_for\(timeout\).*operation.Cancel\(\).*ERROR_TIMEOUT.*operation.GetResults\(\))rx",
+            R"rx(AwaitWinrtOperation.*wait_for\(timeout\).*operation.Cancel\(\).*ERROR_TIMEOUT.*operation.GetResults\(\).*AwaitPackagedStartupOperation.*milliseconds\(5000\).*AwaitWinrtOperation)rx",
             "shared StartupTask waits must use a bounded deadline", false});
         checks.push_back({"Packaged startup avoids unbounded async get", "shared packaged startup", sharedPackagedStartup,
             R"rx(\.get\(\))rx", "StartupTask APIs must not use unbounded get()", true});
+        checks.push_back({"Experimental background task WinRT requests have deadlines", "..\\dependencies\\DesktopStub\\ga_live_tile.inc", liveTile,
+            R"rx(TriggerPackagedLiveTileBackgroundTask.*backgroundTaskTimeout.*milliseconds\(5000\).*AwaitWinrtOperation.*RequestAccessAsync.*backgroundTaskTimeout.*AwaitWinrtOperation.*trigger\.RequestAsync.*backgroundTaskTimeout)rx",
+            "experimental background-task access and activation requests must cancel after a finite shared WinRT deadline", false});
+        checks.push_back({"Experimental background task has no unbounded WinRT get", "..\\dependencies\\DesktopStub\\ga_live_tile.inc", liveTile,
+            R"rx(RequestAccessAsync\(\)\.get\(\)|trigger\.RequestAsync\(\)\.get\(\))rx",
+            "experimental background-task requests must not block indefinitely on WinRT get()", true});
         checks.push_back({"Windows10 manifest declares initially disabled packaged startup via shared builder", "manifest generation", manifest,
             R"rx(if \(target == ManifestCompatibilityTarget::Windows10\).*DesktopStartupNamespace.*BuildDesktopStartupExtension\(L"DesktopStubStartup".*if \(target == ManifestCompatibilityTarget::Windows81\))rx",
             "only the Windows10 branch may emit the shared desktop startup extension", false});
