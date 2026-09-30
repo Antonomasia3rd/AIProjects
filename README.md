@@ -15,7 +15,7 @@ or declarative policy.
 | `legacy/asusblink` | C# tray/console app | ASUS ACPI LED controller for mic LED, keyboard backlight states, and HDD-activity keyboard patterns. |
 | `legacy/capsblink` | C# tray app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
 | `legacy/CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
-| `legacy/ChromeProfileCounter` | PowerShell utility | Inspects and repairs Chrome's local profile counter. |
+| `legacy/ChromeProfileCounter` | PowerShell utility | Compatibility wrapper for the dependency-backed Chrome profile-counter repair tool. |
 | `DesktopStub` | C++ Win32 tray app | Builds `DesktopStub.exe`, a Live Tile generator: wallpaper by default, or ordered content with image/wallpaper backgrounds and RSS/custom/SMTC/Caps Lock text; see `docs/content-engine.md`. Also a loose Appx registrar. |
 | `DiscordRPC` | C++ Win32 tray/console app | Discord Rich Presence app with Discord IPC, Gateway transport, DPAPI token storage, dynamic placeholders, and a tray config UI. |
 | `legacy/DNSAutoUpdate` | C# DNS updater | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |

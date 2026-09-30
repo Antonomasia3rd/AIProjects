@@ -27,7 +27,7 @@ All of these use the shared tooltip policy. Native apps call `RegisterTrayIcon` 
 | YourPhoneHideBanner | Windows service | Service install/control arguments | Requires an interactive companion for the common user surface. |
 | PhotoCollage | One-shot image utility | CLI, shared logging, and a managed INI profile | A tray/startup surface requires a resident host and should not automatically run image jobs at sign-in. |
 | TaskSchedulerMigration | One-shot Task Scheduler utility | CLI, shared managed INI profile, and local validation | A tray/startup surface requires a resident host; automatically rerunning a migration at sign-in would be unsafe and confusing. |
-| ChromeProfileCounter | One-shot PowerShell script | Script parameters | Needs a product wrapper or companion before it can share the common desktop surface. |
+| ChromeProfileCounter | One-shot PowerShell script | Dependency-backed legacy wrapper and interactive menu | Needs an explicit profile and a companion before it can share the common desktop surface; it must not edit Chrome data at sign-in. |
 | YouTubeMusicMigrate | One-shot PowerShell utility | Script parameters and local files | Needs a product wrapper or companion before it can share the common desktop surface. |
 | WindhawkMods and LockScreenWin10 | Windhawk host modules | Windhawk settings and lifecycle | Windhawk owns loading and startup. A separate interactive companion or DesktopStub source would be needed for the common surface. |
 

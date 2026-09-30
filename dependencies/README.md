@@ -203,7 +203,7 @@ Product-specific implementations live under matching subfolders:
 `dependencies/DesktopStub/`, `dependencies/DiscordRPC/`,
 `dependencies/NowPlayingTile/`, `dependencies/CharmTray/`,
 `dependencies/ADBController/`, `dependencies/SecureDesktopLauncher/`,
-`dependencies/RealTimeNotesDeskband/`, `dependencies/PhotoCollage/`,
+`dependencies/RealTimeNotesDeskband/`, `dependencies/ChromeProfileCounter/`, `dependencies/PhotoCollage/`,
 `dependencies/TaskSchedulerMigration/`, `dependencies/DNSAutoUpdate/`,
 `dependencies/capsblink/`, and `dependencies/asusblink/`. Their project-local
 source is limited to the includes, composition declarations, assembly metadata,

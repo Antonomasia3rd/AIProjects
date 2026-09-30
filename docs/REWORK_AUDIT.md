@@ -409,3 +409,20 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   preservation, configuration-only enforcement, and direct-command backward
   compatibility. They were not compiled or run; no Task Scheduler COM service,
   task backup, or registration action occurred on this laptop.
+
+### Source-only ChromeProfileCounter relocation follow-up — 2026-09-30
+
+- The ChromeProfileCounter implementation has moved from the legacy product
+  folder to `dependencies/ChromeProfileCounter`; the legacy `.ps1` is now a
+  compatibility overlay. This puts its maintained body with the other
+  dependency-owned product implementations without changing its interactive
+  entry point.
+- The source audit found that backup names were only second-granular and that
+  Chrome `Local State` was written directly. Backups now receive a GUID suffix
+  and are published by a same-directory move. The target update writes a
+  temporary UTF-8 file, checks Chrome again, then uses same-directory
+  `File.Replace`; an interrupted write leaves the prior Local State intact.
+- A source-only PowerShell checker parses the implementation/wrapper and checks
+  the atomic-write contract without reading Chrome data. It was added but not
+  run under the Defender quarantine restriction. The tool remains interactive
+  with no INI/tray/Startup surface; no Chrome data or process was accessed.
