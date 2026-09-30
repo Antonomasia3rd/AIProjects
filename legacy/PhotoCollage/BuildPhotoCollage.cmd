@@ -19,6 +19,7 @@ for %%I in ("%ROOT%..\..") do set "REPO=%%~fI"
 "%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /r:System.Drawing.dll /out:"%OUT%" ^
   "%REPO%\dependencies\managed_named_objects.cs" ^
   "%REPO%\dependencies\managed_logging.cs" ^
+  "%REPO%\dependencies\managed_ini.cs" ^
   "%REPO%\dependencies\PhotoCollage\photo_collage_app.cs" ^
   "%ROOT%PhotoCollage.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%

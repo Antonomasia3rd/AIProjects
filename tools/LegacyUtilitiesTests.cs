@@ -130,6 +130,94 @@ static class LegacyUtilitiesTests
                 bitmap.Save(second);
             }
 
+            string profile = Path.Combine(root, "PhotoCollage.ini");
+            string profileOutput = Path.Combine(root, "profile-collage.png");
+            int configureResult = InvokeMainAndCapture(
+                typeof(PhotoCollage),
+                new[]
+                {
+                    "--ini", profile,
+                    "--set", "Settings.InputFolder=.",
+                    "--set", "Settings.OutputFile=profile-collage.png",
+                    "--set", "Settings.Cols=2",
+                    "--set", "Settings.MaxImages=2",
+                    "--set", "Settings.LogFile=profile.log",
+                    "--configure-only"
+                },
+                out informationalOutput);
+            Check(
+                configureResult == 0 && File.Exists(profile) &&
+                informationalOutput.Contains("Configuration is valid:"),
+                "PhotoCollage creates and validates a shared managed INI profile without rendering");
+
+            object profileOptions = InvokePrivate(
+                typeof(PhotoCollage),
+                "ParseArgs",
+                new object[] { new[] { "--ini", profile } });
+            Check(
+                (string)GetField(profileOptions, "InputFolder") == Path.GetFullPath(root) &&
+                (string)GetField(profileOptions, "OutputFile") == profileOutput &&
+                (int)GetField(profileOptions, "Cols") == 2 &&
+                (int)GetField(profileOptions, "MaxImages") == 2 &&
+                (string)GetField(profileOptions, "LogFile") == Path.Combine(root, "profile.log"),
+                "PhotoCollage resolves persistent profile paths relative to the profile directory");
+
+            object oneRunOptions = InvokePrivate(
+                typeof(PhotoCollage),
+                "ParseArgs",
+                new object[]
+                {
+                    new[] { "--ini", profile, "--cols", "3", "--log-file", "one-run.log" }
+                });
+            Check(
+                (int)GetField(oneRunOptions, "Cols") == 3 &&
+                (string)GetField(oneRunOptions, "LogFile") == Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    "one-run.log") &&
+                File.ReadAllText(profile).Contains("\"Cols\" = \"2\""),
+                "PhotoCollage one-run switches override but do not mutate the persistent profile");
+
+            int showResult = InvokeMainAndCapture(
+                typeof(PhotoCollage),
+                new[] { "--ini", profile, "--show-config" },
+                out informationalOutput);
+            Check(
+                showResult == 0 && informationalOutput.Contains(profileOutput) &&
+                informationalOutput.Contains("Cols = 2"),
+                "PhotoCollage can inspect the effective profile without rendering");
+
+            int unsafeSetResult = InvokeMainAndCapture(
+                typeof(PhotoCollage),
+                new[] { "--ini", profile, "--set", "Settings.Cols=3" },
+                out informationalOutput);
+            Check(
+                unsafeSetResult == 1 && informationalOutput.Contains("requires --configure-only"),
+                "PhotoCollage rejects persistent configuration commands that could also render");
+
+            string profileBeforeInvalidUpdate = File.ReadAllText(profile);
+            int invalidProfileResult = InvokeMainAndCapture(
+                typeof(PhotoCollage),
+                new[]
+                {
+                    "--ini", profile,
+                    "--set", "Settings.OutputFile=not-an-image.txt",
+                    "--configure-only"
+                },
+                out informationalOutput);
+            Check(
+                invalidProfileResult == 1 &&
+                informationalOutput.Contains("Unsupported output extension") &&
+                File.ReadAllText(profile) == profileBeforeInvalidUpdate,
+                "PhotoCollage validates a complete persistent profile before saving an update");
+
+            int directConfigureResult = InvokeMainAndCapture(
+                typeof(PhotoCollage),
+                new[] { "--ini", profile, "--input-folder", root, "--configure-only" },
+                out informationalOutput);
+            Check(
+                directConfigureResult == 1 && informationalOutput.Contains("persistent --set values"),
+                "PhotoCollage keeps one-run image options separate from persistent configuration");
+
             Type optionsType = typeof(PhotoCollage).GetNestedType(
                 "Options",
                 BindingFlags.NonPublic);
@@ -170,6 +258,17 @@ static class LegacyUtilitiesTests
                 source.Contains("ManagedLogFile.AppendLine(") &&
                 !source.Contains("File.AppendAllText("),
                 "PhotoCollage delegates sidecar logging to the shared managed logger");
+            string buildSource = File.ReadAllText(Path.Combine(
+                repositoryRoot,
+                "legacy",
+                "PhotoCollage",
+                "BuildPhotoCollage.cmd"));
+            Check(
+                source.Contains("ManagedIniFile.LoadSection(iniFile)") &&
+                source.Contains("ManagedIniFile.SaveSectionBatch(iniFile,") &&
+                source.Contains("--set requires --configure-only") &&
+                buildSource.Contains("dependencies\\managed_ini.cs"),
+                "PhotoCollage profile configuration uses the shared managed INI implementation");
         }
         finally
         {
@@ -1398,6 +1497,16 @@ static class LegacyUtilitiesTests
         if (field == null)
             throw new MissingFieldException(target.GetType().FullName, name);
         field.SetValue(target, value);
+    }
+
+    static object GetField(object target, string name)
+    {
+        FieldInfo field = target.GetType().GetField(
+            name,
+            BindingFlags.Public | BindingFlags.Instance);
+        if (field == null)
+            throw new MissingFieldException(target.GetType().FullName, name);
+        return field.GetValue(target);
     }
 
     static void CheckThrows<T>(Action action, string name) where T : Exception

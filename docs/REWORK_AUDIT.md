@@ -315,3 +315,25 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
 - Cleanup is NOT complete. Automatic approval review rejected the bulk cleanup, a narrowed single MEMORY.md deletion, and a narrowed single test-executable deletion with only "blocked by policy". None of those commands executed. Memory and temporary/build artifacts remain. No workaround was used to bypass the rejection.
 - `CLEANUP-REQUIRED.md` and cleanup-plan/results files in the Desktop handoff identify manual actions. A broad untracked snapshot accidentally included the unrelated LockScreenWin10 directory; its original was untouched, and its handoff-only duplicate is explicitly listed for removal (also blocked). Codex memory contents were not copied into the handoff. App sign-out/history purging and secure storage erasure were not performed or claimed.
 - Resume only on a later explicit user request; do not launch tests or source actuators automatically from this stopped checkpoint. No commit/push or reset credit redemption occurred.
+
+### Source-only PhotoCollage configuration follow-up — 2026-09-30
+
+- PhotoCollage was already a thin metadata overlay over
+  `dependencies/PhotoCollage`, but it had no persistent configuration despite
+  the shared managed INI implementation used by resident C# products. It now
+  uses a sidecar `PhotoCollage.ini` profile with typed settings for input/output
+  paths, grid size, image/canvas limits, JPEG quality, and logging.
+- Existing image command-line switches remain one-run overrides. Persistent
+  edits use `--set Settings.Key=Value --configure-only`; the program rejects a
+  `--set` command without `--configure-only` so a configuration operation
+  cannot also write or replace a collage. `--show-config` exposes the resolved
+  profile without processing images.
+- Relative values read from a profile resolve relative to that profile, while
+  direct command-line input/output paths retain working-directory behavior and
+  direct log paths retain the previous executable-directory behavior.
+- The PhotoCollage build now explicitly compiles `managed_ini.cs`; the project
+  map, user README, product-surface inventory, and legacy utility harness have
+  matching source/tests. The new test cases cover profile creation, relative
+  paths, one-run precedence, safe configuration-only behavior, and config
+  inspection. They have not been compiled or executed because the Defender
+  quarantine restriction remains in force.

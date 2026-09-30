@@ -161,6 +161,7 @@
     "dependencyPaths": [
       "dependencies/managed_named_objects.cs",
       "dependencies/managed_logging.cs",
+      "dependencies/managed_ini.cs",
       "dependencies/PhotoCollage"
     ],
     "artifactPaths": [

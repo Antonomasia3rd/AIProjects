@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -12,6 +13,16 @@ using AIProjects.Dependencies;
 
 static class PhotoCollage
 {
+    const string SettingsSection = "Settings";
+    const string InputFolderKey = "InputFolder";
+    const string OutputFileKey = "OutputFile";
+    const string ColsKey = "Cols";
+    const string MaxImagesKey = "MaxImages";
+    const string JpegQualityKey = "JpegQuality";
+    const string MaxCanvasMegapixelsKey = "MaxCanvasMegapixels";
+    const string LogFileKey = "LogFile";
+    const string DefaultLogFileName = "PhotoCollage.log";
+
     static int Main(string[] args)
     {
         // Information commands never parse companion arguments or touch the
@@ -30,7 +41,18 @@ static class PhotoCollage
 
         try
         {
-            var options = ParseArgs(args);
+            ParsedCommand command = ParseCommandLine(args);
+            Options options = BuildOptions(command);
+            if (command.ConfigureOnly)
+            {
+                Console.WriteLine("Configuration is valid: " + options.IniPath);
+                return 0;
+            }
+            if (command.ShowConfiguration)
+            {
+                PrintConfiguration(options);
+                return 0;
+            }
             if (String.IsNullOrWhiteSpace(options.InputFolder) || String.IsNullOrWhiteSpace(options.OutputFile))
             {
                 Usage();
@@ -55,65 +77,367 @@ static class PhotoCollage
         public long JpegQuality = 80;
         public long MaxCanvasMegapixels = 100;
         public string LogFile;
-        public bool Help;
-        public bool Version;
+        public string IniPath;
+    }
+
+    sealed class ParsedCommand
+    {
+        public string IniPath;
+        public readonly Dictionary<string, string> DirectSettings =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public readonly Dictionary<string, string> PersistentSettings =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public bool ConfigureOnly;
+        public bool ShowConfiguration;
     }
 
     static Options ParseArgs(string[] args)
     {
-        var o = new Options();
+        return BuildOptions(ParseCommandLine(args));
+    }
+
+    static ParsedCommand ParseCommandLine(string[] args)
+    {
+        var parsed = new ParsedCommand();
+        if (args == null)
+            args = new string[0];
         for (int i = 0; i < args.Length; ++i)
         {
             string a = args[i];
-            if (IsHelpOption(a))
-            {
-                o.Help = true;
-                continue;
-            }
-            if (IsVersionOption(a))
-            {
-                o.Version = true;
-                continue;
-            }
-
-            if (Is(a, "-InputFolder") || Is(a, "--input-folder")) o.InputFolder = RequireValue(args, ref i, a);
-            else if (Is(a, "-OutputFile") || Is(a, "--output-file")) o.OutputFile = RequireValue(args, ref i, a);
-            else if (Is(a, "-Cols") || Is(a, "--cols")) o.Cols = ParseIntInRange(RequireValue(args, ref i, a), a, 1, 1000);
-            else if (Is(a, "-MaxImages") || Is(a, "--max-images")) o.MaxImages = ParseIntInRange(RequireValue(args, ref i, a), a, 1, 10000);
-            else if (Is(a, "-JpegQuality") || Is(a, "--jpeg-quality")) o.JpegQuality = ParseLongInRange(RequireValue(args, ref i, a), a, 1, 100);
-            else if (Is(a, "-MaxCanvasMegapixels") || Is(a, "--max-canvas-megapixels")) o.MaxCanvasMegapixels = ParseLongInRange(RequireValue(args, ref i, a), a, 1, 1024);
-            else if (Is(a, "-LogFile") || Is(a, "--log-file")) o.LogFile = RequireValue(args, ref i, a);
+            if (Is(a, "-InputFolder") || Is(a, "--input-folder"))
+                SetDirectSetting(parsed, InputFolderKey, RequireValue(args, ref i, a));
+            else if (Is(a, "-OutputFile") || Is(a, "--output-file"))
+                SetDirectSetting(parsed, OutputFileKey, RequireValue(args, ref i, a));
+            else if (Is(a, "-Cols") || Is(a, "--cols"))
+                SetDirectSetting(parsed, ColsKey, RequireValue(args, ref i, a));
+            else if (Is(a, "-MaxImages") || Is(a, "--max-images"))
+                SetDirectSetting(parsed, MaxImagesKey, RequireValue(args, ref i, a));
+            else if (Is(a, "-JpegQuality") || Is(a, "--jpeg-quality"))
+                SetDirectSetting(parsed, JpegQualityKey, RequireValue(args, ref i, a));
+            else if (Is(a, "-MaxCanvasMegapixels") || Is(a, "--max-canvas-megapixels"))
+                SetDirectSetting(parsed, MaxCanvasMegapixelsKey, RequireValue(args, ref i, a));
+            else if (Is(a, "-LogFile") || Is(a, "--log-file"))
+                SetDirectSetting(parsed, LogFileKey, RequireValue(args, ref i, a));
+            else if (Is(a, "--ini") || Is(a, "-IniFile"))
+                parsed.IniPath = RequireValue(args, ref i, a);
+            else if (Is(a, "--set"))
+                SetPersistentSetting(parsed, RequireValue(args, ref i, a));
+            else if (Is(a, "--configure-only"))
+                parsed.ConfigureOnly = true;
+            else if (Is(a, "--show-config") || Is(a, "--print-config"))
+                parsed.ShowConfiguration = true;
             else throw new ArgumentException("Unknown argument: " + a);
         }
 
-        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        if (String.IsNullOrWhiteSpace(o.LogFile))
-            o.LogFile = Path.Combine(baseDir, "PhotoCollage.log");
-        else if (!Path.IsPathRooted(o.LogFile))
-            o.LogFile = Path.Combine(baseDir, o.LogFile);
-        return o;
+        if (parsed.ConfigureOnly && parsed.DirectSettings.Count != 0)
+            throw new ArgumentException("--configure-only accepts persistent --set values, not one-run options.");
+        if (parsed.PersistentSettings.Count != 0 && !parsed.ConfigureOnly)
+            throw new ArgumentException("--set requires --configure-only so a configuration change cannot also create a collage.");
+        return parsed;
+    }
+
+    static void SetDirectSetting(ParsedCommand parsed, string key, string value)
+    {
+        parsed.DirectSettings[key] = NormalizeSettingValue(key, value);
+    }
+
+    static void SetPersistentSetting(ParsedCommand parsed, string assignment)
+    {
+        int equals = assignment.IndexOf('=');
+        if (equals <= 0)
+            throw new ArgumentException("--set requires Settings.Key=Value.");
+        string key = assignment.Substring(0, equals).Trim();
+        int sectionSeparator = key.IndexOf('.');
+        if (sectionSeparator >= 0)
+        {
+            string section = key.Substring(0, sectionSeparator);
+            if (!section.Equals(SettingsSection, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("--set supports only the [Settings] section.");
+            key = key.Substring(sectionSeparator + 1);
+        }
+        key = CanonicalSettingName(key);
+        if (key == null)
+            throw new ArgumentException("Unknown setting: " + assignment.Substring(0, equals).Trim());
+        parsed.PersistentSettings[key] = NormalizeSettingValue(
+            key,
+            assignment.Substring(equals + 1));
+    }
+
+    static Options BuildOptions(ParsedCommand command)
+    {
+        string iniPath = ResolveIniPath(command.IniPath);
+        ManagedIniFileSpec iniFile = BuildIniFileSpec(iniPath);
+        Dictionary<string, string> values = LoadEffectiveSettings(iniFile);
+        foreach (KeyValuePair<string, string> setting in command.PersistentSettings)
+            values[setting.Key] = setting.Value;
+
+        Options options = OptionsFromSettings(values, Path.GetDirectoryName(iniPath));
+        options.IniPath = iniPath;
+        ValidateConfiguration(options);
+        if (command.PersistentSettings.Count != 0)
+        {
+            string error;
+            if (!ManagedIniFile.SaveSectionBatch(iniFile, command.PersistentSettings, out error))
+                throw new IOException("Could not save PhotoCollage configuration: " + error);
+        }
+        ApplyDirectSettings(options, command.DirectSettings);
+        ValidateConfiguration(options);
+        return options;
+    }
+
+    static Dictionary<string, string> LoadEffectiveSettings(ManagedIniFileSpec iniFile)
+    {
+        Dictionary<string, string> values = DefaultSettingValues();
+        foreach (KeyValuePair<string, string> rawSetting in ManagedIniFile.LoadSection(iniFile))
+        {
+            string key = CanonicalSettingName(rawSetting.Key);
+            if (key == null)
+                throw new InvalidDataException("Unknown [Settings] key: " + rawSetting.Key);
+            try
+            {
+                values[key] = NormalizeSettingValue(key, rawSetting.Value);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException("Invalid [Settings] " + rawSetting.Key + ": " + ex.Message, ex);
+            }
+        }
+        return values;
+    }
+
+    static Dictionary<string, string> DefaultSettingValues()
+    {
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { InputFolderKey, "" },
+            { OutputFileKey, "" },
+            { ColsKey, "5" },
+            { MaxImagesKey, "25" },
+            { JpegQualityKey, "80" },
+            { MaxCanvasMegapixelsKey, "100" },
+            { LogFileKey, DefaultLogFileName }
+        };
+    }
+
+    static Options OptionsFromSettings(Dictionary<string, string> values, string profileDirectory)
+    {
+        return new Options
+        {
+            InputFolder = ResolveProfilePath(profileDirectory, values[InputFolderKey]),
+            OutputFile = ResolveProfilePath(profileDirectory, values[OutputFileKey]),
+            Cols = ParseIntInRange(values[ColsKey], ColsKey, 1, 1000),
+            MaxImages = ParseIntInRange(values[MaxImagesKey], MaxImagesKey, 1, 10000),
+            JpegQuality = ParseLongInRange(values[JpegQualityKey], JpegQualityKey, 1, 100),
+            MaxCanvasMegapixels = ParseLongInRange(
+                values[MaxCanvasMegapixelsKey],
+                MaxCanvasMegapixelsKey,
+                1,
+                1024),
+            LogFile = ResolveProfilePath(
+                profileDirectory,
+                String.IsNullOrWhiteSpace(values[LogFileKey])
+                    ? DefaultLogFileName
+                    : values[LogFileKey])
+        };
+    }
+
+    static void ApplyDirectSettings(Options options, Dictionary<string, string> values)
+    {
+        string value;
+        if (values.TryGetValue(InputFolderKey, out value))
+            options.InputFolder = ResolveWorkingDirectoryPath(value);
+        if (values.TryGetValue(OutputFileKey, out value))
+            options.OutputFile = ResolveWorkingDirectoryPath(value);
+        if (values.TryGetValue(ColsKey, out value))
+            options.Cols = ParseIntInRange(value, ColsKey, 1, 1000);
+        if (values.TryGetValue(MaxImagesKey, out value))
+            options.MaxImages = ParseIntInRange(value, MaxImagesKey, 1, 10000);
+        if (values.TryGetValue(JpegQualityKey, out value))
+            options.JpegQuality = ParseLongInRange(value, JpegQualityKey, 1, 100);
+        if (values.TryGetValue(MaxCanvasMegapixelsKey, out value))
+            options.MaxCanvasMegapixels = ParseLongInRange(value, MaxCanvasMegapixelsKey, 1, 1024);
+        if (values.TryGetValue(LogFileKey, out value))
+            options.LogFile = ResolveExecutableDirectoryPath(
+                String.IsNullOrWhiteSpace(value) ? DefaultLogFileName : value);
+    }
+
+    static void ValidateConfiguration(Options options)
+    {
+        if (!String.IsNullOrEmpty(options.OutputFile))
+            ValidateOutputExtension(options.OutputFile);
+        if (String.IsNullOrEmpty(options.LogFile))
+            throw new InvalidDataException("LogFile must not be empty.");
+    }
+
+    static void PrintConfiguration(Options options)
+    {
+        Console.WriteLine("Configuration: " + options.IniPath);
+        Console.WriteLine("InputFolder = " + (options.InputFolder ?? ""));
+        Console.WriteLine("OutputFile = " + (options.OutputFile ?? ""));
+        Console.WriteLine("Cols = " + options.Cols.ToString(CultureInfo.InvariantCulture));
+        Console.WriteLine("MaxImages = " + options.MaxImages.ToString(CultureInfo.InvariantCulture));
+        Console.WriteLine("JpegQuality = " + options.JpegQuality.ToString(CultureInfo.InvariantCulture));
+        Console.WriteLine("MaxCanvasMegapixels = " + options.MaxCanvasMegapixels.ToString(CultureInfo.InvariantCulture));
+        Console.WriteLine("LogFile = " + options.LogFile);
+    }
+
+    static ManagedIniFileSpec BuildIniFileSpec(string iniPath)
+    {
+        return new ManagedIniFileSpec
+        {
+            FilePath = iniPath,
+            SectionName = SettingsSection,
+            DefaultContents =
+                "[Settings]" + Environment.NewLine +
+                "; Persistent defaults. Command-line image options override these for one run." + Environment.NewLine +
+                InputFolderKey + "=" + Environment.NewLine +
+                OutputFileKey + "=" + Environment.NewLine +
+                ColsKey + "=5" + Environment.NewLine +
+                MaxImagesKey + "=25" + Environment.NewLine +
+                JpegQualityKey + "=80" + Environment.NewLine +
+                MaxCanvasMegapixelsKey + "=100" + Environment.NewLine +
+                LogFileKey + "=" + DefaultLogFileName + Environment.NewLine,
+            Log = delegate(string message)
+            {
+                Console.Error.WriteLine("PhotoCollage configuration: " + message);
+            }
+        };
+    }
+
+    static string ResolveIniPath(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "PhotoCollage.ini");
+        return ResolveExecutableDirectoryPath(value);
+    }
+
+    static string ResolveProfilePath(string profileDirectory, string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return null;
+        try
+        {
+            return Path.GetFullPath(Path.IsPathRooted(value) ? value : Path.Combine(profileDirectory, value));
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException("Invalid profile path '" + value + "': " + ex.Message, ex);
+        }
+    }
+
+    static string ResolveWorkingDirectoryPath(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return null;
+        try
+        {
+            return Path.GetFullPath(value);
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException("Invalid command-line path '" + value + "': " + ex.Message, ex);
+        }
+    }
+
+    static string ResolveExecutableDirectoryPath(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("A file path must not be empty.");
+        try
+        {
+            string path = Path.IsPathRooted(value)
+                ? value
+                : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, value);
+            return Path.GetFullPath(path);
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException("Invalid file path '" + value + "': " + ex.Message, ex);
+        }
+    }
+
+    static string CanonicalSettingName(string value)
+    {
+        if (String.IsNullOrWhiteSpace(value))
+            return null;
+        string key = value.Trim();
+        if (key.Equals(InputFolderKey, StringComparison.OrdinalIgnoreCase)) return InputFolderKey;
+        if (key.Equals(OutputFileKey, StringComparison.OrdinalIgnoreCase)) return OutputFileKey;
+        if (key.Equals(ColsKey, StringComparison.OrdinalIgnoreCase)) return ColsKey;
+        if (key.Equals(MaxImagesKey, StringComparison.OrdinalIgnoreCase)) return MaxImagesKey;
+        if (key.Equals(JpegQualityKey, StringComparison.OrdinalIgnoreCase)) return JpegQualityKey;
+        if (key.Equals(MaxCanvasMegapixelsKey, StringComparison.OrdinalIgnoreCase)) return MaxCanvasMegapixelsKey;
+        if (key.Equals(LogFileKey, StringComparison.OrdinalIgnoreCase)) return LogFileKey;
+        return null;
+    }
+
+    static string NormalizeSettingValue(string key, string value)
+    {
+        if (value == null || value.IndexOfAny(new[] { '\r', '\n', '\0' }) >= 0)
+            throw new ArgumentException("The setting value is invalid.");
+        if (key.Equals(InputFolderKey, StringComparison.OrdinalIgnoreCase) ||
+            key.Equals(OutputFileKey, StringComparison.OrdinalIgnoreCase))
+        {
+            if (String.IsNullOrWhiteSpace(value))
+                return "";
+            ValidatePath(value, key);
+            return value;
+        }
+        if (key.Equals(LogFileKey, StringComparison.OrdinalIgnoreCase))
+        {
+            if (String.IsNullOrWhiteSpace(value))
+                return "";
+            ValidatePath(value, key);
+            return value;
+        }
+        if (key.Equals(ColsKey, StringComparison.OrdinalIgnoreCase))
+            return ParseIntInRange(value, key, 1, 1000).ToString(CultureInfo.InvariantCulture);
+        if (key.Equals(MaxImagesKey, StringComparison.OrdinalIgnoreCase))
+            return ParseIntInRange(value, key, 1, 10000).ToString(CultureInfo.InvariantCulture);
+        if (key.Equals(JpegQualityKey, StringComparison.OrdinalIgnoreCase))
+            return ParseLongInRange(value, key, 1, 100).ToString(CultureInfo.InvariantCulture);
+        if (key.Equals(MaxCanvasMegapixelsKey, StringComparison.OrdinalIgnoreCase))
+            return ParseLongInRange(value, key, 1, 1024).ToString(CultureInfo.InvariantCulture);
+        throw new ArgumentException("Unknown setting: " + key);
+    }
+
+    static void ValidatePath(string value, string settingName)
+    {
+        try
+        {
+            Path.GetFullPath(value);
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException("Invalid " + settingName + " path: " + ex.Message, ex);
+        }
     }
 
     static void Usage()
     {
         Console.WriteLine("Usage:");
-        Console.WriteLine("  PhotoCollage.exe -InputFolder C:\\Photos -OutputFile C:\\Photos\\collage.jpg [options]");
+        Console.WriteLine("  PhotoCollage.exe [--ini PATH] -InputFolder C:\\Photos -OutputFile C:\\Photos\\collage.jpg [options]");
         Console.WriteLine();
-        Console.WriteLine("Options:");
+        Console.WriteLine("One-run options (they override the profile without changing it):");
         Console.WriteLine("  -Cols N                  columns (default 5)");
         Console.WriteLine("  -MaxImages N             maximum readable images (default 25)");
         Console.WriteLine("  -JpegQuality N           JPEG quality from 1 through 100");
         Console.WriteLine("  -MaxCanvasMegapixels N   canvas safety limit (default 100)");
         Console.WriteLine("  -LogFile PATH            log path relative to the executable by default");
+        Console.WriteLine();
+        Console.WriteLine("Persistent profile:");
+        Console.WriteLine("  --ini PATH               profile path (default: PhotoCollage.ini beside the executable)");
+        Console.WriteLine("  --set Settings.Key=Value persist InputFolder, OutputFile, Cols, MaxImages,");
+        Console.WriteLine("                           JpegQuality, MaxCanvasMegapixels, or LogFile");
+        Console.WriteLine("  --configure-only         validate/create the profile and save --set values without creating a collage");
+        Console.WriteLine("  --show-config            print effective profile values without creating a collage");
         Console.WriteLine("  --help                   show help without side effects");
         Console.WriteLine("  --version                show version without side effects");
     }
 
     static void Run(Options o)
     {
-        string ext = Path.GetExtension(o.OutputFile).ToLowerInvariant();
-        if (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".bmp")
-            throw new InvalidOperationException("Unsupported output extension '" + ext + "'. Use .jpg, .jpeg, .png, or .bmp.");
+        string ext = ValidateOutputExtension(o.OutputFile);
         if (!Directory.Exists(o.InputFolder))
             throw new DirectoryNotFoundException(o.InputFolder);
 
@@ -191,6 +515,14 @@ static class PhotoCollage
         }
 
         Log(o, "Done! Saved to " + outputPath);
+    }
+
+    static string ValidateOutputExtension(string outputFile)
+    {
+        string ext = Path.GetExtension(outputFile).ToLowerInvariant();
+        if (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".bmp")
+            throw new InvalidOperationException("Unsupported output extension '" + ext + "'. Use .jpg, .jpeg, .png, or .bmp.");
+        return ext;
     }
 
     static void SaveCanvasAtomically(Bitmap canvas, string outputPath, string extension, long jpegQuality)
@@ -425,7 +757,8 @@ static class PhotoCollage
             "-InputFolder", "--input-folder",
             "-OutputFile", "--output-file", "-Cols", "--cols",
             "-MaxImages", "--max-images", "-JpegQuality", "--jpeg-quality",
-            "-MaxCanvasMegapixels", "--max-canvas-megapixels", "-LogFile", "--log-file"
+            "-MaxCanvasMegapixels", "--max-canvas-megapixels", "-LogFile", "--log-file",
+            "--ini", "-IniFile", "--set", "--configure-only", "--show-config", "--print-config"
         };
         return options.Any(option => Is(value, option));
     }

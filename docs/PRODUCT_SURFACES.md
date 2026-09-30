@@ -25,7 +25,7 @@ All of these use the shared tooltip policy. Native apps call `RegisterTrayIcon` 
 | SecureDesktopLauncher | Windows service plus password launcher | Service/launcher configuration and CLI | A service cannot own a user notification area. An interactive companion would be needed for tray and Startup-folder controls. |
 | AllowContentAboveLock | Windows service | Service install/control arguments | Requires an interactive companion to expose user tray/startup settings without moving service work into a user process. |
 | YourPhoneHideBanner | Windows service | Service install/control arguments | Requires an interactive companion for the common user surface. |
-| PhotoCollage | One-shot image utility | CLI and shared logging | A profile/configuration surface can be added directly. A tray/startup surface requires a resident host and should not automatically run image jobs at sign-in. |
+| PhotoCollage | One-shot image utility | CLI, shared logging, and a managed INI profile | A tray/startup surface requires a resident host and should not automatically run image jobs at sign-in. |
 | TaskSchedulerMigration | One-shot Task Scheduler utility | CLI and local validation | A profile/configuration surface can be added directly. A tray/startup surface requires a resident host; automatically rerunning a migration at sign-in would be unsafe and confusing. |
 | ChromeProfileCounter | One-shot PowerShell script | Script parameters | Needs a product wrapper or companion before it can share the common desktop surface. |
 | YouTubeMusicMigrate | One-shot PowerShell utility | Script parameters and local files | Needs a product wrapper or companion before it can share the common desktop surface. |

@@ -16,7 +16,7 @@ Work log: 2026-09-07 onward. Findings come from the current working tree, which 
 | asusblink | C#/.NET Framework, WinForms/WMI/ACPI | Metadata wrapper plus `dependencies/asusblink`; consumes shared managed INI, tray, startup and logging. |
 | capsblink | C#/.NET Framework, WinForms/device I/O | Metadata wrapper plus `dependencies/capsblink`; consumes shared managed baseline. |
 | DNSAutoUpdate | C#/.NET Framework resident utility | Metadata wrapper plus `dependencies/DNSAutoUpdate`; consumes shared managed baseline. |
-| PhotoCollage | C#/.NET Framework/System.Drawing CLI | Metadata wrapper plus `dependencies/PhotoCollage`; no common resident tray/startup settings contract yet. |
+| PhotoCollage | C#/.NET Framework/System.Drawing CLI | Metadata wrapper plus `dependencies/PhotoCollage`; shared managed INI profile and CLI overrides, but no resident tray/startup host. |
 | TaskSchedulerMigration | C#/.NET Framework/Task Scheduler COM CLI | Wrapper plus `dependencies/TaskSchedulerMigration`; no common resident tray/startup settings contract yet. |
 | AllowContentAboveLock | C#/.NET Framework Windows service | Declarative policy overlay over `dependencies/registry_notification_service.cs`. |
 | YourPhoneHideBanner | C#/.NET Framework Windows service | Declarative policy overlay over the same service engine. |
