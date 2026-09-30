@@ -426,3 +426,15 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   the atomic-write contract without reading Chrome data. It was added but not
   run under the Defender quarantine restriction. The tool remains interactive
   with no INI/tray/Startup surface; no Chrome data or process was accessed.
+
+### Source-only YouTubeMusicMigrate boundary finding — 2026-09-30
+
+- YouTubeMusicMigrate is intentionally left in its legacy folder for now. Its
+  large PowerShell implementation derives browser-auth headers, account config,
+  token caches, reports, checkpoints, and cleanup paths from `$PSScriptRoot`.
+  A mechanical move into `dependencies` would redirect existing local state and
+  can break or expose a user's browser-auth workflow.
+- Its README and `.gitignore` already identify those files as local, uncommitted
+  credentials/state. No script, header, cache, or network action was executed
+  or read during this audit. A future dependency extraction needs an explicit
+  data-root argument and migration plan before a compatibility wrapper is safe.
