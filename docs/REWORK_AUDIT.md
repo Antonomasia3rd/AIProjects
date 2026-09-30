@@ -282,6 +282,10 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   using shared INI/CLI/tray/startup infrastructure from services, Explorer
   deskbands, one-shot utilities, and Windhawk modules that still need a
   companion or DesktopStub-source migration to reach the same user surface.
+- Added a source-only [Windhawk and LockScreenWin10 audit](audit-windhawk.md).
+  It records the intentional original-versus-generated source split, ignored
+  local evidence paths, and the remaining infinite-shutdown/lifecycle risks
+  without deleting or changing host-sensitive module code.
 - The same catalog now distinguishes read-only sources that may refresh ahead
   of a future cycle slot from Discord/indicator sources that must follow the
   selected content. Previously an enabled but non-visible CapsBlink, AsusBlink,
