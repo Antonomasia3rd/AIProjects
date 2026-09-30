@@ -2077,7 +2077,8 @@ static bool ValidateDesktopStubContentProfile(
 
     bool usesRss = false;
     for (const auto& entry : composition.entries)
-        if (composition.enabled && entry.enabled && std::find(entry.sources.begin(), entry.sources.end(), L"RssFeed") != entry.sources.end()) usesRss = true;
+        if (composition.enabled && entry.enabled &&
+            aip::content::EntryUsesSource(entry, aip::content::SourceId::RssFeed)) usesRss = true;
     return ValidateDesktopStubContentProfileValues(
         usesRss ? L"RssFeed" : composition.enabled ? L"Wallpaper" : DesktopStubContentProfileValue(
             L"Settings",

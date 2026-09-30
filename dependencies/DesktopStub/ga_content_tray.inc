@@ -209,7 +209,8 @@ template<class Mutator> static bool CommitContentMenuMutation(HWND owner, Mutato
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Invalid content setting", MB_OK | MB_ICONWARNING); return false;
     }
     for (const auto& entry : after.entries) {
-        if (after.enabled && entry.enabled && std::find(entry.sources.begin(), entry.sources.end(), L"RssFeed") != entry.sources.end() &&
+        if (after.enabled && entry.enabled &&
+            aip::content::EntryUsesSource(entry, aip::content::SourceId::RssFeed) &&
             !ValidateConfiguredRssSettingsForContentSource(ContentSource::RssFeed, error)) {
             DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"RSS configuration", MB_OK | MB_ICONWARNING); return false;
         }

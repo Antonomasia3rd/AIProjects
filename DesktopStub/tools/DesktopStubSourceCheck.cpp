@@ -1131,7 +1131,7 @@ int main(int argc, char** argv)
         AssertContainsAll(
             "Content source and background catalogs control every content surface",
             "content engine and DesktopStub content sources",
-            contentEngine + "\n" + contentRuntime + "\n" + tray + "\n" + offline,
+            contentEngine + "\n" + contentRuntime + "\n" + tray + "\n" + offline + "\n" + commandLine,
             {
                 "#include <map>",
                 "enum class BackgroundId",
@@ -1149,11 +1149,20 @@ int main(int argc, char** argv)
                 "prompt += aip::content::SupportedSourceNames();",
                 "SourceIdFor(provider)",
                 "EntryUsesSource(*selected, aip::content::SourceId::CustomText)",
+                "EntryUsesSource(entry, aip::content::SourceId::RssFeed)",
                 "BackgroundIdFor(entry.background)",
                 "BackgroundIdFor(selected->background)",
                 "BackgroundIdFor(background)"
             },
             "public source/background IDs and inactive-refresh scope must have one catalog shared by normalization, tray presentation, provider lifecycle, runtime dispatch, and offline input gating");
+        AssertNotContainsAny(
+            "RSS profile validation does not compare raw source names",
+            "DesktopStub command-line and tray content sources",
+            commandLine + "\n" + tray,
+            {
+                "std::find(entry.sources.begin(), entry.sources.end(), L\"RssFeed\")"
+            },
+            "RSS validation must use the shared source catalog rather than a duplicate string membership check");
         AssertNotContainsAny(
             "Runtime background resolver does not compare raw background names",
             "..\\dependencies\\DesktopStub\\ga_content_runtime.inc",
