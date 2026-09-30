@@ -46,4 +46,11 @@ if(POWERSHELL_EXECUTABLE)
     add_test(NAME TileTextLayoutSpecification
         COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -File "${CMAKE_CURRENT_LIST_DIR}/TestTileTextLayout.ps1")
     set_tests_properties(TileTextLayoutSpecification PROPERTIES TIMEOUT 90)
+    add_test(NAME ChromeProfileCounterSourceCheck
+        COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -File
+            "${REPOSITORY_ROOT}/legacy/ChromeProfileCounter/tools/ChromeProfileCounterSourceCheck.ps1"
+            -RepositoryRoot "${REPOSITORY_ROOT}")
+    set_tests_properties(ChromeProfileCounterSourceCheck PROPERTIES
+        WORKING_DIRECTORY "${REPOSITORY_ROOT}"
+        TIMEOUT 90)
 endif()

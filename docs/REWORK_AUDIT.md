@@ -423,9 +423,11 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   temporary UTF-8 file, checks Chrome again, then uses same-directory
   `File.Replace`; an interrupted write leaves the prior Local State intact.
 - A source-only PowerShell checker parses the implementation/wrapper and checks
-  the atomic-write contract without reading Chrome data. It was added but not
-  run under the Defender quarantine restriction. The tool remains interactive
-  with no INI/tray/Startup surface; no Chrome data or process was accessed.
+  the atomic-write contract without reading Chrome data. CTest invokes it when
+  `pwsh` or Windows PowerShell is available, including non-Windows hosts. It
+  was added but not run under the Defender quarantine restriction. The tool
+  remains interactive with no INI/tray/Startup surface; no Chrome data or
+  process was accessed.
 
 ### Source-only YouTubeMusicMigrate boundary finding — 2026-09-30
 

@@ -4,8 +4,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$sourcePath = Join-Path $RepositoryRoot "dependencies\ChromeProfileCounter\chrome_profile_counter_app.ps1"
-$wrapperPath = Join-Path $RepositoryRoot "legacy\ChromeProfileCounter\ChromeProfileCounter.ps1"
+$sourcePath = Join-Path (Join-Path (Join-Path $RepositoryRoot "dependencies") "ChromeProfileCounter") "chrome_profile_counter_app.ps1"
+$wrapperPath = Join-Path (Join-Path (Join-Path $RepositoryRoot "legacy") "ChromeProfileCounter") "ChromeProfileCounter.ps1"
 
 foreach ($path in @($sourcePath, $wrapperPath)) {
     if (-not (Test-Path -LiteralPath $path)) {
