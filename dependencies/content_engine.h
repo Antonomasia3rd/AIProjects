@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <cwctype>
+#include <map>
 #include <string>
 #include <vector>
 #include <utility>
@@ -17,6 +18,24 @@ constexpr int MaxEntries = 32;
 constexpr std::size_t MaxText = 4096;
 enum class TextMode { Auto, Overlay, Off };
 struct Choice { const wchar_t* value; const wchar_t* label; };
+enum class SourceId {
+    CustomText,
+    RssFeed,
+    CapsLock,
+    Smtc,
+    Notes,
+    DiscordRpc,
+    CapsBlink,
+    AsusBlink,
+    Unknown,
+};
+// This is the one canonical source catalog. INI normalization, the tray
+// source picker, and the DesktopStub source host share its IDs and labels.
+struct SourceDescriptor {
+    const wchar_t* value;
+    const wchar_t* label;
+    SourceId id;
+};
 inline constexpr Choice TextModes[] = {
     {L"Auto", L"Windows text with bitmap fallback"},
     {L"Overlay", L"Text over the background image"},
@@ -28,15 +47,15 @@ inline constexpr Choice Backgrounds[] = {
     {L"Image", L"Custom image"},
     {L"None", L"Solid color"},
 };
-inline constexpr Choice Sources[] = {
-    {L"CustomText", L"Custom text"},
-    {L"RssFeed", L"RSS / Atom headlines"},
-    {L"CapsLock", L"Caps Lock status"},
-    {L"SMTC", L"Now playing (SMTC)"},
-    {L"Notes", L"Real-Time Notes"},
-    {L"DiscordRPC", L"Discord Rich Presence"},
-    {L"CapsBlink", L"Caps indicator pattern"},
-    {L"AsusBlink", L"ASUS indicator patterns"},
+inline constexpr SourceDescriptor Sources[] = {
+    {L"CustomText", L"Custom text", SourceId::CustomText},
+    {L"RssFeed", L"RSS / Atom headlines", SourceId::RssFeed},
+    {L"CapsLock", L"Caps Lock status", SourceId::CapsLock},
+    {L"SMTC", L"Now playing (SMTC)", SourceId::Smtc},
+    {L"Notes", L"Real-Time Notes", SourceId::Notes},
+    {L"DiscordRPC", L"Discord Rich Presence", SourceId::DiscordRpc},
+    {L"CapsBlink", L"Caps indicator pattern", SourceId::CapsBlink},
+    {L"AsusBlink", L"ASUS indicator patterns", SourceId::AsusBlink},
 };
 inline constexpr const wchar_t* AsusPatternKeys[] = {L"MicState", L"MicInterval", L"MicDuration", L"KeyboardState", L"KeyboardInterval", L"KeyboardDuration", L"ErrorRetry", L"ErrorAction"};
 inline constexpr const wchar_t* AsusPatternDefaults[] = {L"off", L"0", L"once", L"off", L"0", L"once", L"3", L"continue"};
@@ -90,6 +109,29 @@ inline std::wstring Lower(std::wstring s) {
     for (auto& ch : s) ch = static_cast<wchar_t>(std::towlower(ch));
     return s;
 }
+inline const SourceDescriptor* FindSourceDescriptor(const std::wstring& value) {
+    const auto canonical = Lower(Trim(value));
+    for (const auto& source : Sources)
+        if (canonical == Lower(source.value)) return &source;
+    return nullptr;
+}
+inline SourceId SourceIdFor(const std::wstring& value) {
+    const auto* source = FindSourceDescriptor(value);
+    return source ? source->id : SourceId::Unknown;
+}
+inline std::wstring SupportedSourceNames() {
+    std::wstring names;
+    for (const auto& source : Sources) {
+        if (!names.empty()) names += L", ";
+        names += source.value;
+    }
+    return names;
+}
+inline bool EntryUsesSource(const Entry& entry, SourceId id) {
+    return std::any_of(entry.sources.begin(), entry.sources.end(), [id](const std::wstring& source) {
+        return SourceIdFor(source) == id;
+    });
+}
 inline bool ParseInt(const std::wstring& input, int low, int high, int& result) {
     auto s = Trim(input);
     if (s.empty()) return false;
@@ -127,10 +169,9 @@ inline bool ParseSources(const std::wstring& value, std::vector<std::wstring>& s
     std::size_t start = 0;
     while (start <= value.size()) {
         auto end = value.find(L',', start);
-        auto item = Lower(Trim(value.substr(start, end == std::wstring::npos ? end : end - start)));
-        std::wstring canonical;
-        for (const auto& choice : Sources) if (item == Lower(choice.value)) canonical = choice.value;
-        if (canonical.empty()) return false;
+        const auto* source = FindSourceDescriptor(value.substr(start, end == std::wstring::npos ? end : end - start));
+        if (!source) return false;
+        const std::wstring canonical = source->value;
         if (std::find(sources.begin(), sources.end(), canonical) != sources.end()) return false;
         sources.push_back(canonical);
         if (end == std::wstring::npos) break;
@@ -252,7 +293,10 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
         else { error += L"expected Wallpaper, LiveWallpaper, Image, or None."; return false; }
     } else if (!root && k == L"textsources") {
         std::vector<std::wstring> sources;
-        if (!ParseSources(value, sources)) { error += L"expected unique CustomText, RssFeed, CapsLock, SMTC, Notes, DiscordRPC, CapsBlink, AsusBlink names separated by commas."; return false; }
+        if (!ParseSources(value, sources)) {
+            error += L"expected unique " + SupportedSourceNames() + L" names separated by commas.";
+            return false;
+        }
         value.clear();
         for (auto& source : sources) { if (!value.empty()) value += L","; value += source; }
     } else if (!root && (k == L"name" || k == L"imagepath" || k == L"text" || k == L"secondarytext" || k == L"badgetext")) {

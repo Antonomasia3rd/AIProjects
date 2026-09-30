@@ -53,6 +53,36 @@ Configuration Read(const Profile& p) {
     Require(error.empty(), "successful configuration clears its error");
     return cfg;
 }
+void TestSourceCatalog() {
+    constexpr std::size_t sourceCount = sizeof(Sources) / sizeof(Sources[0]);
+    Require(sourceCount == 8, "the built-in source catalog has the expected migration set");
+    Require(SupportedSourceNames() == L"CustomText, RssFeed, CapsLock, SMTC, Notes, DiscordRPC, CapsBlink, AsusBlink",
+        "the source catalog supplies the stable display and validation order");
+    Require(SourceIdFor(L" smtc ") == SourceId::Smtc &&
+            SourceIdFor(L"DiscordRPC") == SourceId::DiscordRpc &&
+            SourceIdFor(L"not-a-source") == SourceId::Unknown,
+        "source identifiers canonicalize case and whitespace while unknown names stay explicit");
+    for (std::size_t left = 0; left < sourceCount; ++left) {
+        const auto* found = FindSourceDescriptor(Sources[left].value);
+        Require(found == &Sources[left] && found->id != SourceId::Unknown,
+            "every catalog entry resolves to a non-unknown descriptor");
+        for (std::size_t right = left + 1; right < sourceCount; ++right) {
+            Require(Lower(Sources[left].value) != Lower(Sources[right].value) &&
+                    Sources[left].id != Sources[right].id,
+                "catalog identifiers and public INI names are unique");
+        }
+    }
+    std::vector<std::wstring> parsed;
+    Require(ParseSources(L" customtext , SMTC, rssfeed ", parsed) &&
+            parsed == std::vector<std::wstring>({L"CustomText", L"SMTC", L"RssFeed"}),
+        "source parsing follows the catalog rather than a second hard-coded list");
+    Entry entry;
+    entry.sources = {L"RssFeed", L"SMTC"};
+    Require(EntryUsesSource(entry, SourceId::RssFeed) &&
+            EntryUsesSource(entry, SourceId::Smtc) &&
+            !EntryUsesSource(entry, SourceId::Notes),
+        "source-use queries resolve through catalog IDs");
+}
 void TestParsingAndReload() {
     auto defaults = Read(Profile{});
     Require(!defaults.enabled && !defaults.cycle && defaults.entries.size() == 1,
@@ -277,7 +307,7 @@ void TestRandomSchedule() {
 }
 int main() {
     try {
-        TestParsingAndReload(); TestSettingParity(); TestCycle(); TestTextAndWarnings(); TestRandomSchedule();
+        TestSourceCatalog(); TestParsingAndReload(); TestSettingParity(); TestCycle(); TestTextAndWarnings(); TestRandomSchedule();
         std::cout << "Content engine tests passed (" << checks << " assertions; 100000 randomized schedule iterations).\n";
         return 0;
     } catch (const std::exception& error) {

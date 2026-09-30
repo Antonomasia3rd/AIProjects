@@ -257,6 +257,13 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   Live Tile cycles below 10 seconds receive an explicit advisory warning, not
   a claim that 10 seconds is a Windows minimum. The portable policy test and
   content guide preserve that distinction.
+- The built-in source catalog was consolidated in `dependencies/content_engine.h`.
+  `SourceId`/`SourceDescriptor` now supply canonical source names and labels to
+  INI normalization, the tray picker/prompt, runtime discovery, and content
+  composition. The header now directly includes `<map>` for its public
+  `AsusConfiguration` member rather than relying on a transitive include.
+  New portable assertions and source contracts cover catalog uniqueness and
+  cross-surface routing. No executable was compiled or run for this change.
 - No executable, compiler, package, Startup, hardware, network, or resident
   process was launched for this source-only change because Defender quarantine
   remains unresolved. This boundary is not evidence about the detection cause

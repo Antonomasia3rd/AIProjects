@@ -371,7 +371,11 @@ static bool DispatchContentEngineCommand(HWND owner, UINT command)
         bool enabled = false; aip::content::ParseBool(value, enabled); value = enabled ? L"0" : L"1";
     } else {
         auto prompt = std::wstring(option->label);
-        if (IEquals(option->key, L"TextSources")) prompt += L"\r\nCustomText, RssFeed, CapsLock, SMTC, Notes, DiscordRPC, CapsBlink, AsusBlink in display order. Empty means no text.";
+        if (IEquals(option->key, L"TextSources")) {
+            prompt += L"\r\n";
+            prompt += aip::content::SupportedSourceNames();
+            prompt += L" in display order. Empty means no text.";
+        }
         if (ShowTextInputDialog(owner, L"Content and sources", prompt, value, true) != IDOK) return true;
     }
     SaveContentMenuSettings(owner, {{section, option->key, value}});

@@ -455,6 +455,7 @@ int main(int argc, char** argv)
         const std::string app = ReadSource("..\\dependencies\\DesktopStub\\ga_app.inc");
         const std::string offline = ReadSource("..\\dependencies\\DesktopStub\\ga_render_only.inc");
         const std::string core = ReadSource("..\\dependencies\\DesktopStub\\ga_core.inc");
+        const std::string contentEngine = ReadSource("..\\dependencies\\content_engine.h");
         const std::string contentRuntime = ReadSource("..\\dependencies\\DesktopStub\\ga_content_runtime.inc");
         const std::string contentHardware = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware.inc");
         const std::string contentHardwareUnavailable = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware_unavailable.inc");
@@ -1077,6 +1078,29 @@ int main(int argc, char** argv)
                 "never enters DesktopStub's app path"
             },
             "the Windows host suite must compile the omitted-provider flavor and verify its tray-facing status without calling the application entry point");
+        AssertContainsAll(
+            "Content source catalog controls validation, tray prompts, and host dispatch",
+            "content engine and DesktopStub content sources",
+            contentEngine + "\n" + contentRuntime + "\n" + tray,
+            {
+                "#include <map>",
+                "enum class SourceId",
+                "struct SourceDescriptor",
+                "FindSourceDescriptor",
+                "SupportedSourceNames",
+                "EntryUsesSource",
+                "SourceIdFor(source)",
+                "prompt += aip::content::SupportedSourceNames();"
+            },
+            "public source IDs must have one catalog shared by normalization, tray presentation, needed-source discovery, and runtime dispatch");
+        AssertNotContainsAny(
+            "Tray source prompt does not duplicate the catalog",
+            "..\\dependencies\\DesktopStub\\ga_content_tray.inc",
+            tray,
+            {
+                "CustomText, RssFeed, CapsLock, SMTC, Notes, DiscordRPC, CapsBlink, AsusBlink in display order."
+            },
+            "the tray source prompt must derive its public list from the shared catalog");
         AssertContainsAll(
             "Build script can omit optional hardware sources",
             "BuildDesktopStub.cmd",

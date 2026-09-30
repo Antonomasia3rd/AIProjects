@@ -335,12 +335,13 @@ static bool ContentEngineTick(bool synchronous)
     std::array<bool, 3> needsNotes{};
     for (const auto& e : cfg.entries)
     {
-        if (e.enabled && std::find(e.sources.begin(), e.sources.end(), L"RssFeed") != e.sources.end()) needsRss = true;
-        if (e.enabled && std::find(e.sources.begin(), e.sources.end(), L"SMTC") != e.sources.end()) needsSmtc = true;
-        if (e.enabled && std::find(e.sources.begin(), e.sources.end(), L"Notes") != e.sources.end()) needsNotes[e.notesResource] = true;
-        if (e.enabled && std::find(e.sources.begin(), e.sources.end(), L"DiscordRPC") != e.sources.end()) needsDiscord = true;
-        if (e.enabled && std::find(e.sources.begin(), e.sources.end(), L"CapsBlink") != e.sources.end()) needsCaps = true;
-        if (e.enabled && std::find(e.sources.begin(), e.sources.end(), L"AsusBlink") != e.sources.end()) needsAsus = true;
+        if (!e.enabled) continue;
+        if (aip::content::EntryUsesSource(e, aip::content::SourceId::RssFeed)) needsRss = true;
+        if (aip::content::EntryUsesSource(e, aip::content::SourceId::Smtc)) needsSmtc = true;
+        if (aip::content::EntryUsesSource(e, aip::content::SourceId::Notes)) needsNotes[e.notesResource] = true;
+        if (aip::content::EntryUsesSource(e, aip::content::SourceId::DiscordRpc)) needsDiscord = true;
+        if (aip::content::EntryUsesSource(e, aip::content::SourceId::CapsBlink)) needsCaps = true;
+        if (aip::content::EntryUsesSource(e, aip::content::SourceId::AsusBlink)) needsAsus = true;
     }
     RssFeedSettings rssSettings;
     if (needsRss) { rssSettings = ReadRssFeedSettings(); g_contentRss.Refresh(rssSettings, synchronous); }
@@ -372,18 +373,33 @@ static bool ContentEngineTick(bool synchronous)
     snapshot.backgroundPath = cachedBackground;
     for (const auto& source : entry.sources) {
         aip::content::Text text;
-        if (source == L"CustomText") text = entry.custom;
-        else if (source == L"CapsBlink") text = g_contentCaps.Read();
-        else if (source == L"AsusBlink") text = g_contentAsus.Read();
-        else if (source == L"DiscordRPC") text = g_contentDiscord.Read();
-        else if (source == L"Notes") text = g_contentNotes.Read(cfg.notes, entry.notesResource);
-        else if (source == L"SMTC") text = g_contentSmtc.Read();
-        else if (source == L"CapsLock") {
+        switch (aip::content::SourceIdFor(source)) {
+        case aip::content::SourceId::CustomText:
+            text = entry.custom;
+            break;
+        case aip::content::SourceId::CapsBlink:
+            text = g_contentCaps.Read();
+            break;
+        case aip::content::SourceId::AsusBlink:
+            text = g_contentAsus.Read();
+            break;
+        case aip::content::SourceId::DiscordRpc:
+            text = g_contentDiscord.Read();
+            break;
+        case aip::content::SourceId::Notes:
+            text = g_contentNotes.Read(cfg.notes, entry.notesResource);
+            break;
+        case aip::content::SourceId::Smtc:
+            text = g_contentSmtc.Read();
+            break;
+        case aip::content::SourceId::CapsLock: {
             bool enabled = false;
             std::wstring stateError;
             if (ReadContentLogicalCaps(enabled, stateError)) text.primary = enabled ? L"Caps Lock is on" : L"Caps Lock is off";
             else { text.primary = L"Caps Lock"; text.secondary = stateError; }
-        } else if (source == L"RssFeed") {
+            break;
+        }
+        case aip::content::SourceId::RssFeed: {
             const auto feed = g_contentRss.Read(rssSettings);
             if (feed.ok && !feed.items.empty()) {
                 bool numberedProfile = false;
@@ -403,6 +419,13 @@ static bool ContentEngineTick(bool synchronous)
                 text.secondary = feed.sourceTitle;
                 aip::content::AppendBounded(text.secondary, item.summary);
             } else { text.primary = L"RSS"; text.secondary = feed.status; }
+            break;
+        }
+        case aip::content::SourceId::Unknown:
+        default:
+            text.primary = L"Content source unavailable";
+            text.secondary = source;
+            break;
         }
         aip::content::Overlay(snapshot.text, text);
     }
