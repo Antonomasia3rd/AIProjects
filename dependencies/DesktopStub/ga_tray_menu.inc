@@ -129,12 +129,12 @@ void Menu(HWND h)
     addTo(
         contentSourceMenu,
         ID_CONTENT_SOURCE_WALLPAPER,
-        L"Preset: " + g_ui.contentSourceWallpaper,
+        L"Legacy preset: " + g_ui.contentSourceWallpaper,
         !layeredContent && configuredContentSource == ContentSource::Wallpaper);
     addTo(
         contentSourceMenu,
         ID_CONTENT_SOURCE_RSS_FEED,
-        L"Preset: " + g_ui.contentSourceRssFeed,
+        L"Legacy preset: " + g_ui.contentSourceRssFeed,
         !layeredContent && configuredContentSource == ContentSource::RssFeed);
 
     HMENU rssFeedMenu = beginNestedMenu(

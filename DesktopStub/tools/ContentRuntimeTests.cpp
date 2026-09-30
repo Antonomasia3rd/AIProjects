@@ -3,13 +3,18 @@
 // notifications, playback or network operations are requested.
 #define NOMINMAX
 #include <windows.h>
+#include <string>
 static int contentDialogs = 0;
-static int ContentTestMessageBox(HWND, LPCWSTR, LPCWSTR, UINT flags)
+static int contentDialogResponse = IDNO;
+static std::wstring contentDialogText;
+static int ContentTestMessageBox(HWND, LPCWSTR text, LPCWSTR, UINT flags)
 {
     ++contentDialogs;
-    return (flags & MB_YESNO) ? IDNO : IDOK;
+    contentDialogText = text ? text : L"";
+    return (flags & MB_YESNO) ? contentDialogResponse : IDOK;
 }
 #define DESKTOPSTUB_CONTENT_MESSAGEBOX ContentTestMessageBox
+#define DESKTOPSTUB_TRAY_MESSAGEBOX ContentTestMessageBox
 #define DESKTOPSTUB_INERT_HARDWARE
 static int contentLogicalCaps = 0, contentLogicalSamples = 0;
 static int ContentTestLogicalCaps() { ++contentLogicalSamples; return contentLogicalCaps; }
@@ -300,6 +305,26 @@ int wmain()
     Check(SaveContentMenuSettings(nullptr, {{L"Notes.Stamina", L"UID", L"600000001"}, {L"Notes.Stamina", L"LToken", L"fixture-only"}}), "synthetic notes account saves locally without fetch");
     Check(aip::content::SensitiveSetting(L"Notes.Stamina", L"LToken"), "notes credential is classified for log redaction");
     Check(IniReadS(L"Discord", L"SendPresence", L"0") == L"0", "Discord sending defaults off");
+    contentDialogs = 0;
+    contentDialogText.clear();
+    contentDialogResponse = IDNO;
+    DispatchTrayCommand(nullptr, ID_CONTENT_SOURCE_WALLPAPER);
+    Check(
+        IniReadS(L"Content", L"Enabled", L"0") == L"true" &&
+        contentDialogs == 1 &&
+        contentDialogText.find(L"Numbered entries stay saved") != std::wstring::npos,
+        "legacy preset warns before disabling layered content and leaves it unchanged when declined");
+    contentDialogResponse = IDYES;
+    DispatchTrayCommand(nullptr, ID_CONTENT_SOURCE_WALLPAPER);
+    Check(
+        IniReadS(L"Content", L"Enabled", L"") == L"0" &&
+        IniReadS(L"Settings", L"ContentSource", L"") == L"Wallpaper",
+        "accepted legacy preset disables layered content while retaining its saved entries");
+    Check(WriteUtf8BomTextFile(ini, config), "legacy preset regression restores layered test profile");
+    LoadUiStrings();
+    contentDialogs = 0;
+    contentDialogText.clear();
+    contentDialogResponse = IDNO;
     const auto inactiveCapsConfig =
         L"[Content]\r\nEnabled=true\r\nCount=2\r\nCycleEnabled=true\r\nCycleSeconds=60\r\nTextMode=Overlay\r\n"
         L"[Content.1]\r\nEnabled=true\r\nName=Visible\r\nBackground=Image\r\nImagePath=" + bitmapPath +

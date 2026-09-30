@@ -4,7 +4,7 @@ DesktopStub can compose text and backgrounds through one renderer and delivery p
 
 ## Configuration
 
-All keys below work in the INI, through `--set Section.Key=Value`, and through the **Content and sources** tray menu. Text delivery and backgrounds have choice submenus; text providers have checkboxes with an optional source-order editor. **Choose background image** saves the file and background type together. **Add content** adds an entry, and **Move earlier/later in cycle** changes its position while preserving its INI fields/comments. Reducing the number of contents preserves unused sections. Selecting a legacy Wallpaper/RSS preset turns off the numbered profile; its checkmark is suppressed while layered content is active.
+All keys below work in the INI, through `--set Section.Key=Value`, and through the **Content and sources** tray menu. Text delivery and backgrounds have choice submenus; text providers have checkboxes with an optional source-order editor. **Choose background image** saves the file and background type together. **Add content** adds an entry, and **Move earlier/later in cycle** changes its position while preserving its INI fields/comments. Reducing the number of contents preserves unused sections. Selecting a **Legacy preset** asks before turning off the numbered profile, keeps its entries saved for later re-enabling, and suppresses the preset checkmark while layered content is active. The RSS legacy preset renders headlines over wallpaper; it does not replace the wallpaper with feed data.
 
 | `[Content]` key | Default | Meaning |
 |---|---|---|

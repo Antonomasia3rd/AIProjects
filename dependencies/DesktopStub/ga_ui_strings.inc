@@ -209,9 +209,9 @@ void LoadUiStrings()
     g_ui.trayIcon = IniReadS(L"Strings", L"TrayIcon", L"Tray Icon (this session)");
     g_ui.runAtStartup = IniReadS(L"Strings", L"RunAtStartup", L"Run at startup");
     g_ui.contentSourceTitle = IniReadS(L"Strings", L"ContentSourceTitle", L"Content and sources");
-    g_ui.contentSourceWallpaper = IniReadS(L"Strings", L"ContentSourceWallpaper", L"Wallpaper");
-    g_ui.contentSourceRssFeed = IniReadS(L"Strings", L"ContentSourceRssFeed", L"RSS / Atom feed");
-    g_ui.contentSourceRestartRequired = IniReadS(L"Strings", L"ContentSourceRestartRequired", L"The content source was saved. The monitor applies source changes automatically.");
+    g_ui.contentSourceWallpaper = IniReadS(L"Strings", L"ContentSourceWallpaper", L"Wallpaper only");
+    g_ui.contentSourceRssFeed = IniReadS(L"Strings", L"ContentSourceRssFeed", L"RSS / Atom over wallpaper");
+    g_ui.contentSourceRestartRequired = IniReadS(L"Strings", L"ContentSourceRestartRequired", L"Switching to a legacy preset turns off layered content. Numbered entries stay saved and can be re-enabled later. The RSS preset displays headlines over the wallpaper background.\r\n\r\nContinue?");
     g_ui.rssFeedSettingsTitle = IniReadS(L"Strings", L"RssFeedSettingsTitle", L"RSS / Atom settings");
     g_ui.rssFeedUrlLabel = IniReadS(L"Strings", L"RssFeedUrlLabel", L"Feed URL: %s");
     g_ui.rssFeedUserAgentLabel = IniReadS(L"Strings", L"RssFeedUserAgentLabel", L"User agent: %s");

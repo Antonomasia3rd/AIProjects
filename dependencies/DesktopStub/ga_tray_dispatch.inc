@@ -1,3 +1,7 @@
+#ifndef DESKTOPSTUB_TRAY_MESSAGEBOX
+#define DESKTOPSTUB_TRAY_MESSAGEBOX MessageBoxW
+#endif
+
 static void DispatchTrayCommand(HWND h, UINT cmd)
 {
     if (DispatchContentEngineCommand(h, cmd)) return;
@@ -289,6 +293,15 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         aip::content::ParseBool(IniReadS(L"Content", L"Enabled", L"0"), layeredContent);
         if (configuredSource == desiredSource && !layeredContent)
             break;
+        if (layeredContent &&
+            DESKTOPSTUB_TRAY_MESSAGEBOX(
+                h,
+                g_ui.contentSourceRestartRequired.c_str(),
+                L"Legacy content preset",
+                MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) != IDYES)
+        {
+            break;
+        }
         if (desiredSource == ContentSource::RssFeed)
         {
             aip::content::Configuration preset;

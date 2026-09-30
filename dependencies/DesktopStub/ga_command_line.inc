@@ -1080,6 +1080,10 @@ static bool ParseCommandLineOptions()
                 return fail(L"--content-source: " + error);
             }
             AddCommandLineIniSetting(L"Settings", L"ContentSource", normalized);
+            // This is the dedicated legacy-preset command, not a raw --set
+            // assignment. Match the tray action by turning off the numbered
+            // content profile; the entries remain in the INI for later reuse.
+            AddCommandLineIniSetting(L"Content", L"Enabled", L"0");
             continue;
         }
 

@@ -138,7 +138,7 @@ Supported options:
 - `--regenerate-manifest`: rewrite `AppxManifest.xml` once from the configured manifest defaults.
 - `--generate` / `--generate-now`: force startup generation and keep running.
 - `--wallpaper <path>` or a bare wallpaper path: generate from that image.
-- `--content-source Wallpaper|RssFeed`: select the legacy wallpaper/RSS preset. The unified monitor applies source changes without a restart; Content.Enabled=1 takes precedence for numbered entries.
+- `--content-source Wallpaper|RssFeed`: select the legacy wallpaper/RSS preset. It also writes `Content.Enabled=0`, matching the tray preset action; numbered entries stay saved and can be re-enabled later. The RSS preset renders headlines over wallpaper. A later explicit `--set Content.Enabled=1` keeps layered content instead.
 - `--rss-feed-url <http(s)://...>` and `--rss-user-agent <text>`: set the RSS endpoint and HTTP user agent.
 - `--rss-update-interval <60-86400>`, `--rss-max-items <1-20>`, `--rss-http-timeout <5-120>`, and `--rss-max-feed-bytes <65536-16777216>`: set the bounded RSS fetch controls.
 - `--no-monitor`: skip wallpaper/fit/DPI monitoring.
@@ -292,7 +292,7 @@ The displayed name comes from `ManifestDisplayName` (`Desktop` by default). Bran
 
 ## RSS Feed Content Source
 
-The old `Settings.ContentSource=RssFeed` preset now maps to ordered headline entries in the content engine, with wallpaper behind them. It no longer selects an exclusive notification-publishing worker. The tray exposes both source choices and all RSS values, as well as the new numbered content configuration. See [content composition, examples and timing](../docs/content-engine.md).
+The old `Settings.ContentSource=RssFeed` preset now maps to ordered headline entries in the content engine, with wallpaper behind them. It no longer selects an exclusive notification-publishing worker. The tray labels this as **Legacy preset: RSS / Atom over wallpaper** and asks before it turns off layered content; numbered entries remain saved. The tray exposes both source choices and all RSS values, as well as the new numbered content configuration. See [content composition, examples and timing](../docs/content-engine.md).
 
 Use `--content-source Wallpaper|RssFeed` and `--rss-feed-url <http(s)://...>` for legacy profiles, or enable `RssFeed` in an entry's TextSources. Known content/RSS settings use one typed validation contract across INI, CLI and tray. Invalid profiles fail explicitly instead of being silently clamped; resident errors are logged and shown as source status. A command can set the URL and source together:
 

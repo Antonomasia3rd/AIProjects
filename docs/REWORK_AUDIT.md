@@ -357,3 +357,21 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
 - This remains a one-shot migration utility. Its missing profile/tray/startup
   surface is recorded in `PRODUCT_SURFACES.md`; a future profile must not turn a
   saved SID migration into an unattended sign-in action.
+
+### Source-only DesktopStub legacy-preset parity follow-up — 2026-09-30
+
+- The **Content and sources** tray section was already outside General, but its
+  short `Preset: RSS / Atom feed` label did not say that RSS renders over
+  wallpaper or that choosing a legacy preset disables `[Content] Enabled`.
+  This made the RSS choice look like it might replace wallpaper or discard the
+  numbered source configuration.
+- The tray now says **Legacy preset: RSS / Atom over wallpaper** and asks for a
+  confirmation before switching away from layered content. The numbered entries
+  remain saved. The dedicated `--content-source` command now writes the same
+  `Content.Enabled=0` state as the tray action, while a later explicit generic
+  `--set Content.Enabled=1` keeps the layered profile active.
+- An inert host regression captures both declining and accepting the prompt,
+  verifies the saved profile state, and restores its temporary INI. Source
+  checks require the same wording and CLI/tray write path. No host binary or
+  UI test was compiled or run while the Defender quarantine restriction is in
+  force.

@@ -942,6 +942,7 @@ int main(int argc, char** argv)
                 "ValidateDesktopStubContentProfile(true, g_commandLine.applyError)",
                 "Invalid content-source configuration:",
                 "L\"--content-source\"",
+                "AddCommandLineIniSetting(L\"Content\", L\"Enabled\", L\"0\");",
                 "L\"--rss-feed-url\"",
                 "L\"--rss-user-agent\"",
                 "L\"--rss-update-interval\"",
@@ -964,11 +965,27 @@ int main(int argc, char** argv)
                 "ID_RSS_FEED_HTTP_TIMEOUT",
                 "ID_RSS_FEED_MAX_FEED_BYTES",
                 "ValidateConfiguredRssSettingsForContentSource(",
+                "Legacy preset: ",
+                "contentSourceRestartRequired",
+                "DESKTOPSTUB_TRAY_MESSAGEBOX(",
                 "PromptRssFeedStringSetting(",
                 "CycleRssFeedIntPreset(",
                 "WakePollThread()"
             },
             "the tray must configure the same source, URL, user-agent, interval, item, timeout, and response-cap values as INI and CLI");
+        AssertContainsAll(
+            "Legacy source presets preserve the layered profile transparently",
+            "tray/menu/runtime content sources",
+            tray + "\n" + defaults + "\n" + contentRuntimeTests + "\n" + commandLine,
+            {
+                "Switching to a legacy preset turns off layered content.",
+                "Numbered entries stay saved and can be re-enabled later.",
+                "RSS / Atom over wallpaper",
+                "legacy preset warns before disabling layered content and leaves it unchanged when declined",
+                "accepted legacy preset disables layered content while retaining its saved entries",
+                "AddCommandLineIniSetting(L\"Content\", L\"Enabled\", L\"0\");"
+            },
+            "legacy RSS and wallpaper presets must be explicit about their wallpaper background and the reversible switch away from numbered content");
         AssertContainsAll(
             "DesktopStub reloads the source for its unified monitor",
             "DesktopStub runtime settings",
