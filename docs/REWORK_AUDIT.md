@@ -265,6 +265,11 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   transitive include.
   New portable assertions and source contracts cover catalog uniqueness and
   cross-surface routing. No executable was compiled or run for this change.
+- Background values now use the matching `BackgroundId`/`BackgroundDescriptor`
+  catalog. This moves Wallpaper, LiveWallpaper, Image, and None normalization,
+  tray image selection, host background resolution, and render-only checks
+  behind one shared declaration. It makes live wallpaper an explicit
+  catalogued content background instead of a duplicated special string.
 - The same catalog now distinguishes read-only sources that may refresh ahead
   of a future cycle slot from Discord/indicator sources that must follow the
   selected content. Previously an enabled but non-visible CapsBlink, AsusBlink,

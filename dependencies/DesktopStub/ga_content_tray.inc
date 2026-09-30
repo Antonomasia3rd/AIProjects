@@ -339,7 +339,8 @@ static bool DispatchContentEngineCommand(HWND owner, UINT command)
         section = L"Content." + std::to_wstring(entry);
         if (field >= 16 && field < 16 + _countof(aip::content::Backgrounds)) {
             const auto background = aip::content::Backgrounds[field - 16].value;
-            if (IEquals(background, L"Image") && IniReadS(section.c_str(), L"ImagePath", L"").empty()) ChooseContentImage(owner, section);
+            if (aip::content::BackgroundIdFor(background) == aip::content::BackgroundId::Image &&
+                IniReadS(section.c_str(), L"ImagePath", L"").empty()) ChooseContentImage(owner, section);
             else SaveContentMenuSettings(owner, {{section, L"Background", background}});
             return true;
         }

@@ -54,6 +54,24 @@ Configuration Read(const Profile& p) {
     return cfg;
 }
 void TestSourceCatalog() {
+    constexpr std::size_t backgroundCount = sizeof(Backgrounds) / sizeof(Backgrounds[0]);
+    Require(backgroundCount == 4 &&
+            SupportedBackgroundNames() == L"Wallpaper, LiveWallpaper, Image, None",
+        "the built-in background catalog has the expected stable public names");
+    Require(BackgroundIdFor(L" livewallpaper ") == BackgroundId::LiveWallpaper &&
+            BackgroundIdFor(L"Image") == BackgroundId::Image &&
+            BackgroundIdFor(L"unsupported") == BackgroundId::Unknown,
+        "background identifiers canonicalize case and whitespace while unknown names stay explicit");
+    for (std::size_t left = 0; left < backgroundCount; ++left) {
+        const auto* found = FindBackgroundDescriptor(Backgrounds[left].value);
+        Require(found == &Backgrounds[left] && found->id != BackgroundId::Unknown,
+            "every background catalog entry resolves to a non-unknown descriptor");
+        for (std::size_t right = left + 1; right < backgroundCount; ++right) {
+            Require(Lower(Backgrounds[left].value) != Lower(Backgrounds[right].value) &&
+                    Backgrounds[left].id != Backgrounds[right].id,
+                "background identifiers and public INI names are unique");
+        }
+    }
     constexpr std::size_t sourceCount = sizeof(Sources) / sizeof(Sources[0]);
     Require(sourceCount == 8, "the built-in source catalog has the expected migration set");
     Require(SupportedSourceNames() == L"CustomText, RssFeed, CapsLock, SMTC, Notes, DiscordRPC, CapsBlink, AsusBlink",

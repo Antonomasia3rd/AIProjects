@@ -44,14 +44,16 @@ static int RunRenderOnlyCommand()
         for (const auto& provider : selected->sources)
             if (aip::content::SourceIdFor(provider) != aip::content::SourceId::CustomText)
                 return fail(L"offline rendering supports CustomText only; external providers are not started.");
-        if (selected->background != L"Image" && selected->background != L"None" && source.empty())
+        const auto background = aip::content::BackgroundIdFor(selected->background);
+        if (background != aip::content::BackgroundId::Image &&
+            background != aip::content::BackgroundId::None && source.empty())
             return fail(L"supply --wallpaper explicitly, or select an Image/None background.");
         snapshot.active = true;
         snapshot.name = selected->name;
         snapshot.textMode = composition.textMode;
         if (aip::content::EntryUsesSource(*selected, aip::content::SourceId::CustomText))
             snapshot.text = selected->custom;
-        if (selected->background == L"Image") {
+        if (background == aip::content::BackgroundId::Image) {
             source = TrimCopy(selected->imagePath);
             if (PathIsRelativeW(source.c_str())) source = ParentDirectoryOfPath(g_iniPath) + L"\\" + source;
         }

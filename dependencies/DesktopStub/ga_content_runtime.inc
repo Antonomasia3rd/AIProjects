@@ -250,7 +250,9 @@ static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstr
 
 static std::wstring ContentBackgroundPath(const aip::content::Entry& entry)
 {
-    if (entry.background == L"Image") {
+    const auto background = aip::content::BackgroundIdFor(entry.background);
+    switch (background) {
+    case aip::content::BackgroundId::Image: {
         auto path = TrimCopy(entry.imagePath);
         if (PathIsRelativeW(path.c_str())) {
             std::lock_guard<std::mutex> lock(g_pathMutex);
@@ -258,9 +260,16 @@ static std::wstring ContentBackgroundPath(const aip::content::Entry& entry)
         }
         return path;
     }
-    if (entry.background != L"None") {
-        auto path = GetWallpaper(entry.background == L"LiveWallpaper");
+    case aip::content::BackgroundId::Wallpaper:
+    case aip::content::BackgroundId::LiveWallpaper: {
+        auto path = GetWallpaper(background == aip::content::BackgroundId::LiveWallpaper);
         if (!path.empty()) return path;
+        break;
+    }
+    case aip::content::BackgroundId::None:
+    case aip::content::BackgroundId::Unknown:
+    default:
+        break;
     }
 
     // A solid-color desktop has no source file. Supply a tiny BMP so text-only

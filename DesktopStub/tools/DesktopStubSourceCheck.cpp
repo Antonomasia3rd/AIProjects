@@ -1097,11 +1097,15 @@ int main(int argc, char** argv)
             },
             "the host suite must prevent inactive cycle entries from starting optional hardware providers while preserving the selected-entry preview");
         AssertContainsAll(
-            "Content source catalog controls validation, tray prompts, and host lifecycle",
+            "Content source and background catalogs control every content surface",
             "content engine and DesktopStub content sources",
             contentEngine + "\n" + contentRuntime + "\n" + tray + "\n" + offline,
             {
                 "#include <map>",
+                "enum class BackgroundId",
+                "struct BackgroundDescriptor",
+                "FindBackgroundDescriptor",
+                "SupportedBackgroundNames",
                 "enum class SourceId",
                 "struct SourceDescriptor",
                 "FindSourceDescriptor",
@@ -1112,9 +1116,22 @@ int main(int argc, char** argv)
                 "SourceIdFor(source)",
                 "prompt += aip::content::SupportedSourceNames();",
                 "SourceIdFor(provider)",
-                "EntryUsesSource(*selected, aip::content::SourceId::CustomText)"
+                "EntryUsesSource(*selected, aip::content::SourceId::CustomText)",
+                "BackgroundIdFor(entry.background)",
+                "BackgroundIdFor(selected->background)",
+                "BackgroundIdFor(background)"
             },
-            "public source IDs and inactive-refresh scope must have one catalog shared by normalization, tray presentation, provider lifecycle, runtime dispatch, and offline input gating");
+            "public source/background IDs and inactive-refresh scope must have one catalog shared by normalization, tray presentation, provider lifecycle, runtime dispatch, and offline input gating");
+        AssertNotContainsAny(
+            "Runtime background resolver does not compare raw background names",
+            "..\\dependencies\\DesktopStub\\ga_content_runtime.inc",
+            contentRuntime,
+            {
+                "entry.background == L\"Image\"",
+                "entry.background != L\"None\"",
+                "entry.background == L\"LiveWallpaper\""
+            },
+            "background routing must use the shared typed catalog rather than a second set of string comparisons");
         AssertNotContainsAny(
             "Tray source prompt does not duplicate the catalog",
             "..\\dependencies\\DesktopStub\\ga_content_tray.inc",

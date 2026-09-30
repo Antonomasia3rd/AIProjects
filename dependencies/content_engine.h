@@ -18,6 +18,18 @@ constexpr int MaxEntries = 32;
 constexpr std::size_t MaxText = 4096;
 enum class TextMode { Auto, Overlay, Off };
 struct Choice { const wchar_t* value; const wchar_t* label; };
+enum class BackgroundId {
+    Wallpaper,
+    LiveWallpaper,
+    Image,
+    None,
+    Unknown,
+};
+struct BackgroundDescriptor {
+    const wchar_t* value;
+    const wchar_t* label;
+    BackgroundId id;
+};
 enum class SourceId {
     CustomText,
     RssFeed,
@@ -44,11 +56,11 @@ inline constexpr Choice TextModes[] = {
     {L"Overlay", L"Text over the background image"},
     {L"Off", L"Hide text"},
 };
-inline constexpr Choice Backgrounds[] = {
-    {L"Wallpaper", L"Desktop wallpaper"},
-    {L"LiveWallpaper", L"Live wallpaper capture"},
-    {L"Image", L"Custom image"},
-    {L"None", L"Solid color"},
+inline constexpr BackgroundDescriptor Backgrounds[] = {
+    {L"Wallpaper", L"Desktop wallpaper", BackgroundId::Wallpaper},
+    {L"LiveWallpaper", L"Live wallpaper capture", BackgroundId::LiveWallpaper},
+    {L"Image", L"Custom image", BackgroundId::Image},
+    {L"None", L"Solid color", BackgroundId::None},
 };
 inline constexpr SourceDescriptor Sources[] = {
     {L"CustomText", L"Custom text", SourceId::CustomText, false},
@@ -111,6 +123,24 @@ inline std::wstring Trim(std::wstring s) {
 inline std::wstring Lower(std::wstring s) {
     for (auto& ch : s) ch = static_cast<wchar_t>(std::towlower(ch));
     return s;
+}
+inline const BackgroundDescriptor* FindBackgroundDescriptor(const std::wstring& value) {
+    const auto canonical = Lower(Trim(value));
+    for (const auto& background : Backgrounds)
+        if (canonical == Lower(background.value)) return &background;
+    return nullptr;
+}
+inline BackgroundId BackgroundIdFor(const std::wstring& value) {
+    const auto* background = FindBackgroundDescriptor(value);
+    return background ? background->id : BackgroundId::Unknown;
+}
+inline std::wstring SupportedBackgroundNames() {
+    std::wstring names;
+    for (const auto& background : Backgrounds) {
+        if (!names.empty()) names += L", ";
+        names += background.value;
+    }
+    return names;
 }
 inline const SourceDescriptor* FindSourceDescriptor(const std::wstring& value) {
     const auto canonical = Lower(Trim(value));
@@ -297,12 +327,12 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
         else if (mode == L"off") value = L"Off";
         else { error += L"expected Auto, Overlay, or Off."; return false; }
     } else if (!root && k == L"background") {
-        auto bg = Lower(Trim(value));
-        if (bg == L"wallpaper") value = L"Wallpaper";
-        else if (bg == L"livewallpaper") value = L"LiveWallpaper";
-        else if (bg == L"image") value = L"Image";
-        else if (bg == L"none") value = L"None";
-        else { error += L"expected Wallpaper, LiveWallpaper, Image, or None."; return false; }
+        const auto* background = FindBackgroundDescriptor(value);
+        if (!background) {
+            error += L"expected " + SupportedBackgroundNames() + L".";
+            return false;
+        }
+        value = background->value;
     } else if (!root && k == L"textsources") {
         std::vector<std::wstring> sources;
         if (!ParseSources(value, sources)) {
@@ -347,7 +377,7 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
         ParseInt(get(section, L"RssItem", L"1"), 1, 20, entry.rssItem);
         const auto notesResource = get(section, L"NotesResource", L"Resin");
         for (int resource = 0; resource < 3; ++resource) if (notesResource == NotesResources[resource].value) entry.notesResource = resource;
-        if (entry.enabled && entry.background == L"Image" && Trim(entry.imagePath).empty()) {
+        if (entry.enabled && BackgroundIdFor(entry.background) == BackgroundId::Image && Trim(entry.imagePath).empty()) {
             if (valid) error = section + L".ImagePath is required for an Image background.";
             valid = false;
         }

@@ -177,8 +177,8 @@ code for nothing:
   artwork/widget/delivery behavior. The standalone app remains until that
   feature set is integrated.
 - `content_engine.h`: platform-neutral composition policy and the canonical
-  built-in source catalog used by DesktopStub configuration, tray source
-  selection, provider dispatch, and offline render-only validation. Add a
+  built-in source and background catalogs used by DesktopStub configuration,
+  tray selection, provider dispatch, and offline render-only validation. Add a
   source descriptor before adding its host adapter so INI/CLI/tray names
   cannot drift. Its inactive-refresh flag
   lets read-only data preload while output/device sources follow the active
