@@ -62,6 +62,14 @@ void TestSourceCatalog() {
             SourceIdFor(L"DiscordRPC") == SourceId::DiscordRpc &&
             SourceIdFor(L"not-a-source") == SourceId::Unknown,
         "source identifiers canonicalize case and whitespace while unknown names stay explicit");
+    Require(SourceRefreshesWhileInactive(SourceId::RssFeed) &&
+            SourceRefreshesWhileInactive(SourceId::Smtc) &&
+            SourceRefreshesWhileInactive(SourceId::Notes) &&
+            !SourceRefreshesWhileInactive(SourceId::DiscordRpc) &&
+            !SourceRefreshesWhileInactive(SourceId::CapsBlink) &&
+            !SourceRefreshesWhileInactive(SourceId::AsusBlink) &&
+            !SourceRefreshesWhileInactive(SourceId::Unknown),
+        "read-only sources may prefetch while output and hardware sources follow the active content");
     for (std::size_t left = 0; left < sourceCount; ++left) {
         const auto* found = FindSourceDescriptor(Sources[left].value);
         Require(found == &Sources[left] && found->id != SourceId::Unknown,

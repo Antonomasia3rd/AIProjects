@@ -460,6 +460,7 @@ int main(int argc, char** argv)
         const std::string contentHardware = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware.inc");
         const std::string contentHardwareUnavailable = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware_unavailable.inc");
         const std::string contentRuntimeNoHardware = ReadSource("tools\\ContentRuntimeNoHardwareTests.cpp");
+        const std::string contentRuntimeTests = ReadSource("tools\\ContentRuntimeTests.cpp");
         const std::string contentRuntimeTestScript = ReadSource("..\\tools\\TestContentRuntime.cmd");
         const std::string desktopStub = ReadSource("DesktopStub.cpp");
         const std::string buildScript = ReadSource("BuildDesktopStub.cmd");
@@ -1079,7 +1080,18 @@ int main(int argc, char** argv)
             },
             "the Windows host suite must compile the omitted-provider flavor and verify its tray-facing status without calling the application entry point");
         AssertContainsAll(
-            "Content source catalog controls validation, tray prompts, and host dispatch",
+            "Inert host checks cover active content scope for hardware sources",
+            "ContentRuntimeTests.cpp",
+            contentRuntimeTests,
+            {
+                "TextSources=CapsBlink",
+                "an enabled CapsBlink entry outside the active cycle slot does not start its inert controller",
+                "the selected CapsBlink entry starts only the injected inert preview controller",
+                "cycle-scope regression restores the baseline temporary configuration"
+            },
+            "the host suite must prevent inactive cycle entries from starting optional hardware providers while preserving the selected-entry preview");
+        AssertContainsAll(
+            "Content source catalog controls validation, tray prompts, and host lifecycle",
             "content engine and DesktopStub content sources",
             contentEngine + "\n" + contentRuntime + "\n" + tray,
             {
@@ -1089,10 +1101,12 @@ int main(int argc, char** argv)
                 "FindSourceDescriptor",
                 "SupportedSourceNames",
                 "EntryUsesSource",
+                "SourceRefreshesWhileInactive",
+                "const auto sourceNeeded",
                 "SourceIdFor(source)",
                 "prompt += aip::content::SupportedSourceNames();"
             },
-            "public source IDs must have one catalog shared by normalization, tray presentation, needed-source discovery, and runtime dispatch");
+            "public source IDs and inactive-refresh scope must have one catalog shared by normalization, tray presentation, provider lifecycle, and runtime dispatch");
         AssertNotContainsAny(
             "Tray source prompt does not duplicate the catalog",
             "..\\dependencies\\DesktopStub\\ga_content_tray.inc",

@@ -35,6 +35,9 @@ struct SourceDescriptor {
     const wchar_t* value;
     const wchar_t* label;
     SourceId id;
+    // Read-only data can refresh ahead of a future cycle slot. Sources that
+    // can send output or change device state run only in the active content.
+    bool refreshesWhileInactive;
 };
 inline constexpr Choice TextModes[] = {
     {L"Auto", L"Windows text with bitmap fallback"},
@@ -48,14 +51,14 @@ inline constexpr Choice Backgrounds[] = {
     {L"None", L"Solid color"},
 };
 inline constexpr SourceDescriptor Sources[] = {
-    {L"CustomText", L"Custom text", SourceId::CustomText},
-    {L"RssFeed", L"RSS / Atom headlines", SourceId::RssFeed},
-    {L"CapsLock", L"Caps Lock status", SourceId::CapsLock},
-    {L"SMTC", L"Now playing (SMTC)", SourceId::Smtc},
-    {L"Notes", L"Real-Time Notes", SourceId::Notes},
-    {L"DiscordRPC", L"Discord Rich Presence", SourceId::DiscordRpc},
-    {L"CapsBlink", L"Caps indicator pattern", SourceId::CapsBlink},
-    {L"AsusBlink", L"ASUS indicator patterns", SourceId::AsusBlink},
+    {L"CustomText", L"Custom text", SourceId::CustomText, false},
+    {L"RssFeed", L"RSS / Atom headlines", SourceId::RssFeed, true},
+    {L"CapsLock", L"Caps Lock status", SourceId::CapsLock, false},
+    {L"SMTC", L"Now playing (SMTC)", SourceId::Smtc, true},
+    {L"Notes", L"Real-Time Notes", SourceId::Notes, true},
+    {L"DiscordRPC", L"Discord Rich Presence", SourceId::DiscordRpc, false},
+    {L"CapsBlink", L"Caps indicator pattern", SourceId::CapsBlink, false},
+    {L"AsusBlink", L"ASUS indicator patterns", SourceId::AsusBlink, false},
 };
 inline constexpr const wchar_t* AsusPatternKeys[] = {L"MicState", L"MicInterval", L"MicDuration", L"KeyboardState", L"KeyboardInterval", L"KeyboardDuration", L"ErrorRetry", L"ErrorAction"};
 inline constexpr const wchar_t* AsusPatternDefaults[] = {L"off", L"0", L"once", L"off", L"0", L"once", L"3", L"continue"};
@@ -115,9 +118,18 @@ inline const SourceDescriptor* FindSourceDescriptor(const std::wstring& value) {
         if (canonical == Lower(source.value)) return &source;
     return nullptr;
 }
+inline const SourceDescriptor* FindSourceDescriptor(SourceId id) {
+    for (const auto& source : Sources)
+        if (source.id == id) return &source;
+    return nullptr;
+}
 inline SourceId SourceIdFor(const std::wstring& value) {
     const auto* source = FindSourceDescriptor(value);
     return source ? source->id : SourceId::Unknown;
+}
+inline bool SourceRefreshesWhileInactive(SourceId id) {
+    const auto* source = FindSourceDescriptor(id);
+    return source && source->refreshesWhileInactive;
 }
 inline std::wstring SupportedSourceNames() {
     std::wstring names;

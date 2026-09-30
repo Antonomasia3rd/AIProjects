@@ -290,6 +290,31 @@ int wmain()
     Check(SaveContentMenuSettings(nullptr, {{L"Notes.Stamina", L"UID", L"600000001"}, {L"Notes.Stamina", L"LToken", L"fixture-only"}}), "synthetic notes account saves locally without fetch");
     Check(aip::content::SensitiveSetting(L"Notes.Stamina", L"LToken"), "notes credential is classified for log redaction");
     Check(IniReadS(L"Discord", L"SendPresence", L"0") == L"0", "Discord sending defaults off");
+    const auto inactiveCapsConfig =
+        L"[Content]\r\nEnabled=true\r\nCount=2\r\nCycleEnabled=true\r\nCycleSeconds=60\r\nTextMode=Overlay\r\n"
+        L"[Content.1]\r\nEnabled=true\r\nName=Visible\r\nBackground=Image\r\nImagePath=" + bitmapPath +
+        L"\r\nTextSources=CustomText\r\nText=visible\r\n"
+        L"[Content.2]\r\nEnabled=true\r\nName=Later\r\nBackground=None\r\nTextSources=CapsBlink\r\n"
+        L"[CapsBlink]\r\nHardwareEnabled=0\r\nKeyboardTargetPath=\\Device\\KeyboardClass0\r\nBlinkIntervalMs=500\r\n";
+    g_contentCaps.Stop();
+    g_contentCaps.controller.reset();
+    Check(WriteUtf8BomTextFile(ini, inactiveCapsConfig) && ContentEngineTick(true),
+        "inactive hardware source scope profile composes without an external provider");
+    Check(!g_contentCaps.controller,
+        "an enabled CapsBlink entry outside the active cycle slot does not start its inert controller");
+    const auto activeCapsConfig =
+        L"[Content]\r\nEnabled=true\r\nCount=2\r\nCycleEnabled=true\r\nCycleSeconds=60\r\nTextMode=Overlay\r\n"
+        L"[Content.1]\r\nEnabled=true\r\nName=Visible\r\nBackground=Image\r\nImagePath=" + bitmapPath +
+        L"\r\nTextSources=CapsBlink\r\n"
+        L"[Content.2]\r\nEnabled=true\r\nName=Later\r\nBackground=None\r\nTextSources=CustomText\r\nText=later\r\n"
+        L"[CapsBlink]\r\nHardwareEnabled=0\r\nKeyboardTargetPath=\\Device\\KeyboardClass0\r\nBlinkIntervalMs=500\r\n";
+    Check(WriteUtf8BomTextFile(ini, activeCapsConfig) && ContentEngineTick(true),
+        "active hardware source scope profile composes with an inert provider");
+    Check(g_contentCaps.controller && !g_contentCaps.controller->GetSnapshot().actionsEnabled,
+        "the selected CapsBlink entry starts only the injected inert preview controller");
+    g_contentCaps.Stop();
+    Check(WriteUtf8BomTextFile(ini, config) && ContentEngineTick(true),
+        "cycle-scope regression restores the baseline temporary configuration");
     aip::caps::Config capsPreview;
     g_contentCaps.Refresh(capsPreview);
     Check(g_contentCaps.controller && !g_contentCaps.controller->GetSnapshot().actionsEnabled &&

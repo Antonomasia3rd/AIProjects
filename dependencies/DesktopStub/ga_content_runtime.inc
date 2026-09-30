@@ -331,17 +331,26 @@ static bool ContentEngineTick(bool synchronous)
         PublishContentSnapshot({}); lastFrame.clear();
         return true;
     }
-    bool needsRss = false, needsSmtc = false, needsDiscord = false, needsCaps = false, needsAsus = false;
+    const auto& entry = cfg.entries[index];
+    const auto sourceNeeded = [&](aip::content::SourceId id) {
+        if (!aip::content::SourceRefreshesWhileInactive(id))
+            return aip::content::EntryUsesSource(entry, id);
+        return std::any_of(cfg.entries.begin(), cfg.entries.end(), [id](const aip::content::Entry& candidate) {
+            return candidate.enabled && aip::content::EntryUsesSource(candidate, id);
+        });
+    };
+    const bool needsRss = sourceNeeded(aip::content::SourceId::RssFeed);
+    const bool needsSmtc = sourceNeeded(aip::content::SourceId::Smtc);
+    const bool needsDiscord = sourceNeeded(aip::content::SourceId::DiscordRpc);
+    const bool needsCaps = sourceNeeded(aip::content::SourceId::CapsBlink);
+    const bool needsAsus = sourceNeeded(aip::content::SourceId::AsusBlink);
     std::array<bool, 3> needsNotes{};
-    for (const auto& e : cfg.entries)
-    {
-        if (!e.enabled) continue;
-        if (aip::content::EntryUsesSource(e, aip::content::SourceId::RssFeed)) needsRss = true;
-        if (aip::content::EntryUsesSource(e, aip::content::SourceId::Smtc)) needsSmtc = true;
-        if (aip::content::EntryUsesSource(e, aip::content::SourceId::Notes)) needsNotes[e.notesResource] = true;
-        if (aip::content::EntryUsesSource(e, aip::content::SourceId::DiscordRpc)) needsDiscord = true;
-        if (aip::content::EntryUsesSource(e, aip::content::SourceId::CapsBlink)) needsCaps = true;
-        if (aip::content::EntryUsesSource(e, aip::content::SourceId::AsusBlink)) needsAsus = true;
+    if (aip::content::SourceRefreshesWhileInactive(aip::content::SourceId::Notes)) {
+        for (const auto& candidate : cfg.entries)
+            if (candidate.enabled && aip::content::EntryUsesSource(candidate, aip::content::SourceId::Notes))
+                needsNotes[candidate.notesResource] = true;
+    } else if (aip::content::EntryUsesSource(entry, aip::content::SourceId::Notes)) {
+        needsNotes[entry.notesResource] = true;
     }
     RssFeedSettings rssSettings;
     if (needsRss) { rssSettings = ReadRssFeedSettings(); g_contentRss.Refresh(rssSettings, synchronous); }
@@ -357,7 +366,6 @@ static bool ContentEngineTick(bool synchronous)
     if (needsCaps) g_contentCaps.Refresh(cfg.caps); else g_contentCaps.Cancel();
     if (needsAsus) g_contentAsus.Refresh(cfg.asus); else g_contentAsus.Cancel();
 
-    const auto& entry = cfg.entries[index];
     aip::content::Snapshot snapshot;
     snapshot.active = true; snapshot.name = entry.name; snapshot.textMode = cfg.textMode;
     auto backgroundKey = entry.background + L"\n" + entry.imagePath;
