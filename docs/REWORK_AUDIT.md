@@ -277,6 +277,11 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
 - Failed Wallpaper/LiveWallpaper resolution no longer falls through to that
   solid BMP. Only an explicit None entry may synthesize a solid background;
   unavailable wallpaper sources now reach the existing tray/log diagnostic.
+- Added [the product surface inventory](PRODUCT_SURFACES.md), based on the
+  project map and source hosts. It distinguishes the resident apps already
+  using shared INI/CLI/tray/startup infrastructure from services, Explorer
+  deskbands, one-shot utilities, and Windhawk modules that still need a
+  companion or DesktopStub-source migration to reach the same user surface.
 - The same catalog now distinguishes read-only sources that may refresh ahead
   of a future cycle slot from Discord/indicator sources that must follow the
   selected content. Previously an enabled but non-visible CapsBlink, AsusBlink,
