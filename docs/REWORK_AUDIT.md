@@ -259,9 +259,10 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   content guide preserve that distinction.
 - The built-in source catalog was consolidated in `dependencies/content_engine.h`.
   `SourceId`/`SourceDescriptor` now supply canonical source names and labels to
-  INI normalization, the tray picker/prompt, runtime discovery, and content
-  composition. The header now directly includes `<map>` for its public
-  `AsusConfiguration` member rather than relying on a transitive include.
+  INI normalization, the tray picker/prompt, runtime discovery, content
+  composition, and render-only source gate. The header now directly includes
+  `<map>` for its public `AsusConfiguration` member rather than relying on a
+  transitive include.
   New portable assertions and source contracts cover catalog uniqueness and
   cross-surface routing. No executable was compiled or run for this change.
 - The same catalog now distinguishes read-only sources that may refresh ahead

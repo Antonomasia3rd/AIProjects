@@ -1093,7 +1093,7 @@ int main(int argc, char** argv)
         AssertContainsAll(
             "Content source catalog controls validation, tray prompts, and host lifecycle",
             "content engine and DesktopStub content sources",
-            contentEngine + "\n" + contentRuntime + "\n" + tray,
+            contentEngine + "\n" + contentRuntime + "\n" + tray + "\n" + offline,
             {
                 "#include <map>",
                 "enum class SourceId",
@@ -1104,9 +1104,11 @@ int main(int argc, char** argv)
                 "SourceRefreshesWhileInactive",
                 "const auto sourceNeeded",
                 "SourceIdFor(source)",
-                "prompt += aip::content::SupportedSourceNames();"
+                "prompt += aip::content::SupportedSourceNames();",
+                "SourceIdFor(provider)",
+                "EntryUsesSource(*selected, aip::content::SourceId::CustomText)"
             },
-            "public source IDs and inactive-refresh scope must have one catalog shared by normalization, tray presentation, provider lifecycle, and runtime dispatch");
+            "public source IDs and inactive-refresh scope must have one catalog shared by normalization, tray presentation, provider lifecycle, runtime dispatch, and offline input gating");
         AssertNotContainsAny(
             "Tray source prompt does not duplicate the catalog",
             "..\\dependencies\\DesktopStub\\ga_content_tray.inc",

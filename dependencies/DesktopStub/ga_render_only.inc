@@ -42,14 +42,14 @@ static int RunRenderOnlyCommand()
             [](const aip::content::Entry& entry) { return entry.enabled; });
         if (selected == composition.entries.end()) return fail(L"no content entry is enabled.");
         for (const auto& provider : selected->sources)
-            if (provider != L"CustomText")
+            if (aip::content::SourceIdFor(provider) != aip::content::SourceId::CustomText)
                 return fail(L"offline rendering supports CustomText only; external providers are not started.");
         if (selected->background != L"Image" && selected->background != L"None" && source.empty())
             return fail(L"supply --wallpaper explicitly, or select an Image/None background.");
         snapshot.active = true;
         snapshot.name = selected->name;
         snapshot.textMode = composition.textMode;
-        if (std::find(selected->sources.begin(), selected->sources.end(), L"CustomText") != selected->sources.end())
+        if (aip::content::EntryUsesSource(*selected, aip::content::SourceId::CustomText))
             snapshot.text = selected->custom;
         if (selected->background == L"Image") {
             source = TrimCopy(selected->imagePath);

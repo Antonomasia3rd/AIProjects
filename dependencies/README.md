@@ -174,8 +174,9 @@ code for nothing:
   its artwork/widget/delivery features are integrated.
 - `content_engine.h`: platform-neutral composition policy and the canonical
   built-in source catalog used by DesktopStub configuration, tray source
-  selection, and provider dispatch. Add a source descriptor before adding its
-  host adapter so INI/CLI/tray names cannot drift. Its inactive-refresh flag
+  selection, provider dispatch, and offline render-only validation. Add a
+  source descriptor before adding its host adapter so INI/CLI/tray names
+  cannot drift. Its inactive-refresh flag
   lets read-only data preload while output/device sources follow the active
   content entry.
 - `content_sources/notes.inc`: the extracted Real-Time Notes data engine for
