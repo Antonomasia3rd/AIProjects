@@ -248,6 +248,10 @@ int wmain()
     Check(!solidPath.empty() && GetFileAttributesW(solidPath.c_str()) != INVALID_FILE_ATTRIBUTES,
         "solid content background is generated in the product temporary snapshot directory");
     if (!solidPath.empty()) DeleteFileW(solidPath.c_str());
+    aip::content::Entry unknownBackground;
+    unknownBackground.background = L"Unknown";
+    Check(ContentBackgroundPath(unknownBackground).empty(),
+        "unknown content backgrounds do not silently become solid-color backgrounds");
     const std::wstring config = L"[Content]\r\nEnabled=true\r\nCount=2\r\nCycleEnabled=false\r\nTextMode=Overlay\r\n"
         L"[Content.1]\r\nName=First\r\nBackground=Image\r\nImagePath=image.bmp\r\nTextSources=CustomText\r\nText=alpha\r\nSecondaryText=beta\r\nBadgeText=42\r\n"
         L"[Content.2]\r\nEnabled=false\r\nName=Second\r\nBackground=None\r\nTextSources=CustomText\r\nText=gamma\r\n";

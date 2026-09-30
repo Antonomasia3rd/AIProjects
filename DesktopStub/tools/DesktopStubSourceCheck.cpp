@@ -1117,6 +1117,18 @@ int main(int argc, char** argv)
             },
             "a protected installation directory must not prevent the None content background from rendering");
         AssertContainsAll(
+            "Unavailable content backgrounds do not silently synthesize None",
+            "content runtime and ContentRuntimeTests.cpp",
+            contentRuntime + "\n" + contentRuntimeTests,
+            {
+                "if (!path.empty()) return path;",
+                "case aip::content::BackgroundId::None:",
+                "case aip::content::BackgroundId::Unknown:",
+                "default:",
+                "unknown content backgrounds do not silently become solid-color backgrounds"
+            },
+            "only the explicit None background may synthesize a solid BMP; failed wallpaper lookups must reach the normal diagnostic path");
+        AssertContainsAll(
             "Content source and background catalogs control every content surface",
             "content engine and DesktopStub content sources",
             contentEngine + "\n" + contentRuntime + "\n" + tray + "\n" + offline,

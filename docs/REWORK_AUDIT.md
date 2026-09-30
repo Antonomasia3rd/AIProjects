@@ -274,6 +274,9 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   executable, which can fail from a protected install directory. It now uses
   the same product-scoped temporary directory as live-wallpaper snapshots.
   The inert host test creates and removes that temporary fixture.
+- Failed Wallpaper/LiveWallpaper resolution no longer falls through to that
+  solid BMP. Only an explicit None entry may synthesize a solid background;
+  unavailable wallpaper sources now reach the existing tray/log diagnostic.
 - The same catalog now distinguishes read-only sources that may refresh ahead
   of a future cycle slot from Discord/indicator sources that must follow the
   selected content. Previously an enabled but non-visible CapsBlink, AsusBlink,

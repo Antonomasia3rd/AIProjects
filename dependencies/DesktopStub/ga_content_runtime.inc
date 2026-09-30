@@ -264,12 +264,13 @@ static std::wstring ContentBackgroundPath(const aip::content::Entry& entry)
     case aip::content::BackgroundId::LiveWallpaper: {
         auto path = GetWallpaper(background == aip::content::BackgroundId::LiveWallpaper);
         if (!path.empty()) return path;
-        break;
+        return {};
     }
     case aip::content::BackgroundId::None:
+        break;
     case aip::content::BackgroundId::Unknown:
     default:
-        break;
+        return {};
     }
 
     // A solid-color desktop has no source file. Supply a tiny BMP so text-only
