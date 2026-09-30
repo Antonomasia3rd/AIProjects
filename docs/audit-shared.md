@@ -33,7 +33,11 @@ The pre-existing shared native tray registration already sets `NIF_SHOWTIP` for 
 1. Physical relocation alone is not an overlay architecture. `dependencies/<Product>` still contains application globals and entire app bodies. Source providers must expose snapshots and declared options through shared interfaces, rather than include another app's entry point or tray engine.
 2. Valid native and managed INI value syntax now agrees. Managed malformed-target-line and unsafe programmatic-key rejection remains stricter than native. A compatibility change to observe: bare `#`/`;` now starts a comment, matching DesktopStub; literal comment characters belong inside quotes. Standard legacy bare assignments remain readable, and writes preserve significant quoted whitespace.
 3. Native and managed Startup helpers both use the current user's Startup folder. Native mutations use a session-local mutex; managed mutations are user-scoped across sessions. Multi-session writes to the same native INI/shortcut remain an audit target.
-4. ADBController is currently a foreground UI with no tray or startup configuration. Its old README claimed that absence was intentional policy; it is now tracked as missing functionality under the current rules.
+4. ADBController now uses the shared native baseline for typed INI/CLI settings,
+   tray/menu/hover behavior, and a profile-scoped per-user Startup-folder
+   shortcut. Its prior no-tray/no-startup README statement is historical and has
+   been replaced. The current source audit does not prove ADB hardware or
+   Explorer behavior on this machine.
 5. RealTimeNotesDeskband is an Explorer COM deskband and currently saves DPAPI-protected credentials by default. `KeepLegacyPlaintextSecrets` is rollback compatibility, not a complete opt-in-security mode. Existing token persistence needs an explicit migration before it meets the user's requested default.
 6. SecureDesktopLauncher, AllowContentAboveLock, and YourPhoneHideBanner retain mandatory protected-path checks in code. They are privileged/service integrations whose present behavior cannot be described as opt-in. Security-default migration remains open while functional consolidation is completed.
    DiscordRPC also automatically migrates plaintext Gateway tokens to DPAPI and currently has no persistent portable plaintext mode. Its README now identifies this gap rather than presenting forced encryption as the current requested rule.
@@ -44,7 +48,8 @@ The pre-existing shared native tray registration already sets `NIF_SHOWTIP` for 
 
 The following old statements were identified and the user confirmed that current rules override them:
 
-- `legacy/ADBController/README.md`: intentionally no tray/startup.
+- An earlier `legacy/ADBController/README.md` revision: intentionally no
+  tray/startup. The current README and implementation use the shared surface.
 - `legacy/RealTimeNotesDeskband/README.md`: mandatory DPAPI-only new saves.
 - `legacy/SecureDesktopLauncher/README.md`: protected-path policy as an immutable project rule.
 - `legacy/AllowContentAboveLock/README.md` and `legacy/YourPhoneHideBanner/README.md`: protected Program Files deployment as a repository-wide design rule.

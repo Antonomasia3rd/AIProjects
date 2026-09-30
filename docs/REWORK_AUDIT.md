@@ -375,3 +375,20 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   checks require the same wording and CLI/tray write path. No host binary or
   UI test was compiled or run while the Defender quarantine restriction is in
   force.
+
+### Source-only repository-surface inventory follow-up — 2026-09-30
+
+- The mapped desktop products now keep their production implementations under
+  `dependencies`; remaining product-folder source files are entry/resource
+  overlays, host adapters, or test tools. Windhawk modules and the unmapped
+  PowerShell one-shot utilities remain host-specific legacy work rather than
+  candidates for a mechanical DesktopStub conversion.
+- The inventory caught a stale line in `docs/audit-shared.md` claiming that
+  ADBController had no tray or Startup support. Current source and README show
+  shared INI/CLI/tray handling plus a profile-scoped `shell:startup` shortcut,
+  so the audit now records that implementation and labels the earlier statement
+  historical.
+- Remaining user-visible surface gaps are still explicit in
+  `PRODUCT_SURFACES.md`: services/deskband/Windhawk need a companion or source
+  migration; PhotoCollage has a safe profile but no resident host; and
+  TaskSchedulerMigration must not become an unattended sign-in operation.
