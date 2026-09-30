@@ -270,6 +270,10 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   tray image selection, host background resolution, and render-only checks
   behind one shared declaration. It makes live wallpaper an explicit
   catalogued content background instead of a duplicated special string.
+- The `None` background's generated solid-color BMP used to live beside the
+  executable, which can fail from a protected install directory. It now uses
+  the same product-scoped temporary directory as live-wallpaper snapshots.
+  The inert host test creates and removes that temporary fixture.
 - The same catalog now distinguishes read-only sources that may refresh ahead
   of a future cycle slot from Discord/indicator sources that must follow the
   selected content. Previously an enabled but non-visible CapsBlink, AsusBlink,

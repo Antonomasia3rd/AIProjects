@@ -1097,6 +1097,26 @@ int main(int argc, char** argv)
             },
             "the host suite must prevent inactive cycle entries from starting optional hardware providers while preserving the selected-entry preview");
         AssertContainsAll(
+            "Solid content backgrounds use the product temporary directory",
+            "content runtime and ContentRuntimeTests.cpp",
+            contentRuntime + "\n" + contentRuntimeTests,
+            {
+                "aip::GetTemporaryDirectoryPath().empty()",
+                "GetLiveWallpaperSnapshotDirectory()",
+                "ContentSolid-",
+                "solid content background is generated in the product temporary snapshot directory",
+                "DeleteFileW(solidPath.c_str())"
+            },
+            "solid content backgrounds must not require writing a hidden BMP beside the executable");
+        AssertNotContainsAny(
+            "Solid content backgrounds do not write beside the executable",
+            "..\\dependencies\\DesktopStub\\ga_content_runtime.inc",
+            contentRuntime,
+            {
+                "GetExeDir() + L\"\\\\.DesktopStubContent-\""
+            },
+            "a protected installation directory must not prevent the None content background from rendering");
+        AssertContainsAll(
             "Content source and background catalogs control every content surface",
             "content engine and DesktopStub content sources",
             contentEngine + "\n" + contentRuntime + "\n" + tray + "\n" + offline,

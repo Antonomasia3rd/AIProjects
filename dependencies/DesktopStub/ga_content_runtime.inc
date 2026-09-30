@@ -279,7 +279,10 @@ static std::wstring ContentBackgroundPath(const aip::content::Entry& entry)
     { std::lock_guard<std::mutex> lock(g_pathMutex); profile = g_iniPath; }
     std::uint64_t hash = 14695981039346656037ull;
     HashWide(hash, profile);
-    auto path = GetExeDir() + L"\\.DesktopStubContent-" + Hex64(hash) + L".bmp";
+    if (aip::GetTemporaryDirectoryPath().empty()) return {};
+    const auto directory = GetLiveWallpaperSnapshotDirectory();
+    if (directory.empty()) return {};
+    const auto path = directory + L"\\ContentSolid-" + Hex64(hash) + L".bmp";
     BITMAPFILEHEADER file{};
     file.bfType = 0x4d42; file.bfSize = 58; file.bfOffBits = 54;
     BITMAPINFOHEADER info{};
