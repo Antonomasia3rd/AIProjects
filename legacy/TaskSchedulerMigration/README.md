@@ -74,6 +74,8 @@ TaskSchedulerMigration.cmd -OldSID "S-1-5-21-..." -NewUser "DOMAIN\User" -WhatIf
 ## Safety Notes
 
 - Matching tasks are exported to the backup directory before they are changed.
+  Each backup is written to a same-directory temporary file and atomically
+  renamed into a distinct filename; an existing backup is never overwritten.
 - The utility uses Task Scheduler COM registration, so matching tasks are overwritten with updated XML.
 - The existing task logon type is passed back to Task Scheduler; it is never replaced with `TASK_LOGON_NONE` as a generic fallback.
 - Task registration uses `TASK_IGNORE_REGISTRATION_TRIGGERS`, so registration triggers do not run merely because the migration updates a task.

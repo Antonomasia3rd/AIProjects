@@ -337,3 +337,23 @@ All earlier shared/notes/Discord/startup/AppX implementations and validation rec
   paths, one-run precedence, safe configuration-only behavior, and config
   inspection. They have not been compiled or executed because the Defender
   quarantine restriction remains in force.
+
+### Source-only TaskSchedulerMigration backup follow-up — 2026-09-30
+
+- TaskSchedulerMigration previously selected a backup name through an unbounded
+  `File.Exists` loop and then wrote XML directly at that final path. Concurrent
+  migration processes could race after the existence check, and an interrupted
+  direct write could leave a partial backup.
+- Backups now use a bounded, unique reservation path and a same-directory
+  temporary file. `File.Move` creates the final backup without overwriting an
+  existing one; only after that completed backup exists can the task be
+  re-registered. The temporary file is removed on success, collision retry, or
+  failure.
+- The local source/unit harness now covers distinct completed backups, exact XML
+  retention, temp cleanup, bounded collision behavior, and the existing
+  WhatIf/Confirm gate ordering. It has not been compiled or run because the
+  Defender quarantine restriction remains in force. No Task Scheduler COM call
+  or task registration occurred during this review.
+- This remains a one-shot migration utility. Its missing profile/tray/startup
+  surface is recorded in `PRODUCT_SURFACES.md`; a future profile must not turn a
+  saved SID migration into an unattended sign-in action.

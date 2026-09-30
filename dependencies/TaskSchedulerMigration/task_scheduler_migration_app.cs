@@ -227,9 +227,10 @@ static class TaskSchedulerMigration
                             " and suppressing registration triggers"))
                         continue;
 
-                    Directory.CreateDirectory(o.BackupDirectory);
-                    string backupPath = BuildBackupPath(o.BackupDirectory, fullName);
-                    File.WriteAllText(backupPath, xml, Encoding.UTF8);
+                    string backupPath = SaveBackupAtomically(
+                        o.BackupDirectory,
+                        fullName,
+                        xml);
                     Console.ForegroundColor = ConsoleColor.DarkCyan;
                     Console.WriteLine("[BACKUP] " + backupPath);
                     Console.ResetColor();
@@ -600,16 +601,57 @@ static class TaskSchedulerMigration
         }
 
         string timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmssfff");
-        string fileName = leaf + "-" + hash + "-" + timestamp + ".xml";
-        string path = Path.Combine(backupDirectory, fileName);
-        int suffix = 2;
-        while (File.Exists(path))
+        string nonce = Guid.NewGuid().ToString("N");
+        return Path.Combine(
+            backupDirectory,
+            leaf + "-" + hash + "-" + timestamp + "-" + nonce + ".xml");
+    }
+
+    static string SaveBackupAtomically(
+        string backupDirectory,
+        string fullTaskName,
+        string xml)
+    {
+        Directory.CreateDirectory(backupDirectory);
+        const int MaximumNameReservations = 16;
+        for (int attempt = 0; attempt < MaximumNameReservations; ++attempt)
         {
-            fileName = leaf + "-" + hash + "-" + timestamp + "-" + suffix + ".xml";
-            path = Path.Combine(backupDirectory, fileName);
-            suffix++;
+            string backupPath = BuildBackupPath(backupDirectory, fullTaskName);
+            string temporaryPath = Path.Combine(
+                backupDirectory,
+                ".TaskSchedulerMigration-" + Guid.NewGuid().ToString("N") + ".tmp");
+            try
+            {
+                File.WriteAllText(temporaryPath, xml, new UTF8Encoding(true));
+                try
+                {
+                    // The temporary file is in the destination directory, so this is
+                    // a same-volume rename. File.Move refuses to overwrite an existing
+                    // backup and therefore closes the name-reservation race.
+                    File.Move(temporaryPath, backupPath);
+                    return backupPath;
+                }
+                catch (IOException)
+                {
+                    if (!File.Exists(backupPath))
+                        throw;
+                }
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(temporaryPath))
+                        File.Delete(temporaryPath);
+                }
+                catch
+                {
+                }
+            }
         }
-        return path;
+        throw new IOException(
+            "Could not reserve a unique task-backup filename after " +
+            MaximumNameReservations + " attempts.");
     }
 
     static void ReleaseComObject(object value)

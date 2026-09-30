@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Text;
 
 static class TaskSchedulerMigrationLocalTests
 {
@@ -16,6 +17,7 @@ static class TaskSchedulerMigrationLocalTests
         TestRegistrationFlags(sourcePath);
         TestLogonPolicy();
         TestWhatIfGate(sourcePath);
+        TestAtomicBackupWrite(sourcePath);
         TestInformationalOptions();
 
         if (failures != 0)
@@ -106,11 +108,49 @@ static class TaskSchedulerMigrationLocalTests
 
         string source = File.ReadAllText(sourcePath);
         int gate = source.IndexOf("if (!ShouldApply(", StringComparison.Ordinal);
-        int backup = source.IndexOf("Directory.CreateDirectory(o.BackupDirectory)", gate, StringComparison.Ordinal);
+        int backup = source.IndexOf("string backupPath = SaveBackupAtomically(", gate, StringComparison.Ordinal);
         int registration = source.IndexOf("object registeredTask =", gate, StringComparison.Ordinal);
         Check(
             gate >= 0 && backup > gate && registration > backup,
             "WhatIf/Confirm gate remains before backup and registration side effects");
+    }
+
+    static void TestAtomicBackupWrite(string sourcePath)
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "AIProjects-TaskSchedulerMigrationTests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string xml = "<Task><Principals><Principal><UserId>S-1-5-21-1</UserId></Principal></Principals></Task>";
+            string first = (string)PrivateMethod("SaveBackupAtomically").Invoke(
+                null,
+                new object[] { root, "\\Folder\\Task:Name", xml });
+            string second = (string)PrivateMethod("SaveBackupAtomically").Invoke(
+                null,
+                new object[] { root, "\\Folder\\Task:Name", xml });
+            Check(
+                File.Exists(first) && File.Exists(second) && first != second &&
+                File.ReadAllText(first, Encoding.UTF8) == xml &&
+                File.ReadAllText(second, Encoding.UTF8) == xml,
+                "task backups use distinct completed files without overwriting earlier backups");
+            Check(
+                Directory.GetFiles(root, "*.tmp", SearchOption.TopDirectoryOnly).Length == 0,
+                "task backup writes clean up same-directory temporary files");
+
+            string source = File.ReadAllText(sourcePath);
+            Check(
+                source.Contains("File.Move(temporaryPath, backupPath);") &&
+                source.Contains("MaximumNameReservations") &&
+                !source.Contains("while (File.Exists(path))") &&
+                !source.Contains("File.WriteAllText(backupPath, xml"),
+                "task backup source uses bounded atomic name reservation instead of an unbounded collision loop");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
     }
 
     static void TestInformationalOptions()
