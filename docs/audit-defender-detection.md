@@ -83,6 +83,21 @@ command-line documentation](https://learn.microsoft.com/en-us/defender-endpoint/
 
 ## Remaining engineering decision
 
+### Renewed detection on 2026-10-03
+
+The user-authorized staged run built a fresh full validation host/broker and
+scanned both without executing them; each custom scan reported no threats.
+After the smoke copy completed its initial offline help/configuration commands,
+Defender quarantined that copy as `Trojan:Win32/Bearfoos.A!ml` again. Remediation
+succeeded, `IsActive=false`, and no test processes survived the failed runner.
+The record's `DidThreatExecute=false` does not negate the preceding successful
+test commands. See [the precise validation record](VALIDATION_2026-09-30.md).
+
+Execution of the affected host is paused again. The remaining original build
+must not substitute for the quarantined copy. Pre-execution scans are useful
+but did not prevent this later detection, and the result has not been
+established as a false positive.
+
 The optional hardware build boundary is now in place. A future separate-process
 provider model, or a split for the optional package-registration helpers, would
 still be a larger installation and user-experience decision. It must not be

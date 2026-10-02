@@ -30,6 +30,16 @@ static void Check(bool value, const char* name)
     if (!value) { ++failures; std::cerr << "FAIL: " << name << '\n'; }
 }
 
+static bool WriteContentFixture(const std::wstring& text)
+{
+    if (!WriteUtf8BomTextFile(g_iniPath, text)) return false;
+    // External edits are intentionally cached by the host for 250 ms. Fixture
+    // changes must observe the newly written file before checking its behavior,
+    // rather than accidentally exercising whichever preceding profile is cached.
+    std::wstring loaded;
+    return ReadIniFileForMutation(loaded) && loaded == text;
+}
+
 template<class Ready> static bool HostUntil(Ready ready)
 {
     const auto deadline = steady_clock::now() + milliseconds(2500);
@@ -259,7 +269,7 @@ int wmain()
     const std::wstring config = L"[Content]\r\nEnabled=true\r\nCount=2\r\nCycleEnabled=false\r\nTextMode=Overlay\r\n"
         L"[Content.1]\r\nName=First\r\nBackground=Image\r\nImagePath=image.bmp\r\nTextSources=CustomText\r\nText=alpha\r\nSecondaryText=beta\r\nBadgeText=42\r\n"
         L"[Content.2]\r\nEnabled=false\r\nName=Second\r\nBackground=None\r\nTextSources=CustomText\r\nText=gamma\r\n";
-    Check(WriteUtf8BomTextFile(ini, config), "temporary INI fixture");
+    Check(WriteContentFixture(config), "temporary INI fixture");
     LoadUiStrings();
     {
         const auto defaults = aip::ParseIniDocument(BuildInitialIniTemplate());
@@ -269,14 +279,14 @@ int wmain()
             "new preset prompt round-trips through the generated INI without raw line breaks");
         const auto oldStrings = config + L"[Strings]\r\nContentSourceRestartRequired=The content source was saved.\r\n"
             L"ContentSourceRssFeed=RSS / Atom feed\r\nContentSourceWallpaper=My custom wallpaper label\r\n";
-        Check(WriteUtf8BomTextFile(ini, oldStrings), "old preset string fixture");
+        Check(WriteContentFixture(oldStrings), "old preset string fixture");
         UpgradeRenamedStringDefaults();
         LoadUiStrings();
         Check(g_ui.contentPresetSwitchPrompt.find(L"Numbered entries stay saved") != std::wstring::npos &&
             g_ui.contentSourceRssFeed == L"RSS / Atom over wallpaper" &&
             g_ui.contentSourceWallpaper == L"My custom wallpaper label",
             "old profiles receive the new preset warning and retain custom labels");
-        Check(WriteUtf8BomTextFile(ini, config), "preset string regression restores test profile");
+        Check(WriteContentFixture(config), "preset string regression restores test profile");
         LoadUiStrings();
     }
     Check(CompositionRequested(), "direct INI boolean agrees with typed config");
@@ -340,7 +350,7 @@ int wmain()
         IniReadS(L"Content.1", L"Text", L"") == L"alpha" &&
         IniReadS(L"Content.2", L"Text", L"") == L"gamma",
         "accepted legacy preset disables layered content while retaining its saved entries");
-    Check(WriteUtf8BomTextFile(ini, config), "legacy preset regression restores layered test profile");
+    Check(WriteContentFixture(config), "legacy preset regression restores layered test profile");
     LoadUiStrings();
     contentDialogs = 0;
     contentDialogText.clear();
@@ -353,7 +363,7 @@ int wmain()
         L"[CapsBlink]\r\nHardwareEnabled=0\r\nKeyboardTargetPath=\\Device\\KeyboardClass0\r\nBlinkIntervalMs=500\r\n";
     g_contentCaps.Stop();
     g_contentCaps.controller.reset();
-    Check(WriteUtf8BomTextFile(ini, inactiveCapsConfig) && ContentEngineTick(true),
+    Check(WriteContentFixture(inactiveCapsConfig) && ContentEngineTick(true),
         "inactive hardware source scope profile composes without an external provider");
     Check(!g_contentCaps.controller,
         "an enabled CapsBlink entry outside the active cycle slot does not start its inert controller");
@@ -363,12 +373,12 @@ int wmain()
         L"\r\nTextSources=CapsBlink\r\n"
         L"[Content.2]\r\nEnabled=true\r\nName=Later\r\nBackground=None\r\nTextSources=CustomText\r\nText=later\r\n"
         L"[CapsBlink]\r\nHardwareEnabled=0\r\nKeyboardTargetPath=\\Device\\KeyboardClass0\r\nBlinkIntervalMs=500\r\n";
-    Check(WriteUtf8BomTextFile(ini, activeCapsConfig) && ContentEngineTick(true),
+    Check(WriteContentFixture(activeCapsConfig) && ContentEngineTick(true),
         "active hardware source scope profile composes with an inert provider");
     Check(g_contentCaps.controller && !g_contentCaps.controller->GetSnapshot().actionsEnabled,
         "the selected CapsBlink entry starts only the injected inert preview controller");
     g_contentCaps.Stop();
-    Check(WriteUtf8BomTextFile(ini, config) && ContentEngineTick(true),
+    Check(WriteContentFixture(config) && ContentEngineTick(true),
         "cycle-scope regression restores the baseline temporary configuration");
     aip::caps::Config capsPreview;
     g_contentCaps.Refresh(capsPreview);

@@ -469,3 +469,16 @@ tile layout/XML/GDI+ suites compiled/scanned/passed as recorded in
 [the new validation ledger](VALIDATION_2026-09-30.md). Real integration remains
 disabled. The full host/menu and separate-process offline smoke still require
 their own outcomes; old evidence must not stand in for those runs.
+
+### Scanned host validation continuation — 2026-10-03
+
+- Fixed stale test fixtures by refreshing the existing 250 ms INI cache after
+  each temporary profile write. The same 90 inert host/menu assertions now
+  pass; production cache behavior and assertions were not weakened.
+- Fresh full validation host/broker compilation and Defender scans succeeded.
+  Smoke interruption cleanup also passed. Defender then quarantined the copied
+  host during early offline smoke as Bearfoos again, despite the clean earlier
+  scan. The full offline smoke did not complete.
+- Testing of that host is stopped, no test processes remain, and no exclusions,
+  restores or allow actions were taken. Detection times, statuses and evidence
+  paths are recorded in [the validation ledger](VALIDATION_2026-09-30.md).
