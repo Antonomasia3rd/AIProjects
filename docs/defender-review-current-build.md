@@ -1,8 +1,9 @@
 # Defender review: current comparison build
 
-Prepared on 2026-10-03. The user approved submission of this comparison build
-and sanitized report. Microsoft currently requires the user to finish sign-in;
-no manual submission has been made. This is a different
+Submitted on 2026-10-03 after the user's explicit approval and sign-in.
+Microsoft confirmed receipt of one file; its final determination is pending.
+The authenticated case link and receipt are saved locally in the ignored
+`build/review-validation/microsoft-submission-receipt.json`. This is a different
 file from the quarantined sample in the [incident brief](defender-submission-2026-10-03.md).
 A clean scan of this file is not a determination about the older detection.
 
@@ -33,8 +34,9 @@ Intended destination: [Microsoft Security Intelligence](https://www.microsoft.co
 software developer review. The proposed disclosure is this one compiled file
 and the factual text below; no INI, credentials, account data, full repository,
 PDB or diagnostic archive is included. The user explicitly approved that
-disclosure. Continue that approved submission after sign-in; do not request
-the same upload permission again.
+disclosure. Microsoft received the selected executable and report; no other
+repository or account files were included. The portal's default removal date
+was displayed as October 3, 2031 on the review page.
 
 Suggested additional information:
 
@@ -83,4 +85,4 @@ The ignored `build/review-validation/` directory contains
 Existing Defender settings report MAPSReporting=2, SubmitSamplesConsent=1,
 DisableBlockAtFirstSeen=false and DisableIOAVProtection=false. They were not
 changed. This record does not establish whether Defender itself automatically
-submitted either file; "no submission" here means no manual agent submission.
+submitted either file before this authorized manual submission.

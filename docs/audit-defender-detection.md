@@ -132,6 +132,13 @@ The application was not executed. This scan does not establish that the prior
 detection is fixed: the earlier file also passed a scan before quarantine, and
 both the definitions and binary differ. The new hash, prepared external-review
 text and limits are in [the comparison-build brief](defender-review-current-build.md).
-No quarantined file was restored. No manual upload, exclusion or protection
-disablement was performed; normal automatic sample-submission settings were
-read and left unchanged, and their submission history has not been established.
+No quarantined file was restored, and no exclusion or protection disablement
+was performed. Normal automatic sample-submission settings were read and left
+unchanged; their submission history has not been established.
+
+The user subsequently approved manual submission of the comparison build and
+sanitized report, completed Microsoft sign-in and approved the CAPTCHA step.
+Microsoft confirmed receipt of one file. The authenticated case link is saved
+in ignored `build/review-validation/microsoft-submission-receipt.json`; final
+determination is Pending. The original quarantined sample was not uploaded.
+No vendor verdict or detection fix is claimed while this review is pending.

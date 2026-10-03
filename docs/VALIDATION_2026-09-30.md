@@ -122,7 +122,9 @@ into a DLL. The [comparison-build report](defender-review-current-build.md)
 contains the exact identity, OS, scan result and local log names.
 
 This is not a runtime smoke pass or a resolved false-positive verdict. The user
-approved Microsoft submission of the comparison file and sanitized report;
-the browser is awaiting user sign-in before upload. The older sample remains
+approved Microsoft submission of the comparison file and sanitized report,
+completed sign-in and approved the CAPTCHA. Microsoft confirmed the submitted
+case; final determination remains Pending. Its receipt is stored locally under
+ignored `build/review-validation/microsoft-submission-receipt.json`. The older sample remains
 quarantined. Existing automatic sample-submission preferences were read without
 change; this task cannot claim that Defender itself never transmitted a sample.

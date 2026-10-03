@@ -541,12 +541,14 @@ their own outcomes; old evidence must not stand in for those runs.
 - The [comparison-build report](defender-review-current-build.md) records its
   SHA-256, distinguishes the quarantined original, and provides 1,499 characters
   of sanitized submission text. The user explicitly approved sending this one
-  binary and report to Microsoft Security Intelligence. The software-developer
-  portal redirected to account selection; the user must finish sign-in. No
-  file has been uploaded and no submission ID exists yet. Approval remains
-  valid; resume submission after sign-in without asking it again.
-- Exact next step: finish the approved Microsoft submission, retain its case
-  ID and determination, and correlate the historical hash if Microsoft has the
-  old sample. The clean scan of a different build does not resolve the prior
-  classification. No quarantined file was restored, and no new application
-  execution or integration smoke occurred in this investigation.
+  binary and report to Microsoft Security Intelligence, completed sign-in, and
+  approved the CAPTCHA step. Microsoft confirmed receipt of one file; status
+  is Submitted and final determination is Pending. The private case link and
+  receipt are in ignored `build/review-validation/microsoft-submission-receipt.json`.
+  Do not create a duplicate submission when resuming this work.
+- Exact next step: read the existing case's determination and any request for
+  additional evidence. The report asks Microsoft to correlate the historical
+  hash if the old sample is available there. A clean scan of a different build
+  does not resolve the prior classification. No quarantined file was restored,
+  and no new application execution or integration smoke occurred in this
+  investigation. No recurring polling automation has been created.
