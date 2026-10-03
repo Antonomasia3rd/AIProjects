@@ -4,5 +4,11 @@
     "folder": "legacy/ChromeProfileCounter",
     "dependencyPaths": ["dependencies/ChromeProfileCounter"],
     "sourceCheck": "legacy/ChromeProfileCounter/tools/ChromeProfileCounterSourceCheck.ps1"
+  },
+  {
+    "key": "YouTubeMusicMigrate",
+    "folder": "legacy/YouTubeMusicMigrate",
+    "dependencyPaths": ["dependencies/YouTubeMusicMigrate"],
+    "sourceCheck": "legacy/YouTubeMusicMigrate/tools/YouTubeMusicMigrateSourceCheck.ps1"
   }
 ]

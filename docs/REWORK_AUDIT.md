@@ -482,3 +482,44 @@ their own outcomes; old evidence must not stand in for those runs.
 - Testing of that host is stopped, no test processes remain, and no exclusions,
   restores or allow actions were taken. Detection times, statuses and evidence
   paths are recorded in [the validation ledger](VALIDATION_2026-09-30.md).
+
+### Local review and script consolidation — 2026-10-03
+
+- Prepared a [local Defender submission brief](defender-submission-2026-10-03.md)
+  and [isolated Windows validation plan](isolated-validation-plan.md). Neither
+  an upload nor VM setup was performed. Recorded events associate RepoTools
+  with the quarantine but do not establish the classification's cause. A
+  fresh read of the surviving validation host was blocked, so the brief labels
+  its SHA-256 as the previously recorded value.
+- [Audited the offline startup path](audit-offline-startup-2026-10-03.md).
+  Informational commands unnecessarily encountered the 30-second mode-switch
+  parent wait; the wait now follows their early returns. Added bounded
+  help/version cases using a live parent PID. Host runtime validation remains
+  deferred. Configure-only default-write failure reporting is still an open
+  finding, not a verified fix.
+- Extracted both YouTube Music engines into `dependencies/YouTubeMusicMigrate`.
+  Legacy entries retain parameter defaults and the original data root; explicit
+  argument keys remain separate from defaults. Compared extracted bodies with
+  the prior tracked source: cleanup logic is unchanged, and the main body only
+  substitutes the explicit data-root/original-argument variables. No personal
+  auth/config/cache file was read or moved.
+- Six script scans reported no threats; all four product/engine ASTs parsed.
+  The 50 inert wrapper assertions pass under PowerShell 7.6.5 and Windows
+  PowerShell 5.1. Tests copy only entry points and substitute fixture engines;
+  no live engine, account, cleanup action, or network operation is exercised.
+  CTest registration permits the same tests on other PowerShell platforms,
+  but Linux/macOS execution has not been verified here.
+- Source ownership now includes two script products alongside the 14 binary
+  products. YTM still lacks INI/tray/Startup surfaces, and the original repository
+  requirements, standalone retirements and exact renderer investigation remain
+  open. These changes are not a validated DesktopStub release.
+- Recompiled the two check tools, scanned both without detections, then ran
+  only their source/CI commands. DesktopStub source checks pass 1,747 assertions;
+  RepoTools project-map and workflow-selection validation pass. The newly added
+  host CLI cases were compiled into RepoTools but were not executed. No host
+  binary was rebuilt or launched in this continuation.
+- Found and fixed a second runner defect during the audit: an expected binary
+  removed after selection could be reported as a skipped success. The helper
+  now fails with the missing path. Its missing-file regression passed after a
+  fresh compile/scan; it starts no child process and is included in the existing
+  smoke interruption-test command for future CI runs.

@@ -1451,7 +1451,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
     std::wstring dir = sidecarPaths.exeDir.empty() ? GetExeDir() : sidecarPaths.exeDir;
     ConfigureSingleInstanceIdentity(dir, g_iniPath, g_commandLine.customIniPath);
-    if (!g_commandLine.renderOnly && !g_commandLine.configureOnly) WaitForModeSwitchParentExitIfRequested();
 
     if (g_commandLine.helpRequested)
     {
@@ -1468,6 +1467,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
     if (g_commandLine.renderOnly || g_commandLine.configureOnly)
         return RunRenderOnlyCommand();
+
+    WaitForModeSwitchParentExitIfRequested();
 
     std::wstring comHelperManifestPath;
     if (CommandLineComRegistrationHelper(comHelperManifestPath))

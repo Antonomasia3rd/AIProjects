@@ -58,4 +58,14 @@ if(POWERSHELL_EXECUTABLE)
             "${REPOSITORY_ROOT}/legacy/ChromeProfileCounter/tools/ChromeProfileCounterTests.ps1"
             -RepositoryRoot "${REPOSITORY_ROOT}")
     set_tests_properties(ChromeProfileCounterTests PROPERTIES TIMEOUT 30)
+    add_test(NAME YouTubeMusicMigrateSourceCheck
+        COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -File
+            "${REPOSITORY_ROOT}/legacy/YouTubeMusicMigrate/tools/YouTubeMusicMigrateSourceCheck.ps1"
+            -RepositoryRoot "${REPOSITORY_ROOT}")
+    set_tests_properties(YouTubeMusicMigrateSourceCheck PROPERTIES TIMEOUT 30)
+    add_test(NAME YouTubeMusicMigrateWrapperTests
+        COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -NonInteractive -File
+            "${REPOSITORY_ROOT}/legacy/YouTubeMusicMigrate/tools/YouTubeMusicMigrateWrapperTests.ps1"
+            -RepositoryRoot "${REPOSITORY_ROOT}")
+    set_tests_properties(YouTubeMusicMigrateWrapperTests PROPERTIES TIMEOUT 30)
 endif()

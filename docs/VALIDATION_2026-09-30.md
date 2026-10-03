@@ -72,3 +72,42 @@ Next: resolve/adjudicate this renewed detection before resuming execution of
 the affected host. A clean custom scan alone is insufficient here. Once the
 host can be tested, resume the exact separate-process offline suite; the old
 four-pixel discrepancy remains unresolved and assertions must stay exact.
+
+## Source and script continuation, 2026-10-03
+
+The [local submission draft](defender-submission-2026-10-03.md) and
+[offline startup audit](audit-offline-startup-2026-10-03.md) record the event-log
+evidence and a later blocked attempt to read the original build. No sample was
+uploaded or restored, and no affected host was rebuilt or executed.
+
+The two YouTube Music source bodies were extracted into dependencies. Compared
+with their tracked predecessors, the cleanup body is unchanged; the main body
+only substitutes the explicit data-root and original-bound-argument variables.
+Product parameter blocks are unchanged. All six entry/engine/test scripts
+passed custom Defender scans. The four application ASTs parse, and 50 inert
+wrapper checks pass independently under PowerShell 7.6.5 and Windows PowerShell
+5.1. The fixture engines never access auth, clipboard, accounts or the network.
+Linux/macOS execution remains unverified; CTest now registers these portable
+PowerShell checks when the interpreter is available.
+
+RepoTools compiled with warnings as errors, and the standalone DesktopStub
+source checker compiled. Both were scanned without detections before their
+source-only commands ran: project-map validation, workflow selection and all
+1,747 DesktopStub source checks passed. The new help/version parent-wait runtime
+regressions are compiled into RepoTools but remain unexecuted under the host
+restriction. No previous bitmap or live-UI result is extended to this change.
+
+The smoke helper also now fails when an expected executable disappears instead
+of returning a skipped success. RepoTools was recompiled/scanned after that
+change; its pure missing-file regression passed without starting a child
+process. The source checks still pass 1,747 assertions. The regression is part
+of the existing CI interruption-test command as well as a standalone guard-test
+command. The interruption suite itself was not repeated in this continuation.
+
+Additional logs in `build/review-validation/`: `ytm-*-defender.log`,
+`ytm-inert-wrapper-pwsh.log`, `ytm-inert-wrapper-windows-powershell.log`,
+`repo-tools-oct03-compile.log`, `repo-tools-oct03-defender.log`,
+`source-check-oct03-compile.log`, `source-check-oct03-defender.log`,
+`source-check-oct03-run.log`, `oct03-validate-project-map.log`,
+`oct03-test-workflow-project-selection.log`, and
+`oct03-smoke-process-guard-tests.log`.

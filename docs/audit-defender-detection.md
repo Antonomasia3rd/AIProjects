@@ -98,6 +98,13 @@ must not substitute for the quarantined copy. Pre-execution scans are useful
 but did not prevent this later detection, and the result has not been
 established as a false positive.
 
+A [local submission brief](defender-submission-2026-10-03.md) now records the
+sample identity and event evidence without account files. The remaining build
+also became unreadable with Windows' virus/PUA error, so its recorded hash has
+not been freshly verified. The [source audit](audit-offline-startup-2026-10-03.md)
+does not establish the detection cause. An [isolated validation plan](isolated-validation-plan.md)
+is prepared; no upload, VM setup, restoration or protection change has occurred.
+
 The optional hardware build boundary is now in place. A future separate-process
 provider model, or a split for the optional package-registration helpers, would
 still be a larger installation and user-experience decision. It must not be

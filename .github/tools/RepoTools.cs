@@ -170,6 +170,7 @@ static class RepoTools
 
     static int SmokeCleanupTests()
     {
+        SmokeProcessGuardTests();
         InstallSmokeLifetime(60000);
         string root = Path.Combine(Path.GetTempPath(), "AIProjects-SmokeCleanup-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -206,6 +207,7 @@ static class RepoTools
             string command = args[0].ToLowerInvariant();
             string[] rest = args.Skip(1).ToArray();
             if (command == "smoke-cleanup-tests") return SmokeCleanupTests();
+            if (command == "smoke-process-guard-tests") return SmokeProcessGuardTests();
             if (command == "smoke-cleanup-fixture") return SmokeCleanupFixture(rest);
             if (command == "smoke-inert-child") return SmokeInertChild(rest);
             if (command == "validate-project-map") return ValidateProjectMap(rest);
@@ -244,6 +246,7 @@ static class RepoTools
         Console.WriteLine("  smoke-windows-build [--projects All|Project1,Project2] [--allow-package-integration]");
         Console.WriteLine("    [--desktopstub-binary path] [--desktopstub-broker path]");
         Console.WriteLine("  smoke-cleanup-tests (temporary inert processes only)");
+        Console.WriteLine("  smoke-process-guard-tests (missing-file check; no child process)");
         Console.WriteLine("  prepare-release-versions");
         Console.WriteLine("  publish-project-releases");
     }
@@ -2034,6 +2037,21 @@ static class RepoTools
                         helpResult.Output.IndexOf("--configure-only", StringComparison.Ordinal) < 0))
                         throw new InvalidOperationException("The selected DesktopStub binary lacks the offline smoke entry points; rebuild it first.");
                     AssertFileDoesNotExist(helpIni, "DesktopStub --help must be side-effect-free");
+                    // The runner remains alive: waiting for this PID would stall
+                    // for the mode-switch timeout rather than print information.
+                    string liveParentPid;
+                    using (Process current = Process.GetCurrentProcess())
+                        liveParentPid = current.Id.ToString(CultureInfo.InvariantCulture);
+                    foreach (string infoOption in new[] { "--help", "--version" })
+                    {
+                        ProcessResult infoResult = SmokeProcess(exe,
+                            new[] { infoOption, "--ini", helpIni, "--ds-wait-for-pid", liveParentPid },
+                            new[] { 0 }, 5, "DesktopStub immediate " + infoOption);
+                        string expectedInfo = infoOption == "--help" ? "--content-source" : expectedTag;
+                        if (infoResult.Output.IndexOf(expectedInfo, StringComparison.Ordinal) < 0)
+                            throw new InvalidOperationException("DesktopStub informational command did not print its output: " + infoOption);
+                        AssertFileDoesNotExist(helpIni, "DesktopStub informational commands must not create the INI");
+                    }
                     if (!allowPackageIntegration) VerifyDesktopStubOfflineGuards(exe, tempRoot);
                     string customHelpText = "[CommandLineHelp]\r\n\"Template\" = \"CUSTOM_HELP_MARKER {exe}\"\r\n";
                     File.WriteAllText(customHelpIni, customHelpText, new UTF8Encoding(true));
@@ -2957,13 +2975,27 @@ static class RepoTools
         return 0;
     }
 
+    static int SmokeProcessGuardTests()
+    {
+        string missing = Path.Combine(Path.GetTempPath(),
+            "AIProjects-MissingSmoke-" + Guid.NewGuid().ToString("N"), "Missing.exe");
+        try
+        {
+            SmokeProcess(missing, new[] { "--help" }, new[] { 0 }, 1, "missing fixture");
+        }
+        catch (FileNotFoundException ex)
+        {
+            if (!String.Equals(ex.FileName, missing, StringComparison.Ordinal)) throw;
+            Console.WriteLine("ok - a missing expected smoke binary fails explicitly");
+            return 0;
+        }
+        throw new InvalidOperationException("A missing expected smoke binary was reported as a skipped success.");
+    }
+
     static ProcessResult SmokeProcess(string file, string[] args, int[] allowedExitCodes, int timeoutSeconds, string name)
     {
         if (!File.Exists(file))
-        {
-            Console.WriteLine("skip - " + name + " not built: " + file);
-            return new ProcessResult { ExitCode = 0 };
-        }
+            throw new FileNotFoundException("Expected smoke binary is missing or unreadable: " + name, file);
 
         if (!allowPackageIntegration && Path.GetFileName(file).Equals("DesktopStub.exe", StringComparison.OrdinalIgnoreCase) &&
             !args.Contains("--help") && !args.Contains("--version") &&

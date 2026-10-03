@@ -208,7 +208,8 @@ Product-specific implementations live under matching subfolders:
 `dependencies/DesktopStub/`, `dependencies/DiscordRPC/`,
 `dependencies/NowPlayingTile/`, `dependencies/CharmTray/`,
 `dependencies/ADBController/`, `dependencies/SecureDesktopLauncher/`,
-`dependencies/RealTimeNotesDeskband/`, `dependencies/ChromeProfileCounter/`, `dependencies/PhotoCollage/`,
+`dependencies/RealTimeNotesDeskband/`, `dependencies/ChromeProfileCounter/`,
+`dependencies/YouTubeMusicMigrate/`, `dependencies/PhotoCollage/`,
 `dependencies/TaskSchedulerMigration/`, `dependencies/DNSAutoUpdate/`,
 `dependencies/capsblink/`, and `dependencies/asusblink/`. Their project-local
 source is limited to the includes, composition declarations, assembly metadata,
@@ -223,6 +224,14 @@ not the finished overlay architecture. Extract reusable providers and helpers
 behind shared interfaces as products consolidate; avoid importing another
 app's entry point or resident loop. Keep project-map ownership accurate as
 modules move so a shared-provider change selects every affected build in CI.
+
+The YouTube Music PowerShell engines receive data paths from their legacy
+entry points. Their auth/config/cache files stay beside those entry points;
+moving the implementation does not move user data into `dependencies`.
+The main engine is dot-sourced into the product's option scope, with an explicit
+data root and a snapshot of the original explicit arguments. Its wrapper tests
+use temporary stub engines and do not access a live account. This extraction
+does not yet provide the common INI/tray/Startup surface.
 
 This has happened in practice, not just as a hypothetical: DesktopStub's
 `PS_Run` and RssLiveTile's independently-written `RunPowerShellCommand` had
