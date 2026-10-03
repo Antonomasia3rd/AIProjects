@@ -110,3 +110,28 @@ provider model, or a split for the optional package-registration helpers, would
 still be a larger installation and user-experience decision. It must not be
 framed as antivirus evasion; its purpose would be least capability and clearer
 trust boundaries.
+
+### User-requested detection investigation and topology check — 2026-10-03
+
+The user prioritized resolving this detection and allowed compiled source DLLs
+only if needed; the preference remains the current portable layout. The
+[topology map](DESKTOPSTUB_TOPOLOGY.md) confirms that providers are compiled into
+the host, with no external source DLL interface. A separate packaged broker
+already exists. The compatibility AppX stub is currently a copy of the host.
+These facts do not identify which code caused the classification.
+
+The old original validation file was also quarantined successfully, with
+initial detection at 06:52:40 and final status at 06:53:30 +07:00. Its path was
+absent at the start of this continuation. Defender's normal signature update
+advanced from 1.459.512.0 to 1.459.523.0. One normal, full-featured comparison
+build from `53d9e32` was then compiled for non-executing analysis. Its custom
+scan reported no threats, its hash remained unchanged, and static inspection
+showed ordinary Windows imports. No source capability or DLL boundary changed.
+
+The application was not executed. This scan does not establish that the prior
+detection is fixed: the earlier file also passed a scan before quarantine, and
+both the definitions and binary differ. The new hash, prepared external-review
+text and limits are in [the comparison-build brief](defender-review-current-build.md).
+No quarantined file was restored. No manual upload, exclusion or protection
+disablement was performed; normal automatic sample-submission settings were
+read and left unchanged, and their submission history has not been established.

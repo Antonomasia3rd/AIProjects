@@ -1,8 +1,10 @@
 # DesktopStub detection review brief — draft, not submitted
 
 This is a local factual brief for a possible Microsoft Security Intelligence
-submission. No binary, account data, INI, cookie, or diagnostic archive has been
-uploaded. Permission to prepare this brief is not permission to submit files.
+submission. No manual file submission has been made from this task. Permission
+to prepare this brief is not permission to submit files. This historical sample
+is now quarantined. A later build at the same local filename is a different
+file; see the [current comparison-build brief](defender-review-current-build.md).
 
 ## File and source identity
 

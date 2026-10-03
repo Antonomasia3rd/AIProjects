@@ -111,3 +111,18 @@ Additional logs in `build/review-validation/`: `ytm-*-defender.log`,
 `source-check-oct03-run.log`, `oct03-validate-project-map.log`,
 `oct03-test-workflow-project-selection.log`, and
 `oct03-smoke-process-guard-tests.log`.
+
+## Detection-priority investigation, 2026-10-03
+
+Following the user's new request to address detection before other rework,
+Defender definitions updated normally to 1.459.523.0. One standard full-feature
+host build from `53d9e32` compiled, was scanned without execution, and remained
+readable at the same SHA-256 after PE metadata inspection. No source was split
+into a DLL. The [comparison-build report](defender-review-current-build.md)
+contains the exact identity, OS, scan result and local log names.
+
+This is not a runtime smoke pass or a resolved false-positive verdict. The user
+approved Microsoft submission of the comparison file and sanitized report;
+the browser is awaiting user sign-in before upload. The older sample remains
+quarantined. Existing automatic sample-submission preferences were read without
+change; this task cannot claim that Defender itself never transmitted a sample.

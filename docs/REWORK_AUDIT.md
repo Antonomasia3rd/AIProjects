@@ -523,3 +523,30 @@ their own outcomes; old evidence must not stand in for those runs.
   now fails with the missing path. Its missing-file regression passed after a
   fresh compile/scan; it starts no child process and is included in the existing
   smoke interruption-test command for future CI runs.
+
+### Detection priority and topology clarification — 2026-10-03
+
+- The user prioritized resolving Defender detection and allowed provider DLLs
+  only if necessary, preferring the portable layout otherwise. The verified
+  [topology map](DESKTOPSTUB_TOPOLOGY.md) records built-in providers, the separate
+  broker, copied activation stub and disabled experimental background-task DLL.
+  No provider DLL conversion or other production architecture change was made.
+- The previously flagged original host was also quarantined; its path was
+  absent before this investigation. Updated Defender definitions normally from
+  1.459.512.0 to 1.459.523.0. Protection settings remained enabled.
+- Built one standard full-feature comparison host from `53d9e32` for scan-only
+  investigation. It passed a custom scan, stayed readable with the same hash,
+  and has ordinary Windows imports. It is unsigned and was not executed.
+  Neither the responsible module nor a detection fix has been established.
+- The [comparison-build report](defender-review-current-build.md) records its
+  SHA-256, distinguishes the quarantined original, and provides 1,499 characters
+  of sanitized submission text. The user explicitly approved sending this one
+  binary and report to Microsoft Security Intelligence. The software-developer
+  portal redirected to account selection; the user must finish sign-in. No
+  file has been uploaded and no submission ID exists yet. Approval remains
+  valid; resume submission after sign-in without asking it again.
+- Exact next step: finish the approved Microsoft submission, retain its case
+  ID and determination, and correlate the historical hash if Microsoft has the
+  old sample. The clean scan of a different build does not resolve the prior
+  classification. No quarantined file was restored, and no new application
+  execution or integration smoke occurred in this investigation.
