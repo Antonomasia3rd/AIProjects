@@ -204,6 +204,14 @@ and effective-setting normalization. PhotoCollage and TaskSchedulerMigration
 use it with `managed_ini.cs`; read-only loads do not create files, and saved
 profiles are revalidated under the INI mutation lock.
 
+`managed_configuration_tray.cs` provides the optional configuration-only tray
+and batch settings editor used by PhotoCollage and TaskSchedulerMigration.
+Products supply their identity, profile path, read callback and existing
+validated save callback. The shared host owns the icon, menu, editor and
+per-profile instance mutex, using `managed_tray.cs` for hover text and lifetime.
+It has no job execution callback. Startup-folder state coupling is still pending;
+this is not yet the complete common lifecycle for every managed product.
+
 Product-specific implementations live under matching subfolders:
 `dependencies/DesktopStub/`, `dependencies/DiscordRPC/`,
 `dependencies/NowPlayingTile/`, `dependencies/CharmTray/`,

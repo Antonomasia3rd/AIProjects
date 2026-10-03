@@ -23,6 +23,7 @@ static class PhotoCollage
     const string LogFileKey = "LogFile";
     const string DefaultLogFileName = "PhotoCollage.log";
 
+    [STAThread]
     static int Main(string[] args)
     {
         // Information commands never parse companion arguments or touch the
@@ -42,6 +43,8 @@ static class PhotoCollage
         try
         {
             ParsedCommand command = ParseCommandLine(args);
+            if (command.Tray)
+                return ManagedConfigurationTray.Run(BuildConfigurationTraySpec(ResolveIniPath(command.IniPath)));
             Options options = BuildOptions(command);
             if (command.ConfigureOnly)
             {
@@ -90,6 +93,7 @@ static class PhotoCollage
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public bool ConfigureOnly;
         public bool ShowConfiguration;
+        public bool Tray;
     }
 
     static Options ParseArgs(string[] args)
@@ -125,16 +129,38 @@ static class PhotoCollage
                 SetPersistentSetting(parsed, RequireValue(args, ref i, a));
             else if (Is(a, "--configure-only"))
                 parsed.ConfigureOnly = true;
+            else if (Is(a, "--tray"))
+                parsed.Tray = true;
             else if (Is(a, "--show-config") || Is(a, "--print-config"))
                 parsed.ShowConfiguration = true;
             else throw new ArgumentException("Unknown argument: " + a);
         }
 
+        if (parsed.Tray && (parsed.ConfigureOnly || parsed.ShowConfiguration ||
+            parsed.DirectSettings.Count != 0 || parsed.PersistentSettings.Count != 0))
+            throw new ArgumentException("--tray accepts only --ini; it never starts an image job or applies command-line edits.");
         if (parsed.ConfigureOnly && parsed.DirectSettings.Count != 0)
             throw new ArgumentException("--configure-only accepts persistent --set values, not one-run options.");
         if (parsed.PersistentSettings.Count != 0 && !parsed.ConfigureOnly)
             throw new ArgumentException("--set requires --configure-only so a configuration change cannot also create a collage.");
         return parsed;
+    }
+
+    static ManagedConfigurationTraySpec BuildConfigurationTraySpec(string iniPath)
+    {
+        return new ManagedConfigurationTraySpec
+        {
+            ProductName = "PhotoCollage",
+            Version = ProductVersion(),
+            IniPath = iniPath,
+            ReadSettings = () => ManagedConfigurationTray.ReadForEditing(DefaultSettingValues(), BuildIniFileSpec(iniPath)),
+            SaveSettings = changes =>
+            {
+                var command = new ParsedCommand { IniPath = iniPath, ConfigureOnly = true };
+                foreach (var entry in changes) SetPersistentSetting(command, entry.Key + "=" + entry.Value);
+                BuildOptions(command);
+            }
+        };
     }
 
     static void SetDirectSetting(ParsedCommand parsed, string key, string value)
@@ -368,6 +394,7 @@ static class PhotoCollage
         Console.WriteLine("  --set Settings.Key=Value persist InputFolder, OutputFile, Cols, MaxImages,");
         Console.WriteLine("                           JpegQuality, MaxCanvasMegapixels, or LogFile");
         Console.WriteLine("  --configure-only         validate/create the profile and save --set values without creating a collage");
+        Console.WriteLine("  --tray                   open a configuration tray; no image job runs (optionally use --ini)");
         Console.WriteLine("  --show-config            print effective profile values without creating a collage");
         Console.WriteLine("  --help                   show help without side effects");
         Console.WriteLine("  --version                show version without side effects");
@@ -696,7 +723,7 @@ static class PhotoCollage
             "-OutputFile", "--output-file", "-Cols", "--cols",
             "-MaxImages", "--max-images", "-JpegQuality", "--jpeg-quality",
             "-MaxCanvasMegapixels", "--max-canvas-megapixels", "-LogFile", "--log-file",
-            "--ini", "-IniFile", "--set", "--configure-only", "--show-config", "--print-config"
+            "--ini", "-IniFile", "--set", "--configure-only", "--show-config", "--print-config", "--tray"
         };
         return options.Any(option => Is(value, option));
     }

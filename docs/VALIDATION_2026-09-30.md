@@ -128,3 +128,28 @@ case; final determination remains Pending. Its receipt is stored locally under
 ignored `build/review-validation/microsoft-submission-receipt.json`. The older sample remains
 quarantined. Existing automatic sample-submission preferences were read without
 change; this task cannot claim that Defender itself never transmitted a sample.
+
+## Persistence/editor continuation, 2026-10-03
+
+| Check | Result |
+| --- | --- |
+| Inert DesktopStub host/menu harness | Compiled and custom-scanned; 114 checks pass, including actual configure-only calls against missing and write-locked temporary profiles. No resident entry point is called. |
+| DesktopStub source checker | Existing scanned checker identity verified; 1,747 checks pass against the changed source. |
+| Managed legacy fixture suite | Compiled with warnings as errors and custom-scanned; 150 checks pass. New editor tests cover read-only opening, typed rejection, failed replacement, multi-field repair and preserved external edits. No real tray/dialog is shown. |
+| PhotoCollage / TaskSchedulerMigration | Both compile with warnings as errors and pass custom scans. Separate-process help, rejection of mixed tray/job modes and read-only inspection pass without creating INIs. |
+| TaskSchedulerMigration local tests | Compiled/scanned; 29 checks pass. No Scheduler COM activation. |
+| Project ownership / workflow selection | Both pass with the new shared configuration-tray dependency. |
+
+An initial ad hoc test compilation used the non-profile overload of the Task
+defaults API; the tray binding was corrected to use profile defaults. A later
+ad hoc source-list extraction also included the test invocation's source-path
+argument twice; deduplicating that command input produced a clean compilation.
+Neither issue remains in the checked-in build commands.
+
+Evidence: `configure-write-runtime-compile.log`,
+`configure-write-runtime-defender.log`, `configure-write-runtime-run.log`,
+`configure-write-source-check.log`, and `configuration-tray-*.log` in
+`build/review-validation/`. Visible tray/editor behavior and the new host's
+Startup transaction are not validated or complete. The full DesktopStub
+process smoke, old exact-render discrepancy and target-Windows shell matrix
+remain open. No protection settings were changed by this continuation.

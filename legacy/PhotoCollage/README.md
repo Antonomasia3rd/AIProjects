@@ -97,11 +97,27 @@ options remain one-run overrides and do not modify the profile.
 
 Image jobs create the requested output and write the configured log. The default
 log is beside the selected INI; `-LogFile` keeps its executable-relative behavior.
-Only `--configure-only` creates or updates the INI. Log appends
+`--configure-only` and the tray editor's Save button create or update the INI. Log appends
 use the shared cross-process UTF-8 dependency and report persistence failures.
 
 Both this tool and TaskSchedulerMigration consume `managed_profile.cs` for
 assignments, paths and final-value validation. `--set` can repair an invalid
 saved value. An empty `--ini` is rejected, and output/log/INI file paths must be
 distinct to avoid corrupting one another. Read-only inspection never starts an
-image job. Tray and Startup controls remain unfinished requirements.
+image job.
+
+## Configuration tray
+
+Run `PhotoCollage.exe --tray --ini "PhotoCollage.ini"` to open the optional
+configuration tray. Double-click the icon or select **Settings...** to edit the
+same `[Settings]` values accepted by `--set`. Save validates the complete profile
+and can repair several invalid fields together; Cancel leaves the file alone.
+Only edited fields are saved, preserving unrelated external edits and comments.
+Relative paths use the selected INI's directory, like persistent CLI settings.
+
+The tray contains no image-job action and does not create an INI until Save.
+Existing one-run CLI options remain available separately. Menu/editor logic is
+shared with TaskSchedulerMigration in `dependencies/managed_configuration_tray.cs`;
+each executable/profile pair has one tray instance and a nonempty hover label.
+No custom runtime DLL was introduced. Startup-folder controls and visible
+Windows tray/dialog validation remain unfinished.

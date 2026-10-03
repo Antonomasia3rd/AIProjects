@@ -58,8 +58,10 @@ static class TaskSchedulerMigration
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public bool ConfigureOnly;
         public bool ShowConfiguration;
+        public bool Tray;
     }
 
+    [STAThread]
     static int Main(string[] args)
     {
         // Informational options intentionally short-circuit before strict parsing,
@@ -79,6 +81,8 @@ static class TaskSchedulerMigration
         try
         {
             ParsedCommand command = ParseCommandLine(args);
+            if (command.Tray)
+                return ManagedConfigurationTray.Run(BuildConfigurationTraySpec(ResolveIniPath(command.IniPath)));
             Options options = BuildOptions(command);
             if (command.ConfigureOnly)
             {
@@ -145,6 +149,8 @@ static class TaskSchedulerMigration
                 SetPersistentSetting(parsed, RequireValue(args, ref i, a));
             else if (Is(a, "--configure-only"))
                 parsed.ConfigureOnly = true;
+            else if (Is(a, "--tray"))
+                parsed.Tray = true;
             else if (Is(a, "--show-config") || Is(a, "--print-config"))
                 parsed.ShowConfiguration = true;
             else throw new ArgumentException("Unknown argument: " + a);
@@ -154,11 +160,31 @@ static class TaskSchedulerMigration
             parsed.PersistentSettings.Count != 0 ||
             parsed.ConfigureOnly ||
             parsed.ShowConfiguration;
+        if (parsed.Tray && (parsed.ConfigureOnly || parsed.ShowConfiguration ||
+            parsed.DirectSettings.Count != 0 || parsed.PersistentSettings.Count != 0))
+            throw new ArgumentException("--tray accepts only --ini; it never starts a migration or applies command-line edits.");
         if (parsed.ConfigureOnly && parsed.DirectSettings.Count != 0)
             throw new ArgumentException("--configure-only accepts persistent --set values, not one-run migration options.");
         if (parsed.PersistentSettings.Count != 0 && !parsed.ConfigureOnly)
             throw new ArgumentException("--set requires --configure-only so a configuration change cannot also start a migration.");
         return parsed;
+    }
+
+    static ManagedConfigurationTraySpec BuildConfigurationTraySpec(string iniPath)
+    {
+        return new ManagedConfigurationTraySpec
+        {
+            ProductName = "TaskSchedulerMigration",
+            Version = ProductVersion(),
+            IniPath = iniPath,
+            ReadSettings = () => ManagedConfigurationTray.ReadForEditing(DefaultSettingValues(true), BuildIniFileSpec(iniPath)),
+            SaveSettings = changes =>
+            {
+                var command = new ParsedCommand { IniPath = iniPath, ProfileMode = true, ConfigureOnly = true };
+                foreach (var entry in changes) SetPersistentSetting(command, entry.Key + "=" + entry.Value);
+                BuildOptions(command);
+            }
+        };
     }
 
     static void SetDirectSetting(ParsedCommand parsed, string key, string value)
@@ -423,6 +449,7 @@ static class TaskSchedulerMigration
         Console.WriteLine("  --set Settings.Key=Value           persist OldSID, NewUser, BackupDirectory, TaskPath,");
         Console.WriteLine("                                     IncludeCredentialSensitiveTasks, WhatIf, or Confirm");
         Console.WriteLine("  --configure-only                   validate/create the profile and save --set values without Task Scheduler access");
+        Console.WriteLine("  --tray                             open a configuration tray; no migration runs (optionally use --ini)");
         Console.WriteLine("  --show-config                      print effective profile values without Task Scheduler access");
         Console.WriteLine("  --help                             show help without side effects");
         Console.WriteLine("  --version                          show version without side effects");
@@ -990,7 +1017,7 @@ static class TaskSchedulerMigration
             "-Confirm", "--confirm", "--no-confirm", "-OldSID", "--old-sid", "-NewUser",
             "--new-user", "-BackupDirectory", "--backup-directory", "-TaskPath",
             "--task-path", "--ini", "-IniFile", "--set", "--configure-only",
-            "--show-config", "--print-config"
+            "--show-config", "--print-config", "--tray"
         };
         return options.Any(option => Is(value, option));
     }

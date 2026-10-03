@@ -1021,20 +1021,20 @@ static const StringDefault g_stringDefaults[] = {
     {L"SingleInstanceMutexFailure", L"[!] Single-instance mutex creation failed (error %lu: %s); action=%s."},
 };
 
-static void EnsureIniStringDefaults()
+static bool EnsureIniStringDefaults()
 {
     DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
     if (!writeLock.IsLocked())
     {
         QueueStartupWarning(L"[!] Failed to lock INI while applying string defaults (error " + std::to_wstring(GetLastError()) + L").");
-        return;
+        return false;
     }
 
     std::wstring iniText;
     if (!ReadIniFileForMutation(iniText))
     {
         QueueStartupWarning(L"[!] Failed to read INI while applying string defaults (error " + std::to_wstring(GetLastError()) + L").");
-        return;
+        return false;
     }
 
     bool haveText = true;
@@ -1049,7 +1049,7 @@ static void EnsureIniStringDefaults()
             if (!WriteIniValueToText(iniText, L"Strings", d.key, d.value))
             {
                 QueueStartupWarning(L"[!] Failed to update INI string default: " + std::wstring(d.key ? d.key : L""));
-                return;
+                return false;
             }
             changed = true;
             doc = ParseIniDocument(iniText);
@@ -1060,12 +1060,14 @@ static void EnsureIniStringDefaults()
     if (changed && !WriteUtf8BomTextFile(g_iniPath, iniText))
     {
         QueueStartupWarning(L"[!] Failed to write INI string defaults (error " + std::to_wstring(GetLastError()) + L").");
+        return false;
     }
     else if (changed)
     {
         std::lock_guard<std::mutex> lk(g_iniCacheMutex);
         SetIniCacheUnlocked(iniText);
     }
+    return true;
 }
 
 static std::wstring BuildInitialIniTemplate()
@@ -1146,8 +1148,11 @@ static std::wstring BuildInitialIniTemplate()
     return JoinLines(lines) + L"\r\n";
 }
 
-static bool EnsureInitialIniTemplate()
+// Success and creation are separate: an existing readable file is a successful
+// no-op, whereas a read/lock/write failure must reach offline command callers.
+static bool TryEnsureInitialIniTemplate(bool& created)
 {
+    created = false;
     DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
     if (!writeLock.IsLocked())
         return false;
@@ -1165,7 +1170,7 @@ static bool EnsureInitialIniTemplate()
         if (!ReadWholeFileBytes(g_iniPath, bytes))
             return false;
         if (!bytes.empty())
-            return false;
+            return true;
     }
     else
     {
@@ -1185,7 +1190,16 @@ static bool EnsureInitialIniTemplate()
         std::lock_guard<std::mutex> lk(g_iniCacheMutex);
         SetIniCacheUnlocked(text);
     }
+    created = true;
     return true;
+}
+
+// Preserve the resident startup callers' "new file created" notification.
+static bool EnsureInitialIniTemplate()
+{
+    bool created = false;
+    TryEnsureInitialIniTemplate(created);
+    return created;
 }
 
 static void UpgradeStringDefaultIfUnmodified(const wchar_t* key, const wchar_t* oldValue, const wchar_t* newValue)

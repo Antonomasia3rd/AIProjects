@@ -63,9 +63,10 @@ static int RunRenderOnlyCommand()
 
     // Persist only the requested local INI values. Deliberately do not call the
     // normal settings transaction, which also owns external Startup changes.
-    EnsureInitialIniTemplate();
-    EnsureIniDefaults();
-    EnsureIniStringDefaults();
+    bool initialIniCreated = false;
+    if (!TryEnsureInitialIniTemplate(initialIniCreated) ||
+        !EnsureIniDefaults() || !EnsureIniStringDefaults())
+        return fail(L"could not initialize or update the local configuration file: " + g_iniPath);
     if (!g_commandLine.settings.empty() && !MutateDesktopStubIniWithWait([](std::wstring& text) {
             for (const auto& setting : g_commandLine.settings)
                 if (!WriteIniValueToText(text, setting.section.c_str(), setting.key.c_str(), setting.value.c_str())) return false;

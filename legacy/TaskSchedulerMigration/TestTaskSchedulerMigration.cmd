@@ -16,10 +16,12 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 
 for %%I in ("%ROOT%..\..") do set "REPO=%%~fI"
 
-"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /d:LEGACY_UTILITY_TESTS /main:TaskSchedulerMigrationLocalTests /r:Microsoft.CSharp.dll /out:"%TEST_OUT%" ^
+"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /d:LEGACY_UTILITY_TESTS /main:TaskSchedulerMigrationLocalTests /r:Microsoft.CSharp.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /out:"%TEST_OUT%" ^
   "%REPO%\dependencies\managed_named_objects.cs" ^
   "%REPO%\dependencies\managed_ini.cs" ^
   "%REPO%\dependencies\managed_profile.cs" ^
+  "%REPO%\dependencies\managed_tray.cs" ^
+  "%REPO%\dependencies\managed_configuration_tray.cs" ^
   "%REPO%\dependencies\TaskSchedulerMigration\task_scheduler_migration_app.cs" ^
   "%ROOT%TaskSchedulerMigration.cs" ^
   "%ROOT%TaskSchedulerMigrationLocalTests.cs"

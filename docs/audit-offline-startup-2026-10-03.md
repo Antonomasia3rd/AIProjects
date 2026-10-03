@@ -51,11 +51,14 @@ the runner process and quarantined file, not a particular function or instructio
   moves that wait after informational/offline returns and adds bounded CLI
   regressions using the live runner PID. Runtime verification of this source
   change is deferred with the affected host; it is not a detection workaround.
-- `EnsureInitialIniTemplate`, `EnsureIniDefaults`, and `EnsureIniStringDefaults`
-  do not expose one combined success result to configure-only mode. In
-  particular, a configure-only invocation with no setting batch needs a
-  focused failed-write regression so it cannot report successful persistence
-  when initialization fails. This remains an open functional audit item.
+- In the recorded build, default writers did not expose failure to configure-only
+  mode. The follow-up separates initialization success from the "file created"
+  result and returns status from both default writers. Offline commands now stop
+  on any failure, even without an assignment batch. Missing-parent, directory,
+  write-locked setting/string defaults, and explicit-batch failures are covered
+  in the 114-check inert host suite. Resident creation-notification semantics
+  remain intact. This does not combine all initialization writes into one
+  transaction; the existing individual atomic writes remain separate stages.
 - The custom scan reported no threats; later normal file access is blocked.
   This evidence does not distinguish delayed/cloud/static classification from
   runtime behavioral detection. Do not claim one of those causes without

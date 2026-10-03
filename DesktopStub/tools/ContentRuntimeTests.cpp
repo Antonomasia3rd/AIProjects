@@ -236,6 +236,77 @@ static void TestCapsHostAndShutdownCache()
     g_shutdownState.Cancel();
 }
 
+static void TestOfflineConfigurationPersistence(const std::wstring& directory)
+{
+    const auto savedPath = g_iniPath;
+    const auto savedCommandLine = g_commandLine;
+    g_commandLine = {};
+    g_commandLine.configureOnly = true;
+
+    g_iniPath = directory + L"\\missing-parent\\settings.ini";
+    Check(RunRenderOnlyCommand() == 2,
+        "configure-only rejects an initial default-file write failure without a setting batch");
+    Check(GetFileAttributesW(g_iniPath.c_str()) == INVALID_FILE_ATTRIBUTES,
+        "failed initialization does not claim to have created its INI");
+    g_iniPath = directory;
+    Check(RunRenderOnlyCommand() == 2, "configure-only rejects a directory as its INI path");
+
+    const auto fixturePath = directory + L"\\configure-only.ini";
+    g_iniPath = fixturePath;
+    Check(RunRenderOnlyCommand() == 0, "configure-only creates a new default profile successfully");
+    bool created = true;
+    Check(TryEnsureInitialIniTemplate(created) && !created,
+        "an existing profile is a successful initialization without a creation notification");
+    Check(!EnsureInitialIniTemplate(), "resident initialization retains its existing-file result");
+
+    const auto complete = BuildInitialIniTemplate();
+    const auto stringsAt = complete.find(L"[Strings]");
+    Check(stringsAt != std::wstring::npos, "default template contains a strings section");
+    const auto expectLockedFailure = [&](const std::wstring& profile, const char* label) {
+        g_iniPath = fixturePath;
+        if (!WriteContentFixture(profile)) {
+            Check(false, "write persistence failure fixture");
+            return;
+        }
+        std::vector<BYTE> before;
+        Check(ReadWholeFileBytes(g_iniPath, before), "read exact original fixture bytes");
+        // Readers remain permitted, so validation succeeds. Replacing the file
+        // is denied, without altering ACLs or any non-fixture file attributes.
+        HANDLE reader = CreateFileW(g_iniPath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        Check(reader != INVALID_HANDLE_VALUE, "hold fixture file against replacement");
+        if (reader == INVALID_HANDLE_VALUE) return;
+        const int result = RunRenderOnlyCommand();
+        CloseHandle(reader);
+        Check(result == 2, label);
+        std::vector<BYTE> after;
+        Check(ReadWholeFileBytes(g_iniPath, after) && before == after,
+            "a rejected write preserves the exact previous profile bytes");
+    };
+    expectLockedFailure(L"; preserve this comment\r\n[Settings]\r\nTrayIcon=0\r\n",
+        "configure-only reports setting-default write failure with no requested assignments");
+    if (stringsAt != std::wstring::npos)
+        expectLockedFailure(complete.substr(0, stringsAt),
+            "configure-only reports string-default write failure with all setting defaults present");
+    g_commandLine.settings.push_back({L"TileText", L"Text", L"saved fixture"});
+    expectLockedFailure(complete, "configure-only reports explicit setting-batch write failure");
+    Check(RunRenderOnlyCommand() == 0 && IniReadS(L"TileText", L"Text", L"") == L"saved fixture",
+        "configure-only succeeds and refreshes the cached setting after the write lock is released");
+    g_commandLine.settings.clear();
+    std::vector<BYTE> before, after;
+    Check(ReadWholeFileBytes(g_iniPath, before) && RunRenderOnlyCommand() == 0 &&
+        ReadWholeFileBytes(g_iniPath, after) && before == after,
+        "configure-only with no changes preserves an already complete profile");
+    Check(GetFileAttributesW((directory + L"\\AppxManifest.xml").c_str()) == INVALID_FILE_ATTRIBUTES &&
+        GetFileAttributesW((directory + L"\\Assets").c_str()) == INVALID_FILE_ATTRIBUTES,
+        "configure-only persistence fixtures do not generate package files or images");
+    Check(DeleteFileW(fixturePath.c_str()) != FALSE, "remove temporary configure-only profile");
+    g_iniPath = savedPath;
+    g_commandLine = savedCommandLine;
+    std::wstring restored;
+    Check(ReadIniFileForMutation(restored), "restore the original fixture profile cache");
+}
+
 int wmain()
 {
     wchar_t temporary[MAX_PATH]{};
@@ -450,6 +521,7 @@ int wmain()
     Check(IniReadS(L"Content.1", L"Text", L"") == L"alpha", "providers do not overwrite configured custom text");
     StopContentProviders();
     PublishContentSnapshot({});
+    TestOfflineConfigurationPersistence(directory);
     DeleteFileW(ini.c_str()); DeleteFileW(bitmapPath.c_str()); DeleteFileW(g_logPath.c_str());
     RemoveDirectoryW(directory.c_str());
     std::cout << checks << " content runtime/menu checks; " << failures << " failures\n";

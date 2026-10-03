@@ -81,20 +81,20 @@ static TextNormalizeResult NormalizeIniToUtf8BomIfNeeded()
     return NormalizeTextFileToUtf8Bom(g_iniPath);
 }
 
-void EnsureIniDefaults()
+bool EnsureIniDefaults()
 {
     DesktopStubIniMutationGuard writeLock(CurrentIniWriteLockWaitMs());
     if (!writeLock.IsLocked())
     {
         QueueStartupWarning(L"[!] Failed to lock INI while applying setting defaults (error " + std::to_wstring(GetLastError()) + L").");
-        return;
+        return false;
     }
 
     std::wstring iniText;
     if (!ReadIniFileForMutation(iniText))
     {
         QueueStartupWarning(L"[!] Failed to read INI while applying setting defaults (error " + std::to_wstring(GetLastError()) + L").");
-        return;
+        return false;
     }
 
     bool haveText = true;
@@ -109,7 +109,7 @@ void EnsureIniDefaults()
             if (!WriteIniValueToText(iniText, d.section, d.key, d.value))
             {
                 QueueStartupWarning(L"[!] Failed to update INI setting default: [" + std::wstring(d.section ? d.section : L"") + L"] " + std::wstring(d.key ? d.key : L""));
-                return;
+                return false;
             }
             changed = true;
             doc = ParseIniDocument(iniText);
@@ -128,7 +128,7 @@ void EnsureIniDefaults()
         if (!WriteIniValueToText(iniText, d.section, d.key, d.value))
         {
             QueueStartupWarning(L"[!] Failed to update INI PowerShell error default: [" + std::wstring(d.section ? d.section : L"") + L"] " + std::wstring(d.key ? d.key : L""));
-            return;
+            return false;
         }
         changed = true;
         doc = ParseIniDocument(iniText);
@@ -146,7 +146,7 @@ void EnsureIniDefaults()
         if (!WriteIniValueToText(iniText, d.section, d.key, d.value))
         {
             QueueStartupWarning(L"[!] Failed to update INI command-line help default: [" + std::wstring(d.section ? d.section : L"") + L"] " + std::wstring(d.key ? d.key : L""));
-            return;
+            return false;
         }
         changed = true;
         doc = ParseIniDocument(iniText);
@@ -156,12 +156,14 @@ void EnsureIniDefaults()
     if (changed && !WriteUtf8BomTextFile(g_iniPath, iniText))
     {
         QueueStartupWarning(L"[!] Failed to write INI setting defaults (error " + std::to_wstring(GetLastError()) + L").");
+        return false;
     }
     else if (changed)
     {
         std::lock_guard<std::mutex> lk(g_iniCacheMutex);
         SetIniCacheUnlocked(iniText);
     }
+    return true;
 }
 
 

@@ -122,8 +122,24 @@ Changing a profile therefore cannot also begin a migration.
 - XML backups under `TaskSchedulerMigrationBackup` beside the compiled helper executable unless `-BackupDirectory` is changed.
 - `TaskSchedulerMigration.ini` beside the compiled helper executable when using the default profile path, or the file supplied through `--ini`.
 
-Only `--configure-only` creates or updates the profile; `--show-config` reads it
+`--configure-only` and the tray editor's Save button create or update the profile; `--show-config` reads it
 or displays defaults without creating a file. Assignment parsing, path checks,
 and effective-value validation are shared with PhotoCollage through
 `managed_profile.cs`. An empty `--ini` is rejected, and `--set` can repair a bad
-saved value. These profiles do not complete the requested tray/Startup surface.
+saved value.
+
+## Configuration tray
+
+Run `TaskSchedulerMigration.exe --tray --ini "TaskSchedulerMigration.ini"`
+to open the optional configuration tray. Double-click the icon or select
+**Settings...** to edit all current profile settings, then Save or Cancel.
+The editor uses the same typed validation and atomic INI writer as the CLI,
+allows multi-field repairs, and preserves comments and unrelated external edits.
+Profile defaults retain preview (`WhatIf`) and confirmation enabled.
+
+Opening this tray does not connect to Task Scheduler or run a migration. To run
+a configured migration later, use the existing CLI with the same `--ini` path.
+Tray mode accepts only the profile-path option alongside `--tray`; job options
+cannot accidentally be combined with it. The shared implementation lives in
+`dependencies/managed_configuration_tray.cs`, compiled into this executable.
+Startup-folder controls and visible Windows tray/dialog validation remain open.

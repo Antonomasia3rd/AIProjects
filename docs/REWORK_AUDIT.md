@@ -552,3 +552,48 @@ their own outcomes; old evidence must not stand in for those runs.
   does not resolve the prior classification. No quarantined file was restored,
   and no new application execution or integration smoke occurred in this
   investigation. No recurring polling automation has been created.
+
+### Continuation: persistence reporting and shared configuration tray — 2026-10-03
+
+- Fixed DesktopStub offline initialization error reporting. The initial-template
+  helper now separates operation success from whether it created a file, and
+  setting/string default writers return success. Offline modes return an error
+  before reporting a save if any initialization stage fails. Existing resident
+  creation notifications retain their old meaning. Individual writes remain
+  atomic; this is not a new whole-bootstrap transaction.
+- Extended the inert host/menu harness with missing-parent, directory-as-INI,
+  locked setting-default/string-default/batch writes, successful retry and
+  unchanged-profile cases. The harness compiled, passed its custom scan and
+  passed **114 checks**. It never invokes the resident application entry point.
+  The existing source checker still passes **1,747 checks**.
+- Added `managed_configuration_tray.cs`, shared by PhotoCollage and
+  TaskSchedulerMigration. Their `--tray [--ini path]` mode opens configuration
+  only; it has no job callback. The host supplies a per-profile instance mutex,
+  shared tooltip/icon handling and a batch editor. Product callbacks reuse the
+  same profile validation/writer as the CLI. Invalid fields can be repaired
+  together, rejected writes preserve the old state, and unrelated external
+  edits are retained. Build dependencies and CI ownership were updated.
+- Managed fixtures pass **150 checks**; local TaskSchedulerMigration tests pass
+  **29 checks**. Both product builds and the fixtures compile with warnings as
+  errors. The new test/product binaries passed custom scans before execution.
+  Separate-process help, mixed-mode rejection and read-only inspection pass
+  for both products. The actual resident tray/window was not launched; visible
+  UI acceptance is still required. Real Startup integration remains skipped.
+- Project-map validation and workflow selection pass. No DesktopStub production
+  binary, actual Task Scheduler migration, user image job, hardware provider or
+  Startup-folder integration was run. The submitted comparison host was not
+  overwritten. The Microsoft review is independent of these source changes.
+
+Next implementation: wire a shared per-user Startup transaction into the new
+configuration tray and expose the same preference through INI/CLI. Reuse
+`ManagedStartupShortcut.CommitIniCoupledState`; sign-in must launch `--tray`
+with the exact profile path and must never run a utility job automatically.
+Do not label the new tray's Startup requirement complete yet. Then validate
+the visible editor/icon lifecycle in a bounded fixture and continue the
+remaining source/standalone/service gaps in the requirements review. No old
+subagents remain active; this continuation ran solo under the user's usage
+constraint.
+
+Logs are under ignored `build/review-validation/`: `configure-write-*.log` and
+`configuration-tray-*.log`. The submitted-file receipt and existing Microsoft
+case remain in `microsoft-submission-receipt.json`; do not submit a duplicate.

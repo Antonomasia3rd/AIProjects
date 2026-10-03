@@ -7,6 +7,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using AIProjects.Dependencies;
 
 static class LegacyUtilitiesTests
 {
@@ -24,6 +25,7 @@ static class LegacyUtilitiesTests
         TestDnsSafetyDefaults(repositoryRoot);
         TestStrictArgumentParsing();
         TestManagedProfiles();
+        TestConfigurationTrayEditing();
         TestPhotoCollageAtomicOutput(repositoryRoot);
         TestTaskXmlHardening(repositoryRoot);
         TestCapsBlinkIdentity(repositoryRoot);
@@ -153,6 +155,91 @@ static class LegacyUtilitiesTests
                 "INI validation sees fresh stored fields and leaves rejected updates intact");
         }
         finally { Directory.Delete(root, true); }
+    }
+
+    static void TestConfigurationTrayEditing()
+    {
+        string temporary = Path.GetFullPath(Path.GetTempPath());
+        string name = "AIProjects-TrayEditor-" + Guid.NewGuid().ToString("N");
+        string root = Path.GetFullPath(Path.Combine(temporary, name));
+        Directory.CreateDirectory(root);
+        try
+        {
+            foreach (Type product in new[] { typeof(PhotoCollage), typeof(TaskSchedulerMigration) })
+            {
+                string ini = Path.Combine(root, product.Name + ".ini");
+                var parsed = InvokePrivate(product, "ParseCommandLine", new object[] { new[] { "--tray", "--ini", ini } });
+                Check((bool)parsed.GetType().GetField("Tray").GetValue(parsed), product.Name + " recognizes the configuration-only tray mode");
+                CheckThrows<ArgumentException>(delegate {
+                    InvokePrivate(product, "ParseCommandLine", new object[] { new[] { "--ini", "--tray" } });
+                }, product.Name + " does not swallow --tray as a missing INI argument");
+                string directOption = product == typeof(PhotoCollage) ? "--cols" : "--what-if";
+                string[] mixed = product == typeof(PhotoCollage)
+                    ? new[] { "--tray", directOption, "3" } : new[] { "--tray", directOption };
+                CheckThrows<ArgumentException>(delegate {
+                    InvokePrivate(product, "ParseCommandLine", new object[] { mixed });
+                }, product.Name + " rejects mixing the tray with job arguments");
+                var spec = (ManagedConfigurationTraySpec)InvokePrivate(product, "BuildConfigurationTraySpec", new object[] { ini });
+                var editor = new ManagedConfigurationEditor(spec);
+                Check(!File.Exists(ini), product.Name + " opening an editor model does not create a profile or run a job");
+                string key = product == typeof(PhotoCollage) ? "Cols" : "WhatIf";
+                string otherKey = product == typeof(PhotoCollage) ? "MaxImages" : "Confirm";
+                string first = product == typeof(PhotoCollage) ? "3" : "1";
+                string second = product == typeof(PhotoCollage) ? "4" : "0";
+                string external = product == typeof(PhotoCollage) ? "8" : "0";
+                var edited = editor.Values;
+                edited[key] = first;
+                editor.Save(edited);
+                Check(File.Exists(ini) && spec.ReadSettings()[key] == first,
+                    product.Name + " tray save uses the real validated profile writer");
+                var externalSpec = new ManagedIniFileSpec { FilePath = ini, SectionName = "Settings" };
+                string error;
+                Check(ManagedIniFile.SaveSectionBatch(externalSpec,
+                    new Dictionary<string, string> { { otherKey, external } }, out error), "external profile edit fixture");
+                edited = editor.Values;
+                edited[key] = second;
+                editor.Save(edited);
+                Check(spec.ReadSettings()[otherKey] == external && editor.Values[otherKey] == external,
+                    product.Name + " tray preserves and reloads unrelated concurrent edits");
+                byte[] before = File.ReadAllBytes(ini);
+                edited = editor.Values;
+                edited[key] = "invalid";
+                CheckThrows<ArgumentException>(delegate { editor.Save(edited); }, product.Name + " tray rejects invalid typed values");
+                Check(before.SequenceEqual(File.ReadAllBytes(ini)) && editor.Values[key] == second,
+                    product.Name + " rejected edits preserve disk and editor state");
+                edited = editor.Values;
+                edited[key] = first;
+                using (var reader = new FileStream(ini, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    CheckThrows<IOException>(delegate { editor.Save(edited); }, product.Name + " tray surfaces replacement failures");
+                }
+                Check(before.SequenceEqual(File.ReadAllBytes(ini)) && editor.Values[key] == second,
+                    product.Name + " failed persistence does not claim the new value was saved");
+                editor.Save(edited);
+                Check(spec.ReadSettings()[key] == first, product.Name + " retry succeeds after the file lock is released");
+
+                File.WriteAllText(ini, "; preserve this comment\r\n[Settings]\r\n" + key + "=invalid\r\n" + otherKey + "=invalid\r\n");
+                editor = new ManagedConfigurationEditor(spec);
+                Check(editor.Values[key] == "invalid" && editor.Values[otherKey] == "invalid",
+                    product.Name + " invalid profiles remain editable before validation");
+                edited = editor.Values;
+                edited[key] = first;
+                edited[otherKey] = external;
+                editor.Save(edited);
+                Check(spec.ReadSettings()[key] == first && spec.ReadSettings()[otherKey] == external &&
+                    File.ReadAllText(ini).Contains("; preserve this comment"),
+                    product.Name + " tray can repair multiple invalid fields in one preserved-comment batch");
+                string output;
+                Check(InvokeMainAndCapture(product, new[] { "--ini", ini, "--show-config" }, out output) == 0,
+                    product.Name + " CLI accepts the tray-saved profile");
+            }
+        }
+        finally
+        {
+            if (!String.Equals(root, Path.GetFullPath(Path.Combine(temporary, name)), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Unexpected fixture cleanup path.");
+            Directory.Delete(root, true);
+        }
     }
 
     static void TestPhotoCollageAtomicOutput(string repositoryRoot)
