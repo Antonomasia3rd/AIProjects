@@ -153,3 +153,28 @@ Evidence: `configure-write-runtime-compile.log`,
 Startup transaction are not validated or complete. The full DesktopStub
 process smoke, old exact-render discrepancy and target-Windows shell matrix
 remain open. No protection settings were changed by this continuation.
+
+## Startup and offscreen UI continuation, 2026-10-07
+
+Fresh compile/custom-scan/run results under independent deadlines:
+
+- Managed suite: 230 passing checks, with injected Startup transactions only.
+- INI transaction fixture: 29 passing checks, including exact UTF-16 and
+  original-absence rollback, competing writers, timeout, retry and disposal.
+- Actual editor controls: 33 passing offscreen checks; no Show/Application.Run
+  or NotifyIcon. Normal/minimum/expanded layouts and actual button handlers
+  are covered.
+- Local migration suite: 29 passing checks, without Scheduler activation.
+- Both product builds: warnings-as-errors compilation, clean custom scans,
+  and separate-process help/configuration/Startup-rejection guards pass.
+- Fresh full native host/broker and RepoTools: scans passed with protection on
+  after a normal signature update. Interruption guards passed. Exact smoke
+  initially failed on the historical four-pixel case, then passed unchanged on
+  a later control run. This is not stable renderer acceptance.
+- Expanded GDI+ renderer: 19,019 passing checks, GDI 3 to 3 and USER 4 to 4.
+
+Logs use `startup-oct07-*`, `native-review-oct07-*`, and `render-*-oct07-*`
+under ignored `build/review-validation/`. The Microsoft-submitted executable
+was not overwritten. No Startup-folder integration, package registration,
+resident DesktopStub instance, account/provider or hardware operation ran.
+Visible tray behavior and original target-OS shell appearance remain open.

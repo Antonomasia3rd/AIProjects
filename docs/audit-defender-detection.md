@@ -142,3 +142,22 @@ Microsoft confirmed receipt of one file. The authenticated case link is saved
 in ignored `build/review-validation/microsoft-submission-receipt.json`; final
 determination is Pending. The original quarantined sample was not uploaded.
 No vendor verdict or detection fix is claimed while this review is pending.
+
+### Microsoft response and bounded reproduction — 2026-10-07
+
+After the user signed in again, the analyst comments reported no positive
+scanner result or telemetry for the submitted comparison file and intended
+closure without further action. The portal still displayed In progress and a
+Pending root-file determination; both current client/cloud detection fields
+said No malware detected. Microsoft requested current-definition reproduction
+and a separate diagnostic archive if further investigation is needed. No such
+archive was collected or sent; the prior approval covered only the comparison
+executable and sanitized report.
+
+With protection enabled and a normal signature update, one fresh standard
+full-feature host/broker was built, scanned and tested only through the bounded
+offline runner. No Defender detection occurred. Exact rendering failed once
+on the historical four-pixel discrepancy, then an unchanged-host control run
+passed the full smoke. This supports continued gated validation of current
+builds; it neither identifies the older detection cause nor clears its exact
+quarantined hash. No DLL split, exclusion or restoration was used.

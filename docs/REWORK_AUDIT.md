@@ -597,3 +597,57 @@ constraint.
 Logs are under ignored `build/review-validation/`: `configure-write-*.log` and
 `configuration-tray-*.log`. The submitted-file receipt and existing Microsoft
 case remain in `microsoft-submission-receipt.json`; do not submit a duplicate.
+
+### Startup integration and renewed validation — 2026-10-07
+
+- Starting checkpoint: `628c2c1`; the user's newly added
+  `legacy/WindhawkMods/local@soft-lock-screen-combined-lab.wh.cpp` was already
+  untracked and remains untouched by this work.
+- PhotoCollage and TaskSchedulerMigration now expose `RunAtStartup` through
+  INI, explicit `--startup`/`--no-startup` management and a tray checkbox. The
+  shortcut uses only the current user's Startup folder and launches `--tray`
+  with the quoted absolute INI path. Management exits before utility jobs;
+  offline configure-only/inspection reject Startup operations. Manual INI
+  changes apply when the tray starts or reloads its configuration.
+- Added a shared adapter and an extended Startup transaction scope. Locks are
+  acquired Startup first, then INI, and held through validation, snapshot,
+  persistence and rollback. Exact original bytes/encoding/comments or missing
+  file state can be restored. Cooperating writers wait until rollback finishes.
+  This mutex does not coordinate arbitrary external editors. Existing older
+  DNS/Caps/ASUS adapters still need adoption of the extended scope.
+- Fixed a shared disable-path defect: disabling an enabled preference with an
+  absent shortcut no longer tries to install the old launch path first.
+  Disabled reconciliation also removes owned shortcuts with obsolete arguments.
+  Invalid saved preferences remain editable; inspection errors do not become
+  optimistic checkbox state.
+- Extracted the real editor form factory for hidden control tests. Save/Cancel,
+  layout at three sizes, validation, persistence failure/retry, concurrent edits,
+  reload errors and disposal are exercised without showing a window or icon.
+- Validation: **230 managed checks**, **29 INI transaction checks**, **33
+  offscreen UI checks**, and **29 local migration checks** pass. Modified
+  products and fixtures compile with warnings as errors; custom scans pass
+  before execution. Separate-process help/offline guards remain read-only.
+  No real Startup-folder changes, migrations, image jobs or hardware actions
+  were used. New fixture executables have independent deadlines.
+- Microsoft reported no positive scan or telemetry result for the comparison
+  sample and intends closure unless a current-definition reproduction plus
+  diagnostics is supplied. The portal still showed root determination Pending
+  while both current detection results were No malware detected. This does not
+  adjudicate the older quarantined hash. The private receipt is updated; no
+  diagnostic archive was collected/uploaded and no duplicate case was created.
+- With protection enabled and updated signatures, a fresh normal full-feature
+  host/broker build and scans succeeded. Cleanup guards passed. The first exact
+  offline smoke passed 35 checks then reproduced the same four changed primary
+  glyph pixels. A later unchanged-host full smoke passed. No Defender detection
+  appeared, no test processes remained, and the submitted binary was preserved.
+- Renderer investigation did not establish a production fix. Added exact
+  cold-GDI-lifetime coverage; the retained renderer suite passes **19,019 checks**
+  with unchanged GDI/USER counts. Comparisons were not relaxed. See ignored
+  `build/review-validation/renderer-investigation-oct07.md` for detailed evidence.
+
+Next: finish visible notification-area acceptance and optional real Startup
+validation in an explicitly selected environment; migrate older managed
+Startup adapters to the shared persistence scope; continue the remaining
+common-surface/standalone/service gaps. Preserve the intermittent renderer
+failure and capture state at an actual recurrence rather than declaring a
+passing rerun a fix. All original requirements are still not complete.

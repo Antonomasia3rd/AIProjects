@@ -139,7 +139,15 @@ Profile defaults retain preview (`WhatIf`) and confirmation enabled.
 
 Opening this tray does not connect to Task Scheduler or run a migration. To run
 a configured migration later, use the existing CLI with the same `--ini` path.
-Tray mode accepts only the profile-path option alongside `--tray`; job options
-cannot accidentally be combined with it. The shared implementation lives in
+Tray mode accepts the profile path and optional Startup management; migration
+arguments cannot accidentally be combined with it. The shared implementation lives in
 `dependencies/managed_configuration_tray.cs`, compiled into this executable.
-Startup-folder controls and visible Windows tray/dialog validation remain open.
+The **Start tray at sign-in (Startup folder)** checkbox, `--startup` /
+`--no-startup`, and `[Settings] RunAtStartup=0|1` share the same preference.
+For example, `TaskSchedulerMigration.exe --startup --ini "TaskSchedulerMigration.ini"`
+saves and applies it without running a migration. Only the current user's
+Startup folder is used; its shortcut launches `--tray --ini` with the exact
+profile. Manual INI changes apply on tray launch, Reload configuration or menu
+refresh. `--configure-only` rejects Startup changes; use the explicit switches.
+The editor has offscreen control tests. Visible notification-area acceptance
+and real Startup-folder integration remain separately gated validation.

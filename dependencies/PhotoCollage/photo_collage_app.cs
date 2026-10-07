@@ -43,6 +43,14 @@ static class PhotoCollage
         try
         {
             ParsedCommand command = ParseCommandLine(args);
+            if (command.StartupManagement)
+            {
+                var traySpec = BuildConfigurationTraySpec(ResolveIniPath(command.IniPath));
+                traySpec.SaveSettings(command.PersistentSettings);
+                if (command.Tray) return ManagedConfigurationTray.Run(traySpec);
+                Console.WriteLine("Saved Startup configuration for: " + traySpec.IniPath);
+                return 0;
+            }
             if (command.Tray)
                 return ManagedConfigurationTray.Run(BuildConfigurationTraySpec(ResolveIniPath(command.IniPath)));
             Options options = BuildOptions(command);
@@ -82,6 +90,7 @@ static class PhotoCollage
         public long MaxCanvasMegapixels = 100;
         public string LogFile;
         public string IniPath;
+        public bool RunAtStartup;
     }
 
     sealed class ParsedCommand
@@ -94,6 +103,7 @@ static class PhotoCollage
         public bool ConfigureOnly;
         public bool ShowConfiguration;
         public bool Tray;
+        public bool StartupManagement;
     }
 
     static Options ParseArgs(string[] args)
@@ -131,36 +141,52 @@ static class PhotoCollage
                 parsed.ConfigureOnly = true;
             else if (Is(a, "--tray"))
                 parsed.Tray = true;
+            else if (Is(a, "--startup") || Is(a, "--no-startup"))
+            {
+                parsed.StartupManagement = true;
+                SetPersistentSetting(parsed, ManagedConfigurationStartup.Key + "=" + (Is(a, "--startup") ? "1" : "0"));
+            }
             else if (Is(a, "--show-config") || Is(a, "--print-config"))
                 parsed.ShowConfiguration = true;
             else throw new ArgumentException("Unknown argument: " + a);
         }
 
         if (parsed.Tray && (parsed.ConfigureOnly || parsed.ShowConfiguration ||
-            parsed.DirectSettings.Count != 0 || parsed.PersistentSettings.Count != 0))
-            throw new ArgumentException("--tray accepts only --ini; it never starts an image job or applies command-line edits.");
+            parsed.DirectSettings.Count != 0 || (parsed.PersistentSettings.Count != 0 && !parsed.StartupManagement)))
+            throw new ArgumentException("--tray accepts --ini and optional Startup management, but no image-job or offline configuration options.");
+        if (parsed.StartupManagement && (parsed.ConfigureOnly || parsed.ShowConfiguration || parsed.DirectSettings.Count != 0))
+            throw new ArgumentException("Startup management cannot be combined with image jobs or offline configuration/inspection.");
+        if (parsed.PersistentSettings.ContainsKey(ManagedConfigurationStartup.Key) && !parsed.StartupManagement)
+            throw new ArgumentException("Use --startup or --no-startup to change Startup; --configure-only does not perform Startup operations.");
         if (parsed.ConfigureOnly && parsed.DirectSettings.Count != 0)
             throw new ArgumentException("--configure-only accepts persistent --set values, not one-run options.");
-        if (parsed.PersistentSettings.Count != 0 && !parsed.ConfigureOnly)
+        if (parsed.PersistentSettings.Count != 0 && !parsed.ConfigureOnly && !parsed.StartupManagement)
             throw new ArgumentException("--set requires --configure-only so a configuration change cannot also create a collage.");
         return parsed;
     }
 
     static ManagedConfigurationTraySpec BuildConfigurationTraySpec(string iniPath)
     {
-        return new ManagedConfigurationTraySpec
+        var spec = new ManagedConfigurationTraySpec
         {
             ProductName = "PhotoCollage",
             Version = ProductVersion(),
             IniPath = iniPath,
-            ReadSettings = () => ManagedConfigurationTray.ReadForEditing(DefaultSettingValues(), BuildIniFileSpec(iniPath)),
-            SaveSettings = changes =>
-            {
-                var command = new ParsedCommand { IniPath = iniPath, ConfigureOnly = true };
-                foreach (var entry in changes) SetPersistentSetting(command, entry.Key + "=" + entry.Value);
-                BuildOptions(command);
-            }
+            ReadSettings = () => ManagedConfigurationTray.ReadForEditing(DefaultSettingValues(), BuildIniFileSpec(iniPath))
         };
+        spec.Startup = new ManagedConfigurationStartup(BuildIniFileSpec(iniPath),
+            ManagedConfigurationStartup.BuildShortcut(spec.ProductName, Assembly.GetExecutingAssembly().Location, iniPath),
+            spec.ReadSettings, changes => ApplyTraySettings(iniPath, changes, true),
+            changes => ApplyTraySettings(iniPath, changes, false));
+        spec.SaveSettings = spec.Startup.Save;
+        return spec;
+    }
+
+    static void ApplyTraySettings(string iniPath, IDictionary<string, string> changes, bool persist)
+    {
+        var command = new ParsedCommand { IniPath = iniPath, ConfigureOnly = persist };
+        foreach (var entry in changes) SetPersistentSetting(command, entry.Key + "=" + entry.Value);
+        BuildOptions(command);
     }
 
     static void SetDirectSetting(ParsedCommand parsed, string key, string value)
@@ -207,6 +233,7 @@ static class PhotoCollage
     {
         return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
+            { ManagedConfigurationStartup.Key, "0" },
             { InputFolderKey, "" },
             { OutputFileKey, "" },
             { ColsKey, "5" },
@@ -221,6 +248,7 @@ static class PhotoCollage
     {
         return new Options
         {
+            RunAtStartup = values[ManagedConfigurationStartup.Key] == "1",
             InputFolder = ResolveProfilePath(profileDirectory, values[InputFolderKey]),
             OutputFile = ResolveProfilePath(profileDirectory, values[OutputFileKey]),
             Cols = ParseIntInRange(values[ColsKey], ColsKey, 1, 1000),
@@ -275,6 +303,7 @@ static class PhotoCollage
     static void PrintConfiguration(Options options)
     {
         Console.WriteLine("Configuration: " + options.IniPath);
+        Console.WriteLine("RunAtStartup = " + (options.RunAtStartup ? "1" : "0"));
         Console.WriteLine("InputFolder = " + (options.InputFolder ?? ""));
         Console.WriteLine("OutputFile = " + (options.OutputFile ?? ""));
         Console.WriteLine("Cols = " + options.Cols.ToString(CultureInfo.InvariantCulture));
@@ -292,6 +321,7 @@ static class PhotoCollage
             SectionName = SettingsSection,
             DefaultContents =
                 "[Settings]" + Environment.NewLine +
+                "RunAtStartup=0" + Environment.NewLine +
                 "; Persistent defaults. Command-line image options override these for one run." + Environment.NewLine +
                 InputFolderKey + "=" + Environment.NewLine +
                 OutputFileKey + "=" + Environment.NewLine +
@@ -332,6 +362,7 @@ static class PhotoCollage
         if (String.IsNullOrWhiteSpace(value))
             return null;
         string key = value.Trim();
+        if (key.Equals(ManagedConfigurationStartup.Key, StringComparison.OrdinalIgnoreCase)) return ManagedConfigurationStartup.Key;
         if (key.Equals(InputFolderKey, StringComparison.OrdinalIgnoreCase)) return InputFolderKey;
         if (key.Equals(OutputFileKey, StringComparison.OrdinalIgnoreCase)) return OutputFileKey;
         if (key.Equals(ColsKey, StringComparison.OrdinalIgnoreCase)) return ColsKey;
@@ -344,6 +375,7 @@ static class PhotoCollage
 
     static string NormalizeSettingValue(string key, string value)
     {
+        if (key.Equals(ManagedConfigurationStartup.Key, StringComparison.OrdinalIgnoreCase)) return ManagedConfigurationStartup.NormalizeValue(value);
         if (value == null || value.IndexOfAny(new[] { '\r', '\n', '\0' }) >= 0)
             throw new ArgumentException("The setting value is invalid.");
         if (key.Equals(InputFolderKey, StringComparison.OrdinalIgnoreCase) ||
@@ -395,6 +427,7 @@ static class PhotoCollage
         Console.WriteLine("                           JpegQuality, MaxCanvasMegapixels, or LogFile");
         Console.WriteLine("  --configure-only         validate/create the profile and save --set values without creating a collage");
         Console.WriteLine("  --tray                   open a configuration tray; no image job runs (optionally use --ini)");
+        Console.WriteLine("  --startup | --no-startup  save Startup-folder preference; sign-in opens --tray, never an image job");
         Console.WriteLine("  --show-config            print effective profile values without creating a collage");
         Console.WriteLine("  --help                   show help without side effects");
         Console.WriteLine("  --version                show version without side effects");
@@ -723,7 +756,7 @@ static class PhotoCollage
             "-OutputFile", "--output-file", "-Cols", "--cols",
             "-MaxImages", "--max-images", "-JpegQuality", "--jpeg-quality",
             "-MaxCanvasMegapixels", "--max-canvas-megapixels", "-LogFile", "--log-file",
-            "--ini", "-IniFile", "--set", "--configure-only", "--show-config", "--print-config", "--tray"
+            "--ini", "-IniFile", "--set", "--configure-only", "--show-config", "--print-config", "--tray", "--startup", "--no-startup"
         };
         return options.Any(option => Is(value, option));
     }

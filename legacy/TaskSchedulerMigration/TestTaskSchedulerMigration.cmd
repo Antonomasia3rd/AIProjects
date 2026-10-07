@@ -22,6 +22,8 @@ for %%I in ("%ROOT%..\..") do set "REPO=%%~fI"
   "%REPO%\dependencies\managed_profile.cs" ^
   "%REPO%\dependencies\managed_tray.cs" ^
   "%REPO%\dependencies\managed_configuration_tray.cs" ^
+  "%REPO%\dependencies\managed_configuration_startup.cs" ^
+  "%REPO%\dependencies\managed_startup_shortcut.cs" ^
   "%REPO%\dependencies\TaskSchedulerMigration\task_scheduler_migration_app.cs" ^
   "%ROOT%TaskSchedulerMigration.cs" ^
   "%ROOT%TaskSchedulerMigrationLocalTests.cs"

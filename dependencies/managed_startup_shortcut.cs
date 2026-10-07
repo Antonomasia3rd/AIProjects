@@ -260,6 +260,22 @@ namespace AIProjects.Dependencies
             ManagedStartupPersistenceMutation restorePrevious,
             out string error)
         {
+            return CommitIniCoupledState(spec, desired, null, capturePrevious,
+                persistDesired, restorePrevious, out error);
+        }
+
+        // The optional persistence scope is acquired AFTER the Startup lock and
+        // retained through snapshot, commit and rollback. All callbacks are
+        // synchronous on this thread; callers can use the reentrant INI mutex.
+        public static bool CommitIniCoupledState(
+            ManagedStartupShortcutSpec spec,
+            bool desired,
+            Func<IDisposable> acquirePersistenceScope,
+            ManagedStartupPersistenceSnapshot capturePrevious,
+            ManagedStartupPersistenceMutation persistDesired,
+            ManagedStartupPersistenceMutation restorePrevious,
+            out string error)
+        {
             error = null;
             if (capturePrevious == null || persistDesired == null || restorePrevious == null)
             {
@@ -277,53 +293,68 @@ namespace AIProjects.Dependencies
                     return false;
                 }
 
-                bool previousConfigured;
-                if (!InvokeSnapshot(capturePrevious, out previousConfigured, out error))
-                    return false;
-
-                string queryError;
-                bool installed = IsInstalled(spec, out queryError);
-                if (!String.IsNullOrEmpty(queryError))
+                IDisposable persistenceScope = null;
+                try
                 {
-                    error = "Could not inspect Startup before the INI transaction: " + queryError;
-                    return false;
-                }
+                    if (acquirePersistenceScope != null)
+                        persistenceScope = acquirePersistenceScope();
+                    bool previousConfigured;
+                    if (!InvokeSnapshot(capturePrevious, out previousConfigured, out error))
+                        return false;
 
-                // Repair a mismatch left by an older release or an externally
-                // edited shortcut before using the configured state as the
-                // rollback point.
-                if (installed != previousConfigured)
-                {
-                    string reconcileError;
-                    if (!SetDesiredStateUnderLock(
-                        spec,
-                        previousConfigured,
-                        mutationLock,
-                        out reconcileError))
+                    string queryError;
+                    bool installed = IsInstalled(spec, out queryError);
+                    if (!String.IsNullOrEmpty(queryError))
                     {
-                        error = "Could not reconcile Startup before the INI transaction: " +
-                            (reconcileError ?? "unknown error");
+                        error = "Could not inspect Startup before the INI transaction: " + queryError;
                         return false;
                     }
-                }
 
-                ManagedStartupShortcutMutation mutateShortcut =
-                    delegate(bool state, out string mutationError)
-                    {
-                        return SetDesiredStateUnderLock(
-                            spec,
-                            state,
-                            mutationLock,
-                            out mutationError);
-                    };
-                return ExecuteCrashConsistentCoupledState(
-                    desired,
-                    previousConfigured,
-                    mutateShortcut,
-                    persistDesired,
-                    restorePrevious,
-                    out error);
+                    ManagedStartupShortcutMutation mutateShortcut =
+                        delegate(bool state, out string mutationError)
+                        {
+                            return SetDesiredStateUnderLock(
+                                spec,
+                                state,
+                                mutationLock,
+                                out mutationError);
+                        };
+                    return CommitObservedCoupledState(
+                        desired,
+                        previousConfigured,
+                        installed,
+                        mutateShortcut,
+                        persistDesired,
+                        restorePrevious,
+                        out error);
+                }
+                catch (Exception ex)
+                {
+                    error = "Could not complete the Startup/INI transaction: " + ex.Message;
+                    return false;
+                }
+                finally
+                {
+                    if (persistenceScope != null) persistenceScope.Dispose();
+                }
             }
+        }
+
+        internal static bool CommitObservedCoupledState(
+            bool desired, bool previousConfigured, bool installed,
+            ManagedStartupShortcutMutation mutateShortcut,
+            ManagedStartupPersistenceMutation persistDesired,
+            ManagedStartupPersistenceMutation restorePrevious,
+            out string error)
+        {
+            // An enable transaction needs a valid rollback launch state.
+            // Disabling must not require installing an absent old shortcut.
+            if (desired && installed != previousConfigured &&
+                !InvokeShortcutMutation(mutateShortcut, previousConfigured,
+                    "Could not reconcile Startup before the INI transaction", out error))
+                return false;
+            return ExecuteCrashConsistentCoupledState(desired, previousConfigured,
+                mutateShortcut, persistDesired, restorePrevious, out error);
         }
 
         internal static bool ExecuteCrashConsistentCoupledState(

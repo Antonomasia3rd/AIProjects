@@ -46,6 +46,7 @@ static class TaskSchedulerMigration
         public bool WhatIf;
         public bool Confirm;
         public string IniPath;
+        public bool RunAtStartup;
     }
 
     sealed class ParsedCommand
@@ -59,6 +60,7 @@ static class TaskSchedulerMigration
         public bool ConfigureOnly;
         public bool ShowConfiguration;
         public bool Tray;
+        public bool StartupManagement;
     }
 
     [STAThread]
@@ -81,6 +83,14 @@ static class TaskSchedulerMigration
         try
         {
             ParsedCommand command = ParseCommandLine(args);
+            if (command.StartupManagement)
+            {
+                var traySpec = BuildConfigurationTraySpec(ResolveIniPath(command.IniPath));
+                traySpec.SaveSettings(command.PersistentSettings);
+                if (command.Tray) return ManagedConfigurationTray.Run(traySpec);
+                Console.WriteLine("Saved Startup configuration for: " + traySpec.IniPath);
+                return 0;
+            }
             if (command.Tray)
                 return ManagedConfigurationTray.Run(BuildConfigurationTraySpec(ResolveIniPath(command.IniPath)));
             Options options = BuildOptions(command);
@@ -151,6 +161,11 @@ static class TaskSchedulerMigration
                 parsed.ConfigureOnly = true;
             else if (Is(a, "--tray"))
                 parsed.Tray = true;
+            else if (Is(a, "--startup") || Is(a, "--no-startup"))
+            {
+                parsed.StartupManagement = true;
+                SetPersistentSetting(parsed, ManagedConfigurationStartup.Key + "=" + (Is(a, "--startup") ? "1" : "0"));
+            }
             else if (Is(a, "--show-config") || Is(a, "--print-config"))
                 parsed.ShowConfiguration = true;
             else throw new ArgumentException("Unknown argument: " + a);
@@ -161,30 +176,41 @@ static class TaskSchedulerMigration
             parsed.ConfigureOnly ||
             parsed.ShowConfiguration;
         if (parsed.Tray && (parsed.ConfigureOnly || parsed.ShowConfiguration ||
-            parsed.DirectSettings.Count != 0 || parsed.PersistentSettings.Count != 0))
-            throw new ArgumentException("--tray accepts only --ini; it never starts a migration or applies command-line edits.");
+            parsed.DirectSettings.Count != 0 || (parsed.PersistentSettings.Count != 0 && !parsed.StartupManagement)))
+            throw new ArgumentException("--tray accepts --ini and optional Startup management, but no migration or offline configuration options.");
+        if (parsed.StartupManagement && (parsed.ConfigureOnly || parsed.ShowConfiguration || parsed.DirectSettings.Count != 0))
+            throw new ArgumentException("Startup management cannot be combined with migrations or offline configuration/inspection.");
+        if (parsed.PersistentSettings.ContainsKey(ManagedConfigurationStartup.Key) && !parsed.StartupManagement)
+            throw new ArgumentException("Use --startup or --no-startup to change Startup; --configure-only does not perform Startup operations.");
         if (parsed.ConfigureOnly && parsed.DirectSettings.Count != 0)
             throw new ArgumentException("--configure-only accepts persistent --set values, not one-run migration options.");
-        if (parsed.PersistentSettings.Count != 0 && !parsed.ConfigureOnly)
+        if (parsed.PersistentSettings.Count != 0 && !parsed.ConfigureOnly && !parsed.StartupManagement)
             throw new ArgumentException("--set requires --configure-only so a configuration change cannot also start a migration.");
         return parsed;
     }
 
     static ManagedConfigurationTraySpec BuildConfigurationTraySpec(string iniPath)
     {
-        return new ManagedConfigurationTraySpec
+        var spec = new ManagedConfigurationTraySpec
         {
             ProductName = "TaskSchedulerMigration",
             Version = ProductVersion(),
             IniPath = iniPath,
-            ReadSettings = () => ManagedConfigurationTray.ReadForEditing(DefaultSettingValues(true), BuildIniFileSpec(iniPath)),
-            SaveSettings = changes =>
-            {
-                var command = new ParsedCommand { IniPath = iniPath, ProfileMode = true, ConfigureOnly = true };
-                foreach (var entry in changes) SetPersistentSetting(command, entry.Key + "=" + entry.Value);
-                BuildOptions(command);
-            }
+            ReadSettings = () => ManagedConfigurationTray.ReadForEditing(DefaultSettingValues(true), BuildIniFileSpec(iniPath))
         };
+        spec.Startup = new ManagedConfigurationStartup(BuildIniFileSpec(iniPath),
+            ManagedConfigurationStartup.BuildShortcut(spec.ProductName, Assembly.GetExecutingAssembly().Location, iniPath),
+            spec.ReadSettings, changes => ApplyTraySettings(iniPath, changes, true),
+            changes => ApplyTraySettings(iniPath, changes, false));
+        spec.SaveSettings = spec.Startup.Save;
+        return spec;
+    }
+
+    static void ApplyTraySettings(string iniPath, IDictionary<string, string> changes, bool persist)
+    {
+        var command = new ParsedCommand { IniPath = iniPath, ProfileMode = true, ConfigureOnly = persist };
+        foreach (var entry in changes) SetPersistentSetting(command, entry.Key + "=" + entry.Value);
+        BuildOptions(command);
     }
 
     static void SetDirectSetting(ParsedCommand parsed, string key, string value)
@@ -239,6 +265,7 @@ static class TaskSchedulerMigration
     {
         return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
+            { ManagedConfigurationStartup.Key, "0" },
             { OldSidKey, "" },
             { NewUserKey, "" },
             { BackupDirectoryKey, DefaultBackupDirectoryName },
@@ -253,6 +280,7 @@ static class TaskSchedulerMigration
     {
         return new Options
         {
+            RunAtStartup = values[ManagedConfigurationStartup.Key] == "1",
             OldSID = values[OldSidKey],
             NewUser = values[NewUserKey],
             BackupDirectory = ResolveProfilePath(
@@ -296,6 +324,7 @@ static class TaskSchedulerMigration
     static void PrintConfiguration(Options options)
     {
         Console.WriteLine("Configuration: " + options.IniPath);
+        Console.WriteLine("RunAtStartup = " + (options.RunAtStartup ? "1" : "0"));
         Console.WriteLine("OldSID = " + (options.OldSID ?? ""));
         Console.WriteLine("NewUser = " + (options.NewUser ?? ""));
         Console.WriteLine("BackupDirectory = " + options.BackupDirectory);
@@ -313,6 +342,7 @@ static class TaskSchedulerMigration
             SectionName = SettingsSection,
             DefaultContents =
                 "[Settings]" + Environment.NewLine +
+                "RunAtStartup=0" + Environment.NewLine +
                 "; Profile runs default to preview and confirmation. Direct CLI use keeps its legacy behavior." + Environment.NewLine +
                 OldSidKey + "=" + Environment.NewLine +
                 NewUserKey + "=" + Environment.NewLine +
@@ -348,6 +378,7 @@ static class TaskSchedulerMigration
         if (String.IsNullOrWhiteSpace(value))
             return null;
         string key = value.Trim();
+        if (key.Equals(ManagedConfigurationStartup.Key, StringComparison.OrdinalIgnoreCase)) return ManagedConfigurationStartup.Key;
         if (key.Equals(OldSidKey, StringComparison.OrdinalIgnoreCase)) return OldSidKey;
         if (key.Equals(NewUserKey, StringComparison.OrdinalIgnoreCase)) return NewUserKey;
         if (key.Equals(BackupDirectoryKey, StringComparison.OrdinalIgnoreCase)) return BackupDirectoryKey;
@@ -360,6 +391,7 @@ static class TaskSchedulerMigration
 
     static string NormalizeSettingValue(string key, string value)
     {
+        if (key.Equals(ManagedConfigurationStartup.Key, StringComparison.OrdinalIgnoreCase)) return ManagedConfigurationStartup.NormalizeValue(value);
         if (value == null || value.IndexOfAny(new[] { '\r', '\n', '\0' }) >= 0)
             throw new ArgumentException("The setting value is invalid.");
         if (key.Equals(OldSidKey, StringComparison.OrdinalIgnoreCase))
@@ -450,6 +482,7 @@ static class TaskSchedulerMigration
         Console.WriteLine("                                     IncludeCredentialSensitiveTasks, WhatIf, or Confirm");
         Console.WriteLine("  --configure-only                   validate/create the profile and save --set values without Task Scheduler access");
         Console.WriteLine("  --tray                             open a configuration tray; no migration runs (optionally use --ini)");
+        Console.WriteLine("  --startup | --no-startup            save Startup-folder preference; sign-in opens --tray, never a migration");
         Console.WriteLine("  --show-config                      print effective profile values without Task Scheduler access");
         Console.WriteLine("  --help                             show help without side effects");
         Console.WriteLine("  --version                          show version without side effects");
@@ -1017,7 +1050,7 @@ static class TaskSchedulerMigration
             "-Confirm", "--confirm", "--no-confirm", "-OldSID", "--old-sid", "-NewUser",
             "--new-user", "-BackupDirectory", "--backup-directory", "-TaskPath",
             "--task-path", "--ini", "-IniFile", "--set", "--configure-only",
-            "--show-config", "--print-config", "--tray"
+            "--show-config", "--print-config", "--tray", "--startup", "--no-startup"
         };
         return options.Any(option => Is(value, option));
     }

@@ -17,6 +17,7 @@ namespace AIProjects.Dependencies
         public string IniPath;
         public Func<Dictionary<string, string>> ReadSettings;
         public Action<IDictionary<string, string>> SaveSettings;
+        public ManagedConfigurationStartup Startup;
     }
 
     public sealed class ManagedConfigurationEditor
@@ -100,6 +101,50 @@ namespace AIProjects.Dependencies
                         };
                         ManagedTrayBaseline.AppendHeader(menu, spec.ProductName, "Version: " + spec.Version);
                         menu.MenuItems.Add(new MenuItem("Settings...", delegate { edit(); }) { DefaultItem = true });
+                        if (spec.Startup != null)
+                        {
+                            var startup = new MenuItem("Start tray at sign-in (Startup folder)");
+                            var status = new MenuItem { Enabled = false, Visible = false };
+                            Action<bool> refresh = delegate(bool showError)
+                            {
+                                try
+                                {
+                                    spec.Startup.Reconcile();
+                                    var state = spec.Startup.ReadState();
+                                    if (!String.IsNullOrEmpty(state.Error)) throw new IOException(state.Error);
+                                    startup.Checked = state.Installed;
+                                    startup.Enabled = true;
+                                    status.Visible = false;
+                                }
+                                catch (Exception ex)
+                                {
+                                    startup.Checked = false;
+                                    startup.Enabled = false;
+                                    status.Text = "Startup status unavailable; use Settings or Reload";
+                                    status.Visible = true;
+                                    if (showError) MessageBox.Show(ex.Message, spec.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                    else Console.Error.WriteLine("Startup: " + ex.Message);
+                                }
+                            };
+                            startup.Click += delegate
+                            {
+                                try
+                                {
+                                    var state = spec.Startup.ReadState();
+                                    if (!String.IsNullOrEmpty(state.Error)) throw new IOException(state.Error);
+                                    spec.SaveSettings(new Dictionary<string, string> {
+                                        { ManagedConfigurationStartup.Key, state.Configured ? "0" : "1" }
+                                    });
+                                }
+                                catch (Exception ex) { MessageBox.Show(ex.Message, spec.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+                                refresh(false);
+                            };
+                            menu.MenuItems.Add(startup);
+                            menu.MenuItems.Add(status);
+                            menu.MenuItems.Add(new MenuItem("Reload configuration", delegate { refresh(true); }));
+                            menu.Popup += delegate { refresh(false); };
+                            refresh(false);
+                        }
                         menu.MenuItems.Add(new MenuItem("Profile: " + Path.GetFileName(spec.IniPath).Replace("&", "&&")) { Enabled = false });
                         menu.MenuItems.Add("-");
                         menu.MenuItems.Add(new MenuItem("Exit", delegate { context.ExitThread(); }));
@@ -122,63 +167,93 @@ namespace AIProjects.Dependencies
         {
             try
             {
-                var editor = new ManagedConfigurationEditor(spec);
-                using (var form = new Form())
-                using (var grid = new DataGridView())
-                using (var path = new Label())
-                using (var buttons = new FlowLayoutPanel())
-                using (var save = new Button())
-                using (var cancel = new Button())
+                using (var form = CreateEditor(spec, delegate(Form owner, string message)
                 {
-                    form.Text = spec.ProductName + " settings";
-                    form.StartPosition = FormStartPosition.CenterScreen;
-                    form.ClientSize = new Size(700, 340);
-                    form.MinimumSize = new Size(500, 260);
-                    form.MinimizeBox = false;
-                    path.Text = spec.IniPath;
-                    path.AutoEllipsis = true;
-                    path.Dock = DockStyle.Top;
-                    path.Height = 34;
-                    grid.Dock = DockStyle.Fill;
-                    grid.AllowUserToAddRows = false;
-                    grid.AllowUserToDeleteRows = false;
-                    grid.RowHeadersVisible = false;
-                    grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-                    grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Setting", ReadOnly = true, FillWeight = 40 });
-                    grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Value", FillWeight = 60 });
-                    foreach (var entry in editor.Values.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase))
-                        grid.Rows.Add(entry.Key, entry.Value);
-                    buttons.Dock = DockStyle.Bottom;
-                    buttons.Height = 42;
-                    buttons.FlowDirection = FlowDirection.RightToLeft;
-                    save.Text = "Save";
-                    cancel.Text = "Cancel";
-                    cancel.DialogResult = DialogResult.Cancel;
-                    save.Click += delegate
-                    {
-                        try
-                        {
-                            grid.EndEdit();
-                            var edited = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                            foreach (DataGridViewRow row in grid.Rows)
-                                edited.Add((string)row.Cells[0].Value, Convert.ToString(row.Cells[1].Value));
-                            editor.Save(edited);
-                            form.DialogResult = DialogResult.OK;
-                            form.Close();
-                        }
-                        catch (Exception ex) { MessageBox.Show(form, ex.Message, "Could not save configuration", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-                    };
-                    buttons.Controls.Add(cancel);
-                    buttons.Controls.Add(save);
-                    form.Controls.Add(grid);
-                    form.Controls.Add(path);
-                    form.Controls.Add(buttons);
-                    form.AcceptButton = save;
-                    form.CancelButton = cancel;
+                    MessageBox.Show(owner, message, "Could not save configuration", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }))
                     form.ShowDialog();
-                }
             }
             catch (Exception ex) { MessageBox.Show(ex.Message, spec.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        }
+
+        // Construction is separate from display so the real layout and button
+        // handlers can be tested without a window, tray icon, or message loop.
+        // The caller owns the returned form and all its child controls.
+        internal static Form CreateEditor(ManagedConfigurationTraySpec spec, Action<Form, string> reportError)
+        {
+            if (reportError == null) throw new ArgumentNullException("reportError");
+            var editor = new ManagedConfigurationEditor(spec);
+            var form = new Form();
+            try
+            {
+                var grid = new DataGridView { Name = "ConfigurationSettingsGrid" };
+                var path = new Label { Name = "ConfigurationProfilePath" };
+                var buttons = new FlowLayoutPanel { Name = "ConfigurationButtons" };
+                var save = new Button { Name = "ConfigurationSaveButton" };
+                var cancel = new Button { Name = "ConfigurationCancelButton" };
+                buttons.Controls.Add(cancel);
+                buttons.Controls.Add(save);
+                form.Controls.Add(grid);
+                form.Controls.Add(path);
+                form.Controls.Add(buttons);
+
+                form.SuspendLayout();
+                form.Name = "ConfigurationEditor";
+                form.Text = spec.ProductName + " settings";
+                form.StartPosition = FormStartPosition.CenterScreen;
+                form.ClientSize = new Size(700, 340);
+                form.MinimumSize = new Size(500, 260);
+                form.MinimizeBox = false;
+                path.Text = spec.IniPath;
+                path.AutoEllipsis = true;
+                path.Dock = DockStyle.Top;
+                path.Height = 34;
+                grid.Dock = DockStyle.Fill;
+                grid.AllowUserToAddRows = false;
+                grid.AllowUserToDeleteRows = false;
+                grid.RowHeadersVisible = false;
+                grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+                grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Setting", ReadOnly = true, FillWeight = 40 });
+                grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Value", FillWeight = 60 });
+                foreach (var entry in editor.Values.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase))
+                    grid.Rows.Add(entry.Key, entry.Value);
+                buttons.Dock = DockStyle.Bottom;
+                buttons.Height = 42;
+                buttons.FlowDirection = FlowDirection.RightToLeft;
+                save.Text = "Save";
+                cancel.Text = "Cancel";
+                cancel.DialogResult = DialogResult.Cancel;
+                cancel.CausesValidation = false;
+                save.Click += delegate
+                {
+                    try
+                    {
+                        if (!grid.EndEdit())
+                            throw new InvalidOperationException("Finish editing the current setting before saving.");
+                        var edited = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (DataGridViewRow row in grid.Rows)
+                            edited.Add((string)row.Cells[0].Value, Convert.ToString(row.Cells[1].Value));
+                        editor.Save(edited);
+                        form.DialogResult = DialogResult.OK;
+                        form.Close();
+                    }
+                    catch (Exception ex) { reportError(form, ex.Message); }
+                };
+                cancel.Click += delegate
+                {
+                    form.DialogResult = DialogResult.Cancel;
+                    form.Close();
+                };
+                form.AcceptButton = save;
+                form.CancelButton = cancel;
+                form.ResumeLayout(true);
+                return form;
+            }
+            catch
+            {
+                form.Dispose();
+                throw;
+            }
         }
     }
 }

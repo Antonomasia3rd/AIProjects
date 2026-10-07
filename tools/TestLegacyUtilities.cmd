@@ -29,6 +29,7 @@ if errorlevel 1 exit /b %ERRORLEVEL%
     "%ROOT%\dependencies\managed_ini.cs" ^
     "%ROOT%\dependencies\managed_profile.cs" ^
     "%ROOT%\dependencies\managed_configuration_tray.cs" ^
+    "%ROOT%\dependencies\managed_configuration_startup.cs" ^
     "%ROOT%\dependencies\managed_startup_shortcut.cs" ^
     "%ROOT%\dependencies\managed_tray.cs" ^
     "%ROOT%\dependencies\asusblink\asusblink_app.cs" ^
@@ -36,4 +37,6 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 "%OUT%" "%ROOT%" %*
+if errorlevel 1 exit /b %ERRORLEVEL%
+call "%ROOT%\tools\TestManagedConfiguration.cmd"
 exit /b %ERRORLEVEL%

@@ -1,7 +1,10 @@
 # Defender review: current comparison build
 
 Submitted on 2026-10-03 after the user's explicit approval and sign-in.
-Microsoft confirmed receipt of one file; its final determination is pending.
+Microsoft confirmed receipt of one file. On 2026-10-07 its analyst reported no
+positive scan or telemetry result for this comparison build and intended to
+close the case without further action. The portal still showed In progress / root
+file Pending, with both client and cloud scans reporting no malware detected.
 The authenticated case link and receipt are saved locally in the ignored
 `build/review-validation/microsoft-submission-receipt.json`. This is a different
 file from the quarantined sample in the [incident brief](defender-submission-2026-10-03.md).

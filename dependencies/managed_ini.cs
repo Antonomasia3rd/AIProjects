@@ -19,6 +19,137 @@ namespace AIProjects.Dependencies
 
     public static class ManagedIniFile
     {
+        // Coordinates cooperating users of this helper; it does not lock out
+        // editors or other processes that do not acquire the same mutex. Hold
+        // an outer Startup lock before entering this scope when coupling the
+        // INI with Startup. The scope must be used and disposed on its creating
+        // thread because Windows mutex ownership is thread-affine.
+        public static Transaction BeginTransaction(ManagedIniFileSpec spec)
+        {
+            string error;
+            if (!ValidateSpec(spec, out error))
+                throw new ArgumentException(error, "spec");
+            return new Transaction(spec);
+        }
+
+        public sealed class Transaction : IDisposable
+        {
+            readonly ManagedIniFileSpec spec;
+            readonly Mutex mutationMutex;
+            readonly int ownerThread;
+            readonly bool originallyExisted;
+            readonly byte[] originalBytes;
+            bool ownsMutex;
+            bool disposed;
+
+            internal Transaction(ManagedIniFileSpec source)
+            {
+                // Freeze the path and limits: changing the caller's mutable
+                // specification must not redirect a later rollback.
+                spec = new ManagedIniFileSpec
+                {
+                    FilePath = Path.GetFullPath(source.FilePath),
+                    SectionName = source.SectionName,
+                    DefaultContents = source.DefaultContents,
+                    Log = source.Log,
+                    MutationWaitMilliseconds = source.MutationWaitMilliseconds,
+                    MaximumBytes = source.MaximumBytes
+                };
+                ownerThread = Thread.CurrentThread.ManagedThreadId;
+                mutationMutex = CreateMutationMutex(spec);
+                try
+                {
+                    ownsMutex = WaitForMutex(mutationMutex, spec.MutationWaitMilliseconds);
+                    originallyExisted = ConfiguredFileExists(spec.FilePath);
+                    originalBytes = originallyExisted ? ReadBytesUnderLock(spec) : null;
+                }
+                catch
+                {
+                    try { if (ownsMutex) mutationMutex.ReleaseMutex(); }
+                    finally { mutationMutex.Dispose(); }
+                    throw;
+                }
+            }
+
+            // Explicit rollback only. Disposing a successful transaction keeps
+            // the committed file; disposing a failed one releases the mutex.
+            public bool TryRestoreOriginal(out string error)
+            {
+                error = null;
+                try
+                {
+                    RequireOwner();
+                    bool currentlyExists = ConfiguredFileExists(spec.FilePath);
+                    if (!originallyExisted)
+                    {
+                        if (currentlyExists) File.Delete(spec.FilePath);
+                        return true;
+                    }
+
+                    string directory = Path.GetDirectoryName(spec.FilePath);
+                    Directory.CreateDirectory(directory);
+                    string temporaryPath = Path.Combine(directory, ".AIProjects-" + Guid.NewGuid().ToString("N") + ".tmp");
+                    try
+                    {
+                        using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                        {
+                            stream.Write(originalBytes, 0, originalBytes.Length);
+                            stream.Flush();
+                        }
+                        if (currentlyExists) File.Replace(temporaryPath, spec.FilePath, null);
+                        else File.Move(temporaryPath, spec.FilePath);
+                    }
+                    finally
+                    {
+                        try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+                        catch { }
+                    }
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    error = "Could not restore the original INI: " + ex.Message;
+                    SafeLog(spec, error);
+                    return false;
+                }
+            }
+
+            void RequireOwner()
+            {
+                if (disposed) throw new ObjectDisposedException("ManagedIniFile.Transaction");
+                if (Thread.CurrentThread.ManagedThreadId != ownerThread)
+                    throw new InvalidOperationException("An INI transaction must be used and disposed on its creating thread.");
+            }
+
+            public void Dispose()
+            {
+                if (disposed) return;
+                RequireOwner();
+                try
+                {
+                    if (ownsMutex) mutationMutex.ReleaseMutex();
+                }
+                finally
+                {
+                    ownsMutex = false;
+                    disposed = true;
+                    mutationMutex.Dispose();
+                }
+            }
+        }
+
+        static bool ConfiguredFileExists(string path)
+        {
+            try
+            {
+                if ((File.GetAttributes(path) & FileAttributes.Directory) != 0)
+                    throw new IOException("The configured INI path is a directory: " + path);
+                return true;
+            }
+            catch (FileNotFoundException) { return false; }
+            catch (DirectoryNotFoundException) { return false; }
+        }
+
         public static void EnsureExists(ManagedIniFileSpec spec)
         {
             string error;
@@ -306,6 +437,11 @@ namespace AIProjects.Dependencies
 
         static List<string> ReadLinesUnderLock(ManagedIniFileSpec spec)
         {
+            return SplitLines(DecodeIniBytes(ReadBytesUnderLock(spec)));
+        }
+
+        static byte[] ReadBytesUnderLock(ManagedIniFileSpec spec)
+        {
             GuardFileSize(spec, spec.FilePath);
             using (var stream = new FileStream(
                 spec.FilePath,
@@ -328,7 +464,7 @@ namespace AIProjects.Dependencies
                         bytes.Write(buffer, 0, read);
                         total += read;
                     }
-                    return SplitLines(DecodeIniBytes(bytes.ToArray()));
+                    return bytes.ToArray();
                 }
             }
         }

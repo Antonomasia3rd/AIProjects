@@ -209,8 +209,15 @@ and batch settings editor used by PhotoCollage and TaskSchedulerMigration.
 Products supply their identity, profile path, read callback and existing
 validated save callback. The shared host owns the icon, menu, editor and
 per-profile instance mutex, using `managed_tray.cs` for hover text and lifetime.
-It has no job execution callback. Startup-folder state coupling is still pending;
-this is not yet the complete common lifecycle for every managed product.
+It has no job execution callback. `managed_configuration_startup.cs` couples the
+profile preference to the existing per-user shortcut helper. Explicit Startup
+management and tray edits use one transaction, held in Startup-then-INI lock
+order through snapshot, persistence and rollback. `ManagedIniFile.BeginTransaction`
+preserves exact original bytes/existence for rollback and serializes cooperating
+writers. Uncoordinated external editors do not participate in that mutex.
+Startup shortcuts contain only `--tray --ini` plus the quoted absolute profile.
+Other resident products still use their older adapters; migrating those callers
+to the extended transaction scope remains follow-up work.
 
 Product-specific implementations live under matching subfolders:
 `dependencies/DesktopStub/`, `dependencies/DiscordRPC/`,

@@ -26,6 +26,7 @@ static class LegacyUtilitiesTests
         TestStrictArgumentParsing();
         TestManagedProfiles();
         TestConfigurationTrayEditing();
+        TestConfigurationStartupIntegration();
         TestPhotoCollageAtomicOutput(repositoryRoot);
         TestTaskXmlHardening(repositoryRoot);
         TestCapsBlinkIdentity(repositoryRoot);
@@ -240,6 +241,301 @@ static class LegacyUtilitiesTests
                 throw new InvalidOperationException("Unexpected fixture cleanup path.");
             Directory.Delete(root, true);
         }
+    }
+
+    sealed class FixtureConfigurationStartupPlatform : IManagedConfigurationStartupPlatform
+    {
+        readonly object mutationGate = new object();
+        public bool LaunchExists;
+        public bool ExactLaunch;
+        public bool RejectEnable;
+        public bool RejectPersistence;
+        public int FailRemovals;
+        public string QueryError;
+        public int Queries;
+        public int Commits;
+        public ManagedStartupShortcutSpec LastShortcut;
+        public Action<bool> BeforeMutation;
+        public readonly List<string> Order = new List<string>();
+
+        public bool IsInstalled(ManagedStartupShortcutSpec spec, out string error)
+        {
+            ++Queries;
+            LastShortcut = spec;
+            error = QueryError;
+            return String.IsNullOrEmpty(error) && LaunchExists && ExactLaunch;
+        }
+
+        public bool Commit(ManagedStartupShortcutSpec spec, bool desired, Func<IDisposable> acquireScope,
+            ManagedStartupPersistenceSnapshot capture, ManagedStartupPersistenceMutation persist,
+            ManagedStartupPersistenceMutation restore, out string error)
+        {
+            ++Commits;
+            LastShortcut = spec;
+            lock (mutationGate)
+            {
+                try
+                {
+                    // Exercise the adapter's real INI transaction and the
+                    // production commit algorithm. Only shortcut I/O is fake.
+                    using (acquireScope())
+                    {
+                        bool previous;
+                        if (!capture(out previous, out error)) return false;
+                        bool installed = IsInstalled(spec, out error);
+                        if (!String.IsNullOrEmpty(error)) return false;
+                        return ManagedStartupShortcut.CommitObservedCoupledState(desired, previous, installed,
+                            delegate(bool state, out string mutationError)
+                            {
+                                Order.Add("shortcut=" + state);
+                                if (BeforeMutation != null) BeforeMutation(state);
+                                if (state && RejectEnable) { mutationError = "fixture installation prohibited"; return false; }
+                                if (!state && FailRemovals > 0)
+                                {
+                                    --FailRemovals;
+                                    LaunchExists = false; ExactLaunch = false;
+                                    mutationError = "fixture removal failed after changing launch state";
+                                    return false;
+                                }
+                                LaunchExists = state; ExactLaunch = state;
+                                mutationError = null;
+                                return true;
+                            },
+                            delegate(out string persistenceError)
+                            {
+                                Order.Add("persist");
+                                if (RejectPersistence) { persistenceError = "fixture persistence rejected"; return false; }
+                                return persist(out persistenceError);
+                            },
+                            delegate(out string restoreError)
+                            {
+                                Order.Add("restore");
+                                return restore(out restoreError);
+                            }, out error);
+                    }
+                }
+                catch (Exception ex) { error = ex.Message; return false; }
+            }
+        }
+    }
+
+    static void TestConfigurationStartupIntegration()
+    {
+        string temporary = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string root = Path.GetFullPath(Path.Combine(temporary, "AIProjects-StartupProfiles-" + Guid.NewGuid().ToString("N")));
+        if (!String.Equals(Path.GetDirectoryName(root), temporary, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Startup fixture must stay inside its temporary parent.");
+        var previousFactory = ManagedConfigurationStartup.PlatformFactory;
+        Directory.CreateDirectory(root);
+        try
+        {
+            Check(ManagedConfigurationStartup.QuoteArgument("") == "\"\"", "Startup quoting preserves an empty argument");
+            Check(ManagedConfigurationStartup.QuoteArgument("a\"b") == "\"a\\\"b\"", "Startup quoting escapes an embedded quote");
+            Check(ManagedConfigurationStartup.QuoteArgument(@"C:\Profiles\") == "\"C:\\Profiles\\\\\"",
+                "Startup quoting doubles a trailing backslash before the closing quote");
+            CheckThrows<ArgumentException>(delegate { ManagedConfigurationStartup.QuoteArgument("bad\r\nargument"); },
+                "Startup quoting rejects injected line breaks");
+
+            foreach (Type product in new[] { typeof(PhotoCollage), typeof(TaskSchedulerMigration) })
+            {
+                var platform = new FixtureConfigurationStartupPlatform();
+                int factories = 0;
+                ManagedConfigurationStartup.PlatformFactory = delegate { ++factories; return platform; };
+                string ini = Path.Combine(root, product.Name + " profile \u00e9.ini");
+                string key = product == typeof(PhotoCollage) ? "Cols" : "WhatIf";
+                string first = product == typeof(PhotoCollage) ? "3" : "0";
+                string second = product == typeof(PhotoCollage) ? "4" : "1";
+                string output;
+                Check(InvokeMainAndCapture(product, new[] { "--help", "--startup", "--ini", ini }, out output) == 0 &&
+                    !File.Exists(ini) && factories == 0, product.Name + " help ignores Startup without constructing a platform or profile");
+                Check(InvokeMainAndCapture(product, new[] { "--version", "--no-startup" }, out output) == 0 && factories == 0,
+                    product.Name + " version cannot perform Startup operations");
+                Check(InvokeMainAndCapture(product, new[] { "--ini", ini, "--show-config" }, out output) == 0 &&
+                    output.Contains("RunAtStartup = 0") && !File.Exists(ini) && factories == 0,
+                    product.Name + " missing-profile inspection shows disabled Startup without creating it");
+                foreach (string[] rejected in new[] {
+                    new[] { "--ini", ini, "--configure-only", "--startup" },
+                    new[] { "--ini", ini, "--configure-only", "--no-startup" },
+                    new[] { "--ini", ini, "--configure-only", "--set", "Settings.RunAtStartup=1" },
+                    new[] { "--ini", "--startup" },
+                    new[] { "--set", "--no-startup" }
+                })
+                    Check(InvokeMainAndCapture(product, rejected, out output) != 0 && !File.Exists(ini) && factories == 0,
+                        product.Name + " rejects unsafe or incomplete Startup/offline option combination");
+
+                platform.RejectEnable = true;
+                Check(InvokeMainAndCapture(product, new[] { "--ini", ini, "--startup" }, out output) != 0 &&
+                    !File.Exists(ini) && !platform.LaunchExists &&
+                    platform.Order.SequenceEqual(new[] { "shortcut=True", "shortcut=False" }),
+                    product.Name + " failed installation neither creates an INI nor reaches utility work");
+                platform.RejectEnable = false;
+                platform.Order.Clear();
+                bool checkedHeldScope = false;
+                platform.BeforeMutation = delegate(bool desired)
+                {
+                    if (desired && !checkedHeldScope)
+                    {
+                        checkedHeldScope = true;
+                        CheckStartupScope(ini, true, product.Name + " shortcut mutation retains the INI transaction lock");
+                    }
+                };
+
+                // Required job inputs stay empty: even a Main fall-through
+                // regression reaches usage, never real Task Scheduler/image work.
+                Check(InvokeMainAndCapture(product, new[] { "--ini", ini, "--startup", "--set", key + "=" + first }, out output) == 0 &&
+                    output.Contains("Saved Startup configuration") && platform.LaunchExists && platform.ExactLaunch,
+                    product.Name + " Startup CLI persists a complete batch and returns before its job path");
+                platform.BeforeMutation = null;
+                Check(checkedHeldScope, product.Name + " enable transaction reached the injected shortcut mutation");
+                var spec = (ManagedConfigurationTraySpec)InvokePrivate(product, "BuildConfigurationTraySpec", new object[] { ini });
+                Check(spec.ReadSettings()[ManagedConfigurationStartup.Key] == "1" && spec.ReadSettings()[key] == first,
+                    product.Name + " CLI and tray share normalized saved preferences");
+                string executable = Path.GetFullPath(product.Assembly.Location);
+                var shortcut = platform.LastShortcut;
+                Check(shortcut.ExecutablePath == executable && shortcut.WorkingDirectory == Path.GetDirectoryName(executable) &&
+                    shortcut.IdentityPath == Path.GetFullPath(ini) &&
+                    shortcut.Arguments == "--tray --ini \"" + Path.GetFullPath(ini) + "\"" &&
+                    shortcut.LegacyFileName == null && shortcut.LegacyFileNames == null,
+                    product.Name + " Startup launches only the tray with the exact spaced Unicode profile and no job arguments");
+                Check(!Directory.Exists(Path.Combine(root, "TaskSchedulerMigrationBackup")) &&
+                    !File.Exists(Path.Combine(root, "PhotoCollage.log")), product.Name + " Startup CLI creates no utility-job output");
+
+                int beforeCommits = platform.Commits, beforeQueries = platform.Queries;
+                byte[] before = File.ReadAllBytes(ini);
+                Check(InvokeMainAndCapture(product, new[] { "--ini", ini, "--show-config" }, out output) == 0 &&
+                    output.Contains("RunAtStartup = 1") && before.SequenceEqual(File.ReadAllBytes(ini)) &&
+                    platform.Commits == beforeCommits && platform.Queries == beforeQueries,
+                    product.Name + " profile inspection preserves both INI bytes and Startup state");
+                Check(InvokeMainAndCapture(product, new[] { "--ini", ini, "--configure-only", "--set", key + "=" + second }, out output) == 0 &&
+                    spec.ReadSettings()[ManagedConfigurationStartup.Key] == "1" && platform.Commits == beforeCommits && platform.Queries == beforeQueries,
+                    product.Name + " ordinary configure-only edits preserve Startup without querying or mutating it");
+                var editor = new ManagedConfigurationEditor(spec);
+                var edited = editor.Values;
+                edited[ManagedConfigurationStartup.Key] = "off";
+                editor.Save(edited);
+                Check(!platform.LaunchExists && editor.Values[ManagedConfigurationStartup.Key] == "0" &&
+                    spec.ReadSettings()[ManagedConfigurationStartup.Key] == "0", product.Name + " tray editor shares CLI Startup boolean normalization and persistence");
+                Check(InvokeMainAndCapture(product, new[] { "--ini", ini, "--show-config" }, out output) == 0 && output.Contains("RunAtStartup = 0"),
+                    product.Name + " CLI prints the tray-saved disabled preference");
+
+                platform.QueryError = "fixture Startup query unavailable";
+                before = File.ReadAllBytes(ini);
+                var unknown = spec.Startup.ReadState();
+                Check(unknown.Error == platform.QueryError, product.Name + " Startup inspection distinguishes unknown from disabled");
+                CheckThrows<IOException>(delegate { spec.Startup.Reconcile(); }, product.Name + " reconciliation reports an unavailable Startup query");
+                CheckThrows<IOException>(delegate { spec.SaveSettings(new Dictionary<string, string> { { ManagedConfigurationStartup.Key, "1" } }); },
+                    product.Name + " Startup write refuses an unknown launch state");
+                Check(before.SequenceEqual(File.ReadAllBytes(ini)) && !platform.LaunchExists,
+                    product.Name + " failed query preserves original INI and launch state");
+                platform.QueryError = null;
+                CheckStartupScopeReleased(ini, product.Name + " query failure disposes the INI scope");
+
+                platform.RejectPersistence = true;
+                platform.Order.Clear();
+                CheckThrows<IOException>(delegate { spec.SaveSettings(new Dictionary<string, string> { { ManagedConfigurationStartup.Key, "1" } }); },
+                    product.Name + " reports an enable transaction's persistence failure");
+                Check(!platform.LaunchExists && before.SequenceEqual(File.ReadAllBytes(ini)) &&
+                    platform.Order.SequenceEqual(new[] { "shortcut=True", "persist", "shortcut=False" }),
+                    product.Name + " failed enable rolls the launch path back without changing INI bytes");
+                platform.RejectPersistence = false;
+
+                File.WriteAllText(ini, "; exact UTF-16 \u03a9\r\n[Settings]\r\nRunAtStartup = 1\r\n" + key + "=" + first + "\r\n", Encoding.Unicode);
+                before = File.ReadAllBytes(ini);
+                platform.LaunchExists = true; platform.ExactLaunch = true; platform.FailRemovals = 1;
+                bool sawPersistedDisable = false;
+                platform.BeforeMutation = delegate(bool desired)
+                {
+                    if (!desired) sawPersistedDisable = spec.ReadSettings()[ManagedConfigurationStartup.Key] == "0";
+                };
+                platform.Order.Clear();
+                CheckThrows<IOException>(delegate { spec.SaveSettings(new Dictionary<string, string> {
+                    { ManagedConfigurationStartup.Key, "0" }, { key, second }
+                }); }, product.Name + " reports a partial shortcut removal failure");
+                Check(sawPersistedDisable && platform.LaunchExists && platform.ExactLaunch && before.SequenceEqual(File.ReadAllBytes(ini)) &&
+                    platform.Order.SequenceEqual(new[] { "persist", "shortcut=False", "shortcut=True", "restore" }),
+                    product.Name + " disable rollback restores exact encoding, comments and all edited values after persistence");
+                platform.BeforeMutation = null;
+                CheckStartupScopeReleased(ini, product.Name + " rollback releases the INI scope");
+
+                File.Delete(ini);
+                platform.LaunchExists = false; platform.ExactLaunch = false; platform.FailRemovals = 1;
+                platform.Order.Clear();
+                CheckThrows<IOException>(delegate { spec.SaveSettings(new Dictionary<string, string> {
+                    { ManagedConfigurationStartup.Key, "0" }, { key, first }
+                }); }, product.Name + " missing-profile disable failure invokes exact rollback");
+                Check(!File.Exists(ini) && !platform.LaunchExists &&
+                    platform.Order.SequenceEqual(new[] { "persist", "shortcut=False", "restore", "shortcut=False" }),
+                    product.Name + " rollback removes a newly created INI instead of materializing old defaults");
+
+                File.WriteAllText(ini, "; invalid preference must be repairable\n[Settings]\nRunAtStartup=broken\n", Encoding.Unicode);
+                before = File.ReadAllBytes(ini);
+                platform.LaunchExists = true; platform.ExactLaunch = true; platform.FailRemovals = 1;
+                editor = new ManagedConfigurationEditor(spec);
+                edited = editor.Values;
+                Check(edited[ManagedConfigurationStartup.Key] == "broken", product.Name + " editor retains a malformed Startup value for repair");
+                edited[ManagedConfigurationStartup.Key] = "no";
+                CheckThrows<IOException>(delegate { editor.Save(edited); }, product.Name + " invalid preference repair can report a platform failure");
+                Check(before.SequenceEqual(File.ReadAllBytes(ini)) && platform.LaunchExists && editor.Values[ManagedConfigurationStartup.Key] == "broken",
+                    product.Name + " failed repair restores the exact invalid profile and leaves editor state intact");
+                editor.Save(edited);
+                Check(spec.ReadSettings()[ManagedConfigurationStartup.Key] == "0" && !platform.LaunchExists,
+                    product.Name + " retry repairs an invalid Startup preference through the same tray writer");
+
+                File.WriteAllText(ini, "[Settings]\nRunAtStartup=1\n");
+                platform.LaunchExists = false; platform.ExactLaunch = false; platform.RejectEnable = true;
+                platform.Order.Clear();
+                Check(InvokeMainAndCapture(product, new[] { "--ini", ini, "--no-startup" }, out output) == 0 &&
+                    spec.ReadSettings()[ManagedConfigurationStartup.Key] == "0" && !platform.LaunchExists &&
+                    platform.Order.SequenceEqual(new[] { "persist", "shortcut=False" }),
+                    product.Name + " disabling an absent link never attempts prohibited installation of an old enabled preference");
+                platform.RejectEnable = false;
+
+                platform.LaunchExists = true; platform.ExactLaunch = false;
+                platform.Order.Clear();
+                before = File.ReadAllBytes(ini);
+                spec.Startup.Reconcile();
+                Check(!platform.LaunchExists && before.SequenceEqual(File.ReadAllBytes(ini)) && platform.Order.Contains("shortcut=False"),
+                    product.Name + " disabled reconciliation removes stale owned launch arguments despite IsInstalled=false");
+                File.WriteAllText(ini, "[Settings]\nRunAtStartup=yes\n");
+                platform.LaunchExists = true; platform.ExactLaunch = false;
+                spec.Startup.Reconcile();
+                Check(platform.ExactLaunch && spec.ReadSettings()[ManagedConfigurationStartup.Key] == "yes",
+                    product.Name + " enabled reconciliation repairs stale launch metadata without rewriting the INI");
+                int committed = platform.Commits;
+                spec.Startup.Reconcile();
+                Check(platform.Commits == committed, product.Name + " exact enabled Startup reconciliation is a no-op");
+            }
+        }
+        finally
+        {
+            ManagedConfigurationStartup.PlatformFactory = previousFactory;
+            if (!String.Equals(Path.GetDirectoryName(Path.GetFullPath(root)), temporary, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Refusing Startup fixture cleanup outside its temporary parent.");
+            Directory.Delete(root, true);
+        }
+    }
+
+    static void CheckStartupScopeReleased(string ini, string name)
+    {
+        CheckStartupScope(ini, false, name);
+    }
+
+    static void CheckStartupScope(string ini, bool expectHeld, string name)
+    {
+        Exception error = null;
+        var contender = new Thread(new ThreadStart(delegate
+        {
+            try
+            {
+                using (ManagedIniFile.BeginTransaction(new ManagedIniFileSpec {
+                    FilePath = ini, SectionName = "Settings", MutationWaitMilliseconds = 100
+                })) { }
+            }
+            catch (Exception ex) { error = ex; }
+        }));
+        contender.IsBackground = true;
+        contender.Start();
+        Check(contender.Join(1500) && (expectHeld ? error is TimeoutException : error == null), name);
     }
 
     static void TestPhotoCollageAtomicOutput(string repositoryRoot)

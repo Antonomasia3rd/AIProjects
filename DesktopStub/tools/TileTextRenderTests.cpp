@@ -333,12 +333,57 @@ static int ProbeDeterminism(const std::filesystem::path& output, bool varyRoundi
     return failures == 0 ? 0 : 1;
 }
 
+static int ProbeColdLifetimes(const std::filesystem::path& output, bool quiet = false)
+{
+    std::filesystem::create_directories(output);
+    const Color previousBackground = g_testBackground;
+    g_testBackground = Color(255, 0, 120, 215);
+    std::vector<ARGB> baseline;
+    for (int iteration = 0; iteration < 64; ++iteration) {
+        // Perturb host-like allocations before each fresh GDI+ initialization.
+        std::vector<std::vector<BYTE>> allocationNoise;
+        for (int n = 0; n <= iteration % 11; ++n) allocationNoise.emplace_back(200 + n * 71, static_cast<BYTE>(iteration));
+        GdiplusStartupInput input;
+        ULONG_PTR token = 0;
+        if (GdiplusStartup(&token, &input, nullptr) != Ok) return 2;
+        {
+            Bitmap bitmap(150, 150, PixelFormat32bppARGB);
+            {
+                Graphics graphics(&bitmap);
+                Check(ConfigureTileTextGraphics(graphics), "cold lifetime graphics settings");
+                Check(RenderMediumTileTextSimulation(graphics, L"AAAA", iteration % 2 ? L"MMMM" : L"IIII", L"7", 1),
+                    "cold lifetime renders");
+            }
+            std::vector<ARGB> pixels;
+            int changed = 0;
+            for (int y = 0; y < 150; ++y) for (int x = 0; x < 150; ++x) {
+                Color color; bitmap.GetPixel(x, y, &color);
+                if (!baseline.empty() && baseline[pixels.size()] != color.GetValue()) ++changed;
+                pixels.push_back(color.GetValue());
+            }
+            Color glyph; bitmap.GetPixel(20, 93, &glyph);
+            if (!quiet || changed) std::printf("cold iteration=%d changed=%d glyph=%08X\n", iteration, changed, glyph.GetValue());
+            if (iteration == 0 || changed)
+                Check(SavePng(bitmap, output / (L"cold-" + std::to_wstring(iteration) + L".png")), "cold lifetime diagnostic saved");
+            Check(changed == 0, "cold GDI+ lifetime preserves unsupported-secondary pixels");
+            if (baseline.empty()) baseline = std::move(pixels);
+        }
+        GdiplusShutdown(token);
+    }
+    g_testBackground = previousBackground;
+    return failures == 0 ? 0 : 1;
+}
+
 int wmain(int argc, wchar_t** argv)
 {
+    if (argc > 2 && std::wstring(argv[2]) == L"--cold-probe") return ProbeColdLifetimes(argv[1]);
+    const std::filesystem::path output = argc > 1 ? argv[1] : L"build/tile-render-smoke";
+    // The normal matrix shares one GDI+ session. Exercise exact invariance
+    // across fresh lifetimes too, before that longer-lived session is started.
+    if (argc <= 2 && ProbeColdLifetimes(output, true) != 0) return 1;
     GdiplusStartupInput input;
     ULONG_PTR token = 0;
     if (GdiplusStartup(&token, &input, nullptr) != Ok) return 2;
-    const std::filesystem::path output = argc > 1 ? argv[1] : L"build/tile-render-smoke";
     std::filesystem::create_directories(output);
     if (argc > 2 && (std::wstring(argv[2]) == L"--determinism-probe" || std::wstring(argv[2]) == L"--rounding-probe" || std::wstring(argv[2]) == L"--dpi-probe" || std::wstring(argv[2]) == L"--hint-probe" || std::wstring(argv[2]) == L"--contrast-probe" || std::wstring(argv[2]) == L"--warmup-probe")) {
         if (std::wstring(argv[2]) == L"--warmup-probe") RunRenderMatrix(output);

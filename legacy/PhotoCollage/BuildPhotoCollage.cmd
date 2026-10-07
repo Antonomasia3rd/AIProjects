@@ -23,6 +23,8 @@ for %%I in ("%ROOT%..\..") do set "REPO=%%~fI"
   "%REPO%\dependencies\managed_profile.cs" ^
   "%REPO%\dependencies\managed_tray.cs" ^
   "%REPO%\dependencies\managed_configuration_tray.cs" ^
+  "%REPO%\dependencies\managed_configuration_startup.cs" ^
+  "%REPO%\dependencies\managed_startup_shortcut.cs" ^
   "%REPO%\dependencies\PhotoCollage\photo_collage_app.cs" ^
   "%ROOT%PhotoCollage.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%

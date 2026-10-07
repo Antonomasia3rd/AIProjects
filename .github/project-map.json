@@ -165,6 +165,8 @@
       "dependencies/managed_profile.cs",
       "dependencies/managed_tray.cs",
       "dependencies/managed_configuration_tray.cs",
+      "dependencies/managed_configuration_startup.cs",
+      "dependencies/managed_startup_shortcut.cs",
       "dependencies/PhotoCollage"
     ],
     "artifactPaths": [
@@ -253,6 +255,8 @@
       "dependencies/managed_profile.cs",
       "dependencies/managed_tray.cs",
       "dependencies/managed_configuration_tray.cs",
+      "dependencies/managed_configuration_startup.cs",
+      "dependencies/managed_startup_shortcut.cs",
       "dependencies/TaskSchedulerMigration"
     ],
     "artifactPaths": [

@@ -119,5 +119,15 @@ The tray contains no image-job action and does not create an INI until Save.
 Existing one-run CLI options remain available separately. Menu/editor logic is
 shared with TaskSchedulerMigration in `dependencies/managed_configuration_tray.cs`;
 each executable/profile pair has one tray instance and a nonempty hover label.
-No custom runtime DLL was introduced. Startup-folder controls and visible
-Windows tray/dialog validation remain unfinished.
+No custom runtime DLL was introduced. The editor's actual controls and Save/Cancel
+handlers have offscreen tests; visible notification-area acceptance remains open.
+
+The **Start tray at sign-in (Startup folder)** checkbox, `--startup` /
+`--no-startup`, and `[Settings] RunAtStartup=0|1` share the same preference.
+For example, `PhotoCollage.exe --startup --ini "PhotoCollage.ini"` saves and
+applies it without running an image job. The shortcut is placed only in the
+current user's Startup folder and launches `--tray --ini` with the exact profile.
+Manual INI changes apply on tray launch, Reload configuration, or menu refresh.
+`--configure-only` rejects Startup changes; use the explicit management switches.
+Startup management can include a validated `--set` batch, but cannot include
+one-run image arguments. Real Startup-folder integration remains an opt-in test.
