@@ -205,3 +205,24 @@ Visible tray behavior and original target-OS shell appearance remain open.
   `1.459.576.0`. Logs are under ignored `build/review-validation/` with prefixes
   `resident-oct08-*` and `chrome-oct08-*`. Every executable run used an external
   deadline. No real Startup changes, DNS updates, or hardware actions ran.
+
+## Completed desktop-host checks, 2026-10-08
+
+These later checks supersede the intermediate engine-only status above:
+
+- Shared managed regression suite: 287 checks; actual offscreen editor: 33.
+- Chrome engine: 220; compiled frontend: 89; wrapper/helper: 27 in each of
+  Windows PowerShell 5.1 and PowerShell 7. Old PowerShell runtime retired.
+- Current-user notification apps: 53 injected app checks and 56 source checks.
+  Both product overlays compile with warnings as errors; manual services remain
+  explicit compatibility modes. No notification-key or service mutation ran.
+- YouTube frontend: 89; typed bridge: 67 in each PowerShell version. Real API,
+  auth-header, clipboard and account operations were replaced by inert stubs.
+- Project map/consumer selection: 16 products plus All.
+
+New executable tests ran only after clean Defender scans, under independent
+limits. No fixture processes remained after completion. See REWORK_AUDIT.md
+for exact scope, logs and the still-open continuation queue. At the final
+checkpoint the usage tool reported 2% remaining; no further integration test
+was started. Visible shell, old-Windows/hardware acceptance and the historical
+four-pixel renderer intermittency are not certified by these passes.
