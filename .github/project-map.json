@@ -176,6 +176,36 @@
     ]
   },
   {
+    "key": "YouTubeMusicMigrate",
+    "label": "YouTubeMusicMigrate",
+    "folder": "legacy/YouTubeMusicMigrate",
+    "buildOutput": "build_youtube_music_migrate",
+    "artifactName": "YouTubeMusicMigrate",
+    "artifactPath": "legacy/YouTubeMusicMigrate/build/YouTubeMusicMigrate.exe",
+    "skipKey": "YouTubeMusicMigrate",
+    "dependencyPaths": [
+      "dependencies/powershell_native_launcher.ps1",
+      "dependencies/managed_named_objects.cs",
+      "dependencies/managed_ini.cs",
+      "dependencies/managed_profile.cs",
+      "dependencies/managed_tray.cs",
+      "dependencies/managed_configuration_tray.cs",
+      "dependencies/managed_configuration_startup.cs",
+      "dependencies/managed_startup_shortcut.cs",
+      "dependencies/YouTubeMusicMigrate"
+    ],
+    "artifactPaths": [
+      "legacy/YouTubeMusicMigrate/build/YouTubeMusicMigrate.exe",
+      "legacy/YouTubeMusicMigrate/build/youtube_music_worker_bridge.ps1",
+      "legacy/YouTubeMusicMigrate/build/youtube_music_tidy_app.ps1",
+      "legacy/YouTubeMusicMigrate/build/youtube_music_legacy_frontend.ps1",
+      "legacy/YouTubeMusicMigrate/build/powershell_native_launcher.ps1",
+      "legacy/YouTubeMusicMigrate/README.md",
+      "legacy/YouTubeMusicMigrate/YouTubeMusicMigrate.example.ini",
+      "legacy/YouTubeMusicMigrate/youtube_music_tidy.ps1"
+    ]
+  },
+  {
     "key": "ChromeProfileCounter",
     "label": "ChromeProfileCounter",
     "folder": "legacy/ChromeProfileCounter",

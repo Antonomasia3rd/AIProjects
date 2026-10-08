@@ -27,7 +27,7 @@ or declarative policy.
 | `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
 | `legacy/WindhawkMods/LockScreenWin10` | Windhawk research mod | Windows 10 lock-screen styling and XAML investigation sources. |
 | `legacy/YourPhoneHideBanner` | C# tray app; optional manual service | Suppresses the current user's Phone Link banners/sounds with shared INI/CLI/tray/Startup controls. |
-| `legacy/YouTubeMusicMigrate` | PowerShell utility | Compatibility entries for dependency-backed YouTube Music tidy/migration tooling. |
+| `legacy/YouTubeMusicMigrate` | C# configuration app + PowerShell worker | Shared INI/CLI/tray/Startup; explicit library operations preserve the typed script parameters. |
 
 ## Prebuilt Releases
 

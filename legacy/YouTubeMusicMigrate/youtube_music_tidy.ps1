@@ -62,14 +62,14 @@ The internal YouTube Music API is unofficial and can change.
 param(
     # Optional legacy import sources. v21 imports these into the main tidy
     # cache once, after which normal operation no longer depends on them.
-    [string]$MigrationCsvPath = (Join-Path $PSScriptRoot "youtube_music_migration.csv"),
-    [string]$AutoAssignmentsPath = (Join-Path $PSScriptRoot "youtube_music_auto_assignments.csv"),
-    [string]$StatePath = (Join-Path $PSScriptRoot "youtube_music_migration_state.json"),
-    [string]$HeadersPath = (Join-Path $PSScriptRoot "raw_headers.txt"),
+    [string]$MigrationCsvPath,
+    [string]$AutoAssignmentsPath,
+    [string]$StatePath,
+    [string]$HeadersPath,
 
-    [string]$CachePath = (Join-Path $PSScriptRoot "youtube_music_tidy_cache.json"),
-    [string]$ReportPath = (Join-Path (Join-Path $PSScriptRoot "reports") "youtube_music_tidy_report.csv"),
-    [string]$ActionsPath = (Join-Path (Join-Path $PSScriptRoot "reports") "youtube_music_tidy_actions.csv"),
+    [string]$CachePath,
+    [string]$ReportPath,
+    [string]$ActionsPath,
 
     # Empty defaults are intentional in the shareable build. The first-run
     # CLUI discovers the authenticated account and stores the expected identity
@@ -77,7 +77,7 @@ param(
     [string]$ExpectedAccountName = "",
     [string]$ExpectedChannelHandle = "",
 
-    [string]$ConfigPath = (Join-Path $PSScriptRoot "youtube_music_tidy_config.json"),
+    [string]$ConfigPath,
 
     # Force the console setup wizard even when configuration already exists.
     [switch]$Setup,
@@ -107,7 +107,7 @@ param(
     # Sort order and add-to-top are intentionally left alone.
     [switch]$NormalizeManagedPlaylistSettings,
 
-    [string]$PlaylistSettingsReportPath = (Join-Path (Join-Path $PSScriptRoot "reports") "youtube_music_tidy_playlist_settings.csv"),
+    [string]$PlaylistSettingsReportPath,
 
     # Metadata-only taste-lane suggestions for new users/friends. This does NOT
     # listen to audio, create playlists, or move songs. It weighs existing
@@ -115,7 +115,7 @@ param(
     # review-only suggestion CSV.
     [switch]$SuggestTasteLanes,
     [int]$TasteLaneCount = 8,
-    [string]$TasteLaneSuggestionsPath = (Join-Path (Join-Path $PSScriptRoot "reports") "youtube_music_tidy_taste_lane_suggestions.csv"),
+    [string]$TasteLaneSuggestionsPath,
 
     # Skip playlist network probes and trust cached playlist snapshots.
     # Useful immediately after a recent successful full playlist scan.
@@ -141,7 +141,7 @@ param(
 
     # Optional persistent config: one playlist ID per line. Blank lines and
     # lines beginning with # are ignored. Built-in exclusions are always kept.
-    [string]$NonMusicPlaylistConfigPath = (Join-Path $PSScriptRoot "youtube_music_tidy_nonmusic_playlists.txt"),
+    [string]$NonMusicPlaylistConfigPath,
 
     # Deep-resolve UNKNOWN Library states with exact-video-ID matches from
     # authenticated YouTube Music search results. Results are cached to disk.
@@ -150,7 +150,7 @@ param(
     # Max UNKNOWN tracks to resolve per run. 0 = no limit.
     [int]$ResolveLibraryLimit = 250,
 
-    [string]$LibraryResolutionCachePath = (Join-Path $PSScriptRoot "youtube_music_tidy_library_resolution.json"),
+    [string]$LibraryResolutionCachePath,
 
     # Enrich confirmed InLibrary=NO catalogue songs with YouTube-provided
     # add-to-Library feedback tokens. This is READ-ONLY; it only makes future
@@ -164,7 +164,7 @@ param(
     # actionable under the current token strategy.
     [switch]$RetryUnavailableLibraryTokens,
 
-    [string]$LibraryTokenCachePath = (Join-Path $PSScriptRoot "youtube_music_tidy_library_tokens.json"),
+    [string]$LibraryTokenCachePath,
 
     # Safety cap for actual ADD_LIBRARY writes after confirmation.
     # 0 = no cap.
@@ -176,7 +176,7 @@ param(
     [int]$AddLibraryFeedbackBatchSize = 20,
 
     # Durable, token-free checkpoint of ADD_LIBRARY write/verification results.
-    [string]$AddLibraryMutationStatePath = (Join-Path $PSScriptRoot "youtube_music_tidy_add_library_state.json"),
+    [string]$AddLibraryMutationStatePath,
 
     # Give YouTube Music a short moment to surface newly-added songs before
     # the authoritative post-write Library verification snapshot.
@@ -193,14 +193,17 @@ param(
     # from normal HTTP retry count. 0 disables the extended outage wait.
     [int]$NetworkOutageRetryMinutes = 30,
 
-    [int]$CheckpointEveryPlaylists = 1
+    [int]$CheckpointEveryPlaylists = 1,
+    [string]$IniFile
 )
 
-# Keep product defaults beside this entry point; the shared engine must not
-# read auth/config/cache files from its dependency directory.
-$implementation = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'dependencies/YouTubeMusicMigrate/youtube_music_tidy_app.ps1'
-$invocationArguments = @{}
-foreach ($entry in $PSBoundParameters.GetEnumerator()) {
-    $invocationArguments[$entry.Key] = $entry.Value
+# Defaults now come from the shared typed profile; only explicit legacy values
+# are forwarded, so omitted identities, false switches and CLUI intent survive.
+$implementation = Join-Path $PSScriptRoot 'youtube_music_legacy_frontend.ps1'
+if (-not (Test-Path -LiteralPath $implementation)) { $implementation = Join-Path $PSScriptRoot 'build/youtube_music_legacy_frontend.ps1' }
+if (-not (Test-Path -LiteralPath $implementation)) {
+    $implementation = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'dependencies/YouTubeMusicMigrate/youtube_music_legacy_frontend.ps1'
 }
-. $implementation -DataRoot $PSScriptRoot -InvocationParameters $invocationArguments
+. $implementation
+$exitCode = Invoke-YtmLegacyFrontend -DataRoot $PSScriptRoot -BoundArguments $PSBoundParameters
+exit $exitCode

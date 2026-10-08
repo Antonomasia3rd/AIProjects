@@ -787,3 +787,62 @@ identity writes consistent with the INI. Remaining larger items include
 SecureDesktopLauncher's interactive host, donor retirement/integration details,
 NowPlaying artwork/Startup policy, deferred security-default work, and the exact
 four-pixel renderer intermittency. Windhawk extraction is not an open task.
+
+## YouTube frontend completion and continuation queue, 2026-10-08
+
+YouTube Music now has the shared managed INI/CLI/editor/tray/Startup frontend.
+Its default launch and Startup entry open configuration only. Explicit worker
+launches use typed temporary JSON plus a fixed PowerShell file bridge, preserving
+all 47 parameter types and the distinction between saved defaults and explicit
+arguments. The existing API worker remains PowerShell; this avoids an untested
+protocol rewrite and introduces no runtime plugin DLL. Account operations keep
+their existing confirmations and require an explicit worker launch.
+
+INI owns editable identity preferences; setup timestamps remain JSON state.
+One-time legacy identity import occurs only on explicit worker launch, and
+setup writeback uses the shared INI transaction with concurrent-change checks.
+One-run identities are not silently saved during authentication timestamp updates.
+Resolved data-file collisions are rejected; `--menu` cannot fall through to
+operations when NoInteractive is enabled. TraceRequests now matches the actual
+default and accepts false, with QuietRequests taking precedence. A worker-owned,
+per-user/data-root Global Windows mutex prevents overlapping workers, including
+across sessions. This coordinates this tool, not arbitrary external editors.
+
+Validation: **89 managed frontend checks** and **67 bridge checks on each of
+PowerShell 5.1 and 7** pass. Builds use warnings as errors; frontend/fixture scans
+are clean. Tests use inert workers and temporary metadata only: no actual
+account, authentication header, clipboard, network, Startup or visible tray
+operation ran. See `legacy/YouTubeMusicMigrate/VALIDATION.md` and ignored logs
+`ytm-*-oct08-complete`, `ytm-bridge-ps5/ps7-oct08-global-final`. Binary map and
+consumer selection pass for **16 projects plus All**.
+
+Remaining work must not be reported as completed:
+
+1. SecureDesktopLauncher: preserve the useful SYSTEM/secure-desktop capability
+   in explicit manual service mode; add a user configuration/Startup tray that
+   does not launch target programs on sign-in or opening. The user allowed
+   either approach; preserving the capability is the chosen direction. Native
+   configuration has General and dynamic Program sections plus the separate
+   password launcher's Launch/UI/Security sections. Its existing privileged
+   checks must not be casually removed to manufacture apparent portability.
+2. Retire integrated donor applications after checking required source behavior
+   and configuration import. The optional question about isolated versus real
+   hardware acceptance was not answered; do not invent a required external DLL
+   ABI or duplicate deskband/widget UI as a new retirement condition.
+3. Resolve NowPlaying source artwork/Startup gaps and concrete remaining shared
+   implementation duplication. Distinguish necessary product behavior from
+   duplicated mechanics; relocating code alone is not the final criterion.
+4. Preserve and diagnose the exact four-pixel renderer intermittency. Do not
+   weaken comparisons or declare an unchanged passing rerun a production fix.
+5. Complete opt-in conversion for retained mandatory Discord/Notes credential
+   storage and privileged-only defaults after functional work; normal current-user
+   notification operation already needs no protected-path deployment.
+6. Finish feasible visible-tray/Startup/target-OS acceptance in a controlled
+   environment. Record unsupported older Windows/hardware checks as unverified,
+   not as passing. Default checks here remain inert and bounded.
+
+User-approved exceptions/deferrals: Windhawk stays as-is under legacy; no
+companion or dependencies extraction is needed. Further Microsoft portal status
+checks are deferred; recent clean scans do not reclassify the historical sample.
+All original gaps are not yet cleared. Near the usage limit, save/push verified
+work and finish every fixture process before beginning another integration.

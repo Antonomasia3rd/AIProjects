@@ -43,6 +43,8 @@ if errorlevel 1 goto Fail
 call :Section "Test Chrome profile configuration and engine"
 call "%REPO%\tools\TestChromeProfileCounter.cmd"
 if errorlevel 1 goto Fail
+call "%REPO%\tools\TestYouTubeMusicMigrate.cmd"
+if errorlevel 1 goto Fail
 
 call :BuildAllowContentAboveLock || goto Fail
 call :BuildADBController || goto Fail
@@ -54,6 +56,7 @@ call :BuildDNSAutoUpdate || goto Fail
 call :BuildNowPlayingTile || goto Fail
 call :BuildPhotoCollage || goto Fail
 call :BuildChromeProfileCounter || goto Fail
+call :BuildYouTubeMusicMigrate || goto Fail
 call :BuildDesktopStub || goto Fail
 call :BuildCharmTray || goto Fail
 call :BuildSecureDesktopLauncher || goto Fail
@@ -237,6 +240,32 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\ChromeProfileCounter\ChromeProfileCounter.example.ini"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\ChromeProfileCounter\ChromeProfileCounter.ps1"
+exit /b %ERRORLEVEL%
+
+:BuildYouTubeMusicMigrate
+call :IsSkipped YouTubeMusicMigrate
+if "!SKIP_RESULT!"=="1" exit /b 0
+call :Section "Build YouTubeMusicMigrate"
+pushd "%LEGACY%\YouTubeMusicMigrate" || exit /b 1
+call :Run cmd.exe /d /c BuildYouTubeMusicMigrate.cmd
+set "STATUS=%ERRORLEVEL%"
+popd
+if not "%STATUS%"=="0" exit /b %STATUS%
+call :RecordArtifact "%LEGACY%\YouTubeMusicMigrate\build\YouTubeMusicMigrate.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\YouTubeMusicMigrate\build\youtube_music_worker_bridge.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\YouTubeMusicMigrate\build\youtube_music_tidy_app.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\YouTubeMusicMigrate\build\youtube_music_legacy_frontend.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\YouTubeMusicMigrate\build\powershell_native_launcher.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\YouTubeMusicMigrate\README.md"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\YouTubeMusicMigrate\YouTubeMusicMigrate.example.ini"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\YouTubeMusicMigrate\youtube_music_tidy.ps1"
 exit /b %ERRORLEVEL%
 
 :BuildDesktopStub

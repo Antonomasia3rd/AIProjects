@@ -1,8 +1,2 @@
 [
-  {
-    "key": "YouTubeMusicMigrate",
-    "folder": "legacy/YouTubeMusicMigrate",
-    "dependencyPaths": ["dependencies/YouTubeMusicMigrate"],
-    "sourceCheck": "legacy/YouTubeMusicMigrate/tools/YouTubeMusicMigrateSourceCheck.ps1"
-  }
 ]

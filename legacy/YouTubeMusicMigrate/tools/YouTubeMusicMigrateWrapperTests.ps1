@@ -1,145 +1,114 @@
 [CmdletBinding()]
-param([string]$RepositoryRoot = (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))))
-
+param([string]$RepositoryRoot)
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) { $RepositoryRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) }
 & (Join-Path $PSScriptRoot 'YouTubeMusicMigrateSourceCheck.ps1') -RepositoryRoot $RepositoryRoot
-$script:Checks = 0
-function Require([bool]$condition, [string]$message) {
-    $script:Checks++
-    if (-not $condition) { throw $message }
-}
-
-# Copy only the thin entry points. The real engines are parsed by the source
-# check above, but are NEVER evaluated, copied into the fixture or dot-sourced.
-# This fixture needs no browser, auth files, network, clipboard or live account.
-$temporaryBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-$fixtureName = 'AIProjects-YtmWrapper-' + [Guid]::NewGuid().ToString('N')
-$fixtureRoot = [IO.Path]::GetFullPath((Join-Path $temporaryBase $fixtureName))
-$productRoot = Join-Path $fixtureRoot 'legacy/YouTubeMusicMigrate'
-$dependencyRoot = Join-Path $fixtureRoot 'dependencies/YouTubeMusicMigrate'
-$mainPath = Join-Path $productRoot 'youtube_music_tidy.ps1'
-$cleanupPath = Join-Path $productRoot 'cleanup_youtube_music_tidy_directory.ps1'
-$mainEngine = Join-Path $dependencyRoot 'youtube_music_tidy_app.ps1'
+$script:checks = 0
+function Require([bool]$ok, [string]$message) { $script:checks++; if (-not $ok) { throw $message } }
+$parent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
+$root = Join-Path $parent ('AIProjects-YtmBridge-' + [Guid]::NewGuid().ToString('N'))
 $utf8 = New-Object Text.UTF8Encoding($true)
-$pathDefaults = [ordered]@{
-    MigrationCsvPath = 'youtube_music_migration.csv'
-    AutoAssignmentsPath = 'youtube_music_auto_assignments.csv'
-    StatePath = 'youtube_music_migration_state.json'
-    HeadersPath = 'raw_headers.txt'
-    CachePath = 'youtube_music_tidy_cache.json'
-    ReportPath = 'reports/youtube_music_tidy_report.csv'
-    ActionsPath = 'reports/youtube_music_tidy_actions.csv'
-    ConfigPath = 'youtube_music_tidy_config.json'
-    PlaylistSettingsReportPath = 'reports/youtube_music_tidy_playlist_settings.csv'
-    TasteLaneSuggestionsPath = 'reports/youtube_music_tidy_taste_lane_suggestions.csv'
-    NonMusicPlaylistConfigPath = 'youtube_music_tidy_nonmusic_playlists.txt'
-    LibraryResolutionCachePath = 'youtube_music_tidy_library_resolution.json'
-    LibraryTokenCachePath = 'youtube_music_tidy_library_tokens.json'
-    AddLibraryMutationStatePath = 'youtube_music_tidy_add_library_state.json'
-}
-$mainStub = @'
-param(
-    [Parameter(Mandatory = $true)][string]$DataRoot,
-    [Parameter(Mandatory = $true)][AllowEmptyCollection()][System.Collections.IDictionary]$InvocationParameters
-)
-function Read-FixtureScriptScope { return $script:ExpectedAccountName }
-$paths = @{}
-foreach ($name in @('MigrationCsvPath', 'AutoAssignmentsPath', 'StatePath', 'HeadersPath',
-    'CachePath', 'ReportPath', 'ActionsPath', 'ConfigPath', 'PlaylistSettingsReportPath',
-    'TasteLaneSuggestionsPath', 'NonMusicPlaylistConfigPath', 'LibraryResolutionCachePath',
-    'LibraryTokenCachePath', 'AddLibraryMutationStatePath')) {
-    $paths[$name] = (Get-Variable -Name $name -ValueOnly)
-}
-[pscustomobject]@{
-    Marker = 'inert-main-engine'
-    DataRoot = $DataRoot
-    Paths = $paths
-    Explicit = $InvocationParameters
-    ExpectedAccountName = $ExpectedAccountName
-    ScriptAccountName = (Read-FixtureScriptScope)
-    ExpectedChannelHandle = $ExpectedChannelHandle
-    Setup = $Setup.IsPresent
-    ReportOnly = $ReportOnly.IsPresent
-    NoInteractive = $NoInteractive.IsPresent
-    HeadCheckCount = $HeadCheckCount
-    BatchSize = $BatchSize
-    BatchDelaySeconds = $BatchDelaySeconds
-    AdditionalIds = @($AdditionalNonMusicPlaylistIds)
-}
-'@
-$cleanupStub = @'
-param([switch]$Apply, [string]$Root)
-[pscustomobject]@{ Marker = 'inert-cleanup-engine'; Apply = $Apply.IsPresent; Root = $Root }
-'@
 try {
-    [IO.Directory]::CreateDirectory($productRoot) | Out-Null
-    [IO.Directory]::CreateDirectory($dependencyRoot) | Out-Null
-    foreach ($name in @('youtube_music_tidy.ps1', 'cleanup_youtube_music_tidy_directory.ps1')) {
-        Copy-Item -LiteralPath (Join-Path $RepositoryRoot ('legacy/YouTubeMusicMigrate/' + $name)) -Destination (Join-Path $productRoot $name)
+    [IO.Directory]::CreateDirectory($root) | Out-Null
+    $product = Join-Path $root 'product'; $build = Join-Path $product 'build'
+    [IO.Directory]::CreateDirectory($build) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $RepositoryRoot 'legacy/YouTubeMusicMigrate/youtube_music_tidy.ps1') -Destination $product
+    foreach ($file in @('youtube_music_legacy_frontend.ps1','youtube_music_worker_bridge.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $RepositoryRoot ('dependencies/YouTubeMusicMigrate/' + $file)) -Destination $build
     }
-    [IO.File]::WriteAllText($mainEngine, $mainStub, $utf8)
-    [IO.File]::WriteAllText((Join-Path $dependencyRoot 'cleanup_youtube_music_tidy_directory_app.ps1'), $cleanupStub, $utf8)
-
-    $default = & $mainPath
-    Require ($default.Marker -ceq 'inert-main-engine') 'The entry point must invoke the inert fixture engine.'
-    Require ($default.DataRoot -ceq $productRoot) 'The data root must remain the product directory.'
-    Require ($default.Explicit.Count -eq 0) 'Defaulted or internal options must not become explicit arguments.'
-    foreach ($name in $pathDefaults.Keys) {
-        Require ([IO.Path]::GetFullPath($default.Paths[$name]) -ceq [IO.Path]::GetFullPath((Join-Path $productRoot $pathDefaults[$name]))) "Default data path changed: $name"
-    }
-    Require ($default.HeadCheckCount -eq 5 -and $default.BatchSize -eq 20 -and $default.BatchDelaySeconds -eq 2.0) 'Numeric defaults changed.'
-    Require (-not $default.Setup -and -not $default.ReportOnly -and -not $default.NoInteractive) 'Switch defaults changed.'
-    Require ($default.ExpectedAccountName -ceq '' -and $default.ExpectedChannelHandle -ceq '') 'Account defaults must remain empty.'
-    Require ($default.AdditionalIds.Count -eq 0) 'Playlist defaults must remain empty.'
-
-    $custom = @{}
-    foreach ($name in $pathDefaults.Keys) { $custom[$name] = Join-Path $fixtureRoot ('custom folder/' + $name + '.fixture') }
-    $custom.ExpectedAccountName = 'fixture account'
-    $custom.ExpectedChannelHandle = ''
-    $custom.Setup = $true
-    $custom.ReportOnly = $false
-    $custom.NoInteractive = $true
-    $custom.HeadCheckCount = 0
-    $custom.BatchSize = 3
-    $custom.BatchDelaySeconds = 0.25
-    $custom.AdditionalNonMusicPlaylistIds = @('fixture-a', 'fixture-b')
-    $actual = & $mainPath @custom
-    Require ($actual.DataRoot -ceq $productRoot) 'Path overrides must not change the debug-output data root.'
-    foreach ($name in $pathDefaults.Keys) {
-        Require ($actual.Paths[$name] -ceq $custom[$name]) "Custom path was lost or rewritten: $name"
-    }
-    Require ((@($actual.Explicit.Keys | Sort-Object) -join ',') -ceq (@($custom.Keys | Sort-Object) -join ',')) 'The original explicit-argument key set must survive forwarding.'
-    Require ($actual.ExpectedAccountName -ceq 'fixture account' -and $actual.ScriptAccountName -ceq 'fixture account') 'Shared functions must see the product script scope.'
-    Require ($actual.Explicit.Contains('ExpectedChannelHandle') -and $actual.ExpectedChannelHandle -ceq '') 'Explicit empty identity differs from an omitted identity.'
-    Require ($actual.Setup -and -not $actual.ReportOnly -and $actual.NoInteractive) 'True and explicit-false switches must retain their values.'
-    Require ($actual.HeadCheckCount -eq 0 -and $actual.BatchSize -eq 3 -and $actual.BatchDelaySeconds -eq 0.25) 'Zero and fractional numeric options must retain their values.'
-    Require (($actual.AdditionalIds -join ',') -ceq 'fixture-a,fixture-b') 'Array options must not become one joined string.'
-    $configOnly = & $mainPath -ConfigPath 'relative config.json'
-    Require ($configOnly.Explicit.Count -eq 1 -and $configOnly.Explicit.Contains('ConfigPath')) 'Config-only invocation must still be identifiable for interactive startup.'
-    Require ($configOnly.Paths.ConfigPath -ceq 'relative config.json') 'Explicit relative paths must retain their existing meaning.'
-
-    $cleanup = & $cleanupPath
-    Require ($cleanup.Marker -ceq 'inert-cleanup-engine') 'Cleanup must select its shared implementation.'
-    Require ($cleanup.Root -ceq $productRoot -and -not $cleanup.Apply) 'Cleanup must default to the product root and dry run.'
-    $cleanup = & $cleanupPath -Root 'relative fixture root' -Apply
-    Require ($cleanup.Root -ceq 'relative fixture root' -and $cleanup.Apply) 'Cleanup must forward explicit root and apply options.'
-    $cleanup = & $cleanupPath -Apply:$false
-    Require (-not $cleanup.Apply) 'Cleanup must preserve an explicit false Apply switch.'
-
-    [IO.File]::WriteAllText($mainEngine, "throw 'inert fixture failure'", $utf8)
-    $failed = $false
-    try { & $mainPath | Out-Null } catch { $failed = $_.Exception.Message -eq 'inert fixture failure' }
-    Require $failed 'The wrapper must propagate an engine failure.'
-    Require (-not (Test-Path -LiteralPath (Join-Path $productRoot 'raw_headers.txt'))) 'The fixture must not create or need auth files.'
-} finally {
-    if (Test-Path -LiteralPath $fixtureRoot) {
-        $expected = [IO.Path]::GetFullPath((Join-Path $temporaryBase $fixtureName))
-        $actualRoot = Get-Item -LiteralPath $fixtureRoot
-        if ($actualRoot.FullName -cne $expected -or
-            ($actualRoot.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            throw 'Refusing cleanup outside the exact temporary fixture directory.'
-        }
-        Remove-Item -LiteralPath $actualRoot.FullName -Recurse -Force
-    }
+    [IO.File]::WriteAllText((Join-Path $build 'YouTubeMusicMigrate.exe'), 'inert placeholder; never executed')
+    $nativeStub = @'
+function Invoke-AipNativeExecutable {
+    param([string]$ExecutablePath, [string[]]$ArgumentList)
+    $global:YtmCapturedRequest = Get-Content -LiteralPath $ArgumentList[1] -Raw -Encoding UTF8 | ConvertFrom-Json
+    $global:YtmCapturedRequestPath = $ArgumentList[1]
+    return 0
 }
-Write-Output ("YouTubeMusicMigrate inert wrapper tests passed: {0} checks." -f $script:Checks)
+'@
+    [IO.File]::WriteAllText((Join-Path $build 'powershell_native_launcher.ps1'), $nativeStub, $utf8)
+    $entry = Join-Path $product 'youtube_music_tidy.ps1'
+    & $entry
+    Require (@($global:YtmCapturedRequest.Arguments.PSObject.Properties).Count -eq 0) 'No-argument legacy invocation gained explicit defaults.'
+    Require ($global:YtmCapturedRequest.DataRoot -eq $product) 'Legacy data root moved into the dependency/build directory.'
+    Require (-not [IO.File]::Exists($global:YtmCapturedRequestPath)) 'Legacy request file leaked.'
+    & $entry -ExpectedAccountName '' -ReportOnly:$false -HeadCheckCount 0 -BatchDelaySeconds 0.25 -AdditionalNonMusicPlaylistIds @('a','b') -IniFile 'relative.ini'
+    $legacy = $global:YtmCapturedRequest
+    Require (@($legacy.Arguments.PSObject.Properties).Count -eq 5) 'Legacy explicit argument set changed.'
+    Require ($legacy.Arguments.ReportOnly -eq $false -and $legacy.Arguments.ExpectedAccountName -ceq '') 'Explicit false/empty values were lost.'
+    Require ($legacy.Arguments.HeadCheckCount -eq 0 -and $legacy.Arguments.BatchDelaySeconds -eq 0.25) 'Zero/fractional values were changed.'
+    Require (($legacy.Arguments.AdditionalNonMusicPlaylistIds -join ',') -eq 'a,b') 'Array arguments became a joined string.'
+    Require ($legacy.IniPath -eq 'relative.ini') 'Explicit INI selection was changed.'
+
+    $profileSource = [IO.File]::ReadAllText((Join-Path $RepositoryRoot 'dependencies/YouTubeMusicMigrate/youtube_music_profile.cs'))
+    $catalog = @([regex]::Matches($profileSource, 'new Parameter\("([A-Za-z0-9]+)", Kind\.([A-Za-z]+), "([^"]*)"\)'))
+    $values = @{}; $switches = @(); $types = @{}
+    foreach ($definition in $catalog) {
+        $name = $definition.Groups[1].Value; $kind = $definition.Groups[2].Value; $value = $definition.Groups[3].Value
+        switch ($kind) {
+            'Path' { $value = Join-Path $root $value; $types[$name] = 'String' }
+            'Text' { $types[$name] = 'String' }
+            'Switch' { $value = $value -eq '1'; $switches += $name; $types[$name] = 'SwitchParameter' }
+            'Integer' { $value = [int]$value; $types[$name] = 'Int32' }
+            'Number' { $value = [double]::Parse($value, [Globalization.CultureInfo]::InvariantCulture); $types[$name] = 'Double' }
+            'List' { $value = @('a','b'); $types[$name] = 'String[]' }
+        }
+        $values[$name] = $value
+    }
+    Require ($values.Count -eq 47) 'Fixture does not cover all legacy parameters.'
+    $values.ExpectedAccountName = 'one-run fixture override'
+    $request = @{ Version = 1; IniPath = (Join-Path $root 'profile.ini'); DataRoot = $root; ProfileRoot = $root; HostPath = (Join-Path $build 'YouTubeMusicMigrate.exe'); Intent = 'legacy'; Values = $values; Switches = $switches; Explicit = @('ExpectedAccountName','ReportOnly'); IdentityBaseline = @{ ExpectedAccountName = 'saved fixture'; ExpectedChannelHandle = '@saved'; DataRoot = $root; ConfigPath = $values.ConfigPath } }
+    # Only the small metadata writer function is loaded from the actual worker.
+    # Its complete body is never evaluated; all API/clipboard/account code stays inert.
+    $tokens = $null; $errors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $RepositoryRoot 'dependencies/YouTubeMusicMigrate/youtube_music_tidy_app.ps1'), [ref]$tokens, [ref]$errors)
+    $saveFunction = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Save-UserConfig' }, $false).Extent.Text
+    $traceStatement = $ast.Find({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$TraceRequests' }, $false).Extent.Text
+    $evaluateTrace = [scriptblock]::Create('param([switch]$TraceRequests,[switch]$QuietRequests)' + "`n" + $traceStatement + "`n[bool]`$TraceRequests")
+    Require ($values.TraceRequests -eq $true -and $values.QuietRequests -eq $false) 'Catalog tracing defaults diverged from the original effective default.'
+    foreach ($case in @(@($true,$false,$true),@($false,$false,$false),@($true,$true,$false),@($false,$true,$false))) {
+        Require ((& $evaluateTrace -TraceRequests:$case[0] -QuietRequests:$case[1]) -eq $case[2]) 'TraceRequests/QuietRequests precedence is inconsistent.'
+    }
+    $stub = @'
+param([string]$DataRoot, [System.Collections.IDictionary]$InvocationParameters, [string]$LaunchIntent, [switch]$UseIniIdentity)
+$global:YtmBridgeTypes = @{}
+$global:YtmBridgeValues = @{}
+foreach ($name in $script:AipYtmRequest.Values.PSObject.Properties.Name) {
+    $value = Get-Variable -Name $name -ValueOnly
+    $global:YtmBridgeTypes[$name] = $value.GetType().Name
+    $global:YtmBridgeValues[$name] = $value
+}
+$global:YtmBridgeExplicit = @($InvocationParameters.Keys)
+$global:YtmBridgeIntent = $LaunchIntent
+$probe = [Management.Automation.PowerShell]::Create()
+$probeRunspace = [Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+$probeRunspace.ThreadOptions = [Management.Automation.Runspaces.PSThreadOptions]::UseNewThread
+$probeRunspace.Open()
+$probe.Runspace = $probeRunspace
+try {
+    [void]$probe.AddScript('param($bridge, $request) & $bridge -RequestPath $request').AddArgument((Join-Path $PSScriptRoot 'youtube_music_worker_bridge.ps1')).AddArgument($RequestPath)
+    $caught = ''
+    try { $null = $probe.Invoke() } catch { $caught = $_.Exception.Message }
+    $global:YtmConcurrentDiagnostic = $caught + (@($probe.Streams.Error | ForEach-Object { $_.ToString() }) -join ' ')
+    $global:YtmConcurrentRejected = $global:YtmConcurrentDiagnostic.Contains('already using this data directory')
+} finally { $probe.Dispose(); $probeRunspace.Dispose() }
+$config = [pscustomobject]@{ Version = 1; ExpectedAccountName = 'confirmed fixture'; ExpectedChannelHandle = '@confirmed'; SetupCompletedAt = 'fixture-time' }
+'@
+    [IO.File]::WriteAllText((Join-Path $build 'youtube_music_tidy_app.ps1'), $stub + "`n" + $saveFunction + "`nSave-UserConfig -Config `$config`n", $utf8)
+    $requestPath = Join-Path $root 'request.json'
+    [IO.File]::WriteAllText($requestPath, ($request | ConvertTo-Json -Depth 10), $utf8)
+    & (Join-Path $build 'youtube_music_worker_bridge.ps1') -RequestPath $requestPath
+    foreach ($name in $types.Keys) { Require ($global:YtmBridgeTypes[$name] -eq $types[$name]) "Worker parameter type changed: $name" }
+    Require (($global:YtmBridgeExplicit | Sort-Object) -join ',' -eq 'ExpectedAccountName,ReportOnly') 'Defaults became explicit worker invocation keys.'
+    Require ($global:YtmBridgeIntent -eq 'legacy') 'Launch intent was lost.'
+    Require $global:YtmConcurrentRejected ('A concurrent worker was not rejected before evaluating its stub: ' + $global:YtmConcurrentDiagnostic)
+    Require ($global:YtmCapturedRequest.Baseline.ExpectedAccountName -eq 'saved fixture' -and $global:YtmCapturedRequest.Values.ExpectedAccountName -eq 'confirmed fixture') 'Identity writeback lost its saved baseline or confirmed value.'
+    Require (-not [IO.File]::Exists($global:YtmCapturedRequestPath)) 'Identity writeback request leaked.'
+    $state = Get-Content -LiteralPath $values.ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    Require ($state.SetupCompletedAt -eq 'fixture-time' -and 'ExpectedAccountName' -notin @($state.PSObject.Properties.Name)) 'State JSON retained a parallel editable identity.'
+} finally {
+    foreach ($name in @('YtmCapturedRequest','YtmCapturedRequestPath','YtmBridgeTypes','YtmBridgeValues','YtmBridgeExplicit','YtmBridgeIntent','YtmConcurrentRejected','YtmConcurrentDiagnostic')) { Remove-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue }
+    $resolved = [IO.Path]::GetFullPath($root)
+    if ([IO.Path]::GetDirectoryName($resolved) -ne $parent -or -not [IO.Path]::GetFileName($resolved).StartsWith('AIProjects-YtmBridge-')) { throw 'Unsafe bridge fixture cleanup path.' }
+    if ([IO.Directory]::Exists($resolved)) { [IO.Directory]::Delete($resolved, $true) }
+}
+Write-Output "YouTube Music bridge: $script:checks checks passed using inert worker/host stubs."

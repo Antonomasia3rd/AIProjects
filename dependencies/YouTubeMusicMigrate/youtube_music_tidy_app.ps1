@@ -6,13 +6,15 @@ param(
     [string]$DataRoot,
     [Parameter(Mandatory = $true)]
     [AllowEmptyCollection()]
-    [System.Collections.IDictionary]$InvocationParameters
+    [System.Collections.IDictionary]$InvocationParameters,
+    [ValidateSet('legacy','menu','run')][string]$LaunchIntent = 'legacy',
+    [switch]$UseIniIdentity
 )
 
 $ErrorActionPreference = "Stop"
 
 # v9: request tracing is the default. Use -QuietRequests to suppress it.
-$TraceRequests = -not $QuietRequests.IsPresent
+$TraceRequests = $TraceRequests.IsPresent -and -not $QuietRequests.IsPresent
 
 $YtmDomain = "https://music.youtube.com"
 $YtmApiKey = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
@@ -91,8 +93,15 @@ function Load-UserConfig {
 function Save-UserConfig {
     param($Config)
 
+    $state = $Config
+    if ($UseIniIdentity.IsPresent) {
+        Sync-YtmProfileIdentity -Config $Config
+        # Editable identity belongs to the INI. Keep only setup/runtime metadata
+        # in JSON, preventing an older parallel preference copy from winning.
+        $state = $Config | Select-Object * -ExcludeProperty ExpectedAccountName,ExpectedChannelHandle
+    }
     $tmp = "$ConfigPath.tmp"
-    $Config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $tmp -Encoding UTF8
+    $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $tmp -Encoding UTF8
     Move-Item -LiteralPath $tmp -Destination $ConfigPath -Force
 }
 
@@ -6193,16 +6202,23 @@ Write-Host "  - ADD_LIBRARY is suppressed when an exact-identity alternate Video
 # v27 console UI + cooperative runtime controls
 # ---------------------------------------------------------------------------
 $script:UserConfig = Load-UserConfig
+if ($UseIniIdentity.IsPresent) {
+    # A one-run CLI identity override must not become a saved preference merely
+    # because an auth refresh updates its timestamp. Setup explicitly changes
+    # this configuration object only after its existing confirmation prompt.
+    $script:UserConfig.ExpectedAccountName = $script:AipIdentityBaseline.ExpectedAccountName
+    $script:UserConfig.ExpectedChannelHandle = $script:AipIdentityBaseline.ExpectedChannelHandle
+}
 $script:SetupWizardActive = $false
 $script:ConfigureNonMusicAfterIndex = $false
 $script:OfferManagedPlaylistCreation = $false
 $script:CluiMode = ""
 
 # Explicit command-line identity always wins. Otherwise use saved config.
-if (-not $InvocationParameters.ContainsKey("ExpectedAccountName")) {
+if (-not $UseIniIdentity.IsPresent -and -not $InvocationParameters.ContainsKey("ExpectedAccountName")) {
     $ExpectedAccountName = [string]$script:UserConfig.ExpectedAccountName
 }
-if (-not $InvocationParameters.ContainsKey("ExpectedChannelHandle")) {
+if (-not $UseIniIdentity.IsPresent -and -not $InvocationParameters.ContainsKey("ExpectedChannelHandle")) {
     $ExpectedChannelHandle = [string]$script:UserConfig.ExpectedChannelHandle
 }
 
@@ -6216,7 +6232,7 @@ $operationalKeys = @(
 )
 $interactiveLaunch = (
     -not $NoInteractive.IsPresent -and
-    ($Setup.IsPresent -or $operationalKeys.Count -eq 0)
+    ($LaunchIntent -eq 'menu' -or $Setup.IsPresent -or ($LaunchIntent -eq 'legacy' -and $operationalKeys.Count -eq 0))
 )
 
 if ($interactiveLaunch) {
