@@ -28,5 +28,16 @@ sign-in while keeping counter changes behind a deliberate action.
 reading Chrome data or starting Chrome. `tools\ChromeProfileCounterTests.ps1`
 loads selected functions and tests synthetic JSON and temporary directories;
 only its Windows fixture checks mutex/file replacement. CTest includes both.
-The AST/parser checks ran during review, but the behavioral fixtures remain
-unrun on this laptop while the Defender quarantine remains unresolved.
+Both checks passed on synthetic inputs in Windows PowerShell 5.1 and
+PowerShell 7 on 2026-10-08. The counter edit also proves that its selected
+numeric span belongs to the parsed profile counter, so an escaped property
+name cannot redirect it into a same-valued unrelated field.
+
+The planned compiled migration starts with
+`dependencies/ChromeProfileCounter/chrome_profile_counter_engine.cs`. It is
+not connected to the launcher yet. It reuses the existing managed ecosystem
+without introducing runtime plugin DLLs; the current PowerShell UI remains
+available during migration. `tools/BuildChromeProfileCounterEngineTests.cmd`
+at the repository root compiles its synthetic fixture only. Scan the resulting
+executable before running it. The fixture supplies all paths and browser
+observations, and never reads actual Chrome data or discovers browser processes.

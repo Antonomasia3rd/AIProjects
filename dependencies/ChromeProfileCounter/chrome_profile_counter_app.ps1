@@ -26,6 +26,16 @@ function Get-CounterMatch([string]$Text) {
         $state.profile.profiles_created -ne $counter) {
         throw "Local State must contain one unambiguous integer profile.profiles_created value."
     }
+    # A same-valued field elsewhere can satisfy the comparison above when the
+    # real property name uses JSON escapes. Prove that this exact digit span
+    # changes the parsed profile counter before offering it to the writer.
+    $digits = $matches[0].Groups[1]
+    $probeText = $Text.Substring(0, $digits.Index) + '-1' +
+        $Text.Substring($digits.Index + $digits.Length)
+    $probe = $probeText | ConvertFrom-Json -ErrorAction Stop
+    if ($null -eq $probe.profile -or $probe.profile.profiles_created -ne -1) {
+        throw "The matched counter does not belong to profile.profiles_created."
+    }
     return $matches[0]
 }
 

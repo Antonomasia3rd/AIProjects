@@ -46,6 +46,7 @@
       "dependencies/managed_logging.cs",
       "dependencies/managed_ini.cs",
       "dependencies/managed_startup_shortcut.cs",
+      "dependencies/managed_configuration_startup.cs",
       "dependencies/managed_tray.cs",
       "dependencies/asusblink"
     ],
@@ -66,6 +67,7 @@
       "dependencies/managed_logging.cs",
       "dependencies/managed_ini.cs",
       "dependencies/managed_startup_shortcut.cs",
+      "dependencies/managed_configuration_startup.cs",
       "dependencies/managed_tray.cs",
       "dependencies/capsblink"
     ],
@@ -121,6 +123,7 @@
       "dependencies/managed_logging.cs",
       "dependencies/managed_ini.cs",
       "dependencies/managed_startup_shortcut.cs",
+      "dependencies/managed_configuration_startup.cs",
       "dependencies/managed_tray.cs",
       "dependencies/DNSAutoUpdate"
     ],

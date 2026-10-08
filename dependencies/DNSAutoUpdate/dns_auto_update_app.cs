@@ -172,7 +172,7 @@ static class DNSAutoUpdate
             throw new IOException("Could not persist the command-line setting batch.");
 
         Options initialSettings = LoadRuntimeSettings();
-        ReconcileStartup(initialSettings.RunAtStartup);
+        ReconcileStartup();
         if (commandLine.ConfigureOnly)
         {
             Console.WriteLine("Settings saved to " + iniPath + ".");
@@ -627,7 +627,7 @@ static class DNSAutoUpdate
     static Dictionary<string, string> LoadEffectiveSettingValues()
     {
         Dictionary<string, string> values = DefaultSettingValues();
-        foreach (KeyValuePair<string, string> rawSetting in ManagedIniFile.LoadSection(iniFile))
+        foreach (KeyValuePair<string, string> rawSetting in ManagedIniFile.LoadSection(iniFile, false))
         {
             string key = CanonicalSettingName(rawSetting.Key);
             if (key == null)
@@ -709,69 +709,35 @@ static class DNSAutoUpdate
             return true;
         }
 
-        Dictionary<string, string> normalized;
         try
         {
-            normalized = NormalizeSettingBatch(settings);
-            ValidateEffectiveSettingBatch(normalized);
+            BuildStartupConfiguration().Save(NormalizeSettingBatch(settings));
+            return true;
         }
         catch (Exception ex)
         {
-            Diagnostic("Could not validate setting batch: " + ex.Message);
+            Diagnostic("Could not commit setting batch: " + ex.Message);
             return false;
         }
+    }
 
-        string startupValue;
-        if (!normalized.TryGetValue(StartupKey, out startupValue))
-            return SaveIniOptions(normalized);
-
-        bool desired = IsTrue(startupValue);
-        Dictionary<string, string> previousSettings = null;
-        string transactionError;
-        bool committed = ManagedStartupShortcut.CommitIniCoupledState(
-            startupShortcut,
-            desired,
-            delegate(out bool previousConfigured, out string snapshotError)
+    static ManagedConfigurationStartup BuildStartupConfiguration()
+    {
+        return new ManagedConfigurationStartup(iniFile, startupShortcut,
+            LoadEffectiveSettingValues,
+            delegate(IDictionary<string, string> changes)
             {
-                previousConfigured = false;
-                snapshotError = null;
-                try
-                {
-                    Dictionary<string, string> effective = LoadEffectiveSettingValues();
-                    previousConfigured = IsTrue(effective[StartupKey]);
-                    previousSettings = new Dictionary<string, string>(
-                        StringComparer.OrdinalIgnoreCase);
-                    foreach (KeyValuePair<string, string> setting in normalized)
-                        previousSettings[setting.Key] = effective[setting.Key];
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    snapshotError = "Could not capture the previous settings: " + ex.Message;
-                    return false;
-                }
+                string error;
+                if (!SaveIniOptions(NormalizeSettingBatch(changes), out error))
+                    throw new IOException(error ?? "Could not save the setting batch.");
             },
-            delegate(out string persistenceError)
-            {
-                return SaveIniOptions(normalized, out persistenceError);
-            },
-            delegate(out string rollbackError)
-            {
-                return SaveIniOptions(previousSettings, out rollbackError);
-            },
-            out transactionError);
-        if (!committed)
-            Diagnostic("Could not commit Startup/INI transaction: " +
-                (transactionError ?? "unknown error"));
-        return committed;
+            ValidateEffectiveSettingBatch);
     }
 
     static void ValidateEffectiveSettingBatch(IDictionary<string, string> settings)
     {
-        Dictionary<string, string> effective = File.Exists(iniPath)
-            ? LoadEffectiveSettingValues()
-            : DefaultSettingValues();
-        foreach (KeyValuePair<string, string> setting in settings)
+        Dictionary<string, string> effective = LoadEffectiveSettingValues();
+        foreach (KeyValuePair<string, string> setting in NormalizeSettingBatch(settings))
             effective[setting.Key] = setting.Value;
         OptionsFromValues(effective);
     }
@@ -806,13 +772,9 @@ static class DNSAutoUpdate
         return saved;
     }
 
-    static void ReconcileStartup(bool desired)
+    static void ReconcileStartup()
     {
-        bool previous;
-        string error;
-        if (!ManagedStartupShortcut.SetDesiredState(
-            startupShortcut, desired, out previous, out error))
-            throw new IOException("Could not reconcile Startup: " + (error ?? "unknown error"));
+        BuildStartupConfiguration().Reconcile();
     }
 
     static List<string> ValidateAndBuildManagedRecordNames(Options options)
@@ -1141,7 +1103,7 @@ static class DNSAutoUpdate
                     {
                         Options reloaded = LoadRuntimeSettings();
                         reloaded.ResidentMode = true;
-                        ReconcileStartup(reloaded.RunAtStartup);
+                        ReconcileStartup();
                         settings = reloaded;
                         observation.Reset();
                         PublishSettings(settings);

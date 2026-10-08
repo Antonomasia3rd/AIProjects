@@ -27,6 +27,7 @@ static class LegacyUtilitiesTests
         TestManagedProfiles();
         TestConfigurationTrayEditing();
         TestConfigurationStartupIntegration();
+        TestResidentStartupTransactions();
         TestPhotoCollageAtomicOutput(repositoryRoot);
         TestTaskXmlHardening(repositoryRoot);
         TestCapsBlinkIdentity(repositoryRoot);
@@ -256,6 +257,7 @@ static class LegacyUtilitiesTests
         public int Commits;
         public ManagedStartupShortcutSpec LastShortcut;
         public Action<bool> BeforeMutation;
+        public Action BeforeScope;
         public readonly List<string> Order = new List<string>();
 
         public bool IsInstalled(ManagedStartupShortcutSpec spec, out string error)
@@ -276,6 +278,7 @@ static class LegacyUtilitiesTests
             {
                 try
                 {
+                    if (BeforeScope != null) BeforeScope();
                     // Exercise the adapter's real INI transaction and the
                     // production commit algorithm. Only shortcut I/O is fake.
                     using (acquireScope())
@@ -316,6 +319,136 @@ static class LegacyUtilitiesTests
                 }
                 catch (Exception ex) { error = ex.Message; return false; }
             }
+        }
+    }
+
+    static void TestResidentStartupTransactions()
+    {
+        string temporary = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
+        string root = Path.GetFullPath(Path.Combine(temporary, "AIProjects-ResidentStartup-" + Guid.NewGuid().ToString("N")));
+        if (!String.Equals(Path.GetDirectoryName(root), temporary, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Resident fixture must stay inside its temporary parent.");
+        Directory.CreateDirectory(root);
+        var previousFactory = ManagedConfigurationStartup.PlatformFactory;
+        try
+        {
+            foreach (Type product in new[] { typeof(DNSAutoUpdate), typeof(CapsLockLight), typeof(Program) })
+            {
+                var profile = (ManagedIniFileSpec)product.GetField("iniFile", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
+                var legacyField = product.GetField("legacyIniFile", BindingFlags.NonPublic | BindingFlags.Static);
+                var legacy = legacyField == null ? null : (ManagedIniFileSpec)legacyField.GetValue(null);
+                string oldPath = profile.FilePath;
+                string oldLegacyPath = legacy == null ? null : legacy.FilePath;
+                string ini = Path.Combine(root, product.Name + ".ini");
+                profile.FilePath = ini;
+                if (legacy != null) legacy.FilePath = ini;
+                var platform = new FixtureConfigurationStartupPlatform();
+                ManagedConfigurationStartup.PlatformFactory = delegate { return platform; };
+                Func<IDictionary<string, string>, bool> save = delegate(IDictionary<string, string> changes)
+                {
+                    return (bool)InvokePrivate(product, "PersistSettingsAtomically", new object[] { changes });
+                };
+                string key = product == typeof(DNSAutoUpdate) ? "SleepSeconds" :
+                    product == typeof(CapsLockLight) ? "BlinkIntervalMs" : "ErrorRetry";
+                string first = product == typeof(DNSAutoUpdate) ? "60" :
+                    product == typeof(CapsLockLight) ? "500" : "3";
+                string second = product == typeof(DNSAutoUpdate) ? "90" :
+                    product == typeof(CapsLockLight) ? "750" : "4";
+                try
+                {
+                    File.WriteAllText(ini, "; keep exact bytes and omitted defaults\r\n[Settings]\r\nRunAtStartup = true\r\n" +
+                        key + " = " + first + "\r\n", Encoding.Unicode);
+                    byte[] original = File.ReadAllBytes(ini);
+                    platform.LaunchExists = true; platform.ExactLaunch = true; platform.FailRemovals = 1;
+                    platform.BeforeMutation = delegate(bool desired)
+                    {
+                        CheckStartupScope(ini, true, product.Name + " holds INI lock during shortcut mutation and rollback");
+                    };
+                    Check(!save(new Dictionary<string, string> { { "RunAtStartup", "false" }, { key, second } }) &&
+                        original.SequenceEqual(File.ReadAllBytes(ini)) && platform.LaunchExists,
+                        product.Name + " removal failure restores exact UTF-16 bytes and the previous launch");
+                    platform.BeforeMutation = null;
+                    CheckStartupScopeReleased(ini, product.Name + " failed transaction releases its INI scope");
+
+                    File.Delete(ini);
+                    platform.RejectEnable = true; platform.LaunchExists = false; platform.ExactLaunch = false;
+                    Check(!save(new Dictionary<string, string> { { "RunAtStartup", "true" }, { key, second } }) && !File.Exists(ini),
+                        product.Name + " denied enable does not create a default INI during validation or capture");
+                    platform.RejectEnable = false; platform.FailRemovals = 1;
+                    Check(!save(new Dictionary<string, string> { { "RunAtStartup", "false" }, { key, second } }) && !File.Exists(ini),
+                        product.Name + " failed disable restores the original absence of a profile");
+                    CheckStartupScopeReleased(ini, product.Name + " missing-file rollback releases its INI scope");
+
+                    Check(save(new Dictionary<string, string> { { "RunAtStartup", "yes" }, { key, second } }) &&
+                        ManagedIniFile.LoadSection(profile, false)["RunAtStartup"] == "true" && platform.LaunchExists,
+                        product.Name + " shared adapter retains canonical product booleans and commits the complete batch");
+                    platform.RejectEnable = true; platform.LaunchExists = false; platform.ExactLaunch = false;
+                    Check(save(new Dictionary<string, string> { { "RunAtStartup", "false" } }) && !platform.LaunchExists,
+                        product.Name + " disabling a missing shortcut never attempts installation");
+
+                    int commits = platform.Commits;
+                    Check(save(new Dictionary<string, string> { { key, first } }) && platform.Commits == commits &&
+                        ManagedIniFile.LoadSection(profile, false)[key] == first,
+                        product.Name + " ordinary settings use the same adapter without touching Startup");
+                    if (product != typeof(CapsLockLight))
+                    {
+                        // Simulate a cooperating writer finishing before the
+                        // Startup transaction acquires its INI scope.
+                        byte[] latest = Encoding.UTF8.GetBytes("; changed while waiting\n[Settings]\n" + key + "=invalid\n");
+                        platform.BeforeScope = delegate { File.WriteAllBytes(ini, latest); };
+                        Check(!save(new Dictionary<string, string> { { "RunAtStartup", "false" } }) &&
+                            latest.SequenceEqual(File.ReadAllBytes(ini)),
+                            product.Name + " validates the latest profile inside the transaction before mutation");
+                        platform.BeforeScope = null;
+                    }
+                    File.WriteAllText(ini, "[Settings]\nRunAtStartup=false\n");
+                    platform.LaunchExists = true; platform.ExactLaunch = true;
+                    platform.BeforeScope = delegate { File.WriteAllText(ini, "[Settings]\nRunAtStartup=true\n"); };
+                    bool rejectedStale = false;
+                    try
+                    {
+                        object result = InvokePrivate(product, "ReconcileStartup", new object[0]);
+                        rejectedStale = result is bool && !(bool)result;
+                    }
+                    catch (IOException) { rejectedStale = true; }
+                    Check(rejectedStale && platform.LaunchExists &&
+                        ManagedIniFile.LoadSection(profile, false)["RunAtStartup"] == "true",
+                        product.Name + " reload refuses a stale Startup preference after acquiring the INI lock");
+                    platform.BeforeScope = null;
+                    File.WriteAllText(ini, "[Settings]\nRunAtStartup=false\n");
+                    InvokePrivate(product, "ReconcileStartup", new object[0]);
+                    Check(!platform.LaunchExists, product.Name + " reload applies the current saved Startup preference");
+                    Check(!Directory.GetFiles(root, ".AIProjects-*.tmp").Any(), product.Name + " transaction leaves no staging files");
+                }
+                finally
+                {
+                    profile.FilePath = oldPath;
+                    if (legacy != null) legacy.FilePath = oldLegacyPath;
+                }
+            }
+
+            var local = new ManagedIniFileSpec { FilePath = Path.Combine(root, "local.ini"), SectionName = "Settings" };
+            var adapter = new ManagedConfigurationStartup(local, new ManagedStartupShortcutSpec(),
+                delegate { return ManagedIniFile.LoadSection(local, false); },
+                delegate(IDictionary<string, string> changes)
+                {
+                    CheckStartupScope(local.FilePath, true, "ordinary configuration publication retains the validation lock");
+                    string error;
+                    if (!ManagedIniFile.SaveSectionBatch(local, changes, out error)) throw new IOException(error);
+                },
+                delegate(IDictionary<string, string> changes)
+                {
+                    CheckStartupScope(local.FilePath, true, "ordinary configuration validation holds the INI lock");
+                });
+            adapter.Save(new Dictionary<string, string> { { "Value", "saved" } });
+            CheckStartupScopeReleased(local.FilePath, "ordinary configuration releases its INI scope after publication");
+        }
+        finally
+        {
+            ManagedConfigurationStartup.PlatformFactory = previousFactory;
+            if (!String.Equals(Path.GetDirectoryName(Path.GetFullPath(root)), temporary, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Unexpected resident fixture cleanup path.");
+            Directory.Delete(root, true);
         }
     }
 
@@ -839,7 +972,7 @@ static class LegacyUtilitiesTests
             source.Contains("CharSet = CharSet.Unicode"),
             "capsblink binds string Win32 APIs to explicit Unicode entry points");
         Check(
-            source.Contains("ManagedStartupShortcut.CommitIniCoupledState(") &&
+            source.Contains("new ManagedConfigurationStartup(iniFile, startupShortcut") &&
             source.Contains("ManagedTrayBaseline.CreateNotifyIcon(") &&
             source.Contains("ManagedTrayBaseline.TryPromptText(") &&
             source.Contains("ShowMenuAsDropdown"),
@@ -1040,7 +1173,7 @@ static class LegacyUtilitiesTests
             "asusblink reports tray creation failure and exits its message loop cooperatively");
         Check(
             source.Contains("ManagedStartupShortcut.IsInstalled(startupShortcut") &&
-            source.Contains("ManagedStartupShortcut.SetDesiredState(") &&
+            source.Contains("BuildStartupConfiguration().Reconcile()") &&
             startupSource.Contains("Environment.SpecialFolder.Startup") &&
             startupSource.Contains("MatchesExactLaunch") &&
             startupSource.Contains("StableIdentityHash(identity)"),
@@ -1057,9 +1190,8 @@ static class LegacyUtilitiesTests
         Check(
             source.Contains("PersistSettingsAtomically(commandLine.Settings)") &&
             source.Contains("SaveIniOptions(settings)") &&
-            source.Contains("CommitIniCoupledState(") &&
-            source.Contains("previousSettings") &&
-            source.Contains("delegate(out string rollbackError)"),
+            source.Contains("BuildStartupConfiguration().Save(NormalizeSettingBatch(settings))") &&
+            source.Contains("new ManagedConfigurationStartup(iniFile, startupShortcut"),
             "asusblink commits command-line settings through the shared crash-consistent Startup transaction");
         Check(
             source.Contains("StartupKey + \"=false\"") &&

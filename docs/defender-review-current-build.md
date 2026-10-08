@@ -10,6 +10,11 @@ The authenticated case link and receipt are saved locally in the ignored
 file from the quarantined sample in the [incident brief](defender-submission-2026-10-03.md).
 A clean scan of this file is not a determination about the older detection.
 
+On 2026-10-08, the user deferred further portal status checks because recent
+builds are no longer being detected. The October 7 result above remains the
+last verified portal result; the historical detection is not reclassified.
+Development continues with bounded tests and normal Defender protection.
+
 ## Current file
 
 - Local file: `DesktopStub/build/DesktopStubValidation.exe`.

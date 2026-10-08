@@ -96,7 +96,17 @@ namespace AIProjects.Dependencies
             if (changes == null) throw new ArgumentNullException("changes");
             var batch = new Dictionary<string, string>(changes, StringComparer.OrdinalIgnoreCase);
             string startup;
-            if (!batch.TryGetValue(Key, out startup)) { saveLocal(batch); return; }
+            if (!batch.TryGetValue(Key, out startup))
+            {
+                // Keep prospective validation and publication in the same INI
+                // scope even when this batch does not change Startup.
+                using (ManagedIniFile.BeginTransaction(ini))
+                {
+                    validate(batch);
+                    saveLocal(batch);
+                }
+                return;
+            }
             batch[Key] = NormalizeValue(startup);
             bool desired = batch[Key] == "1";
             ManagedIniFile.Transaction transaction = null;

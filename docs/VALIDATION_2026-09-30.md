@@ -178,3 +178,30 @@ under ignored `build/review-validation/`. The Microsoft-submitted executable
 was not overwritten. No Startup-folder integration, package registration,
 resident DesktopStub instance, account/provider or hardware operation ran.
 Visible tray behavior and original target-OS shell appearance remain open.
+
+## Managed Startup continuation, 2026-10-08
+
+- Managed fixture suite: **274 checks passed** after warnings-as-errors
+  compilation and a clean Defender custom file scan. The extra cases exercise
+  the actual DNSAutoUpdate/CapsBlink/AsusBlink persistence and reload adapters
+  with temporary profiles and a simulated shortcut platform.
+- DNSAutoUpdate, CapsBlink and AsusBlink product source lists compile with
+  warnings as errors. Their resident entry points were not run.
+- Project ownership map and workflow selection checks pass for 14 projects
+  plus the All selection, using a scanned RepoTools binary.
+- Chrome's current PowerShell source and synthetic behavior checks pass in
+  both Windows PowerShell 5.1 and PowerShell 7. A new regression rejects an
+  unrelated same-valued counter when JSON escapes obscure the real property.
+  Only selected function definitions were loaded; no real browser data,
+  browser process discovery, or interactive product loop ran.
+- The standalone C# Chrome engine fixture passes **220 checks**, with
+  warnings-as-errors compilation and a clean Defender scan before the bounded
+  30-second run. It covers exact backup bytes across six BOM/encoding forms,
+  invalid byte rejection, property-path/duplicate-key ambiguity, competing
+  edits, injected restarts and I/O failures, and mutex contention/abandonment.
+  Logs use `chrome-engine-*-oct08-v2`. This verifies the engine slice only;
+  it does not establish the unfinished launcher, tray or Startup surfaces.
+- Defender antivirus and real-time protection were enabled; definitions were
+  `1.459.576.0`. Logs are under ignored `build/review-validation/` with prefixes
+  `resident-oct08-*` and `chrome-oct08-*`. Every executable run used an external
+  deadline. No real Startup changes, DNS updates, or hardware actions ran.

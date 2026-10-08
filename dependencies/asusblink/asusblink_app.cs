@@ -658,11 +658,8 @@ class Program
         out Dictionary<string, string> missingLegacy)
     {
         missingLegacy = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (!File.Exists(iniPath))
-            return DefaultSettings();
-
-        Dictionary<string, string> raw = ManagedIniFile.LoadSection(iniFile);
-        Dictionary<string, string> legacy = ManagedIniFile.LoadSection(legacyIniFile);
+        Dictionary<string, string> raw = ManagedIniFile.LoadSection(iniFile, false);
+        Dictionary<string, string> legacy = ManagedIniFile.LoadSection(legacyIniFile, false);
         var canonicalRaw = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (KeyValuePair<string, string> setting in raw)
         {
@@ -733,79 +730,44 @@ class Program
     {
         if (settings == null || settings.Count == 0)
         {
-            EnsureIniFile();
+            ManagedIniFile.EnsureExists(iniFile);
             return true;
         }
 
-        Dictionary<string, string> normalized;
         try
         {
-            normalized = NormalizeSettingBatch(settings);
-
-            Dictionary<string, string> ignoredLegacy;
-            Dictionary<string, string> prospective =
-                ReadEffectiveIniOptions(out ignoredLegacy);
-            foreach (KeyValuePair<string, string> setting in normalized)
-                prospective[setting.Key] = setting.Value;
-            // Validate relationships between settings before either the INI or
-            // Startup shortcut is mutated.  Individual typed-value validation
-            // alone cannot catch combinations such as pause-on-error with the
-            // only resident control surface disabled.
-            BuildRuntimeProfile(prospective);
+            BuildStartupConfiguration().Save(NormalizeSettingBatch(settings));
+            return true;
         }
         catch (Exception ex)
         {
-            Log("Could not validate setting batch: {0}", ex.Message);
+            Log("Could not commit setting batch: {0}", ex.Message);
             return false;
         }
+    }
 
-        string startupValue;
-        if (!normalized.TryGetValue(StartupKey, out startupValue))
-            return SaveIniOptions(normalized);
-
-        bool startupDesired = ParseBooleanValue(startupValue, StartupKey);
-        Dictionary<string, string> previousSettings = null;
-        string transactionError;
-        bool committed = ManagedStartupShortcut.CommitIniCoupledState(
-            startupShortcut,
-            startupDesired,
-            delegate(out bool previousConfigured, out string snapshotError)
+    static ManagedConfigurationStartup BuildStartupConfiguration()
+    {
+        return new ManagedConfigurationStartup(iniFile, startupShortcut,
+            delegate
             {
-                previousConfigured = false;
-                snapshotError = null;
-                try
-                {
-                    Dictionary<string, string> ignoredLegacy;
-                    Dictionary<string, string> effective =
-                        ReadEffectiveIniOptions(out ignoredLegacy);
-                    previousConfigured = ParseBooleanValue(
-                        effective[StartupKey],
-                        StartupKey);
-                    previousSettings = new Dictionary<string, string>(
-                        StringComparer.OrdinalIgnoreCase);
-                    foreach (KeyValuePair<string, string> setting in normalized)
-                        previousSettings[setting.Key] = effective[setting.Key];
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    snapshotError = "Could not capture the previous settings: " + ex.Message;
-                    return false;
-                }
+                Dictionary<string, string> ignoredLegacy;
+                return ReadEffectiveIniOptions(out ignoredLegacy);
             },
-            delegate(out string persistenceError)
+            delegate(IDictionary<string, string> changes)
             {
-                return SaveIniOptions(normalized, out persistenceError);
+                string error;
+                if (!SaveIniOptions(NormalizeSettingBatch(changes), out error))
+                    throw new IOException(error ?? "Could not save the setting batch.");
             },
-            delegate(out string rollbackError)
+            delegate(IDictionary<string, string> changes)
             {
-                return SaveIniOptions(previousSettings, out rollbackError);
-            },
-            out transactionError);
-        if (!committed)
-            Log("Could not commit Startup/INI transaction: {0}",
-                transactionError ?? "unknown error");
-        return committed;
+                Dictionary<string, string> ignoredLegacy;
+                Dictionary<string, string> prospective = ReadEffectiveIniOptions(out ignoredLegacy);
+                foreach (KeyValuePair<string, string> setting in NormalizeSettingBatch(changes))
+                    prospective[setting.Key] = setting.Value;
+                BuildRuntimeProfile(prospective);
+            });
     }
 
     static Dictionary<string, string> DefaultSettings()
@@ -1459,20 +1421,18 @@ class Program
         return installed;
     }
 
-    static bool InstallStartupShortcut(bool install)
+    static bool ReconcileStartup()
     {
-        bool previousInstalled;
-        string error;
-        if (!ManagedStartupShortcut.SetDesiredState(
-            startupShortcut,
-            install,
-            out previousInstalled,
-            out error))
+        try
         {
-            Log("Startup shortcut change failed: {0}", error ?? "unknown error");
+            BuildStartupConfiguration().Reconcile();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log("Startup shortcut change failed: {0}", ex.Message);
             return false;
         }
-        return true;
     }
 
     // Build and show the tray (minimal creation, detailed items are filled/updated by RefreshTray)
@@ -2192,7 +2152,7 @@ class Program
             return 1;
         }
 
-        if (!InstallStartupShortcut(initialProfile.RunAtStartup))
+        if (!ReconcileStartup())
             throw new IOException("Could not reconcile the configured Startup shortcut state.");
         if (commandLine.ConfigureOnly)
         {
@@ -2294,7 +2254,7 @@ class Program
         try
         {
             nextProfile = LoadRuntimeProfile();
-            if (!InstallStartupShortcut(nextProfile.RunAtStartup))
+            if (!ReconcileStartup())
                 throw new IOException("Could not reconcile the configured Startup shortcut state.");
         }
         catch (Exception ex)

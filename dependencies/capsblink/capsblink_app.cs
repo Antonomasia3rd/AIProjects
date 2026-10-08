@@ -218,7 +218,7 @@ class CapsLockLight
             throw new IOException("Could not persist the command-line setting batch.");
 
         RuntimeSettings initialSettings = LoadRuntimeSettings();
-        ReconcileStartup(initialSettings.RunAtStartup);
+        ReconcileStartup();
         if (commandLine.ConfigureOnly)
         {
             Console.WriteLine("Settings saved to " + iniPath + ".");
@@ -516,7 +516,7 @@ class CapsLockLight
             { DropdownKey, "true" }
         };
 
-        foreach (KeyValuePair<string, string> rawSetting in ManagedIniFile.LoadSection(iniFile))
+        foreach (KeyValuePair<string, string> rawSetting in ManagedIniFile.LoadSection(iniFile, false))
         {
             string rawKey = rawSetting.Key;
             string key = CanonicalSettingName(rawKey);
@@ -543,66 +543,38 @@ class CapsLockLight
     {
         if (settings == null || settings.Count == 0)
         {
-            EnsureIniFile();
+            ManagedIniFile.EnsureExists(iniFile);
             return true;
         }
 
-        Dictionary<string, string> normalized;
         try
         {
-            normalized = NormalizeSettingBatch(settings);
+            BuildStartupConfiguration().Save(NormalizeSettingBatch(settings));
+            return true;
         }
         catch (Exception ex)
         {
-            Log("Could not validate setting batch: " + ex.Message);
+            Log("Could not commit setting batch: " + ex.Message);
             return false;
         }
+    }
 
-        string startupValue;
-        if (!normalized.TryGetValue(StartupKey, out startupValue))
-            return SaveIniOptions(normalized);
-
-        bool startupDesired = startupValue.Equals("true", StringComparison.Ordinal);
-        Dictionary<string, string> previousSettings = null;
-        string transactionError;
-        bool committed = ManagedStartupShortcut.CommitIniCoupledState(
-            startupShortcut,
-            startupDesired,
-            delegate(out bool previousConfigured, out string snapshotError)
+    static ManagedConfigurationStartup BuildStartupConfiguration()
+    {
+        return new ManagedConfigurationStartup(iniFile, startupShortcut,
+            LoadEffectiveSettingValues,
+            delegate(IDictionary<string, string> changes)
             {
-                previousConfigured = false;
-                snapshotError = null;
-                try
-                {
-                    Dictionary<string, string> effective = LoadEffectiveSettingValues();
-                    previousConfigured = effective[StartupKey].Equals(
-                        "true",
-                        StringComparison.Ordinal);
-                    previousSettings = new Dictionary<string, string>(
-                        StringComparer.OrdinalIgnoreCase);
-                    foreach (KeyValuePair<string, string> setting in normalized)
-                        previousSettings[setting.Key] = effective[setting.Key];
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    snapshotError = "Could not capture the previous settings: " + ex.Message;
-                    return false;
-                }
+                string error;
+                if (!SaveIniOptions(NormalizeSettingBatch(changes), out error))
+                    throw new IOException(error ?? "Could not save the setting batch.");
             },
-            delegate(out string persistenceError)
+            delegate(IDictionary<string, string> changes)
             {
-                return SaveIniOptions(normalized, out persistenceError);
-            },
-            delegate(out string rollbackError)
-            {
-                return SaveIniOptions(previousSettings, out rollbackError);
-            },
-            out transactionError);
-        if (!committed)
-            Log("Could not commit Startup/INI transaction: " +
-                (transactionError ?? "unknown error"));
-        return committed;
+                // CapsBlink fields have no cross-field constraints. Validate
+                // the changes without blocking repair of an invalid old value.
+                NormalizeSettingBatch(changes);
+            });
     }
 
     static Dictionary<string, string> NormalizeSettingBatch(IDictionary<string, string> settings)
@@ -634,16 +606,9 @@ class CapsLockLight
         return saved;
     }
 
-    static void ReconcileStartup(bool desired)
+    static void ReconcileStartup()
     {
-        bool previous;
-        string error;
-        if (!ManagedStartupShortcut.SetDesiredState(
-            startupShortcut,
-            desired,
-            out previous,
-            out error))
-            throw new IOException("Could not reconcile Startup: " + (error ?? "unknown error"));
+        BuildStartupConfiguration().Reconcile();
     }
 
     static void HardwareWorker(RuntimeSettings initialSettings)
@@ -754,7 +719,7 @@ class CapsLockLight
                 }
                 try
                 {
-                    ReconcileStartup(reloaded.RunAtStartup);
+                    ReconcileStartup();
                 }
                 catch (Exception ex)
                 {

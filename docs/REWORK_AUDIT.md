@@ -613,8 +613,8 @@ case remain in `microsoft-submission-receipt.json`; do not submit a duplicate.
   acquired Startup first, then INI, and held through validation, snapshot,
   persistence and rollback. Exact original bytes/encoding/comments or missing
   file state can be restored. Cooperating writers wait until rollback finishes.
-  This mutex does not coordinate arbitrary external editors. Existing older
-  DNS/Caps/ASUS adapters still need adoption of the extended scope.
+  This mutex does not coordinate arbitrary external editors. The older
+  DNS/Caps/ASUS adapters adopted this scope in the October 8 continuation below.
 - Fixed a shared disable-path defect: disabling an enabled preference with an
   absent shortcut no longer tries to install the old launch path first.
   Disabled reconciliation also removes owned shortcuts with obsolete arguments.
@@ -651,3 +651,52 @@ Startup adapters to the shared persistence scope; continue the remaining
 common-surface/standalone/service gaps. Preserve the intermittent renderer
 failure and capture state at an actual recurrence rather than declaring a
 passing rerun a fix. All original requirements are still not complete.
+
+## Shared managed Startup continuation, 2026-10-08
+
+- DNSAutoUpdate, CapsBlink and AsusBlink now use the existing shared
+  configuration/Startup adapter. Removed their duplicated effective-key
+  rollback code. A failed shortcut transaction restores exact original INI
+  bytes or original absence while retaining the cooperating-writer lock.
+- Validation and previous-state reads no longer create a default INI as a
+  side effect of a failed enable operation. Ordinary non-Startup settings
+  also hold the shared INI scope through validation and publication.
+- Startup reconciliation on launch/reload now rechecks the saved preference
+  after acquiring Startup then INI locks, instead of applying a stale runtime
+  snapshot. Existing resident launch arguments and per-user Startup location
+  are preserved. This does not coordinate arbitrary external editors.
+- Regression fixtures inject only the shortcut platform and redirect INI
+  paths into generated temporary directories. They cover exact UTF-16
+  rollback, absent profiles, rejected enable, failed removal, complete-batch
+  commits, lock retention/release, ordinary settings, and stale reloads.
+  The managed suite passes **274 checks** after a clean Defender custom scan;
+  all three product builds pass warnings-as-errors compilation. Real Startup,
+  DNS, hardware, and resident app entry points were not exercised.
+- Review found ChromeProfileCounter forwards arguments but does not parse
+  them; it still always enters its PowerShell menu. A shared C# engine now
+  passes **220 synthetic checks** after a clean Defender scan. It preserves
+  digit-only edits, the path-scoped mutex and exact-byte backups. It rejects
+  ambiguous target properties and malformed UTF-8/16/32, and rechecks browser
+  observations/text before replacement. It is not wired into the launcher.
+  C# reuses the managed configuration ecosystem for the next migration stage;
+  it does not introduce runtime plugin DLLs or claim C++ language parity.
+- The old global counter regex could select a same-valued unrelated field
+  when escapes obscure the real target property. The current PowerShell code
+  now proves its selected span changes the parsed profile counter; its fixtures
+  pass in PowerShell 5.1 and 7. The C# engine additionally records the exact
+  decoded property path and detects duplicate target keys before parsing can
+  collapse them. Chrome does not take the tool's mutex, so keep it closed;
+  final rechecks narrow but cannot eliminate races with external writers.
+- Independent review found no new Startup lock-order inversion. It identified
+  a retained repair gap: DNS/Caps/ASUS normalize saved fields before a new batch
+  can replace them, so malformed saved Startup values can still block CLI
+  repair. Their readers/validators need the shared prospective-value repair
+  semantics already used by PhotoCollage and TaskSchedulerMigration.
+- The user deferred further Microsoft portal checks on October 8 because
+  recent builds are no longer detected. Preserve the last verified case result
+  and historic incident; do not require sign-in for continued code work.
+
+Remaining: Chrome/YouTube Music common surfaces; retained-donor retirement;
+service Startup policy; opt-in security conversion after functional work;
+visible tray and target-Windows shell/layout acceptance; unresolved exact
+renderer intermittency. The full original request remains incomplete.

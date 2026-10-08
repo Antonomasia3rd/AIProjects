@@ -22,6 +22,7 @@ if errorlevel 1 exit /b %ERRORLEVEL%
   "%REPO%\dependencies\managed_logging.cs" ^
   "%REPO%\dependencies\managed_ini.cs" ^
   "%REPO%\dependencies\managed_startup_shortcut.cs" ^
+  "%REPO%\dependencies\managed_configuration_startup.cs" ^
   "%REPO%\dependencies\managed_tray.cs" ^
   "%REPO%\dependencies\capsblink\capsblink_app.cs" ^
   "%ROOT%capsblink.cs"
