@@ -1,9 +1,9 @@
 # Product surface inventory
 
 This inventory records actual host and configuration surfaces. Every project
-remains in scope for the requested INI/CLI/tray/Startup contract; services and
-other hosts may need an interactive companion. Missing surfaces are unfinished
-work, not exceptions. See [the requirements review](REVIEW_2026-09-30.md).
+remains in scope for the requested INI/CLI/tray/Startup contract except Windhawk
+mods, which the user explicitly excluded on 2026-10-08. Services and other hosts
+may need an interactive companion. See [the requirements review](REVIEW_2026-09-30.md).
 
 ## Resident desktop apps
 
@@ -32,14 +32,15 @@ All of these use the shared tooltip policy. Native apps call `RegisterTrayIcon` 
 | TaskSchedulerMigration | Task Scheduler utility with optional configuration tray | CLI, shared INI profile/editor and per-user Startup preference | Startup wiring has injected tests; real-folder and visible tray acceptance remain open. Sign-in never invokes a migration. |
 | ChromeProfileCounter | One-shot PowerShell script | Dependency-backed legacy wrapper and interactive menu | Needs an explicit profile and a companion before it can share the common desktop surface; it must not edit Chrome data at sign-in. |
 | YouTubeMusicMigrate | One-shot PowerShell utility | Dependency engines with compatibility entries; script parameters and product-root auth/config/cache files | Source extraction preserves the explicit data root and original argument set; inert wrapper tests pass in PowerShell 5.1 and 7. INI/tray/Startup, language parity and live-account behavior validation remain open. |
-| WindhawkMods and LockScreenWin10 | Windhawk host modules | Windhawk settings and lifecycle | Windhawk owns loading and startup. A separate interactive companion or DesktopStub source would be needed for the common surface. |
+| WindhawkMods, including LockScreenWin10 | Windhawk host modules | Windhawk settings and lifecycle | Explicit user-approved exception: retain under `legacy/WindhawkMods` as-is. No dependency extraction or separate INI/tray/Startup companion is required. |
 
-The rows above are open migration work. They do not authorize registry Run keys, scheduled tasks, per-machine startup, or hidden destructive login actions. Any new resident companion must use the existing per-user `shell:startup` helper, and packaged companions may expose the separately named StartupTask control.
+Except for the Windhawk exception, unfinished rows above are open migration work. They do not authorize registry Run keys, scheduled tasks, per-machine startup, or hidden destructive login actions. Any new resident companion must use the existing per-user `shell:startup` helper, and packaged companions may expose the separately named StartupTask control.
 
-The existing registry-notification and SecureDesktopLauncher installers still
-select automatic SCM service startup. That does not meet the stated folder-only
-rule for ordinary startup; service-host lifecycle migration remains open along
-with the missing interactive controls. No service exception has been approved.
+Registry-notification and SecureDesktopLauncher installers now select manual
+SCM startup. Existing installations are not changed by a source update.
+Interactive controls and per-user Startup-folder companions remain open work;
+manual service installation is not a replacement for the common user surface.
+No general service exception has been approved.
 
 ## Consolidation order
 

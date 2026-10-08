@@ -84,7 +84,7 @@ moved, oversized, malformed, writable, or redirected INI prevents startup.
 ```text
 --help       Show command help without changing the system.
 --version    Show the executable version without changing the system.
---install    Register this protected Program Files copy as an automatic service.
+--install    Register this protected Program Files copy as a manually started service.
 --uninstall  Remove only a same-name LocalSystem service pointing to this exact executable.
 ```
 

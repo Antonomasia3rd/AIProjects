@@ -717,3 +717,28 @@ warnings-as-errors compilation. Incomplete repairs and failed shortcut removal
 leave the original invalid profile unchanged; successful repair supports normal
 later Startup changes. This closes the malformed-profile repair gap recorded
 above. No resident entry point, hardware, DNS or real Startup entry was used.
+
+## User scope clarification, 2026-10-08
+
+Windhawk mods are an explicit exception to the dependencies and common-control
+migration. Keep them as-is under `legacy/WindhawkMods`, with Windhawk managing
+their configuration and loading. The user clarified that `legacy` contains
+both not-yet-migrated projects and projects that cannot be migrated. Earlier
+audit suggestions to extract Windhawk bodies, generate source, or add a control
+companion are retired; they are not open gaps. Existing mod files are unchanged.
+
+## Service installation startup correction, 2026-10-08
+
+The registry-notification host and SecureDesktopLauncher now request manual
+(demand) SCM startup when installing services. SecureDesktopLauncher also
+sets manual startup when explicitly updating an existing service. Neither
+installer creates an automatic service as a second startup mechanism. Existing
+services on this laptop were not inspected or changed. The managed installer
+retains its create-only behavior; an already-installed service needs deliberate
+operator migration, not a silent side effect of downloading new source.
+
+Both managed service overlays compile with warnings as errors; all 54 shared
+service source checks pass after a clean scan. The native service passes MSVC
+syntax compilation and its updated source contracts pass after a clean scan.
+No service executable was run, installed, started, or stopped. This fixes the
+installer start type; the interactive INI/tray/per-user Startup host gap remains.

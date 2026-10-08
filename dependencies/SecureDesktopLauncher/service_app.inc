@@ -1550,7 +1550,7 @@ static int InstallService()
         kServiceDisplayName,
         SERVICE_ALL_ACCESS,
         SERVICE_WIN32_OWN_PROCESS,
-        SERVICE_AUTO_START,
+        SERVICE_DEMAND_START,
         SERVICE_ERROR_NORMAL,
         serviceBinaryPath.c_str(),
         nullptr,
@@ -1570,7 +1570,7 @@ static int InstallService()
                 configured = ChangeServiceConfigW(
                     service,
                     SERVICE_WIN32_OWN_PROCESS,
-                    SERVICE_AUTO_START,
+                    SERVICE_DEMAND_START,
                     SERVICE_ERROR_NORMAL,
                     serviceBinaryPath.c_str(),
                     nullptr,

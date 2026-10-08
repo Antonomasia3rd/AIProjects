@@ -794,7 +794,9 @@ public static class ManagedPrivilegedServiceHost
     private const uint ServiceAllAccess = 0x000F01FF;
     private const uint DeleteAccess = 0x00010000;
     private const uint ServiceWin32OwnProcess = 0x00000010;
-    private const uint ServiceAutoStart = 0x00000002;
+    // Installation must not create a second automatic startup mechanism.
+    // An explicit service install remains manually started by its operator.
+    private const uint ServiceDemandStart = 0x00000003;
     private const uint ServiceErrorNormal = 0x00000001;
     private const uint ServiceConfigDescription = 1;
     private const int ErrorServiceDoesNotExist = 1060;
@@ -993,7 +995,7 @@ public static class ManagedPrivilegedServiceHost
                     displayName,
                     ServiceAllAccess,
                     ServiceWin32OwnProcess,
-                    ServiceAutoStart,
+                    ServiceDemandStart,
                     ServiceErrorNormal,
                     binaryPath,
                     null,

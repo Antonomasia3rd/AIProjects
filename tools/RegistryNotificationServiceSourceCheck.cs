@@ -44,6 +44,12 @@ static class RegistryNotificationServiceSourceCheck
                 "deleted notification keys fall back to root watching",
                 shared,
                 "if (running)\n                EnsureRootWatcher(sid);");
+            Require("service installation is manually started", shared,
+                "private const uint ServiceDemandStart = 0x00000003;");
+            Require("service installer uses manual start", shared,
+                "ServiceWin32OwnProcess,\n                    ServiceDemandStart,");
+            if (shared.Contains("ServiceAutoStart"))
+                throw new InvalidOperationException("Service installation must not request automatic SCM startup.");
             Require(
                 "service stop uses one aggregate timeout",
                 shared,

@@ -73,7 +73,7 @@ rem Create C:\Program Files\SecureDesktopLauncher\SecureDesktopLauncher.ini from
 sc start SecureDesktopLauncher
 ```
 
-If the service exists, `install` updates the binary path and display name.
+Installation selects manual (demand) service startup. If the service exists, `install` updates the binary path, display name, and start type to manual. The service is not an automatic sign-in mechanism; per-user Startup-folder controls belong to the interactive host. Existing installed services are not changed merely by downloading or building this source.
 
 Command-line inspection is side-effect free:
 
