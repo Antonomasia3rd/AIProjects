@@ -1,72 +1,100 @@
 [CmdletBinding()]
-param([string]$RepositoryRoot = (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))))
+param([string]$RepositoryRoot)
 $ErrorActionPreference = 'Stop'
-$sourcePath = Join-Path $RepositoryRoot 'dependencies/ChromeProfileCounter/chrome_profile_counter_app.ps1'
-$tokens = $null; $errors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$tokens, [ref]$errors)
-if ($errors.Count) { throw ($errors | Out-String) }
-
-# Load only named function definitions. Never evaluate product initialization,
-# the interactive loop, real Chrome process discovery, or explorer launch.
-$wanted = @('Get-StateText', 'Get-CounterMatch', 'Set-CounterInText', 'Get-DiskProfiles',
-    'Get-RegisteredProfiles', 'New-LocalStateBackupPath', 'Write-LocalStateAtomically')
-foreach ($name in $wanted) {
-    $definition = $ast.Find({ param($node)
-        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
-    }, $false)
-    if ($null -eq $definition) { throw "Missing fixture function: $name" }
-    . ([scriptblock]::Create($definition.Extent.Text))
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+    $RepositoryRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 }
-function Test-ChromeRunning { return $false }
-function Require([bool]$condition, [string]$message) {
-    if (-not $condition) { throw $message }
-}
-function Require-Throws([scriptblock]$action, [string]$message) {
-    $threw = $false
-    try { & $action | Out-Null } catch { $threw = $true }
-    Require $threw $message
+$checks = 0
+function Require([bool]$condition, [string]$description) {
+    $script:checks++
+    if (-not $condition) { throw $description }
 }
 
-$fixture = '{"profile":{"profiles_created":4,"info_cache":{"Profile 3":{}}},"other":"keep this"}'
-$updated = Set-CounterInText $fixture 8
-Require ($updated -ceq $fixture.Replace('"profiles_created":4', '"profiles_created":8')) 'Only the exact counter may change.'
-Require ((Get-RegisteredProfiles $fixture).ContainsKey(3)) 'Registered profile was lost.'
-Require-Throws { Set-CounterInText '{"profile":{"profiles_created":4},"other":{"profiles_created":9}}' 8 } 'Ambiguous counters must be rejected.'
-Require-Throws { Get-RegisteredProfiles '{invalid' } 'Unreadable registration must not become an empty list.'
-Require-Throws { Set-CounterInText $fixture 0 } 'Zero counter must be rejected.'
-Require-Throws { Get-CounterMatch '{"profile":{"profiles_created":2147483648}}' } 'Overflowing counter must be rejected.'
-Require-Throws { Set-CounterInText '{"profile":{"profiles\u005fcreated":4},"other":{"profiles_created":4}}' 8 } 'An escaped target must not redirect the edit to an unrelated field.'
-Require-Throws { Set-CounterInText '{"profile":{"profiles_created":4,"profiles\u005fcreated":4}}' 8 } 'A hidden effective counter must not leave the edited field ineffective.'
-$escapedProfile = '{"pro\u0066ile":{"profiles_created":4},"other":{"count":4}}'
-Require ((Set-CounterInText $escapedProfile 8) -ceq $escapedProfile.Replace('"profiles_created":4', '"profiles_created":8')) 'Escaping the profile container must preserve the exact counter edit.'
+. (Join-Path $RepositoryRoot 'dependencies/powershell_native_launcher.ps1')
+$cases = @(
+    @('', '""'),
+    @('plain', '"plain"'),
+    @('two words', '"two words"'),
+    @('C:\path with spaces\', '"C:\path with spaces\\"'),
+    @('say"yes', '"say\"yes"'),
+    @('a\"b', '"a\\\"b"'),
+    @('a\\"b', '"a\\\\\"b"'),
+    @('日本語', '"日本語"')
+)
+foreach ($case in $cases) {
+    Require ((ConvertTo-AipNativeArgument $case[0]) -ceq $case[1]) "Argument encoding failed: $($case[0])"
+}
 
-$root = Join-Path ([IO.Path]::GetTempPath()) ('AIProjects-ChromeFixture-' + [Guid]::NewGuid().ToString('N'))
-$fixtureParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
-$root = [IO.Path]::GetFullPath($root)
-if ([IO.Path]::GetDirectoryName($root) -ne $fixtureParent) { throw 'Fixture must remain inside the temporary parent.' }
-$UserData = $root
-$LocalState = Join-Path $root 'Local State'
-$BackupDir = Join-Path $root 'Backups'
+$parent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
+$root = Join-Path $parent ('AIProjects-ChromeWrapper-' + [Guid]::NewGuid().ToString('N'))
+$oldLocation = Get-Location
 try {
-    [IO.Directory]::CreateDirectory((Join-Path $root 'Profile 2')) | Out-Null
-    [IO.Directory]::CreateDirectory((Join-Path $root 'Profile 7')) | Out-Null
-    $disk = Get-DiskProfiles
-    Require ($disk.ContainsKey(2) -and $disk.ContainsKey(7) -and $disk.Count -eq 2) 'Disk profile matches must not share stale regex capture state.'
-    # Windows named-mutex and replace behavior is tested only on Windows.
-    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-        [IO.File]::WriteAllText($LocalState, $fixture)
-        $backup = Write-LocalStateAtomically $updated $fixture
-        Require ([IO.File]::ReadAllText($backup) -ceq $fixture) 'Backup must be the exact replaced file.'
-        Require ([IO.File]::ReadAllText($LocalState) -ceq $updated) 'Atomic change must publish the updated text.'
-        Require-Throws { Write-LocalStateAtomically $fixture $fixture } 'A stale edit must be rejected.'
-        Require ([IO.File]::ReadAllText($LocalState) -ceq $updated) 'A stale edit must leave the file unchanged.'
-        Require (@(Get-ChildItem -LiteralPath $root -Filter '*.tmp' -Force).Count -eq 0) 'Temporary state file leaked.'
+    [IO.Directory]::CreateDirectory($root) | Out-Null
+    Set-Location -LiteralPath $root
+    $fixtureProcess = New-Object PSObject -Property @{ ExitCode = 23; Waited = $false; Disposed = $false }
+    $fixtureProcess | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { $this.Waited = $true }
+    $fixtureProcess | Add-Member -MemberType ScriptMethod -Name Dispose -Value { $this.Disposed = $true }
+    $expected = @('--show-config', '--ini', 'folder with spaces/profile.ini', '--user-data', 'C:\path with spaces\', '', 'a"b', '$literal; value')
+    $script:observedInfo = $null
+    $code = Invoke-AipNativeExecutable -ExecutablePath (Join-Path $root 'unused.exe') -ArgumentList $expected -StartProcess {
+        param($info)
+        $script:observedInfo = $info
+        return $fixtureProcess
     }
-} finally {
-    if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($root)) -ne $fixtureParent -or
-        -not [IO.Path]::GetFileName($root).StartsWith('AIProjects-ChromeFixture-')) {
-        throw 'Refusing cleanup outside the generated fixture directory.'
-    }
-    if ([IO.Directory]::Exists($root)) { [IO.Directory]::Delete($root, $true) }
+    Require ($code -eq 23 -and $fixtureProcess.Waited -and $fixtureProcess.Disposed) 'Shared launcher lost the child exit code, wait, or disposal.'
+    Require ($script:observedInfo.WorkingDirectory -eq $root -and -not $script:observedInfo.UseShellExecute) 'Shared launcher ignored the current filesystem working directory.'
+    Require ($script:observedInfo.Arguments -ceq (($expected | ForEach-Object { ConvertTo-AipNativeArgument $_ }) -join ' ')) 'Shared launcher lost argument order or values.'
+    $fixtureProcess.Disposed = $false
+    $fixtureProcess | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { throw 'Injected wait failure.' } -Force
+    $failed = $false
+    try { Invoke-AipNativeExecutable -ExecutablePath (Join-Path $root 'unused.exe') -StartProcess { return $fixtureProcess } | Out-Null } catch { $failed = $true }
+    Require ($failed -and $fixtureProcess.Disposed) 'Wait failure leaked the process wrapper or hid the error.'
+    $failed = $false
+    try { Invoke-AipNativeExecutable -ExecutablePath (Join-Path $root 'unused.exe') -StartProcess { return $null } | Out-Null } catch { $failed = $true }
+    Require $failed 'A failed process start must report an error.'
+
+    # Copy the real wrapper unchanged. Only the selected helper is replaced by
+    # an inert fixture; the .exe placeholders below are never executed.
+    $wrapper = Join-Path $root 'ChromeProfileCounter.ps1'
+    [IO.File]::Copy((Join-Path $RepositoryRoot 'legacy/ChromeProfileCounter/ChromeProfileCounter.ps1'), $wrapper)
+    $stub = @'
+function Invoke-AipNativeExecutable {
+    param([string]$ExecutablePath, [string[]]$ArgumentList)
+    $global:ChromeWrapperFixtureArguments = @($ArgumentList)
+    $global:ChromeWrapperFixtureExecutable = $ExecutablePath
+    return 23
 }
-Write-Output 'ChromeProfileCounter synthetic tests passed.'
+'@
+    [IO.File]::WriteAllText((Join-Path $root 'powershell_native_launcher.ps1'), $stub)
+    $child = Join-Path $root 'ChromeProfileCounter.exe'
+    [IO.File]::WriteAllText($child, 'inert placeholder, never executed')
+    $global:LASTEXITCODE = 99
+    & $wrapper @expected
+    Require ($LASTEXITCODE -eq 23) 'Wrapper returned a stale exit code instead of the child result.'
+    Require ($global:ChromeWrapperFixtureExecutable -eq $child) 'Wrapper failed to prefer the sibling release executable.'
+    Require ($global:ChromeWrapperFixtureArguments.Count -eq $expected.Count) 'Wrapper lost an argument.'
+    for ($index = 0; $index -lt $expected.Count; ++$index) {
+        Require ($global:ChromeWrapperFixtureArguments[$index] -ceq $expected[$index]) "Forwarded argument $index was changed."
+    }
+    [IO.File]::Delete($child)
+    $build = Join-Path $root 'build'
+    [IO.Directory]::CreateDirectory($build) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $build 'ChromeProfileCounter.exe'), 'inert placeholder, never executed')
+    & $wrapper --version
+    Require ($LASTEXITCODE -eq 23 -and $global:ChromeWrapperFixtureExecutable -eq (Join-Path $build 'ChromeProfileCounter.exe')) 'Checkout build fallback was not used.'
+    [IO.File]::Move((Join-Path $root 'powershell_native_launcher.ps1'), (Join-Path $build 'powershell_native_launcher.ps1'))
+    & $wrapper --help
+    Require ($LASTEXITCODE -eq 23 -and $global:ChromeWrapperFixtureArguments[0] -eq '--help') 'Folder-preserving release helper fallback was not used.'
+    [IO.File]::Delete((Join-Path $build 'ChromeProfileCounter.exe'))
+    $failed = $false
+    try { & $wrapper --help } catch { $failed = $_.Exception.Message.Contains('is missing') }
+    Require $failed 'Missing executable must fail clearly without compiling or using an old engine.'
+} finally {
+    Set-Location -LiteralPath $oldLocation.ProviderPath
+    Remove-Variable -Name ChromeWrapperFixtureArguments,ChromeWrapperFixtureExecutable -Scope Global -ErrorAction SilentlyContinue
+    $resolved = [IO.Path]::GetFullPath($root)
+    if ([IO.Path]::GetDirectoryName($resolved) -ne $parent -or
+        -not [IO.Path]::GetFileName($resolved).StartsWith('AIProjects-ChromeWrapper-')) { throw 'Unsafe wrapper fixture cleanup path.' }
+    if ([IO.Directory]::Exists($resolved)) { [IO.Directory]::Delete($resolved, $true) }
+}
+Write-Output "ChromeProfileCounter wrapper/helper: $checks checks passed. Only inert process/helper fixtures were used."

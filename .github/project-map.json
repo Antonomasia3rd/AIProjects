@@ -8,10 +8,21 @@
     "artifactPath": "legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe",
     "skipKey": "AllowContentAboveLock",
     "dependencyPaths": [
-      "dependencies/registry_notification_service.cs"
+      "dependencies/registry_notification_service.cs",
+      "dependencies/registry_notification_app.cs",
+      "dependencies/build_registry_notification_app.cmd",
+      "dependencies/managed_named_objects.cs",
+      "dependencies/managed_ini.cs",
+      "dependencies/managed_profile.cs",
+      "dependencies/managed_tray.cs",
+      "dependencies/managed_configuration_tray.cs",
+      "dependencies/managed_configuration_startup.cs",
+      "dependencies/managed_startup_shortcut.cs"
     ],
     "artifactPaths": [
-      "legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe"
+      "legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe",
+      "legacy/AllowContentAboveLock/README.md",
+      "legacy/AllowContentAboveLock/AllowContentAboveLock.example.ini"
     ]
   },
   {
@@ -84,10 +95,21 @@
     "artifactPath": "legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe",
     "skipKey": "YourPhoneHideBanner",
     "dependencyPaths": [
-      "dependencies/registry_notification_service.cs"
+      "dependencies/registry_notification_service.cs",
+      "dependencies/registry_notification_app.cs",
+      "dependencies/build_registry_notification_app.cmd",
+      "dependencies/managed_named_objects.cs",
+      "dependencies/managed_ini.cs",
+      "dependencies/managed_profile.cs",
+      "dependencies/managed_tray.cs",
+      "dependencies/managed_configuration_tray.cs",
+      "dependencies/managed_configuration_startup.cs",
+      "dependencies/managed_startup_shortcut.cs"
     ],
     "artifactPaths": [
-      "legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe"
+      "legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe",
+      "legacy/YourPhoneHideBanner/README.md",
+      "legacy/YourPhoneHideBanner/YourPhoneHideBanner.example.ini"
     ]
   },
   {
@@ -151,6 +173,33 @@
     "artifactPaths": [
       "legacy/NowPlayingTile/build/NowPlayingTile.exe",
       "legacy/NowPlayingTile/README.md"
+    ]
+  },
+  {
+    "key": "ChromeProfileCounter",
+    "label": "ChromeProfileCounter",
+    "folder": "legacy/ChromeProfileCounter",
+    "buildOutput": "build_chrome_profile_counter",
+    "artifactName": "ChromeProfileCounter",
+    "artifactPath": "legacy/ChromeProfileCounter/build/ChromeProfileCounter.exe",
+    "skipKey": "ChromeProfileCounter",
+    "dependencyPaths": [
+      "dependencies/powershell_native_launcher.ps1",
+      "dependencies/managed_named_objects.cs",
+      "dependencies/managed_ini.cs",
+      "dependencies/managed_profile.cs",
+      "dependencies/managed_tray.cs",
+      "dependencies/managed_configuration_tray.cs",
+      "dependencies/managed_configuration_startup.cs",
+      "dependencies/managed_startup_shortcut.cs",
+      "dependencies/ChromeProfileCounter"
+    ],
+    "artifactPaths": [
+      "legacy/ChromeProfileCounter/build/ChromeProfileCounter.exe",
+      "legacy/ChromeProfileCounter/build/powershell_native_launcher.ps1",
+      "legacy/ChromeProfileCounter/README.md",
+      "legacy/ChromeProfileCounter/ChromeProfileCounter.example.ini",
+      "legacy/ChromeProfileCounter/ChromeProfileCounter.ps1"
     ]
   },
   {

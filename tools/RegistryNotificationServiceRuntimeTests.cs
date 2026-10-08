@@ -79,6 +79,7 @@ static class RegistryNotificationServiceRuntimeTests
     private static void VerifyLoggingParser()
     {
         ExpectLogging("default logging", "[Settings]\r\n", true);
+        ExpectLogging("shared editor quoted dialect", "[Settings]\n\"LoggingEnabled\" = \"off\" ; saved by tray\n", false);
         ExpectLogging(
             "disabled logging alias",
             "[Settings]\r\nLoggingEnabled=off\r\n",

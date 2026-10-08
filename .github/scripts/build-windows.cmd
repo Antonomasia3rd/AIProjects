@@ -40,6 +40,10 @@ call :Section "Test legacy utility guardrails"
 call "%REPO%\tools\TestLegacyUtilities.cmd"
 if errorlevel 1 goto Fail
 
+call :Section "Test Chrome profile configuration and engine"
+call "%REPO%\tools\TestChromeProfileCounter.cmd"
+if errorlevel 1 goto Fail
+
 call :BuildAllowContentAboveLock || goto Fail
 call :BuildADBController || goto Fail
 call :BuildAsusBlink || goto Fail
@@ -49,6 +53,7 @@ call :BuildDiscordRPC || goto Fail
 call :BuildDNSAutoUpdate || goto Fail
 call :BuildNowPlayingTile || goto Fail
 call :BuildPhotoCollage || goto Fail
+call :BuildChromeProfileCounter || goto Fail
 call :BuildDesktopStub || goto Fail
 call :BuildCharmTray || goto Fail
 call :BuildSecureDesktopLauncher || goto Fail
@@ -74,9 +79,13 @@ call :Section "Build AllowContentAboveLock"
 call :RequireCsc
 if errorlevel 1 exit /b %ERRORLEVEL%
 if not exist "%LEGACY%\AllowContentAboveLock\build" mkdir "%LEGACY%\AllowContentAboveLock\build"
-call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\AllowContentAboveLock\build\AllowContentAboveLock.exe" "%REPO%\dependencies\registry_notification_service.cs" "%LEGACY%\AllowContentAboveLock\AllowContentAboveLock.cs"
+call :Run cmd.exe /d /c "%LEGACY%\AllowContentAboveLock\BuildAllowContentAboveLock.cmd"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\AllowContentAboveLock\build\AllowContentAboveLock.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\AllowContentAboveLock\README.md"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\AllowContentAboveLock\AllowContentAboveLock.example.ini"
 exit /b %ERRORLEVEL%
 
 :BuildADBController
@@ -138,9 +147,13 @@ call :Section "Build YourPhoneHideBanner"
 call :RequireCsc
 if errorlevel 1 exit /b %ERRORLEVEL%
 if not exist "%LEGACY%\YourPhoneHideBanner\build" mkdir "%LEGACY%\YourPhoneHideBanner\build"
-call :Run "%CSC%" /nologo /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%LEGACY%\YourPhoneHideBanner\build\YourPhoneHideBanner.exe" "%REPO%\dependencies\registry_notification_service.cs" "%LEGACY%\YourPhoneHideBanner\YourPhoneHideBanner.cs"
+call :Run cmd.exe /d /c "%LEGACY%\YourPhoneHideBanner\BuildYourPhoneHideBanner.cmd"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\YourPhoneHideBanner\build\YourPhoneHideBanner.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\YourPhoneHideBanner\README.md"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\YourPhoneHideBanner\YourPhoneHideBanner.example.ini"
 exit /b %ERRORLEVEL%
 
 :BuildDiscordRPC
@@ -204,6 +217,26 @@ set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
 call :RecordArtifact "%LEGACY%\PhotoCollage\build\PhotoCollage.exe"
+exit /b %ERRORLEVEL%
+
+:BuildChromeProfileCounter
+call :IsSkipped ChromeProfileCounter
+if "!SKIP_RESULT!"=="1" exit /b 0
+call :Section "Build ChromeProfileCounter"
+pushd "%LEGACY%\ChromeProfileCounter" || exit /b 1
+call :Run cmd.exe /d /c BuildChromeProfileCounter.cmd
+set "STATUS=%ERRORLEVEL%"
+popd
+if not "%STATUS%"=="0" exit /b %STATUS%
+call :RecordArtifact "%LEGACY%\ChromeProfileCounter\build\ChromeProfileCounter.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\ChromeProfileCounter\build\powershell_native_launcher.ps1"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\ChromeProfileCounter\README.md"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\ChromeProfileCounter\ChromeProfileCounter.example.ini"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\ChromeProfileCounter\ChromeProfileCounter.ps1"
 exit /b %ERRORLEVEL%
 
 :BuildDesktopStub

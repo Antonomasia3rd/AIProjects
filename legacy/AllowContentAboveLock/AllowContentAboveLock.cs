@@ -15,9 +15,10 @@ public static class AllowContentAboveLockProgram
                 "AllowContentAboveLock",
                 1));
 
+    [STAThread]
     public static int Main(string[] args)
     {
-        return ManagedPrivilegedServiceHost.Run(
+        return ManagedRegistryNotificationApp.Run(
             args,
             "AllowContentAboveLockService",
             "Allow content above the lock screen",

@@ -9,7 +9,9 @@ using System.Drawing;
 namespace AIProjects.Dependencies
 {
     // Products provide configuration data and their existing validated writer.
-    // This host has no job callback: opening it cannot run a utility operation.
+    // Utility products leave the resident callbacks unset, so opening their
+    // configuration never runs a utility job. Resident products explicitly
+    // declare a disposable session after the profile mutex has been acquired.
     public sealed class ManagedConfigurationTraySpec
     {
         public string ProductName;
@@ -18,6 +20,9 @@ namespace AIProjects.Dependencies
         public Func<Dictionary<string, string>> ReadSettings;
         public Action<IDictionary<string, string>> SaveSettings;
         public ManagedConfigurationStartup Startup;
+        public Func<IDisposable> OpenResidentSession;
+        public Action ReloadResidentSession;
+        public Func<string> ResidentStatus;
     }
 
     public sealed class ManagedConfigurationEditor
@@ -88,6 +93,7 @@ namespace AIProjects.Dependencies
                 try
                 {
                     Application.EnableVisualStyles();
+                    using (IDisposable resident = spec.OpenResidentSession == null ? null : spec.OpenResidentSession())
                     using (var context = new ApplicationContext())
                     using (var menu = new ContextMenu())
                     {
@@ -109,6 +115,7 @@ namespace AIProjects.Dependencies
                             {
                                 try
                                 {
+                                    if (showError && spec.ReloadResidentSession != null) spec.ReloadResidentSession();
                                     spec.Startup.Reconcile();
                                     var state = spec.Startup.ReadState();
                                     if (!String.IsNullOrEmpty(state.Error)) throw new IOException(state.Error);
@@ -150,9 +157,21 @@ namespace AIProjects.Dependencies
                         menu.MenuItems.Add(new MenuItem("Exit", delegate { context.ExitThread(); }));
                         NotifyIcon tray = ManagedTrayBaseline.CreateNotifyIcon(
                             SystemIcons.Application, spec.ProductName + " - " + Path.GetFileName(spec.IniPath), spec.ProductName, menu);
+                        using (var statusTimer = new System.Windows.Forms.Timer { Interval = 1000 })
                         try
                         {
                             tray.DoubleClick += delegate { edit(); };
+                            if (spec.ResidentStatus != null)
+                            {
+                                Action updateStatus = delegate
+                                {
+                                    try { tray.Text = ManagedTrayBaseline.NormalizeTooltip(spec.ProductName + " - " + spec.ResidentStatus(), spec.ProductName); }
+                                    catch (Exception ex) { Console.Error.WriteLine("Tray status: " + ex.Message); }
+                                };
+                                statusTimer.Tick += delegate { updateStatus(); };
+                                updateStatus();
+                                statusTimer.Start();
+                            }
                             Application.Run(context);
                         }
                         finally { ManagedTrayBaseline.DisposeNotifyIcon(ref tray); }

@@ -1,5 +1,51 @@
 # YourPhoneHideBanner
 
+Suppresses matching Phone Link notification banners and sounds for the signed-in user.
+
+The default is a current-user tray app. It runs from a normal user folder,
+needs no service installation or administrator rights, and does not enumerate
+other users' notification hives. The product overlay supplies its policy;
+`dependencies/registry_notification_app.cs` owns configuration and the tray,
+and the shared registry engine owns watching and typed updates.
+
+Build with `BuildYourPhoneHideBanner.cmd`, then run `build\YourPhoneHideBanner.exe`.
+`--tray` explicitly chooses the same mode. Use **Settings** for every preference:
+
+```ini
+[Settings]
+Enabled=1
+LoggingEnabled=1
+RunAtStartup=0
+```
+
+`Enabled=0` stops enforcement; it does not restore registry values already
+changed. Windows notification settings remain editable while enforcement is
+disabled. Logging writes diagnostics to the app console, not the service event
+log. The hover text reports activity and errors; **Reload configuration** retries
+failed watching or applies manually edited settings. Closing the tray stops
+its watcher threads.
+
+```powershell
+.\build\YourPhoneHideBanner.exe --ini .\personal.ini --configure-only --set Enabled=0
+.\build\YourPhoneHideBanner.exe --ini .\personal.ini --show-config
+.\build\YourPhoneHideBanner.exe --ini .\personal.ini --startup
+.\build\YourPhoneHideBanner.exe --ini .\personal.ini --no-startup
+```
+
+Startup uses only this user's Startup folder and starts `--tray --ini` for the
+selected profile. `--configure-only`, help/version and configuration inspection
+do not start watchers, access notification keys or change Startup. `--enable`
+and `--disable` are persistent aliases; combine them with `--configure-only`
+to edit without running a tray. An invalid profile remains editable in the
+tray; complete replacement batches are validated before saving.
+
+## Optional legacy all-user service
+
+The remainder describes only the explicitly installed, manually started
+compatibility service. Its protected-path requirements do not apply to normal
+current-user tray mode. Existing installed services are not removed or changed
+by the new executable; stop/uninstall the old service deliberately before using
+only the current-user host, to avoid two enforcers changing the same keys.
 Windows service that watches Phone Link notification registry entries for
 loaded users and suppresses matching notification banners and sounds.
 
@@ -36,7 +82,7 @@ From this folder:
 
 ```cmd
 mkdir build 2>nul
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /warn:4 /warnaserror+ /target:exe /optimize+ /out:build\YourPhoneHideBanner.exe /r:System.ServiceProcess.dll ..\..\dependencies\registry_notification_service.cs YourPhoneHideBanner.cs
+BuildYourPhoneHideBanner.cmd
 ```
 
 The installed Windows service name is `YourPhoneHideBannerService`.

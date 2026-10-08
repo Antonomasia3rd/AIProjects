@@ -1224,6 +1224,49 @@ public abstract class RegistryNotificationServiceBase : ServiceBase
     private volatile bool loggingEnabled = true;
     private ManagedPrivilegedPathPin executablePin;
     private ManagedPrivilegedPathPin configurationPin;
+    private Action<string> currentUserLog;
+
+    // Current-user operation does not enter the service's LocalSystem or
+    // protected-path lifecycle. Windows access checks bound it to this user.
+    public void StartForCurrentUser(bool logging, Action<string> report)
+    {
+        lock (watcherLock)
+        {
+            if (watcherThreads.Exists(thread => thread.IsAlive))
+                throw new InvalidOperationException("Previous registry watchers are still stopping.");
+            watcherThreads.Clear();
+            watchedSids.Clear();
+            watchedRootSids.Clear();
+        }
+        currentUserLog = report ?? delegate { };
+        loggingEnabled = logging;
+        string sid;
+        using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+        {
+            if (identity.User == null) throw new InvalidOperationException("The current user SID is unavailable.");
+            sid = identity.User.Value;
+        }
+        if (!IsLoadedUserSid(sid))
+            throw new InvalidOperationException("Current-user mode requires an interactive user account.");
+        stopEvent.Reset();
+        running = true;
+        try
+        {
+            if (!StartWatcher(delegate { TryAttachUser(sid); }))
+                throw new InvalidOperationException("The current-user registry watcher could not start.");
+        }
+        catch { StopWatchers(10000); throw; }
+    }
+
+    public void StopCurrentUser()
+    {
+        StopWatchers(10000);
+        lock (watcherLock)
+        {
+            if (watcherThreads.Exists(thread => thread.IsAlive))
+                throw new IOException("Registry watchers are still stopping; retry before restarting the policy.");
+        }
+    }
 
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern int RegNotifyChangeKeyValue(
@@ -1757,6 +1800,15 @@ public abstract class RegistryNotificationServiceBase : ServiceBase
     {
         lock (logLock)
         {
+            if (currentUserLog != null)
+            {
+                if (loggingEnabled || LooksLikeWarning(message))
+                {
+                    try { currentUserLog(message); }
+                    catch { }
+                }
+                return;
+            }
             if (LooksLikeWarning(message))
             {
                 ManagedServiceEventLog.Warning(ServiceName, message);
@@ -1778,88 +1830,21 @@ public abstract class RegistryNotificationServiceBase : ServiceBase
 
     internal static bool ParseLoggingSetting(string contents)
     {
-        if (contents == null)
-            throw new ArgumentNullException("contents");
-
-        string currentSection = "";
-        bool logging = true;
-        using (StringReader reader = new StringReader(contents))
+        try
         {
-            string rawLine;
-            while ((rawLine = reader.ReadLine()) != null)
-            {
-                string line = rawLine.Trim();
-                if (line.Length == 0 ||
-                    line.StartsWith(";") ||
-                    line.StartsWith("#"))
-                    continue;
-
-                bool startsSection = line.StartsWith("[");
-                bool endsSection = line.EndsWith("]");
-                if (startsSection || endsSection)
-                {
-                    if (!startsSection || !endsSection)
-                    {
-                        throw new InvalidOperationException(
-                            "Malformed section header in the protected " +
-                            "service configuration: " + line);
-                    }
-                    currentSection =
-                        line.Substring(1, line.Length - 2).Trim();
-                    continue;
-                }
-                if (!currentSection.Equals(
-                    "Settings",
-                    StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                int equals = line.IndexOf('=');
-                if (equals <= 0)
-                {
-                    throw new InvalidOperationException(
-                        "Malformed assignment in [Settings] in the protected " +
-                        "service configuration: " + line);
-                }
-
-                string name = line.Substring(0, equals).Trim();
-                if (!IsValidSettingName(name))
-                {
-                    throw new InvalidOperationException(
-                        "Invalid setting name in [Settings] in the protected " +
-                        "service configuration: " + name);
-                }
-                if (!name.Equals(
-                    "LoggingEnabled",
-                    StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                bool parsed;
-                string value = line.Substring(equals + 1).Trim();
-                if (!TryParseBool(value, out parsed))
-                {
-                    throw new InvalidOperationException(
-                        "Invalid [Settings] LoggingEnabled value in " +
-                        "the protected service configuration: " + value);
-                }
-                // Match the repository INI baseline: when an assignment is
-                // duplicated, the last assignment is the effective value.
-                logging = parsed;
-            }
+            var settings = AIProjects.Dependencies.ManagedIniFile.ParseSectionText(contents, "Settings");
+            string value;
+            if (!settings.TryGetValue("LoggingEnabled", out value)) return true;
+            bool parsed;
+            if (!TryParseBool(value, out parsed))
+                throw new InvalidOperationException("Invalid [Settings] LoggingEnabled value in the protected service configuration: " + value);
+            return parsed;
         }
-        return logging;
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidOperationException("Invalid protected service configuration: " + ex.Message, ex);
+        }
     }
-
-    private static bool IsValidSettingName(string name)
-    {
-        return !String.IsNullOrWhiteSpace(name) &&
-            name.Equals(name.Trim(), StringComparison.Ordinal) &&
-            !name.StartsWith(";") &&
-            !name.StartsWith("#") &&
-            name.IndexOfAny(new char[] {
-                '\r', '\n', '\0', '=', '[', ']'
-            }) < 0;
-    }
-
     private static bool TryParseBool(string value, out bool parsed)
     {
         if (value == "1" ||

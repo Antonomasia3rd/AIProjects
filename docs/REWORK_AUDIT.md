@@ -742,3 +742,48 @@ service source checks pass after a clean scan. The native service passes MSVC
 syntax compilation and its updated source contracts pass after a clean scan.
 No service executable was run, installed, started, or stopped. This fixes the
 installer start type; the interactive INI/tray/per-user Startup host gap remains.
+
+## Chrome product migration and current-user policy hosts, 2026-10-08
+
+- ChromeProfileCounter is now a compiled C# overlay using shared INI/profile,
+  configuration editor/tray and per-user Startup components. All passive modes
+  return before worker construction. Explicit repair preserves review, typed
+  confirmation (or a transient `--yes`), exact backups and the old menu actions.
+  The duplicate PowerShell runtime was removed. Its optional compatibility
+  entry uses `powershell_native_launcher.ps1`, fixing PowerShell 5 loss of
+  empty arguments and paths ending in a backslash. Redirected output is UTF-8.
+- Chrome gates: **220 engine checks**, **89 product adapter checks**, and **27
+  wrapper/helper checks in each of PowerShell 5.1 and 7** pass. Fresh compiled
+  product/fixture scans are clean. Passive subprocess tests preserve Japanese,
+  spaces, trailing backslashes, empty arguments and child exit codes. No real
+  browser data, process discovery, Startup entry or visible tray ran.
+- The user approved current-user tray apps as the default for the two
+  notification-policy tools, retaining explicit manual services for compatibility.
+  AllowContentAboveLock and YourPhoneHideBanner now share a resident host, INI
+  settings, CLI/editor/tray and per-profile Startup-folder launch. Their normal
+  runtime selects only the current user's SID and does not enter LocalSystem,
+  protected-path or all-user enumeration code. No service install is required.
+- The shared configuration tray has opt-in disposable resident callbacks;
+  utility products leave them unset. Session creation occurs only after the
+  profile mutex is acquired. Exit disposes the session; settings saves and
+  explicit reload update it. Status/error hover text uses the common policy.
+  Watcher errors permit explicit retry, while pending stop never starts another
+  watcher. Disabling stops enforcement; it does not revert prior registry values.
+- Notification checks: **53 injected app checks** and **56 source checks** pass;
+  both products compile with warnings as errors. Tests covered persistence,
+  malformed profile repair, passive-mode isolation, Startup arguments, watcher
+  error visibility, stop failure, retry, disposal and shared quoted INI parsing.
+  No real notification keys, services or Startup entries were changed. Manual
+  service configuration now consumes the same INI parser as the editor, while
+  retaining its existing explicit privileged-mode path requirements.
+- Chrome is promoted from the source-only map to binary/release ownership;
+  map and selector validation pass for **15 projects plus All**. Releases include
+  example INIs and instructions for the new desktop surfaces.
+
+Active next work: the existing worker is migrating YouTube Music's 47 parameter
+surface into a typed INI/CLI/tray frontend without account/network execution.
+It must preserve explicit arguments separately from defaults and keep setup's
+identity writes consistent with the INI. Remaining larger items include
+SecureDesktopLauncher's interactive host, donor retirement/integration details,
+NowPlaying artwork/Startup policy, deferred security-default work, and the exact
+four-pixel renderer intermittency. Windhawk extraction is not an open task.

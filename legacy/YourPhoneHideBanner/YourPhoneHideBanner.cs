@@ -16,9 +16,10 @@ public static class YourPhoneHideBannerProgram
             RegistryNotificationValuePolicy.Dword("ShowBanner", 0),
             RegistryNotificationValuePolicy.String("SoundFile", ""));
 
+    [STAThread]
     public static int Main(string[] args)
     {
-        return ManagedPrivilegedServiceHost.Run(
+        return ManagedRegistryNotificationApp.Run(
             args,
             "YourPhoneHideBannerService",
             "Hide Phone Link notification banners",

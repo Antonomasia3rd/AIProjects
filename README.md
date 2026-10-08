@@ -10,12 +10,12 @@ or declarative policy.
 
 | Folder | Runtime | Purpose |
 | --- | --- | --- |
-| `legacy/AllowContentAboveLock` | C# Windows service | Keeps notification `AllowContentAboveLock` registry values enabled for loaded users. |
+| `legacy/AllowContentAboveLock` | C# tray app; optional manual service | Current-user notification policy with shared INI/CLI/tray/Startup controls. |
 | `legacy/ADBController` | C++ Win32 GUI app | Direct ADB-over-TCP TV controller that keeps the ADB server running while switching selected TVs. |
 | `legacy/asusblink` | C# tray/console app | ASUS ACPI LED controller for mic LED, keyboard backlight states, and HDD-activity keyboard patterns. |
 | `legacy/capsblink` | C# tray app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
 | `legacy/CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
-| `legacy/ChromeProfileCounter` | PowerShell utility | Compatibility wrapper for the dependency-backed Chrome profile-counter repair tool. |
+| `legacy/ChromeProfileCounter` | C# desktop utility | Shared INI/CLI/configuration tray and per-user Startup; explicit, confirmed Chrome profile-counter repair. |
 | `DesktopStub` | C++ Win32 tray app | Builds `DesktopStub.exe`, a Live Tile generator: wallpaper by default, or ordered content with image/wallpaper backgrounds and RSS/custom/SMTC/Caps Lock text; see `docs/content-engine.md`. Also a loose Appx registrar. |
 | `DiscordRPC` | C++ Win32 tray/console app | Discord Rich Presence app with Discord IPC, Gateway transport, DPAPI token storage, dynamic placeholders, and a tray config UI. |
 | `legacy/DNSAutoUpdate` | C# DNS updater | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
@@ -26,7 +26,7 @@ or declarative policy.
 | `legacy/TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
 | `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
 | `legacy/WindhawkMods/LockScreenWin10` | Windhawk research mod | Windows 10 lock-screen styling and XAML investigation sources. |
-| `legacy/YourPhoneHideBanner` | C# Windows service | Suppresses Phone Link notification banners and sounds for loaded users. |
+| `legacy/YourPhoneHideBanner` | C# tray app; optional manual service | Suppresses the current user's Phone Link banners/sounds with shared INI/CLI/tray/Startup controls. |
 | `legacy/YouTubeMusicMigrate` | PowerShell utility | Compatibility entries for dependency-backed YouTube Music tidy/migration tooling. |
 
 ## Prebuilt Releases

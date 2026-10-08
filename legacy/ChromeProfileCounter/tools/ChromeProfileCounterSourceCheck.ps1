@@ -1,50 +1,36 @@
 [CmdletBinding()]
-param(
-    [string]$RepositoryRoot = (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))
-)
-
-$ErrorActionPreference = "Stop"
-$sourcePath = Join-Path (Join-Path (Join-Path $RepositoryRoot "dependencies") "ChromeProfileCounter") "chrome_profile_counter_app.ps1"
-$wrapperPath = Join-Path (Join-Path (Join-Path $RepositoryRoot "legacy") "ChromeProfileCounter") "ChromeProfileCounter.ps1"
-
-foreach ($path in @($sourcePath, $wrapperPath)) {
-    if (-not (Test-Path -LiteralPath $path)) {
-        throw "Missing ChromeProfileCounter source: $path"
-    }
-    $tokens = $null
-    $errors = $null
-    [System.Management.Automation.Language.Parser]::ParseFile(
-        $path,
-        [ref]$tokens,
-        [ref]$errors) | Out-Null
-    if ($errors.Count -ne 0) {
-        throw ("PowerShell parser errors in {0}: {1}" -f $path, (($errors | ForEach-Object { $_.Message }) -join "; "))
-    }
+param([string]$RepositoryRoot)
+$ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+    $RepositoryRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 }
-
-$source = Get-Content -LiteralPath $sourcePath -Raw
-$wrapper = Get-Content -LiteralPath $wrapperPath -Raw
-$required = @(
-    "function New-LocalStateBackupPath",
-    "function Write-LocalStateAtomically",
-    "[IO.File]::Replace(`$temporary, `$LocalState, `$backup)",
-    "function Set-CounterInText",
-    "break ChromeMenu",
-    "Chrome started before Local State could be replaced"
-)
-foreach ($text in $required) {
-    if (-not $source.Contains($text)) {
-        throw "ChromeProfileCounter is missing the expected atomic-write contract: $text"
-    }
+$product = Join-Path $RepositoryRoot 'legacy/ChromeProfileCounter'
+$wrapper = Join-Path $product 'ChromeProfileCounter.ps1'
+$helper = Join-Path $RepositoryRoot 'dependencies/powershell_native_launcher.ps1'
+foreach ($sourcePath in @($wrapper, $helper)) {
+    $tokens = $null; $errors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$tokens, [ref]$errors) | Out-Null
+    if ($errors.Count) { throw ($errors | Out-String) }
 }
-if ($source -match '\[IO\.File\]::WriteAllText\(\s*\$LocalState') {
-    throw "ChromeProfileCounter still writes Local State directly."
+$engine = [IO.File]::ReadAllText((Join-Path $RepositoryRoot 'dependencies/ChromeProfileCounter/chrome_profile_counter_engine.cs'))
+$app = [IO.File]::ReadAllText((Join-Path $RepositoryRoot 'dependencies/ChromeProfileCounter/chrome_profile_counter_app.cs'))
+$launcher = [IO.File]::ReadAllText($wrapper)
+foreach ($contract in @('File.Replace(temporary, destination, backup)', 'Func<bool> isBrowserRunning', 'span.Start', 'span.Length', 'new UTF8Encoding(false, true)')) {
+    if (-not $engine.Contains($contract)) { throw "Missing compiled engine contract: $contract" }
 }
-if (-not $wrapper.Contains("& `$implementation @args")) {
-    throw "ChromeProfileCounter legacy launcher does not forward to dependencies."
+foreach ($contract in @('ManagedProfile.ResolveSettings', 'ManagedIniFile.SaveSectionBatch', 'ManagedConfigurationTray.Run', 'new ManagedConfigurationStartup(', 'ManagedConfigurationStartup.BuildShortcut')) {
+    if (-not $app.Contains($contract)) { throw "Missing shared product wiring: $contract" }
 }
-if ($wrapper.Contains("`$LASTEXITCODE")) {
-    throw "ChromeProfileCounter legacy launcher must not return a stale host exit code."
+if (-not $launcher.Contains('Invoke-AipNativeExecutable -ExecutablePath $implementation -ArgumentList $args') -or
+    -not $launcher.Contains('dependencies/powershell_native_launcher.ps1') -or
+    -not $launcher.Contains('exit $nativeExitCode') -or
+    -not $launcher.Contains('build/ChromeProfileCounter.exe')) {
+    throw 'Compatibility launcher must forward arguments, report the current child exit code, and support checkout builds.'
 }
-
-Write-Host "ChromeProfileCounter source checks passed."
+if (Test-Path -LiteralPath (Join-Path $RepositoryRoot 'dependencies/ChromeProfileCounter/chrome_profile_counter_app.ps1')) {
+    throw 'The duplicate PowerShell runtime engine was not retired.'
+}
+foreach ($relative in @('ChromeProfileCounter.cs', 'ChromeProfileCounter.example.ini', 'BuildChromeProfileCounter.cmd')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $product $relative) -PathType Leaf)) { throw "Missing product overlay: $relative" }
+}
+Write-Output 'ChromeProfileCounter compiled-source and compatibility launcher checks passed.'

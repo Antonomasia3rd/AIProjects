@@ -178,6 +178,16 @@ namespace AIProjects.Dependencies
             return LoadSection(spec, true);
         }
 
+        // Parse already-read configuration (for example a retained service
+        // file handle) with exactly the same dialect as the desktop editor.
+        public static Dictionary<string, string> ParseSectionText(string contents, string section)
+        {
+            if (contents == null) throw new ArgumentNullException("contents");
+            if (String.IsNullOrWhiteSpace(section) || section.IndexOfAny(new[] { '\r', '\n', '\0', '[', ']' }) >= 0)
+                throw new ArgumentException("A valid INI section is required.", "section");
+            return ParseTargetSection(new ManagedIniFileSpec { SectionName = section }, SplitLines(contents));
+        }
+
         // Inspection and one-shot commands can read defaults without requiring
         // a writable install directory or creating an INI as a side effect.
         public static Dictionary<string, string> LoadSection(ManagedIniFileSpec spec, bool createIfMissing)

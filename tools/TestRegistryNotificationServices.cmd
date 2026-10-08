@@ -22,16 +22,16 @@ if errorlevel 1 goto Fail
 "%CHECKER%" "%REPO%"
 if errorlevel 1 goto Fail
 
-"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /main:RegistryNotificationServiceRuntimeTests /r:System.ServiceProcess.dll /out:"%RUNTIME%" "%REPO%\dependencies\registry_notification_service.cs" "%REPO%\tools\RegistryNotificationServiceRuntimeTests.cs"
+"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /main:RegistryNotificationServiceRuntimeTests /r:System.ServiceProcess.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /out:"%RUNTIME%" "%REPO%\dependencies\managed_ini.cs" "%REPO%\dependencies\managed_named_objects.cs" "%REPO%\dependencies\registry_notification_service.cs" "%REPO%\tools\RegistryNotificationServiceRuntimeTests.cs"
 if errorlevel 1 goto Fail
 
 "%RUNTIME%"
 if errorlevel 1 goto Fail
 
-"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%ALLOW%" "%REPO%\dependencies\registry_notification_service.cs" "%REPO%\legacy\AllowContentAboveLock\AllowContentAboveLock.cs"
+"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /r:System.ServiceProcess.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /out:"%ALLOW%" "%REPO%\dependencies\managed_ini.cs" "%REPO%\dependencies\managed_named_objects.cs" "%REPO%\dependencies\registry_notification_service.cs" "%REPO%\dependencies\registry_notification_app.cs" "%REPO%\dependencies\managed_profile.cs" "%REPO%\dependencies\managed_tray.cs" "%REPO%\dependencies\managed_configuration_tray.cs" "%REPO%\dependencies\managed_configuration_startup.cs" "%REPO%\dependencies\managed_startup_shortcut.cs" "%REPO%\legacy\AllowContentAboveLock\AllowContentAboveLock.cs"
 if errorlevel 1 goto Fail
 
-"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /r:System.ServiceProcess.dll /out:"%PHONE%" "%REPO%\dependencies\registry_notification_service.cs" "%REPO%\legacy\YourPhoneHideBanner\YourPhoneHideBanner.cs"
+"%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /r:System.ServiceProcess.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /out:"%PHONE%" "%REPO%\dependencies\managed_ini.cs" "%REPO%\dependencies\managed_named_objects.cs" "%REPO%\dependencies\registry_notification_service.cs" "%REPO%\dependencies\registry_notification_app.cs" "%REPO%\dependencies\managed_profile.cs" "%REPO%\dependencies\managed_tray.cs" "%REPO%\dependencies\managed_configuration_tray.cs" "%REPO%\dependencies\managed_configuration_startup.cs" "%REPO%\dependencies\managed_startup_shortcut.cs" "%REPO%\legacy\YourPhoneHideBanner\YourPhoneHideBanner.cs"
 if errorlevel 1 goto Fail
 
 "%ALLOW%" --help >"%OUTPUT%" 2>&1
@@ -41,7 +41,7 @@ if errorlevel 1 goto Fail
 
 "%ALLOW%" --version >"%OUTPUT%" 2>&1
 if errorlevel 1 goto Fail
-findstr /c:"AllowContentAboveLockService 1.0.0.0" "%OUTPUT%" >nul
+findstr /c:"AllowContentAboveLock 1.0.0.0" "%OUTPUT%" >nul
 if errorlevel 1 goto Fail
 
 "%PHONE%" --help >"%OUTPUT%" 2>&1
@@ -51,7 +51,7 @@ if errorlevel 1 goto Fail
 
 "%PHONE%" --version >"%OUTPUT%" 2>&1
 if errorlevel 1 goto Fail
-findstr /c:"YourPhoneHideBannerService 1.0.0.0" "%OUTPUT%" >nul
+findstr /c:"YourPhoneHideBanner 1.0.0.0" "%OUTPUT%" >nul
 if errorlevel 1 goto Fail
 
 rem No sibling INI exists, so this must fail during protected-path validation
@@ -75,6 +75,8 @@ if exist "%PHONE_INI%" goto Fail
 if exist "%PHONE_LOG%" goto Fail
 
 echo Registry notification service binary checks passed.
+call "%~dp0TestRegistryNotificationApp.cmd"
+if errorlevel 1 goto Fail
 set "STATUS=0"
 goto Cleanup
 

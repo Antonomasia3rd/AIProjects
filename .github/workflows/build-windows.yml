@@ -23,6 +23,7 @@ on:
           - DNSAutoUpdate
           - NowPlayingTile
           - PhotoCollage
+          - ChromeProfileCounter
           - DesktopStub
           - CharmTray
           - SecureDesktopLauncher
@@ -71,6 +72,7 @@ jobs:
       build_dns_auto_update: ${{ steps.detect.outputs.build_dns_auto_update }}
       build_now_playing_tile: ${{ steps.detect.outputs.build_now_playing_tile }}
       build_photo_collage: ${{ steps.detect.outputs.build_photo_collage }}
+      build_chrome_profile_counter: ${{ steps.detect.outputs.build_chrome_profile_counter }}
       build_desktop_stub: ${{ steps.detect.outputs.build_desktop_stub }}
       build_charm_tray: ${{ steps.detect.outputs.build_charm_tray }}
       build_secure_desktop_launcher: ${{ steps.detect.outputs.build_secure_desktop_launcher }}
@@ -182,7 +184,10 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: AllowContentAboveLock
-          path: legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe
+          path: |
+            legacy/AllowContentAboveLock/build/AllowContentAboveLock.exe
+            legacy/AllowContentAboveLock/README.md
+            legacy/AllowContentAboveLock/AllowContentAboveLock.example.ini
           if-no-files-found: error
 
       - name: Upload ADBController artifact
@@ -217,7 +222,10 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: YourPhoneHideBanner
-          path: legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe
+          path: |
+            legacy/YourPhoneHideBanner/build/YourPhoneHideBanner.exe
+            legacy/YourPhoneHideBanner/README.md
+            legacy/YourPhoneHideBanner/YourPhoneHideBanner.example.ini
           if-no-files-found: error
 
       - name: Upload DiscordRPC artifact
@@ -252,6 +260,19 @@ jobs:
         with:
           name: PhotoCollage
           path: legacy/PhotoCollage/build/PhotoCollage.exe
+          if-no-files-found: error
+
+      - name: Upload ChromeProfileCounter artifact
+        if: needs.detect-projects.outputs.build_chrome_profile_counter == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ChromeProfileCounter
+          path: |
+            legacy/ChromeProfileCounter/build/ChromeProfileCounter.exe
+            legacy/ChromeProfileCounter/build/powershell_native_launcher.ps1
+            legacy/ChromeProfileCounter/README.md
+            legacy/ChromeProfileCounter/ChromeProfileCounter.example.ini
+            legacy/ChromeProfileCounter/ChromeProfileCounter.ps1
           if-no-files-found: error
 
       - name: Upload DesktopStub artifact

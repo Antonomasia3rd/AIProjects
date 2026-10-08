@@ -69,11 +69,11 @@ static class RegistryNotificationServiceSourceCheck
             Require(
                 "protected INI duplicates use the repository last-value rule",
                 shared,
-                "logging = parsed;");
+                "ManagedIniFile.ParseSectionText(contents, \"Settings\")");
             Require(
                 "malformed protected Settings assignments fail closed",
                 shared,
-                "Malformed assignment in [Settings]");
+                "catch (InvalidDataException ex)");
             RequireOrderAfter(
                 "HKEY_USERS notifications are armed before enumeration",
                 shared,
@@ -131,15 +131,22 @@ static class RegistryNotificationServiceSourceCheck
             Require(
                 "AllowContent uses the shared service command host",
                 allow,
-                "return ManagedPrivilegedServiceHost.Run(");
+                "return ManagedRegistryNotificationApp.Run(");
             Require(
                 "Phone Link uses the shared service command host",
                 phone,
-                "return ManagedPrivilegedServiceHost.Run(");
+                "return ManagedRegistryNotificationApp.Run(");
             Require(
                 "both service entry points accept explicit commands",
                 allow + phone,
                 "Main(string[] args)");
+            int userStart = shared.IndexOf("public void StartForCurrentUser(", StringComparison.Ordinal);
+            int userEnd = shared.IndexOf("public void StopCurrentUser()", userStart, StringComparison.Ordinal);
+            string userMode = shared.Substring(userStart, userEnd - userStart);
+            Require("user mode uses the caller's SID", userMode, "WindowsIdentity.GetCurrent()");
+            Require("user mode attaches only that SID", userMode, "TryAttachUser(sid)");
+            if (userMode.Contains("WatchUsersRoot") || userMode.Contains("AcquireRuntimeTrust") || userMode.Contains("Registry.Users.GetSubKeyNames"))
+                throw new InvalidOperationException("Current-user mode must not enter the privileged all-user lifecycle.");
             RequireOrderAfter(
                 "runtime trust is established before registry watcher startup",
                 shared,
