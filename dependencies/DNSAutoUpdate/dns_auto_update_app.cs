@@ -626,6 +626,11 @@ static class DNSAutoUpdate
 
     static Dictionary<string, string> LoadEffectiveSettingValues()
     {
+        return LoadEffectiveSettingValues(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    static Dictionary<string, string> LoadEffectiveSettingValues(IDictionary<string, string> changes)
+    {
         Dictionary<string, string> values = DefaultSettingValues();
         foreach (KeyValuePair<string, string> rawSetting in ManagedIniFile.LoadSection(iniFile, false))
         {
@@ -634,7 +639,9 @@ static class DNSAutoUpdate
                 throw new InvalidDataException("Unknown [Settings] key: " + rawSetting.Key);
             try
             {
-                values[key] = NormalizeSettingValue(key, rawSetting.Value);
+                string replacement;
+                values[key] = NormalizeSettingValue(key,
+                    changes.TryGetValue(key, out replacement) ? replacement : rawSetting.Value);
             }
             catch (ArgumentException ex)
             {
@@ -643,6 +650,7 @@ static class DNSAutoUpdate
                     ex);
             }
         }
+        foreach (var setting in changes) values[setting.Key] = NormalizeSettingValue(setting.Key, setting.Value);
         return values;
     }
 
@@ -724,7 +732,7 @@ static class DNSAutoUpdate
     static ManagedConfigurationStartup BuildStartupConfiguration()
     {
         return new ManagedConfigurationStartup(iniFile, startupShortcut,
-            LoadEffectiveSettingValues,
+            delegate { return ManagedConfigurationStartup.ReadPreference(iniFile, CanonicalSettingName); },
             delegate(IDictionary<string, string> changes)
             {
                 string error;
@@ -736,9 +744,7 @@ static class DNSAutoUpdate
 
     static void ValidateEffectiveSettingBatch(IDictionary<string, string> settings)
     {
-        Dictionary<string, string> effective = LoadEffectiveSettingValues();
-        foreach (KeyValuePair<string, string> setting in NormalizeSettingBatch(settings))
-            effective[setting.Key] = setting.Value;
+        Dictionary<string, string> effective = LoadEffectiveSettingValues(NormalizeSettingBatch(settings));
         OptionsFromValues(effective);
     }
 

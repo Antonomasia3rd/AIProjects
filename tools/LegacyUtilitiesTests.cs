@@ -418,6 +418,32 @@ static class LegacyUtilitiesTests
                     File.WriteAllText(ini, "[Settings]\nRunAtStartup=false\n");
                     InvokePrivate(product, "ReconcileStartup", new object[0]);
                     Check(!platform.LaunchExists, product.Name + " reload applies the current saved Startup preference");
+
+                    File.WriteAllText(ini, "; retain invalid original on failure\r\n[Settings]\r\nRunAtStartup=broken\r\n" + key + "=invalid\r\n", Encoding.Unicode);
+                    byte[] invalidOriginal = File.ReadAllBytes(ini);
+                    platform.RejectEnable = false; platform.LaunchExists = true; platform.ExactLaunch = true;
+                    int beforeInvalid = platform.Commits;
+                    Check(!save(new Dictionary<string, string> { { key, first } }) && platform.Commits == beforeInvalid &&
+                        invalidOriginal.SequenceEqual(File.ReadAllBytes(ini)),
+                        product.Name + " an incomplete repair leaves the invalid profile untouched");
+                    platform.FailRemovals = 1;
+                    Check(!save(new Dictionary<string, string> { { "RunAtStartup", "false" }, { key, first } }) &&
+                        invalidOriginal.SequenceEqual(File.ReadAllBytes(ini)) && platform.LaunchExists,
+                        product.Name + " failed repair restores exact invalid bytes and the observed launch state");
+                    Check(save(new Dictionary<string, string> { { "RunAtStartup", "true" }, { key, second } }) &&
+                        ManagedIniFile.LoadSection(profile, false)["RunAtStartup"] == "true" &&
+                        ManagedIniFile.LoadSection(profile, false)[key] == second && platform.LaunchExists,
+                        product.Name + " a complete batch repairs invalid Startup and ordinary saved values together");
+                    Check(save(new Dictionary<string, string> { { "RunAtStartup", "false" } }) && !platform.LaunchExists,
+                        product.Name + " repaired profile supports normal later Startup changes");
+                    if (legacy != null)
+                    {
+                        File.WriteAllText(ini, "[Options]\nRunStartup=invalid\nErrorRetry=invalid\nno-tray=invalid\n");
+                        Check(save(new Dictionary<string, string> {
+                            { "RunAtStartup", "false" }, { "ErrorRetry", "3" }, { "ShowTrayIcon", "true" }
+                        }) && save(new Dictionary<string, string> { { "ErrorRetry", "4" } }),
+                            "ASUS modern settings repair and override invalid legacy values on future loads");
+                    }
                     Check(!Directory.GetFiles(root, ".AIProjects-*.tmp").Any(), product.Name + " transaction leaves no staging files");
                 }
                 finally
@@ -1236,7 +1262,7 @@ static class LegacyUtilitiesTests
             "asusblink supports user-scoped, cross-session profile reload and exit control");
         Check(
             source.Contains("BuildRuntimeProfile(prospective)") &&
-            source.Contains("ReadEffectiveIniOptions(out ignoredLegacy)") &&
+            source.Contains("ReadEffectiveIniOptions(out ignoredLegacy, NormalizeSettingBatch(changes))") &&
             source.Contains("Duplicate semantic [Settings] key:"),
             "asusblink validates the complete prospective profile before persistent mutation");
         Check(

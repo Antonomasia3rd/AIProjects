@@ -700,3 +700,20 @@ Remaining: Chrome/YouTube Music common surfaces; retained-donor retirement;
 service Startup policy; opt-in security conversion after functional work;
 visible tray and target-Windows shell/layout acceptance; unresolved exact
 renderer intermittency. The full original request remains incomplete.
+
+## Complete-profile repair continuation, 2026-10-08
+
+DNSAutoUpdate, CapsBlink and AsusBlink now apply replacement values before
+validating the prospective profile. A malformed saved Startup preference and
+ordinary setting can be repaired in one CLI/tray batch. Snapshot capture reads
+only the raw launch preference through the shared adapter, so unrelated old
+invalid fields cannot obstruct repair. Invalid old preferences use the observed
+shortcut state for rollback; the transaction still restores exact original
+bytes. ASUS modern settings also override invalid obsolete `[Options]` values
+on later loads, instead of letting an unused legacy value block every launch.
+
+The managed fixture suite passes **287 checks** after a fresh clean scan and
+warnings-as-errors compilation. Incomplete repairs and failed shortcut removal
+leave the original invalid profile unchanged; successful repair supports normal
+later Startup changes. This closes the malformed-profile repair gap recorded
+above. No resident entry point, hardware, DNS or real Startup entry was used.

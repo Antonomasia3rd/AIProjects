@@ -63,6 +63,25 @@ namespace AIProjects.Dependencies
             return values.TryGetValue(Key, out value) && NormalizeValue(value) == "1";
         }
 
+        // Capture just the raw launch preference. Validation of the prospective
+        // profile belongs to the caller's validator; parsing unrelated old
+        // values here would prevent a batch from repairing them.
+        public static Dictionary<string, string> ReadPreference(ManagedIniFileSpec ini,
+            Func<string, string> canonicalKey, ManagedIniFileSpec legacy = null)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var values = ManagedIniFile.LoadSection(ini, false);
+            foreach (var setting in values)
+            {
+                if (!String.Equals(canonicalKey(setting.Key), Key, StringComparison.OrdinalIgnoreCase)) continue;
+                if (result.ContainsKey(Key)) throw new InvalidDataException("Duplicate semantic Startup preference.");
+                result[Key] = setting.Value;
+            }
+            if (result.Count == 0 && legacy != null)
+                return ReadPreference(legacy, canonicalKey);
+            return result;
+        }
+
         public static string QuoteArgument(string value)
         {
             if (value == null || value.IndexOfAny(new[] { '\0', '\r', '\n' }) >= 0)

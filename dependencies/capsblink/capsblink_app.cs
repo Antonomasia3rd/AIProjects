@@ -507,6 +507,11 @@ class CapsLockLight
 
     static Dictionary<string, string> LoadEffectiveSettingValues()
     {
+        return LoadEffectiveSettingValues(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    static Dictionary<string, string> LoadEffectiveSettingValues(IDictionary<string, string> changes)
+    {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             { KeyboardTargetKey, DefaultKeyboardTargetPath },
@@ -524,13 +529,16 @@ class CapsLockLight
                 throw new InvalidDataException("Unknown [Settings] key: " + rawKey);
             try
             {
-                values[key] = NormalizeSettingValue(key, rawSetting.Value);
+                string replacement;
+                values[key] = NormalizeSettingValue(key,
+                    changes.TryGetValue(key, out replacement) ? replacement : rawSetting.Value);
             }
             catch (ArgumentException ex)
             {
                 throw new InvalidDataException("Invalid [Settings] " + rawKey + ": " + ex.Message, ex);
             }
         }
+        foreach (var setting in changes) values[setting.Key] = NormalizeSettingValue(setting.Key, setting.Value);
         return values;
     }
 
@@ -562,7 +570,7 @@ class CapsLockLight
     static ManagedConfigurationStartup BuildStartupConfiguration()
     {
         return new ManagedConfigurationStartup(iniFile, startupShortcut,
-            LoadEffectiveSettingValues,
+            delegate { return ManagedConfigurationStartup.ReadPreference(iniFile, CanonicalSettingName); },
             delegate(IDictionary<string, string> changes)
             {
                 string error;
@@ -571,9 +579,7 @@ class CapsLockLight
             },
             delegate(IDictionary<string, string> changes)
             {
-                // CapsBlink fields have no cross-field constraints. Validate
-                // the changes without blocking repair of an invalid old value.
-                NormalizeSettingBatch(changes);
+                LoadEffectiveSettingValues(NormalizeSettingBatch(changes));
             });
     }
 

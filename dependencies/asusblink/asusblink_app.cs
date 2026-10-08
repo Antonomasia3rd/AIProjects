@@ -657,6 +657,13 @@ class Program
     static Dictionary<string, string> ReadEffectiveIniOptions(
         out Dictionary<string, string> missingLegacy)
     {
+        return ReadEffectiveIniOptions(out missingLegacy,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    static Dictionary<string, string> ReadEffectiveIniOptions(
+        out Dictionary<string, string> missingLegacy, IDictionary<string, string> changes)
+    {
         missingLegacy = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, string> raw = ManagedIniFile.LoadSection(iniFile, false);
         Dictionary<string, string> legacy = ManagedIniFile.LoadSection(legacyIniFile, false);
@@ -674,7 +681,9 @@ class Program
             }
             try
             {
-                canonicalRaw[key] = NormalizeSettingValue(key, setting.Value);
+                string replacement;
+                canonicalRaw[key] = NormalizeSettingValue(key,
+                    changes.TryGetValue(key, out replacement) ? replacement : setting.Value);
             }
             catch (ArgumentException ex)
             {
@@ -684,8 +693,17 @@ class Program
             }
         }
 
-        Dictionary<string, string> canonicalLegacy =
-            NormalizeLegacySettingBatch(legacy);
+        // Modern settings (including this repair batch) override legacy keys.
+        // An obsolete invalid value must not block its valid replacement.
+        var relevantLegacy = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var setting in legacy)
+        {
+            string key = setting.Key.Equals("no-tray", StringComparison.OrdinalIgnoreCase)
+                ? ShowTrayKey : CanonicalSettingName(setting.Key);
+            if (key == null || (!canonicalRaw.ContainsKey(key) && !changes.ContainsKey(key)))
+                relevantLegacy[setting.Key] = setting.Value;
+        }
+        Dictionary<string, string> canonicalLegacy = NormalizeLegacySettingBatch(relevantLegacy);
         foreach (KeyValuePair<string, string> setting in canonicalLegacy)
         {
             if (!canonicalRaw.ContainsKey(setting.Key))
@@ -697,6 +715,8 @@ class Program
             values[setting.Key] = setting.Value;
         foreach (KeyValuePair<string, string> setting in canonicalRaw)
             values[setting.Key] = setting.Value;
+        foreach (var setting in changes)
+            values[setting.Key] = NormalizeSettingValue(setting.Key, setting.Value);
         return values;
     }
 
@@ -751,8 +771,7 @@ class Program
         return new ManagedConfigurationStartup(iniFile, startupShortcut,
             delegate
             {
-                Dictionary<string, string> ignoredLegacy;
-                return ReadEffectiveIniOptions(out ignoredLegacy);
+                return ManagedConfigurationStartup.ReadPreference(iniFile, CanonicalSettingName, legacyIniFile);
             },
             delegate(IDictionary<string, string> changes)
             {
@@ -763,9 +782,7 @@ class Program
             delegate(IDictionary<string, string> changes)
             {
                 Dictionary<string, string> ignoredLegacy;
-                Dictionary<string, string> prospective = ReadEffectiveIniOptions(out ignoredLegacy);
-                foreach (KeyValuePair<string, string> setting in NormalizeSettingBatch(changes))
-                    prospective[setting.Key] = setting.Value;
+                Dictionary<string, string> prospective = ReadEffectiveIniOptions(out ignoredLegacy, NormalizeSettingBatch(changes));
                 BuildRuntimeProfile(prospective);
             });
     }
