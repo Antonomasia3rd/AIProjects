@@ -175,6 +175,11 @@ jobs:
         shell: cmd
         run: .github\scripts\Write-ChecksumSummary.cmd
 
+      - name: Test offline composed content independently
+        if: needs.detect-projects.outputs.build_desktop_stub == 'true'
+        shell: cmd
+        run: .github\scripts\Smoke-WindowsBuild.cmd --projects DesktopStub --desktopstub-phase content
+
       - name: Run smoke tests
         shell: cmd
         run: .github\scripts\Smoke-WindowsBuild.cmd --projects "${{ needs.detect-projects.outputs.project_list }}"

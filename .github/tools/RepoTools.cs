@@ -1424,6 +1424,17 @@ static class RepoTools
         var projects = LoadProjectMap(root);
         string desktopStubBinaryOverride = Option(args, "--desktopstub-binary");
         string desktopStubBrokerOverride = Option(args, "--desktopstub-broker");
+        string phaseOption = Option(args, "--desktopstub-phase");
+        if (String.IsNullOrWhiteSpace(phaseOption) && args.Any(arg =>
+            arg.Equals("--desktopstub-phase", StringComparison.OrdinalIgnoreCase) ||
+            arg.StartsWith("--desktopstub-phase=", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("--desktopstub-phase requires all or content.");
+        string desktopStubPhase = String.IsNullOrWhiteSpace(phaseOption) ? "all" : phaseOption.Trim().ToLowerInvariant();
+        if (desktopStubPhase != "all" && desktopStubPhase != "content")
+            throw new InvalidOperationException("--desktopstub-phase accepts all or content.");
+        if (desktopStubPhase == "content" && (allowPackageIntegration ||
+            !String.Equals(Option(args, "--projects"), "DesktopStub", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("The content phase requires --projects DesktopStub and offline mode.");
         bool explicitSelection = args.Any(arg => arg.Equals("--projects", StringComparison.OrdinalIgnoreCase) ||
             arg.StartsWith("--projects=", StringComparison.OrdinalIgnoreCase));
         if (explicitSelection)
@@ -1731,7 +1742,10 @@ static class RepoTools
                         }, new[] { 0 }, 30, "DesktopStub static-tile generation with Live Tile disabled");
                     AssertFileContains(ini, "\"ExperimentalLiveTileUpdate\" = \"Registration\"", "DesktopStub --no-live-tile must persist the static Registration mode used by the TileText smoke test");
                     Dictionary<string, TilePixelSnapshot> tilesWithoutText = CaptureDesktopStubTileAssets(tempRoot, "TileText-disabled baseline");
-                    VerifyDesktopStubTileTextRendering(root, exe, ini, wallpaper, tempRoot, tilesWithoutText);
+                    if (desktopStubPhase == "all")
+                        VerifyDesktopStubTileTextRendering(root, exe, ini, wallpaper, tempRoot, tilesWithoutText);
+                    else
+                        Console.WriteLine("Selected content phase: exact glyph comparisons remain in the separate default all phase.");
                     VerifyDesktopStubComposedContent(exe, ini, wallpaper, tempRoot);
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", Path.Combine(tempRoot, "missing.png"), "--no-tray" }, new[] { 2 }, 30, "DesktopStub invalid wallpaper guard");
                     if (allowPackageIntegration) VerifyDesktopStubSecondLaunchActions(exe, tempRoot);

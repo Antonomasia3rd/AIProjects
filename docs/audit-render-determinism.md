@@ -58,3 +58,73 @@ assertion should be relaxed. Next work compares exact saved assets and effective
 configuration/cache/scale inputs, then the production drawing path. Verified
 source consolidation is checkpointed separately so this investigation cannot
 lose it if quota is exhausted.
+
+Read-only decoded-pixel comparison confirms the same four coordinates as the
+original failure: `(20,93)`, `(30,93)`, `(40,93)`, `(50,93)`. RGBA changes again
+from `(174,212,242,255)` to `(156,203,239,255)`. The secondary variant's medium
+PNG has the exact historical darker-state hash
+`F5A76FCD16428B4AEC2819C07BF5A49FB221653EDE9C109062AA6F3C900DFBED`;
+the baseline is
+`EC8F0259326C166E7239FFE90C18985B6A7F93FDAE6D8D1F344992F2958526D8`.
+Inventory: `build/review-validation/renderer-recurrence-pixels-oct11.json`.
+
+Baseline/primary/secondary cache keys are `7570DB1DA623618D`,
+`C106AABF951C756D`, and `C54A79CA6CEFAF4D`. Nontext assets are byte-identical
+across those entries; each base PNG equals its own scale-100 PNG. Wallpaper and
+manifest were unchanged before the three text runs. Capture copies each decoded
+pixel array before disposing the source image, excluding later-file overwrite of
+the captured baseline. Both secondary values select mask 7; the medium renderer
+draws only badge and primary text with the same regions/fonts.
+
+Independent source/test reviews found no causal configuration, capture or cache
+copying difference. A bounded copied-production probe is next: observe existing
+medium draw state (font metrics, graphics state and complete floating-point state)
+without extra drawing/warmup, then one synthetic four-child cache-disabled
+sequence. Tracked renderer behavior remains unchanged pending evidence.
+
+The approved four-child copied-production probe completed after a clean scan in
+5.94 seconds. Both baseline and secondary reproduced the darker PNG hash recorded
+above, with zero decoded pixel changes. All 12 medium state records matched:
+full floating-point control `0008001f`, MXCSR `00001f80`, body font 15 pixels,
+style 0, UnitPixel, height bits `419f9c00`, 96 DPI, hint 3, contrast 4,
+compositing 0, quality 0, offset 0, smoothing 4, Display page units, scale 1 and
+identity transform. No extra warmup draw/GetHDC/pixel reads were added to drawing.
+Evidence: `build/review-validation/renderer-probe-oct11/outcome.md` and
+`sequence-results.json`. The instrumented/cache-disabled path changes allocation
+and timing and captured no lighter failing state; it does not establish a cause.
+
+`--desktopstub-phase content` now runs the later offline composition/save tests
+independently, requiring an explicit DesktopStub-only selection and forbidding
+package integration. It passed changed-text cache checks, hidden-text background
+restoration on Medium/Wide/Large, invalid wallpaper rejection and 12 concurrent
+INI writers. The default `all` phase retains every exact glyph comparison and
+the reproduced failure. The passing selected phase is not a passing full smoke.
+Windows CI runs this selected phase before the full smoke so an early glyph
+failure does not prevent the unrelated composition/save checks from executing.
+
+One subsequent copied-production probe used the full default/all smoke prehistory
+and cache-enabled path. The copied runner's only diagnostic change forwards
+successful child output; assertions, entry-point guards and Job Object behavior
+remain intact. A phase-default control failure launched no children, and an
+incorrect diagnostic CLI version stopped after one version child with no renders.
+The canonical phase default was corrected and checked with missing-binary guards;
+the diagnostic-only build then used the product's exact v27 numeric defines and
+generated-header search, with CLI/PE version equality verified before rendering.
+Neither aborted control is a rendering result.
+
+The intended exact-version full batch passed all unchanged assertions, including
+medium unsupported-secondary equality, expected Wide/Large secondary differences
+of 345/866 pixels, badge, line-limit and composition checks. All 90 observed
+medium state records retained the same floating-point/graphics/font invariants.
+The successful runner cleaned its fixture, so no PNG/color/hash result is claimed
+for that full batch. Instrumentation changes allocation/timing and no lighter
+failing raster was captured. The normal-product failure remains unresolved.
+
+Scanned diagnostic renderer:
+`B11559FA44104988BA940F03947B2D3D00294A9DFA4F27AF217186241CAD7A3C`.
+Copied diagnostic runner:
+`61E8BD9C0A68A494970A5B31223F05B8FB5EECF454C64F8BC7323B4EB624EB48`.
+Final report: `build/review-validation/renderer-probe-oct11-full/outcome.md`;
+captured log: `renderer-probe-oct11-full-exact-version-smoke.log`.
+All owned processes ended. No renderer behavior, tolerance or protection change
+is supported by these results, and none was made.

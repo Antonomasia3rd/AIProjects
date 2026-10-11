@@ -1055,3 +1055,32 @@ ordinary-failure rollback, not power-loss atomicity across two publications.
 Real target-OS shell/Startup, hardware/account acceptance and the historical
 four-pixel renderer intermittency remain unverified. Windhawk files remain outside
 this work and the deferred Microsoft case has not been rechecked.
+
+### Renderer investigation and independent content smoke, 2026-10-11
+
+The original normal-product failure is preserved with the exact historical
+coordinates/colors and darker PNG hash. Independent source/test reviews exclude
+an unsupported secondary glyph being drawn, changed medium geometry, mutable
+captured arrays and whole-background/scale/cache-copy corruption. A copied
+production four-child cache-disabled probe passed with identical darker output;
+a copied exact-version full/cache-enabled smoke passed all original assertions
+while recording 90 invariant medium graphics/font/floating-point states. Neither
+captured the lighter failing state or identified its cause. Renderer behavior and
+zero-pixel comparison remain unchanged. See [the detailed investigation](audit-render-determinism.md).
+
+The new explicit offline `--desktopstub-phase content` passed all later
+composition/background/cache/invalid-input/concurrent-save checks independently.
+CI runs it before the default full phase; its success never substitutes for the
+full exact-glyph gate. Phase validation rejects missing/unknown modes, broader
+project selection and package integration. An omitted-option empty-string
+regression was caught before any rendering, fixed, and checked using safe
+missing-binary guards for both omitted and explicit all. Final catalog/selector
+validation still passes for 11 products plus All.
+
+Current continuation priority is the reproduced four-pixel raster variation.
+Use the preserved normal failure and retained probe state before any further
+behavior change. Actual target-Windows appearance/Startup and real hardware/
+account acceptance remain separate unperformed stages; do not claim them as
+passing. New credential protection remains deferred under the user's security-last
+rule. All agents and owned validation processes are stopped; findings, binary
+identities and failed/passing scopes are saved, and Windhawk remains untouched.

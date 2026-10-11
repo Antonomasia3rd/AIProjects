@@ -7,6 +7,14 @@ hardware engines, profile importers, host configuration/actions and their inert
 fixtures remain. The optional NowPlaying widget and Explorer deskband toolbar
 are outside the requested replacement surface.
 
+DiscordRPC was also retired after its shared advanced editor/host gates: six
+project wrapper/resource/build/README/checker files plus three app/CLI/tray
+fragments. The five donors total 41 tracked deletions. Its retained native library
+keeps functional defaults, context/presence rules, IPC/Gateway, cancellation and
+explicit plain/protected credential reading; automatic app-level token migration,
+Startup and log/lifecycle bodies are removed. See
+[the final Discord validation](discord-profile-editor-validation-2026-10-11.md).
+
 This is a repository source retirement. It does not uninstall an existing EXE,
 DLL, registered deskband, AppX package, StartupTask or Startup-folder shortcut.
 No unregister, package, Startup, device or account operation was performed.
@@ -29,6 +37,17 @@ The donor source remains recoverable from Git history, including `e6e7b0f`.
 Build/CI/catalog references are coordinated with this retirement; historical
 audit names and compatibility metadata do not imply a remaining standalone
 build target.
+
+For Discord, point `[Discord] ProfilePath` at the existing INI to retain advanced
+presence/transport settings. Old app/Startup preferences are not applied by the
+source host. The tray advanced editor and `--discord-set Section.Key=Value` edit
+that separate profile. `--discord-create-profile NewDiscord.ini` explicitly
+creates shared functional defaults and binds them; it never replaces a file.
+These commands configure only. Actual sends and host Startup remain separate
+choices. Credential replacement is explicit/private, plain values remain readable
+in the INI, and unrelated edits preserve old protected representations. The
+[content guide](content-engine.md) explains effective credential selection, cadence,
+ordinary-failure rollback and the two-file power-loss limitation.
 
 ## Migration to DesktopStub
 

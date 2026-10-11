@@ -108,6 +108,16 @@ or contact accounts/devices. Portable CMake tests also run on Linux in CI withou
 WSL. Actual Windows 8/8.1/10 shell appearance and real device/account behavior
 remain separate acceptance checks.
 
+DesktopStub's offline composition/save phase can also run independently:
+
+```cmd
+.github\scripts\Smoke-WindowsBuild.cmd --projects DesktopStub --desktopstub-phase content
+```
+
+This selected phase does not replace the default full smoke. The full exact glyph
+suite currently reproduces a four-pixel medium-caption discrepancy; evidence and
+the bounded diagnostic probe are in [the renderer audit](docs/audit-render-determinism.md).
+
 The Windows workflow project metadata lives in `.github/project-map.json`. Keep that map, `.github/workflows/build-windows.yml`, `.github/scripts/build-windows.cmd`, and this README in sync when adding or removing projects that produce Windows artifacts. Validation checks selector options, upload conditions, artifact names, declared artifact payload paths, and build-script artifact recording before building.
 
 `.github/source-project-map.json` separately records dependency ownership and
