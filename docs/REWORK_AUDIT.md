@@ -846,3 +846,51 @@ companion or dependencies extraction is needed. Further Microsoft portal status
 checks are deferred; recent clean scans do not reclassify the historical sample.
 All original gaps are not yet cleared. Near the usage limit, save/push verified
 work and finish every fixture process before beginning another integration.
+
+## SecureDesktop configuration continuation, 2026-10-11
+
+The user's latest instruction excludes WindhawkMods while they actively edit it.
+Its committed source is untouched by this work. Work resumed from the clean
+review branch after a fresh usage reset.
+
+SecureDesktopLauncher now has a shared configuration-only user tray, with native
+General/dynamic Program sections and a separate password-profile editor. It uses
+the existing Startup adapter and a new shared document-level INI API: one
+prospective validation and one file publication for an entire multi-section
+batch. Comments, unrelated sections and inherited defaults are preserved.
+Adding a program is checked and saved under one transaction; new entries default
+disabled. Password salt/hash/KDF/counter fields remain under native setup/runtime
+and are read-only in both the actual editor and validated writer.
+
+Default launch, profile inspection, configure-only and Startup management invoke
+no native helper. Startup selects only `--tray --ini` in the per-user folder.
+Explicit service/password actions use the native sibling INI; drafts are not
+deployed automatically. Start/stop/uninstall verify installation routing, and
+native uninstall rechecks image/account identity after elevation before stopping
+or deleting. Explicit install/update can retarget the fixed service name.
+The privileged helpers' existing path/account checks remain confined to that
+explicit native mode; normal configuration can use a writable user draft.
+
+Validation: **65 controller checks**, including offscreen read-only cells,
+concurrent program creation, exact whole-file Startup rollback, profile repair,
+locked-file retry, native action isolation/routing and inherited values. The
+shared document API passes **50 checks** and the existing transaction API passes
+**29**. Native identity has **8 pure cases**; updated source contracts pass.
+All new fixture binaries compiled with warnings as errors and were custom-scanned
+before bounded execution. No service, elevation, password UI, real Startup entry
+or native launcher operation was performed. Logs use `secure-control-oct11-*`,
+`secure-identity-oct11-*` and `managed-ini-document*` in ignored validation output.
+Map and selector checks pass for 16 projects plus All.
+
+`tools/ReviewValidation.ps1` now provides the bounded/scanned local runner in a
+fresh checkout; the document recipe no longer depends on an ignored private
+driver. PowerShell 7 is required for that optional local runner; the C# fixture
+and ordinary Windows CI recipes retain their .NET Framework build path.
+Windows atomic replacement can transiently prevent an uncoordinated external
+open; cooperating INI APIs share the mutex. No arbitrary-editor coordination or
+real shell/elevation acceptance is implied by these tests.
+
+SMTC artwork integration and Notes detail/import/action coverage are separate
+source work in progress. Current code evidence confirms DesktopStub already has
+both Startup modes. Donor retirement will require the remaining data/import
+coverage, not an external DLL ABI or reconstruction of unrelated old widgets.

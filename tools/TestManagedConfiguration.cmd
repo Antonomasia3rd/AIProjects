@@ -22,4 +22,8 @@ if errorlevel 1 exit /b %ERRORLEVEL%
   "%ROOT%\dependencies\managed_startup_shortcut.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
 "%OUT%\ConfigurationTrayUiTests.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call "%~dp0BuildManagedIniDocumentTests.cmd"
+if errorlevel 1 exit /b %ERRORLEVEL%
+"%ROOT%\build\review-validation\ManagedIniDocumentTests.exe"
 exit /b %ERRORLEVEL%

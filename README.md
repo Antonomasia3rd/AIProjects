@@ -22,7 +22,7 @@ or declarative policy.
 | `legacy/NowPlayingTile` | C++ app plus Appx helpers | SMTC-based Windows Start live tile updater with optional widget mode. |
 | `legacy/PhotoCollage` | C# console app | Creates a simple JPEG grid/collage from images in a folder. |
 | `legacy/RealTimeNotesDeskband` | C++ Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes resources. |
-| `legacy/SecureDesktopLauncher` | C++ service/tools | Launches trusted configured programs on secure desktops, with an optional password-gated launcher. |
+| `legacy/SecureDesktopLauncher` | Shared configuration tray + manual native tools | INI/CLI/tray/Startup controls; explicit service/password actions preserve secure-desktop launching. |
 | `legacy/TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
 | `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
 | `legacy/WindhawkMods/LockScreenWin10` | Windhawk research mod | Windows 10 lock-screen styling and XAML investigation sources. |

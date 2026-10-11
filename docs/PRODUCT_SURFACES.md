@@ -27,7 +27,7 @@ All of these use the shared tooltip policy. Native apps call `RegisterTrayIcon` 
 | Product | Actual host | Current surface | Work still required for the common interactive contract |
 | --- | --- | --- | --- |
 | RealTimeNotesDeskband | Explorer COM deskband | Explorer-loaded toolbar and its configuration commands | Its shared Notes provider is available to DesktopStub. Full deskband UI/parity must be represented as a source or a companion before retirement. |
-| SecureDesktopLauncher | Windows service plus password launcher | Service/launcher configuration and CLI | A service cannot own a user notification area. An interactive companion would be needed for tray and Startup-folder controls. |
+| SecureDesktopLauncher | User configuration tray plus explicit native service/password helpers | Shared whole-document INI/CLI/editor/tray and per-user Startup | Default/sign-in opens configuration only. Manual native actions preserve secure-desktop capability and require matching sibling profiles; isolated controller tests pass. Actual elevation/service/password UI acceptance is not claimed. |
 | PhotoCollage | Image utility with optional configuration tray | CLI, shared logging/INI profile/editor and per-user Startup preference | Startup wiring has injected tests; real-folder and visible tray acceptance remain open. Sign-in starts configuration only, never an image job. |
 | TaskSchedulerMigration | Task Scheduler utility with optional configuration tray | CLI, shared INI profile/editor and per-user Startup preference | Startup wiring has injected tests; real-folder and visible tray acceptance remain open. Sign-in never invokes a migration. |
 | ChromeProfileCounter | Compiled C# utility with optional PowerShell compatibility entry | Shared INI/CLI/editor/tray and per-user Startup | Startup opens configuration only. Confirmed repair and menu actions use the shared engine; isolated engine, adapter and wrapper tests pass. Visible tray/real Startup acceptance is not claimed. |
@@ -39,9 +39,9 @@ Except for the Windhawk exception, unfinished rows above are open migration work
 Registry-notification and SecureDesktopLauncher installers now select manual
 SCM startup. Existing installations are not changed by a source update.
 The two notification products now have current-user tray hosts and per-user
-Startup controls. SecureDesktopLauncher still needs an interactive common host;
-manual service installation does not replace that surface. No general service
-exception has been approved.
+Startup controls. SecureDesktopLauncher now has a configuration-only user tray;
+its native service remains an explicit manual action. No general automatic-service
+Startup exception has been approved.
 
 ## Consolidation order
 

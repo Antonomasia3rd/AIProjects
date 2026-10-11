@@ -17,6 +17,95 @@ namespace AIProjects.Dependencies
         public long MaximumBytes = 16L * 1024L * 1024L;
     }
 
+    // A document specification has the same path, limits and lock identity as
+    // a section specification, but does not pick one section to edit.
+    public sealed class ManagedIniDocumentSpec
+    {
+        public string FilePath;
+        public string DefaultContents;
+        public Action<string> Log;
+        public int MutationWaitMilliseconds = 10000;
+        public long MaximumBytes = 16L * 1024L * 1024L;
+    }
+
+    // Section and key are separate so dots in either name remain unambiguous.
+    public sealed class ManagedIniSetting
+    {
+        public string SectionName { get; private set; }
+        public string Key { get; private set; }
+        public string Value { get; private set; }
+
+        public ManagedIniSetting(string sectionName, string key, string value)
+        {
+            SectionName = sectionName;
+            Key = key;
+            Value = value;
+        }
+    }
+
+    // Effective values from all named sections. Repeated sections merge and
+    // the last assignment wins, just as with LoadSection. Returned sections
+    // are copies, so inspecting or validating a snapshot cannot mutate it.
+    public sealed class ManagedIniDocumentSnapshot
+    {
+        readonly Dictionary<string, Dictionary<string, string>> sections;
+
+        internal ManagedIniDocumentSnapshot(Dictionary<string, Dictionary<string, string>> values)
+        {
+            sections = values;
+        }
+
+        public IEnumerable<string> Sections
+        {
+            get { return new List<string>(sections.Keys); }
+        }
+
+        public bool ContainsSection(string sectionName)
+        {
+            if (sectionName == null) throw new ArgumentNullException("sectionName");
+            return sections.ContainsKey(sectionName);
+        }
+
+        public Dictionary<string, string> GetSection(string sectionName)
+        {
+            if (sectionName == null) throw new ArgumentNullException("sectionName");
+            Dictionary<string, string> values;
+            return sections.TryGetValue(sectionName, out values)
+                ? new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        public bool TryGetValue(string sectionName, string key, out string value)
+        {
+            if (sectionName == null) throw new ArgumentNullException("sectionName");
+            if (key == null) throw new ArgumentNullException("key");
+            Dictionary<string, string> values;
+            value = null;
+            return sections.TryGetValue(sectionName, out values) && values.TryGetValue(key, out value);
+        }
+
+        // Apply edits to detached effective values without serialization, file
+        // access or mutation of this snapshot. Later duplicate changes win.
+        public ManagedIniDocumentSnapshot WithChanges(IEnumerable<ManagedIniSetting> settings)
+        {
+            List<ManagedIniSetting> changes = ManagedIniFile.ValidateDocumentChanges(settings);
+            var updated = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var section in sections)
+                updated.Add(section.Key, new Dictionary<string, string>(section.Value, StringComparer.OrdinalIgnoreCase));
+            foreach (ManagedIniSetting setting in changes)
+            {
+                Dictionary<string, string> values;
+                if (!updated.TryGetValue(setting.SectionName, out values))
+                {
+                    values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    updated.Add(setting.SectionName, values);
+                }
+                values[setting.Key] = setting.Value;
+            }
+            return new ManagedIniDocumentSnapshot(updated);
+        }
+    }
+
     public static class ManagedIniFile
     {
         // Coordinates cooperating users of this helper; it does not lock out
@@ -30,6 +119,98 @@ namespace AIProjects.Dependencies
             if (!ValidateSpec(spec, out error))
                 throw new ArgumentException(error, "spec");
             return new Transaction(spec);
+        }
+
+        public static Transaction BeginTransaction(ManagedIniDocumentSpec spec)
+        {
+            // The existing scope captures original bytes, including encoding,
+            // or original absence. Both APIs deliberately use the same mutex.
+            return BeginTransaction(FreezeDocumentSpec(spec));
+        }
+
+        public static ManagedIniDocumentSnapshot ParseDocumentText(string contents)
+        {
+            if (contents == null) throw new ArgumentNullException("contents");
+            return ParseDocumentLines(SplitLines(contents));
+        }
+
+        // Returns defaults when absent; never creates a directory or file.
+        public static ManagedIniDocumentSnapshot LoadDocument(ManagedIniDocumentSpec source)
+        {
+            ManagedIniFileSpec spec = FreezeDocumentSpec(source);
+            using (Mutex mutationMutex = CreateMutationMutex(spec))
+            {
+                bool ownsMutex = WaitForMutex(mutationMutex, spec.MutationWaitMilliseconds);
+                try
+                {
+                    return ParseDocumentLines(ConfiguredFileExists(spec.FilePath)
+                        ? ReadLinesUnderLock(spec) : SplitLines(spec.DefaultContents ?? ""));
+                }
+                finally
+                {
+                    if (ownsMutex) mutationMutex.ReleaseMutex();
+                }
+            }
+        }
+
+        public static bool SaveDocumentBatch(
+            ManagedIniDocumentSpec spec,
+            IEnumerable<ManagedIniSetting> settings,
+            out string error)
+        {
+            return SaveDocumentBatch(spec, settings, null, out error);
+        }
+
+        // Build and validate one prospective whole document under the path
+        // mutex, then publish it once. No section is published separately and
+        // no filesystem mutation occurs before the validator accepts it.
+        public static bool SaveDocumentBatch(
+            ManagedIniDocumentSpec source,
+            IEnumerable<ManagedIniSetting> settings,
+            Action<ManagedIniDocumentSnapshot> validateProspective,
+            out string error)
+        {
+            error = null;
+            ManagedIniFileSpec spec = null;
+            try
+            {
+                spec = FreezeDocumentSpec(source);
+                List<ManagedIniSetting> changes = ValidateDocumentChanges(settings);
+
+                using (Mutex mutationMutex = CreateMutationMutex(spec))
+                {
+                    bool ownsMutex = WaitForMutex(mutationMutex, spec.MutationWaitMilliseconds);
+                    try
+                    {
+                        bool existed = ConfiguredFileExists(spec.FilePath);
+                        var lines = existed ? ReadLinesUnderLock(spec) : SplitLines(spec.DefaultContents ?? "");
+                        // Preserve the existing refusal to silently repair
+                        // malformed assignments before performing edits.
+                        ParseDocumentLines(lines);
+                        foreach (ManagedIniSetting setting in changes)
+                            ApplySettingToLines(lines, setting.SectionName, setting.Key, setting.Value);
+                        ManagedIniDocumentSnapshot prospective = ParseDocumentLines(lines);
+                        if (validateProspective != null) validateProspective(prospective);
+
+                        if (changes.Count == 0 && existed) return true;
+                        string contents = changes.Count == 0 ? spec.DefaultContents ?? ""
+                            : String.Join(Environment.NewLine, lines.ToArray()) + Environment.NewLine;
+                        byte[] bytes = EncodeDocument(spec, contents);
+                        PublishBytesUnderLock(spec, bytes, existed);
+                        return true;
+                    }
+                    finally
+                    {
+                        if (ownsMutex) mutationMutex.ReleaseMutex();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                error = "Could not save INI settings: " + ex.Message;
+                SafeLog(spec, error);
+                return false;
+            }
         }
 
         public sealed class Transaction : IDisposable
@@ -422,6 +603,195 @@ namespace AIProjects.Dependencies
             }
         }
 
+        static void ApplySettingToLines(List<string> lines, string sectionName, string key, string value)
+        {
+            var matches = new List<int>();
+            int firstSectionHeader = -1;
+            int firstSectionEnd = lines.Count;
+            bool inTargetSection = false;
+            for (int i = 0; i < lines.Count; ++i)
+            {
+                string trimmed = lines[i].Trim();
+                string section;
+                if (TryParseSectionHeader(trimmed, out section))
+                {
+                    if (inTargetSection && firstSectionHeader >= 0 && firstSectionEnd == lines.Count)
+                        firstSectionEnd = i;
+                    inTargetSection = section.Equals(sectionName, StringComparison.OrdinalIgnoreCase);
+                    if (inTargetSection && firstSectionHeader < 0) firstSectionHeader = i;
+                    continue;
+                }
+                if (!inTargetSection || trimmed.Length == 0 || trimmed.StartsWith(";") || trimmed.StartsWith("#"))
+                    continue;
+                int equals = trimmed.IndexOf('=');
+                if (equals > 0 && UnquoteIniString(trimmed.Substring(0, equals)).Equals(key, StringComparison.OrdinalIgnoreCase))
+                    matches.Add(i);
+            }
+
+            // Native names unescape quotes only; values also unescape doubled
+            // backslashes. Keep their serializers distinct for named keys.
+            string assignment = QuoteIniName(key) + " = " + QuoteIniString(value);
+            if (matches.Count != 0)
+            {
+                string comment = AssignmentComment(lines[matches[0]]);
+                lines[matches[0]] = assignment + (comment.Length == 0 ? "" : " " + comment);
+                for (int i = matches.Count - 1; i >= 1; --i)
+                {
+                    comment = AssignmentComment(lines[matches[i]]);
+                    if (comment.Length != 0) lines[matches[i]] = comment;
+                    else lines.RemoveAt(matches[i]);
+                }
+            }
+            else if (firstSectionHeader >= 0)
+            {
+                lines.Insert(firstSectionEnd, assignment);
+            }
+            else
+            {
+                string header = "[" + sectionName + "]";
+                string parsed;
+                if (!TryParseSectionHeader(header, out parsed) || !parsed.Equals(sectionName, StringComparison.Ordinal))
+                    header = "[" + QuoteIniName(sectionName) + "]";
+                if (!TryParseSectionHeader(header, out parsed) || !parsed.Equals(sectionName, StringComparison.Ordinal))
+                    throw new ArgumentException("The INI section name cannot round-trip in the native INI dialect.", "sectionName");
+                if (lines.Count != 0 && lines[lines.Count - 1].Length != 0) lines.Add("");
+                lines.Add(header);
+                lines.Add(assignment);
+            }
+        }
+
+        static string QuoteIniName(string value)
+        {
+            return "\"" + value.Replace("\"", "\\\"") + "\"";
+        }
+
+        static string AssignmentComment(string assignment)
+        {
+            int equals = assignment.IndexOf('=');
+            if (equals < 0) return "";
+            string value = assignment.Substring(equals + 1).Trim();
+            if (value.Length == 0) return "";
+            char quote = value[0];
+            if (quote == '"' || quote == '\'')
+            {
+                // Follow ParseIniValue's treatment of quoted Windows paths,
+                // including a literal trailing backslash before the end quote.
+                for (int i = 1; i < value.Length; ++i)
+                {
+                    if (value[i] == '\\' && i + 1 < value.Length && (value[i + 1] == quote || value[i + 1] == '\\'))
+                    {
+                        if (value[i + 1] == quote && !HasLaterQuote(value, i + 2, quote)) continue;
+                        ++i;
+                        continue;
+                    }
+                    if (value[i] == quote)
+                    {
+                        string remainder = value.Substring(i + 1).TrimStart();
+                        return remainder.StartsWith(";") || remainder.StartsWith("#") ? remainder : "";
+                    }
+                }
+            }
+            string stripped = StripInlineComment(value, quote == '"' || quote == '\'');
+            string suffix = value.Substring(stripped.Length).TrimStart();
+            return suffix.StartsWith(";") || suffix.StartsWith("#") ? suffix : "";
+        }
+
+        static ManagedIniDocumentSnapshot ParseDocumentLines(IEnumerable<string> lines)
+        {
+            var sections = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> current = null;
+            string currentSection = null;
+            foreach (string rawLine in lines)
+            {
+                string line = (rawLine ?? "").Trim();
+                if (line.Length == 0 || line.StartsWith(";") || line.StartsWith("#")) continue;
+                string section;
+                if (TryParseSectionHeader(line, out section))
+                {
+                    currentSection = section;
+                    if (!sections.TryGetValue(section, out current))
+                    {
+                        current = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        sections.Add(section, current);
+                    }
+                    continue;
+                }
+                if (current == null) continue;
+                int equals = line.IndexOf('=');
+                if (equals <= 0) throw new InvalidDataException("Malformed assignment in [" + currentSection + "]: " + line);
+                string key = UnquoteIniString(line.Substring(0, equals));
+                if (!IsValidKey(key)) throw new InvalidDataException("Invalid key in [" + currentSection + "]: " + key);
+                current[key] = ParseIniValue(line.Substring(equals + 1));
+            }
+            return new ManagedIniDocumentSnapshot(sections);
+        }
+
+        static ManagedIniFileSpec FreezeDocumentSpec(ManagedIniDocumentSpec source)
+        {
+            if (source == null) throw new ArgumentNullException("spec");
+            var spec = new ManagedIniFileSpec
+            {
+                FilePath = source.FilePath,
+                SectionName = "Document",
+                DefaultContents = source.DefaultContents,
+                Log = source.Log,
+                MutationWaitMilliseconds = source.MutationWaitMilliseconds,
+                MaximumBytes = source.MaximumBytes
+            };
+            string error;
+            if (!ValidateSpec(spec, out error)) throw new ArgumentException(error, "spec");
+            spec.FilePath = Path.GetFullPath(spec.FilePath);
+            return spec;
+        }
+
+        internal static List<ManagedIniSetting> ValidateDocumentChanges(IEnumerable<ManagedIniSetting> settings)
+        {
+            var changes = new List<ManagedIniSetting>();
+            foreach (ManagedIniSetting setting in settings ?? new ManagedIniSetting[0])
+            {
+                if (setting == null || !IsValidSectionName(setting.SectionName) ||
+                    !IsValidKey(setting.Key) || setting.Value == null ||
+                    setting.Value.IndexOfAny(new[] { '\r', '\n', '\0' }) >= 0)
+                    throw new ArgumentException("The INI document batch contains an invalid section, key or value.", "settings");
+                changes.Add(setting);
+            }
+            return changes;
+        }
+
+        static byte[] EncodeDocument(ManagedIniFileSpec spec, string contents)
+        {
+            var encoding = new UTF8Encoding(true, true);
+            byte[] encoded = encoding.GetBytes(contents);
+            byte[] preamble = encoding.GetPreamble();
+            if ((long)encoded.Length + preamble.Length > spec.MaximumBytes) throw OversizedFile(spec.MaximumBytes);
+            byte[] bytes = new byte[preamble.Length + encoded.Length];
+            Buffer.BlockCopy(preamble, 0, bytes, 0, preamble.Length);
+            Buffer.BlockCopy(encoded, 0, bytes, preamble.Length, encoded.Length);
+            return bytes;
+        }
+
+        static void PublishBytesUnderLock(ManagedIniFileSpec spec, byte[] bytes, bool existed)
+        {
+            string directory = Path.GetDirectoryName(spec.FilePath);
+            Directory.CreateDirectory(directory);
+            string temporaryPath = Path.Combine(directory, ".AIProjects-" + Guid.NewGuid().ToString("N") + ".tmp");
+            try
+            {
+                using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    stream.Write(bytes, 0, bytes.Length);
+                    stream.Flush();
+                }
+                if (existed) File.Replace(temporaryPath, spec.FilePath, null);
+                else File.Move(temporaryPath, spec.FilePath);
+            }
+            finally
+            {
+                try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+                catch { }
+            }
+        }
+
         static Mutex CreateMutationMutex(ManagedIniFileSpec spec)
         {
             return new Mutex(
@@ -725,9 +1095,7 @@ namespace AIProjects.Dependencies
                 error = "The managed INI path must be absolute and have a parent directory.";
                 return false;
             }
-            if (!spec.SectionName.Equals(spec.SectionName.Trim(), StringComparison.Ordinal) ||
-                spec.SectionName.StartsWith(";") || spec.SectionName.StartsWith("#") ||
-                spec.SectionName.IndexOfAny(new[] { '\r', '\n', '\0', '[', ']' }) >= 0)
+            if (!IsValidSectionName(spec.SectionName))
             {
                 error = "The managed INI section name is invalid.";
                 return false;
@@ -738,6 +1106,14 @@ namespace AIProjects.Dependencies
                 return false;
             }
             return true;
+        }
+
+        static bool IsValidSectionName(string sectionName)
+        {
+            return !String.IsNullOrWhiteSpace(sectionName) &&
+                sectionName.Equals(sectionName.Trim(), StringComparison.Ordinal) &&
+                !sectionName.StartsWith(";") && !sectionName.StartsWith("#") &&
+                sectionName.IndexOfAny(new[] { '\r', '\n', '\0', '[', ']' }) < 0;
         }
 
         static bool IsValidKey(string key)

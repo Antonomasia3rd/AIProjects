@@ -45,6 +45,8 @@ call "%REPO%\tools\TestChromeProfileCounter.cmd"
 if errorlevel 1 goto Fail
 call "%REPO%\tools\TestYouTubeMusicMigrate.cmd"
 if errorlevel 1 goto Fail
+call "%REPO%\tools\TestSecureDesktopControl.cmd"
+if errorlevel 1 goto Fail
 
 call :BuildAllowContentAboveLock || goto Fail
 call :BuildADBController || goto Fail
@@ -323,11 +325,19 @@ if "!STATUS!"=="0" (
   call :Run cmd.exe /d /c build_password_launcher.cmd
   set "STATUS=!ERRORLEVEL!"
 )
+if "!STATUS!"=="0" (
+  call :Run cmd.exe /d /c build_control.cmd
+  set "STATUS=!ERRORLEVEL!"
+)
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
 call :RecordArtifact "%LEGACY%\SecureDesktopLauncher\build\SecureDesktopLauncher.exe"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\SecureDesktopLauncher\build\SecureDesktopPasswordLauncher.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\SecureDesktopLauncher\build\SecureDesktopLauncherControl.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%LEGACY%\SecureDesktopLauncher\SecureDesktopLauncher.example.ini"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\SecureDesktopLauncher\README.md"
 exit /b %ERRORLEVEL%

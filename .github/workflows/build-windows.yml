@@ -319,6 +319,8 @@ jobs:
           path: |
             legacy/SecureDesktopLauncher/build/SecureDesktopLauncher.exe
             legacy/SecureDesktopLauncher/build/SecureDesktopPasswordLauncher.exe
+            legacy/SecureDesktopLauncher/build/SecureDesktopLauncherControl.exe
+            legacy/SecureDesktopLauncher/SecureDesktopLauncher.example.ini
             legacy/SecureDesktopLauncher/README.md
           if-no-files-found: error
 

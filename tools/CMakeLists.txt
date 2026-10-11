@@ -28,6 +28,7 @@ add_portable_test(CharmTraySourceCheck legacy/CharmTray/tools/CharmTraySourceChe
 add_portable_test(NowPlayingTileSourceCheck legacy/NowPlayingTile/tools/NowPlayingTileSourceCheck.cpp legacy/NowPlayingTile)
 add_portable_test(RealTimeNotesDeskbandSourceCheck legacy/RealTimeNotesDeskband/tools/RealTimeNotesDeskbandSourceCheck.cpp legacy/RealTimeNotesDeskband)
 add_portable_test(SecureDesktopLauncherSourceCheck legacy/SecureDesktopLauncher/tools/SecureDesktopLauncherSourceCheck.cpp legacy/SecureDesktopLauncher)
+add_portable_test(SecureDesktopIdentityTests tools/SecureDesktopIdentityTests.cpp .)
 add_portable_test(TileTextLayoutTests DesktopStub/tools/TileTextLayoutTests.cpp .)
 add_portable_test(TileTextTemplateTests DesktopStub/tools/TileTextTemplateTests.cpp .)
 add_portable_test(ContentEngineTests tools/ContentEngineTests.cpp .)

@@ -21,6 +21,7 @@
 #include "../desktop_app_baseline.h"
 #include "../release_version.inc"
 #include "../privileged_path_trust.h"
+#include "service_identity.h"
 
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "wtsapi32.lib")
@@ -1635,8 +1636,24 @@ static int UninstallService()
         return 1;
     }
 
-    SC_HANDLE service = OpenServiceW(scm, kServiceName, DELETE | SERVICE_STOP | SERVICE_QUERY_STATUS);
+    SC_HANDLE service = OpenServiceW(scm, kServiceName, DELETE | SERVICE_STOP | SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG);
     if (!service) {
+        const DWORD error = GetLastError();
+        CloseServiceHandle(scm);
+        return error == ERROR_SERVICE_DOES_NOT_EXIST ? 0 : 1;
+    }
+
+    DWORD needed = 0;
+    QueryServiceConfigW(service, nullptr, 0, &needed);
+    std::vector<BYTE> configuration(needed);
+    auto* details = needed >= sizeof(QUERY_SERVICE_CONFIGW)
+        ? reinterpret_cast<QUERY_SERVICE_CONFIGW*>(configuration.data()) : nullptr;
+    if (!details || !QueryServiceConfigW(service, details, needed, &needed) ||
+        !aip::secure_desktop::OwnsService(details->lpBinaryPathName ? details->lpBinaryPathName : L"",
+            details->lpServiceStartName ? details->lpServiceStartName : L"", CurrentExePath()))
+    {
+        aip::WriteCommandLineText(L"Refusing to uninstall a service belonging to a different executable or account.", true);
+        CloseServiceHandle(service);
         CloseServiceHandle(scm);
         return 1;
     }
@@ -1673,7 +1690,7 @@ static std::wstring ServiceCommandLineHelp()
         L"SecureDesktopLauncher\r\n"
         L"Usage: SecureDesktopLauncher.exe [command]\r\n\r\n"
         L"  install       Validate the protected install and create/update the service.\r\n"
-        L"  uninstall     Stop and remove the service.\r\n"
+        L"  uninstall     Stop and remove this executable's LocalSystem installation.\r\n"
         L"  validate      Validate protected paths and configuration without launching programs.\r\n"
         L"  test          Alias for validate; retained for compatibility.\r\n"
         L"  --help, -h    Show this help without changing service state.\r\n"

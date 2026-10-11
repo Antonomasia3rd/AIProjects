@@ -23,6 +23,14 @@ namespace AIProjects.Dependencies
         public Func<IDisposable> OpenResidentSession;
         public Action ReloadResidentSession;
         public Func<string> ResidentStatus;
+        public Func<string, bool> ReadOnlySetting;
+        public IList<ManagedConfigurationCommand> Commands;
+    }
+
+    public sealed class ManagedConfigurationCommand
+    {
+        public string Text;
+        public Action Execute;
     }
 
     public sealed class ManagedConfigurationEditor
@@ -50,7 +58,11 @@ namespace AIProjects.Dependencies
             var changes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in edited)
                 if (!String.Equals(entry.Value, original[entry.Key], StringComparison.Ordinal))
+                {
+                    if (spec.ReadOnlySetting != null && spec.ReadOnlySetting(entry.Key))
+                        throw new ArgumentException("This value is managed by the application: " + entry.Key);
                     changes[entry.Key] = entry.Value ?? "";
+                }
             // Save only actual edits. The product validates the prospective
             // profile under its existing INI lock; unrelated external edits
             // are preserved, and rejected edits never update this snapshot.
@@ -107,6 +119,18 @@ namespace AIProjects.Dependencies
                         };
                         ManagedTrayBaseline.AppendHeader(menu, spec.ProductName, "Version: " + spec.Version);
                         menu.MenuItems.Add(new MenuItem("Settings...", delegate { edit(); }) { DefaultItem = true });
+                        if (spec.Commands != null)
+                            foreach (var command in spec.Commands)
+                            {
+                                if (command == null || String.IsNullOrWhiteSpace(command.Text) || command.Execute == null)
+                                    throw new ArgumentException("Configuration commands require a label and handler.");
+                                var selected = command;
+                                menu.MenuItems.Add(new MenuItem(selected.Text, delegate
+                                {
+                                    try { selected.Execute(); }
+                                    catch (Exception ex) { MessageBox.Show(ex.Message, spec.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+                                }));
+                            }
                         if (spec.Startup != null)
                         {
                             var startup = new MenuItem("Start tray at sign-in (Startup folder)");
@@ -182,7 +206,7 @@ namespace AIProjects.Dependencies
             return 0;
         }
 
-        static void ShowEditor(ManagedConfigurationTraySpec spec)
+        public static void ShowEditor(ManagedConfigurationTraySpec spec)
         {
             try
             {
@@ -235,7 +259,14 @@ namespace AIProjects.Dependencies
                 grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Setting", ReadOnly = true, FillWeight = 40 });
                 grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Value", FillWeight = 60 });
                 foreach (var entry in editor.Values.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase))
-                    grid.Rows.Add(entry.Key, entry.Value);
+                {
+                    int row = grid.Rows.Add(entry.Key, entry.Value);
+                    if (spec.ReadOnlySetting != null && spec.ReadOnlySetting(entry.Key))
+                    {
+                        grid.Rows[row].Cells[1].ReadOnly = true;
+                        grid.Rows[row].Cells[1].ToolTipText = "Managed by the application; use its dedicated action to change this value.";
+                    }
+                }
                 buttons.Dock = DockStyle.Bottom;
                 buttons.Height = 42;
                 buttons.FlowDirection = FlowDirection.RightToLeft;

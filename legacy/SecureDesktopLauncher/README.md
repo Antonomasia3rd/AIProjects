@@ -1,6 +1,60 @@
 # SecureDesktopLauncher
 
-Windows secure-desktop tooling made of two executables:
+Use `SecureDesktopLauncherControl.exe` for ordinary configuration. It shares
+AIProjects' INI editor, command-line settings, versioned tray and per-user Startup
+controls. Opening it or signing in starts configuration only. Native program
+launching remains an explicit manual service action, preserving the useful
+secure-desktop capability.
+
+Build `build_control.cmd` alongside the native build recipes below. The control
+app uses the Windows .NET Framework and shared source; it adds no runtime plugin
+DLL. Its default profile is `SecureDesktopLauncher.ini` beside it. Copy the
+example profile or create a draft through `--configure-only`.
+
+```powershell
+.\build\SecureDesktopLauncherControl.exe --ini .\draft.ini --configure-only --add-program "Example.With.Dots"
+.\build\SecureDesktopLauncherControl.exe --ini .\draft.ini --configure-only --set "Program:Example.With.Dots.Path=C:\Program Files\Example\Example.exe"
+.\build\SecureDesktopLauncherControl.exe --ini .\draft.ini --show-config
+.\build\SecureDesktopLauncherControl.exe --ini .\draft.ini --startup
+.\build\SecureDesktopLauncherControl.exe --ini .\draft.ini --no-startup
+```
+
+Settings edits preserve comments and unknown sections and publish all changed
+sections together. New programs default disabled; an explicit CLI Enabled=1 is
+accepted only with a usable Path. Dots in program names are supported. Missing
+program WorkingDirectory inherits the Path's directory; Desktop, LaunchSpacingMs
+and StopOnServiceStop inherit General. An unrelated edit does not freeze those
+inherited defaults into the file. Complete batches can repair invalid values.
+
+**Password launcher settings** opens the separate profile. Use
+`--password-profile` or `--password-ini FILE` for the same CLI editor. Password
+hashes, salt, KDF parameters and attempt counters are read-only here because
+they belong to the native password setup/runtime. Ordinary UI and attempt/lockout
+preferences remain editable. **Set password** explicitly opens the native setup.
+
+Native actions (`--install-service`, `--start-service`, `--stop-service`,
+`--uninstall-service`, `--set-password`) are separate from configuration/Startup
+commands and request Windows elevation when needed. The native helpers consume
+only an INI with the same basename beside their executable. Alternate `--ini`
+profiles are editable drafts; the controller does not silently deploy them to a
+service. Select the installed helper and matching sibling profile for an actual
+native action. The controller checks which installed executable the fixed
+service name targets; uninstall repeats its identity check inside the native
+helper after elevation. Explicit install/update can retarget the service.
+
+A running native helper may retain the configuration file with write/delete
+sharing denied. Stop that helper deliberately before editing, or save an
+editable draft for later deployment. Normal Windows file permissions still
+apply to Program Files. The control app can edit a writable user-folder draft
+without imposing the native privileged helpers' deployment restrictions.
+
+`RunAtStartup` is saved in `[Control]` and controls only this profile's tray in
+this user's Startup folder. `--configure-only`, help/version and configuration
+inspection perform no service/elevation/program-launch action. See
+`docs/REWORK_AUDIT.md` for isolated validation and remaining native/OS acceptance.
+
+## Native helpers
+The two explicit native helpers are:
 
 - `SecureDesktopLauncher.exe`: Windows service that launches configured programs as `LocalSystem` on matching sessions/desktops, usually `WinSta0\Winlogon`.
 - `SecureDesktopPasswordLauncher.exe`: password-gated launcher that starts one configured target only after password verification and keeps spawned processes in a kill-on-close Job object.
