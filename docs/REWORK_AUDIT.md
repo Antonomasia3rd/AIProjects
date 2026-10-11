@@ -894,3 +894,86 @@ SMTC artwork integration and Notes detail/import/action coverage are separate
 source work in progress. Current code evidence confirms DesktopStub already has
 both Startup modes. Donor retirement will require the remaining data/import
 coverage, not an external DLL ABI or reconstruction of unrelated old widgets.
+
+## Source integration continuation, 2026-10-11
+
+The useful donor behavior is being consolidated into the existing built-in
+DesktopStub source engine. WindhawkMods remains excluded while the user edits
+it. No new runtime plugin DLL is introduced.
+
+- SMTC metadata and bounded artwork decoding now share one immutable media
+  snapshot per frame. `Background=SMTCArtwork` is available through the same
+  catalog as CLI/INI/tray, with idle/error fallback and reference-counted cache
+  cleanup. Synthetic media/artwork and native host checks passed; real sessions
+  and visible shell delivery were not exercised. See
+  [the artwork validation](smtc-artwork-validation-2026-10-11.md).
+- Notes adds per-entry detail selection, per-account cadence, explicit profile/
+  cookie import, clear and existing-resident refresh actions. Legacy protected
+  credentials are copied unchanged and resolved only by the fetch worker.
+  Explicit CLI plain/protected overrides now clear the opposite credential
+  family, preventing an imported protected value from silently winning. No new
+  mandatory encryption, live account, browser or registry discovery is added.
+  See [Notes validation](notes-integration-validation-2026-10-11.md).
+- Caps/ASUS profile adapters preserve activation choices and donor files. ASUS
+  inline event replacement clears only recognized old pattern fields, retains
+  unrelated preferences and exposes numbered-event editing. Inactive inline
+  patterns must not reject a nonempty external ProfilePath. A strict regression
+  covers switching back to invalid inline patterns, which must still fail.
+- NowPlaying imports Text/Artwork/Combined/Cycle layouts without querying SMTC.
+  Its republish interval is not a content cycle interval; Startup preferences
+  are diagnosed and left for the separate host controls. The pure import has
+  111 inert checks and the final passive host CLI has 18 bounded cases. The
+  fresh combined host passes 208 runtime/menu checks after the snapshot freeze.
+- Discord's typed advanced profile editor has 38 clean-scanned inert checks.
+  It reuses existing defaults and grammar, preserves untouched comments and
+  opaque credentials, and detects stale editor snapshots. Explicit creation uses
+  real defaults and never replaces an existing profile. Host UI/CLI wiring
+  and cadence mapping are the next step; the shared API alone is not completion.
+
+The combined configuration stress gate exposed a cooperating writer receiving
+`ACCESS_DENIED` during concurrent INI cache refresh and atomic replacement.
+Diagnostics showed no mixed document reads. The correction copies one full
+cached document while holding the existing named path lock, then releases the
+lock before parsing/provider work. Scalar fields, numbered events and legacy RSS
+fallback all read that detached document. The strict old/new snapshot assertion
+is retained. The snapshot correction passed 282,198 model assertions and 208
+combined runtime checks, including nested same-thread acquisition and an explicit
+lock-unavailable result that preserves the caller's previous configuration.
+
+`tools/TestContentIntegration.ps1` and its compile-only batch recipe now provide
+one public path for source/import/host fixtures. Windows CI uses scan-gated inert
+execution; Linux CI retains the portable model/layout checks. The common local
+recipe passed all eight fresh-scanned fixtures: 40 hardware imports, 111 media
+imports, 58 Notes checks, 38 injected SMTC/artwork checks, 38 Discord profile
+checks, 208 host checks, three omitted-hardware checks and seven donor JPEG
+checks. No real sources or integration modes ran. CMake is not installed on
+this laptop, so its newly declared Windows targets have not been configured here.
+The public process helper now preserves a missing-executable error instead of
+accessing an unstarted process ID in cleanup; a no-launch probe and script parser
+check passed. New `.cmd` files must retain CRLF as specified by `.gitattributes`.
+
+Source archives previously excluded all INI files, including tracked examples.
+`.gitattributes` now retains `*.example.ini` while continuing to exclude runtime
+INIs; `git check-attr` confirmed the distinction. This closes the archive-side
+example omission missed by the earlier SecureDesktop map/ignore correction.
+The shared Discord file classifier now includes the profile editor; selector
+coverage verifies those edits rebuild both the source host and the donor while
+the latter remains in the map.
+
+A further shared locking gap was confirmed: native INI mutations use a
+session-local, case-sensitive path hash, while managed mutations use a different
+user-scoped global name. Thus an elevated/native password runtime and managed
+configuration writer are not cooperating even when they target the same file.
+The next correction will use one normalized global file identity in both
+implementations, preserving standard kernel-object permissions and explicit
+lock errors. Native Startup cross-session scope is also still to be corrected.
+No real Startup, service or elevated operation is needed to test this naming and
+mixed-process temporary-file behavior.
+
+Timing research was refreshed against Microsoft's Windows 8-era queue and
+current periodic-notification documentation. Windows controls visible duration
+and order; no fixed ten-second local-update minimum was established. The warning
+remains advisory and the content guide separates polling, source retrieval,
+composition and visible delivery. The exact four-pixel renderer discrepancy,
+donor retirement, remaining duplicate mechanics and controlled target-OS UI/
+hardware/account acceptance remain open; passing inert checks does not close them.

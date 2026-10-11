@@ -48,6 +48,13 @@ if errorlevel 1 (
     exit /b %errorlevel%
 )
 
+if /I "%~1"=="build-artwork-test" (
+    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\NowPlayingArtworkTests.cpp /Fe:build\NowPlayingArtworkTests.exe /Fo:build\obj\NowPlayingArtworkTests.obj /link gdiplus.lib windowscodecs.lib advapi32.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib windowsapp.lib runtimeobject.lib
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+
 if /I "%~1"=="check" (
     cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /Zs NowPlayingTile.cpp
     set "STATUS=!ERRORLEVEL!"
@@ -60,7 +67,7 @@ if /I "%~1"=="check" (
 set "OUT_EXE=build\NowPlayingTile.exe"
 set "OBJ_FILE=build\obj\NowPlayingTile.obj"
 
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE NowPlayingTile.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE NowPlayingTile.cpp /Fe:%OUT_EXE% /Fo:%OBJ_FILE% /link gdiplus.lib windowscodecs.lib advapi32.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
 set "STATUS=%ERRORLEVEL%"
 popd
 

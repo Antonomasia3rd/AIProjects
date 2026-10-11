@@ -2,6 +2,7 @@
 #include "../content_sources/smtc.inc"
 #include "../content_source_host.h"
 #include "../content_sources/notes.inc"
+#include "../content_sources/notes_profile.inc"
 #include "../content_sources/discord.h"
 
 // Hardware sources have a separate compile boundary.  The normal product build
@@ -108,75 +109,125 @@ struct ContentNotesProvider
 {
     std::array<aip::content::AsyncSource<aip::notes::Snapshot>, 3> sources;
     std::array<bool, 3> waitExpired{};
+    std::array<std::wstring, 3> keys;
+    std::atomic<unsigned> refreshRequested{0};
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    aip::notes::CredentialDecoder testDecoder;
+    aip::notes::HttpTransport testTransport;
+#endif
     static std::wstring Key(const aip::content::NotesConfiguration& cfg, int resource)
     {
         const auto& account = cfg.accounts[resource];
         return std::to_wstring(resource) + L":" + account.uid + L"\n" + account.token + L"\n" + account.userId +
-            L"\n" + std::to_wstring(cfg.timeoutSeconds) + L":" + std::to_wstring(cfg.maximumBytes);
+            L"\n" + account.tokenProtected + L"\n" + account.userIdProtected + L"\n" + std::to_wstring(account.refreshSeconds) +
+            L"\n" + std::to_wstring(cfg.refreshSeconds) + L":" + std::to_wstring(cfg.timeoutSeconds) + L":" + std::to_wstring(cfg.maximumBytes);
     }
     void Refresh(const aip::content::NotesConfiguration& cfg, int resource, bool synchronous)
     {
         waitExpired[resource] = false;
         aip::notes::Configuration settings;
         settings.resource = static_cast<aip::notes::ResourceKind>(resource);
-        settings.uid = aip::WideToUtf8(cfg.accounts[resource].uid);
-        settings.ltoken = aip::WideToUtf8(cfg.accounts[resource].token);
-        settings.ltuid = aip::WideToUtf8(cfg.accounts[resource].userId);
-        settings.refreshSeconds = static_cast<UINT>(cfg.refreshSeconds);
+        settings.refreshSeconds = static_cast<UINT>(cfg.accounts[resource].refreshSeconds ? cfg.accounts[resource].refreshSeconds : cfg.refreshSeconds);
         settings.timeout = milliseconds(cfg.timeoutSeconds * 1000);
         settings.maximumBytes = static_cast<size_t>(cfg.maximumBytes);
         const auto key = Key(cfg, resource);
-        sources[resource].Request(key, milliseconds(static_cast<long long>(cfg.refreshSeconds) * 1000),
-            [settings](const aip::content::AsyncSource<aip::notes::Snapshot>::Cancel& canceled) mutable {
+        const bool force = (refreshRequested.fetch_and(~(1u << resource)) & (1u << resource)) != 0;
+        if (keys[resource] != key || force) sources[resource].CancelPending();
+        keys[resource] = key;
+        aip::notes::CredentialDecoder decoder;
+        aip::notes::HttpTransport transport;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+        decoder = testDecoder;
+        transport = testTransport ? testTransport : [](const auto&, auto&, std::wstring& error) { error = L"The inert host has no Notes network transport."; return false; };
+#else
+        decoder = aip::notes::DecodeNativeCredential;
+        transport = aip::FetchHttpBytes;
+#endif
+        sources[resource].Request(key, milliseconds(static_cast<long long>(settings.refreshSeconds) * 1000),
+            [settings, account = cfg.accounts[resource], decoder, transport](const aip::content::AsyncSource<aip::notes::Snapshot>::Cancel& canceled) mutable {
                 settings.canceled = [canceled] { return !g_running.load() || canceled(); };
-                return aip::notes::Fetch(settings);
-            }, WakePollThread, synchronous);
+                if (settings.canceled()) return aip::notes::MakeError(settings.resource, L"Canceled", L"Notes refresh was canceled", settings.refreshSeconds);
+                aip::notes::Account resolved;
+                std::wstring error;
+                if (!aip::notes::ResolveStoredAccount(account, resolved, error, decoder))
+                    return aip::notes::MakeError(settings.resource, L"Configuration error", error, settings.refreshSeconds);
+                settings.uid = resolved.uid; settings.ltoken = resolved.ltoken; settings.ltuid = resolved.ltuid;
+                return aip::notes::Fetch(settings, transport);
+            }, WakePollThread, synchronous || force);
         if (synchronous && !sources[resource].Wait(key, settings.timeout + milliseconds(1000))) {
             waitExpired[resource] = true; sources[resource].CancelPending();
         }
     }
-    aip::content::Text Read(const aip::content::NotesConfiguration& cfg, int resource)
+    aip::content::Text Read(const aip::content::NotesConfiguration& cfg, int resource, aip::notes::DetailId detail = aip::notes::DetailId::Summary)
     {
         if (waitExpired[resource]) return {L"Notes refresh timed out", L"No fresh result before the one-shot deadline.", L""};
         aip::notes::Snapshot snapshot;
         std::string error;
         if (!sources[resource].Read(Key(cfg, resource), snapshot, error))
             return {L"Real-Time Notes", error.empty() ? L"Loading resource information..." : L"The notes source could not complete.", L""};
-        return {snapshot.line1, snapshot.line2, L""};
+        if (detail == aip::notes::DetailId::Summary || snapshot.state == aip::notes::StateKind::Error || snapshot.state == aip::notes::StateKind::Loading)
+            return {snapshot.line1, snapshot.line2, L""};
+        const auto* choice = aip::notes::FindDetail(detail);
+        const auto found = snapshot.details.find(detail);
+        if (!choice || found == snapshot.details.end()) return {L"Notes detail unavailable", choice ? choice->label : L"Unknown detail", L""};
+        return {choice->label, found->second, L""};
     }
-    void Cancel(int resource) { sources[resource].CancelPending(); }
+    void Cancel(int resource) { sources[resource].CancelPending(); keys[resource].clear(); }
     void Cancel() { for (auto& source : sources) source.CancelPending(); }
     void Stop() { Cancel(); for (auto& source : sources) source.Stop(); }
 };
 static ContentNotesProvider g_contentNotes;
+static void RequestContentNotesRefresh(int resource)
+{
+    if (resource < 0 || resource > 3) return;
+    const auto mask = resource == 3 ? 7u : 1u << resource;
+    g_contentNotes.refreshRequested.fetch_or(mask);
+    for (int index = 0; index < 3; ++index) if (mask & (1u << index)) g_contentNotes.sources[index].CancelPending();
+    WakePollThread();
+}
 
 struct ContentSmtcProvider
 {
-    aip::content::AsyncSource<aip::content::Text> source;
+    aip::content::AsyncSource<aip::content::SmtcMediaSnapshot> source;
     bool waitExpired = false;
-    void Refresh(int seconds, bool synchronous)
+    std::wstring key, profile;
+    std::shared_ptr<aip::content::SmtcArtworkCache> cache;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    aip::content::SmtcSessionReader testReader;
+#endif
+    void Refresh(int seconds, bool synchronous, bool artworkNeeded = false)
     {
         waitExpired = false;
-        source.Request(L"SMTC", milliseconds(static_cast<long long>(seconds) * 1000),
-            [](const aip::content::AsyncSource<aip::content::Text>::Cancel& canceled) {
-                aip::content::Text result;
+        std::wstring currentProfile;
+        { std::lock_guard<std::mutex> lock(g_pathMutex); currentProfile = aip::MakeAbsolutePath(g_iniPath); }
+        if (profile != currentProfile) { profile = currentProfile; cache = std::make_shared<aip::content::SmtcArtworkCache>(L"DesktopStub", profile); }
+        key = L"SMTC:" + profile + (artworkNeeded ? L":artwork" : L":text");
+        aip::content::SmtcSessionReader reader;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+        reader = testReader ? testReader : [](auto, bool, const auto&) -> aip::content::SmtcSessionData {
+            throw std::runtime_error("The inert host has no system SMTC reader.");
+        };
+#endif
+        source.Request(key, milliseconds(static_cast<long long>(seconds) * 1000),
+            [reader, artworkNeeded, artworkCache = cache](const aip::content::AsyncSource<aip::content::SmtcMediaSnapshot>::Cancel& canceled) {
+                aip::content::SmtcMediaSnapshot result;
                 if (canceled()) return result;
                 std::wstring error;
-                if (!aip::content::ReadSmtcContent(result, error)) {
-                    result.primary = L"Media source unavailable"; result.secondary = error;
+                if (!aip::content::ReadSmtcMedia(result, error, milliseconds(2500), artworkNeeded, reader, canceled, artworkCache.get())) {
+                    result.text.primary = L"Media source unavailable"; result.text.secondary = error;
                 }
                 return result;
             }, WakePollThread, synchronous);
-        if (synchronous && !source.Wait(L"SMTC", milliseconds(3000))) { waitExpired = true; source.CancelPending(); }
+        if (synchronous && !source.Wait(key, milliseconds(3000))) { waitExpired = true; source.CancelPending(); }
     }
-    aip::content::Text Read()
+    aip::content::SmtcMediaSnapshot Read()
     {
-        if (waitExpired) return {L"Media refresh timed out", L"No fresh result before the one-shot deadline.", L""};
-        aip::content::Text result;
+        aip::content::SmtcMediaSnapshot result;
+        if (waitExpired) { result.text = {L"Media refresh timed out", L"No fresh result before the one-shot deadline.", L""}; return result; }
         std::string error;
-        if (!source.Read(L"SMTC", result, error)) {
-            result.primary = L"Now playing";
-            result.secondary = error.empty() ? L"Loading media information..." : aip::Utf8ToWide(error);
+        if (!source.Read(key, result, error)) {
+            result.text.primary = L"Now playing";
+            result.text.secondary = error.empty() ? L"Loading media information..." : aip::Utf8ToWide(error);
         }
         return result;
     }
@@ -226,18 +277,40 @@ static ContentRssProvider g_contentRss;
 
 static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error)
 {
-    if (!aip::content::ReadConfiguration([](const wchar_t* s, const wchar_t* k, const wchar_t* d) {
-        return IniReadS(s, k, d);
-    }, cfg, error)) return false;
+    // Refresh the normal cache once, then copy one complete published document.
+    // Subsequent writers may update the cache, but cannot mix versions within
+    // this configuration's scalar values, numbered events or RSS fallback.
+    std::vector<aip::IniSectionData> document;
+    {
+        // Only the existing named path lock is needed here. Windows mutex
+        // ownership is recursive on this thread, so a mutation callback may
+        // inspect its last published document without reentering the host's
+        // nonrecursive process write mutex. Refresh I/O cannot overlap a
+        // cooperating replacement; release before parsing/provider work.
+        aip::IniWriteMutexGuard snapshotScope(g_iniPath, CurrentIniWriteLockWaitMs());
+        if (!snapshotScope.IsLocked()) { error = L"The content configuration snapshot is temporarily unavailable."; return false; }
+        std::vector<IniEntry> refreshed;
+        ReadIniSectionCached(L"Content", refreshed);
+        std::lock_guard<std::mutex> lock(g_iniCacheMutex);
+        if (!g_iniCacheLoaded) { error = L"The content configuration could not be read."; return false; }
+        document = g_iniCacheDoc;
+    }
+    const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        std::wstring value;
+        return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+    };
+    if (!aip::content::ReadConfiguration(read, cfg, error, ContentAsusEventsFromDocument(document))) return false;
 
     // Existing RSS profiles migrate in memory. Keep their INI intact, retain
     // headline cycling, and provide wallpaper behind the feed by default.
-    if (!cfg.enabled && ParseContentSourceValue(IniReadS(L"Settings", L"ContentSource", L"Wallpaper")) == ContentSource::RssFeed)
+    if (!cfg.enabled && ParseContentSourceValue(read(L"Settings", L"ContentSource", L"Wallpaper")) == ContentSource::RssFeed)
     {
         cfg.enabled = true;
         cfg.cycle = true;
         cfg.entries.clear();
-        int count = IniReadClampedI(L"RssFeed", L"MaxItems", 5, 1, 20);
+        int count = 5;
+        aip::ParseIntValue(read(L"RssFeed", L"MaxItems", L"5"), count);
+        count = (std::max)(1, (std::min)(20, count));
         for (int i = 0; i < count; ++i) {
             aip::content::Entry entry;
             entry.name = L"RSS " + std::to_wstring(i + 1);
@@ -248,7 +321,7 @@ static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstr
     return true;
 }
 
-static std::wstring ContentBackgroundPath(const aip::content::Entry& entry)
+static std::wstring ContentBackgroundPath(const aip::content::Entry& entry, const aip::content::SmtcMediaSnapshot* media = nullptr)
 {
     const auto background = aip::content::BackgroundIdFor(entry.background);
     switch (background) {
@@ -268,6 +341,9 @@ static std::wstring ContentBackgroundPath(const aip::content::Entry& entry)
     }
     case aip::content::BackgroundId::None:
         break;
+    case aip::content::BackgroundId::SmtcArtwork:
+        if (media && media->artwork) return media->artwork->path;
+        break; // Absent/bad artwork uses the existing solid/text fallback.
     case aip::content::BackgroundId::Unknown:
     default:
         return {};
@@ -345,11 +421,15 @@ static bool ContentEngineTick(bool synchronous)
         return true;
     }
     const auto& entry = cfg.entries[index];
+    const auto usesSmtc = [](const aip::content::Entry& candidate) {
+        return aip::content::EntryUsesSource(candidate, aip::content::SourceId::Smtc) ||
+            aip::content::BackgroundIdFor(candidate.background) == aip::content::BackgroundId::SmtcArtwork;
+    };
     const auto sourceNeeded = [&](aip::content::SourceId id) {
         if (!aip::content::SourceRefreshesWhileInactive(id))
             return aip::content::EntryUsesSource(entry, id);
-        return std::any_of(cfg.entries.begin(), cfg.entries.end(), [id](const aip::content::Entry& candidate) {
-            return candidate.enabled && aip::content::EntryUsesSource(candidate, id);
+        return std::any_of(cfg.entries.begin(), cfg.entries.end(), [id, &usesSmtc](const aip::content::Entry& candidate) {
+            return candidate.enabled && (id == aip::content::SourceId::Smtc ? usesSmtc(candidate) : aip::content::EntryUsesSource(candidate, id));
         });
     };
     const bool needsRss = sourceNeeded(aip::content::SourceId::RssFeed);
@@ -368,8 +448,14 @@ static bool ContentEngineTick(bool synchronous)
     RssFeedSettings rssSettings;
     if (needsRss) { rssSettings = ReadRssFeedSettings(); g_contentRss.Refresh(rssSettings, synchronous); }
     else g_contentRss.Cancel();
-    if (needsSmtc) g_contentSmtc.Refresh(cfg.refreshSeconds, synchronous);
+    const bool needsArtwork = std::any_of(cfg.entries.begin(), cfg.entries.end(), [](const aip::content::Entry& candidate) {
+        return candidate.enabled && aip::content::BackgroundIdFor(candidate.background) == aip::content::BackgroundId::SmtcArtwork;
+    });
+    if (needsSmtc) g_contentSmtc.Refresh(cfg.refreshSeconds, synchronous, needsArtwork);
     else g_contentSmtc.Cancel();
+    // Read once so a worker publication cannot pair one track's text with
+    // another track's background while this frame is composed.
+    const auto media = needsSmtc ? g_contentSmtc.Read() : aip::content::SmtcMediaSnapshot{};
     for (int resource = 0; resource < 3; ++resource) {
         if (needsNotes[resource]) g_contentNotes.Refresh(cfg.notes, resource, synchronous);
         else g_contentNotes.Cancel(resource);
@@ -382,16 +468,23 @@ static bool ContentEngineTick(bool synchronous)
     aip::content::Snapshot snapshot;
     snapshot.active = true; snapshot.name = entry.name; snapshot.textMode = cfg.textMode;
     auto backgroundKey = entry.background + L"\n" + entry.imagePath;
+    const bool artworkBackground = aip::content::BackgroundIdFor(entry.background) == aip::content::BackgroundId::SmtcArtwork;
+    if (artworkBackground) {
+        backgroundKey += L"\n" + (media.artwork ? media.artwork->path : L"");
+        snapshot.backgroundLease = media.artwork;
+    }
     if (backgroundRefreshSeconds != cfg.refreshSeconds) {
         backgroundRefreshSeconds = cfg.refreshSeconds;
         nextBackgroundRead = 0;
     }
     if (backgroundKey != lastBackgroundEntry || GetTickCount64() >= nextBackgroundRead || synchronous) {
-        cachedBackground = ContentBackgroundPath(entry);
+        cachedBackground = ContentBackgroundPath(entry, &media);
         lastBackgroundEntry = backgroundKey;
         nextBackgroundRead = GetTickCount64() + static_cast<ULONGLONG>(cfg.refreshSeconds) * 1000;
     }
     snapshot.backgroundPath = cachedBackground;
+    if (artworkBackground && !media.artwork && !aip::content::EntryUsesSource(entry, aip::content::SourceId::Smtc))
+        snapshot.text = media.text; // Artwork-only entries also retain a useful fallback.
     for (const auto& source : entry.sources) {
         aip::content::Text text;
         switch (aip::content::SourceIdFor(source)) {
@@ -408,10 +501,10 @@ static bool ContentEngineTick(bool synchronous)
             text = g_contentDiscord.Read();
             break;
         case aip::content::SourceId::Notes:
-            text = g_contentNotes.Read(cfg.notes, entry.notesResource);
+            text = g_contentNotes.Read(cfg.notes, entry.notesResource, entry.notesDetail);
             break;
         case aip::content::SourceId::Smtc:
-            text = g_contentSmtc.Read();
+            text = media.text;
             break;
         case aip::content::SourceId::CapsLock: {
             bool enabled = false;
@@ -450,6 +543,7 @@ static bool ContentEngineTick(bool synchronous)
         }
         aip::content::Overlay(snapshot.text, text);
     }
+    if (artworkBackground && !media.artworkError.empty()) aip::content::AppendBounded(snapshot.text.secondary, media.artworkError);
     PublishContentSnapshot(snapshot);
     if (!IsUsableWallpaperPath(snapshot.backgroundPath)) {
         auto message = L"Content background is unavailable: " + snapshot.backgroundPath;

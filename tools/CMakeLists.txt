@@ -42,6 +42,51 @@ target_link_libraries(ContentSourceHostTests PRIVATE Threads::Threads)
 target_link_libraries(AsusEngineTests PRIVATE Threads::Threads)
 target_link_libraries(CapsBlinkEngineTests PRIVATE Threads::Threads)
 
+if(WIN32)
+    # Data/profile fixtures never start the product entry point or real sources.
+    add_portable_test(HardwareProfileImportTests tools/HardwareProfileImportTests.cpp .)
+    add_portable_test(NowPlayingProfileImportTests tools/NowPlayingProfileImportTests.cpp .)
+    add_portable_test(NotesSourceTests tools/NotesSourceTests.cpp .)
+    add_portable_test(SmtcSourceTests tools/SmtcSourceTests.cpp .)
+    add_portable_test(DiscordProfileEditTests tools/DiscordProfileEditTests.cpp .)
+    target_sources(DiscordProfileEditTests PRIVATE
+        "${REPOSITORY_ROOT}/dependencies/DiscordRPC/service.cpp"
+        "${REPOSITORY_ROOT}/dependencies/DiscordRPC/profile_edit.cpp")
+    target_link_libraries(HardwareProfileImportTests PRIVATE user32 shell32 shlwapi advapi32)
+    target_link_libraries(NowPlayingProfileImportTests PRIVATE user32 shell32 shlwapi advapi32)
+    target_link_libraries(NotesSourceTests PRIVATE winhttp advapi32)
+    target_link_libraries(SmtcSourceTests PRIVATE windowscodecs advapi32 windowsapp runtimeobject ole32)
+    target_link_libraries(DiscordProfileEditTests PRIVATE user32 shell32 shlwapi advapi32 ole32 uuid winhttp crypt32)
+    foreach(fixture HardwareProfileImportTests NowPlayingProfileImportTests NotesSourceTests SmtcSourceTests DiscordProfileEditTests)
+        target_compile_definitions(${fixture} PRIVATE UNICODE _UNICODE)
+    endforeach()
+
+    add_library(ContentIntegrationDiscord STATIC
+        "${REPOSITORY_ROOT}/dependencies/DiscordRPC/service.cpp"
+        "${REPOSITORY_ROOT}/dependencies/DiscordRPC/profile_edit.cpp")
+    add_library(ContentIntegrationAsus STATIC "${REPOSITORY_ROOT}/dependencies/asusblink/service.cpp")
+    target_compile_features(ContentIntegrationDiscord PRIVATE cxx_std_17)
+    target_compile_features(ContentIntegrationAsus PRIVATE cxx_std_17)
+    target_compile_definitions(ContentIntegrationDiscord PRIVATE UNICODE _UNICODE)
+    target_compile_definitions(ContentIntegrationAsus PRIVATE AIP_ASUS_NO_NATIVE_BACKEND)
+    if(MSVC)
+        target_compile_options(ContentIntegrationDiscord PRIVATE /W4 /utf-8 /EHsc)
+        target_compile_options(ContentIntegrationAsus PRIVATE /W4 /utf-8 /EHsc)
+    endif()
+    add_portable_test(ContentRuntimeTests DesktopStub/tools/ContentRuntimeTests.cpp .)
+    add_portable_test(ContentRuntimeNoHardwareTests DesktopStub/tools/ContentRuntimeNoHardwareTests.cpp .)
+    foreach(fixture ContentRuntimeTests ContentRuntimeNoHardwareTests)
+        target_compile_definitions(${fixture} PRIVATE UNICODE _UNICODE)
+        target_link_libraries(${fixture} PRIVATE ContentIntegrationDiscord
+            gdiplus windowscodecs gdi32 user32 shlwapi shell32 ole32 uuid comdlg32
+            advapi32 winhttp crypt32 windowsapp runtimeobject)
+    endforeach()
+    target_link_libraries(ContentRuntimeTests PRIVATE ContentIntegrationAsus)
+    add_portable_test(NowPlayingArtworkTests legacy/NowPlayingTile/tools/NowPlayingArtworkTests.cpp legacy/NowPlayingTile)
+    target_compile_definitions(NowPlayingArtworkTests PRIVATE UNICODE _UNICODE)
+    target_link_libraries(NowPlayingArtworkTests PRIVATE gdiplus windowscodecs advapi32 gdi32 user32 shlwapi shell32 ole32 windowsapp runtimeobject)
+endif()
+
 find_program(POWERSHELL_EXECUTABLE NAMES pwsh powershell)
 if(POWERSHELL_EXECUTABLE)
     add_test(NAME TileTextLayoutSpecification

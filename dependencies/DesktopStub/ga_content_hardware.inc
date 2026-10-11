@@ -83,17 +83,13 @@ struct ContentAsusProvider
         for (const auto& setting : cfg.settings) requested += L":" + setting.first + L":" + std::to_wstring(setting.second.size()) + L":" + setting.second;
         if (key == requested) { if (service && started) service->Pause(cfg.paused); return; }
         key = requested;
-        auto settings = cfg.settings;
-        if (!path.empty()) {
-            std::vector<aip::IniSectionData> profile;
-            if (!aip::LoadIniDocument(path, profile)) { RequestStop(); error = L"The ASUS pattern profile could not be read."; return; }
-            settings.clear();
-            for (const auto& section : profile) if (IEquals(section.name, L"Settings"))
-                for (const auto& entry : section.entries) settings[entry.key] = entry.value;
-        }
         aip::asus::Options options;
         options.hardwareEnabled = cfg.hardwareEnabled; options.readDiskActivity = cfg.readDiskActivity;
-        if (!aip::asus::ParseConfiguration(settings, options.configuration, error)) { RequestStop(); return; }
+        if (!path.empty()) {
+            aip::hardware_profile::AsusProfile profile;
+            if (!aip::hardware_profile::ReadAsusProfile(path, profile, error)) { RequestStop(); return; }
+            options.configuration = std::move(profile.configuration);
+        } else if (!aip::asus::ParseConfiguration(cfg.settings, options.configuration, error)) { RequestStop(); return; }
 #ifdef DESKTOPSTUB_INERT_HARDWARE
         if (configureTestOptions) configureTestOptions(options);
 #endif

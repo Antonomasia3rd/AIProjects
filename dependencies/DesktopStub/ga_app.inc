@@ -117,6 +117,10 @@ static void QueueCommandLineGenerationRequest()
 
 static void HandleSingleInstanceRequest(WPARAM request)
 {
+    const auto action = request & SINGLE_INSTANCE_REQUEST_MASK;
+    if (action >= SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE && action <= SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE + 3) {
+        RequestContentNotesRefresh(static_cast<int>(action - SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE)); return;
+    }
     bool applyTrayIcon = (request & SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON) != 0;
     bool regenerateManifest = (request & SINGLE_INSTANCE_FLAG_REGENERATE_MANIFEST) != 0;
 
@@ -1465,6 +1469,22 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         return 0;
     }
 
+    std::wstring notesImportError;
+    if (!ExpandCommandLineNotesImports(notesImportError) || !ExpandCommandLineHardwareImports(notesImportError) || !ExpandCommandLineNowPlayingImports(notesImportError)) {
+        aip::WriteCommandLineText(notesImportError, true); return 2;
+    }
+    if (g_commandLine.notesRefresh >= 0) {
+        if (g_commandLine.renderOnly || g_commandLine.configureOnly || !g_commandLine.settings.empty() ||
+            g_commandLine.generateOnce || g_commandLine.forceGenerateOnStartup || g_commandLine.exitRequested ||
+            g_commandLine.regenerateManifest || g_commandLine.appxActivationServer || g_commandLine.comRegistrationHelper) {
+            aip::WriteCommandLineText(L"--notes-refresh cannot be combined with settings, offline, activation, or rendering commands.", true); return 2;
+        }
+        g_singleInstanceMessage = RegisterWindowMessageW(g_singleInstanceMessageName.c_str());
+        if (!g_singleInstanceMessage || !SignalExistingInstance(SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE + g_commandLine.notesRefresh)) {
+            aip::WriteCommandLineText(L"Notes refresh requires an existing resident for this INI profile.", true); return 2;
+        }
+        aip::WriteCommandLineText(L"Requested Notes refresh from the existing resident.", false); return 0;
+    }
     if (g_commandLine.renderOnly || g_commandLine.configureOnly)
         return RunRenderOnlyCommand();
 

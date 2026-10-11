@@ -7,11 +7,13 @@
 #include <cstdint>
 #include <cwctype>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 #include <utility>
 #include "hardware/caps_blink_engine.h"
 #include "asusblink/pattern.h"
+#include "content_sources/notes_model.h"
 
 namespace aip { namespace content {
 constexpr int MaxEntries = 32;
@@ -23,6 +25,7 @@ enum class BackgroundId {
     LiveWallpaper,
     Image,
     None,
+    SmtcArtwork,
     Unknown,
 };
 struct BackgroundDescriptor {
@@ -61,6 +64,7 @@ inline constexpr BackgroundDescriptor Backgrounds[] = {
     {L"LiveWallpaper", L"Live wallpaper capture", BackgroundId::LiveWallpaper},
     {L"Image", L"Custom image", BackgroundId::Image},
     {L"None", L"Solid color", BackgroundId::None},
+    {L"SMTCArtwork", L"Now playing artwork (SMTC)", BackgroundId::SmtcArtwork},
 };
 inline constexpr SourceDescriptor Sources[] = {
     {L"CustomText", L"Custom text", SourceId::CustomText, false},
@@ -85,7 +89,10 @@ struct DiscordConfiguration {
     std::wstring profilePath, clientId, name = L"DesktopStub", details = L"{win_title}", state = L"CPU: {cpu}";
 };
 inline constexpr Choice NotesResources[] = {{L"Resin", L"Genshin Impact resin"}, {L"Stamina", L"Star Rail stamina"}, {L"Charge", L"Zenless Zone Zero charge"}};
-struct NotesAccount { std::wstring uid, token, userId; };
+struct NotesAccount {
+    std::wstring uid, token, userId, tokenProtected, userIdProtected;
+    int refreshSeconds = 0; // Zero inherits the global refresh preference.
+};
 struct NotesConfiguration {
     int refreshSeconds = 300, timeoutSeconds = 15, maximumBytes = 1048576;
     std::array<NotesAccount, 3> accounts;
@@ -98,6 +105,7 @@ struct Entry {
     Text custom;
     int rssItem = 1; // One-based index; independent of the content's cycle position.
     int notesResource = 0;
+    aip::notes::DetailId notesDetail = aip::notes::DetailId::Summary;
 };
 struct Configuration {
     bool enabled = false, cycle = false;
@@ -114,6 +122,9 @@ struct Snapshot {
     std::wstring name, backgroundPath, activationArguments;
     Text text;
     TextMode textMode = TextMode::Auto;
+    // Keep an immutable source asset alive while a published/render snapshot
+    // still reads it. The portable composition model does not own its files.
+    std::shared_ptr<const void> backgroundLease;
 };
 inline std::wstring Trim(std::wstring s) {
     const auto first = s.find_first_not_of(L" \t\r\n");
@@ -203,7 +214,8 @@ inline bool KnownSection(const std::wstring& section) {
     return s == L"content" || s.compare(0, 8, L"content.") == 0 || s == L"notes" || s.compare(0, 6, L"notes.") == 0 || s == L"discord" || s == L"capsblink" || s == L"asusblink";
 }
 inline bool SensitiveSetting(const std::wstring& section, const std::wstring& key) {
-    return Lower(section).compare(0, 6, L"notes.") == 0 && (Lower(key) == L"ltoken" || Lower(key) == L"ltuid");
+    const auto k = Lower(key);
+    return Lower(section).compare(0, 6, L"notes.") == 0 && (k.compare(0, 6, L"ltoken") == 0 || k.compare(0, 5, L"ltuid") == 0);
 }
 inline bool ParseSources(const std::wstring& value, std::vector<std::wstring>& sources) {
     sources.clear();
@@ -237,7 +249,9 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
         } else {
             bool known = false;
             for (const auto* name : AsusPatternKeys) if (k == Lower(name)) known = true;
-            if (!known) { error += L"unknown inline setting; use an advanced profile for numbered events."; return false; }
+            // The native parser owns numbered-event spelling and bounds; no
+            // second event grammar or invented limit is needed in the host.
+            if (!known && k.compare(0, 5, L"event") != 0) { error += L"unknown inline pattern setting."; return false; }
             aip::asus::Configuration parsed;
             if (!aip::asus::ParseConfiguration({{key, value}}, parsed, error)) return false;
         }
@@ -292,12 +306,32 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
         value = std::to_wstring(parsed); error.clear(); return true;
     }
     if (Lower(section).compare(0, 6, L"notes.") == 0) {
+        auto accountKey = k;
+        if (accountKey == L"ltoken_v2" || accountKey == L"ltuid_v2")
+            accountKey.erase(std::remove(accountKey.begin(), accountKey.end(), L'_'), accountKey.end());
         bool known = false;
         for (const auto& resource : NotesResources) if (Lower(section.substr(6)) == Lower(resource.value)) known = true;
-        if (!known || (k != L"uid" && k != L"ltoken" && k != L"ltuid")) { error += L"unknown account setting."; return false; }
+        const bool protectedValue = accountKey == L"ltokenprotected" || accountKey == L"ltuidprotected" || accountKey == L"ltokenv2protected" || accountKey == L"ltuidv2protected";
+        if (!known || (accountKey != L"uid" && accountKey != L"ltoken" && accountKey != L"ltuid" && accountKey != L"ltokenv2" && accountKey != L"ltuidv2" && !protectedValue && accountKey != L"refreshseconds" && accountKey != L"refreshintervalseconds")) { error += L"unknown account setting."; return false; }
         value = Trim(value);
-        if (value.size() > (k == L"uid" ? 32u : MaxText) ||
-            std::any_of(value.begin(), value.end(), [&](wchar_t ch) { return k == L"uid" ? ch < L'0' || ch > L'9' : ch < 0x20 || ch == L';' || ch == 0x7F; })) {
+        if (accountKey == L"refreshseconds" || accountKey == L"refreshintervalseconds") {
+            int parsed = 0;
+            if (!ParseInt(value, 0, 86400, parsed) || (parsed && parsed < 30)) { error += L"expected 0 (inherit) or 30-86400 seconds."; return false; }
+            value = std::to_wstring(parsed); error.clear(); return true;
+        }
+        if (protectedValue) {
+            if (!value.empty()) {
+                const auto lower = Lower(value);
+                const auto prefix = lower.compare(0, 14, L"dpapi:v1:utf8:") == 0 ? 14u : lower.compare(0, 6, L"dpapi:") == 0 ? 6u : 0u;
+                if (!prefix || value.size() > 65536 || value.size() <= prefix || (value.size() - prefix) % 2 ||
+                    std::any_of(value.begin() + prefix, value.end(), [](wchar_t ch) { return !((ch >= L'0' && ch <= L'9') || (ch >= L'a' && ch <= L'f') || (ch >= L'A' && ch <= L'F')); })) {
+                    error += L"invalid protected credential encoding (not shown)."; return false;
+                }
+            }
+            error.clear(); return true;
+        }
+        if (value.size() > (accountKey == L"uid" ? 32u : MaxText) ||
+            std::any_of(value.begin(), value.end(), [&](wchar_t ch) { return accountKey == L"uid" ? ch < L'0' || ch > L'9' : ch < 0x20 || ch == L';' || ch == 0x7F; })) {
             error += L"invalid account value (not shown)."; return false;
         }
         error.clear(); return true;
@@ -316,6 +350,11 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
             value = resource.value; error.clear(); return true;
         }
         error += L"expected Resin, Stamina, or Charge."; return false;
+    } else if (!root && k == L"notesdetail") {
+        for (const auto& detail : aip::notes::Details) if (Lower(Trim(value)) == Lower(detail.value)) {
+            value = detail.value; error.clear(); return true;
+        }
+        error += L"unknown Notes detail."; return false;
     } else if (!root && k == L"rssitem") {
         int parsed = 0;
         if (!ParseInt(value, 1, 20, parsed)) { error += L"expected a headline number from 1 to 20."; return false; }
@@ -346,7 +385,8 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
     } else { error += L"unknown setting."; return false; }
     error.clear(); return true;
 }
-template<class Reader> bool ReadConfiguration(Reader read, Configuration& result, std::wstring& error) {
+template<class Reader> bool ReadConfiguration(Reader read, Configuration& result, std::wstring& error,
+        const std::map<std::wstring, std::wstring>& asusEvents = {}) {
     Configuration cfg;
     bool valid = true;
     auto get = [&](const std::wstring& section, const wchar_t* key, const wchar_t* fallback) {
@@ -377,6 +417,12 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
         ParseInt(get(section, L"RssItem", L"1"), 1, 20, entry.rssItem);
         const auto notesResource = get(section, L"NotesResource", L"Resin");
         for (int resource = 0; resource < 3; ++resource) if (notesResource == NotesResources[resource].value) entry.notesResource = resource;
+        const auto notesDetail = get(section, L"NotesDetail", L"Summary");
+        for (const auto& detail : aip::notes::Details) if (notesDetail == detail.value) entry.notesDetail = detail.id;
+        if (!aip::notes::DetailAvailable(entry.notesResource, entry.notesDetail)) {
+            if (valid) error = section + L".NotesDetail is unavailable for its selected game.";
+            valid = false;
+        }
         if (entry.enabled && BackgroundIdFor(entry.background) == BackgroundId::Image && Trim(entry.imagePath).empty()) {
             if (valid) error = section + L".ImagePath is required for an Image background.";
             valid = false;
@@ -389,8 +435,11 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
     for (int resource = 0; resource < 3; ++resource) {
         const auto section = L"Notes." + std::wstring(NotesResources[resource].value);
         cfg.notes.accounts[resource].uid = get(section, L"UID", L"");
-        cfg.notes.accounts[resource].token = get(section, L"LToken", L"");
-        cfg.notes.accounts[resource].userId = get(section, L"LTUid", L"");
+        cfg.notes.accounts[resource].token = get(section, L"LToken", read(section.c_str(), L"LTokenV2", read(section.c_str(), L"ltoken_v2", L"").c_str()).c_str());
+        cfg.notes.accounts[resource].userId = get(section, L"LTUid", read(section.c_str(), L"LTuidV2", read(section.c_str(), L"ltuid_v2", L"").c_str()).c_str());
+        cfg.notes.accounts[resource].tokenProtected = get(section, L"LTokenProtected", read(section.c_str(), L"LTokenV2Protected", L"").c_str());
+        cfg.notes.accounts[resource].userIdProtected = get(section, L"LTUidProtected", read(section.c_str(), L"LTuidV2Protected", L"").c_str());
+        ParseInt(get(section, L"RefreshSeconds", read(section.c_str(), L"RefreshIntervalSeconds", L"0").c_str()), 0, 86400, cfg.notes.accounts[resource].refreshSeconds);
     }
     cfg.discord.profilePath = get(L"Discord", L"ProfilePath", L"");
     cfg.discord.clientId = get(L"Discord", L"ClientId", L"");
@@ -408,9 +457,21 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
     cfg.asus.readDiskActivity = get(L"AsusBlink", L"ReadDiskActivity", L"0") == L"1";
     cfg.asus.paused = get(L"AsusBlink", L"Paused", L"0") == L"1";
     cfg.asus.profilePath = get(L"AsusBlink", L"ProfilePath", L"");
+    const bool externalAsusProfile = !Trim(cfg.asus.profilePath).empty();
     for (std::size_t option = 0; option < 8; ++option)
-        cfg.asus.settings[AsusPatternKeys[option]] = get(L"AsusBlink", AsusPatternKeys[option], AsusPatternDefaults[option]);
-    if (cfg.asus.profilePath.empty()) {
+        cfg.asus.settings[AsusPatternKeys[option]] = !externalAsusProfile
+            ? get(L"AsusBlink", AsusPatternKeys[option], AsusPatternDefaults[option])
+            : read(L"AsusBlink", AsusPatternKeys[option], AsusPatternDefaults[option]);
+    for (const auto& setting : asusEvents) {
+        auto value = setting.second;
+        std::wstring issue;
+        if (Lower(setting.first).compare(0, 5, L"event") != 0 ||
+            (!externalAsusProfile && !NormalizeSetting(L"AsusBlink", setting.first, value, issue))) {
+            if (valid) error = issue.empty() ? L"Expected an ASUS numbered-event setting." : issue;
+            valid = false;
+        } else cfg.asus.settings[setting.first] = std::move(value);
+    }
+    if (!externalAsusProfile) {
         aip::asus::Configuration parsed;
         std::wstring issue;
         if (!aip::asus::ParseConfiguration(cfg.asus.settings, parsed, issue)) { if (valid) error = issue; valid = false; }

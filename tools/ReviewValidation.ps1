@@ -18,8 +18,10 @@ function Invoke-ReviewProcess {
     $p.StartInfo.RedirectStandardOutput = $true
     $p.StartInfo.RedirectStandardError = $true
     foreach ($parameter in $Parameters) { $p.StartInfo.ArgumentList.Add($parameter) }
+    $started = $false
     try {
         if (-not $p.Start()) { throw "Cannot start stage: $Label" }
+        $started = $true
         $stdout = $p.StandardOutput.ReadToEndAsync()
         $stderr = $p.StandardError.ReadToEndAsync()
         if (-not $p.WaitForExit($Seconds * 1000)) {
@@ -32,7 +34,7 @@ function Invoke-ReviewProcess {
         [IO.File]::WriteAllText((Join-Path $ReviewLogs ($Label + '.log')), $output)
         [pscustomobject]@{ Label=$Label; ExitCode=$p.ExitCode; Output=$output }
     } finally {
-        if ($p.Id -and -not $p.HasExited) { $p.Kill($true) }
+        if ($started -and -not $p.HasExited) { $p.Kill($true) }
         $p.Dispose()
     }
 }

@@ -31,7 +31,7 @@ static int RunRenderOnlyCommand()
     aip::content::Configuration composition;
     if (!aip::content::ReadConfiguration([](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
             return DesktopStubContentProfileValue(section, key, fallback, true);
-        }, composition, error)) return fail(error);
+        }, composition, error, ReadContentAsusEvents(true))) return fail(error);
 
     aip::content::Snapshot snapshot;
     std::wstring source;
@@ -68,12 +68,27 @@ static int RunRenderOnlyCommand()
         !EnsureIniDefaults() || !EnsureIniStringDefaults())
         return fail(L"could not initialize or update the local configuration file: " + g_iniPath);
     if (!g_commandLine.settings.empty() && !MutateDesktopStubIniWithWait([](std::wstring& text) {
+            if (!g_commandLine.nowPlayingImports.empty() && !aip::now_playing_profile::RemoveContentEntriesFromText(text)) return false;
+            if (ReplacesCommandLineAsusEvents() && !RemoveContentAsusEvents(text)) return false;
             for (const auto& setting : g_commandLine.settings)
-                if (!WriteIniValueToText(text, setting.section.c_str(), setting.key.c_str(), setting.value.c_str())) return false;
+                if (!WriteContentProfileSetting(text, setting)) return false;
+            // Notes imports/clear validate the complete prospective profile
+            // again under the INI mutation lock, including concurrent changes.
+            if (!g_commandLine.notesImports.empty() || !g_commandLine.hardwareImports.empty() || !g_commandLine.nowPlayingImports.empty() || std::any_of(g_commandLine.settings.begin(), g_commandLine.settings.end(),
+                [](const auto& setting) { return aip::content::Lower(setting.section).compare(0, 6, L"notes.") == 0 ||
+                    IEquals(setting.section, L"AsusBlink") || IEquals(setting.section, L"CapsBlink"); })) {
+                const auto document = aip::ParseIniDocument(text);
+                aip::content::Configuration prospective; std::wstring issue;
+                if (!aip::content::ReadConfiguration([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+                    std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+                }, prospective, issue, ContentAsusEventsFromDocument(document))) return false;
+            }
             return true;
         }, CurrentIniWriteLockWaitMs())) return fail(L"could not save the local setting batch.");
     if (g_commandLine.configureOnly)
     {
+        for (const auto& issue : g_commandLine.nowPlayingImportDiagnostics)
+            aip::WriteCommandLineText(L"NowPlaying import: " + issue + L"\n", false);
         aip::WriteCommandLineText(L"Saved local configuration; no resident or Startup operation was performed.", false);
         return 0;
     }

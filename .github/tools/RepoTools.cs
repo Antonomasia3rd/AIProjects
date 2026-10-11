@@ -506,7 +506,7 @@ static class RepoTools
         string path = dependencyPath.Replace('\\', '/');
         const string prefix = "dependencies/DiscordRPC/";
         if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
-        return new[] { "service.h", "service.cpp", "service_cancel.h", "drpc_environment.inc", "drpc_types.inc", "drpc_core.inc",
+        return new[] { "service.h", "service.cpp", "service_cancel.h", "profile_edit.h", "profile_edit.cpp", "drpc_environment.inc", "drpc_types.inc", "drpc_core.inc",
             "drpc_config_defaults.inc", "drpc_presence.inc", "drpc_ipc.inc", "drpc_gateway.inc" }
             .Contains(path.Substring(prefix.Length), StringComparer.OrdinalIgnoreCase);
     }
@@ -714,6 +714,10 @@ static class RepoTools
             new List<string> { "dependencies/DiscordRPC/service.cpp" }).Select(p => p.key).OrderBy(k => k).ToArray();
         if (!discordServiceConsumers.SequenceEqual(new[] { "DesktopStub", "DiscordRPC" }))
             throw new InvalidOperationException("Shared Discord service consumers: " + String.Join(", ", discordServiceConsumers));
+        var discordEditorConsumers = ProjectsUsingChangedDependencies(root, projects,
+            new List<string> { "dependencies/DiscordRPC/profile_edit.cpp" }).Select(p => p.key).OrderBy(k => k).ToArray();
+        if (!discordEditorConsumers.SequenceEqual(new[] { "DesktopStub", "DiscordRPC" }))
+            throw new InvalidOperationException("Shared Discord profile editor consumers: " + String.Join(", ", discordEditorConsumers));
         var discordTrayConsumers = ProjectsUsingChangedDependencies(root, projects,
             new List<string> { "dependencies/DiscordRPC/drpc_tray.inc" }).Select(p => p.key).ToArray();
         if (discordTrayConsumers.Length != 1 || discordTrayConsumers[0] != "DiscordRPC")

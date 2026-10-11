@@ -307,8 +307,409 @@ static void TestOfflineConfigurationPersistence(const std::wstring& directory)
     Check(ReadIniFileForMutation(restored), "restore the original fixture profile cache");
 }
 
+static void TestSmtcArtworkHost(const std::vector<BYTE>& bytes)
+{
+    int scene = 1, reads = 0;
+    bool requestedArtwork = false;
+    g_contentSmtc.testReader = [&](auto, bool artwork, const auto&) {
+        ++reads; requestedArtwork = artwork;
+        aip::content::SmtcSessionData data;
+        data.hasSession = scene != 0;
+        data.title = scene == 1 ? L"First fixture song" : L"Second fixture song";
+        data.artist = L"Fixture artist"; data.appId = L"Fixture.Player"; data.status = L"Playing";
+        if (scene == 1 || scene == 2) {
+            data.artworkBytes = bytes;
+            if (scene == 2) data.artworkBytes[54] = 200;
+        }
+        if (scene == 4) data.artworkBytes = {1, 2, 3};
+        return data;
+    };
+    const std::wstring mediaProfile =
+        L"[Content]\r\nEnabled=1\r\nCount=1\r\nTextMode=Overlay\r\n"
+        L"[Content.1]\r\nBackground=SMTCArtwork\r\nTextSources=SMTC\r\n";
+    Check(WriteContentFixture(mediaProfile) && ContentEngineTick(true), "artwork background composes through the host with an injected session");
+    aip::content::Snapshot first;
+    { ContentRenderScope scope; first = scope.snapshot; }
+    Check(requestedArtwork && reads == 1 && first.backgroundLease && first.text.primary == L"First fixture song" &&
+        first.backgroundPath.find(L"AIProjects-SMTC-") != std::wstring::npos,
+        "the host publishes text and artwork from one session/property snapshot");
+    const auto firstPath = first.backgroundPath;
+    {
+        Gdiplus::GdiplusStartupInput input;
+        ULONG_PTR token = 0;
+        const bool started = Gdiplus::GdiplusStartup(&token, &input, nullptr) == Gdiplus::Ok;
+        if (started) {
+            { Gdiplus::Bitmap image(firstPath.c_str());
+                Check(image.GetLastStatus() == Gdiplus::Ok && image.GetWidth() == 1 && image.GetHeight() == 1,
+                    "the production image decoder accepts the generated bounded artwork BMP");
+            }
+            Gdiplus::GdiplusShutdown(token);
+        } else Check(false, "initialize inert image decoder for the cached artwork fixture");
+    }
+    scene = 2;
+    Check(ContentEngineTick(true), "changed-track fixture refreshes without native SMTC");
+    { ContentRenderScope scope;
+        Check(scope.snapshot.text.primary == L"Second fixture song" && scope.snapshot.backgroundPath != firstPath && scope.snapshot.backgroundLease,
+            "track changes replace composed text and background atomically");
+    }
+    Check(GetFileAttributesW(firstPath.c_str()) != INVALID_FILE_ATTRIBUTES,
+        "an old generation lease prevents source refresh from deleting its artwork");
+    first = {};
+    Check(GetFileAttributesW(firstPath.c_str()) == INVALID_FILE_ATTRIBUTES,
+        "old artwork is deleted after the final old generation lease ends");
+    scene = 3;
+    Check(ContentEngineTick(true), "no-thumbnail fixture composes a usable fallback");
+    { ContentRenderScope scope;
+        Check(!scope.snapshot.backgroundLease && scope.snapshot.backgroundPath.find(L"ContentSolid-") != std::wstring::npos &&
+            scope.snapshot.text.primary == L"Second fixture song", "absent artwork uses current song text over a solid background");
+    }
+    scene = 0;
+    Check(ContentEngineTick(true), "idle media fixture composes without stale artwork");
+    { ContentRenderScope scope;
+        Check(!scope.snapshot.backgroundLease && scope.snapshot.text.primary == L"No media playing",
+            "idle clears the former track and reports its own status");
+    }
+    scene = 4;
+    Check(ContentEngineTick(true), "malformed image fixture retains media data");
+    { ContentRenderScope scope;
+        Check(!scope.snapshot.backgroundLease && scope.snapshot.text.primary == L"Second fixture song" &&
+            scope.snapshot.text.secondary.find(L"artwork") != std::wstring::npos,
+            "decode errors fall back to current text and expose the artwork diagnostic");
+    }
+    scene = 1;
+    const std::wstring artworkOnly =
+        L"[Content]\r\nEnabled=1\r\nCount=1\r\nTextMode=Overlay\r\n"
+        L"[Content.1]\r\nBackground=smtcartwork\r\nTextSources=\r\n";
+    Check(WriteContentFixture(artworkOnly) && ContentEngineTick(true), "artwork-only content starts the media provider without selecting SMTC text");
+    { ContentRenderScope scope;
+        Check(scope.snapshot.backgroundLease && scope.snapshot.text.primary.empty(), "artwork-only content retains a pure image while artwork exists");
+    }
+    scene = 3;
+    Check(ContentEngineTick(true), "artwork-only content refreshes a missing-thumbnail fallback");
+    { ContentRenderScope scope;
+        Check(!scope.snapshot.backgroundLease && scope.snapshot.text.primary == L"Second fixture song",
+            "an artwork-only entry falls back to useful media text when its image is absent");
+    }
+    const std::wstring futureArtwork =
+        L"[Content]\r\nEnabled=1\r\nCount=2\r\nCycleEnabled=1\r\nCycleSeconds=60\r\nTextMode=Overlay\r\n"
+        L"[Content.1]\r\nBackground=None\r\nTextSources=CustomText\r\nText=Visible fixture\r\n"
+        L"[Content.2]\r\nBackground=SMTCArtwork\r\nTextSources=SMTC\r\n";
+    Check(WriteContentFixture(futureArtwork) && ContentEngineTick(true) && requestedArtwork,
+        "a future artwork cycle slot can prefetch its read-only source");
+    { ContentRenderScope scope;
+        Check(!scope.snapshot.backgroundLease && scope.snapshot.text.primary == L"Visible fixture",
+            "prefetched media does not replace the active entry's configured text or background");
+    }
+    g_contentSmtc.Cancel();
+    g_contentSmtc.testReader = {};
+}
+
+static void TestNotesImportsAndHost()
+{
+    const auto section = L"Notes.Resin";
+    const auto source = aip::GetDirectoryName(g_iniPath) + L"\\legacy-notes.ini";
+    const std::wstring donor = L"[Settings]\nRunAtStartup=1\nRefreshIntervalSeconds=600\n[Account.Resin]\nUID=800000001\nLTokenV2Protected=dpapi:0102\nLTuidV2Protected=dpapi:0304\nRefreshIntervalSeconds=90\n";
+    Check(WriteUtf8BomTextFile(source, donor), "write synthetic donor account profile");
+    const std::wstring base = L"[Content]\nEnabled=1\nCount=1\n[Content.1]\nBackground=None\nTextSources=Notes\nNotesResource=Resin\n";
+    Check(WriteContentFixture(base), "prepare inert Notes host configuration");
+    Check(ImportContentNotesFile(nullptr, -1, source) && IniReadS(section, L"LTokenProtected", L"") == L"dpapi:0102" &&
+        IniReadS(section, L"LTUidProtected", L"") == L"dpapi:0304" && IniReadS(section, L"RefreshSeconds", L"") == L"90",
+        "native tray/import adapter commits protected aliases and per-account refresh without decrypting");
+    std::wstring unchanged, error;
+    Check(aip::notes::ReadImportFile(source, unchanged, error) && unchanged == donor,
+        "importing leaves the source profile unchanged");
+    const auto before = IniReadS(section, L"LTokenProtected", L"");
+    Check(WriteUtf8BomTextFile(source, L"[Account.Resin]\nUID=800000001\nLTokenV2Protected=bad\nLTuidV2Protected=dpapi:01\n"), "write invalid protected source fixture");
+    std::wstring original;
+    ReadIniFileForMutation(original);
+    Check(!ImportContentNotesFile(nullptr, -1, source), "invalid protected import is rejected");
+    std::wstring after;
+    Check(ReadIniFileForMutation(after) && after == original && IniReadS(section, L"LTokenProtected", L"") == before,
+        "a malformed source causes zero target-byte changes");
+    Check(WriteUtf8BomTextFile(source, donor), "restore synthetic donor profile");
+    const auto savedCommand = g_commandLine;
+    g_commandLine = {}; g_commandLine.configureOnly = true;
+    g_commandLine.notesImports.push_back({-1, source});
+    g_commandLine.settings.push_back({section, L"UID", L"800000002"});
+    Check(ExpandCommandLineNotesImports(error) && RunRenderOnlyCommand() == 0 && IniReadS(section, L"UID", L"") == L"800000002",
+        "CLI import expands as one configure-only batch with explicit setting precedence");
+    g_commandLine = {}; g_commandLine.configureOnly = true; g_commandLine.notesImports.push_back({-1, source});
+    g_commandLine.settings = {{section, L"ltoken_v2", L"synthetic-token"}, {section, L"LTUid", L"synthetic-user"}};
+    aip::content::Configuration importedCredentials;
+    Check(ExpandCommandLineNotesImports(error) && RunRenderOnlyCommand() == 0 && ReadContentConfiguration(importedCredentials, error) &&
+        importedCredentials.notes.accounts[0].token == L"synthetic-token" && importedCredentials.notes.accounts[0].userId == L"synthetic-user" &&
+        importedCredentials.notes.accounts[0].tokenProtected.empty() && importedCredentials.notes.accounts[0].userIdProtected.empty(),
+        "explicit plain credential aliases replace protected import families without values being logged");
+    Check(WriteUtf8BomTextFile(source, L"[Account.Resin]\nUID=800000001\nLToken=synthetic-token\nLTUid=synthetic-user\n"),
+        "prepare plain synthetic account donor for reverse precedence");
+    g_commandLine = {}; g_commandLine.configureOnly = true; g_commandLine.notesImports.push_back({-1, source});
+    g_commandLine.settings = {{section, L"LTokenV2Protected", L"dpapi:0102"}, {section, L"LTuidV2Protected", L"dpapi:0304"}};
+    Check(ExpandCommandLineNotesImports(error) && RunRenderOnlyCommand() == 0 && ReadContentConfiguration(importedCredentials, error) &&
+        importedCredentials.notes.accounts[0].token.empty() && importedCredentials.notes.accounts[0].userId.empty() &&
+        importedCredentials.notes.accounts[0].tokenProtected == L"dpapi:0102" && importedCredentials.notes.accounts[0].userIdProtected == L"dpapi:0304",
+        "explicit protected aliases replace plain import families without opening credentials");
+    g_commandLine = savedCommand;
+    ContentNotesProvider provider;
+    aip::content::NotesConfiguration cfg;
+    cfg.accounts[0].uid = L"800000001"; cfg.accounts[0].tokenProtected = L"dpapi:01"; cfg.accounts[0].userIdProtected = L"dpapi:02";
+    cfg.accounts[0].refreshSeconds = 90;
+    std::atomic<int> decryptions{0}, fetches{0};
+    std::atomic<bool> entered{false}, release{true};
+    provider.testDecoder = [&](const auto&, auto& plain) { ++decryptions; plain = L"fixture-only"; return true; };
+    provider.testTransport = [&](const auto& request, auto& response, auto&) {
+        ++fetches; entered = true;
+        const auto deadline = steady_clock::now() + milliseconds(2000);
+        while (!release && steady_clock::now() < deadline) std::this_thread::sleep_for(milliseconds(1));
+        response.statusCode = 200;
+        const std::string body = R"({"retcode":0,"data":{"current_resin":20,"max_resin":200,"resin_recovery_time":"7200","finished_task_num":2,"total_task_num":4}})";
+        response.body.assign(body.begin(), body.end());
+        return true;
+    };
+    provider.Refresh(cfg, 0, true);
+    const auto summary = provider.Read(cfg, 0);
+    const auto detail = provider.Read(cfg, 0, aip::notes::DetailId::Commissions);
+    Check(summary.primary == L"20/200" && summary.secondary == L"2h 0m" && detail.primary == L"Commissions" && detail.secondary == L"2/4" &&
+        fetches == 1 && decryptions == 2, "summary and selectable detail share one injected fetch snapshot");
+    provider.refreshRequested = 1;
+    release = false; entered = false;
+    provider.Refresh(cfg, 0, false);
+    Check(HostUntil([&] { return entered.load(); }), "start a bounded stale-account transport fixture");
+    const auto oldCfg = cfg;
+    cfg.accounts[0] = {};
+    provider.Refresh(cfg, 0, false);
+    Check(provider.Read(cfg, 0).primary != L"20/200", "clear/reconfiguration immediately hides the old cached account data");
+    release = true;
+    Check(HostUntil([&] { return provider.Read(cfg, 0).primary == L"Configuration error"; }) && fetches == 2 && decryptions == 4,
+        "late stale fetch cannot publish after clear and the cleared account starts no decryption or HTTP");
+    provider.Stop();
+    HandleSingleInstanceRequest(SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE + 1);
+    Check((g_contentNotes.refreshRequested.load() & 2u) != 0, "existing-resident Notes IPC queues the specific game without lifecycle work");
+    Check(DispatchContentEngineCommand(nullptr, ID_NOTES_SETTINGS + 16 + 7) && IniReadS(section, L"UID", L"missing").empty() &&
+        IniReadS(section, L"LTokenProtected", L"missing").empty(), "tray clear atomically clears plain/protected credentials and cancels cached requests");
+    g_contentNotes.refreshRequested = 0;
+    DeleteFileW(source.c_str());
+}
+
+static void TestNowPlayingProfileHostImports(const std::vector<BYTE>& artworkBytes)
+{
+    const auto source = aip::GetDirectoryName(g_iniPath) + L"\\now-playing-donor.ini";
+    const auto savedCommand = g_commandLine;
+    const auto savedResponse = contentDialogResponse; contentDialogResponse = IDYES;
+    int reads = 0;
+    g_contentSmtc.testReader = [&](auto, bool artwork, const auto&) {
+        ++reads; aip::content::SmtcSessionData data;
+        data.hasSession = true; data.title = L"Imported fixture song"; data.artist = L"Fixture artist"; data.status = L"Playing";
+        if (artwork) data.artworkBytes = artworkBytes;
+        return data;
+    };
+    const std::wstring base = L"[Settings]\nRunAtStartup=1\nRunAtStartupPackaged=0\n[Content]\nEnabled=0\nCount=4\nCycleSeconds=23\n"
+        L"[Content.1]\nBackground=Image\nImagePath=obsolete.bmp\nNotesDetail=invalid-old-detail\n[Content.4]\nText=stale-four\n"
+        L"[Unrelated]\nKeep=unchanged\n";
+    for (const auto* layout : {L"Text", L"Artwork", L"Combined", L"Cycle"}) {
+        const auto donor = L"; untouched donor\n[Settings]\nTileLayout=" + std::wstring(layout) +
+            L"\nUpdateIntervalSeconds=6\nTileRefreshSeconds=240\nRunAtStartup=false\n";
+        Check(WriteUtf8BomTextFile(source, donor) && WriteContentFixture(base), "prepare synthetic NowPlaying donor and stale host entries");
+        const auto beforeReads = reads;
+        Check(ImportContentNowPlayingFile(nullptr, source) && reads == beforeReads,
+            "tray NowPlaying import commits without querying the injected media source");
+        aip::content::Configuration cfg; std::wstring error, unchanged;
+        Check(ReadContentConfiguration(cfg, error) && cfg.enabled && cfg.entries.size() == (std::wstring(layout) == L"Cycle" ? 3u : 1u) &&
+            cfg.refreshSeconds == 6 && cfg.cycleSeconds == 23 && IniReadS(L"Settings", L"RunAtStartup", L"") == L"1" &&
+            IniReadS(L"Unrelated", L"Keep", L"") == L"unchanged" && IniReadS(L"Content.4", L"Text", L"missing") == L"missing" &&
+            contentDialogText.find(L"Donor RunAtStartup=false") != std::wstring::npos,
+            "tray replacement removes dormant entries, preserves native Startup and reports deferred donor preference");
+        Check(ReadTextFile(source, unchanged) && unchanged == donor && ContentEngineTick(true),
+            "imported layout composes through the real host using an injected session and leaves its donor unchanged");
+        { ContentRenderScope scope;
+            const bool pureArtwork = std::wstring(layout) == L"Artwork";
+            Check((pureArtwork ? scope.snapshot.text.primary.empty() : scope.snapshot.text.primary == L"Imported fixture song") &&
+                (pureArtwork || std::wstring(layout) == L"Combined" ? bool(scope.snapshot.backgroundLease) : !scope.snapshot.backgroundLease),
+                "native imported Text, Artwork, Combined and initial Cycle slots publish their expected composition");
+        }
+    }
+    std::wstring error, before, after;
+    Check(WriteContentFixture(base), "restore stale content before configure-only projection preflight");
+    g_commandLine = {}; g_commandLine.configureOnly = true; g_commandLine.nowPlayingImports = {source};
+    g_commandLine.settings = {{L"Content", L"RefreshSeconds", L"9"}, {L"Content.1", L"Name", L"Explicit name"}};
+    const auto beforeReads = reads;
+    Check(ExpandCommandLineNowPlayingImports(error) && RunRenderOnlyCommand() == 0 && reads == beforeReads &&
+        IniReadS(L"Content", L"RefreshSeconds", L"") == L"9" && IniReadS(L"Content.1", L"Name", L"") == L"Explicit name" &&
+        IniReadS(L"Content.1", L"NotesDetail", L"missing") == L"missing" && !g_commandLine.nowPlayingImportPlan.snapshot.runAtStartup,
+        "configure-only preflight uses fresh-entry defaults and explicit settings win without media or Startup work");
+    ReadIniFileForMutation(before);
+    for (const auto* invalid : {L"[Settings]\nTileLayout=bad\n", L"[Settings]\nUpdateIntervalSeconds=61\n", L"[Settings]\nRunAtStartup=perhaps\n", L"[Settings\nTileLayout=Text\n"}) {
+        Check(WriteUtf8BomTextFile(source, invalid), "create a malformed synthetic NowPlaying profile");
+        g_commandLine = {}; g_commandLine.configureOnly = true; g_commandLine.nowPlayingImports = {source};
+        Check(!ExpandCommandLineNowPlayingImports(error) && g_commandLine.settings.empty() &&
+            !ImportContentNowPlayingFile(nullptr, source) && ReadIniFileForMutation(after) && after == before && reads == beforeReads,
+            "malformed CLI/tray imports publish no settings or target writes and query no media");
+    }
+    aip::now_playing_profile::ImportPlan plan; aip::now_playing_profile::ConfigurationProjection projection;
+    Check(!ReadContentNowPlayingImport(g_iniPath, plan, projection, error) && projection.settings.empty() &&
+        ReadIniFileForMutation(after) && after == before, "self-import is rejected without altering the source/output profile");
+    g_contentSmtc.Cancel(); g_contentSmtc.testReader = {};
+    g_commandLine = savedCommand; contentDialogResponse = savedResponse;
+    DeleteFileW(source.c_str());
+}
+
+static void TestHardwareProfileHostImports()
+{
+    const auto directory = aip::GetDirectoryName(g_iniPath);
+    const auto capsSource = directory + L"\\caps-donor.ini", asusSource = directory + L"\\asus-donor.ini";
+    const std::wstring capsText = L"; source stays exact\n[Settings]\nKeyboardTargetPath=\\Device\\KeyboardClass03\nBlinkIntervalMs=750\nRunAtStartup=1\n";
+    const std::wstring asusText = L"; legacy donor\n[Options]\nmic-state=bad\nkeyboard-state=130\nno-tray=\n[Settings]\nMicState=1\nEvent001HddState=128,129\nEvent001HddInterval=0.5s\n";
+    Check(WriteUtf8BomTextFile(capsSource, capsText) && WriteUtf8BomTextFile(asusSource, asusText), "create synthetic Caps/ASUS donor import files");
+    const std::wstring base = L"; preserve host\n[Content]\nEnabled=0\nCount=1\n[Content.1]\nBackground=None\nTextSources=CustomText\n"
+        L"[CapsBlink]\nHardwareEnabled=0\n[AsusBlink]\nHardwareEnabled=0\nReadDiskActivity=0\nPaused=1\nProfilePath=old-draft.ini\nEvent2MicState=1\nEvent2MicInterval=bad\nVendor=keep\n";
+    Check(WriteContentFixture(base) && ImportContentHardwareFile(nullptr, true, asusSource) && ImportContentHardwareFile(nullptr, false, capsSource),
+        "tray import adapters replace stale invalid event fields and clear external profile selection atomically");
+    aip::content::Configuration cfg; std::wstring error;
+    Check(ReadContentConfiguration(cfg, error) && cfg.asus.settings.count(L"Event001HddState") && !cfg.asus.settings.count(L"Event2MicState") &&
+        cfg.asus.profilePath.empty() && cfg.asus.paused && !cfg.asus.hardwareEnabled && !cfg.asus.readDiskActivity && !cfg.caps.actionsEnabled &&
+        cfg.caps.target == L"\\Device\\KeyboardClass03" && cfg.caps.intervalMs == 750 && IniReadS(L"AsusBlink", L"Vendor", L"") == L"keep",
+        "runtime typed reads retain imported events and preserve flags, unrelated fields and Caps target/interval");
+    std::wstring capsAfter, asusAfter;
+    Check(ReadTextFile(capsSource, capsAfter) && ReadTextFile(asusSource, asusAfter) && capsAfter == capsText && asusAfter == asusText,
+        "hardware tray imports leave both donor sources and comments unchanged");
+    Check(SaveContentAsusEventSetting(nullptr, L"event-001-hdd-state", L"130") && SaveContentAsusEventSetting(nullptr, L"Event01MicState", L"1") &&
+        ReadContentConfiguration(cfg, error) && cfg.asus.settings.at(L"Event001HddState") == L"130" && cfg.asus.settings.count(L"Event01MicState"),
+        "advanced tray setting route validates aliases and retains leading-zero numbered identities");
+    std::wstring before, after;
+    ReadIniFileForMutation(before);
+    Check(!SaveContentAsusEventSetting(nullptr, L"Event01MicState", L"2") && ReadIniFileForMutation(after) && before == after,
+        "invalid advanced edits make zero target byte changes");
+    Check(WriteUtf8BomTextFile(asusSource, L"[Settings]\nEvent001MicState=2\n"), "create malformed donor replacement fixture");
+    Check(!ImportContentHardwareFile(nullptr, true, asusSource) && ReadIniFileForMutation(after) && before == after,
+        "malformed donor replacement cannot remove existing events or publish a partial map");
+    Check(WriteUtf8BomTextFile(asusSource, asusText), "restore synthetic modern/legacy donor source");
+    const auto savedCommand = g_commandLine;
+    g_commandLine = {}; g_commandLine.configureOnly = true;
+    g_commandLine.hardwareImports = {{true, asusSource}, {false, capsSource}};
+    g_commandLine.settings = {{L"AsusBlink", L"Event001HddState", L"140"}, {L"CapsBlink", L"BlinkIntervalMs", L"900"}};
+    Check(ExpandCommandLineHardwareImports(error) && RunRenderOnlyCommand() == 0 &&
+        IniReadS(L"AsusBlink", L"Event001HddState", L"") == L"140" && IniReadS(L"CapsBlink", L"BlinkIntervalMs", L"") == L"900" &&
+        IniReadS(L"AsusBlink", L"Event01MicState", L"missing") == L"missing",
+        "configure-only imports replace prior events with explicit setting precedence in one saved batch");
+    Check(IniReadS(L"CapsBlink", L"HardwareEnabled", L"") == L"0" && IniReadS(L"AsusBlink", L"HardwareEnabled", L"") == L"0" &&
+        IniReadS(L"AsusBlink", L"ReadDiskActivity", L"") == L"0" && IniReadS(L"AsusBlink", L"Paused", L"") == L"1",
+        "configure-only hardware imports leave independent activation and pause flags untouched");
+    ReadIniFileForMutation(before);
+    HANDLE lock = CreateFileW(g_iniPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    Check(lock != INVALID_HANDLE_VALUE, "hold imported target against atomic replacement");
+    if (lock != INVALID_HANDLE_VALUE) {
+        Check(RunRenderOnlyCommand() == 2, "failed import publication reports a configure-only error");
+        CloseHandle(lock);
+        Check(ReadIniFileForMutation(after) && before == after && RunRenderOnlyCommand() == 0,
+            "failed import publication preserves full target bytes and allows retry after the lock is released");
+    }
+    Check(!ReadContentHardwareImport(g_iniPath, true, g_commandLine.settings, error), "a donor source cannot equal the host output profile");
+    g_commandLine = savedCommand;
+    ContentAsusProvider provider; aip::content::AsusConfiguration external;
+    external.profilePath = asusSource;
+    std::atomic<int> backends{0}; bool inert = false;
+    provider.configureTestOptions = [&](aip::asus::Options& options) {
+        inert = !options.hardwareEnabled && !options.readDiskActivity;
+        options.backendFactory = [&]() -> std::unique_ptr<aip::asus::Backend> { ++backends; return {}; };
+    };
+    provider.Refresh(external);
+    Check(HostUntil([&] { return provider.service && provider.service->Read().pattern.micState == 1; }) &&
+        inert && backends == 0 && provider.error.empty(), "external ProfilePath loads legacy Options fallback through the shared reader with no hardware/disk backend");
+    provider.Stop();
+    Check(ReadTextFile(asusSource, asusAfter) && asusAfter == asusText, "external profile runtime also leaves the donor source unchanged");
+    DeleteFileW(capsSource.c_str()); DeleteFileW(asusSource.c_str());
+}
+
+static void TestContentConfigurationSnapshots()
+{
+    const auto originalRefresh = g_iniCacheRefreshMs.load();
+    g_iniCacheRefreshMs = 0;
+    const std::wstring oldDocument = L"[Settings]\nContentSource=RssFeed\n[RssFeed]\nMaxItems=2\n[Content]\nEnabled=0\nCount=1\n"
+        L"[CapsBlink]\nHardwareEnabled=0\nKeyboardTargetPath=\\Device\\KeyboardClass0\nBlinkIntervalMs=500\n"
+        L"[AsusBlink]\nHardwareEnabled=0\nReadDiskActivity=0\nMicState=1\nErrorRetry=1\nEvent1HddState=128\n"
+        L"[Notes.Resin]\nUID=800000001\nLToken=old-fixture-token\nLTUid=old-fixture-user\nRefreshSeconds=60\n";
+    const std::wstring newDocument = L"[Settings]\nContentSource=RssFeed\n[RssFeed]\nMaxItems=4\n[Content]\nEnabled=0\nCount=1\n"
+        L"[CapsBlink]\nHardwareEnabled=0\nKeyboardTargetPath=\\Device\\KeyboardClass1\nBlinkIntervalMs=600\n"
+        L"[AsusBlink]\nHardwareEnabled=0\nReadDiskActivity=0\nMicState=0\nErrorRetry=7\nEvent1HddState=255\n"
+        L"[Notes.Resin]\nUID=800000002\nLToken=new-fixture-token\nLTUid=new-fixture-user\nRefreshSeconds=90\n";
+    const auto coherent = [](const aip::content::Configuration& cfg) {
+        const bool old = cfg.notes.accounts[0].uid == L"800000001";
+        if (!old && cfg.notes.accounts[0].uid != L"800000002") return false;
+        const auto field = [&](const wchar_t* key, const wchar_t* expected) {
+            const auto found = cfg.asus.settings.find(key);
+            return found != cfg.asus.settings.end() && found->second == expected;
+        };
+        return cfg.enabled && cfg.cycle && cfg.entries.size() == (old ? 2u : 4u) &&
+            cfg.caps.target == (old ? L"\\Device\\KeyboardClass0" : L"\\Device\\KeyboardClass1") && cfg.caps.intervalMs == (old ? 500 : 600) &&
+            !cfg.caps.actionsEnabled && !cfg.asus.hardwareEnabled && !cfg.asus.readDiskActivity &&
+            field(L"MicState", old ? L"1" : L"0") && field(L"ErrorRetry", old ? L"1" : L"7") && field(L"Event1HddState", old ? L"128" : L"255") &&
+            cfg.notes.accounts[0].token == (old ? L"old-fixture-token" : L"new-fixture-token") &&
+            cfg.notes.accounts[0].userId == (old ? L"old-fixture-user" : L"new-fixture-user") && cfg.notes.accounts[0].refreshSeconds == (old ? 60 : 90);
+    };
+    aip::content::Configuration cfg; std::wstring error;
+    Check(WriteContentFixture(oldDocument) && ReadContentConfiguration(cfg, error) && coherent(cfg), "old configuration snapshot contains coherent scalar, event, account and RSS fallback values");
+    Check(WriteContentFixture(newDocument) && ReadContentConfiguration(cfg, error) && coherent(cfg), "new configuration snapshot contains coherent scalar, event, account and RSS fallback values");
+    std::atomic<bool> start{false}, writerFailed{false};
+    std::atomic<DWORD> writerError{0};
+    std::thread writer([&] {
+        while (!start) std::this_thread::yield();
+        for (int index = 0; index < 300; ++index) {
+            const auto& document = index % 2 ? oldDocument : newDocument;
+            if (!MutateDesktopStubIniWithWait([&](std::wstring& text) { text = document; return true; }, 1500)) {
+                writerError = GetLastError(); writerFailed = true; return;
+            }
+            std::this_thread::sleep_for(milliseconds(1));
+        }
+    });
+    start = true;
+    int mixed = 0, readFailures = 0, emptyAccountSnapshots = 0;
+    for (int index = 0; index < 200; ++index) {
+        if (!ReadContentConfiguration(cfg, error)) ++readFailures;
+        else if (!coherent(cfg)) { ++mixed; if (cfg.notes.accounts[0].uid.empty()) ++emptyAccountSnapshots; }
+    }
+    writer.join();
+    if (writerFailed || readFailures || mixed) std::cerr << "Configuration snapshot diagnostics: writerError=" << writerError.load()
+        << ", readFailures=" << readFailures << ", mixed=" << mixed << ", emptyAccountSnapshots=" << emptyAccountSnapshots << '\n';
+    Check(!writerFailed && !readFailures && !mixed, "200 reads across 300 cooperating atomic publications return only whole old/new configurations");
+    bool nested = false;
+    Check(MutateDesktopStubIniWithWait([&](std::wstring&) {
+        aip::content::Configuration published; std::wstring issue;
+        nested = ReadContentConfiguration(published, issue) && coherent(published);
+        return nested;
+    }, 1500) && nested, "configuration snapshot acquisition safely reenters a same-thread named mutation scope");
+    const int savedWait = g_iniWriteLockWaitMs.load();
+    std::atomic<bool> holderReady{false}, holderLocked{false}, releaseHolder{false};
+    std::thread holder([&] {
+        aip::IniWriteMutexGuard scope(g_iniPath, 1500);
+        holderLocked = scope.IsLocked(); holderReady = true;
+        while (!releaseHolder) std::this_thread::sleep_for(milliseconds(1));
+    });
+    Check(HostUntil([&] { return holderReady.load(); }) && holderLocked, "a cooperating fixture owns the path lock for bounded snapshot failure validation");
+    g_iniWriteLockWaitMs = 0;
+    const auto retainedUid = cfg.notes.accounts[0].uid;
+    Check(!ReadContentConfiguration(cfg, error) && !error.empty() && cfg.notes.accounts[0].uid == retainedUid,
+        "snapshot lock failure returns unavailable status without changing the previous typed configuration");
+    g_iniWriteLockWaitMs = savedWait;
+    releaseHolder = true; holder.join();
+    const auto inactive = L"; retain stale inline fields\n[AsusBlink]\nHardwareEnabled=0\nReadDiskActivity=0\nProfilePath=external-profile.ini\nMicState=bad\nEvent1MicState=2\nEvent1MicInterval=bad\n";
+    Check(WriteContentFixture(inactive) && ReadContentConfiguration(cfg, error) && cfg.asus.profilePath == L"external-profile.ini" &&
+        cfg.asus.settings.at(L"MicState") == L"bad" && cfg.asus.settings.at(L"Event1MicInterval") == L"bad",
+        "runtime external-profile selection preserves and ignores invalid inactive inline patterns");
+    Check(MutateDesktopStubIniWithWait([](std::wstring& text) { return WriteIniValueToText(text, L"AsusBlink", L"ProfilePath", L""); }, 1500) &&
+        !ReadContentConfiguration(cfg, error), "returning to invalid inline patterns rejects the typed reload");
+    g_iniCacheRefreshMs = originalRefresh;
+}
+
 int wmain()
 {
+    struct FixtureDeadline {
+        std::atomic<bool> finished{false};
+        std::thread thread;
+        FixtureDeadline() : thread([this] {
+            for (int tick = 0; tick < 450 && !finished; ++tick) std::this_thread::sleep_for(milliseconds(100));
+            if (!finished) { std::cerr << "Inert host fixture exceeded 45 seconds.\n"; std::_Exit(124); }
+        }) {}
+        ~FixtureDeadline() { finished = true; thread.join(); }
+    } fixtureDeadline;
     wchar_t temporary[MAX_PATH]{};
     if (!GetTempPathW(_countof(temporary), temporary)) return 2;
     const auto directory = std::wstring(temporary) + L"DesktopStubContentTest-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
@@ -379,7 +780,9 @@ int wmain()
 
     HMENU menu = CreatePopupMenu();
     AppendContentEngineMenu(menu);
-    Check(GetMenuItemCount(menu) == static_cast<int>(_countof(g_contentOptions)) + 7, "menu contains provider settings, add action and entries");
+    Check(GetMenuItemCount(menu) == static_cast<int>(_countof(g_contentOptions)) + 8 &&
+        GetMenuState(menu, ID_CONTENT_NOW_PLAYING_IMPORT, MF_BYCOMMAND) != 0xffffffffu,
+        "menu contains provider settings, add action, NowPlaying import and entries");
     Check((GetMenuState(menu, ID_CONTENT_OPTIONS, MF_BYCOMMAND) & MF_CHECKED) != 0, "menu checks direct INI true");
     Check(DispatchContentEngineCommand(nullptr, ID_CONTENT_ENTRY_OPTIONS), "entry toggle dispatches through real menu handler");
     Check(IniReadS(L"Content.1", L"Enabled", L"1") == L"0", "tray toggle persists canonical value");
@@ -489,6 +892,12 @@ int wmain()
         Check(fixtureService.Stop(2000), "linked fixture service stops within deadline");
     }
     Check(contentDialogs == 0, "routine settings do not produce modal prompts");
+    TestSmtcArtworkHost(bytes);
+    TestNotesImportsAndHost();
+    TestHardwareProfileHostImports();
+    TestContentConfigurationSnapshots();
+    TestNowPlayingProfileHostImports(bytes);
+    Check(WriteContentFixture(config) && ContentEngineTick(true), "media fixtures restore the original custom-image profile");
     TestServiceHostLifecycles();
     TestCapsHostAndShutdownCache();
     DestroyMenu(menu);

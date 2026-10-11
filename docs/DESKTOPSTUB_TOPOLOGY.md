@@ -46,7 +46,7 @@ remain ordinary Windows runtime dependencies.
 The canonical catalog is in [`content_engine.h`](../dependencies/content_engine.h):
 
 - Background: desktop wallpaper, live wallpaper capture, custom image, or solid
-  color.
+  color, plus current-session SMTC artwork.
 - Text/data: custom text, RSS/Atom, Caps Lock state, SMTC, Notes, Discord Rich
   Presence, CapsBlink, and AsusBlink.
 - Up to 32 entries can each combine a background and ordered text/data sources.

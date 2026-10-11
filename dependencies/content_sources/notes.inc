@@ -5,6 +5,8 @@
 // Account discovery/storage and all UI/registration remain host concerns.
 #include "../desktop_app_baseline.h"
 #include "../http_fetch.inc"
+#include "notes_model.h"
+#include <map>
 #include <wincrypt.h>
 #include <ctime>
 #include <random>
@@ -37,6 +39,7 @@ struct Snapshot
     std::wstring line2 = L"Real-Time Notes";
     std::wstring tooltip = L"Real-Time Notes";
     std::vector<std::wstring> menuLines;
+    std::map<DetailId, std::wstring> details;
     UINT refreshSeconds = kDefaultRefreshSeconds;
 };
 
@@ -581,6 +584,12 @@ inline Snapshot ParseResponse(ResourceKind resource, const std::string& body, UI
         {
             state.menuLines.push_back(L"Video Store: " + ZzzSaleStateText(saleState));
         }
+    }
+    for (const auto& line : state.menuLines) {
+        const auto colon = line.find(L':');
+        if (colon == std::wstring::npos) continue;
+        for (const auto& choice : Details) if (line.substr(0, colon) == choice.label)
+            state.details[choice.id] = aip::Trim(line.substr(colon + 1));
     }
     return state;
 }

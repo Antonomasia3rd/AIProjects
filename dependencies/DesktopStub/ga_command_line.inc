@@ -2,6 +2,11 @@
 // Command-line parsing and persisted INI setting changes
 // -----------------------------------------------------------------------------
 using CommandLineIniSetting = aip::IniSetting;
+#include "../content_sources/notes_profile.inc"
+#include "../hardware/hardware_profile_import.inc"
+#include "../content_sources/now_playing_profile.inc"
+struct CommandLineNotesImport { int resource = -1; std::wstring path; };
+struct CommandLineHardwareImport { bool asus = false; std::wstring path; };
 
 struct CommandLineOptions
 {
@@ -32,6 +37,12 @@ struct CommandLineOptions
     std::vector<CommandLineIniSetting> settings;
     bool liveTileModeChanged = false;
     bool trayIconChanged = false;
+    int notesRefresh = -1;
+    std::vector<CommandLineNotesImport> notesImports;
+    std::vector<CommandLineHardwareImport> hardwareImports;
+    std::vector<std::wstring> nowPlayingImports;
+    aip::now_playing_profile::ImportPlan nowPlayingImportPlan;
+    std::vector<std::wstring> nowPlayingImportDiagnostics;
 };
 
 static CommandLineOptions g_commandLine;
@@ -47,6 +58,7 @@ static constexpr WPARAM SINGLE_INSTANCE_REQUEST_GENERATE = 3;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_REGENERATE_MANIFEST = 4;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_MESSAGEBOX = 5;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_CONSOLE = 6;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE = 7;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MASK = 0x00FF;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON = 0x0100;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_REGENERATE_MANIFEST = 0x0200;
@@ -1041,6 +1053,33 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--notes-import-profile", value, error, matched)) return fail(error);
+        if (matched) { g_commandLine.notesImports.push_back({-1, value}); g_commandLine.configureOnly = true; continue; }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--caps-import-profile", value, error, matched)) return fail(error);
+        if (matched) { g_commandLine.hardwareImports.push_back({false, value}); g_commandLine.configureOnly = true; continue; }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--asus-import-profile", value, error, matched)) return fail(error);
+        if (matched) { g_commandLine.hardwareImports.push_back({true, value}); g_commandLine.configureOnly = true; continue; }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--now-playing-import-profile", value, error, matched)) return fail(error);
+        if (matched) { g_commandLine.nowPlayingImports.push_back(value); g_commandLine.configureOnly = true; continue; }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--notes-import-cookie", value, error, matched)) return fail(error);
+        if (matched) {
+            const auto equal = value.find(L'='); int resource = -1;
+            if (equal == std::wstring::npos || !aip::notes::ParseHostResource(value.substr(0, equal), resource) || equal + 1 == value.size())
+                return fail(L"--notes-import-cookie expects Resin|Stamina|Charge=JSON-path.");
+            g_commandLine.notesImports.push_back({resource, value.substr(equal + 1)}); g_commandLine.configureOnly = true; continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--notes-clear", value, error, matched)) return fail(error);
+        if (matched) {
+            int resource = -1;
+            if (!aip::notes::ParseHostResource(value, resource)) return fail(L"--notes-clear expects Resin, Stamina, or Charge.");
+            for (const auto& setting : aip::notes::ClearAccountSettings(resource)) AddCommandLineIniSetting(setting.section, setting.key, setting.value);
+            g_commandLine.configureOnly = true; continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--notes-refresh", value, error, matched)) return fail(error);
+        if (matched) {
+            if (!aip::notes::ParseHostResource(value, g_commandLine.notesRefresh, true)) return fail(L"--notes-refresh expects Resin, Stamina, Charge, or All.");
+            continue;
+        }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--set", value, error, matched))
             return fail(error);
         if (matched)
@@ -1050,6 +1089,10 @@ static bool ParseCommandLineOptions()
             std::wstring overrideValue;
             if (!TryParseCommandLineOverrideSpec(value, section, key, overrideValue, error))
                 return fail(error);
+            if (IEquals(section, L"AsusBlink")) {
+                const auto canonical = aip::hardware_profile::CanonicalAsusKey(key);
+                if (!canonical.empty()) key = canonical;
+            }
             if (!NormalizeDesktopStubTypedSetting(section, key, overrideValue, error))
                 return fail(L"--set " + error);
             AddCommandLineIniSetting(section, key, overrideValue);
@@ -1801,7 +1844,185 @@ static std::wstring CommandLineUsageText()
         COMMAND_LINE_HELP_SECTION,
         COMMAND_LINE_HELP_TEMPLATE_KEY,
         g_commandLineHelpDefaults[0].value);
-    return FormatCommandLineHelpTemplate(iniTemplate.c_str());
+    return FormatCommandLineHelpTemplate(iniTemplate.c_str()) +
+        L"\nNotes: --notes-import-profile INI; --notes-import-cookie GAME=JSON; --notes-clear GAME (configuration only).\n"
+        L"       --notes-refresh GAME|All (existing resident only; no new process).\n"
+        L"Hardware profiles: --caps-import-profile INI; --asus-import-profile INI (configuration only).\n"
+        L"Now playing: --now-playing-import-profile INI (configuration only; donor Startup is reported and deferred).\n"
+        L"ASUS numbered fields: --set AsusBlink.Event001HddState=128,129 (hardware and disk flags stay explicit).\n";
+}
+
+static bool AsusEventKey(const std::wstring& key)
+{
+    return aip::hardware_profile::CanonicalAsusKey(key).compare(0, 5, L"Event") == 0;
+}
+
+static std::map<std::wstring, std::wstring> ContentAsusEventsFromDocument(const std::vector<aip::IniSectionData>& document)
+{
+    std::map<std::wstring, std::wstring> events;
+    for (const auto& section : document) if (IEquals(section.name, L"AsusBlink"))
+        for (const auto& setting : section.entries) if (AsusEventKey(setting.key)) events[setting.key] = setting.value;
+    return events;
+}
+
+static bool ReplacesCommandLineAsusEvents()
+{
+    return std::any_of(g_commandLine.hardwareImports.begin(), g_commandLine.hardwareImports.end(), [](const auto& request) { return request.asus; });
+}
+
+static std::map<std::wstring, std::wstring> ReadContentAsusEvents(bool commandLineOverrides = false)
+{
+    std::map<std::wstring, std::wstring> events;
+    if (!commandLineOverrides || !ReplacesCommandLineAsusEvents()) {
+        std::vector<IniEntry> entries;
+        ReadIniSectionCached(L"AsusBlink", entries);
+        for (const auto& entry : entries) if (AsusEventKey(entry.key)) events[entry.key] = entry.value;
+    }
+    if (commandLineOverrides) for (const auto& setting : g_commandLine.settings)
+        if (IEquals(setting.section, L"AsusBlink") && AsusEventKey(setting.key)) {
+            const auto canonical = aip::hardware_profile::CanonicalAsusKey(setting.key);
+            for (auto entry = events.begin(); entry != events.end(); )
+                if (aip::hardware_profile::CanonicalAsusKey(entry->first) == canonical) entry = events.erase(entry);
+                else ++entry;
+            events[canonical] = setting.value;
+        }
+    return events;
+}
+
+static bool RemoveContentAsusEvents(std::wstring& text)
+{
+    const auto document = aip::ParseIniDocument(text);
+    for (const auto& section : document) if (IEquals(section.name, L"AsusBlink"))
+        for (const auto& setting : section.entries) if (AsusEventKey(setting.key))
+            if (!aip::RemoveIniValueFromText(text, section.name.c_str(), setting.key.c_str())) return false;
+    return true;
+}
+
+static bool WriteContentProfileSetting(std::wstring& text, const aip::IniSetting& setting)
+{
+    if (IEquals(setting.section, L"AsusBlink") && AsusEventKey(setting.key)) {
+        const auto canonical = aip::hardware_profile::CanonicalAsusKey(setting.key);
+        const auto document = aip::ParseIniDocument(text);
+        for (const auto& section : document) if (IEquals(section.name, L"AsusBlink"))
+            for (const auto& entry : section.entries)
+                if (aip::hardware_profile::CanonicalAsusKey(entry.key) == canonical && !IEquals(entry.key, canonical))
+                    if (!aip::RemoveIniValueFromText(text, section.name.c_str(), entry.key.c_str())) return false;
+        return WriteIniValueToText(text, L"AsusBlink", canonical.c_str(), setting.value.c_str());
+    }
+    return WriteIniValueToText(text, setting.section.c_str(), setting.key.c_str(), setting.value.c_str());
+}
+
+static bool ReadContentNowPlayingImport(const std::wstring& path, aip::now_playing_profile::ImportPlan& plan,
+    aip::now_playing_profile::ConfigurationProjection& projection, std::wstring& error)
+{
+    plan = {}; projection = {}; error.clear();
+    if (TrimCopy(path).empty()) { error = L"A NowPlayingTile donor INI path is required."; return false; }
+    if (aip::ToLower(aip::MakeAbsolutePath(path)) == aip::ToLower(aip::MakeAbsolutePath(g_iniPath))) {
+        error = L"The import source must differ from the target INI."; return false;
+    }
+    return aip::now_playing_profile::ImportProfileFile(path, plan, error) &&
+        aip::now_playing_profile::ProjectConfigurationOnly(plan, projection, error);
+}
+
+static bool ExpandCommandLineNowPlayingImports(std::wstring& error)
+{
+    if (g_commandLine.nowPlayingImports.empty()) return true;
+    aip::now_playing_profile::ImportPlan plan;
+    aip::now_playing_profile::ConfigurationProjection projection;
+    // Each donor supplies a complete replacement. The last successful profile
+    // wins; only explicit host arguments are folded over its entry batch.
+    for (auto path : g_commandLine.nowPlayingImports) {
+        if (PathIsRelativeW(path.c_str())) path = aip::GetDirectoryName(g_iniPath) + L"\\" + path;
+        if (!ReadContentNowPlayingImport(aip::MakeAbsolutePath(path), plan, projection, error)) return false;
+    }
+    const auto explicitSettings = g_commandLine.settings;
+    g_commandLine.settings.clear();
+    for (const auto& setting : projection.settings) AddCommandLineIniSetting(setting.section, setting.key, setting.value);
+    for (const auto& setting : explicitSettings) AddCommandLineIniSetting(setting.section, setting.key, setting.value);
+    g_commandLine.nowPlayingImportPlan = std::move(plan);
+    g_commandLine.nowPlayingImportDiagnostics = std::move(projection.diagnostics);
+    return true;
+}
+
+static bool ReadContentHardwareImport(const std::wstring& path, bool asus, std::vector<aip::IniSetting>& changes, std::wstring& error)
+{
+    std::vector<aip::IniSetting> next;
+    if (aip::ToLower(aip::MakeAbsolutePath(path)) == aip::ToLower(aip::MakeAbsolutePath(g_iniPath))) {
+        error = L"The import source must differ from the target INI."; return false;
+    }
+    aip::hardware_profile::Settings mapped;
+    if (asus) {
+        aip::hardware_profile::AsusProfile imported;
+        if (!aip::hardware_profile::ReadAsusProfile(path, imported, error)) return false;
+        mapped = aip::hardware_profile::ToHostSettings(imported);
+        next.push_back({L"AsusBlink", L"ProfilePath", L""}); // explicit switch to imported inline fields
+    } else {
+        aip::hardware_profile::CapsProfile imported;
+        if (!aip::hardware_profile::ReadCapsProfile(path, imported, error)) return false;
+        mapped = aip::hardware_profile::ToHostSettings(imported);
+    }
+    for (const auto& setting : mapped) {
+        const auto split = setting.first.find(L'.');
+        next.push_back({setting.first.substr(0, split), setting.first.substr(split + 1), setting.second});
+    }
+    changes = std::move(next); return true;
+}
+
+static bool ExpandCommandLineHardwareImports(std::wstring& error)
+{
+    if (g_commandLine.hardwareImports.empty()) return true;
+    std::vector<CommandLineIniSetting> imported;
+    for (const auto& request : g_commandLine.hardwareImports) {
+        auto path = request.path;
+        if (TrimCopy(path).empty()) { error = L"A hardware donor INI path is required."; return false; }
+        if (PathIsRelativeW(path.c_str())) path = aip::GetDirectoryName(g_iniPath) + L"\\" + path;
+        std::vector<aip::IniSetting> changes;
+        if (!ReadContentHardwareImport(aip::MakeAbsolutePath(path), request.asus, changes, error)) return false;
+        if (request.asus) imported.erase(std::remove_if(imported.begin(), imported.end(),
+            [](const auto& setting) { return IEquals(setting.section, L"AsusBlink"); }), imported.end());
+        imported.insert(imported.end(), changes.begin(), changes.end());
+    }
+    const auto explicitSettings = g_commandLine.settings;
+    g_commandLine.settings.clear();
+    for (const auto& setting : imported) AddCommandLineIniSetting(setting.section, setting.key, setting.value);
+    for (const auto& setting : explicitSettings) AddCommandLineIniSetting(setting.section, setting.key, setting.value);
+    return true;
+}
+
+static bool ExpandCommandLineNotesImports(std::wstring& error)
+{
+    if (g_commandLine.notesImports.empty()) return true;
+    std::vector<CommandLineIniSetting> imported;
+    for (const auto& request : g_commandLine.notesImports) {
+        auto path = request.path;
+        if (PathIsRelativeW(path.c_str())) path = aip::GetDirectoryName(g_iniPath) + L"\\" + path;
+        path = aip::MakeAbsolutePath(path);
+        if (aip::ToLower(path) == aip::ToLower(aip::MakeAbsolutePath(g_iniPath))) { error = L"The import source must differ from the target INI."; return false; }
+        std::wstring text;
+        std::vector<CommandLineIniSetting> changes;
+        if (!aip::notes::ReadImportFile(path, text, error) ||
+            !(request.resource < 0 ? aip::notes::ImportAccountProfile(text, changes, error) : aip::notes::ImportCookieJson(request.resource, text, changes, error))) return false;
+        imported.insert(imported.end(), changes.begin(), changes.end());
+    }
+    const auto explicitSettings = g_commandLine.settings;
+    g_commandLine.settings.clear();
+    for (const auto& setting : imported) AddCommandLineIniSetting(setting.section, setting.key, setting.value);
+    for (const auto& setting : explicitSettings) {
+        const auto field = aip::notes::CredentialField(setting.key);
+        const bool token = field == L"LToken" || field == L"LTokenProtected";
+        const bool user = field == L"LTUid" || field == L"LTUidProtected";
+        if (aip::content::Lower(setting.section).compare(0, 6, L"notes.") == 0 && (token || user)) {
+            // Explicit credential choice replaces every plain/protected alias
+            // in its family, matching tray edits and the resolver's precedence.
+            // Canonicalize aliases so empty imported keys cannot mask them.
+            for (const auto* key : {L"LToken", L"LTokenV2", L"ltoken_v2", L"LTokenProtected", L"LTokenV2Protected",
+                L"LTUid", L"LTuidV2", L"ltuid_v2", L"LTUidProtected", L"LTuidV2Protected"})
+                if ((aip::notes::CredentialField(key).compare(0, 6, L"LToken") == 0) == token)
+                    AddCommandLineIniSetting(setting.section, key, L"");
+            AddCommandLineIniSetting(setting.section, field, setting.value);
+        } else AddCommandLineIniSetting(setting.section, setting.key, setting.value);
+    }
+    return true;
 }
 
 
@@ -1992,7 +2213,12 @@ static std::wstring DesktopStubContentProfileValue(
     const wchar_t* fallback,
     bool includeCommandLineOverrides)
 {
-    std::wstring value = IniReadS(section, key, fallback);
+    // A full NowPlaying import removes all old entry sections during commit.
+    // Preflight must use those same fresh-entry defaults, including optional
+    // fields such as NotesDetail that are absent from the imported batch.
+    std::wstring value = includeCommandLineOverrides && !g_commandLine.nowPlayingImports.empty() &&
+        aip::content::Lower(section ? section : L"").compare(0, 8, L"content.") == 0
+        ? std::wstring(fallback ? fallback : L"") : IniReadS(section, key, fallback);
     if (!includeCommandLineOverrides)
         return value;
 
@@ -2077,7 +2303,7 @@ static bool ValidateDesktopStubContentProfile(
     aip::content::Configuration composition;
     if (!aip::content::ReadConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
-    }, composition, error)) return false;
+    }, composition, error, ReadContentAsusEvents(includeCommandLineOverrides))) return false;
 
     bool usesRss = false;
     for (const auto& entry : composition.entries)
@@ -2232,14 +2458,18 @@ static bool ApplyCommandLinePersistentSettings()
             const wchar_t* value = entry.value.c_str();
             if (IsDesktopStubStartupSetting(entry.section, entry.key))
                 value = startupDesired ? L"1" : L"0";
-            if (!WriteIniValueToText(
-                    text,
-                    entry.section.c_str(),
-                    entry.key.c_str(),
-                    value))
+            if (!WriteContentProfileSetting(text, {entry.section, entry.key, value}))
             {
                 return false;
             }
+        }
+        if (std::any_of(g_commandLine.settings.begin(), g_commandLine.settings.end(), [](const auto& setting) {
+            return IEquals(setting.section, L"AsusBlink") || IEquals(setting.section, L"CapsBlink"); })) {
+            const auto document = aip::ParseIniDocument(text);
+            aip::content::Configuration prospective; std::wstring issue;
+            if (!aip::content::ReadConfiguration([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+                std::wstring read; return aip::ReadIniValueFromDoc(document, section, key, read) ? read : std::wstring(fallback);
+            }, prospective, issue, ContentAsusEventsFromDocument(document))) return false;
         }
         return true;
     };

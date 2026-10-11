@@ -1,7 +1,7 @@
 #ifndef AIP_CONTENT_SOURCES_SMTC_INC
 #define AIP_CONTENT_SOURCES_SMTC_INC
 
-// Read-only SMTC text provider. Call on a worker, never the host's UI thread.
+// Read-only SMTC media provider. Call on a worker, never the host's UI thread.
 // Windows 10 1809+ exposes this API; older systems return a provider error.
 // Link windowsapp.lib and runtimeobject.lib. No package registration required.
 #include "../content_engine.h"
@@ -12,6 +12,8 @@
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Control.h>
+#include <winrt/Windows.Storage.Streams.h>
+#include "smtc_artwork.inc"
 
 namespace aip { namespace content {
 namespace smtc_detail {
@@ -96,12 +98,76 @@ inline const wchar_t* PlaybackStatus(
 }
 } // namespace smtc_detail
 
-inline bool ReadSmtcContent(
-    Text& text,
-    std::wstring& error,
-    std::chrono::milliseconds timeout = std::chrono::milliseconds(1500))
+struct SmtcSessionData {
+    bool hasSession = false;
+    std::wstring title, artist, albumArtist, subtitle, appId, status;
+    std::vector<std::uint8_t> artworkBytes;
+    std::wstring artworkError;
+};
+struct SmtcMediaSnapshot {
+    bool hasSession = false;
+    Text text;
+    std::wstring title, artist, source, status, artworkError;
+    std::vector<std::uint8_t> artworkBytes;
+    std::shared_ptr<const SmtcArtworkFile> artwork;
+};
+// Injection replaces the complete session/property read, so fixtures never
+// request real system media sessions. Native text and thumbnail use one session,
+// one property object, and the same total operation deadline.
+using SmtcSessionReader = std::function<SmtcSessionData(
+    smtc_detail::Clock::time_point, bool, const SmtcCancel&)>;
+
+inline SmtcSessionData ReadNativeSmtcSession(
+    smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled)
 {
-    text = {};
+    using Manager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
+    if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+    const auto manager = smtc_detail::Await(Manager::RequestAsync(), deadline);
+    const auto session = manager.GetCurrentSession();
+    SmtcSessionData data;
+    if (session == nullptr) return data;
+    const auto properties = smtc_detail::Await(session.TryGetMediaPropertiesAsync(), deadline);
+    data.hasSession = true;
+    data.title = std::wstring(properties.Title());
+    data.artist = std::wstring(properties.Artist());
+    data.albumArtist = std::wstring(properties.AlbumArtist());
+    data.subtitle = std::wstring(properties.Subtitle());
+    data.appId = std::wstring(session.SourceAppUserModelId());
+    const auto playback = session.GetPlaybackInfo();
+    data.status = playback == nullptr ? L"" : smtc_detail::PlaybackStatus(playback.PlaybackStatus());
+    if (includeArtwork && properties.Thumbnail() != nullptr) {
+        try {
+            if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+            const auto stream = smtc_detail::Await(properties.Thumbnail().OpenReadAsync(), deadline);
+            const auto size = stream.Size();
+            if (size > SmtcMaximumArtworkBytes) data.artworkError = L"The media artwork exceeds the encoded byte limit.";
+            else if (size != 0) {
+                winrt::Windows::Storage::Streams::DataReader reader(stream.GetInputStreamAt(0));
+                const auto loaded = smtc_detail::Await(reader.LoadAsync(static_cast<std::uint32_t>(size)), deadline);
+                if (loaded != size) data.artworkError = L"The media artwork stream was incomplete.";
+                else {
+                    data.artworkBytes.resize(loaded);
+                    reader.ReadBytes(winrt::array_view<std::uint8_t>(data.artworkBytes));
+                }
+            }
+        } catch (...) {
+            data.artworkBytes.clear();
+            data.artworkError = L"Could not read the media artwork before its deadline.";
+        }
+    }
+    return data;
+}
+
+inline bool ReadSmtcMedia(
+    SmtcMediaSnapshot& media,
+    std::wstring& error,
+    std::chrono::milliseconds timeout = std::chrono::milliseconds(1500),
+    bool includeArtwork = true,
+    const SmtcSessionReader& reader = {},
+    const SmtcCancel& canceled = {},
+    SmtcArtworkCache* cache = nullptr)
+{
+    media = {};
     error.clear();
     if (timeout.count() < 1 || timeout.count() > 60000)
     {
@@ -118,31 +184,39 @@ inline bool ReadSmtcContent(
     }
     try
     {
-        using Manager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
         const auto deadline = smtc_detail::Clock::now() + timeout;
-        const auto manager = smtc_detail::Await(Manager::RequestAsync(), deadline);
-        const auto session = manager.GetCurrentSession();
-        if (session == nullptr)
+        if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+        auto data = reader ? reader(deadline, includeArtwork, canceled) : ReadNativeSmtcSession(deadline, includeArtwork, canceled);
+        if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+        if (!data.hasSession)
         {
-            text.primary = L"No media playing";
-            text.secondary = L"SMTC";
+            media.text = {L"No media playing", L"SMTC", L""};
+            media.title = media.text.primary; media.source = L"SMTC"; media.status = L"Idle";
             return true;
         }
-        const auto properties = smtc_detail::Await(session.TryGetMediaPropertiesAsync(), deadline);
-        Text snapshot;
-        snapshot.primary = smtc_detail::Clean(std::wstring(properties.Title()));
-        if (snapshot.primary.empty()) snapshot.primary = L"(untitled media)";
-        snapshot.secondary = smtc_detail::Clean(std::wstring(properties.Artist()));
-        if (snapshot.secondary.empty()) snapshot.secondary = smtc_detail::Clean(std::wstring(properties.AlbumArtist()));
-        if (snapshot.secondary.empty()) snapshot.secondary = smtc_detail::Clean(std::wstring(properties.Subtitle()));
-        auto playbackText = smtc_detail::SourceName(std::wstring(session.SourceAppUserModelId()));
-        const auto playback = session.GetPlaybackInfo();
-        if (playback != nullptr)
-        {
-            playbackText = std::wstring(smtc_detail::PlaybackStatus(playback.PlaybackStatus())) + L" - " + playbackText;
+        SmtcMediaSnapshot snapshot;
+        snapshot.hasSession = true;
+        snapshot.title = smtc_detail::Clean(std::move(data.title));
+        if (snapshot.title.empty()) snapshot.title = L"(untitled media)";
+        snapshot.artist = smtc_detail::Clean(std::move(data.artist));
+        if (snapshot.artist.empty()) snapshot.artist = smtc_detail::Clean(std::move(data.albumArtist));
+        if (snapshot.artist.empty()) snapshot.artist = smtc_detail::Clean(std::move(data.subtitle));
+        snapshot.source = smtc_detail::SourceName(std::move(data.appId));
+        snapshot.status = smtc_detail::Clean(std::move(data.status));
+        snapshot.text = {snapshot.title, snapshot.artist, L""};
+        AppendBounded(snapshot.text.secondary, snapshot.status.empty() ? snapshot.source : snapshot.status + L" - " + snapshot.source);
+        if (includeArtwork) {
+            if (data.artworkBytes.size() > SmtcMaximumArtworkBytes)
+                snapshot.artworkError = L"The media artwork exceeds the encoded byte limit.";
+            else snapshot.artworkBytes = std::move(data.artworkBytes);
+            if (snapshot.artworkError.empty()) snapshot.artworkError = smtc_detail::Clean(std::move(data.artworkError));
+            if (cache && !snapshot.artworkBytes.empty()) {
+                snapshot.artwork = cache->Store(snapshot.artworkBytes, snapshot.artworkError, deadline, canceled);
+                snapshot.artworkBytes.clear();
+                snapshot.artworkBytes.shrink_to_fit();
+            }
         }
-        AppendBounded(snapshot.secondary, smtc_detail::Clean(std::move(playbackText)));
-        text = std::move(snapshot);
+        media = std::move(snapshot);
         return true;
     }
     catch (const winrt::hresult_error& exception)
@@ -167,6 +241,15 @@ inline bool ReadSmtcContent(
         error = L"SMTC could not retrieve media information.";
     }
     return false;
+}
+
+inline bool ReadSmtcContent(Text& text, std::wstring& error,
+    std::chrono::milliseconds timeout = std::chrono::milliseconds(1500))
+{
+    SmtcMediaSnapshot snapshot;
+    const bool ok = ReadSmtcMedia(snapshot, error, timeout, false);
+    text = std::move(snapshot.text);
+    return ok;
 }
 } } // namespace aip::content
 

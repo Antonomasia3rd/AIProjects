@@ -1,4 +1,5 @@
 #include "service.h"
+#include "profile_edit.h"
 #include "service_cancel.h"
 #define AIP_DISCORD_ENGINE_CONTEXT
 #include "drpc_environment.inc"
@@ -14,6 +15,56 @@ static thread_local const aip::discord::Options* g_embeddedOptions = nullptr;
 #include "drpc_gateway.inc"
 
 namespace aip { namespace discord {
+std::vector<ProfileOptionDescriptor> ProfileOptions() {
+    std::vector<ProfileOptionDescriptor> options;
+    const std::vector<std::wstring> sections = {L"general", L"censor_map", L"large_time_ranges", L"small_time_ranges", L"large_assets", L"small_assets", L"layout", L"buttons", L"afk", L"ipc", L"gateway"};
+    for (const auto& value : kDefaults) {
+        if (std::find(sections.begin(), sections.end(), value.section) == sections.end()) continue;
+        ProfileOptionDescriptor option;
+        option.section = value.section; option.key = value.key; option.label = option.section + L"." + option.key; option.defaultValue = value.value;
+        const auto integer = [&](int minimum, int maximum) { option.kind = ProfileOptionKind::Integer; option.minimum = minimum; option.maximum = maximum; };
+        if ((option.section == L"general" && option.key == L"window_title_detection_enabled") ||
+            (option.section == L"censor_map" && option.key == L"apply_pattern_on_raw") || option.section == L"layout" ||
+            (option.section == L"afk" && option.key == L"show_idle_time") || (option.section == L"gateway" && option.key == L"supported")) option.kind = ProfileOptionKind::Boolean;
+        else if (option.section == L"general" && option.key == L"activity_type") option.kind = ProfileOptionKind::ActivityType;
+        else if (option.section == L"general" && option.key == L"client_id") option.kind = ProfileOptionKind::ClientId;
+        else if (option.section == L"general" && option.key == L"token_protected") option.kind = ProfileOptionKind::OpaqueSecret;
+        else if (option.section == L"general" && option.key == L"update_interval") { integer(1, 86400); option.hostCadence = true; }
+        else if (option.section == L"general" && option.key == L"transport_mode") { option.kind = ProfileOptionKind::Enumeration; option.choices = {L"ipc", L"gateway", L"auto"}; }
+        else if (option.section == L"general" && option.key == L"status") { option.kind = ProfileOptionKind::Enumeration; option.choices = {L"online", L"idle", L"dnd", L"invisible"}; }
+        else if (option.section == L"large_time_ranges" || option.section == L"small_time_ranges") integer(0, 24);
+        else if (option.section == L"afk" && option.key == L"idle_threshold") integer(0, 86400);
+        else if (option.section == L"ipc") integer(option.key == L"connect_timeout_ms" ? 50 : 250, option.key == L"connect_timeout_ms" ? 30000 : 120000);
+        else if (option.section == L"gateway") {
+            if (option.key == L"client_build_number") integer(1, INT_MAX);
+            else if (option.key == L"capabilities") integer(0, INT_MAX);
+            else if (option.key == L"close_timeout_ms") integer(0, 30000);
+            else if (option.key.size() >= 11 && option.key.substr(option.key.size() - 11) == L"_timeout_ms") integer(1000, option.key == L"ready_timeout_ms" ? 180000 : 120000);
+        }
+        options.push_back(std::move(option));
+    }
+    ProfileOptionDescriptor legacy;
+    legacy.section = L"general"; legacy.key = L"token"; legacy.label = L"general.token (private input only)"; legacy.kind = ProfileOptionKind::SecretText;
+    options.push_back(std::move(legacy));
+    return options;
+}
+bool ValidateProfileFieldGrammar(const std::wstring& section, const std::wstring& key, const std::wstring& value, std::wstring& error) {
+    error.clear();
+    if (section != L"censor_map") return true;
+    if (key == L"rule_order") {
+        std::vector<std::wstring> unknown;
+        ParseCensorRuleOrder(value, &unknown);
+        if (!unknown.empty()) { error = L"Censor rule order contains an unknown rule kind."; return false; }
+    } else if (key == L"full_replace" || key == L"word_replace" || key == L"pattern_replace") {
+        const auto rules = ParseReplacementRules(value);
+        if (!Trim(value).empty() && rules.empty()) { error = L"Censor replacement rules require a source and replacement separator."; return false; }
+        if (key == L"pattern_replace") {
+            try { for (const auto& rule : rules) { const std::wregex pattern(rule.first, std::regex_constants::icase); (void)pattern; } }
+            catch (...) { error = L"A censor regular expression is invalid (value not shown)."; return false; }
+        }
+    }
+    return true;
+}
 namespace {
 class ActualTransport final : public Transport {
     CancellationRelay cancellation_; // Outlives client cleanup; callbacks also retain its state.

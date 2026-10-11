@@ -37,12 +37,13 @@ bool Same(const Configuration& a, const Configuration& b) {
         a.notes.maximumBytes != b.notes.maximumBytes) return false;
     for (std::size_t i = 0; i < a.notes.accounts.size(); ++i)
         if (a.notes.accounts[i].uid != b.notes.accounts[i].uid || a.notes.accounts[i].token != b.notes.accounts[i].token ||
-            a.notes.accounts[i].userId != b.notes.accounts[i].userId) return false;
+            a.notes.accounts[i].userId != b.notes.accounts[i].userId || a.notes.accounts[i].tokenProtected != b.notes.accounts[i].tokenProtected ||
+            a.notes.accounts[i].userIdProtected != b.notes.accounts[i].userIdProtected || a.notes.accounts[i].refreshSeconds != b.notes.accounts[i].refreshSeconds) return false;
     for (std::size_t i = 0; i < a.entries.size(); ++i) {
         const auto& x = a.entries[i]; const auto& y = b.entries[i];
         if (x.enabled != y.enabled || x.name != y.name || x.background != y.background ||
             x.imagePath != y.imagePath || x.sources != y.sources || x.custom.primary != y.custom.primary ||
-            x.custom.secondary != y.custom.secondary || x.custom.badge != y.custom.badge || x.rssItem != y.rssItem || x.notesResource != y.notesResource) return false;
+            x.custom.secondary != y.custom.secondary || x.custom.badge != y.custom.badge || x.rssItem != y.rssItem || x.notesResource != y.notesResource || x.notesDetail != y.notesDetail) return false;
     }
     return true;
 }
@@ -55,11 +56,12 @@ Configuration Read(const Profile& p) {
 }
 void TestSourceCatalog() {
     constexpr std::size_t backgroundCount = sizeof(Backgrounds) / sizeof(Backgrounds[0]);
-    Require(backgroundCount == 4 &&
-            SupportedBackgroundNames() == L"Wallpaper, LiveWallpaper, Image, None",
+    Require(backgroundCount == 5 &&
+            SupportedBackgroundNames() == L"Wallpaper, LiveWallpaper, Image, None, SMTCArtwork",
         "the built-in background catalog has the expected stable public names");
     Require(BackgroundIdFor(L" livewallpaper ") == BackgroundId::LiveWallpaper &&
             BackgroundIdFor(L"Image") == BackgroundId::Image &&
+            BackgroundIdFor(L" smtcartwork ") == BackgroundId::SmtcArtwork &&
             BackgroundIdFor(L"unsupported") == BackgroundId::Unknown,
         "background identifiers canonicalize case and whitespace while unknown names stay explicit");
     for (std::size_t left = 0; left < backgroundCount; ++left) {
@@ -303,6 +305,45 @@ void TestTextAndWarnings() {
     cfg.cycle = true; for (auto& entry : cfg.entries) entry.enabled = false; cfg.entries[0].enabled = true;
     Require(TimingWarning(cfg, false).empty(), "one active entry does not warn about nonexistent cycling");
 }
+void TestNumberedAsusSettings() {
+    Profile profile;
+    Configuration cfg; std::wstring error;
+    const std::map<std::wstring, std::wstring> events{{L"Event001MicState", L"1"}, {L"Event1MicState", L"0"},
+        {L"Event00HddState", L"128,129"}, {L"Event00HddInterval", L"0.5s"}, {L"Event00HddDuration", L"0"}};
+    Require(ReadConfiguration(profile, cfg, error, events) && cfg.asus.settings.size() == 13,
+        "enumerated numbered ASUS fields are retained in the portable typed configuration");
+    Require(!cfg.asus.hardwareEnabled && !cfg.asus.readDiskActivity && !cfg.caps.actionsEnabled,
+        "advanced inline patterns never infer hardware or disk activation");
+    aip::asus::Configuration parsed;
+    Require(aip::asus::ParseConfiguration(cfg.asus.settings, parsed, error) && parsed.events.size() == 3,
+        "numbered inline patterns reach the existing native parser with leading-zero identities intact");
+    const auto original = cfg;
+    for (const auto& invalid : std::vector<std::map<std::wstring, std::wstring>>{
+        {{L"Event1000MicState", L"1"}}, {{L"Event001MicState", L"2"}}, {{L"Event1HddInterval", L"0.1ms"}},
+        {{L"Event001MicState", L"1"}, {L"Event_001_MicState", L"0"}}})
+        Require(!ReadConfiguration(profile, cfg, error, invalid) && Same(cfg, original),
+            "invalid numbered fields or duplicate aliases preserve the complete prior typed configuration");
+    std::wstring value = L"130";
+    Require(NormalizeSetting(L"AsusBlink", L"Event000HddState", value, error), "numbered HDD state edits use native typed validation");
+    value = L"1";
+    Require(!NormalizeSetting(L"AsusBlink", L"Event1000MicState", value, error), "numbered field bounds come from the existing native parser");
+    Profile external;
+    external.Set(L"AsusBlink", L"ProfilePath", L"external-profile.ini");
+    external.Set(L"AsusBlink", L"MicState", L"inactive-invalid-state");
+    const std::map<std::wstring, std::wstring> inactive{{L"Event1MicState", L"2"}, {L"Event1MicInterval", L"bad"}};
+    Require(ReadConfiguration(external, cfg, error, inactive) && cfg.asus.settings.at(L"MicState") == L"inactive-invalid-state" &&
+        cfg.asus.settings.at(L"Event1MicInterval") == L"bad", "external profile preserves inactive inline fields while bypassing their validation");
+    const auto externallySelected = cfg;
+    external.Set(L"AsusBlink", L"ProfilePath", L"");
+    Require(!ReadConfiguration(external, cfg, error, inactive) && Same(cfg, externallySelected),
+        "selecting inactive malformed inline fields rejects the reload without replacing the prior external configuration");
+    external.Set(L"AsusBlink", L"ProfilePath", L"external-profile.ini");
+    external.Set(L"AsusBlink", L"HardwareEnabled", L"bad");
+    Require(!ReadConfiguration(external, cfg, error, inactive), "external profiles still validate independent host activation controls");
+    external.Set(L"AsusBlink", L"HardwareEnabled", L"0");
+    external.Set(L"AsusBlink", L"ProfilePath", L"  ");
+    Require(!ReadConfiguration(external, cfg, error, inactive), "whitespace-only external paths retain the runtime's inline selection semantics");
+}
 void TestRandomSchedule() {
     auto cfg = Cycling(); cfg.entries.resize(MaxEntries);
     Cycle cycle; std::uint64_t now = 1234, random = 0x38a7f93b;
@@ -333,7 +374,7 @@ void TestRandomSchedule() {
 }
 int main() {
     try {
-        TestSourceCatalog(); TestParsingAndReload(); TestSettingParity(); TestCycle(); TestTextAndWarnings(); TestRandomSchedule();
+        TestSourceCatalog(); TestParsingAndReload(); TestSettingParity(); TestCycle(); TestTextAndWarnings(); TestNumberedAsusSettings(); TestRandomSchedule();
         std::cout << "Content engine tests passed (" << checks << " assertions; 100000 randomized schedule iterations).\n";
         return 0;
     } catch (const std::exception& error) {

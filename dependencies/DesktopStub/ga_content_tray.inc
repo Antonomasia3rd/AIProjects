@@ -4,6 +4,7 @@
 #endif
 static constexpr UINT ID_CONTENT_OPTIONS = 19000;
 static constexpr UINT ID_CONTENT_ADD = 19010;
+static constexpr UINT ID_CONTENT_NOW_PLAYING_IMPORT = 19011;
 static constexpr UINT ID_CONTENT_TEXT_MODE = 19020;
 static constexpr UINT ID_CONTENT_ENTRY_OPTIONS = 20000;
 static constexpr UINT CONTENT_ENTRY_COMMANDS = 64;
@@ -14,7 +15,7 @@ static constexpr UINT ID_ASUS_SETTINGS = 27000;
 static const wchar_t* g_notesOptionKeys[] = {L"RefreshSeconds", L"HttpTimeoutSeconds", L"MaximumBytes"};
 static const wchar_t* g_notesOptionDefaults[] = {L"300", L"15", L"1048576"};
 static const wchar_t* g_notesOptionLabels[] = {L"Refresh (seconds)", L"HTTP timeout (seconds)", L"Response limit (bytes)"};
-static const wchar_t* g_notesAccountKeys[] = {L"UID", L"LToken", L"LTUid"};
+static const wchar_t* g_notesAccountKeys[] = {L"UID", L"LToken", L"LTUid", L"RefreshSeconds", L"LTokenProtected", L"LTUidProtected"};
 struct ContentTrayOption { const wchar_t* key; const wchar_t* label; const wchar_t* fallback; bool toggle; };
 static const ContentTrayOption g_capsOptions[] = {
     {L"HardwareEnabled", L"Control physical Caps indicator", L"0", true},
@@ -65,6 +66,7 @@ static const ContentTrayOption g_contentEntryOptions[] = {
     {L"BadgeText", L"Custom badge text", L"", false},
     {L"RssItem", L"RSS headline number (1-20)", L"1", false},
     {L"NotesResource", L"Notes game/resource", L"Resin", false},
+    {L"NotesDetail", L"Notes detail", L"Summary", false},
 };
 
 static std::wstring ContentMenuValue(std::wstring value)
@@ -106,6 +108,7 @@ static void AppendContentEngineMenu(HMENU menu)
     }
     const int count = IniReadClampedI(L"Content", L"Count", 1, 1, aip::content::MaxEntries);
     aip::AppendTrayMenuItem(menu, ID_CONTENT_ADD, L"Add content", false, count < aip::content::MaxEntries);
+    aip::AppendTrayMenuItem(menu, ID_CONTENT_NOW_PLAYING_IMPORT, L"Import NowPlayingTile profile...", false, true);
     HMENU notes = CreatePopupMenu();
     if (notes) {
         for (UINT i = 0; i < 3; ++i)
@@ -115,14 +118,20 @@ static void AppendContentEngineMenu(HMENU menu)
             HMENU accountMenu = CreatePopupMenu();
             if (!accountMenu) continue;
             const auto section = L"Notes." + std::wstring(aip::content::NotesResources[resource].value);
-            for (UINT field = 0; field < 3; ++field) {
-                const auto value = IniReadS(section.c_str(), g_notesAccountKeys[field], L"");
-                const auto display = field == 0 ? ContentMenuValue(value) : value.empty() ? L"not configured" : L"configured";
+            for (UINT field = 0; field < _countof(g_notesAccountKeys); ++field) {
+                const auto fallback = field == 4 ? IniReadS(section.c_str(), L"LTokenV2Protected", L"") :
+                    field == 5 ? IniReadS(section.c_str(), L"LTuidV2Protected", L"") : field == 3 ? L"0" : L"";
+                const auto value = IniReadS(section.c_str(), g_notesAccountKeys[field], fallback.c_str());
+                const auto display = field == 0 || field == 3 ? ContentMenuValue(value) : value.empty() ? L"not configured" : L"configured";
                 aip::AppendTrayMenuItem(accountMenu, ID_NOTES_SETTINGS + 16 + resource * 8 + field,
                     std::wstring(g_notesAccountKeys[field]) + L": " + display, false, true);
             }
+            aip::AppendTrayMenuItem(accountMenu, ID_NOTES_SETTINGS + 16 + resource * 8 + 6, L"Refresh this game now", false, true);
+            aip::AppendTrayMenuItem(accountMenu, ID_NOTES_SETTINGS + 16 + resource * 8 + 7, L"Clear this account", false, true);
+            aip::AppendTrayMenuItem(accountMenu, ID_NOTES_SETTINGS + 64 + resource, L"Import cookie JSON...", false, true);
             AppendContentSubmenu(notes, accountMenu, aip::content::NotesResources[resource].label);
         }
+        aip::AppendTrayMenuItem(notes, ID_NOTES_SETTINGS + 72, L"Import legacy account INI...", false, true);
         AppendContentSubmenu(menu, notes, L"Real-Time Notes accounts/settings");
     }
     HMENU discord = CreatePopupMenu();
@@ -136,6 +145,7 @@ static void AppendContentEngineMenu(HMENU menu)
         for (UINT option = 0; option < _countof(g_capsOptions); ++option)
             append(caps, ID_CAPS_SETTINGS + option, L"CapsBlink", g_capsOptions[option]);
         aip::AppendTrayMenuItem(caps, ID_CAPS_SETTINGS + 30, L"Restart indicator pattern", false, true);
+        aip::AppendTrayMenuItem(caps, ID_CAPS_SETTINGS + 31, L"Import Caps donor INI...", false, true);
         AppendContentSubmenu(menu, caps, L"Caps indicator settings");
     }
     HMENU asus = CreatePopupMenu();
@@ -143,6 +153,8 @@ static void AppendContentEngineMenu(HMENU menu)
         for (UINT option = 0; option < _countof(g_asusOptions); ++option)
             append(asus, ID_ASUS_SETTINGS + option, L"AsusBlink", g_asusOptions[option]);
         aip::AppendTrayMenuItem(asus, ID_ASUS_SETTINGS + 30, L"Restart patterns", false, true);
+        aip::AppendTrayMenuItem(asus, ID_ASUS_SETTINGS + 31, L"Import ASUS donor INI...", false, true);
+        aip::AppendTrayMenuItem(asus, ID_ASUS_SETTINGS + 32, L"Edit numbered event setting...", false, true);
         AppendContentSubmenu(menu, asus, L"ASUS indicator settings");
     }
     for (int entry = 1; entry <= count; ++entry) {
@@ -151,7 +163,7 @@ static void AppendContentEngineMenu(HMENU menu)
         HMENU child = CreatePopupMenu();
         if (!child) continue;
         for (UINT i = 0; i < _countof(g_contentEntryOptions); ++i) {
-            if (i == 2 || i == 4 || i == 9) {
+            if (i == 2 || i == 4 || i == 9 || i == 10) {
                 HMENU choices = CreatePopupMenu();
                 if (!choices) continue;
                 if (i == 2) {
@@ -166,6 +178,12 @@ static void AppendContentEngineMenu(HMENU menu)
                         aip::AppendTrayMenuItem(choices, base + 24 + choice, aip::content::Sources[choice].label,
                             std::find(sources.begin(), sources.end(), aip::content::Sources[choice].value) != sources.end(), true);
                     aip::AppendTrayMenuItem(choices, base + 4, L"Edit source order...", false, true);
+                } else if (i == 10) {
+                    int resource = 0; aip::notes::ParseHostResource(IniReadS(section.c_str(), L"NotesResource", L"Resin"), resource);
+                    const auto selected = IniReadS(section.c_str(), L"NotesDetail", L"Summary");
+                    for (UINT detail = 0; detail < _countof(aip::notes::Details); ++detail)
+                        if (aip::notes::DetailAvailable(resource, aip::notes::Details[detail].id))
+                            aip::AppendTrayMenuItem(choices, base + 48 + detail, aip::notes::Details[detail].label, IEquals(selected, aip::notes::Details[detail].value), true);
                 } else {
                     const auto selected = IniReadS(section.c_str(), L"NotesResource", L"Resin");
                     for (UINT resource = 0; resource < 3; ++resource)
@@ -200,7 +218,7 @@ template<class Mutator> static bool CommitContentMenuMutation(HWND owner, Mutato
         return aip::content::ReadConfiguration([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
             std::wstring value;
             return aip::ReadIniValueFromDoc(doc, section, key, value) ? value : std::wstring(fallback);
-        }, cfg, issue);
+        }, cfg, issue, ContentAsusEventsFromDocument(doc));
     };
     aip::content::Configuration before, after;
     std::wstring ignored;
@@ -228,13 +246,15 @@ template<class Mutator> static bool CommitContentMenuMutation(HWND owner, Mutato
     return true;
 }
 
-static bool SaveContentMenuSettings(HWND owner, const std::vector<aip::IniSetting>& settings)
+static bool SaveContentMenuSettings(HWND owner, const std::vector<aip::IniSetting>& settings, bool replaceAsusEvents = false, bool replaceContentEntries = false)
 {
     return CommitContentMenuMutation(owner, [&](std::wstring& text, std::wstring& error) {
+        if (replaceAsusEvents && !RemoveContentAsusEvents(text)) return false;
+        if (replaceContentEntries && !aip::now_playing_profile::RemoveContentEntriesFromText(text)) return false;
         for (const auto& setting : settings) {
             auto value = setting.value;
             if (!aip::content::NormalizeSetting(setting.section, setting.key, value, error) ||
-                !WriteIniValueToText(text, setting.section.c_str(), setting.key.c_str(), value.c_str())) return false;
+                !WriteContentProfileSetting(text, {setting.section, setting.key, value})) return false;
         }
         return true;
     });
@@ -274,8 +294,106 @@ static bool MoveContentMenuEntry(HWND owner, int first, int second)
     });
 }
 
+static bool ImportContentNotesFile(HWND owner, int resource, const std::wstring& path)
+{
+    if (aip::ToLower(aip::MakeAbsolutePath(path)) == aip::ToLower(aip::MakeAbsolutePath(g_iniPath))) return false;
+    std::wstring text, error;
+    std::vector<aip::IniSetting> changes;
+    if (!aip::notes::ReadImportFile(path, text, error) ||
+        !(resource < 0 ? aip::notes::ImportAccountProfile(text, changes, error) : aip::notes::ImportCookieJson(resource, text, changes, error))) {
+        DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Notes import", MB_OK | MB_ICONWARNING); return false;
+    }
+    return SaveContentMenuSettings(owner, changes);
+}
+
+static bool ImportContentHardwareFile(HWND owner, bool asus, const std::wstring& path)
+{
+    std::vector<aip::IniSetting> changes;
+    std::wstring error;
+    if (!ReadContentHardwareImport(path, asus, changes, error)) {
+        DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Hardware profile import", MB_OK | MB_ICONWARNING); return false;
+    }
+    return SaveContentMenuSettings(owner, changes, asus);
+}
+
+static bool ImportContentNowPlayingFile(HWND owner, const std::wstring& path)
+{
+    aip::now_playing_profile::ImportPlan plan;
+    aip::now_playing_profile::ConfigurationProjection projection;
+    std::wstring error;
+    if (!ReadContentNowPlayingImport(path, plan, projection, error)) {
+        DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"NowPlayingTile import", MB_OK | MB_ICONWARNING); return false;
+    }
+    if (!SaveContentMenuSettings(owner, projection.settings, false, true)) return false;
+    std::wstring report = L"NowPlayingTile content was imported.\r\n";
+    for (const auto& issue : projection.diagnostics) report += L"\r\n" + issue;
+    DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, report.c_str(), L"NowPlayingTile import", MB_OK | MB_ICONINFORMATION);
+    return true;
+}
+
+static bool SaveContentAsusEventSetting(HWND owner, const std::wstring& key, const std::wstring& value)
+{
+    const auto canonical = aip::hardware_profile::CanonicalAsusKey(key);
+    if (canonical.compare(0, 5, L"Event") != 0) {
+        DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, L"A supported numbered ASUS event key is required.", L"ASUS numbered event", MB_OK | MB_ICONWARNING);
+        return false;
+    }
+    return SaveContentMenuSettings(owner, {{L"AsusBlink", canonical, value}});
+}
+
 static bool DispatchContentEngineCommand(HWND owner, UINT command)
 {
+    if (command == ID_CONTENT_NOW_PLAYING_IMPORT) {
+        wchar_t path[32768]{};
+        OPENFILENAMEW dialog{}; dialog.lStructSize = sizeof(dialog); dialog.hwndOwner = owner;
+        dialog.lpstrFile = path; dialog.nMaxFile = _countof(path);
+        dialog.lpstrFilter = L"INI profiles\0*.ini\0All files\0*.*\0\0";
+        dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        dialog.lpstrTitle = L"Import NowPlayingTile profile";
+        if (GetOpenFileNameW(&dialog)) ImportContentNowPlayingFile(owner, path);
+        return true;
+    }
+    if (command == ID_CAPS_SETTINGS + 31 || command == ID_ASUS_SETTINGS + 31) {
+        wchar_t path[32768]{};
+        OPENFILENAMEW dialog{}; dialog.lStructSize = sizeof(dialog); dialog.hwndOwner = owner;
+        dialog.lpstrFile = path; dialog.nMaxFile = _countof(path);
+        dialog.lpstrFilter = L"INI profiles\0*.ini\0All files\0*.*\0\0";
+        dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if (GetOpenFileNameW(&dialog)) ImportContentHardwareFile(owner, command == ID_ASUS_SETTINGS + 31, path);
+        return true;
+    }
+    if (command == ID_ASUS_SETTINGS + 32) {
+        std::wstring key = L"Event1HddState";
+        if (ShowTextInputDialog(owner, L"ASUS numbered event", L"Setting name (for example Event001MicInterval)", key, true) != IDOK) return true;
+        const auto canonical = aip::hardware_profile::CanonicalAsusKey(key);
+        if (canonical.compare(0, 5, L"Event") != 0) {
+            DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, L"Use Event followed by 1-3 digits, Mic/Keyboard/Hdd, and State/Interval/Duration.", L"ASUS numbered event", MB_OK | MB_ICONWARNING);
+            return true;
+        }
+        std::wstring value = IniReadS(L"AsusBlink", canonical.c_str(), canonical.find(L"State") != std::wstring::npos ? L"off" : canonical.find(L"Duration") != std::wstring::npos ? L"once" : L"0");
+        if (ShowTextInputDialog(owner, L"ASUS numbered event", canonical, value, true) == IDOK)
+            SaveContentAsusEventSetting(owner, canonical, value);
+        return true;
+    }
+    if ((command >= ID_NOTES_SETTINGS + 64 && command < ID_NOTES_SETTINGS + 67) || command == ID_NOTES_SETTINGS + 72) {
+        const int resource = command == ID_NOTES_SETTINGS + 72 ? -1 : static_cast<int>(command - ID_NOTES_SETTINGS - 64);
+        wchar_t path[32768]{};
+        OPENFILENAMEW dialog{}; dialog.lStructSize = sizeof(dialog); dialog.hwndOwner = owner;
+        dialog.lpstrFile = path; dialog.nMaxFile = _countof(path);
+        dialog.lpstrFilter = resource < 0 ? L"INI profiles\0*.ini\0All files\0*.*\0\0" : L"Cookie JSON\0*.json\0All files\0*.*\0\0";
+        dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if (GetOpenFileNameW(&dialog)) ImportContentNotesFile(owner, resource, path);
+        return true;
+    }
+    if (command >= ID_NOTES_SETTINGS + 16 && command < ID_NOTES_SETTINGS + 40) {
+        const auto offset = command - ID_NOTES_SETTINGS - 16;
+        if (offset % 8 == 6) { RequestContentNotesRefresh(static_cast<int>(offset / 8)); return true; }
+        if (offset % 8 == 7) {
+            const auto resource = static_cast<int>(offset / 8);
+            if (SaveContentMenuSettings(owner, aip::notes::ClearAccountSettings(resource))) RequestContentNotesRefresh(resource);
+            return true;
+        }
+    }
     if (command == ID_CAPS_SETTINGS + 30 || command == ID_ASUS_SETTINGS + 30) {
         if (command == ID_CAPS_SETTINGS + 30) g_contentCaps.restart = true;
         else g_contentAsus.restart = true;
@@ -308,16 +426,30 @@ static bool DispatchContentEngineCommand(HWND owner, UINT command)
         const UINT offset = command - ID_NOTES_SETTINGS;
         std::wstring section = L"Notes", key, label, fallback;
         if (offset < 3) { key = g_notesOptionKeys[offset]; label = g_notesOptionLabels[offset]; fallback = g_notesOptionDefaults[offset]; }
-        else if (offset >= 16 && (offset - 16) / 8 < 3 && (offset - 16) % 8 < 3) {
+        else if (offset >= 16 && (offset - 16) / 8 < 3 && (offset - 16) % 8 < _countof(g_notesAccountKeys)) {
             const UINT resource = (offset - 16) / 8, field = (offset - 16) % 8;
             section += L"." + std::wstring(aip::content::NotesResources[resource].value);
-            key = g_notesAccountKeys[field]; label = key;
+            key = g_notesAccountKeys[field]; label = key; if (field == 3) fallback = L"0";
         } else return false;
         const bool secret = aip::content::SensitiveSetting(section, key);
         std::wstring value = secret ? L"" : IniReadS(section.c_str(), key.c_str(), fallback.c_str());
-        if (secret) label += L" (replace saved cookie; blank clears it). Stored in plain text in this INI.";
-        if (ShowTextInputDialog(owner, L"Real-Time Notes", label, value, true, secret) == IDOK)
-            SaveContentMenuSettings(owner, {{section, key, value}});
+        if (secret) label += key.find(L"Protected") != std::wstring::npos ? L" (paste protected blob; blank clears it)." : L" (replace saved cookie; blank clears it). Stored in plain text in this INI.";
+        if (ShowTextInputDialog(owner, L"Real-Time Notes", label, value, true, secret) == IDOK) {
+            std::vector<aip::IniSetting> changes{{section, key, value}};
+            if (key == L"LToken" || key == L"LTUid" || key == L"LTokenProtected" || key == L"LTUidProtected") {
+                const bool token = key.find(L"Token") != std::wstring::npos;
+                static constexpr const wchar_t* tokenKeys[] = {L"LToken", L"LTokenV2", L"ltoken_v2", L"LTokenProtected", L"LTokenV2Protected"};
+                static constexpr const wchar_t* userKeys[] = {L"LTUid", L"LTuidV2", L"ltuid_v2", L"LTUidProtected", L"LTuidV2Protected"};
+                for (UINT index = 0; index < _countof(tokenKeys); ++index) {
+                    const auto* other = token ? tokenKeys[index] : userKeys[index];
+                    if (key != other) changes.push_back({section, other, L""});
+                }
+            }
+            if (SaveContentMenuSettings(owner, changes)) {
+                if (section.size() > 6) { int resource = 0; aip::notes::ParseHostResource(section.substr(6), resource); RequestContentNotesRefresh(resource); }
+                else RequestContentNotesRefresh(3);
+            }
+        }
         return true;
     }
     if (command >= ID_CONTENT_TEXT_MODE && command < ID_CONTENT_TEXT_MODE + _countof(aip::content::TextModes)) {
@@ -361,7 +493,11 @@ static bool DispatchContentEngineCommand(HWND owner, UINT command)
             return true;
         }
         if (field >= 40 && field < 43) {
-            SaveContentMenuSettings(owner, {{section, L"NotesResource", aip::content::NotesResources[field - 40].value}});
+            SaveContentMenuSettings(owner, {{section, L"NotesResource", aip::content::NotesResources[field - 40].value}, {section, L"NotesDetail", L"Summary"}});
+            return true;
+        }
+        if (field >= 48 && field < 48 + _countof(aip::notes::Details)) {
+            SaveContentMenuSettings(owner, {{section, L"NotesDetail", aip::notes::Details[field - 48].value}});
             return true;
         }
         if (field >= _countof(g_contentEntryOptions)) return false;

@@ -18,6 +18,7 @@
 **/references/ export-ignore
 **/*.log export-ignore
 **/*.ini export-ignore
+**/*.example.ini -export-ignore
 **/*.tmp export-ignore
 **/*.bak export-ignore
 **/*.obj export-ignore

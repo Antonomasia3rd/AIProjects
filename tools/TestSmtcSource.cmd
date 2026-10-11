@@ -28,10 +28,10 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 :Compile
 pushd "%ROOT%" || exit /b 1
 if not exist "build" mkdir "build"
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\SmtcSourceTests.cpp /Fe:build\SmtcSourceTests.exe /Fo:build\SmtcSourceTests.obj /link windowsapp.lib runtimeobject.lib ole32.lib /SUBSYSTEM:CONSOLE
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE tools\SmtcSourceTests.cpp /Fe:build\SmtcSourceTests.exe /Fo:build\SmtcSourceTests.obj /link windowscodecs.lib advapi32.lib windowsapp.lib runtimeobject.lib ole32.lib /SUBSYSTEM:CONSOLE
 set "STATUS=%ERRORLEVEL%"
 if not "%STATUS%"=="0" goto Done
-call build\SmtcSourceTests.exe
+call build\SmtcSourceTests.exe %*
 set "STATUS=%ERRORLEVEL%"
 :Done
 popd

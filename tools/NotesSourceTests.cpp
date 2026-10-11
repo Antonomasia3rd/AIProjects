@@ -1,13 +1,15 @@
-#include "../dependencies/content_sources/notes.inc"
+#include "../dependencies/content_sources/notes_profile.inc"
 #include <iostream>
 #include <thread>
 #include <atomic>
 
 namespace {
 int failures = 0;
+int checks = 0;
 using namespace aip::notes;
 void Check(bool passed, const char* message)
 {
+    ++checks;
     std::cout << (passed ? "ok - " : "FAIL - ") << message << '\n';
     if (!passed) ++failures;
 }
@@ -180,12 +182,62 @@ void TestConcurrentSnapshots()
     for (auto& thread : workers) thread.join();
     Check(errors == 0, "two thousand concurrent fixture parses have no host globals or shared mutable state");
 }
+void TestDetailsAndImports()
+{
+    auto snapshot = ParseResponse(ResourceKind::Resin, resin);
+    Check(snapshot.details[DetailId::Commissions] == L"2/4" && snapshot.details[DetailId::Realm] == L"100/2400" &&
+        snapshot.details[DetailId::Expeditions] == L"1/5", "canonical detail values come from the same parsed Notes snapshot");
+    snapshot = ParseResponse(ResourceKind::Charge, charge);
+    Check(snapshot.details[DetailId::ScratchCard] == L"Incomplete" && snapshot.details[DetailId::VideoStore] == L"Open",
+        "non-numeric Notes statuses remain selectable details");
+    std::vector<aip::IniSetting> changes;
+    std::wstring error;
+    const std::wstring profile = L"[Settings]\nRunAtStartup=1\nRefreshIntervalSeconds=600\n[Account.Resin]\nUID=800000001\nLTokenV2Protected=dpapi:0102\nLTuidV2Protected=dpapi:v1:utf8:0304\nRefreshIntervalSeconds=90\n";
+    Check(ImportAccountProfile(profile, changes, error), "protected donor account aliases import without decryption");
+    bool protectedToken = false, protectedUser = false, interval = false, unsafe = false;
+    for (const auto& change : changes) {
+        if (change.key == L"LTokenProtected") protectedToken = change.value == L"dpapi:0102";
+        if (change.key == L"LTUidProtected") protectedUser = change.value == L"dpapi:v1:utf8:0304";
+        if (change.key == L"RefreshSeconds" && change.section == L"Notes.Resin") interval = change.value == L"90";
+        if (change.key == L"RunAtStartup" || change.section == L"Settings") unsafe = true;
+    }
+    Check(protectedToken && protectedUser && interval && !unsafe, "imports preserve blobs and per-account refresh while ignoring host activation metadata");
+    Check(ImportCookieJson(1, L"{\"uid\":\"800000001\",\"ltoken_v2\":\"fixture-token\",\"ltuid_v2\":\"fixture-user\",\"refresh_interval\":120,\"install\":true}", changes, error),
+        "legacy cookie JSON and its refresh alias import as one passive setting batch");
+    for (const auto& malformed : {L"{}", L"{\"uid\":\"800000001\",\"uid\":\"800000002\",\"ltoken_v2\":\"a\",\"ltuid_v2\":\"b\"}",
+        L"{\"uid\":\"800000001\",\"ltoken_v2\":\"a\",\"ltuid_v2\":\"b\",\"refresh_interval\":\"bad\"}", L"[]", L"{bad}"})
+        Check(!ImportCookieJson(0, malformed, changes, error) && changes.empty() && !error.empty(), "malformed or ambiguous cookie sources publish no partial batch");
+    for (const auto& malformed : {L"[Account.Resin]\nUID=800000001\nLTokenV2Protected=dpapi:ZZ\nLTuidV2Protected=dpapi:01\n",
+        L"[Account.Resin]\nUID=800000001\nLTokenV2=a\nLTuidV2=c\nRefreshIntervalSeconds 90\n", L"[Account.Charge]\nUID=800000001\n"})
+        Check(!ImportAccountProfile(malformed, changes, error) && changes.empty(), "invalid protected/duplicate/incomplete profiles publish no partial batch");
+    Check(ImportAccountProfile(L"[Account.Resin]\nUID=800000001\nLTokenV2=primary\nltoken_v2=fallback\nLTuidV2=account\n[account.resin]\nUID=800000009\n", changes, error),
+        "repeated account sections preserve the baseline's last effective assignment");
+    bool lastUid = false, primaryAlias = false;
+    for (const auto& change : changes) {
+        if (change.key == L"UID") lastUid = change.value == L"800000009";
+        if (change.key == L"LToken") primaryAlias = change.value == L"primary";
+    }
+    Check(lastUid && primaryAlias, "native credential alias precedence is preserved without rejecting a valid fallback alias");
+    aip::content::NotesAccount saved;
+    saved.uid = L"800000001"; saved.tokenProtected = L"dpapi:0102"; saved.userIdProtected = L"dpapi:0304";
+    int decryptions = 0;
+    Account resolved;
+    Check(ResolveStoredAccount(saved, resolved, error, [&](const auto&, auto& plain) { ++decryptions; plain = L"fixture-only"; return true; }) &&
+        decryptions == 2 && resolved.uid == "800000001", "credential resolution occurs only through the injected fetch-time decoder");
+    saved.uid.clear();
+    Check(!ResolveStoredAccount(saved, resolved, error, [&](const auto&, auto&) { ++decryptions; return true; }) && decryptions == 2,
+        "an incomplete account starts no decryption");
+    Check(aip::content::SensitiveSetting(L"Notes.Resin", L"LTokenV2Protected") &&
+        aip::content::SensitiveSetting(L"Notes.Resin", L"LTUidProtected"), "all protected and legacy credential fields share log redaction");
+}
 }
 int main()
 {
     TestResponses();
     TestRequestsAndTransport();
     TestConcurrentSnapshots();
+    TestDetailsAndImports();
+    std::cout << checks << " Notes checks; " << failures << " failures\n";
     std::cout << (failures ? "Notes source tests failed.\n" : "Notes source tests passed.\n");
     return failures ? 1 : 0;
 }

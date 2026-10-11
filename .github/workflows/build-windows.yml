@@ -144,6 +144,10 @@ jobs:
         shell: cmd
         run: tools\TestNotesSource.cmd
 
+      - name: Test source profiles and composed host with inert fixtures
+        shell: pwsh
+        run: tools\TestContentIntegration.ps1 -Run
+
       - name: Test smoke runner interruption cleanup
         shell: cmd
         run: .github\scripts\repo-tools.cmd smoke-cleanup-tests

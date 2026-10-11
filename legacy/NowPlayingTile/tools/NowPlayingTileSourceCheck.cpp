@@ -142,10 +142,10 @@ int main()
             sharedSmtc,
             "operation.Cancel()");
         RequireContains(
-            "SMTC metadata and artwork use the shared deadline helper",
+            "SMTC metadata and artwork use the shared media reader",
             "npt_media.inc",
             media,
-            "aip::content::smtc_detail::Await(");
+            "aip::content::ReadSmtcMedia(");
         RequireContains(
             "SMTC reads use one total deadline",
             "NowPlayingTile sources",
