@@ -68,9 +68,11 @@ The fixture is part of the bounded, scan-before-run Windows content suite and
 its existing CI entry point. Windows API factory activation is platform-specific;
 the existing portable model/layout suites are unaffected.
 
-The actual packaged tray-mode switch still requires a user acceptance retry.
-Factory-only regression tests do not claim a completed live package/Start-tile
-test. Detailed dump output, original executable, linker map and scan/run logs
+The user subsequently retried the packaged tray-mode switch and reported that
+it no longer crashes. This confirms the reported case on their installation;
+it is not a stress-test result for every delivery target or source combination.
+Factory-only regression tests do not substitute for that user acceptance.
+Detailed dump output, original executable, linker map and scan/run logs
 remain under ignored `build/review-validation`; the original dump remains intact.
 
 The scanned fixed host and broker were copied to the user's normal

@@ -49,15 +49,15 @@ static const ContentTrayOption g_discordOptions[] = {
     {L"ClearOnStop", L"Clear sent presence on shutdown", L"1", true},
 };
 static const ContentTrayOption g_contentOptions[] = {
-    {L"Enabled", L"Use layered content", L"0", true},
-    {L"Count", L"Number of contents (1-32)", L"1", false},
-    {L"CycleEnabled", L"Cycle enabled contents", L"0", true},
-    {L"CycleSeconds", L"Cycle interval (seconds)", L"10", false},
-    {L"RefreshSeconds", L"Source refresh (seconds)", L"2", false},
+    {L"Enabled", L"Use tile contents", L"0", true},
+    {L"Count", L"Content slots (1-32)", L"1", false},
+    {L"CycleEnabled", L"Rotate through enabled contents", L"0", true},
+    {L"CycleSeconds", L"Show each content for (seconds)", L"10", false},
+    {L"RefreshSeconds", L"Check for source updates every (seconds)", L"2", false},
     {L"TextMode", L"Text delivery", L"Auto", false},
 };
 static const ContentTrayOption g_contentEntryOptions[] = {
-    {L"Enabled", L"Include in cycle", L"1", true},
+    {L"Enabled", L"Use this content", L"1", true},
     {L"Name", L"Name", L"Content", false},
     {L"Background", L"Background", L"Wallpaper", false},
     {L"ImagePath", L"Choose background image...", L"", false},
@@ -78,7 +78,9 @@ static std::wstring ContentMenuValue(std::wstring value)
         if (!value.empty() && value.back() >= 0xD800 && value.back() <= 0xDBFF) value.pop_back();
         value += L"...";
     }
-    return value.empty() ? L"(empty)" : value;
+    std::wstring display;
+    for (const auto ch : value) { display += ch; if (ch == L'&') display += ch; }
+    return display.empty() ? L"(empty)" : display;
 }
 
 static void AppendContentSubmenu(HMENU menu, HMENU child, const std::wstring& label)
@@ -86,8 +88,25 @@ static void AppendContentSubmenu(HMENU menu, HMENU child, const std::wstring& la
     if (child && !AppendMenuW(menu, MF_POPUP | MF_STRING, reinterpret_cast<UINT_PTR>(child), label.c_str())) DestroyMenu(child);
 }
 
-static void AppendContentEngineMenu(HMENU menu)
+enum class ContentMenuPart { All, Contents, Sources, Timing, TextDelivery };
+
+static void AppendContentEngineMenu(HMENU menu, ContentMenuPart part = ContentMenuPart::All)
 {
+    if (part == ContentMenuPart::All) {
+        const std::pair<ContentMenuPart, const wchar_t*> groups[] = {
+            {ContentMenuPart::Contents, L"Tile contents"},
+            {ContentMenuPart::Sources, L"Sources and accounts"},
+            {ContentMenuPart::Timing, L"Updates and cycling"},
+            {ContentMenuPart::TextDelivery, L"Text display"},
+        };
+        for (const auto& group : groups) {
+            HMENU child = CreatePopupMenu();
+            if (!child) continue;
+            AppendContentEngineMenu(child, group.first);
+            AppendContentSubmenu(menu, child, group.second);
+        }
+        return;
+    }
     auto append = [](HMENU target, UINT id, const wchar_t* section, const ContentTrayOption& option) {
         const auto value = IniReadS(section, option.key, option.fallback);
         bool checked = false;
@@ -97,6 +116,10 @@ static void AppendContentEngineMenu(HMENU menu)
         aip::AppendTrayMenuItem(target, id, label, option.toggle && checked, true);
     };
     for (UINT i = 0; i < _countof(g_contentOptions); ++i) {
+        if (i < 2 && part != ContentMenuPart::Contents) continue;
+        if (i >= 2 && i <= 4 && part != ContentMenuPart::Timing) continue;
+        if (i == 5 && part != ContentMenuPart::TextDelivery) continue;
+        if (i == 1) continue; // List size belongs next to the entries, below.
         if (IEquals(g_contentOptions[i].key, L"TextMode")) {
             HMENU choices = CreatePopupMenu();
             if (!choices) continue;
@@ -108,8 +131,7 @@ static void AppendContentEngineMenu(HMENU menu)
         } else append(menu, ID_CONTENT_OPTIONS + i, L"Content", g_contentOptions[i]);
     }
     const int count = IniReadClampedI(L"Content", L"Count", 1, 1, aip::content::MaxEntries);
-    aip::AppendTrayMenuItem(menu, ID_CONTENT_ADD, L"Add content", false, count < aip::content::MaxEntries);
-    aip::AppendTrayMenuItem(menu, ID_CONTENT_NOW_PLAYING_IMPORT, L"Import NowPlayingTile profile...", false, true);
+    if (part == ContentMenuPart::Sources) {
     HMENU notes = CreatePopupMenu();
     if (notes) {
         for (UINT i = 0; i < 3; ++i)
@@ -137,6 +159,9 @@ static void AppendContentEngineMenu(HMENU menu)
     }
     HMENU discord = CreatePopupMenu();
     if (discord) {
+        bool sending = false;
+        aip::content::ParseBool(IniReadS(L"Discord", L"SendPresence", L"0"), sending);
+        aip::AppendTrayMenuItem(discord, 0, sending ? L"Sending presence to Discord" : L"Preview only; sending is off", false, false);
         const auto activeProfile = TrimCopy(IniReadS(L"Discord", L"ProfilePath", L""));
         if (!activeProfile.empty()) {
             aip::AppendTrayMenuItem(discord, 0, L"Active advanced profile: " + ContentMenuValue(activeProfile), false, false);
@@ -155,12 +180,36 @@ static void AppendContentEngineMenu(HMENU menu)
         HMENU advanced = CreatePopupMenu();
         if (advanced) {
             const auto options = aip::discord::ProfileOptions();
-            for (UINT index = 0; index < options.size(); ++index)
-                aip::AppendTrayMenuItem(advanced, ID_DISCORD_PROFILE_OPTION + index, options[index].label, false, true);
+            std::vector<std::pair<std::wstring, HMENU>> sections;
+            for (UINT index = 0; index < options.size(); ++index) {
+                auto found = std::find_if(sections.begin(), sections.end(), [&](const auto& section) { return section.first == options[index].section; });
+                if (found == sections.end()) {
+                    HMENU section = CreatePopupMenu();
+                    if (!section) {
+                        aip::AppendTrayMenuItem(advanced, ID_DISCORD_PROFILE_OPTION + index, options[index].label, false, true);
+                        continue;
+                    }
+                    sections.push_back({options[index].section, section});
+                    found = sections.end() - 1;
+                }
+                aip::AppendTrayMenuItem(found->second, ID_DISCORD_PROFILE_OPTION + index, options[index].label, false, true);
+            }
+            for (const auto& section : sections) {
+                const std::pair<const wchar_t*, const wchar_t*> titles[] = {
+                    {L"general", L"Activity and connection"}, {L"layout", L"Text layout"},
+                    {L"censor_map", L"Text filters"}, {L"large_time_ranges", L"Large image schedule"},
+                    {L"small_time_ranges", L"Small image schedule"}, {L"large_assets", L"Large image assets"},
+                    {L"small_assets", L"Small image assets"}, {L"buttons", L"Buttons"},
+                    {L"afk", L"Away status"}, {L"ipc", L"Discord connection"}, {L"gateway", L"Gateway connection"},
+                };
+                std::wstring title = section.first;
+                for (const auto& item : titles) if (section.first == item.first) { title = item.second; break; }
+                AppendContentSubmenu(advanced, section.second, title);
+            }
             AppendContentSubmenu(discord, advanced, L"Edit advanced profile options");
         }
         aip::AppendTrayMenuItem(discord, ID_DISCORD_SETTINGS + 80, L"Create new advanced INI...", false, true);
-        AppendContentSubmenu(menu, discord, L"Discord presence settings (preview until sending enabled)");
+        AppendContentSubmenu(menu, discord, L"Discord Rich Presence");
     }
     HMENU caps = CreatePopupMenu();
     if (caps) {
@@ -172,19 +221,48 @@ static void AppendContentEngineMenu(HMENU menu)
     }
     HMENU asus = CreatePopupMenu();
     if (asus) {
-        for (UINT option = 0; option < _countof(g_asusOptions); ++option)
-            append(asus, ID_ASUS_SETTINGS + option, L"AsusBlink", g_asusOptions[option]);
+        HMENU microphone = CreatePopupMenu(), keyboard = CreatePopupMenu(), errors = CreatePopupMenu();
+        for (UINT option = 0; option < _countof(g_asusOptions); ++option) {
+            HMENU target = option >= 4 && option <= 6 && microphone ? microphone :
+                option >= 7 && option <= 9 && keyboard ? keyboard :
+                option >= 10 && errors ? errors : asus;
+            append(target, ID_ASUS_SETTINGS + option, L"AsusBlink", g_asusOptions[option]);
+        }
+        AppendContentSubmenu(asus, microphone, L"Microphone indicator");
+        AppendContentSubmenu(asus, keyboard, L"Keyboard lighting");
+        AppendContentSubmenu(asus, errors, L"Error handling");
         aip::AppendTrayMenuItem(asus, ID_ASUS_SETTINGS + 30, L"Restart patterns", false, true);
         aip::AppendTrayMenuItem(asus, ID_ASUS_SETTINGS + 31, L"Import ASUS donor INI...", false, true);
         aip::AppendTrayMenuItem(asus, ID_ASUS_SETTINGS + 32, L"Edit numbered event setting...", false, true);
         AppendContentSubmenu(menu, asus, L"ASUS indicator settings");
     }
+    }
+    if (part != ContentMenuPart::Contents) return;
+    HMENU entries = CreatePopupMenu();
+    const bool ownEntries = entries != nullptr;
+    if (!entries) entries = menu;
+    aip::AppendTrayMenuItem(entries, ID_CONTENT_ADD, L"Add content...", false, count < aip::content::MaxEntries);
+    aip::AppendMenuSeparator(entries);
     for (int entry = 1; entry <= count; ++entry) {
         auto section = L"Content." + std::to_wstring(entry);
         const UINT base = ID_CONTENT_ENTRY_OPTIONS + static_cast<UINT>(entry - 1) * CONTENT_ENTRY_COMMANDS;
         HMENU child = CreatePopupMenu();
         if (!child) continue;
+        HMENU backgroundMenu = CreatePopupMenu();
+        HMENU customTextMenu = CreatePopupMenu();
+        HMENU sourceOptionsMenu = CreatePopupMenu();
         for (UINT i = 0; i < _countof(g_contentEntryOptions); ++i) {
+            HMENU target = (i == 2 || i == 3) && backgroundMenu ? backgroundMenu :
+                (i >= 5 && i <= 7) && customTextMenu ? customTextMenu :
+                (i >= 8 && i <= 10) && sourceOptionsMenu ? sourceOptionsMenu : child;
+            if (i == 2 && backgroundMenu) {
+                const auto selected = IniReadS(section.c_str(), L"Background", L"Wallpaper");
+                for (UINT choice = 0; choice < _countof(aip::content::Backgrounds); ++choice)
+                    aip::AppendTrayMenuItem(target, base + 16 + choice, aip::content::Backgrounds[choice].label,
+                        IEquals(selected, aip::content::Backgrounds[choice].value), true);
+                aip::AppendMenuSeparator(target);
+                continue;
+            }
             if (i == 2 || i == 4 || i == 9 || i == 10) {
                 HMENU choices = CreatePopupMenu();
                 if (!choices) continue;
@@ -212,14 +290,24 @@ static void AppendContentEngineMenu(HMENU menu)
                         aip::AppendTrayMenuItem(choices, base + 40 + resource, aip::content::NotesResources[resource].label,
                             IEquals(selected, aip::content::NotesResources[resource].value), true);
                 }
-                AppendContentSubmenu(child, choices, g_contentEntryOptions[i].label);
-            } else append(child, base + i, section.c_str(), g_contentEntryOptions[i]);
+                AppendContentSubmenu(target, choices, g_contentEntryOptions[i].label);
+            } else append(target, base + i, section.c_str(), g_contentEntryOptions[i]);
         }
+        AppendContentSubmenu(child, backgroundMenu, L"Background");
+        AppendContentSubmenu(child, customTextMenu, L"Custom text");
+        AppendContentSubmenu(child, sourceOptionsMenu, L"RSS headline and Notes detail");
+        aip::AppendMenuSeparator(child);
         aip::AppendTrayMenuItem(child, base + 32, L"Move earlier in cycle", false, entry > 1);
         aip::AppendTrayMenuItem(child, base + 33, L"Move later in cycle", false, entry < count);
         auto label = std::to_wstring(entry) + L". " + ContentMenuValue(IniReadS(section.c_str(), L"Name", L"Content"));
-        AppendContentSubmenu(menu, child, label);
+        bool enabled = true;
+        aip::content::ParseBool(IniReadS(section.c_str(), L"Enabled", L"1"), enabled);
+        if (!enabled) label += L" (disabled)";
+        AppendContentSubmenu(entries, child, label);
     }
+    aip::AppendMenuSeparator(entries);
+    append(entries, ID_CONTENT_OPTIONS + 1, L"Content", g_contentOptions[1]);
+    if (ownEntries) AppendContentSubmenu(menu, entries, L"Content list (" + std::to_wstring(count) + L")");
 }
 
 // A menu action works from one file snapshot and commits once. Concurrent

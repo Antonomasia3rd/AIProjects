@@ -4,7 +4,7 @@ See the [current topology](../docs/DESKTOPSTUB_TOPOLOGY.md) for what is compiled
 into the host, which helper executables are separate, and the status of source
 plugins versus shared source code.
 
-`DesktopStub.exe` generates Windows Start tile content and registers a loose Appx manifest for a desktop tile entry. Wallpaper remains the default. The Content and sources menu can compose wallpaper/custom images with RSS, custom text, SMTC media information and Caps Lock status, with separate refresh and cycle timing. See the [content engine guide](../docs/content-engine.md).
+`DesktopStub.exe` generates Windows Start tile content and registers a loose Appx manifest for a desktop tile entry. Wallpaper remains the default. **Tile contents** combines backgrounds and source text; **Sources and accounts** configures the providers; **Tile display** chooses native or bitmap text; **Updates and cycling** controls timing. See the [settings guide](../docs/desktopstub-settings.md) and [content engine guide](../docs/content-engine.md).
 
 The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale settings, then regenerate assets and re-register the manifest automatically. Most behavior is configurable through the tray menu and generated INI file. The same generation and delivery pipeline now handles composed content.
 

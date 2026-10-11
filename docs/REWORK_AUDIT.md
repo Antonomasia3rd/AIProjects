@@ -1102,3 +1102,23 @@ checks, packaged Startup fake tests 13, shared source checks 277, and injected
 SMTC tests 38. Actual packaged mode-switch acceptance remains pending the user's
 retry. This crash takes priority over the separate unresolved renderer variation;
 the renderer comparison remains exact and unchanged. Windhawk remains untouched.
+
+### Settings organization and crash acceptance, 2026-10-11
+
+The user retried Live Tile enabling and reported that it no longer crashes.
+They then requested a complete settings reorganization. The new seven-category
+tray separates contents, provider setup, display, update timing, application
+behavior, diagnostics and advanced internals. Per-entry, Discord, ASUS and
+manifest menus group related fields; quick layouts and standalone fallback text
+have clear labels. Functional IDs/INI/CLI bindings and Startup policy stay intact.
+
+Menu construction is now independently inspectable without resident reconciliation
+or popup tracking. Final validation passes 6,443 runtime/menu checks, 1,764 source
+checks, normal host/broker build/scans and copied offline content smoke. The
+reviewed binaries are installed at the normal paths; the INI is unchanged and
+local pre-settings binaries are preserved. Custom-label migration, secret masking,
+32-slot reachability, flat/grouped state parity and menu-object cleanup are covered.
+Two independent-review allocation fallback findings were corrected. See the
+[settings validation](desktopstub-settings-validation-2026-10-11.md) and
+[navigation guide](desktopstub-settings.md). Visible menu/dialog acceptance still
+requires user feedback. The renderer discrepancy remains separate and unchanged.

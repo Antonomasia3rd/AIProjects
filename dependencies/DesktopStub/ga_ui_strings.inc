@@ -169,9 +169,16 @@ bool EnsureIniDefaults()
 
 void LoadUiStrings()
 {
-    g_ui.generalTitle = IniReadS(L"Strings", L"GeneralTitle", L"General:");
+    g_ui.generalTitle = IniReadS(L"Strings", L"GeneralTitle", L"Application:");
+    g_ui.trayContentsTitle = IniReadS(L"Strings", L"TrayContentsTitle", L"Tile contents");
+    g_ui.traySourcesTitle = IniReadS(L"Strings", L"TraySourcesTitle", L"Sources and accounts");
+    g_ui.trayUpdatesTitle = IniReadS(L"Strings", L"TrayUpdatesTitle", L"Updates and cycling");
+    g_ui.trayQuickLayoutsTitle = IniReadS(L"Strings", L"TrayQuickLayoutsTitle", L"Quick layouts");
+    g_ui.trayStartupTitle = IniReadS(L"Strings", L"TrayStartupTitle", L"Launch at sign-in");
+    g_ui.trayInterfaceTitle = IniReadS(L"Strings", L"TrayInterfaceTitle", L"Tray and console");
+    g_ui.trayPackageTitle = IniReadS(L"Strings", L"TrayPackageTitle", L"Package registration and compatibility");
     g_ui.wallpaperTitle = IniReadS(L"Strings", L"WallpaperTitle", L"Wallpaper:");
-    g_ui.appearanceAssetsTitle = IniReadS(L"Strings", L"AppearanceAssetsTitle", L"Appearance && assets:");
+    g_ui.appearanceAssetsTitle = IniReadS(L"Strings", L"AppearanceAssetsTitle", L"Tile display:");
     g_ui.diagnosticsTitle = IniReadS(L"Strings", L"DiagnosticsTitle", L"Diagnostics:");
     g_ui.loggingTitle = IniReadS(L"Strings", L"LoggingTitle", L"Logging:");
     g_ui.wallpaperFittingTitle = IniReadS(L"Strings", L"WallpaperFittingTitle", L"Wallpaper fitting:");
@@ -183,7 +190,7 @@ void LoadUiStrings()
     g_ui.cachingTitle = IniReadS(L"Strings", L"CachingTitle", L"Caching:");
     g_ui.liveTileTitle = IniReadS(L"Strings", L"LiveTileTitle", L"Live Tile:");
     g_ui.tileAppearanceTitle = IniReadS(L"Strings", L"TileAppearanceTitle", L"Tile appearance:");
-    g_ui.tileTextTitle = IniReadS(L"Strings", L"TileTextTitle", L"Windows tile text");
+    g_ui.tileTextTitle = IniReadS(L"Strings", L"TileTextTitle", L"Default text (without tile contents)");
     g_ui.tileTextEnabled = IniReadS(L"Strings", L"TileTextEnabled", L"Enable text overlay");
     g_ui.tileTextEdit = IniReadS(L"Strings", L"TileTextEdit", L"Edit text...");
     g_ui.tileTextClear = IniReadS(L"Strings", L"TileTextClear", L"Clear text");
@@ -213,7 +220,7 @@ void LoadUiStrings()
     g_ui.contentSourceTitle = IniReadS(L"Strings", L"ContentSourceTitle", L"Content and sources");
     g_ui.contentSourceWallpaper = IniReadS(L"Strings", L"ContentSourceWallpaper", L"Wallpaper only");
     g_ui.contentSourceRssFeed = IniReadS(L"Strings", L"ContentSourceRssFeed", L"RSS / Atom over wallpaper");
-    g_ui.contentPresetSwitchPrompt = IniReadS(L"Strings", L"ContentPresetSwitchPrompt", L"Switching to a legacy preset turns off layered content. Numbered entries stay saved and can be re-enabled later. The RSS preset uses wallpaper as its background; the selected text layout determines whether it remains visible.");
+    g_ui.contentPresetSwitchPrompt = IniReadS(L"Strings", L"ContentPresetSwitchPrompt", L"Applying a quick layout turns off tile contents. Numbered entries stay saved and can be re-enabled later. RSS uses wallpaper as its background; the selected text display determines whether it remains visible.");
     g_ui.rssFeedSettingsTitle = IniReadS(L"Strings", L"RssFeedSettingsTitle", L"RSS / Atom settings");
     g_ui.rssFeedUrlLabel = IniReadS(L"Strings", L"RssFeedUrlLabel", L"Feed URL: %s");
     g_ui.rssFeedUserAgentLabel = IniReadS(L"Strings", L"RssFeedUserAgentLabel", L"User agent: %s");
@@ -240,8 +247,8 @@ void LoadUiStrings()
     g_ui.liveTileModeAuto = IniReadS(L"Strings", L"LiveTileModeAuto", L"Auto");
     g_ui.liveTileModeRegistration = IniReadS(L"Strings", L"LiveTileModeRegistration", L"Registration");
     g_ui.liveTileModeLiveTile = IniReadS(L"Strings", L"LiveTileModeLiveTile", L"Live Tile");
-    g_ui.liveTileModeEnabled = IniReadS(L"Strings", L"LiveTileModeEnabled", L"Enabled");
-    g_ui.liveTileModeDisabled = IniReadS(L"Strings", L"LiveTileModeDisabled", L"Disabled");
+    g_ui.liveTileModeEnabled = IniReadS(L"Strings", L"LiveTileModeEnabled", L"Live Tile updates");
+    g_ui.liveTileModeDisabled = IniReadS(L"Strings", L"LiveTileModeDisabled", L"Static tile updates");
     g_ui.liveTileModeTitle = IniReadS(L"Strings", L"LiveTileModeTitle", L"Mode");
     g_ui.liveTileTemplateTitle = IniReadS(L"Strings", L"LiveTileTemplateTitle", L"Windows 10 template");
     g_ui.liveTileTemplateAdaptive = IniReadS(L"Strings", L"LiveTileTemplateAdaptive", L"Adaptive");
@@ -307,7 +314,7 @@ void LoadUiStrings()
     g_ui.generatedAssetPrecache = IniReadS(L"Strings", L"GeneratedAssetPrecache", L"Pre-cache slideshow wallpapers");
     g_ui.generatedAssetCacheMaxEntriesLabel = IniReadS(L"Strings", L"GeneratedAssetCacheMaxEntriesLabel", L"Cache max entries: %d");
     g_ui.generatedAssetPrecacheMaxFilesLabel = IniReadS(L"Strings", L"GeneratedAssetPrecacheMaxFilesLabel", L"Pre-cache max files: %d");
-    g_ui.showMenuAsDropdown = IniReadS(L"Strings", L"ShowMenuAsDropdown", L"Show menu as dropdown");
+    g_ui.showMenuAsDropdown = IniReadS(L"Strings", L"ShowMenuAsDropdown", L"Group settings into submenus");
     g_ui.notificationsTitle = IniReadS(L"Strings", L"NotificationsTitle", L"Notifications:");
     g_ui.notificationsEnabled = IniReadS(L"Strings", L"NotificationsEnabled", L"Enable all tray notifications");
     g_ui.notifyOnStart = IniReadS(L"Strings", L"NotifyOnStart", L"Notify when generation starts");
@@ -317,7 +324,7 @@ void LoadUiStrings()
     g_ui.notifyOnAlreadyRunning = IniReadS(L"Strings", L"NotifyOnAlreadyRunning", L"Notify when the app is already running");
     g_ui.notifyOnSingleInstanceFailure = IniReadS(L"Strings", L"NotifyOnSingleInstanceFailure", L"Notify when single-instance protection fails");
     g_ui.showConsole = IniReadS(L"Strings", L"ShowConsole", L"Show Console");
-    g_ui.generateNow = IniReadS(L"Strings", L"GenerateNow", L"Generate now");
+    g_ui.generateNow = IniReadS(L"Strings", L"GenerateNow", L"Update tile now");
     g_ui.trimWorkingSetOnIdle = IniReadS(L"Strings", L"TrimWorkingSetOnIdle", L"Trim working set when idle");
     g_ui.trimWorkingSetOperation = IniReadS(L"Strings", L"TrimWorkingSetOperation", L"SetProcessWorkingSetSize(trim idle working set)");
     g_ui.idleTrimIntervalMsLabel = IniReadS(L"Strings", L"IdleTrimIntervalMsLabel", L"Idle trim interval: %s");

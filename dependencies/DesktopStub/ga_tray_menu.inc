@@ -1,63 +1,13 @@
-void Menu(HWND h)
+// Construction is separate from resident Startup reconciliation and popup tracking,
+// so tests can inspect the complete menu without changing live system state.
+static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool startupInstalled)
 {
-    ReloadRuntimeSettingsFromIni();
-    std::wstring startupReconcileError;
-    if (!ReconcileDesktopStubStartupShortcutFromConfig(startupReconcileError))
-        Log(L"[!] Could not synchronize the shell:startup shortcut: %s", startupReconcileError.c_str());
-    EnsureIniStringDefaults();
-    UpgradeRenamedStringDefaults();
-    LoadUiStrings();
-    ValidateFormatStrings();
-    NormalizeSeparatorStrings();
-    if (TrayIconPresent())
-    {
-        DWORD tooltipError = ERROR_SUCCESS;
-        if (!UpdateTrayIconTooltip(&tooltipError))
-            LogWin32Failure(L"Shell_NotifyIconW(NIM_MODIFY tooltip)", tooltipError);
-    }
-
-    POINT pt; GetCursorPos(&pt);
-    HMENU m = aip::CreateTrayPopupMenu();
-    if (!m)
-    {
-        LogWin32Failure(L"CreatePopupMenu(root)");
-        return;
-    }
-    bool showMenuAsDropdown = g_showMenuAsDropdown;
-
     auto addTo = [&](HMENU target, UINT id, const std::wstring& t, bool chk=false, bool en=true){
         if (g_hideDisabled && !en)
             return;
         if (!aip::AppendTrayMenuItem(target, id, t, chk, en))
             LogWin32Failure(L"AppendMenuW");
     };
-
-    if (g_shutdownState.IsRequested())
-    {
-        if (!GenerationWorkPending())
-        {
-            DestroyMenu(m);
-            PostQuitMessage(0);
-            return;
-        }
-
-        std::wstring reason = FormatWide(g_ui.shutdownPendingReason.c_str(), CurrentGenerationReason().c_str());
-        AppendMenuChecked(m, MF_STRING | MF_DISABLED, 0, g_ui.shutdownPendingTitle.c_str());
-        AppendMenuChecked(m, MF_STRING | MF_DISABLED, 0, reason.c_str());
-        AppendMenuChecked(m, MF_STRING, ID_CANCEL_SHUTDOWN, g_ui.cancelShutdown.c_str());
-        AppendMenuChecked(m, MF_STRING, ID_FORCE_SHUTDOWN, g_ui.forceShutdown.c_str());
-
-        SetForegroundWindow(h);
-        UINT cmd = static_cast<UINT>(TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, h, nullptr));
-        DestroyMenu(m);
-        AfterTrayPopupClosed(h);
-
-        if (cmd == ID_CANCEL_SHUTDOWN)
-            CancelRequestedShutdown(h);
-        else if (cmd == ID_FORCE_SHUTDOWN)
-            ForceShutdownNow();
-        return;
-    }
 
     aip::TraySectionLayout sectionLayout(m, showMenuAsDropdown);
     auto beginSection = [&](const std::wstring& title) -> HMENU {
@@ -106,88 +56,35 @@ void Menu(HWND h)
         LogWin32Failure(L"AppendBaselineTrayMenuHeader");
     }
 
-    HMENU generalMenu = beginSection(g_ui.generalTitle);
-    addTo(generalMenu, ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);
-    bool startupInstalled = IniReadI(L"Settings", L"RunAtStartup", 0) != 0;
-    std::wstring startupQueryError;
-    if (!QueryDesktopStubStartupShortcutInstalled(startupInstalled, startupQueryError))
-        Log(L"[!] Could not query the shell:startup shortcut: %s", startupQueryError.c_str());
-    addTo(generalMenu, ID_RUN_AT_STARTUP, g_ui.runAtStartup.c_str(), startupInstalled);
-    QueueDesktopStubPackagedStartupSync(true);
-    bool packagedStartupDesired = false;
-    TryParseCommandLineBoolValue(IniReadS(L"Settings", L"RunAtStartupPackaged", L"0"), packagedStartupDesired);
-    addTo(generalMenu, ID_RUN_AT_STARTUP_PACKAGED, L"Run at sign-in (Windows startup task)", packagedStartupDesired);
-    addTo(generalMenu, ID_RUN_AT_STARTUP_PACKAGED_STATUS, L"Windows startup task status...");
-
-    HMENU contentSourceMenu = beginSection(L"Content and sources");
-    AppendContentEngineMenu(contentSourceMenu);
+    const auto& contentsTitle = g_ui.trayContentsTitle;
+    const auto& sourcesTitle = g_ui.traySourcesTitle;
+    const auto& updatesTitle = g_ui.trayUpdatesTitle;
+    HMENU contentSourceMenu = beginSection(contentsTitle);
+    AppendContentEngineMenu(contentSourceMenu, ContentMenuPart::Contents);
+    HMENU quickLayoutsMenu = beginNestedMenu(contentSourceMenu, L"CreatePopupMenu(Quick layouts)");
     ContentSource configuredContentSource = ParseContentSourceValue(
         IniReadS(L"Settings", L"ContentSource", L"Wallpaper"),
         static_cast<ContentSource>(-1));
     bool layeredContent = false;
     aip::content::ParseBool(IniReadS(L"Content", L"Enabled", L"0"), layeredContent);
     addTo(
-        contentSourceMenu,
+        quickLayoutsMenu,
         ID_CONTENT_SOURCE_WALLPAPER,
-        L"Legacy preset: " + g_ui.contentSourceWallpaper,
+        g_ui.contentSourceWallpaper,
         !layeredContent && configuredContentSource == ContentSource::Wallpaper);
     addTo(
-        contentSourceMenu,
+        quickLayoutsMenu,
         ID_CONTENT_SOURCE_RSS_FEED,
-        L"Legacy preset: " + g_ui.contentSourceRssFeed,
+        g_ui.contentSourceRssFeed,
         !layeredContent && configuredContentSource == ContentSource::RssFeed);
 
-    HMENU rssFeedMenu = beginNestedMenu(
-        contentSourceMenu,
-        L"CreatePopupMenu(RSS feed settings)");
-    std::wstring rssFeedUrlLine = FormatWide(
-        g_ui.rssFeedUrlLabel.c_str(),
-        TraySettingDisplayValue(
-            IniReadS(L"RssFeed", L"FeedUrl", L"")).c_str());
-    std::wstring rssFeedUserAgentLine = FormatWide(
-        g_ui.rssFeedUserAgentLabel.c_str(),
-        TraySettingDisplayValue(
-            IniReadS(
-                L"RssFeed",
-                L"UserAgent",
-                L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)")).c_str());
-    std::wstring rssFeedUpdateIntervalLine = FormatWide(
-        g_ui.rssFeedUpdateIntervalLabel.c_str(),
-        IniReadClampedI(L"RssFeed", L"UpdateIntervalSeconds", 900, 60, 86400));
-    std::wstring rssFeedMaxItemsLine = FormatWide(
-        g_ui.rssFeedMaxItemsLabel.c_str(),
-        IniReadClampedI(L"RssFeed", L"MaxItems", 5, 1, 20));
-    std::wstring rssFeedHttpTimeoutLine = FormatWide(
-        g_ui.rssFeedHttpTimeoutLabel.c_str(),
-        IniReadClampedI(L"RssFeed", L"HttpTimeoutSeconds", 20, 5, 120));
-    std::wstring rssFeedMaxFeedBytesLine = FormatWide(
-        g_ui.rssFeedMaxFeedBytesLabel.c_str(),
-        IniReadClampedI(
-            L"RssFeed",
-            L"MaxFeedBytes",
-            2 * 1024 * 1024,
-            64 * 1024,
-            16 * 1024 * 1024));
-    addTo(rssFeedMenu, ID_RSS_FEED_URL, rssFeedUrlLine);
-    addTo(rssFeedMenu, ID_RSS_FEED_USER_AGENT, rssFeedUserAgentLine);
-    addTo(rssFeedMenu, ID_RSS_FEED_UPDATE_INTERVAL, rssFeedUpdateIntervalLine);
-    addTo(rssFeedMenu, ID_RSS_FEED_MAX_ITEMS, rssFeedMaxItemsLine);
-    addTo(rssFeedMenu, ID_RSS_FEED_HTTP_TIMEOUT, rssFeedHttpTimeoutLine);
-    addTo(rssFeedMenu, ID_RSS_FEED_MAX_FEED_BYTES, rssFeedMaxFeedBytesLine);
-    endNestedMenu(
-        contentSourceMenu,
-        rssFeedMenu,
-        g_ui.rssFeedSettingsTitle);
-    endSection(contentSourceMenu, L"Content and sources");
+    aip::AppendMenuSeparator(quickLayoutsMenu);
+    addTo(quickLayoutsMenu, ID_CONTENT_NOW_PLAYING_IMPORT, L"Import NowPlayingTile layout...");
+    endNestedMenu(contentSourceMenu, quickLayoutsMenu, g_ui.trayQuickLayoutsTitle);
+    endSection(contentSourceMenu, contentsTitle);
 
-    addTo(generalMenu, ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
-    addTo(generalMenu, ID_GENERATE_STARTUP_CHANGED_ONLY, g_ui.generateOnStartupOnlyWhenChanged.c_str(), g_generateOnStartupOnlyWhenChanged, g_generateOnStartup);
-    addTo(generalMenu, ID_HIDE_DISABLED, g_ui.hideDisabledEntries.c_str(), g_hideDisabled);
-    addTo(generalMenu, ID_CONSOLE, g_ui.showConsole.c_str(), g_console);
-    endSection(generalMenu, g_ui.generalTitle);
-
-    HMENU wallpaperMenu = beginSection(g_ui.wallpaperTitle);
-    addTo(wallpaperMenu, ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
+    HMENU sourcesMenu = beginSection(sourcesTitle);
+    HMENU wallpaperMenu = beginNestedMenu(sourcesMenu, L"CreatePopupMenu(Wallpaper source)");
     HMENU fittingMenu = beginNestedMenu(wallpaperMenu, L"CreatePopupMenu(Wallpaper fitting)");
     addTo(fittingMenu, ID_DISABLE_FIT, g_ui.disableFitting.c_str(), g_disableFitting);
     addTo(fittingMenu, ID_LISTEN_FIT, g_ui.listenFit.c_str(), g_listenFit, !g_disableFitting);
@@ -243,9 +140,54 @@ void Menu(HWND h)
         addTo(liveWallpaperMenu, ID_LIVE_WALLPAPER_CAPTURE_STARTUP_REFRESH_DURATION, liveWallpaperCaptureStartupRefreshDurationLine.c_str(), false, liveWallpaperCapture);
     }
     endNestedMenu(wallpaperMenu, liveWallpaperMenu, g_ui.liveWallpaperCaptureTitle);
-    endSection(wallpaperMenu, g_ui.wallpaperTitle);
+    endNestedMenu(sourcesMenu, wallpaperMenu, g_ui.wallpaperTitle);
 
-    HMENU liveTileMenu = beginSection(g_ui.liveTileTitle);
+    HMENU rssFeedMenu = beginNestedMenu(
+        sourcesMenu,
+        L"CreatePopupMenu(RSS feed settings)");
+    std::wstring rssFeedUrlLine = FormatWide(
+        g_ui.rssFeedUrlLabel.c_str(),
+        TraySettingDisplayValue(
+            IniReadS(L"RssFeed", L"FeedUrl", L"")).c_str());
+    std::wstring rssFeedUserAgentLine = FormatWide(
+        g_ui.rssFeedUserAgentLabel.c_str(),
+        TraySettingDisplayValue(
+            IniReadS(
+                L"RssFeed",
+                L"UserAgent",
+                L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)")).c_str());
+    std::wstring rssFeedUpdateIntervalLine = FormatWide(
+        g_ui.rssFeedUpdateIntervalLabel.c_str(),
+        IniReadClampedI(L"RssFeed", L"UpdateIntervalSeconds", 900, 60, 86400));
+    std::wstring rssFeedMaxItemsLine = FormatWide(
+        g_ui.rssFeedMaxItemsLabel.c_str(),
+        IniReadClampedI(L"RssFeed", L"MaxItems", 5, 1, 20));
+    std::wstring rssFeedHttpTimeoutLine = FormatWide(
+        g_ui.rssFeedHttpTimeoutLabel.c_str(),
+        IniReadClampedI(L"RssFeed", L"HttpTimeoutSeconds", 20, 5, 120));
+    std::wstring rssFeedMaxFeedBytesLine = FormatWide(
+        g_ui.rssFeedMaxFeedBytesLabel.c_str(),
+        IniReadClampedI(
+            L"RssFeed",
+            L"MaxFeedBytes",
+            2 * 1024 * 1024,
+            64 * 1024,
+            16 * 1024 * 1024));
+    addTo(rssFeedMenu, ID_RSS_FEED_URL, rssFeedUrlLine);
+    addTo(rssFeedMenu, ID_RSS_FEED_USER_AGENT, rssFeedUserAgentLine);
+    addTo(rssFeedMenu, ID_RSS_FEED_UPDATE_INTERVAL, rssFeedUpdateIntervalLine);
+    addTo(rssFeedMenu, ID_RSS_FEED_MAX_ITEMS, rssFeedMaxItemsLine);
+    addTo(rssFeedMenu, ID_RSS_FEED_HTTP_TIMEOUT, rssFeedHttpTimeoutLine);
+    addTo(rssFeedMenu, ID_RSS_FEED_MAX_FEED_BYTES, rssFeedMaxFeedBytesLine);
+    endNestedMenu(
+        sourcesMenu,
+        rssFeedMenu,
+        g_ui.rssFeedSettingsTitle);
+    AppendContentEngineMenu(sourcesMenu, ContentMenuPart::Sources);
+    endSection(sourcesMenu, sourcesTitle);
+
+    HMENU appearanceAssetsMenu = beginSection(g_ui.appearanceAssetsTitle);
+    HMENU liveTileMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Live Tile delivery)");
     {
         LiveTileUpdateMode liveTileMode = ConfiguredLiveTileUpdateMode();
 
@@ -324,21 +266,6 @@ void Menu(HWND h)
             addTo(liveTileMenu, ID_LIVE_TILE_BRANDING_NAME_AND_LOGO, g_ui.liveTileBrandingNameAndLogo.c_str(), branding == LiveTileBranding::NameAndLogo, templateStyleAvailable);
         }
 
-        HMENU registrationMenu = CreatePopupMenu();
-        if (registrationMenu)
-        {
-            addTo(registrationMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
-            addTo(registrationMenu, ID_COM_REGISTRATION_USE_HELPER, FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)), IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
-            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)registrationMenu, g_ui.liveTileRegistrationTitle.c_str()))
-                DestroyMenu(registrationMenu);
-        }
-        else
-        {
-            LogWin32Failure(L"CreatePopupMenu(Live Tile Registration)");
-            addTo(liveTileMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
-            addTo(liveTileMenu, ID_COM_REGISTRATION_USE_HELPER, FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)), IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
-        }
-
         HMENU runtimeMenu = CreatePopupMenu();
         if (runtimeMenu)
         {
@@ -354,28 +281,13 @@ void Menu(HWND h)
             addTo(liveTileMenu, ID_CLEAR_LIVE_TILE_ON_SHUTDOWN, g_ui.clearLiveTileOnShutdown.c_str(), g_clearLiveTileOnShutdown);
         }
 
-        HMENU win8Menu = CreatePopupMenu();
-        if (win8Menu)
-        {
-            addTo(win8Menu, ID_WIN8_LIVE_TILE_BROKER_APP, g_ui.win8LiveTileBrokerApp.c_str(), IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) != 0);
-            addTo(win8Menu, ID_WIN8_LIVE_TILE_BACKGROUND_TASK, g_ui.win8LiveTileBackgroundTask.c_str(), IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0);
-            addTo(win8Menu, ID_WIN8_LIVE_TILE_OOP_HELPER, g_ui.win8LiveTileOopHelper.c_str(), IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) != 0);
-            if (!AppendMenuChecked(liveTileMenu, MF_POPUP, (UINT_PTR)win8Menu, g_ui.liveTileWindows8Title.c_str()))
-                DestroyMenu(win8Menu);
-        }
-        else
-        {
-            LogWin32Failure(L"CreatePopupMenu(Live Tile Windows 8)");
-            addTo(liveTileMenu, ID_WIN8_LIVE_TILE_BROKER_APP, g_ui.win8LiveTileBrokerApp.c_str(), IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) != 0);
-            addTo(liveTileMenu, ID_WIN8_LIVE_TILE_BACKGROUND_TASK, g_ui.win8LiveTileBackgroundTask.c_str(), IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0);
-            addTo(liveTileMenu, ID_WIN8_LIVE_TILE_OOP_HELPER, g_ui.win8LiveTileOopHelper.c_str(), IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) != 0);
-        }
     }
-    endSection(liveTileMenu, g_ui.liveTileTitle);
+    endNestedMenu(appearanceAssetsMenu, liveTileMenu, g_ui.liveTileTitle);
 
-    HMENU appearanceAssetsMenu = beginSection(g_ui.appearanceAssetsTitle);
+    AppendContentEngineMenu(appearanceAssetsMenu, ContentMenuPart::TextDelivery);
     HMENU tileTextMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Tile Text)");
     {
+        if (layeredContent) AppendMenuChecked(tileTextMenu, MF_STRING | MF_DISABLED, 0, L"Text comes from Tile contents > Content list");
         HMENU textMenu = tileTextMenu;
         if (!textMenu)
         {
@@ -441,19 +353,119 @@ void Menu(HWND h)
         AppendMenuChecked(scaleMenu, MF_STRING | MF_DISABLED, 0, g_ui.generateScaleAutoPreservesManualToggles.c_str());
     endNestedMenu(appearanceAssetsMenu, scaleMenu, g_ui.dpiScalesTitle);
 
-    HMENU cachingMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Caching)");
-    bool cacheEnabled = GeneratedAssetCacheEnabled();
-    bool cacheCanStore = cacheEnabled && GeneratedAssetCacheMaxEntries() > 0;
-    bool precacheConfigured = IniReadI(L"Settings", L"GeneratedAssetPrecache", 0) != 0;
-    addTo(cachingMenu, ID_GENERATED_ASSET_CACHE, g_ui.generatedAssetCache.c_str(), cacheEnabled);
-    addTo(cachingMenu, ID_GENERATED_ASSET_PRECACHE, g_ui.generatedAssetPrecache.c_str(), precacheConfigured, cacheCanStore);
-    std::wstring cacheMaxEntriesLine = FormatWide(g_ui.generatedAssetCacheMaxEntriesLabel.c_str(), GeneratedAssetCacheMaxEntries());
-    std::wstring precacheMaxFilesLine = FormatWide(g_ui.generatedAssetPrecacheMaxFilesLabel.c_str(), GeneratedAssetPrecacheMaxFiles());
-    addTo(cachingMenu, ID_GENERATED_ASSET_CACHE_MAX_ENTRIES, cacheMaxEntriesLine);
-    addTo(cachingMenu, ID_GENERATED_ASSET_PRECACHE_MAX_FILES, precacheMaxFilesLine, false, cacheCanStore);
-    endNestedMenu(appearanceAssetsMenu, cachingMenu, g_ui.cachingTitle);
+    endSection(appearanceAssetsMenu, g_ui.appearanceAssetsTitle);
 
-    HMENU manifestMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Manifest)");
+    HMENU updatesMenu = beginSection(updatesTitle);
+    AppendContentEngineMenu(updatesMenu, ContentMenuPart::Timing);
+    aip::AppendMenuSeparator(updatesMenu);
+    addTo(updatesMenu, ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
+    addTo(updatesMenu, ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
+    addTo(updatesMenu, ID_GENERATE_STARTUP_CHANGED_ONLY, g_ui.generateOnStartupOnlyWhenChanged.c_str(), g_generateOnStartupOnlyWhenChanged, g_generateOnStartup);
+    endSection(updatesMenu, updatesTitle);
+
+    HMENU generalMenu = beginSection(g_ui.generalTitle);
+    HMENU startupMenu = beginNestedMenu(generalMenu, L"CreatePopupMenu(Sign-in)");
+    addTo(startupMenu, ID_RUN_AT_STARTUP, g_ui.runAtStartup.c_str(), startupInstalled);
+    bool packagedStartupDesired = false;
+    TryParseCommandLineBoolValue(IniReadS(L"Settings", L"RunAtStartupPackaged", L"0"), packagedStartupDesired);
+    addTo(startupMenu, ID_RUN_AT_STARTUP_PACKAGED, L"Run at sign-in (Windows startup task)", packagedStartupDesired);
+    addTo(startupMenu, ID_RUN_AT_STARTUP_PACKAGED_STATUS, L"Windows startup task status...");
+
+    endNestedMenu(generalMenu, startupMenu, g_ui.trayStartupTitle);
+    HMENU interfaceMenu = beginNestedMenu(generalMenu, L"CreatePopupMenu(Interface)");
+    addTo(interfaceMenu, ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);
+    addTo(interfaceMenu, ID_HIDE_DISABLED, g_ui.hideDisabledEntries.c_str(), g_hideDisabled);
+    addTo(interfaceMenu, ID_CONSOLE, g_ui.showConsole.c_str(), g_console);
+    endNestedMenu(generalMenu, interfaceMenu, g_ui.trayInterfaceTitle);
+    HMENU notificationsMenu = beginNestedMenu(generalMenu, L"CreatePopupMenu(Notifications)");
+    addTo(notificationsMenu, ID_NOTIF_ENABLED, g_ui.notificationsEnabled.c_str(), g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_START, g_ui.notifyOnStart.c_str(), g_notifyOnStart, g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_SUCCESS, g_ui.notifyOnSuccess.c_str(), g_notifyOnSuccess, g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_FAILURE, g_ui.notifyOnFailure.c_str(), g_notifyOnFailure, g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_BUSY, g_ui.notifyOnBusy.c_str(), g_notifyOnBusy, g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_ALREADY_RUNNING, g_ui.notifyOnAlreadyRunning.c_str(), g_notifyOnAlreadyRunning, g_notificationsEnabled);
+    addTo(notificationsMenu, ID_NOTIFY_SINGLE_INSTANCE_FAILURE, g_ui.notifyOnSingleInstanceFailure.c_str(), g_notifyOnSingleInstanceFailure, g_notificationsEnabled);
+    endNestedMenu(generalMenu, notificationsMenu, g_ui.notificationsTitle);
+
+    endSection(generalMenu, g_ui.generalTitle);
+
+    HMENU diagnosticsMenu = beginSection(g_ui.diagnosticsTitle);
+    HMENU loggingMenu = beginNestedMenu(diagnosticsMenu, L"CreatePopupMenu(Logging)");
+    addTo(loggingMenu, ID_LOG, g_ui.loggingEnable.c_str(), g_logging);
+    addTo(loggingMenu, ID_LOGFILE, g_ui.changePath.c_str(), false, g_logging);
+    addTo(loggingMenu, ID_LOG_RENAME, g_ui.renamePath.c_str(), false, g_logging);
+    addTo(loggingMenu, ID_LOG_OPEN, g_ui.openInExplorer.c_str(), false, g_logging);
+    addTo(loggingMenu, ID_LOG_RESET, g_ui.resetDefault.c_str(), false, g_logging);
+    addTo(loggingMenu, ID_SHOW_PSLOG, g_ui.showPowerShellLog.c_str());
+
+    std::wstring pathLine = g_ui.logPathPrefix + GetLogPathCopy();
+    HMENU hPath = CreatePopupMenu();
+    if (!hPath)
+        LogWin32Failure(L"CreatePopupMenu(log path)");
+    else
+    {
+        AppendMenuChecked(hPath, MF_STRING | MF_DISABLED, 0, pathLine.c_str());
+        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPath, g_ui.logPathTitle.c_str()))
+            DestroyMenu(hPath);
+    }
+
+    std::wstring psLine = g_ui.psStatusPrefix;
+    {
+        std::lock_guard<std::mutex> lk(g_psMutex);
+        if (!g_psMsg.empty())
+            psLine += g_psMsg;
+        else if (g_psErr)
+            psLine += g_ui.errorTitle.c_str();
+        else
+            psLine += g_ui.okText.c_str();
+    }
+
+    HMENU hPs = CreatePopupMenu();
+    if (!hPs)
+        LogWin32Failure(L"CreatePopupMenu(PowerShell status)");
+    else
+    {
+        AppendMenuChecked(hPs, MF_STRING | MF_DISABLED, 0, psLine.c_str());
+        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPs, g_ui.psStatusTitle.c_str()))
+            DestroyMenu(hPs);
+    }
+    endNestedMenu(diagnosticsMenu, loggingMenu, g_ui.loggingTitle);
+    endSection(diagnosticsMenu, g_ui.diagnosticsTitle);
+
+    HMENU advancedMenu = beginSection(g_ui.advancedTitle);
+    HMENU packageMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Package setup)");
+        HMENU registrationMenu = CreatePopupMenu();
+        if (registrationMenu)
+        {
+            addTo(registrationMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
+            addTo(registrationMenu, ID_COM_REGISTRATION_USE_HELPER, FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)), IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
+            if (!AppendMenuChecked(packageMenu, MF_POPUP, (UINT_PTR)registrationMenu, g_ui.liveTileRegistrationTitle.c_str()))
+                DestroyMenu(registrationMenu);
+        }
+        else
+        {
+            LogWin32Failure(L"CreatePopupMenu(Live Tile Registration)");
+            addTo(packageMenu, ID_USE_PS, g_ui.usePowerShell.c_str(), UsePowerShell());
+            addTo(packageMenu, ID_COM_REGISTRATION_USE_HELPER, FormatWide(g_ui.comRegistrationHelperLabel.c_str(), StateEnabled(IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0)), IniReadI(L"Settings", L"ComRegistrationUseHelper", 0) != 0);
+        }
+
+        HMENU win8Menu = CreatePopupMenu();
+        if (win8Menu)
+        {
+            addTo(win8Menu, ID_WIN8_LIVE_TILE_BROKER_APP, g_ui.win8LiveTileBrokerApp.c_str(), IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) != 0);
+            addTo(win8Menu, ID_WIN8_LIVE_TILE_BACKGROUND_TASK, g_ui.win8LiveTileBackgroundTask.c_str(), IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0);
+            addTo(win8Menu, ID_WIN8_LIVE_TILE_OOP_HELPER, g_ui.win8LiveTileOopHelper.c_str(), IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) != 0);
+            if (!AppendMenuChecked(packageMenu, MF_POPUP, (UINT_PTR)win8Menu, g_ui.liveTileWindows8Title.c_str()))
+                DestroyMenu(win8Menu);
+        }
+        else
+        {
+            LogWin32Failure(L"CreatePopupMenu(Live Tile Windows 8)");
+            addTo(packageMenu, ID_WIN8_LIVE_TILE_BROKER_APP, g_ui.win8LiveTileBrokerApp.c_str(), IniReadI(L"Settings", L"Win8LiveTileBrokerApp", 1) != 0);
+            addTo(packageMenu, ID_WIN8_LIVE_TILE_BACKGROUND_TASK, g_ui.win8LiveTileBackgroundTask.c_str(), IniReadI(L"Settings", L"Win8LiveTileBackgroundTask", 0) != 0);
+            addTo(packageMenu, ID_WIN8_LIVE_TILE_OOP_HELPER, g_ui.win8LiveTileOopHelper.c_str(), IniReadI(L"Settings", L"Win8LiveTileOopHelper", 0) != 0);
+        }
+    HMENU manifestMenu = beginNestedMenu(packageMenu, L"CreatePopupMenu(Manifest)");
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
     std::wstring manifestSourceLine = FormatWide(g_ui.manifestSourceLabel.c_str(), manifestInfo.existing ? g_ui.manifestSourceExisting.c_str() : g_ui.manifestSourceGenerated.c_str());
     std::wstring manifestTargetLine = FormatWide(g_ui.manifestTargetLabel.c_str(), manifestInfo.manifestTarget.c_str());
@@ -504,99 +516,68 @@ void Menu(HWND h)
     }
     AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestSourceLine.c_str());
     AppendMenuChecked(manifestDetailsMenu, MF_STRING | MF_DISABLED, 0, manifestTargetLine.c_str());
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_IDENTITY_NAME, manifestIdentityLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_PUBLISHER, manifestPublisherLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_PACKAGE_VERSION, manifestPackageVersionLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_DISPLAY_NAME, manifestDisplayNameLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_PUBLISHER_DISPLAY_NAME, manifestPublisherDisplayNameLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_DESCRIPTION, manifestDescriptionLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_EXECUTABLE, manifestExecutableLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_APPLICATION_ID, manifestApplicationIdLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_TARGET_DEVICE_FAMILY_NAME, manifestTargetDeviceFamilyNameLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_MIN_VERSION, manifestMinVersionLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_MAX_VERSION_TESTED, manifestMaxVersionTestedLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_RESOURCE_LANGUAGE, manifestResourceLanguageLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_PROPERTIES_LOGO, manifestPropertiesLogoLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SQUARE150_LOGO, manifestSquare150x150LogoLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SQUARE44_LOGO, manifestSquare44x44LogoLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SQUARE30_LOGO, manifestSquare30x30LogoLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SQUARE71_LOGO, manifestSquare71x71LogoLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_WIDE310_LOGO, manifestWide310x150LogoLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SQUARE310_LOGO, manifestSquare310x310LogoLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_BACKGROUND_COLOR, manifestBackgroundColorLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SHOW_NAME_ON_TILES, manifestShowNameOnTilesLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_ENTRY_POINT, manifestEntryPointLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_RESTRICTED_CAPABILITY, manifestRestrictedCapabilityLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_SPLASH_SCREEN_IMAGE, manifestSplashScreenImageLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_BROKER_EXECUTABLE, manifestLiveTileBrokerExecutableLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_BROKER_ENTRY_POINT, manifestLiveTileBrokerEntryPointLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_OOP_SERVER_NAME, manifestLiveTileOopServerNameLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_OOP_RUNTIME_CLASS_ID, manifestLiveTileOopRuntimeClassIdLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_DLL, manifestLiveTileBackgroundTaskDllLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_CLASS_ID, manifestLiveTileBackgroundTaskClassIdLine);
-    addTo(manifestDetailsMenu, ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_NAME, manifestLiveTileBackgroundTaskNameLine);
+    HMENU manifestIdentityMenu = beginNestedMenu(manifestDetailsMenu, L"CreatePopupMenu(Manifest identity)");
+    HMENU manifestDisplayMenu = beginNestedMenu(manifestDetailsMenu, L"CreatePopupMenu(Manifest display)");
+    HMENU manifestAppMenu = beginNestedMenu(manifestDetailsMenu, L"CreatePopupMenu(Manifest app)");
+    HMENU manifestCompatibilityMenu = beginNestedMenu(manifestDetailsMenu, L"CreatePopupMenu(Manifest compat)");
+    HMENU manifestImagesMenu = beginNestedMenu(manifestDetailsMenu, L"CreatePopupMenu(Manifest images)");
+    HMENU manifestHelpersMenu = beginNestedMenu(manifestDetailsMenu, L"CreatePopupMenu(Manifest helpers)");
+    addTo(manifestIdentityMenu, ID_MANIFEST_EDIT_IDENTITY_NAME, manifestIdentityLine);
+    addTo(manifestIdentityMenu, ID_MANIFEST_EDIT_PUBLISHER, manifestPublisherLine);
+    addTo(manifestIdentityMenu, ID_MANIFEST_EDIT_PACKAGE_VERSION, manifestPackageVersionLine);
+    addTo(manifestDisplayMenu, ID_MANIFEST_EDIT_DISPLAY_NAME, manifestDisplayNameLine);
+    addTo(manifestDisplayMenu, ID_MANIFEST_EDIT_PUBLISHER_DISPLAY_NAME, manifestPublisherDisplayNameLine);
+    addTo(manifestDisplayMenu, ID_MANIFEST_EDIT_DESCRIPTION, manifestDescriptionLine);
+    addTo(manifestAppMenu, ID_MANIFEST_EDIT_EXECUTABLE, manifestExecutableLine);
+    addTo(manifestAppMenu, ID_MANIFEST_EDIT_APPLICATION_ID, manifestApplicationIdLine);
+    addTo(manifestCompatibilityMenu, ID_MANIFEST_EDIT_TARGET_DEVICE_FAMILY_NAME, manifestTargetDeviceFamilyNameLine);
+    addTo(manifestCompatibilityMenu, ID_MANIFEST_EDIT_MIN_VERSION, manifestMinVersionLine);
+    addTo(manifestCompatibilityMenu, ID_MANIFEST_EDIT_MAX_VERSION_TESTED, manifestMaxVersionTestedLine);
+    addTo(manifestAppMenu, ID_MANIFEST_EDIT_RESOURCE_LANGUAGE, manifestResourceLanguageLine);
+    addTo(manifestImagesMenu, ID_MANIFEST_EDIT_PROPERTIES_LOGO, manifestPropertiesLogoLine);
+    addTo(manifestImagesMenu, ID_MANIFEST_EDIT_SQUARE150_LOGO, manifestSquare150x150LogoLine);
+    addTo(manifestImagesMenu, ID_MANIFEST_EDIT_SQUARE44_LOGO, manifestSquare44x44LogoLine);
+    addTo(manifestImagesMenu, ID_MANIFEST_EDIT_SQUARE30_LOGO, manifestSquare30x30LogoLine);
+    addTo(manifestImagesMenu, ID_MANIFEST_EDIT_SQUARE71_LOGO, manifestSquare71x71LogoLine);
+    addTo(manifestImagesMenu, ID_MANIFEST_EDIT_WIDE310_LOGO, manifestWide310x150LogoLine);
+    addTo(manifestImagesMenu, ID_MANIFEST_EDIT_SQUARE310_LOGO, manifestSquare310x310LogoLine);
+    addTo(manifestDisplayMenu, ID_MANIFEST_EDIT_BACKGROUND_COLOR, manifestBackgroundColorLine);
+    addTo(manifestDisplayMenu, ID_MANIFEST_EDIT_SHOW_NAME_ON_TILES, manifestShowNameOnTilesLine);
+    addTo(manifestAppMenu, ID_MANIFEST_EDIT_ENTRY_POINT, manifestEntryPointLine);
+    addTo(manifestAppMenu, ID_MANIFEST_EDIT_RESTRICTED_CAPABILITY, manifestRestrictedCapabilityLine);
+    addTo(manifestImagesMenu, ID_MANIFEST_EDIT_SPLASH_SCREEN_IMAGE, manifestSplashScreenImageLine);
+    addTo(manifestHelpersMenu, ID_MANIFEST_EDIT_LIVE_TILE_BROKER_EXECUTABLE, manifestLiveTileBrokerExecutableLine);
+    addTo(manifestHelpersMenu, ID_MANIFEST_EDIT_LIVE_TILE_BROKER_ENTRY_POINT, manifestLiveTileBrokerEntryPointLine);
+    addTo(manifestHelpersMenu, ID_MANIFEST_EDIT_LIVE_TILE_OOP_SERVER_NAME, manifestLiveTileOopServerNameLine);
+    addTo(manifestHelpersMenu, ID_MANIFEST_EDIT_LIVE_TILE_OOP_RUNTIME_CLASS_ID, manifestLiveTileOopRuntimeClassIdLine);
+    addTo(manifestHelpersMenu, ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_DLL, manifestLiveTileBackgroundTaskDllLine);
+    addTo(manifestHelpersMenu, ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_CLASS_ID, manifestLiveTileBackgroundTaskClassIdLine);
+    addTo(manifestHelpersMenu, ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_NAME, manifestLiveTileBackgroundTaskNameLine);
+    endNestedMenu(manifestDetailsMenu, manifestIdentityMenu, L"Identity and publisher");
+    endNestedMenu(manifestDetailsMenu, manifestDisplayMenu, L"Name and tile appearance");
+    endNestedMenu(manifestDetailsMenu, manifestAppMenu, L"Application and permissions");
+    endNestedMenu(manifestDetailsMenu, manifestCompatibilityMenu, L"Windows compatibility");
+    endNestedMenu(manifestDetailsMenu, manifestImagesMenu, L"Image assets");
+    endNestedMenu(manifestDetailsMenu, manifestHelpersMenu, L"Live Tile helpers");
     if (manifestDetailsMenu != manifestMenu)
     {
         if (!AppendMenuChecked(manifestMenu, MF_POPUP, (UINT_PTR)manifestDetailsMenu, g_ui.manifestDetailsTitle.c_str()))
             DestroyMenu(manifestDetailsMenu);
     }
-    endNestedMenu(appearanceAssetsMenu, manifestMenu, g_ui.manifestTitle);
-    endSection(appearanceAssetsMenu, g_ui.appearanceAssetsTitle);
+    endNestedMenu(packageMenu, manifestMenu, g_ui.manifestTitle);
+    endNestedMenu(advancedMenu, packageMenu, g_ui.trayPackageTitle);
+    HMENU cachingMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Caching)");
+    bool cacheEnabled = GeneratedAssetCacheEnabled();
+    bool cacheCanStore = cacheEnabled && GeneratedAssetCacheMaxEntries() > 0;
+    bool precacheConfigured = IniReadI(L"Settings", L"GeneratedAssetPrecache", 0) != 0;
+    addTo(cachingMenu, ID_GENERATED_ASSET_CACHE, g_ui.generatedAssetCache.c_str(), cacheEnabled);
+    addTo(cachingMenu, ID_GENERATED_ASSET_PRECACHE, g_ui.generatedAssetPrecache.c_str(), precacheConfigured, cacheCanStore);
+    std::wstring cacheMaxEntriesLine = FormatWide(g_ui.generatedAssetCacheMaxEntriesLabel.c_str(), GeneratedAssetCacheMaxEntries());
+    std::wstring precacheMaxFilesLine = FormatWide(g_ui.generatedAssetPrecacheMaxFilesLabel.c_str(), GeneratedAssetPrecacheMaxFiles());
+    addTo(cachingMenu, ID_GENERATED_ASSET_CACHE_MAX_ENTRIES, cacheMaxEntriesLine);
+    addTo(cachingMenu, ID_GENERATED_ASSET_PRECACHE_MAX_FILES, precacheMaxFilesLine, false, cacheCanStore);
+    endNestedMenu(advancedMenu, cachingMenu, g_ui.cachingTitle);
 
-    HMENU diagnosticsMenu = beginSection(g_ui.diagnosticsTitle);
-    HMENU notificationsMenu = beginNestedMenu(diagnosticsMenu, L"CreatePopupMenu(Notifications)");
-    addTo(notificationsMenu, ID_NOTIF_ENABLED, g_ui.notificationsEnabled.c_str(), g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_START, g_ui.notifyOnStart.c_str(), g_notifyOnStart, g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_SUCCESS, g_ui.notifyOnSuccess.c_str(), g_notifyOnSuccess, g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_FAILURE, g_ui.notifyOnFailure.c_str(), g_notifyOnFailure, g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_BUSY, g_ui.notifyOnBusy.c_str(), g_notifyOnBusy, g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_ALREADY_RUNNING, g_ui.notifyOnAlreadyRunning.c_str(), g_notifyOnAlreadyRunning, g_notificationsEnabled);
-    addTo(notificationsMenu, ID_NOTIFY_SINGLE_INSTANCE_FAILURE, g_ui.notifyOnSingleInstanceFailure.c_str(), g_notifyOnSingleInstanceFailure, g_notificationsEnabled);
-    endNestedMenu(diagnosticsMenu, notificationsMenu, g_ui.notificationsTitle);
-
-    HMENU loggingMenu = beginNestedMenu(diagnosticsMenu, L"CreatePopupMenu(Logging)");
-    addTo(loggingMenu, ID_LOG, g_ui.loggingEnable.c_str(), g_logging);
-    addTo(loggingMenu, ID_LOGFILE, g_ui.changePath.c_str(), false, g_logging);
-    addTo(loggingMenu, ID_LOG_RENAME, g_ui.renamePath.c_str(), false, g_logging);
-    addTo(loggingMenu, ID_LOG_OPEN, g_ui.openInExplorer.c_str(), false, g_logging);
-    addTo(loggingMenu, ID_LOG_RESET, g_ui.resetDefault.c_str(), false, g_logging);
-    addTo(loggingMenu, ID_SHOW_PSLOG, g_ui.showPowerShellLog.c_str());
-
-    std::wstring pathLine = g_ui.logPathPrefix + GetLogPathCopy();
-    HMENU hPath = CreatePopupMenu();
-    if (!hPath)
-        LogWin32Failure(L"CreatePopupMenu(log path)");
-    else
-    {
-        AppendMenuChecked(hPath, MF_STRING | MF_DISABLED, 0, pathLine.c_str());
-        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPath, g_ui.logPathTitle.c_str()))
-            DestroyMenu(hPath);
-    }
-
-    std::wstring psLine = g_ui.psStatusPrefix;
-    {
-        std::lock_guard<std::mutex> lk(g_psMutex);
-        if (!g_psMsg.empty())
-            psLine += g_psMsg;
-        else if (g_psErr)
-            psLine += g_ui.errorTitle.c_str();
-        else
-            psLine += g_ui.okText.c_str();
-    }
-
-    HMENU hPs = CreatePopupMenu();
-    if (!hPs)
-        LogWin32Failure(L"CreatePopupMenu(PowerShell status)");
-    else
-    {
-        AppendMenuChecked(hPs, MF_STRING | MF_DISABLED, 0, psLine.c_str());
-        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPs, g_ui.psStatusTitle.c_str()))
-            DestroyMenu(hPs);
-    }
-    endNestedMenu(diagnosticsMenu, loggingMenu, g_ui.loggingTitle);
-    endSection(diagnosticsMenu, g_ui.diagnosticsTitle);
-
-    HMENU advancedMenu = beginSection(g_ui.advancedTitle);
     std::wstring pollLine = FormatWide(g_ui.pollIntervalLabel.c_str(), IniReadClampedI(L"Settings", L"PollIntervalMs", 2000, 250, 60000));
     std::wstring confirmLine = FormatWide(g_ui.confirmMsLabel.c_str(), IniReadClampedI(L"Settings", L"ConfirmMs", 800, 0, 10000));
     std::wstring debounceLine = FormatWide(g_ui.debounceMinMsLabel.c_str(), IniReadClampedI(L"Settings", L"DebounceMinMs", 1200, 0, 60000));
@@ -680,11 +661,72 @@ void Menu(HWND h)
     addTo(advancedSingleInstanceMenu, ID_ADV_ALREADY_RUNNING_ACTION, alreadyRunningLine);
     addTo(advancedSingleInstanceMenu, ID_ADV_SINGLE_INSTANCE_FAILURE_ACTION, singleInstanceLine);
     endNestedMenu(advancedMenu, advancedSingleInstanceMenu, g_ui.advancedSingleInstanceTitle);
-    endSection(advancedMenu, g_ui.advancedTitle);
 
-    if (showMenuAsDropdown)
-        AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
+    endSection(advancedMenu, g_ui.advancedTitle);
+    if (showMenuAsDropdown) AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
     addTo(m, ID_EXIT, g_ui.exitText.c_str());
+}
+
+void Menu(HWND h)
+{
+    ReloadRuntimeSettingsFromIni();
+    std::wstring startupReconcileError;
+    if (!ReconcileDesktopStubStartupShortcutFromConfig(startupReconcileError))
+        Log(L"[!] Could not synchronize the shell:startup shortcut: %s", startupReconcileError.c_str());
+    EnsureIniStringDefaults();
+    UpgradeRenamedStringDefaults();
+    LoadUiStrings();
+    ValidateFormatStrings();
+    NormalizeSeparatorStrings();
+    if (TrayIconPresent())
+    {
+        DWORD tooltipError = ERROR_SUCCESS;
+        if (!UpdateTrayIconTooltip(&tooltipError))
+            LogWin32Failure(L"Shell_NotifyIconW(NIM_MODIFY tooltip)", tooltipError);
+    }
+
+    POINT pt; GetCursorPos(&pt);
+    HMENU m = aip::CreateTrayPopupMenu();
+    if (!m)
+    {
+        LogWin32Failure(L"CreatePopupMenu(root)");
+        return;
+    }
+    bool showMenuAsDropdown = g_showMenuAsDropdown;
+
+    if (g_shutdownState.IsRequested())
+    {
+        if (!GenerationWorkPending())
+        {
+            DestroyMenu(m);
+            PostQuitMessage(0);
+            return;
+        }
+
+        std::wstring reason = FormatWide(g_ui.shutdownPendingReason.c_str(), CurrentGenerationReason().c_str());
+        AppendMenuChecked(m, MF_STRING | MF_DISABLED, 0, g_ui.shutdownPendingTitle.c_str());
+        AppendMenuChecked(m, MF_STRING | MF_DISABLED, 0, reason.c_str());
+        AppendMenuChecked(m, MF_STRING, ID_CANCEL_SHUTDOWN, g_ui.cancelShutdown.c_str());
+        AppendMenuChecked(m, MF_STRING, ID_FORCE_SHUTDOWN, g_ui.forceShutdown.c_str());
+
+        SetForegroundWindow(h);
+        UINT cmd = static_cast<UINT>(TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, h, nullptr));
+        DestroyMenu(m);
+        AfterTrayPopupClosed(h);
+
+        if (cmd == ID_CANCEL_SHUTDOWN)
+            CancelRequestedShutdown(h);
+        else if (cmd == ID_FORCE_SHUTDOWN)
+            ForceShutdownNow();
+        return;
+    }
+
+    bool startupInstalled = IniReadI(L"Settings", L"RunAtStartup", 0) != 0;
+    std::wstring startupQueryError;
+    if (!QueryDesktopStubStartupShortcutInstalled(startupInstalled, startupQueryError))
+        Log(L"[!] Could not query the shell:startup shortcut: %s", startupQueryError.c_str());
+    QueueDesktopStubPackagedStartupSync(true);
+    PopulateDesktopStubTrayMenu(m, showMenuAsDropdown, startupInstalled);
 
     SetForegroundWindow(h);
     UINT cmd = static_cast<UINT>(TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,h,nullptr));

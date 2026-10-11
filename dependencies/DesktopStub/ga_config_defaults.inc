@@ -650,9 +650,16 @@ static const StringDefault g_stringDefaults[] = {
     {L"UnknownError", L"Unknown error"},
     {L"LogFileFilter", L"Log files (*.log)|*.log|All files (*.*)|*.*||"},
 
-    {L"GeneralTitle", L"General:"},
+    {L"GeneralTitle", L"Application:"},
+    {L"TrayContentsTitle", L"Tile contents"},
+    {L"TraySourcesTitle", L"Sources and accounts"},
+    {L"TrayUpdatesTitle", L"Updates and cycling"},
+    {L"TrayQuickLayoutsTitle", L"Quick layouts"},
+    {L"TrayStartupTitle", L"Launch at sign-in"},
+    {L"TrayInterfaceTitle", L"Tray and console"},
+    {L"TrayPackageTitle", L"Package registration and compatibility"},
     {L"WallpaperTitle", L"Wallpaper:"},
-    {L"AppearanceAssetsTitle", L"Appearance && assets:"},
+    {L"AppearanceAssetsTitle", L"Tile display:"},
     {L"DiagnosticsTitle", L"Diagnostics:"},
     {L"LoggingTitle", L"Logging:"},
     {L"WallpaperFittingTitle", L"Wallpaper fitting:"},
@@ -672,7 +679,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"ContentSourceTitle", L"Content and sources"},
     {L"ContentSourceWallpaper", L"Wallpaper only"},
     {L"ContentSourceRssFeed", L"RSS / Atom over wallpaper"},
-    {L"ContentPresetSwitchPrompt", L"Switching to a legacy preset turns off layered content. Numbered entries stay saved and can be re-enabled later. The RSS preset uses wallpaper as its background; the selected text layout determines whether it remains visible."},
+    {L"ContentPresetSwitchPrompt", L"Applying a quick layout turns off tile contents. Numbered entries stay saved and can be re-enabled later. RSS uses wallpaper as its background; the selected text display determines whether it remains visible."},
     {L"RssFeedSettingsTitle", L"RSS / Atom settings"},
     {L"RssFeedUrlLabel", L"Feed URL: %s"},
     {L"RssFeedUserAgentLabel", L"User agent: %s"},
@@ -696,8 +703,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileModeAuto", L"Auto"},
     {L"LiveTileModeRegistration", L"Registration"},
     {L"LiveTileModeLiveTile", L"Live Tile"},
-    {L"LiveTileModeEnabled", L"Enabled"},
-    {L"LiveTileModeDisabled", L"Disabled"},
+    {L"LiveTileModeEnabled", L"Live Tile updates"},
+    {L"LiveTileModeDisabled", L"Static tile updates"},
     {L"LiveTileModeTitle", L"Mode"},
     {L"LiveTileTemplateTitle", L"Windows 10 template"},
     {L"LiveTileTemplateAdaptive", L"Adaptive"},
@@ -725,7 +732,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"LiveTileClearForRegistrationFailed", L"[!] Could not clear the previous native Live Tile notification before static registration: %s"},
     {L"LiveTileClearForRegistrationFailedUnknown", L"Could not clear the previous native Live Tile notification before static registration."},
     {L"TileAppearanceTitle", L"Tile appearance:"},
-    {L"TileTextTitle", L"Windows tile text"},
+    {L"TileTextTitle", L"Default text (without tile contents)"},
     {L"TileTextEnabled", L"Enable text overlay"},
     {L"TileTextEdit", L"Edit text..."},
     {L"TileTextClear", L"Clear text"},
@@ -761,7 +768,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"GenerateScale200", L"200%"},
     {L"GenerateScale400", L"400%"},
     {L"CurrentDpiScaleLabel", L"Current DPI: %d%% (asset scale: %d%%)"},
-    {L"ShowMenuAsDropdown", L"Show menu as dropdown"},
+    {L"ShowMenuAsDropdown", L"Group settings into submenus"},
     {L"NotificationsTitle", L"Notifications:"},
     {L"NotificationsEnabled", L"Enable all tray notifications"},
     {L"NotifyOnStart", L"Notify when generation starts"},
@@ -771,7 +778,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"NotifyOnAlreadyRunning", L"Notify when the app is already running"},
     {L"NotifyOnSingleInstanceFailure", L"Notify when single-instance protection fails"},
     {L"ShowConsole", L"Show Console"},
-    {L"GenerateNow", L"Generate now"},
+    {L"GenerateNow", L"Update tile now"},
     {L"LoggingEnable", L"Enable"},
     {L"ChangePath", L"Change path..."},
     {L"RenamePath", L"Rename path..."},
@@ -1337,6 +1344,16 @@ static void UpgradePowerShellExeDefault()
 
 static void UpgradeRenamedStringDefaults()
 {
+    UpgradeStringDefaultIfUnmodified(L"GenerateNow", L"Generate now", L"Update tile now");
+    UpgradeStringDefaultIfUnmodified(L"ShowMenuAsDropdown", L"Show menu as dropdown", L"Group settings into submenus");
+    UpgradeStringDefaultIfUnmodified(L"GeneralTitle", L"General:", L"Application:");
+    UpgradeStringDefaultIfUnmodified(L"AppearanceAssetsTitle", L"Appearance && assets:", L"Tile display:");
+    UpgradeStringDefaultIfUnmodified(L"TileTextTitle", L"Windows tile text", L"Default text (without tile contents)");
+    UpgradeStringDefaultIfUnmodified(L"LiveTileModeEnabled", L"Enabled", L"Live Tile updates");
+    UpgradeStringDefaultIfUnmodified(L"LiveTileModeDisabled", L"Disabled", L"Static tile updates");
+    UpgradeStringDefaultIfUnmodified(L"ContentPresetSwitchPrompt",
+        L"Switching to a legacy preset turns off layered content. Numbered entries stay saved and can be re-enabled later. The RSS preset uses wallpaper as its background; the selected text layout determines whether it remains visible.",
+        L"Applying a quick layout turns off tile contents. Numbered entries stay saved and can be re-enabled later. RSS uses wallpaper as its background; the selected text display determines whether it remains visible.");
     UpgradeStringDefaultIfUnmodified(L"ContentSourceWallpaper", L"Wallpaper", L"Wallpaper only");
     UpgradeStringDefaultIfUnmodified(L"ContentSourceRssFeed", L"RSS / Atom feed", L"RSS / Atom over wallpaper");
     UpgradeStringDefaultIfUnmodified(L"RunAtStartup", L"Run at startup", L"Run at sign-in (Startup folder)");

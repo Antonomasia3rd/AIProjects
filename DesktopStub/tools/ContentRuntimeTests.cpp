@@ -22,12 +22,30 @@ static int ContentTestLogicalCaps() { ++contentLogicalSamples; return contentLog
 #include "../DesktopStub.cpp"
 #undef wWinMain
 #include <iostream>
+#include <map>
 
 static int checks = 0, failures = 0;
 static void Check(bool value, const char* name)
 {
     ++checks;
     if (!value) { ++failures; std::cerr << "FAIL: " << name << '\n'; }
+}
+
+struct TrayMenuProbe { std::wstring path; UINT state = 0; };
+using TrayMenuCommands = std::map<UINT, TrayMenuProbe>;
+static void InspectTrayMenu(HMENU menu, TrayMenuCommands& commands, const std::wstring& parent = L"")
+{
+    for (int position = 0; position < GetMenuItemCount(menu); ++position) {
+        wchar_t label[2048]{};
+        MENUITEMINFOW item{}; item.cbSize = sizeof(item);
+        item.fMask = MIIM_SUBMENU | MIIM_ID | MIIM_STATE | MIIM_FTYPE | MIIM_STRING;
+        item.dwTypeData = label; item.cch = _countof(label);
+        Check(GetMenuItemInfoW(menu, position, TRUE, &item) != FALSE, "menu item can be inspected without opening a popup");
+        const auto path = parent.empty() ? std::wstring(label) : parent + L" / " + label;
+        if (item.hSubMenu) InspectTrayMenu(item.hSubMenu, commands, path);
+        else if (!(item.fType & MFT_SEPARATOR) && item.wID && item.wID != static_cast<UINT>(-1))
+            Check(commands.emplace(item.wID, TrayMenuProbe{path, item.fState}).second, "every command appears exactly once in the menu tree");
+    }
 }
 
 static bool WriteContentFixture(const std::wstring& text)
@@ -890,7 +908,9 @@ int wmain()
             prompt == g_ui.contentPresetSwitchPrompt,
             "new preset prompt round-trips through the generated INI without raw line breaks");
         const auto oldStrings = config + L"[Strings]\r\nContentSourceRestartRequired=The content source was saved.\r\n"
-            L"ContentSourceRssFeed=RSS / Atom feed\r\nContentSourceWallpaper=My custom wallpaper label\r\n";
+            L"ContentSourceRssFeed=RSS / Atom feed\r\nContentSourceWallpaper=My custom wallpaper label\r\n"
+            L"GeneralTitle=General:\r\nAppearanceAssetsTitle=My custom display\r\nTileTextTitle=Windows tile text\r\n"
+            L"TrayContentsTitle=My contents\r\nShowMenuAsDropdown=Show menu as dropdown\r\nGenerateNow=Generate now\r\n";
         Check(WriteContentFixture(oldStrings), "old preset string fixture");
         UpgradeRenamedStringDefaults();
         LoadUiStrings();
@@ -898,6 +918,11 @@ int wmain()
             g_ui.contentSourceRssFeed == L"RSS / Atom over wallpaper" &&
             g_ui.contentSourceWallpaper == L"My custom wallpaper label",
             "old profiles receive the new preset warning and retain custom labels");
+        Check(g_ui.generalTitle == L"Application:" && g_ui.tileTextTitle == L"Default text (without tile contents)" &&
+            g_ui.showMenuAsDropdown == L"Group settings into submenus" && g_ui.generateNow == L"Update tile now",
+            "old stock settings labels upgrade to the new organization");
+        Check(g_ui.appearanceAssetsTitle == L"My custom display" && g_ui.trayContentsTitle == L"My contents",
+            "custom category labels survive the upgrade");
         Check(WriteContentFixture(config), "preset string regression restores test profile");
         LoadUiStrings();
     }
@@ -919,9 +944,88 @@ int wmain()
     Check(g_renderContent == nullptr, "render scope restores thread-local pointer");
 
     HMENU menu = CreatePopupMenu();
-    AppendContentEngineMenu(menu);
-    Check(GetMenuItemCount(menu) == static_cast<int>(_countof(g_contentOptions)) + 8 &&
-        GetMenuState(menu, ID_CONTENT_NOW_PLAYING_IMPORT, MF_BYCOMMAND) != 0xffffffffu,
+    std::vector<BYTE> menuIniBefore, menuIniAfter;
+    Check(ReadWholeFileBytes(g_iniPath, menuIniBefore), "capture configuration before constructing settings");
+    PopulateDesktopStubTrayMenu(menu, true, false);
+    TrayMenuCommands groupedCommands;
+    InspectTrayMenu(menu, groupedCommands);
+    const UINT requiredCommands[] = {
+        ID_CONTENT_OPTIONS, ID_CONTENT_OPTIONS + 1, ID_CONTENT_OPTIONS + 2,
+        ID_CONTENT_OPTIONS + 3, ID_CONTENT_OPTIONS + 4, ID_CONTENT_ADD,
+        ID_CONTENT_NOW_PLAYING_IMPORT, ID_CONTENT_SOURCE_WALLPAPER, ID_CONTENT_SOURCE_RSS_FEED,
+        ID_RSS_FEED_URL, ID_RSS_FEED_USER_AGENT, ID_RSS_FEED_UPDATE_INTERVAL,
+        ID_RSS_FEED_MAX_ITEMS, ID_RSS_FEED_HTTP_TIMEOUT, ID_RSS_FEED_MAX_FEED_BYTES,
+        ID_RUN_AT_STARTUP, ID_RUN_AT_STARTUP_PACKAGED, ID_RUN_AT_STARTUP_PACKAGED_STATUS,
+        ID_LIVE_TILE_MODE_LIVE_TILE, ID_LIVE_TILE_MODE_REGISTRATION, ID_LIVE_TILE_MODE_AUTO,
+        ID_TILE_TEXT_ENABLED, ID_CAPS_SETTINGS + 30, ID_CAPS_SETTINGS + 31,
+        ID_ASUS_SETTINGS + 30, ID_ASUS_SETTINGS + 31, ID_ASUS_SETTINGS + 32,
+        ID_DISCORD_SETTINGS + 80, ID_NOTES_SETTINGS + 72,
+        ID_GENERATED_ASSET_CACHE, ID_GENERATED_ASSET_PRECACHE, ID_GENERATE_NOW, ID_EXIT,
+    };
+    for (const auto command : requiredCommands)
+        Check(groupedCommands.count(command) == 1, "existing configuration and action commands stay reachable");
+    for (UINT index = 0; index < aip::discord::ProfileOptions().size(); ++index)
+        Check(groupedCommands.count(ID_DISCORD_PROFILE_OPTION + index) == 1, "every advanced Discord field survives category grouping");
+    for (UINT index = ID_MANIFEST_EDIT_IDENTITY_NAME; index <= ID_MANIFEST_EDIT_LIVE_TILE_BACKGROUND_TASK_NAME; ++index)
+        Check(groupedCommands.count(index) == 1, "every manifest field survives category grouping");
+    const auto inCategory = [&](UINT command, const wchar_t* title) {
+        const auto found = groupedCommands.find(command);
+        return found != groupedCommands.end() && found->second.path.find(title) != std::wstring::npos;
+    };
+    Check(inCategory(ID_CONTENT_ENTRY_OPTIONS + 3, L"Tile contents") &&
+        inCategory(ID_CONTENT_ENTRY_OPTIONS + 3, L"Background"), "content image belongs to its entry background");
+    Check(inCategory(ID_CONTENT_ENTRY_OPTIONS + 5, L"Custom text"), "custom text belongs to the content entry");
+    Check(inCategory(ID_DISCORD_SETTINGS + 2, L"Sources and accounts") &&
+        inCategory(ID_RSS_FEED_URL, L"Sources and accounts"), "provider setup is separated from content editing");
+    Check(inCategory(ID_CONTENT_OPTIONS + 3, L"Updates and cycling"), "rotation timing has its own category");
+    Check(inCategory(ID_CONTENT_TEXT_MODE, L"Tile display"), "text display lives with tile appearance");
+    Check(inCategory(ID_CONTENT_NOW_PLAYING_IMPORT, L"Quick layouts"), "layout import lives with quick layouts");
+    Check(inCategory(ID_MANIFEST_EDIT_IDENTITY_NAME, L"Advanced") &&
+        inCategory(ID_GENERATED_ASSET_CACHE, L"Advanced"), "package and cache internals stay in Advanced");
+    HMENU flatMenu = CreatePopupMenu();
+    PopulateDesktopStubTrayMenu(flatMenu, false, false);
+    TrayMenuCommands flatCommands; InspectTrayMenu(flatMenu, flatCommands);
+    Check(flatCommands.size() == groupedCommands.size(), "flat and grouped menus expose the same command count");
+    for (const auto& command : groupedCommands) {
+        const auto found = flatCommands.find(command.first);
+        if (command.first == ID_SHOW_MENU_DROPDOWN) {
+            Check(found != flatCommands.end() && (command.second.state & MFS_CHECKED) && !(found->second.state & MFS_CHECKED),
+                "layout checkbox reflects grouped versus flat presentation");
+            continue;
+        }
+        Check(found != flatCommands.end() && found->second.state == command.second.state,
+            "flat and grouped menus preserve command IDs, checks and disabled states");
+    }
+    DestroyMenu(flatMenu);
+    const DWORD menuResourcesBefore = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
+    for (int iteration = 0; iteration < 12; ++iteration) {
+        HMENU repeated = CreatePopupMenu();
+        PopulateDesktopStubTrayMenu(repeated, (iteration % 2) != 0, false);
+        Check(DestroyMenu(repeated) != FALSE, "repeated menu trees are destroyed completely");
+    }
+    Check(GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS) == menuResourcesBefore,
+        "repeated grouped and flat construction does not leak USER menu objects");
+    Check(ReadWholeFileBytes(g_iniPath, menuIniAfter) && menuIniBefore == menuIniAfter,
+        "constructing the entire menu does not write configuration");
+    Check(!g_packagedStartup.worker.joinable(), "inert menu construction never starts a StartupTask worker");
+    Check(ContentMenuValue(L"A & B") == L"A && B", "user content names keep literal ampersands instead of accidental menu accelerators");
+    Check(WriteContentFixture(config + L"[Notes.Resin]\r\nLToken=fixture-menu-secret\r\nLTUid=fixture-menu-secret\r\n"),
+        "synthetic account menu fixture");
+    HMENU maskedMenu = CreatePopupMenu(); PopulateDesktopStubTrayMenu(maskedMenu, true, false);
+    TrayMenuCommands maskedCommands; InspectTrayMenu(maskedMenu, maskedCommands);
+    Check(std::all_of(maskedCommands.begin(), maskedCommands.end(), [](const auto& item) {
+        return item.second.path.find(L"fixture-menu-secret") == std::wstring::npos;
+    }), "regrouped account menus keep credential values masked");
+    DestroyMenu(maskedMenu);
+    Check(IniWrite(L"Content", L"Count", L"32"), "maximum content-list menu fixture");
+    HMENU largestMenu = CreatePopupMenu(); PopulateDesktopStubTrayMenu(largestMenu, true, false);
+    TrayMenuCommands largestCommands; InspectTrayMenu(largestMenu, largestCommands);
+    for (UINT entry = 0; entry < 32; ++entry)
+        Check(largestCommands.count(ID_CONTENT_ENTRY_OPTIONS + entry * CONTENT_ENTRY_COMMANDS + 3) == 1,
+            "maximum-size content list retains every entry's image editor");
+    DestroyMenu(largestMenu);
+    Check(WriteContentFixture(config), "menu fixtures restore original content configuration");
+    Check(GetMenuState(menu, ID_CONTENT_NOW_PLAYING_IMPORT, MF_BYCOMMAND) != 0xffffffffu,
         "menu contains provider settings, add action, NowPlaying import and entries");
     Check((GetMenuState(menu, ID_CONTENT_OPTIONS, MF_BYCOMMAND) & MF_CHECKED) != 0, "menu checks direct INI true");
     Check(DispatchContentEngineCommand(nullptr, ID_CONTENT_ENTRY_OPTIONS), "entry toggle dispatches through real menu handler");

@@ -18,6 +18,13 @@ static HWND g_hwnd = nullptr;
 struct UiStrings
 {
     std::wstring generalTitle;
+    std::wstring trayContentsTitle;
+    std::wstring traySourcesTitle;
+    std::wstring trayUpdatesTitle;
+    std::wstring trayQuickLayoutsTitle;
+    std::wstring trayStartupTitle;
+    std::wstring trayInterfaceTitle;
+    std::wstring trayPackageTitle;
     std::wstring wallpaperTitle;
     std::wstring appearanceAssetsTitle;
     std::wstring diagnosticsTitle;
