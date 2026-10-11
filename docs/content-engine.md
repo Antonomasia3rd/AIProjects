@@ -79,7 +79,7 @@ Auto uses the selected native/preset layout; some preset templates replace the b
 
 ## Migration status
 
-This is a built-in source host. Shared providers now cover Notes data/details/actions, SMTC metadata/artwork, Discord presence/preview, and ASUS/Caps patterns. Profile import and advanced configuration are being completed before removing the donor build entries. The old Explorer deskband and media widget are not part of the tile source engine. Dynamic external plugin loading is not implemented. Real device, account and older Windows acceptance remain separate from the inert integration tests; see [the audit](REWORK_AUDIT.md) for current validation status.
+This is a built-in source host. Shared providers cover Notes data/details/actions, SMTC metadata/artwork, Discord presence/preview, and ASUS/Caps patterns. All five donor app hosts/build entries are retired; explicit profile imports and the Discord advanced editor remain supported. The old Explorer deskband and media widget are not part of the tile source engine. Dynamic external plugin loading is not implemented. Real device, account and older Windows acceptance remain separate from inert integration tests; see [migration](donor-retirement-2026-10-11.md) and [the audit](REWORK_AUDIT.md).
 
 ## Real-Time Notes
 
@@ -102,6 +102,39 @@ DesktopStub.exe --ini DesktopStub.ini --notes-clear Resin
 Enable `DiscordRPC` in an entry's text sources. The default is preview-only: `[Discord] SendPresence=0`. Set `Name`, `Details` and `State` (templates use the existing DiscordRPC placeholders). Set a valid `ClientId` and explicitly enable `SendPresence` to send using Discord IPC. `RefreshSeconds=5`, `OperationTimeoutMs=5000`, and `ClearOnStop=1` control the service. The tile shows details/state plus preview, sending, stopped or error status.
 
 For existing advanced configuration, set `[Discord] ProfilePath` to a DiscordRPC INI, absolute or relative to DesktopStub's INI. That profile supplies the complete existing presence/transport settings, including Gateway configuration; the simple Name/Details/State/ClientId fields are used only when ProfilePath is empty. The service reads the profile without creating or migrating it. It uses the shared transport code inside DesktopStub, without launching DiscordRPC.exe. Existing advanced credential rules are not silently changed. Tests inject fake transport and never contact Discord.
+
+The tray's advanced editor and CLI use the same typed option catalog, including
+censoring, layouts, time ranges, assets, buttons, AFK and transport options. Basic
+Name/Details/State/ClientId values remain editable for use after leaving an
+advanced profile. The menu identifies the active profile and actual host refresh.
+Explicit advanced cadence changes update `Discord.RefreshSeconds`; contradictory
+host/profile cadence requests in one command are rejected.
+
+```cmd
+DesktopStub.exe --ini DesktopStub.ini --discord-create-profile DiscordSource.ini
+DesktopStub.exe --ini DesktopStub.ini --discord-set general.details_template=Working
+DesktopStub.exe --ini DesktopStub.ini --discord-set general.update_interval=8
+```
+
+These commands are configuration-only. Creation uses shared defaults, binds the
+new profile and never replaces an existing file. Editing requires a separate
+existing profile; reads never create one. Both files validate before publication,
+and ordinary save failures restore their exact previous bytes. Each publication
+is atomic; a power loss between the two is not a crash-safe two-file transaction.
+After an external/manual profile edit, the host's `Discord.RefreshSeconds` remains
+the actual scheduler preference. Stale tray editors ask you to reopen before saving.
+
+**Plain Discord tokens are readable in the profile and command-line tokens may
+remain in shell history.** Secret prompts are blank and masked. Intentional CLI
+credential replacement requires `--discord-private-input`; values are not echoed.
+An explicit plain/protected replacement clears the opposite representation,
+unrelated edits preserve credentials, and clearing credentials does not reactivate
+an old hidden value. Existing protected tokens are still readable; a configured
+protected value or decode failure takes precedence and never falls back to plain
+text. No token is encrypted/migrated during editor or preview operations. Keep
+profiles private, avoid sharing them, and use an existing protected value when
+that Windows-user-bound storage suits your setup. Actual sends require the
+separate `SendPresence` choice.
 
 ## Caps indicator
 

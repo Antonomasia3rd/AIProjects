@@ -19,7 +19,7 @@ UI thread, since canceled driver I/O retains target ownership until it settles.
 See [the Caps engine audit](../docs/audit-caps-source.md) for fake-test coverage
 and the retained standalone migration boundary.
 
-DesktopStub and NowPlayingTile now consume `appx_registration_script.h` for typed, literal-safe registration command construction and `packaged_startup_manifest.h` for the initially disabled startup extension. Both execute registration scripts through `powershell_runner.inc`; product fragments supply identity, policy and result presentation. See [the AppX sharing audit](../docs/audit-appx-sharing.md) for validation and the native COM mechanisms that remain separate.
+DesktopStub consumes `appx_registration_script.h` for typed, literal-safe registration command construction and `packaged_startup_manifest.h` for the initially disabled startup extension. It executes registration scripts through `powershell_runner.inc`; product fragments supply identity, policy and result presentation. The former NowPlaying host is retired. See [the AppX sharing audit](../docs/audit-appx-sharing.md) for historical sharing evidence and the native COM mechanisms that remain separate.
 
 New resident desktop projects should compose these modules instead of copying a
 product implementation:
@@ -67,7 +67,9 @@ code for nothing:
   encryption for the current Windows user. New values use the self-identifying
   `dpapi:v1:utf8:` format; reads of the old ambiguous `dpapi:` format require
   each product to explicitly select its historical UTF-8 or UTF-16LE encoding.
-  Used by DiscordRPC and RealTimeNotesDeskband for encrypted token storage.
+  DesktopStub can read explicitly imported protected Notes credentials; Discord
+  can resolve an explicitly configured protected token. Encryption is not
+  automatically triggered by these source imports or previews.
 - `powershell_runner.inc`: spawn `powershell.exe` with a timeout, an optional
   output-size cap, and captured stdout/stderr (`aip::RunPowerShellCaptured`),
   plus the quoting/encoding helpers around building a
@@ -123,7 +125,7 @@ code for nothing:
   the helper never claims it overrode a user or administrator decision. The package manifest
   must declare a matching `desktop:Extension Category="windows.startupTask"`
   and `desktop:StartupTask TaskId`; this is the startup strategy for packaged
-  apps such as NowPlayingTile.
+  apps, including the retired NowPlayingTile donor.
 - `managed_startup_shortcut.cs`: the equivalent target-safe, profile-scoped,
   cross-process-serialized Startup-folder shortcut lifecycle for .NET
   Framework desktop applications. It refuses foreign same-name links,
@@ -149,12 +151,12 @@ code for nothing:
   appends for .NET Framework applications. It writes one BOM on a new file,
   permits concurrent diagnostic readers, reports bounded lock/write failures,
   and can rotate a configured number of generations under the same mutation
-  lock. asusblink, capsblink, DNSAutoUpdate, and PhotoCollage use this instead
+  lock. DNSAutoUpdate and PhotoCollage use this instead
   of private `File.AppendAllText` implementations.
 - `managed_tray.cs`: WinForms notification-icon construction, the length-safe
   tooltip policy, baseline product/version header, validated text prompts,
-  tooltip updates, and disposal for managed tray applications. asusblink,
-  capsblink, and DNSAutoUpdate compile this together with the shared managed
+  tooltip updates, and disposal for managed tray applications. DNSAutoUpdate
+  compiles this together with the shared managed
   INI, logging, and Startup sources.
 - `privileged_path_trust.h`: fail-closed path validation for native processes
   that launch or register code as `LocalSystem`. It accepts only canonical
@@ -172,10 +174,11 @@ code for nothing:
   default). Timeout cancellation is cooperative; synchronous Windows COM calls
   are not a hard process-level deadline. A missing media session returns idle
   text; unavailable APIs return an error. Build/read-only smoke:
-  `tools\TestSmtcSource.cmd`. DesktopStub uses the provider directly, and
-  NowPlayingTile reuses its bounded asynchronous wait helper while retaining
-  artwork/widget/delivery behavior. The standalone app remains until that
-  feature set is integrated.
+  `tools\TestSmtcSource.cmd`. DesktopStub consumes one immutable title/artwork
+  snapshot per frame. `content_sources/smtc_artwork.inc` adds bounded WIC decoding,
+  atomic profile-scoped cache publication and reference-counted cleanup.
+  Default tests inject synthetic sessions; actual system reads require an
+  explicit test opt-in.
 - `content_engine.h`: platform-neutral composition policy and the canonical
   built-in source and background catalogs used by DesktopStub configuration,
   tray selection, provider dispatch, and offline render-only validation. Add a
@@ -186,9 +189,9 @@ code for nothing:
 - `content_sources/notes.inc`: the extracted Real-Time Notes data engine for
   Genshin resin, Star Rail stamina, and ZZZ charge. Hosts supply explicit account
   values and cancellation; `Fetch` returns a typed count/recovery/status
-  snapshot plus detail lines. The deskband consumes this implementation after
-  its separate account loader, and DesktopStub can use it without an Explorer
-  host. It uses named headers through `http_fetch.inc`, without logging header
+  snapshot plus detail lines. DesktopStub selects per-entry details and imports
+  explicit account profiles through `notes_model.h` and `notes_profile.inc`;
+  no Explorer host is required. It uses named headers through `http_fetch.inc`, without logging header
   contents. `tools\TestNotesSource.cmd` exercises synthetic responses and an
   injected transport only. Endpoint/auth compatibility with the live service
   remains unverified; see [the provider audit](../docs/audit-notes-source.md).
@@ -207,9 +210,11 @@ profiles are revalidated under the INI mutation lock.
 `managed_configuration_tray.cs` provides the optional configuration-only tray
 and batch settings editor used by PhotoCollage and TaskSchedulerMigration.
 Products supply their identity, profile path, read callback and existing
-validated save callback. The shared host owns the icon, menu, editor and
+validated save callback. Optional explicit commands and resident lifecycle
+callbacks support the notification-policy and SecureDesktop controls; utility
+sign-in still opens configuration only. The shared host owns the icon, menu, editor and
 per-profile instance mutex, using `managed_tray.cs` for hover text and lifetime.
-It has no job execution callback. `managed_configuration_startup.cs` couples the
+`managed_configuration_startup.cs` couples the
 profile preference to the existing per-user shortcut helper. Explicit Startup
 management and tray edits use one transaction, held in Startup-then-INI lock
 order through snapshot, persistence and rollback. `ManagedIniFile.BeginTransaction`
@@ -220,16 +225,26 @@ Other resident products still use their older adapters; migrating those callers
 to the extended transaction scope remains follow-up work.
 
 Product-specific implementations live under matching subfolders:
-`dependencies/DesktopStub/`, `dependencies/DiscordRPC/`,
-`dependencies/NowPlayingTile/`, `dependencies/CharmTray/`,
+`dependencies/DesktopStub/`,
+`dependencies/CharmTray/`,
 `dependencies/ADBController/`, `dependencies/SecureDesktopLauncher/`,
-`dependencies/RealTimeNotesDeskband/`, `dependencies/ChromeProfileCounter/`,
+`dependencies/ChromeProfileCounter/`,
 `dependencies/YouTubeMusicMigrate/`, `dependencies/PhotoCollage/`,
-`dependencies/TaskSchedulerMigration/`, `dependencies/DNSAutoUpdate/`,
-`dependencies/capsblink/`, and `dependencies/asusblink/`. Their project-local
+`dependencies/TaskSchedulerMigration/`, and `dependencies/DNSAutoUpdate/`. Their project-local
 source is limited to the includes, composition declarations, assembly metadata,
 or declarative policy needed to combine those implementations with the
 root-level shared modules.
+
+`dependencies/asusblink/` now contains a shared native pattern/service/backend
+engine, with no standalone managed app body. Caps control is in `hardware/`.
+`dependencies/DiscordRPC/` now contains the shared presence/transport service,
+functional defaults/grammar and typed advanced editor. Its automatic app-level
+token migration, Startup, logging and lifecycle hosts are retired. Explicit plain
+or existing protected credentials are selected only for actual sends.
+The native `hardware_profile_import.inc` and `now_playing_profile.inc` adapters
+read old donor INIs without writing them or applying Startup/hardware choices.
+Discord, NowPlaying, Notes, Caps and ASUS standalone hosts/builds are retired; migration
+and existing-installation limits are in [the retirement note](../docs/donor-retirement-2026-10-11.md).
 
 These implementations used to live in project-local source files or `src`
 folders. They were relocated so maintained product implementation bodies have

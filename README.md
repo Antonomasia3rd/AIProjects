@@ -12,16 +12,11 @@ or declarative policy.
 | --- | --- | --- |
 | `legacy/AllowContentAboveLock` | C# tray app; optional manual service | Current-user notification policy with shared INI/CLI/tray/Startup controls. |
 | `legacy/ADBController` | C++ Win32 GUI app | Direct ADB-over-TCP TV controller that keeps the ADB server running while switching selected TVs. |
-| `legacy/asusblink` | C# tray/console app | ASUS ACPI LED controller for mic LED, keyboard backlight states, and HDD-activity keyboard patterns. |
-| `legacy/capsblink` | C# tray app | Raw keyboard class-device experiment that blinks the physical Caps Lock indicator. |
 | `legacy/CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
 | `legacy/ChromeProfileCounter` | C# desktop utility | Shared INI/CLI/configuration tray and per-user Startup; explicit, confirmed Chrome profile-counter repair. |
-| `DesktopStub` | C++ Win32 tray app | Builds `DesktopStub.exe`, a Live Tile generator: wallpaper by default, or ordered content with image/wallpaper backgrounds and RSS/custom/SMTC/Caps Lock text; see `docs/content-engine.md`. Also a loose Appx registrar. |
-| `DiscordRPC` | C++ Win32 tray/console app | Discord Rich Presence app with Discord IPC, Gateway transport, DPAPI token storage, dynamic placeholders, and a tray config UI. |
+| `DesktopStub` | C++ Win32 tray app | Live Tile source engine: wallpaper/images/media artwork with ordered RSS, custom text, SMTC, Notes, Discord and indicator sources. Also a loose Appx registrar. See `docs/content-engine.md`. |
 | `legacy/DNSAutoUpdate` | C# DNS updater | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
-| `legacy/NowPlayingTile` | C++ app plus Appx helpers | SMTC-based Windows Start live tile updater with optional widget mode. |
 | `legacy/PhotoCollage` | C# console app | Creates a simple JPEG grid/collage from images in a folder. |
-| `legacy/RealTimeNotesDeskband` | C++ Deskband DLL | Classic taskbar toolbar for HoYoLAB Real-Time Notes resources. |
 | `legacy/SecureDesktopLauncher` | Shared configuration tray + manual native tools | INI/CLI/tray/Startup controls; explicit service/password actions preserve secure-desktop launching. |
 | `legacy/TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
 | `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
@@ -37,7 +32,7 @@ Release tag families:
 
 | Change scope | Release tag family |
 | --- | --- |
-| Any built project | `<Project>-vN`, for example `DesktopStub-v1`, `DiscordRPC-v1`, or `asusblink-v1` |
+| Any built project | `<Project>-vN`, for example `DesktopStub-v1`, `CharmTray-v1`, or `ADBController-v1` |
 | Shared workflow/repository files changed | one release per built project, each in that project's `<Project>-vN` family |
 | Manual workflow run with `All` selected | one release per built project, each in that project's `<Project>-vN` family |
 
@@ -56,7 +51,6 @@ Common prerequisites:
 - .NET Framework compiler at `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` for C# projects.
 - Visual Studio Build Tools with the C++ workload for MSVC projects.
 - Android Platform Tools for `legacy/ADBController` at runtime (`adb.exe` is not bundled).
-- Visual Studio 2019/2022 Build Tools or MinGW-w64 `g++` for `legacy/RealTimeNotesDeskband`.
 - `dnscmd.exe` for `legacy/DNSAutoUpdate` on Windows DNS Server systems.
 
 Build all Windows binary artifacts:
@@ -70,21 +64,27 @@ and loaded by Windhawk. They are not built by the repository Windows workflow.
 An installed Windhawk compiler can validate both x64 and x86 sources with
 `legacy\WindhawkMods\TestWindhawkMods.cmd`.
 
-`legacy/RssLiveTile` no longer exists -- it was retired and removed once its
-capability landed as DesktopStub's `ContentSource=RssFeed` (see
-`dependencies/README.md`); its history is in git, not in the working tree.
+RSS, DiscordRPC, NowPlayingTile, RealTimeNotesDeskband, asusblink and capsblink are integrated
+DesktopStub sources. Their standalone build/release entries and duplicate app
+hosts have been removed; shared native engines and explicit profile imports
+remain under `dependencies`. Their history remains in git. See
+[migration instructions](docs/donor-retirement-2026-10-11.md) and
+[the content guide](docs/content-engine.md). Updating this source does not
+uninstall an older binary, unregister a deskband/package, or remove an existing
+Startup entry on your computer. Migrate your chosen configuration first and
+disable the old app explicitly before enabling the same hardware source.
 
 Useful build options:
 
 ```cmd
 rem Skip one or more projects.
-.github\scripts\build-windows.cmd /skip:asusblink,RealTimeNotesDeskband
+.github\scripts\build-windows.cmd /skip:ADBController,DNSAutoUpdate
 
 rem Skip DesktopStub.
 .github\scripts\build-windows.cmd /skip:DesktopStub
 
-rem Skip DiscordRPC.
-.github\scripts\build-windows.cmd /skip:DiscordRPC
+rem Skip CharmTray.
+.github\scripts\build-windows.cmd /skip:CharmTray
 ```
 
 Run repository validation and smoke checks:
@@ -99,6 +99,14 @@ tools\TestRegistryNotificationServices.cmd
 .github\scripts\Test-ReadmeConsistency.cmd
 .github\scripts\Smoke-WindowsBuild.cmd
 ```
+
+For interruption-safe source validation on a local Windows machine, PowerShell 7
+`tools\TestContentIntegration.ps1` compiles only. Add `-Run` to custom-scan each
+fixture before a bounded inert run. It uses synthetic profiles, accounts, media
+and hardware backends; it does not register packages, change real Startup entries
+or contact accounts/devices. Portable CMake tests also run on Linux in CI without
+WSL. Actual Windows 8/8.1/10 shell appearance and real device/account behavior
+remain separate acceptance checks.
 
 The Windows workflow project metadata lives in `.github/project-map.json`. Keep that map, `.github/workflows/build-windows.yml`, `.github/scripts/build-windows.cmd`, and this README in sync when adding or removing projects that produce Windows artifacts. Validation checks selector options, upload conditions, artifact names, declared artifact payload paths, and build-script artifact recording before building.
 

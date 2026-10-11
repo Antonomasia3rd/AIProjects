@@ -15,6 +15,21 @@ static thread_local const aip::discord::Options* g_embeddedOptions = nullptr;
 #include "drpc_gateway.inc"
 
 namespace aip { namespace discord {
+bool ResolveConfiguredToken(const std::wstring& plaintext, const std::wstring& protectedValue,
+    const CredentialDecoder& decoder, std::wstring& token, std::wstring& error) {
+    token.clear(); error.clear();
+    const auto protectedToken = aip::Trim(protectedValue);
+    if (!protectedToken.empty()) {
+        if (!decoder) { error = L"A protected Discord token could not be decoded."; return false; }
+        try { token = aip::Trim(decoder(protectedToken)); }
+        catch (...) { error = L"A protected Discord token could not be decoded."; return false; }
+        if (token.empty()) { error = L"A protected Discord token decoded to an empty value."; return false; }
+        return true;
+    }
+    token = aip::Trim(plaintext);
+    if (token.empty()) { error = L"No Discord token is configured."; return false; }
+    return true;
+}
 std::vector<ProfileOptionDescriptor> ProfileOptions() {
     std::vector<ProfileOptionDescriptor> options;
     const std::vector<std::wstring> sections = {L"general", L"censor_map", L"large_time_ranges", L"small_time_ranges", L"large_assets", L"small_assets", L"layout", L"buttons", L"afk", L"ipc", L"gateway"};
@@ -88,7 +103,7 @@ public:
             // transports. No migration, encryption or configuration write occurs.
             if (!gateway_) {
                 auto token = ResolveDiscordToken();
-                if (token.empty()) throw std::runtime_error("Gateway sending needs a configured protected token.");
+                if (token.empty()) throw std::runtime_error("Gateway sending needs a configured token.");
                 gateway_.reset(new DiscordGatewayClient(token, client, false, LoadGatewayOptions(), cancellation_.Callback()));
             }
             if (!gateway_->IsConnected()) gateway_->Connect(activity, status);
@@ -249,9 +264,6 @@ Service::Service() : impl_(new Impl()) {
     std::call_once(configured, [] {
         // Engine diagnostics stay in snapshots. Never configure app logging,
         // console, tray, startup, mutexes, or token migration from this TU.
-        g_loggingEnabled = false; g_fileLoggingEnabled = false;
-        aip::Utf8LoggerOptions logger; logger.enabled = false; logger.fileEnabled = false; logger.consoleEnabled = false;
-        g_logger.Configure(logger);
         g_exePath = aip::GetCurrentExecutablePath();
     });
 }

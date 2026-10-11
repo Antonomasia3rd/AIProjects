@@ -1,59 +1,4 @@
-static constexpr const wchar_t* DEFAULT_HELP_TEMPLATE =
-    L"Usage:\\n"
-    L"  {exe} [config.ini] [options]\\n"
-    L"\\n"
-    L"Options:\\n"
-    L"  --help                         Show this help text.\\n"
-    L"  --version                      Show version information.\\n"
-    L"  --ini <path>                   Use an alternate INI file.\\n"
-    L"  --exit                         Ask a running resident instance to exit.\\n"
-    L"  --set Section.Key=Value        Set and save a non-secret INI value; known typed keys are validated.\\n"
-    L"  --bool Section.Key=Value       Set and save a known boolean INI value.\\n"
-    L"  --client-id <id>               Set [general] client_id (17-20 decimal digits).\\n"
-    L"  --token <token>                Store token as DPAPI-protected token_protected and clear legacy plaintext token.\\n"
-    L"  --protect-token                Migrate legacy plaintext [general] token to token_protected.\\n"
-    L"  --status <value>               Set [general] status: online, idle, dnd, invisible.\\n"
-    L"  --update-interval <seconds>    Set [general] update_interval (1-86400).\\n"
-    L"  --details-template <template>  Set [general] details_template.\\n"
-    L"  --state-template <template>    Set [general] state_template.\\n"
-    L"  --window-detection             Enable foreground-window placeholders.\\n"
-    L"  --no-window-detection          Disable foreground-window placeholders.\\n"
-    L"  --show-large-image             Enable large activity image.\\n"
-    L"  --hide-large-image             Disable large activity image.\\n"
-    L"  --show-small-image             Enable small activity image.\\n"
-    L"  --hide-small-image             Disable small activity image.\\n"
-    L"  --buttons                      Enable activity buttons.\\n"
-    L"  --no-buttons                   Disable activity buttons.\\n"
-    L"  --dry-run                      Print generated activity JSON and tokens.\\n"
-    L"  --dry-run-full                 Print unredacted dry-run token values.\\n"
-    L"  --dry-run-unredacted           Alias for --dry-run-full.\\n"
-    L"  --once                         Send one IPC update and exit.\\n"
-    L"  --verbose                      Enable verbose logging for this run.\\n"
-    L"  --logging / --no-logging       Set [app] logging_enabled.\\n"
-    L"  --startup / --no-startup       Add or remove this INI profile's shell:startup shortcut.\\n"
-    L"  --file-logging / --no-file-logging Set [app] file_logging_enabled.\\n"
-    L"  --log-lock-wait-ms <ms>        Set log append wait from 0 to 60000 ms.\\n"
-    L"  --tray / --no-tray             Force tray icon on or off for this run.\\n"
-    L"  --show-console / --hide-console Force console visibility.\\n"
-    L"  --show-console-setting / --hide-console-setting Save console visibility.\\n"
-    L"  --transport <ipc|gateway|auto> Set [general] transport_mode.\\n"
-    L"\\n"
-    L"Transports: ipc uses the local Discord desktop pipe; gateway uses a Discord\\n"
-    L"user token stored through DPAPI token_protected; auto tries IPC first and\\n"
-    L"falls back to Gateway. Discord forbids automating normal user accounts and\\n"
-    L"warns that doing so can terminate the account; prefer IPC.\\n";
-
-static std::wstring DefaultHelpText()
-{
-    std::wstring rawTemplate = aip::IniConfigStore(g_iniPath).ReadRaw(
-        L"CommandLineHelp",
-        L"Template",
-        DEFAULT_HELP_TEMPLATE);
-    return aip::FormatTextTemplate(
-        rawTemplate,
-        { { L"{exe}", g_exeBaseName + L".exe" } });
-}
-
+// Shared functional source defaults; setup is explicit through profile_edit.
 static const aip::IniDefaultValue kDefaults[] =
 {
     { L"general", L"transport_mode", L"ipc" },
@@ -132,24 +77,6 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"afk", L"show_idle_time", L"true" },
     { L"afk", L"idle_text", L"since {idle_hh}h {idle_mm}m {idle_ss}s" },
 
-    { L"app", L"show_tray", L"true" },
-    { L"app", L"show_menu_as_dropdown", L"true" },
-    { L"app", L"single_instance", L"true" },
-    { L"app", L"run_at_startup", L"false" },
-    { L"app", L"show_console", L"false" },
-    { L"app", L"notifications_enabled", L"true" },
-    { L"app", L"notify_on_start", L"false" },
-    { L"app", L"notify_on_success", L"false" },
-    { L"app", L"notify_on_failure", L"true" },
-    { L"app", L"notify_on_reload", L"true" },
-    { L"app", L"logging_enabled", L"true" },
-    { L"app", L"file_logging_enabled", L"true" },
-    { L"app", L"log_path", L"" },
-    { L"app", L"log_append_lock_wait_ms", L"5000" },
-    { L"app", L"ini_write_lock_wait_ms", L"5000" },
-    { L"app", L"verbose_logging", L"false" },
-    { L"app", L"dry_run_redact_sensitive", L"true" },
-
     { L"ipc", L"connect_timeout_ms", L"250" },
     { L"ipc", L"response_timeout_ms", L"5000" },
 
@@ -168,73 +95,4 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"gateway", L"close_timeout_ms", L"2000" },
     { L"gateway", L"asset_fetch_timeout_ms", L"10000" },
     { L"gateway", L"asset_fetch_user_agent", L"DiscordBot (https://github.com, 1)" },
-
-    { L"strings", L"tray_tip", L"DiscordRPC" },
-    { L"strings", L"menu_refresh", L"Refresh now" },
-    { L"strings", L"menu_version_prefix", L"Version: " },
-    { L"strings", L"menu_reload", L"Reload configuration" },
-    { L"strings", L"menu_run_at_startup", L"Run at startup" },
-    { L"strings", L"startup_error_title", L"DiscordRPC startup shortcut" },
-    { L"strings", L"menu_open_config", L"Open config" },
-    { L"strings", L"menu_open_log_folder", L"Open log folder" },
-    { L"strings", L"menu_recent_log", L"Recent log" },
-    { L"strings", L"menu_exit", L"Exit" },
-    { L"strings", L"menu_shutdown_pending", L"Shutdown pending: waiting for Discord cleanup" },
-    { L"strings", L"menu_force_shutdown", L"Force shutdown" },
-    { L"strings", L"menu_general", L"General" },
-    { L"strings", L"menu_presence", L"Presence" },
-    { L"strings", L"menu_diagnostics", L"Diagnostics" },
-    { L"strings", L"menu_logging", L"Logging" },
-    { L"strings", L"menu_update_interval", L"Update interval" },
-    { L"strings", L"menu_transport", L"Transport" },
-    { L"strings", L"menu_transport_ipc", L"Discord IPC" },
-    { L"strings", L"menu_transport_gateway", L"Gateway" },
-    { L"strings", L"menu_transport_auto", L"Auto: IPC then Gateway" },
-    { L"strings", L"menu_dropdown", L"Show menu as dropdown" },
-    { L"strings", L"window_detection", L"Window detection" },
-    { L"strings", L"details_field", L"Details field" },
-    { L"strings", L"state_field", L"State field" },
-    { L"strings", L"large_image", L"Large image" },
-    { L"strings", L"small_image", L"Small image" },
-    { L"strings", L"buttons", L"Buttons" },
-    { L"strings", L"logging_enabled", L"Logging enabled" },
-    { L"strings", L"file_logging", L"File logging" },
-    { L"strings", L"log_lock_wait", L"Log lock wait" },
-    { L"strings", L"verbose_logging", L"Verbose logging" },
-    { L"strings", L"show_console", L"Show console" },
-    { L"strings", L"no_recent_log", L"No log entries yet." },
-    { L"strings", L"recent_log_title", L"DiscordRPC recent log" },
-    { L"strings", L"notification_title", L"DiscordRPC" },
-    { L"strings", L"notification_started", L"Rich Presence is running." },
-    { L"strings", L"notification_connected", L"Rich Presence is active through Discord IPC." },
-    { L"strings", L"notification_connected_gateway", L"Rich Presence is active through Discord Gateway." },
-    { L"strings", L"notification_failed", L"Rich Presence update failed." },
-    { L"strings", L"notification_reloaded", L"Configuration reloaded." },
-    { L"strings", L"notification_startup_failed", L"The shell:startup shortcut could not be synchronized with the INI." },
-    { L"strings", L"notification_gateway_missing_token", L"Gateway mode needs DPAPI token_protected. Legacy plaintext token is only read for migration." },
-    { L"strings", L"notification_gateway_auto_missing_token", L"Discord IPC update failed. Gateway fallback is enabled by transport_mode=auto, but no DPAPI token_protected is configured. Set transport_mode=ipc to disable Gateway fallback, or protect a token for Gateway mode." },
-    { L"strings", L"notification_gateway_unsupported", L"Discord Gateway transport is disabled by [gateway] supported." },
-    { L"strings", L"notification_gateway_auth_failed", L"Discord Gateway authentication failed. Check your token." },
-    { L"strings", L"notification_shutdown_pending", L"Shutdown requested. Use Force shutdown from the tray if Discord cleanup does not finish." },
-    { L"strings", L"previous_force_shutdown_warning", L"The previous run was force-closed while Discord cleanup was pending. Presence clearing or the Gateway close handshake may not have completed." },
-    { L"strings", L"already_running", L"DiscordRPC is already running for this config." },
-    { L"strings", L"reload_requested", L"DiscordRPC configuration reload requested." },
-    { L"strings", L"missing_client_id", L"Missing [general] client_id. Create a Discord application and paste its Application ID into the INI." },
-    { L"strings", L"dry_run_header", L"=== Discord activity JSON ===" },
-    { L"strings", L"dry_run_tokens", L"=== Available template tokens ===" },
-    { L"strings", L"dry_run_redacted_note", L"Sensitive local tokens are redacted. Use --dry-run-full to show raw values." },
-
-    { L"CommandLineHelp", L"Template", DEFAULT_HELP_TEMPLATE }
 };
-
-static bool EnsureDefaultConfigFile()
-{
-    if (!aip::IniConfigStore(g_iniPath, DefaultConfigHeader(), g_iniWriteLockWaitMs.load()).EnsureDefaults(
-        kDefaults,
-        ARRAYSIZE(kDefaults)))
-    {
-        ReportConfigWriteFailure(L"Creating or updating default DiscordRPC config");
-        return false;
-    }
-    return true;
-}

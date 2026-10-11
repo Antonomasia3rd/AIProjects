@@ -122,18 +122,39 @@ bool ApplyProfileEditsToText(const std::wstring& original, const std::vector<aip
     const auto options = ProfileOptions();
     std::set<std::pair<std::wstring, std::wstring>> seen;
     ProfileEditResult prepared;
+    bool credentialsTouched = false, replacePlain = false, replaceProtected = false;
     for (auto setting : settings) {
         if (!NormalizeProfileSetting(setting, policy, error)) return false;
         if (!seen.emplace(setting.section, setting.key).second) { error = L"Duplicate setting in an advanced profile batch."; return false; }
         const auto* option = FindOption(options, setting.section, setting.key);
+        if (setting.section == L"general" && (setting.key == L"token" || setting.key == L"token_protected")) {
+            credentialsTouched = true;
+            if (setting.key == L"token") replacePlain = !aip::Trim(setting.value).empty();
+            else replaceProtected = !aip::Trim(setting.value).empty();
+        }
         if (option->hostCadence) { prepared.requiresHostCadenceApply = true; prepared.requestedRefreshSeconds = std::stoi(setting.value); }
         if (option->kind != ProfileOptionKind::OpaqueSecret) setting.value = EncodeText(setting.value);
         normalized.push_back(std::move(setting));
     }
+    if (replacePlain && replaceProtected) { error = L"Choose one nonempty Discord credential representation per private batch (values not shown)."; return false; }
+    if (credentialsTouched) {
+        const auto clear = [&](const wchar_t* key) {
+            auto found = std::find_if(normalized.begin(), normalized.end(), [&](const aip::IniSetting& setting) {
+                return setting.section == L"general" && setting.key == key;
+            });
+            if (found == normalized.end()) normalized.push_back({L"general", key, L""});
+            else found->value.clear();
+        };
+        // An explicit private choice replaces the effective credential. Blank
+        // clears the full family rather than reactivating stale fallback data.
+        if (!replacePlain) clear(L"token");
+        if (!replaceProtected) clear(L"token_protected");
+    }
     auto text = original;
     for (const auto& setting : normalized)
         if (!aip::WriteIniValueToText(text, setting.section.c_str(), setting.key.c_str(), setting.value)) { error = L"Could not stage an advanced profile setting."; return false; }
-    if (aip::WideToUtf8(text).size() > 1048576) { error = L"The edited profile exceeds its 1 MiB limit."; return false; }
+    std::string bytes;
+    if (!aip::TryWideToUtf8(text, bytes) || bytes.size() > 1048576 - 3) { error = L"The edited profile has invalid Unicode or exceeds its 1 MiB byte limit."; return false; }
     if (!ParseProfileDocument(text, prepared.profile, error)) return false;
     prepared.changed = text != original;
     candidate = std::move(text); result = std::move(prepared); return true;
@@ -143,6 +164,11 @@ bool CommitProfileEdits(const std::wstring& path, const std::vector<aip::IniSett
     result = {}; error.clear();
     if (policy.lockWaitMs > 60000) { error = L"The profile lock wait must be at most 60000 milliseconds."; return false; }
     if (settings.empty()) { error = L"An advanced profile edit batch is required."; return false; }
+    if (!ExistingAbsoluteFile(path, error)) return false;
+    aip::IniWriteMutexGuard boundedLock(path, policy.lockWaitMs);
+    if (!boundedLock.IsLocked()) { error = L"Could not lock the bounded advanced profile capture."; return false; }
+    // Keep the source-byte limit and the native fresh mutation under the same
+    // mutex. MutateFresh recursively acquires it on this thread.
     ProfileDocument bounded;
     if (!ReadProfileDocument(path, bounded, error)) return false;
     ProfileEditResult staged;
@@ -156,6 +182,17 @@ bool CommitProfileEdits(const std::wstring& path, const std::vector<aip::IniSett
     if (!ok) { if (error.empty()) error = L"The advanced profile transaction could not be committed."; return false; }
     result = std::move(staged); return true;
 }
+bool MakeDefaultProfileDocument(std::wstring& text, ProfileEditResult& result, std::wstring& error) {
+    text.clear(); result = {}; error.clear();
+    std::wstring candidate = L"; Discord source profile, explicitly created from the shared functional defaults.\r\n";
+    ProfileEditResult prepared;
+    for (const auto& option : ProfileOptions()) {
+        if (!aip::WriteIniValueToText(candidate, option.section.c_str(), option.key.c_str(), option.defaultValue)) { error = L"Could not stage the real source defaults."; return false; }
+        if (option.hostCadence) { prepared.requiresHostCadenceApply = true; prepared.requestedRefreshSeconds = std::stoi(option.defaultValue); }
+    }
+    if (!ParseProfileDocument(candidate, prepared.profile, error)) return false;
+    prepared.changed = true; text = std::move(candidate); result = std::move(prepared); return true;
+}
 bool CreateProfileDocument(const std::wstring& path, const ProfileEditPolicy& policy,
     ProfileEditResult& result, std::wstring& error) {
     result = {}; error.clear();
@@ -163,13 +200,8 @@ bool CreateProfileDocument(const std::wstring& path, const ProfileEditPolicy& po
         error = L"Explicit profile creation requires an absolute path and a bounded lock wait."; return false;
     }
     if (!policy.acknowledgeHostCadenceMapping) { error = L"Creating a source profile requires acknowledgement of its default host cadence mapping."; return false; }
-    std::wstring text = L"; Discord source profile, explicitly created from the shared functional defaults.\r\n";
-    ProfileEditResult prepared;
-    for (const auto& option : ProfileOptions()) {
-        if (!aip::WriteIniValueToText(text, option.section.c_str(), option.key.c_str(), option.defaultValue)) { error = L"Could not stage the real source defaults."; return false; }
-        if (option.hostCadence) { prepared.requiresHostCadenceApply = true; prepared.requestedRefreshSeconds = std::stoi(option.defaultValue); }
-    }
-    if (!ParseProfileDocument(text, prepared.profile, error)) return false;
+    std::wstring text; ProfileEditResult prepared;
+    if (!MakeDefaultProfileDocument(text, prepared, error)) return false;
     aip::IniWriteMutexGuard lock(path, policy.lockWaitMs);
     if (!lock.IsLocked()) { error = L"Could not lock the explicit profile creation."; return false; }
     if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) { error = L"The profile already exists; creation never replaces it."; return false; }

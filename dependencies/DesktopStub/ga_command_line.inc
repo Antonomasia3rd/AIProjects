@@ -43,6 +43,9 @@ struct CommandLineOptions
     std::vector<std::wstring> nowPlayingImports;
     aip::now_playing_profile::ImportPlan nowPlayingImportPlan;
     std::vector<std::wstring> nowPlayingImportDiagnostics;
+    std::vector<aip::IniSetting> discordProfileSettings;
+    std::wstring discordCreatePath;
+    bool discordPrivateInput = false;
 };
 
 static CommandLineOptions g_commandLine;
@@ -1053,6 +1056,15 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (IEquals(arg, L"--discord-private-input")) { g_commandLine.discordPrivateInput = true; g_commandLine.configureOnly = true; continue; }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--discord-create-profile", value, error, matched)) return fail(error);
+        if (matched) { if (value.empty()) return fail(L"--discord-create-profile requires a path."); g_commandLine.discordCreatePath = value; g_commandLine.configureOnly = true; continue; }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--discord-set", value, error, matched)) return fail(error);
+        if (matched) {
+            aip::IniSetting setting;
+            if (!aip::ParseIniSetSpec(value, setting, error)) return fail(L"--discord-set expects Section.Key=Value (value not shown).");
+            g_commandLine.discordProfileSettings.push_back(std::move(setting)); g_commandLine.configureOnly = true; continue;
+        }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--notes-import-profile", value, error, matched)) return fail(error);
         if (matched) { g_commandLine.notesImports.push_back({-1, value}); g_commandLine.configureOnly = true; continue; }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--caps-import-profile", value, error, matched)) return fail(error);
@@ -1849,6 +1861,8 @@ static std::wstring CommandLineUsageText()
         L"       --notes-refresh GAME|All (existing resident only; no new process).\n"
         L"Hardware profiles: --caps-import-profile INI; --asus-import-profile INI (configuration only).\n"
         L"Now playing: --now-playing-import-profile INI (configuration only; donor Startup is reported and deferred).\n"
+        L"Discord advanced profile: --discord-set Section.Key=Value; --discord-create-profile INI (configuration only).\n"
+        L"  Credential replacements require masked tray input or explicit --discord-private-input; values are never echoed.\n"
         L"ASUS numbered fields: --set AsusBlink.Event001HddState=128,129 (hardware and disk flags stay explicit).\n";
 }
 

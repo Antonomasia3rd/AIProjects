@@ -29,32 +29,17 @@ int main()
         const std::string sharedTests = ReadAll("tools/SharedBaselineTests.cpp");
         const std::string sharedTestScript = ReadAll("tools/TestSharedBaseline.cmd");
         const std::string desktopSourceTestScript = ReadAll("DesktopStub/TestDesktopStubSource.cmd");
-        const std::string discordSourceTestScript = ReadAll("DiscordRPC/TestDiscordRPCSource.cmd");
         const std::string secureSourceTestScript = ReadAll("legacy/SecureDesktopLauncher/TestSecureDesktopLauncherSource.cmd");
-        const std::string discordMain = ReadAll("dependencies/DiscordRPC/drpc_environment.inc") + ReadAll("DiscordRPC/DiscordRPC.cpp");
+        const std::string discordMain = ReadAll("dependencies/DiscordRPC/drpc_environment.inc");
         const std::string discordCore = ReadAll("dependencies/DiscordRPC/drpc_core.inc");
         const std::string desktopMain = ReadAll("DesktopStub/DesktopStub.cpp");
-        const std::string asusBlink = ReadAll("dependencies/asusblink/asusblink_app.cs");
-        const std::string asusOverlay = ReadAll("legacy/asusblink/asusblink.cs");
-        const std::string asusProductBuild = ReadAll("legacy/asusblink/BuildAsusBlink.cmd");
-        const std::string capsBlink = ReadAll("dependencies/capsblink/capsblink_app.cs");
-        const std::string capsOverlay = ReadAll("legacy/capsblink/capsblink.cs");
-        const std::string capsProductBuild = ReadAll("legacy/capsblink/BuildCapsBlink.cmd");
         const std::string dnsAutoUpdate = ReadAll("dependencies/DNSAutoUpdate/dns_auto_update_app.cs");
         const std::string dnsOverlay = ReadAll("legacy/DNSAutoUpdate/DNSAutoUpdate.cs");
         const std::string dnsBuild = ReadAll("legacy/DNSAutoUpdate/BuildDNSAutoUpdate.cmd");
         const std::string windowsBuild = ReadAll(".github/scripts/build-windows.cmd");
-        const auto buildSection = [&windowsBuild](const std::string& start, const std::string& end)
-        {
-            const size_t first = windowsBuild.find(start);
-            const size_t last = windowsBuild.find(end, first == std::string::npos ? 0 : first + start.size());
-            if (first == std::string::npos || last == std::string::npos || last <= first)
-                throw std::runtime_error("missing Windows build section: " + start);
-            return windowsBuild.substr(first, last - first);
-        };
-        const std::string asusBuild = buildSection("\n:BuildAsusBlink\n", "\n:BuildCapsBlink\n");
-        const std::string capsBuild = buildSection("\n:BuildCapsBlink\n", "\n:BuildYourPhoneHideBanner\n");
-
+        for (const std::string& retired : {"AsusBlink", "CapsBlink", "NowPlayingTile", "RealTimeNotesDeskband", "DiscordRPC"})
+            RequireNotContains("retired donor has no build entry: " + retired,
+                ".github/scripts/build-windows.cmd", windowsBuild, ":Build" + retired);
         RequireContains(
             "supported aggregate include is documented",
             "dependencies/README.md",
@@ -259,7 +244,7 @@ int main()
             "shared startup helper serializes cross-process shortcut mutation",
             "dependencies/startup_shortcut.inc",
             startupShortcut,
-            "AIProjects.StartupShortcut.");
+            "named_objects::CurrentUserScopedName(L\"StartupShortcut\"");
         RequireContains(
             "shared startup desired-state operation locks across query and mutation",
             "dependencies/startup_shortcut.inc",
@@ -465,10 +450,10 @@ int main()
             managedNamedObjects,
             "WindowsIdentity.GetCurrent()");
         RequireContains(
-            "shared managed INI helper serializes cross-process and cross-session mutation",
+            "shared managed INI helper coordinates the same file across native and managed processes",
             "dependencies/managed_ini.cs",
             managedIni,
-            "ManagedNamedObjects.CurrentUserScopedName(");
+            "ManagedNamedObjects.MachineScopedName(");
         RequireContains(
             "shared managed INI helper bounds sidecar reads",
             "dependencies/managed_ini.cs",
@@ -494,11 +479,14 @@ int main()
             "dependencies/managed_ini.cs",
             managedIni,
             "lines.RemoveAt(matches[i])");
-        RequireContains(
+        RequireOrderedContains(
             "shared managed INI helper serializes reads with replacement",
             "dependencies/managed_ini.cs",
             managedIni,
-            "List<string> lines = ReadLinesUnderLock(spec)");
+            {"LoadSection(ManagedIniFileSpec spec, bool createIfMissing)",
+             "using (Mutex mutationMutex = CreateMutationMutex(spec))",
+             "WaitForMutex(mutationMutex, spec.MutationWaitMilliseconds)",
+             "ReadLinesUnderLock(spec)", "ParseTargetSection(spec, lines)"});
         RequireContains(
             "shared managed INI helper rejects non-round-tripping keys",
             "dependencies/managed_ini.cs",
@@ -600,146 +588,6 @@ int main()
             managedTray,
             "TryPromptText");
         RequireContains(
-            "asusblink project source is a metadata overlay",
-            "legacy/asusblink/asusblink.cs",
-            asusOverlay,
-            "implementation is compiled from");
-        RequireContains(
-            "asusblink consumes the shared managed startup lifecycle",
-            "dependencies/asusblink/asusblink_app.cs",
-            asusBlink,
-            "ManagedStartupShortcut.CommitIniCoupledState");
-        RequireContains(
-            "asusblink consumes the shared managed INI lifecycle",
-            "dependencies/asusblink/asusblink_app.cs",
-            asusBlink,
-            "ManagedIniFile.SaveSectionBatch");
-        RequireContains(
-            "asusblink consumes the shared managed tray lifecycle",
-            "dependencies/asusblink/asusblink_app.cs",
-            asusBlink,
-            "ManagedTrayBaseline.CreateNotifyIcon");
-        RequireContains(
-            "Windows build delegates asusblink to its product build",
-            ".github/scripts/build-windows.cmd :BuildAsusBlink",
-            asusBuild,
-            "BuildAsusBlink.cmd");
-        RequireContains(
-            "asusblink build compiles shared named-object scoping",
-            "legacy/asusblink/BuildAsusBlink.cmd",
-            asusProductBuild,
-            "dependencies\\managed_named_objects.cs");
-        RequireContains(
-            "asusblink build compiles the shared managed startup source",
-            "legacy/asusblink/BuildAsusBlink.cmd",
-            asusProductBuild,
-            "dependencies\\managed_startup_shortcut.cs");
-        RequireContains(
-            "asusblink build compiles the shared managed tray source",
-            "legacy/asusblink/BuildAsusBlink.cmd",
-            asusProductBuild,
-            "dependencies\\managed_tray.cs");
-        RequireContains(
-            "asusblink build compiles the shared managed INI source",
-            "legacy/asusblink/BuildAsusBlink.cmd",
-            asusProductBuild,
-            "dependencies\\managed_ini.cs");
-        RequireContains(
-            "asusblink build compiles the product dependency overlay",
-            "legacy/asusblink/BuildAsusBlink.cmd",
-            asusProductBuild,
-            "dependencies\\asusblink\\asusblink_app.cs");
-        RequireContains(
-            "asusblink build compiles the project metadata overlay",
-            "legacy/asusblink/BuildAsusBlink.cmd",
-            asusProductBuild,
-            "%ROOT%asusblink.cs");
-        RequireContains(
-            "capsblink project source is a metadata overlay",
-            "legacy/capsblink/capsblink.cs",
-            capsOverlay,
-            "implementation is compiled from");
-        RequireContains(
-            "capsblink consumes the shared managed startup lifecycle",
-            "dependencies/capsblink/capsblink_app.cs",
-            capsBlink,
-            "ManagedStartupShortcut.CommitIniCoupledState");
-        RequireContains(
-            "capsblink consumes the shared managed INI lifecycle",
-            "dependencies/capsblink/capsblink_app.cs",
-            capsBlink,
-            "ManagedIniFile.LoadSection");
-        RequireContains(
-            "capsblink consumes shared managed tray construction",
-            "dependencies/capsblink/capsblink_app.cs",
-            capsBlink,
-            "ManagedTrayBaseline.CreateNotifyIcon");
-        RequireContains(
-            "capsblink exposes typed INI CLI and tray settings",
-            "dependencies/capsblink/capsblink_app.cs",
-            capsBlink,
-            "PersistSettingsAtomically");
-        RequireContains(
-            "Windows build delegates capsblink to its product build",
-            ".github/scripts/build-windows.cmd :BuildCapsBlink",
-            capsBuild,
-            "BuildCapsBlink.cmd");
-        RequireContains(
-            "capsblink uses a GUI subsystem binary so Startup is console-free",
-            "legacy/capsblink/BuildCapsBlink.cmd",
-            capsProductBuild,
-            "/target:winexe");
-        RequireContains(
-            "capsblink build treats compiler warnings as errors",
-            "legacy/capsblink/BuildCapsBlink.cmd",
-            capsProductBuild,
-            "/warnaserror+");
-        RequireContains(
-            "capsblink build compiles shared named-object scoping",
-            "legacy/capsblink/BuildCapsBlink.cmd",
-            capsProductBuild,
-            "dependencies\\managed_named_objects.cs");
-        RequireContains(
-            "capsblink build compiles the shared managed INI source",
-            "legacy/capsblink/BuildCapsBlink.cmd",
-            capsProductBuild,
-            "dependencies\\managed_ini.cs");
-        RequireContains(
-            "capsblink build compiles the shared managed Startup source",
-            "legacy/capsblink/BuildCapsBlink.cmd",
-            capsProductBuild,
-            "dependencies\\managed_startup_shortcut.cs");
-        RequireContains(
-            "capsblink build compiles the shared managed tray source",
-            "legacy/capsblink/BuildCapsBlink.cmd",
-            capsProductBuild,
-            "dependencies\\managed_tray.cs");
-        RequireContains(
-            "capsblink build compiles the product dependency overlay",
-            "legacy/capsblink/BuildCapsBlink.cmd",
-            capsProductBuild,
-            "dependencies\\capsblink\\capsblink_app.cs");
-        RequireContains(
-            "capsblink build compiles the project metadata overlay",
-            "legacy/capsblink/BuildCapsBlink.cmd",
-            capsProductBuild,
-            "%ROOT%capsblink.cs");
-        RequireContains(
-            "capsblink uses cross-session profile and device controls",
-            "dependencies/capsblink/capsblink_app.cs",
-            capsBlink,
-            "ManagedNamedObjects.MachineScopedName(");
-        RequireContains(
-            "capsblink reloads UI-only settings without reopening its device",
-            "dependencies/capsblink/capsblink_app.cs",
-            capsBlink,
-            "Applied reloaded settings without reopening the keyboard device");
-        RequireContains(
-            "capsblink fixes logically-on indicator synchronization",
-            "dependencies/capsblink/capsblink_app.cs",
-            capsBlink,
-            "indicators.LEDflags | Flags.KEYBOARD_CAPS_LOCK_ON");
-        RequireContains(
             "DNSAutoUpdate project source is a metadata overlay",
             "legacy/DNSAutoUpdate/DNSAutoUpdate.cs",
             dnsOverlay,
@@ -753,7 +601,7 @@ int main()
             "DNSAutoUpdate consumes the shared managed Startup lifecycle",
             "dependencies/DNSAutoUpdate/dns_auto_update_app.cs",
             dnsAutoUpdate,
-            "ManagedStartupShortcut.CommitIniCoupledState");
+            "new ManagedConfigurationStartup(iniFile, startupShortcut");
         RequireContains(
             "DNSAutoUpdate consumes the shared managed tray lifecycle",
             "dependencies/DNSAutoUpdate/dns_auto_update_app.cs",
@@ -1224,10 +1072,10 @@ int main()
             logging,
             "Log file write failed");
         RequireContains(
-            "shared config mutex uses stable hash helper",
+            "shared config mutex uses the normalized native and managed file identity",
             "dependencies/config_ini.inc",
             configIni,
-            "StableHashHex64(MakeAbsolutePath(path))");
+            "named_objects::IniMutationName(path, name)");
         RequireContains(
             "shared config mutex supports bounded waits",
             "dependencies/config_ini.inc",
@@ -1423,7 +1271,6 @@ int main()
         for (const auto& script : std::vector<std::pair<std::string, std::string>>{
                  { "tools/TestSharedBaseline.cmd", sharedTestScript },
                  { "DesktopStub/TestDesktopStubSource.cmd", desktopSourceTestScript },
-                 { "DiscordRPC/TestDiscordRPCSource.cmd", discordSourceTestScript },
                  { "legacy/SecureDesktopLauncher/TestSecureDesktopLauncherSource.cmd", secureSourceTestScript } })
         {
             RequireOrderedContains(
@@ -1547,21 +1394,13 @@ int main()
             sharedTests,
             "single-instance identity supports shared path-scoped hashing");
 
-        RequireContains(
-            "DiscordRPC help contract allows read-only configured templates",
-            "DiscordRPC/DiscordRPC.cpp",
-            discordMain,
-            "it may read an existing configured");
+
         RequireContains(
             "DiscordRPC consumes the aggregate desktop baseline",
-            "DiscordRPC/DiscordRPC.cpp",
+            "dependencies/DiscordRPC/drpc_environment.inc",
             discordMain,
             "../desktop_app_baseline.h");
-        RequireContains(
-            "DiscordRPC consumes the optional shared startup helper",
-            "DiscordRPC/DiscordRPC.cpp",
-            discordMain,
-            "../startup_shortcut.inc");
+
         RequireContains(
             "DesktopStub consumes the aggregate desktop baseline",
             "DesktopStub/DesktopStub.cpp",

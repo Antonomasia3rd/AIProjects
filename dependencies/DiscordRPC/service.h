@@ -10,6 +10,12 @@ using Cancel = std::function<bool()>;
 struct Profile {
     std::map<std::pair<std::wstring, std::wstring>, std::wstring> values;
 };
+// Actual-send credential selection. Explicit inputs only: no file, migration,
+// encryption or transport. A configured protected value is authoritative,
+// including decode failure; plaintext is used only when it is absent.
+using CredentialDecoder = std::function<std::wstring(const std::wstring&)>;
+bool ResolveConfiguredToken(const std::wstring& plaintext, const std::wstring& protectedValue,
+    const CredentialDecoder& decoder, std::wstring& token, std::wstring& error);
 struct Context {
     std::map<std::wstring, std::wstring, std::less<>> tokens;
     int idleSeconds = 0;

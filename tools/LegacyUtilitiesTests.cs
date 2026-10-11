@@ -11,7 +11,7 @@ using AIProjects.Dependencies;
 
 static class LegacyUtilitiesTests
 {
-    static int failures;
+    static int checks, failures;
 
     static bool allowStartupIntegration;
     static int Main(string[] args)
@@ -30,13 +30,12 @@ static class LegacyUtilitiesTests
         TestResidentStartupTransactions();
         TestPhotoCollageAtomicOutput(repositoryRoot);
         TestTaskXmlHardening(repositoryRoot);
-        TestCapsBlinkIdentity(repositoryRoot);
-        TestAsusBlinkGuardrails(repositoryRoot);
+        TestManagedTrayTooltip();
         TestManagedNamedObjectScoping();
         TestManagedLoggingLifecycle();
         TestManagedIniLifecycle();
         TestManagedIniDialect(repositoryRoot);
-        TestManagedStartupShortcutLifecycle();
+        TestManagedStartupShortcutLifecycle(repositoryRoot);
         TestAlwaysUiAccessSource(repositoryRoot);
 
         if (failures != 0)
@@ -45,7 +44,8 @@ static class LegacyUtilitiesTests
             return 1;
         }
 
-        Console.WriteLine("Legacy utility tests passed.");
+        Console.WriteLine("Legacy utility tests passed: " + checks + " scoped checks; real Startup integration " +
+            (allowStartupIntegration ? "explicitly enabled" : "disabled") + ".");
         return 0;
     }
 
@@ -332,28 +332,19 @@ static class LegacyUtilitiesTests
         var previousFactory = ManagedConfigurationStartup.PlatformFactory;
         try
         {
-            foreach (Type product in new[] { typeof(DNSAutoUpdate), typeof(CapsLockLight), typeof(Program) })
+            foreach (Type product in new[] { typeof(DNSAutoUpdate) })
             {
                 var profile = (ManagedIniFileSpec)product.GetField("iniFile", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
-                var legacyField = product.GetField("legacyIniFile", BindingFlags.NonPublic | BindingFlags.Static);
-                var legacy = legacyField == null ? null : (ManagedIniFileSpec)legacyField.GetValue(null);
                 string oldPath = profile.FilePath;
-                string oldLegacyPath = legacy == null ? null : legacy.FilePath;
                 string ini = Path.Combine(root, product.Name + ".ini");
                 profile.FilePath = ini;
-                if (legacy != null) legacy.FilePath = ini;
                 var platform = new FixtureConfigurationStartupPlatform();
                 ManagedConfigurationStartup.PlatformFactory = delegate { return platform; };
                 Func<IDictionary<string, string>, bool> save = delegate(IDictionary<string, string> changes)
                 {
                     return (bool)InvokePrivate(product, "PersistSettingsAtomically", new object[] { changes });
                 };
-                string key = product == typeof(DNSAutoUpdate) ? "SleepSeconds" :
-                    product == typeof(CapsLockLight) ? "BlinkIntervalMs" : "ErrorRetry";
-                string first = product == typeof(DNSAutoUpdate) ? "60" :
-                    product == typeof(CapsLockLight) ? "500" : "3";
-                string second = product == typeof(DNSAutoUpdate) ? "90" :
-                    product == typeof(CapsLockLight) ? "750" : "4";
+                string key = "SleepSeconds", first = "60", second = "90";
                 try
                 {
                     File.WriteAllText(ini, "; keep exact bytes and omitted defaults\r\n[Settings]\r\nRunAtStartup = true\r\n" +
@@ -390,7 +381,6 @@ static class LegacyUtilitiesTests
                     Check(save(new Dictionary<string, string> { { key, first } }) && platform.Commits == commits &&
                         ManagedIniFile.LoadSection(profile, false)[key] == first,
                         product.Name + " ordinary settings use the same adapter without touching Startup");
-                    if (product != typeof(CapsLockLight))
                     {
                         // Simulate a cooperating writer finishing before the
                         // Startup transaction acquires its INI scope.
@@ -436,20 +426,11 @@ static class LegacyUtilitiesTests
                         product.Name + " a complete batch repairs invalid Startup and ordinary saved values together");
                     Check(save(new Dictionary<string, string> { { "RunAtStartup", "false" } }) && !platform.LaunchExists,
                         product.Name + " repaired profile supports normal later Startup changes");
-                    if (legacy != null)
-                    {
-                        File.WriteAllText(ini, "[Options]\nRunStartup=invalid\nErrorRetry=invalid\nno-tray=invalid\n");
-                        Check(save(new Dictionary<string, string> {
-                            { "RunAtStartup", "false" }, { "ErrorRetry", "3" }, { "ShowTrayIcon", "true" }
-                        }) && save(new Dictionary<string, string> { { "ErrorRetry", "4" } }),
-                            "ASUS modern settings repair and override invalid legacy values on future loads");
-                    }
                     Check(!Directory.GetFiles(root, ".AIProjects-*.tmp").Any(), product.Name + " transaction leaves no staging files");
                 }
                 finally
                 {
                     profile.FilePath = oldPath;
-                    if (legacy != null) legacy.FilePath = oldLegacyPath;
                 }
             }
 
@@ -919,367 +900,11 @@ static class LegacyUtilitiesTests
             "TaskSchedulerMigration reports partial enumeration as a nonzero result");
     }
 
-    static void TestCapsBlinkIdentity(string repositoryRoot)
+    static void TestManagedTrayTooltip()
     {
-        string first = (string)InvokePrivate(
-            typeof(CapsLockLight),
-            "StableHash",
-            new object[] { "\\Device\\KeyboardClass0" });
-        string second = (string)InvokePrivate(
-            typeof(CapsLockLight),
-            "StableHash",
-            new object[] { "\\device\\keyboardclass0" });
-        Check(first == second && first.Length == 8, "capsblink uses a stable case-insensitive device identity");
-
-        CheckThrows<ArgumentException>(
-            delegate
-            {
-                InvokePrivate(
-                    typeof(CapsLockLight),
-                    "ParseCommandLine",
-                    new object[] { new[] { "--unknown" } });
-            },
-            "capsblink rejects unknown command-line arguments");
-        CheckThrows<ArgumentException>(
-            delegate
-            {
-                InvokePrivate(
-                    typeof(CapsLockLight),
-                    "ParseCommandLine",
-                    new object[] { new[] { "--blink-interval-ms", "49" } });
-            },
-            "capsblink rejects out-of-range command-line timing");
-
-        object parsed = InvokePrivate(
-            typeof(CapsLockLight),
-            "ParseCommandLine",
-            new object[]
-            {
-                new[]
-                {
-                    "--startup",
-                    "--flat-menu",
-                    "--set", "Settings.BlinkIntervalMs=750"
-                }
-            });
-        var parsedSettings = (IDictionary)parsed.GetType().GetField("Settings").GetValue(parsed);
-        Check(
-            (string)parsedSettings["RunAtStartup"] == "true" &&
-            (string)parsedSettings["ShowMenuAsDropdown"] == "false" &&
-            (string)parsedSettings["BlinkIntervalMs"] == "750",
-            "capsblink aliases and generic setter share canonical persistent settings");
-
-        string source = File.ReadAllText(Path.Combine(
-            repositoryRoot,
-            "dependencies",
-            "capsblink",
-            "capsblink_app.cs"));
-        int parsePosition = source.IndexOf("commandLine = ParseCommandLine(args);", StringComparison.Ordinal);
-        int persistPosition = source.IndexOf("PersistSettingsAtomically(commandLine.Settings)", StringComparison.Ordinal);
-        int hardwarePosition = source.IndexOf("HardwareWorker(initialSettings)", StringComparison.Ordinal);
-        Check(
-            parsePosition >= 0 && persistPosition >= 0 && hardwarePosition >= 0 &&
-            parsePosition < persistPosition && persistPosition < hardwarePosition,
-            "capsblink validates command-line syntax before INI and hardware mutation");
-        Check(
-            source.Contains("WaitHandle.WaitAny(controls, settings.BlinkIntervalMs)") &&
-            source.Contains("localReloadEvent") &&
-            source.Contains("externalExitEvent") &&
-            source.Contains("RequestExit();"),
-            "capsblink interrupts long waits for console, tray, and CLI control");
-        Check(
-            source.Contains("BlinkIntervalKey + \" must be an integer from 50 through 86400000.\"") &&
-            source.Contains("throw new InvalidDataException(\"Invalid [Settings] \"") &&
-            source.Contains("Unknown [Settings] key"),
-            "capsblink strictly validates typed INI settings");
-        Check(
-            source.Contains("EntryPoint = \"DefineDosDeviceW\"") &&
-            source.Contains("EntryPoint = \"CreateFileW\"") &&
-            source.Contains("CharSet = CharSet.Unicode"),
-            "capsblink binds string Win32 APIs to explicit Unicode entry points");
-        Check(
-            source.Contains("new ManagedConfigurationStartup(iniFile, startupShortcut") &&
-            source.Contains("ManagedTrayBaseline.CreateNotifyIcon(") &&
-            source.Contains("ManagedTrayBaseline.TryPromptText(") &&
-            source.Contains("ShowMenuAsDropdown"),
-            "capsblink consumes shared managed Startup and tray dependencies for every setting surface");
-        Check(
-            source.Contains("ManagedLogFile.AppendLine(") &&
-            !source.Contains("File.AppendAllText("),
-            "capsblink delegates sidecar logging and error reporting to the shared managed logger");
-        Check(
-            source.Contains("capsLockOn") &&
-            source.Contains("indicators.LEDflags | Flags.KEYBOARD_CAPS_LOCK_ON") &&
-            source.Contains("SynchronizeCapsIndicator(device"),
-            "capsblink forces a logically-on Caps Lock indicator back on and restores it at cleanup");
-    }
-
-    static void TestAsusBlinkGuardrails(string repositoryRoot)
-    {
-        CheckThrows<ArgumentException>(
-            delegate
-            {
-                InvokePrivate(
-                    typeof(Program),
-                    "ParseArgs",
-                    new object[] { new[] { "--mic-state", "--no-tray" } });
-            },
-            "asusblink rejects a missing option value");
-        CheckThrows<ArgumentException>(
-            delegate
-            {
-                InvokePrivate(
-                    typeof(Program),
-                    "ParseArgs",
-                    new object[] { new[] { "--unknown", "1" } });
-            },
-            "asusblink rejects unknown options");
-        CheckThrows<ArgumentException>(
-            delegate
-            {
-                InvokePrivate(
-                    typeof(Program),
-                    "ParseTimeMs",
-                    new object[] { "not-a-time", "test-time" });
-            },
-            "asusblink rejects malformed time values");
-        CheckThrows<ArgumentException>(
-            delegate
-            {
-                InvokePrivate(
-                    typeof(Program),
-                    "ParseTimeMs",
-                    new object[] { "0.5ms", "test-time" });
-            },
-            "asusblink rejects sub-millisecond values instead of truncating to an infinite duration");
-        CheckThrows<ArgumentException>(
-            delegate
-            {
-                InvokePrivate(
-                    typeof(Program),
-                    "ParseArgs",
-                    new object[] { new[] { "--set", "Options.run-at-startup=maybe" } });
-            },
-            "asusblink rejects invalid typed persistent booleans");
-        CheckThrows<ArgumentException>(
-            delegate
-            {
-                InvokePrivate(
-                    typeof(Program),
-                    "ParseArgs",
-                    new object[] { new[] { "--set", "Settings.ShowTrayIcon=" } });
-            },
-            "asusblink rejects empty canonical booleans consistently with other managed residents");
-
-        object parsedAliases = InvokePrivate(
-            typeof(Program),
-            "ParseArgs",
-            new object[]
-            {
-                new[]
-                {
-                    "--startup",
-                    "--flat-menu",
-                    "--set", "Options.error-retry=5"
-                }
-            });
-        var persistentAliases = (IDictionary)parsedAliases.GetType()
-            .GetField("PersistentOptions")
-            .GetValue(parsedAliases);
-        Check(
-            (string)persistentAliases["RunAtStartup"] == "true" &&
-            (string)persistentAliases["ShowMenuAsDropdown"] == "false" &&
-            (string)persistentAliases["ErrorRetry"] == "5",
-            "asusblink command-line aliases share canonical persistent settings");
-
-        var defaults = (IDictionary)InvokePrivate(
-            typeof(Program),
-            "DefaultSettings",
-            new object[0]);
-        Check(
-            (string)defaults["MicInterval"] == "0" &&
-            (string)defaults["MicDuration"] == "once" &&
-            (string)defaults["KeyboardInterval"] == "0" &&
-            (string)defaults["KeyboardDuration"] == "once",
-            "asusblink canonical defaults preserve legacy one-cycle event behavior");
-        Check(
-            (string)InvokePrivate(
-                typeof(Program),
-                "CanonicalizeOptionValue",
-                new object[] { "mic-duration", "ONCE" }) == "once",
-            "asusblink exposes one-cycle duration consistently through typed settings");
-        var invalidProfile = (IDictionary)InvokePrivate(
-            typeof(Program),
-            "DefaultSettings",
-            new object[0]);
-        invalidProfile["ErrorAction"] = "pause";
-        invalidProfile["ShowTrayIcon"] = "false";
-        CheckThrows<InvalidDataException>(
-            delegate
-            {
-                InvokePrivate(
-                    typeof(Program),
-                    "BuildRuntimeProfile",
-                    new object[] { invalidProfile });
-            },
-            "asusblink rejects cross-setting combinations before they can become a runtime profile");
-
-        string path = Path.Combine(
-            repositoryRoot,
-            "dependencies",
-            "asusblink",
-            "asusblink_app.cs");
-        string source = File.ReadAllText(path);
-        string startupSource = File.ReadAllText(Path.Combine(
-            repositoryRoot,
-            "dependencies",
-            "managed_startup_shortcut.cs"));
-        string managedIniSource = File.ReadAllText(Path.Combine(
-            repositoryRoot,
-            "dependencies",
-            "managed_ini.cs"));
-        string traySource = File.ReadAllText(Path.Combine(
-            repositoryRoot,
-            "dependencies",
-            "managed_tray.cs"));
-        string namedObjectsSource = File.ReadAllText(Path.Combine(
-            repositoryRoot,
-            "dependencies",
-            "managed_named_objects.cs"));
-        string managedLoggingSource = File.ReadAllText(Path.Combine(
-            repositoryRoot,
-            "dependencies",
-            "managed_logging.cs"));
-        string windowsBuild = File.ReadAllText(Path.Combine(
-            repositoryRoot,
-            ".github",
-            "scripts",
-            "build-windows.cmd"));
-        string asusProductBuild = File.ReadAllText(Path.Combine(
-            repositoryRoot,
-            "legacy",
-            "asusblink",
-            "BuildAsusBlink.cmd"));
-        int asusBuildStart = windowsBuild.IndexOf(
-            "\n:BuildAsusBlink",
-            StringComparison.OrdinalIgnoreCase);
-        int asusBuildEnd = windowsBuild.IndexOf(
-            "\n:BuildCapsBlink",
-            Math.Max(0, asusBuildStart + 1),
-            StringComparison.OrdinalIgnoreCase);
-        string asusBuildSection = asusBuildStart >= 0 && asusBuildEnd > asusBuildStart
-            ? windowsBuild.Substring(asusBuildStart, asusBuildEnd - asusBuildStart)
-            : "";
-        int parsePosition = source.IndexOf(
-            "commandLine = ParseArgs(args);",
-            StringComparison.Ordinal);
-        int loadPosition = source.IndexOf(
-            "RuntimeProfile initialProfile = LoadRuntimeProfile();",
-            StringComparison.Ordinal);
-        Check(
-            parsePosition >= 0 && loadPosition >= 0 && parsePosition < loadPosition,
-            "asusblink validates command-line syntax before creating/loading the INI");
-        Check(
-            source.Contains("ManagedIniFile.EnsureExists(iniFile)") &&
-            managedIniSource.Contains("Guid.NewGuid().ToString(\"N\") + \".tmp\"") &&
-            managedIniSource.Contains("File.Move(temporaryPath, spec.FilePath)") &&
-            managedIniSource.Contains("ManagedNamedObjects.CurrentUserScopedName("),
-            "asusblink creates its default INI atomically under cross-session startup races");
-        Check(
-            !source.Contains("Environment.Exit(") &&
-            !source.Contains("Environment.TickCount"),
-            "asusblink uses cooperative shutdown and monotonic duration timing");
-        Check(
-            source.Contains("WaitForRunningTasks(Timeout.Infinite)") &&
-            source.Contains("lock (acpiLock)"),
-            "asusblink drains workers before synchronized ACPI cleanup");
-        Check(
-            source.Contains("static bool CreateTray()") &&
-            source.Contains("Application.ExitThread()"),
-            "asusblink reports tray creation failure and exits its message loop cooperatively");
-        Check(
-            source.Contains("ManagedStartupShortcut.IsInstalled(startupShortcut") &&
-            source.Contains("BuildStartupConfiguration().Reconcile()") &&
-            startupSource.Contains("Environment.SpecialFolder.Startup") &&
-            startupSource.Contains("MatchesExactLaunch") &&
-            startupSource.Contains("StableIdentityHash(identity)"),
-            "asusblink consumes the shared profile-scoped Startup shortcut lifecycle");
-        Check(
-            source.Contains("static readonly string startupArguments = \"\"") &&
-            source.Contains("IdentityPath = iniPath") &&
-            source.Contains("ManagedStartupShortcut.HasOwnedTarget(") &&
-            startupSource.Contains("WorkingDirectory = ReadShortcutProperty") &&
-            startupSource.Contains("String.Equals(info.Arguments ?? \"\", spec.Arguments ?? \"\"") &&
-            startupSource.Contains("Refusing to replace a same-named Startup shortcut") &&
-            startupSource.Contains("File.Replace(temporary, destination, null)"),
-            "asusblink Startup shortcut is INI-scoped, metadata-validated, target-safe, and atomically replaced");
-        Check(
-            source.Contains("PersistSettingsAtomically(commandLine.Settings)") &&
-            source.Contains("SaveIniOptions(settings)") &&
-            source.Contains("BuildStartupConfiguration().Save(NormalizeSettingBatch(settings))") &&
-            source.Contains("new ManagedConfigurationStartup(iniFile, startupShortcut"),
-            "asusblink commits command-line settings through the shared crash-consistent Startup transaction");
-        Check(
-            source.Contains("StartupKey + \"=false\"") &&
-            source.Contains("ShowTrayKey + \"=true\"") &&
-            source.Contains("DropdownKey + \"=true\"") &&
-            source.Contains("settings[StartupKey]") &&
-            source.Contains("settings[DropdownKey]"),
-            "asusblink common INI settings are exposed through CLI and tray");
-        Check(
-            !startupSource.Contains("HKEY_CURRENT_USER") &&
-            !startupSource.Contains("TaskScheduler") &&
-            startupSource.Contains("Environment.SpecialFolder.Startup"),
-            "shared managed Startup lifecycle uses only the per-user Startup folder");
-        Check(
-            source.Contains("SaveIniOption(ErrorLogKey, iniValue)") &&
-            source.Contains("ManagedIniFile.SaveSectionBatch(iniFile, settings, out error)") &&
-            managedIniSource.Contains("File.Replace(temporaryPath, spec.FilePath, null)") &&
-            source.Contains("Log path changed and saved to:"),
-            "asusblink tray log selection persists through the same INI used on restart");
-        Check(
-            source.Contains("ManagedLogFile.AppendLine(") &&
-            !source.Contains("File.AppendAllText(") &&
-            managedLoggingSource.Contains("ManagedNamedObjects.MachineScopedName(") &&
-            managedLoggingSource.Contains("FileShare.Read"),
-            "asusblink delegates cross-process UTF-8 sidecar logging to the shared managed logger");
-        Check(
-            source.Contains("ManagedTrayBaseline.CreateNotifyIcon(") &&
-            source.Contains("ManagedTrayBaseline.AppendHeader(") &&
-            traySource.Contains("NotifyIconTooltipLimit = 63") &&
-            traySource.Contains("text.Substring(0, NotifyIconTooltipLimit)"),
-            "asusblink consumes the shared managed tray header and length-safe hover tooltip lifecycle");
-        Check(
-            source.Contains("ProfileMutexName()") &&
-            source.Contains("ReloadEventName()") &&
-            source.Contains("ExitEventName()") &&
-            source.Contains("ReloadRuntimeProfile()") &&
-            source.Contains("RunResidentLoop()") &&
-            source.Contains("ManagedStartupShortcut.StableIdentityHash(iniPath)") &&
-            source.Contains("ManagedNamedObjects.CurrentUserScopedName(") &&
-            namedObjectsSource.Contains("@\"Global\\AIProjects.\"") &&
-            source.Contains("new MenuItem(\"Reload settings\""),
-            "asusblink supports user-scoped, cross-session profile reload and exit control");
-        Check(
-            source.Contains("BuildRuntimeProfile(prospective)") &&
-            source.Contains("ReadEffectiveIniOptions(out ignoredLegacy, NormalizeSettingBatch(changes))") &&
-            source.Contains("Duplicate semantic [Settings] key:"),
-            "asusblink validates the complete prospective profile before persistent mutation");
-        Check(
-            asusBuildSection.Contains("BuildAsusBlink.cmd") &&
-            asusProductBuild.Contains("/warnaserror+") &&
-            asusProductBuild.Contains("dependencies\\managed_named_objects.cs") &&
-            asusProductBuild.Contains("dependencies\\managed_logging.cs") &&
-            asusProductBuild.Contains("dependencies\\managed_ini.cs") &&
-            asusProductBuild.Contains("dependencies\\managed_startup_shortcut.cs") &&
-            asusProductBuild.Contains("dependencies\\managed_tray.cs") &&
-            asusProductBuild.Contains("dependencies\\asusblink\\asusblink_app.cs") &&
-            asusProductBuild.Contains("%ROOT%asusblink.cs"),
-            "asusblink build guardrails pin every shared dependency inside its own build section");
         Check(
             AIProjects.Dependencies.ManagedTrayBaseline.NormalizeTooltip(
-                new string('x', 80),
-                "fallback").Length == 63,
+                new string('x', 80), "fallback").Length == 63,
             "shared managed tray tooltip enforces the WinForms length limit at runtime");
         Check(
             AIProjects.Dependencies.ManagedTrayBaseline.NormalizeTooltip("\0 state", "Product") == "state" &&
@@ -1289,10 +914,6 @@ static class LegacyUtilitiesTests
             AIProjects.Dependencies.ManagedTrayBaseline.NormalizeTooltip(
                 new string('x', 62) + "\uD83D\uDE00", "Product") == new string('x', 62),
             "shared managed tooltip truncation preserves complete Unicode pairs");
-        Check(
-            source.Contains("if (bytesReturned < sizeof(int))") &&
-            source.Contains("ACPI returned a truncated response"),
-            "asusblink rejects truncated ACPI firmware responses");
     }
 
     static void TestAlwaysUiAccessSource(string repositoryRoot)
@@ -1394,8 +1015,14 @@ static class LegacyUtilitiesTests
             "DNS IPv4 validation is strict for " + input);
     }
 
-    static void TestManagedStartupShortcutLifecycle()
+    static void TestManagedStartupShortcutLifecycle(string repositoryRoot)
     {
+        // Retain the shared policy guard previously grouped with ASUS app
+        // checks; it is independent of every retired donor entry point.
+        string startupSource = File.ReadAllText(Path.Combine(repositoryRoot, "dependencies", "managed_startup_shortcut.cs"));
+        Check(!startupSource.Contains("HKEY_CURRENT_USER") && !startupSource.Contains("TaskScheduler") &&
+            startupSource.Contains("Environment.SpecialFolder.Startup"),
+            "shared managed Startup lifecycle uses only the per-user Startup folder");
         var enableOrder = new List<string>();
         string coupledError;
         bool enabled = AIProjects.Dependencies.ManagedStartupShortcut
@@ -2126,6 +1753,7 @@ static class LegacyUtilitiesTests
 
     static void Check(bool condition, string name)
     {
+        checks++;
         if (condition)
         {
             Console.WriteLine("ok - " + name);

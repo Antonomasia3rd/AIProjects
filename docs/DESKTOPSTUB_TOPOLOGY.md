@@ -59,10 +59,12 @@ See [the content guide](content-engine.md) for configuration and remaining UI
 limitations.
 
 Notes uses `dependencies/content_sources/notes.inc` directly. DesktopStub does
-not load `RealTimeNotesDeskband.dll`. The retained standalone deskband is a
-separate Explorer COM product sharing that data engine. The other remaining
-standalone products likewise remain until their required behavior has parity;
-their presence is not evidence of a DLL plugin architecture.
+not load `RealTimeNotesDeskband.dll`. Its former Explorer host and the standalone
+NowPlaying/Caps/ASUS hosts are retired from the source/build catalog. Their
+shared providers and explicit configuration imports remain inside DesktopStub.
+Discord's donor is also retired; its advanced editor and shared transports remain
+inside the host. Source retirement does not uninstall older programs or shell integrations;
+see [migration](donor-retirement-2026-10-11.md).
 
 The standard host includes hardware code, but the hardware actions default
 off. `DESKTOPSTUB_ENABLE_HARDWARE_SOURCES=0` can omit those backends at build

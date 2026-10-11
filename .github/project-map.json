@@ -45,48 +45,6 @@
     ]
   },
   {
-    "key": "asusblink",
-    "label": "asusblink",
-    "folder": "legacy/asusblink",
-    "buildOutput": "build_asusblink",
-    "artifactName": "asusblink",
-    "artifactPath": "legacy/asusblink/build/asusblink.exe",
-    "skipKey": "asusblink",
-    "dependencyPaths": [
-      "dependencies/managed_named_objects.cs",
-      "dependencies/managed_logging.cs",
-      "dependencies/managed_ini.cs",
-      "dependencies/managed_startup_shortcut.cs",
-      "dependencies/managed_configuration_startup.cs",
-      "dependencies/managed_tray.cs",
-      "dependencies/asusblink"
-    ],
-    "artifactPaths": [
-      "legacy/asusblink/build/asusblink.exe"
-    ]
-  },
-  {
-    "key": "capsblink",
-    "label": "capsblink",
-    "folder": "legacy/capsblink",
-    "buildOutput": "build_capsblink",
-    "artifactName": "capsblink",
-    "artifactPath": "legacy/capsblink/build/capsblink.exe",
-    "skipKey": "capsblink",
-    "dependencyPaths": [
-      "dependencies/managed_named_objects.cs",
-      "dependencies/managed_logging.cs",
-      "dependencies/managed_ini.cs",
-      "dependencies/managed_startup_shortcut.cs",
-      "dependencies/managed_configuration_startup.cs",
-      "dependencies/managed_tray.cs",
-      "dependencies/capsblink"
-    ],
-    "artifactPaths": [
-      "legacy/capsblink/build/capsblink.exe"
-    ]
-  },
-  {
     "key": "YourPhoneHideBanner",
     "label": "YourPhoneHideBanner",
     "folder": "legacy/YourPhoneHideBanner",
@@ -113,26 +71,6 @@
     ]
   },
   {
-    "key": "DiscordRPC",
-    "label": "DiscordRPC",
-    "folder": "DiscordRPC",
-    "buildOutput": "build_discord_rpc",
-    "artifactName": "DiscordRPC",
-    "artifactPath": "DiscordRPC/build/DiscordRPC.exe",
-    "skipKey": "DiscordRPC",
-    "dependencyPaths": [
-      "dependencies/desktop_app_baseline.h",
-      "dependencies/release_version.inc",
-      "dependencies/dpapi.inc",
-      "dependencies/startup_shortcut.inc",
-      "dependencies/DiscordRPC"
-    ],
-    "releaseTagEnvironment": "DISCORDRPC_RELEASE_TAG",
-    "artifactPaths": [
-      "DiscordRPC/build/DiscordRPC.exe"
-    ]
-  },
-  {
     "key": "DNSAutoUpdate",
     "label": "DNSAutoUpdate",
     "folder": "legacy/DNSAutoUpdate",
@@ -151,29 +89,6 @@
     ],
     "artifactPaths": [
       "legacy/DNSAutoUpdate/build/DNSAutoUpdate.exe"
-    ]
-  },
-  {
-    "key": "NowPlayingTile",
-    "label": "NowPlayingTile",
-    "folder": "legacy/NowPlayingTile",
-    "buildOutput": "build_now_playing_tile",
-    "artifactName": "NowPlayingTile",
-    "artifactPath": "legacy/NowPlayingTile/build/NowPlayingTile.exe",
-    "skipKey": "NowPlayingTile",
-    "dependencyPaths": [
-      "dependencies/desktop_app_baseline.h",
-      "dependencies/content_sources/smtc.inc",
-      "dependencies/content_sources/smtc_artwork.inc",
-      "dependencies/packaged_startup.inc",
-      "dependencies/packaged_startup_manifest.h",
-      "dependencies/appx_registration_script.h",
-      "dependencies/powershell_runner.inc",
-      "dependencies/NowPlayingTile"
-    ],
-    "artifactPaths": [
-      "legacy/NowPlayingTile/build/NowPlayingTile.exe",
-      "legacy/NowPlayingTile/README.md"
     ]
   },
   {
@@ -353,29 +268,6 @@
     ],
     "artifactPaths": [
       "legacy/TaskSchedulerMigration/build/TaskSchedulerMigration.exe"
-    ]
-  },
-  {
-    "key": "RealTimeNotesDeskband",
-    "label": "RealTimeNotesDeskband",
-    "folder": "legacy/RealTimeNotesDeskband",
-    "buildOutput": "build_real_time_notes_deskband",
-    "artifactName": "RealTimeNotesDeskband",
-    "artifactPath": "legacy/RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll",
-    "skipKey": "RealTimeNotesDeskband",
-    "dependencyPaths": [
-      "dependencies/desktop_app_baseline.h",
-      "dependencies/http_fetch.inc",
-      "dependencies/content_sources/notes.inc",
-      "dependencies/dpapi.inc",
-      "dependencies/RealTimeNotesDeskband"
-    ],
-    "artifactPaths": [
-      "legacy/RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll",
-      "legacy/RealTimeNotesDeskband/README.md",
-      "legacy/RealTimeNotesDeskband/RegisterDeskband.cmd",
-      "legacy/RealTimeNotesDeskband/UnregisterDeskband.cmd",
-      "legacy/RealTimeNotesDeskband/ConfigureDeskband.cmd"
     ]
   }
 ]

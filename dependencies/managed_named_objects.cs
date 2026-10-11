@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
@@ -23,6 +24,15 @@ namespace AIProjects.Dependencies
         {
             return @"Global\AIProjects." + NormalizeComponent(component) + "." +
                 StableIdentityHash(identity ?? "");
+        }
+
+        // Keep aligned with native named_objects::NormalizeFileIdentity. The
+        // mutex follows a file across language, account and session boundaries.
+        public static string NormalizeFileIdentity(string path)
+        {
+            if (String.IsNullOrWhiteSpace(path)) throw new ArgumentException("A file path is required.", "path");
+            return Path.GetFullPath(path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)).TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToUpperInvariant();
         }
 
         public static string StableIdentityHash(string value)

@@ -16,12 +16,8 @@ on:
           - All
           - AllowContentAboveLock
           - ADBController
-          - asusblink
-          - capsblink
           - YourPhoneHideBanner
-          - DiscordRPC
           - DNSAutoUpdate
-          - NowPlayingTile
           - PhotoCollage
           - ChromeProfileCounter
           - YouTubeMusicMigrate
@@ -29,7 +25,6 @@ on:
           - CharmTray
           - SecureDesktopLauncher
           - TaskSchedulerMigration
-          - RealTimeNotesDeskband
 
 concurrency:
   group: windows-build-${{ github.ref }}
@@ -66,12 +61,8 @@ jobs:
       release_base: ${{ steps.detect.outputs.release_base }}
       build_allow_content_above_lock: ${{ steps.detect.outputs.build_allow_content_above_lock }}
       build_adb_controller: ${{ steps.detect.outputs.build_adb_controller }}
-      build_asusblink: ${{ steps.detect.outputs.build_asusblink }}
-      build_capsblink: ${{ steps.detect.outputs.build_capsblink }}
       build_your_phone_hide_banner: ${{ steps.detect.outputs.build_your_phone_hide_banner }}
-      build_discord_rpc: ${{ steps.detect.outputs.build_discord_rpc }}
       build_dns_auto_update: ${{ steps.detect.outputs.build_dns_auto_update }}
-      build_now_playing_tile: ${{ steps.detect.outputs.build_now_playing_tile }}
       build_photo_collage: ${{ steps.detect.outputs.build_photo_collage }}
       build_chrome_profile_counter: ${{ steps.detect.outputs.build_chrome_profile_counter }}
       build_youtube_music_migrate: ${{ steps.detect.outputs.build_youtube_music_migrate }}
@@ -79,7 +70,6 @@ jobs:
       build_charm_tray: ${{ steps.detect.outputs.build_charm_tray }}
       build_secure_desktop_launcher: ${{ steps.detect.outputs.build_secure_desktop_launcher }}
       build_task_scheduler_migration: ${{ steps.detect.outputs.build_task_scheduler_migration }}
-      build_real_time_notes_deskband: ${{ steps.detect.outputs.build_real_time_notes_deskband }}
 
     steps:
       - name: Check out repository
@@ -131,6 +121,10 @@ jobs:
       - name: Test shared C++ baseline
         shell: cmd
         run: tools\TestSharedBaseline.cmd
+
+      - name: Test native and managed INI interoperability
+        shell: pwsh
+        run: tools\TestManagedIniInteropTests.ps1 -Run
 
       - name: Test shared media source
         shell: cmd
@@ -207,22 +201,6 @@ jobs:
             legacy/ADBController/ADBController.example.ini
           if-no-files-found: error
 
-      - name: Upload asusblink artifact
-        if: needs.detect-projects.outputs.build_asusblink == 'true'
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: asusblink
-          path: legacy/asusblink/build/asusblink.exe
-          if-no-files-found: error
-
-      - name: Upload capsblink artifact
-        if: needs.detect-projects.outputs.build_capsblink == 'true'
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: capsblink
-          path: legacy/capsblink/build/capsblink.exe
-          if-no-files-found: error
-
       - name: Upload YourPhoneHideBanner artifact
         if: needs.detect-projects.outputs.build_your_phone_hide_banner == 'true'
         uses: actions/upload-artifact@v7.0.1
@@ -234,30 +212,12 @@ jobs:
             legacy/YourPhoneHideBanner/YourPhoneHideBanner.example.ini
           if-no-files-found: error
 
-      - name: Upload DiscordRPC artifact
-        if: needs.detect-projects.outputs.build_discord_rpc == 'true'
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: DiscordRPC
-          path: DiscordRPC/build/DiscordRPC.exe
-          if-no-files-found: error
-
       - name: Upload DNSAutoUpdate artifact
         if: needs.detect-projects.outputs.build_dns_auto_update == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: DNSAutoUpdate
           path: legacy/DNSAutoUpdate/build/DNSAutoUpdate.exe
-          if-no-files-found: error
-
-      - name: Upload NowPlayingTile artifact
-        if: needs.detect-projects.outputs.build_now_playing_tile == 'true'
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: NowPlayingTile
-          path: |
-            legacy/NowPlayingTile/build/NowPlayingTile.exe
-            legacy/NowPlayingTile/README.md
           if-no-files-found: error
 
       - name: Upload PhotoCollage artifact
@@ -334,19 +294,6 @@ jobs:
         with:
           name: TaskSchedulerMigration
           path: legacy/TaskSchedulerMigration/build/TaskSchedulerMigration.exe
-          if-no-files-found: error
-
-      - name: Upload RealTimeNotesDeskband artifact
-        if: needs.detect-projects.outputs.build_real_time_notes_deskband == 'true'
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: RealTimeNotesDeskband
-          path: |
-            legacy/RealTimeNotesDeskband/build/RealTimeNotesDeskband.dll
-            legacy/RealTimeNotesDeskband/README.md
-            legacy/RealTimeNotesDeskband/RegisterDeskband.cmd
-            legacy/RealTimeNotesDeskband/UnregisterDeskband.cmd
-            legacy/RealTimeNotesDeskband/ConfigureDeskband.cmd
           if-no-files-found: error
 
   attest-build-provenance:

@@ -1,0 +1,171 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using AIProjects.Dependencies;
+
+// Files belong to one new temp directory. The native worker only hashes names,
+// owns ephemeral mutexes or edits this fixture; no actual Startup is exercised.
+static class ManagedIniInteropTests
+{
+    static string native;
+    static int checks;
+    static Process Start(string root, params string[] arguments)
+    {
+        var info = new ProcessStartInfo(native, String.Join(" ", arguments.Select(ManagedConfigurationStartup.QuoteArgument))) {
+            WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
+            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+        };
+        return Process.Start(info);
+    }
+    static string Run(string root, int expected, params string[] arguments)
+    {
+        using (var process = Start(root, arguments))
+        {
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(5000)) { process.Kill(); throw new TimeoutException("Native fixture worker exceeded five seconds."); }
+            string output = stdout.Result + stderr.Result;
+            if (process.ExitCode != expected) throw new IOException("Unexpected native fixture exit: " + process.ExitCode + " " + output);
+            return output.Trim();
+        }
+    }
+    static Dictionary<string, string> Fields(string output)
+    {
+        var fields = new Dictionary<string, string>();
+        foreach (string line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            int equal = line.IndexOf('=');
+            if (equal > 0) fields.Add(line.Substring(0, equal), line.Substring(equal + 1));
+        }
+        return fields;
+    }
+    static ManagedIniDocumentSpec Spec(string path)
+    { return new ManagedIniDocumentSpec { FilePath = path, DefaultContents = "", MutationWaitMilliseconds = 1500 }; }
+    static void Names(string root)
+    {
+        string actual = Path.Combine(root, "École-亚洲-😀.ini");
+        string relative = Path.Combine(Path.GetFileName(root), "..", Path.GetFileName(root), "École-亚洲-😀.ini");
+        // The relative alias is resolved from the same temporary parent in both languages.
+        string parent = Path.GetDirectoryName(root);
+        string previous = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = parent;
+            string expectedIdentity = ManagedNamedObjects.NormalizeFileIdentity(actual);
+            string expectedName = ManagedNamedObjects.MachineScopedName("ConfigIni", expectedIdentity);
+            foreach (string alias in new[] { actual, actual.ToLowerInvariant(), actual.Replace('\\', '/'), relative,
+                Path.Combine(root, ".", "École-亚洲-😀.ini"), Path.Combine(root, "sub", "..", "École-亚洲-😀.ini") })
+            {
+                var fields = Fields(Run(parent, 0, "--name", alias));
+                Check(fields["IDENTITY"] == ManagedNamedObjects.NormalizeFileIdentity(alias) && fields["NAME"] == expectedName,
+                    "native/managed file name matches across case, slashes, relative/dot aliases and Unicode");
+            }
+            Check(expectedName.StartsWith(@"Global\AIProjects.ConfigIni.") && expectedName.Split('.').Length == 3,
+                "INI identity is Global and scoped only to its normalized file, with no account/session suffix");
+            var different = Fields(Run(root, 0, "--name", Path.Combine(root, "different.ini")));
+            Check(different["NAME"] != expectedName, "different files keep independent shared lock identities");
+            foreach (string value in new[] { "", "ASCII identity", "亚洲 😀 é" })
+                Check(Run(root, 0, "--hash", value) == ManagedNamedObjects.StableIdentityHash(value), "native UTF-8 SHA identity uses the same first eight bytes and uppercase hex as managed");
+            var startup = Fields(Run(root, 0, "--startup-name", Path.Combine(root, "synthetic-shortcut.lnk")));
+            Check(startup["NAME"] == ManagedNamedObjects.CurrentUserScopedName("StartupShortcut", startup["IDENTITY"]) &&
+                startup["NAME"].StartsWith(@"Global\AIProjects.StartupShortcut."), "native Startup uses Global user scope and its existing shortcut-path identity without creating a shortcut");
+        }
+        finally { Environment.CurrentDirectory = previous; }
+    }
+    static void Locks(string root, string path)
+    {
+        File.WriteAllText(path, "; exact original\r\n[Managed]\r\nCount=0\r\n[Native]\r\nCount=0\r\n", Encoding.Unicode);
+        var spec = Spec(path);
+        using (var transaction = ManagedIniFile.BeginTransaction(spec))
+        {
+            Check(Run(root, 3, "--probe", path.Replace('\\', '/').ToUpperInvariant(), "50").StartsWith("LOCK_UNAVAILABLE="),
+                "managed owner blocks native alias acquisition on the same Global file mutex");
+            string error;
+            Check(transaction.TryRestoreOriginal(out error), "managed exact-original rollback still works with the shared native identity");
+        }
+        Check(Run(root, 0, "--nested", path) == "", "native file mutex retains same-thread recursive ownership");
+        using (var holder = Start(root, "--hold", path))
+        {
+            try
+            {
+                Check(holder.StandardOutput.ReadLine() == "READY", "native owner acquires its ephemeral fixture mutex");
+                var impatient = Spec(path); impatient.MutationWaitMilliseconds = 50;
+                bool timedOut = false;
+                try { using (ManagedIniFile.BeginTransaction(impatient)) { } }
+                catch (TimeoutException) { timedOut = true; }
+                Check(timedOut, "native owner blocks managed acquisition using the configured bounded wait");
+                holder.StandardInput.WriteLine("release"); holder.StandardInput.Flush();
+                Check(holder.WaitForExit(3000) && holder.ExitCode == 0, "native owner releases without a file or Startup mutation");
+            }
+            finally { if (!holder.HasExited) holder.Kill(); }
+        }
+    }
+    static void Writers(string root, string path)
+    {
+        const int count = 100;
+        var spec = Spec(path);
+        using (var worker = Start(root, "--write", path.Replace('\\', '/').ToLowerInvariant(), count.ToString(CultureInfo.InvariantCulture)))
+        {
+            var stdout = worker.StandardOutput.ReadToEndAsync();
+            var stderr = worker.StandardError.ReadToEndAsync();
+            try
+            {
+                for (int index = 0; index < count; ++index)
+                {
+                    using (var transaction = ManagedIniFile.BeginTransaction(spec))
+                    {
+                        var current = ManagedIniFile.LoadDocument(spec);
+                        string raw;
+                        int value = current.TryGetValue("Managed", "Count", out raw) ? Int32.Parse(raw, CultureInfo.InvariantCulture) : 0;
+                        Thread.Sleep(1);
+                        string error;
+                        if (!ManagedIniFile.SaveDocumentBatch(spec, new[] { new ManagedIniSetting("Managed", "Count", (value + 1).ToString(CultureInfo.InvariantCulture)) }, out error))
+                            throw new IOException(error);
+                    }
+                }
+                Check(worker.WaitForExit(5000) && worker.ExitCode == 0, "bounded managed/native writers complete without lock or publication failures");
+                if (worker.ExitCode != 0) throw new IOException(stdout.Result + stderr.Result);
+            }
+            finally { if (!worker.HasExited) worker.Kill(); }
+        }
+        var final = ManagedIniFile.LoadDocument(spec);
+        Check(final.GetSection("Managed")["Count"] == count.ToString(CultureInfo.InvariantCulture) && final.GetSection("Native")["Count"] == count.ToString(CultureInfo.InvariantCulture),
+            "100 read-modify-writes per language preserve both sections without losing unrelated concurrent edits");
+        Check(File.ReadAllText(path).Contains("; exact original") && Directory.GetFiles(root, "*.tmp*").Length == 0,
+            "mixed publication preserves comments and leaves no temporary siblings");
+    }
+    static void Check(bool passed, string label)
+    {
+        if (!passed) throw new InvalidOperationException("FAIL: " + label);
+        ++checks; Console.WriteLine("ok - " + label);
+    }
+    static int Main(string[] args)
+    {
+        if (args.Length != 1 || !Path.IsPathRooted(args[0]) || !File.Exists(args[0])) return 2;
+        native = Path.GetFullPath(args[0]);
+        string parent = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string root = Path.GetFullPath(Path.Combine(parent, "AIProjects-IniInterop-" + Guid.NewGuid().ToString("N")));
+        if (!String.Equals(Path.GetDirectoryName(root), parent, StringComparison.OrdinalIgnoreCase)) return 2;
+        using (var deadline = new Timer(delegate(object ignored) { Console.Error.WriteLine("Managed INI interop fixture exceeded 45 seconds."); Environment.Exit(124); }, null, 45000, Timeout.Infinite))
+        {
+            Directory.CreateDirectory(root);
+            try
+            {
+                Names(root); string path = Path.Combine(root, "shared.ini"); Locks(root, path); Writers(root, path);
+                Console.WriteLine("Managed/native INI interoperability checks passed: " + checks); return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+            finally
+            {
+                if (!String.Equals(Path.GetDirectoryName(Path.GetFullPath(root)), parent, StringComparison.OrdinalIgnoreCase)) throw new IOException("Refusing cleanup outside fixture parent.");
+                Directory.Delete(root, true);
+            }
+        }
+    }
+}

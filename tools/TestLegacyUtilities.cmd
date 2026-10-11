@@ -22,8 +22,6 @@ if errorlevel 1 exit /b %ERRORLEVEL%
     "%ROOT%\legacy\PhotoCollage\PhotoCollage.cs" ^
     "%ROOT%\dependencies\TaskSchedulerMigration\task_scheduler_migration_app.cs" ^
     "%ROOT%\legacy\TaskSchedulerMigration\TaskSchedulerMigration.cs" ^
-    "%ROOT%\dependencies\capsblink\capsblink_app.cs" ^
-    "%ROOT%\legacy\capsblink\capsblink.cs" ^
     "%ROOT%\dependencies\managed_named_objects.cs" ^
     "%ROOT%\dependencies\managed_logging.cs" ^
     "%ROOT%\dependencies\managed_ini.cs" ^
@@ -31,10 +29,13 @@ if errorlevel 1 exit /b %ERRORLEVEL%
     "%ROOT%\dependencies\managed_configuration_tray.cs" ^
     "%ROOT%\dependencies\managed_configuration_startup.cs" ^
     "%ROOT%\dependencies\managed_startup_shortcut.cs" ^
-    "%ROOT%\dependencies\managed_tray.cs" ^
-    "%ROOT%\dependencies\asusblink\asusblink_app.cs" ^
-    "%ROOT%\legacy\asusblink\asusblink.cs"
+    "%ROOT%\dependencies\managed_tray.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
+
+if /i "%~1"=="--compile-only" (
+    echo Compiled the scoped managed utility fixture. Nothing was executed.
+    exit /b 0
+)
 
 "%OUT%" "%ROOT%" %*
 if errorlevel 1 exit /b %ERRORLEVEL%

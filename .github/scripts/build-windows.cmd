@@ -50,12 +50,8 @@ if errorlevel 1 goto Fail
 
 call :BuildAllowContentAboveLock || goto Fail
 call :BuildADBController || goto Fail
-call :BuildAsusBlink || goto Fail
-call :BuildCapsBlink || goto Fail
 call :BuildYourPhoneHideBanner || goto Fail
-call :BuildDiscordRPC || goto Fail
 call :BuildDNSAutoUpdate || goto Fail
-call :BuildNowPlayingTile || goto Fail
 call :BuildPhotoCollage || goto Fail
 call :BuildChromeProfileCounter || goto Fail
 call :BuildYouTubeMusicMigrate || goto Fail
@@ -63,7 +59,6 @@ call :BuildDesktopStub || goto Fail
 call :BuildCharmTray || goto Fail
 call :BuildSecureDesktopLauncher || goto Fail
 call :BuildTaskSchedulerMigration || goto Fail
-call :BuildRealTimeNotesDeskband || goto Fail
 call :WriteChecksums || goto Fail
 
 call :Section "Artifacts"
@@ -121,30 +116,6 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\ADBController\ADBController.example.ini"
 exit /b %ERRORLEVEL%
 
-:BuildAsusBlink
-call :IsSkipped asusblink
-if "!SKIP_RESULT!"=="1" exit /b 0
-call :Section "Build asusblink"
-pushd "%LEGACY%\asusblink" || exit /b 1
-call :Run cmd.exe /d /c BuildAsusBlink.cmd
-set "STATUS=%ERRORLEVEL%"
-popd
-if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%LEGACY%\asusblink\build\asusblink.exe"
-exit /b %ERRORLEVEL%
-
-:BuildCapsBlink
-call :IsSkipped capsblink
-if "!SKIP_RESULT!"=="1" exit /b 0
-call :Section "Build capsblink"
-pushd "%LEGACY%\capsblink" || exit /b 1
-call :Run cmd.exe /d /c BuildCapsBlink.cmd
-set "STATUS=%ERRORLEVEL%"
-popd
-if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%LEGACY%\capsblink\build\capsblink.exe"
-exit /b %ERRORLEVEL%
-
 :BuildYourPhoneHideBanner
 call :IsSkipped YourPhoneHideBanner
 if "!SKIP_RESULT!"=="1" exit /b 0
@@ -161,24 +132,6 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%LEGACY%\YourPhoneHideBanner\YourPhoneHideBanner.example.ini"
 exit /b %ERRORLEVEL%
 
-:BuildDiscordRPC
-call :IsSkipped DiscordRPC
-if "!SKIP_RESULT!"=="1" exit /b 0
-call :Section "Build DiscordRPC"
-pushd "%REPO%\DiscordRPC" || exit /b 1
-call :Run cmd.exe /d /c TestDiscordRPCSource.cmd
-if errorlevel 1 (
-  set "STATUS=%ERRORLEVEL%"
-  popd
-  exit /b !STATUS!
-)
-call :Run cmd.exe /d /c build.cmd
-set "STATUS=%ERRORLEVEL%"
-popd
-if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%REPO%\DiscordRPC\build\DiscordRPC.exe"
-exit /b %ERRORLEVEL%
-
 :BuildDNSAutoUpdate
 call :IsSkipped DNSAutoUpdate
 if "!SKIP_RESULT!"=="1" exit /b 0
@@ -190,27 +143,6 @@ popd
 if not "%STATUS%"=="0" exit /b %STATUS%
 call :RecordArtifact "%LEGACY%\DNSAutoUpdate\build\DNSAutoUpdate.exe"
 exit /b %ERRORLEVEL%
-
-:BuildNowPlayingTile
-call :IsSkipped NowPlayingTile
-if "!SKIP_RESULT!"=="1" exit /b 0
-call :Section "Build NowPlayingTile"
-pushd "%LEGACY%\NowPlayingTile" || exit /b 1
-call :Run cmd.exe /d /c TestNowPlayingTileSource.cmd
-if errorlevel 1 (
-  set "STATUS=!ERRORLEVEL!"
-  popd
-  exit /b !STATUS!
-)
-call :Run cmd.exe /d /c BuildNowPlayingTile.cmd
-set "STATUS=%ERRORLEVEL%"
-popd
-if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%LEGACY%\NowPlayingTile\build\NowPlayingTile.exe"
-if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%LEGACY%\NowPlayingTile\README.md"
-if errorlevel 1 exit /b %ERRORLEVEL%
-exit /b 0
 
 :BuildPhotoCollage
 call :IsSkipped PhotoCollage
@@ -352,30 +284,6 @@ set "STATUS=%ERRORLEVEL%"
 popd
 if not "%STATUS%"=="0" exit /b %STATUS%
 call :RecordArtifact "%LEGACY%\TaskSchedulerMigration\build\TaskSchedulerMigration.exe"
-exit /b %ERRORLEVEL%
-
-:BuildRealTimeNotesDeskband
-call :IsSkipped RealTimeNotesDeskband
-if "!SKIP_RESULT!"=="1" exit /b 0
-call :Section "Build RealTimeNotesDeskband"
-pushd "%LEGACY%\RealTimeNotesDeskband" || exit /b 1
-call :Run cmd.exe /d /c TestRealTimeNotesDeskbandSource.cmd
-if errorlevel 1 (
-  set "STATUS=!ERRORLEVEL!"
-  popd
-  exit /b !STATUS!
-)
-call :Run cmd.exe /d /c BuildDeskband.cmd
-set "STATUS=%ERRORLEVEL%"
-popd
-if not "%STATUS%"=="0" exit /b %STATUS%
-call :RecordArtifact "%LEGACY%\RealTimeNotesDeskband\build\RealTimeNotesDeskband.dll"
-if errorlevel 1 exit /b %ERRORLEVEL%
-call :RecordArtifact "%LEGACY%\RealTimeNotesDeskband\README.md"
-if errorlevel 1 exit /b %ERRORLEVEL%
-for %%F in (RegisterDeskband.cmd UnregisterDeskband.cmd ConfigureDeskband.cmd) do (
-  call :RecordArtifactIfExists "%LEGACY%\RealTimeNotesDeskband\%%F" || exit /b !ERRORLEVEL!
-)
 exit /b %ERRORLEVEL%
 
 :WriteChecksums

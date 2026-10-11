@@ -442,10 +442,16 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
         ParseInt(get(section, L"RefreshSeconds", read(section.c_str(), L"RefreshIntervalSeconds", L"0").c_str()), 0, 86400, cfg.notes.accounts[resource].refreshSeconds);
     }
     cfg.discord.profilePath = get(L"Discord", L"ProfilePath", L"");
-    cfg.discord.clientId = get(L"Discord", L"ClientId", L"");
-    cfg.discord.name = get(L"Discord", L"Name", L"DesktopStub");
-    cfg.discord.details = get(L"Discord", L"Details", L"{win_title}");
-    cfg.discord.state = get(L"Discord", L"State", L"CPU: {cpu}");
+    const bool externalDiscordProfile = !Trim(cfg.discord.profilePath).empty();
+    const auto discordInline = [&](const wchar_t* key, const wchar_t* fallback) {
+        // Preserve dormant inline values for repair/switching. Only the active
+        // representation's semantics may reject a complete configuration.
+        return externalDiscordProfile ? read(L"Discord", key, fallback) : get(L"Discord", key, fallback);
+    };
+    cfg.discord.clientId = discordInline(L"ClientId", L"");
+    cfg.discord.name = discordInline(L"Name", L"DesktopStub");
+    cfg.discord.details = discordInline(L"Details", L"{win_title}");
+    cfg.discord.state = discordInline(L"State", L"CPU: {cpu}");
     cfg.discord.send = get(L"Discord", L"SendPresence", L"0") == L"1";
     cfg.discord.clearOnStop = get(L"Discord", L"ClearOnStop", L"1") == L"1";
     ParseInt(get(L"Discord", L"RefreshSeconds", L"5"), 1, 86400, cfg.discord.refreshSeconds);

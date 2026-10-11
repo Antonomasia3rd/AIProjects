@@ -20,6 +20,22 @@ bool Wait(const std::function<bool()>& ready) {
 }
 int wmain()
 {
+    std::wstring selectedToken, credentialError;
+    int decodes = 0;
+    const CredentialDecoder fakeDecoder = [&](const std::wstring& value) { ++decodes; return value == L"opaque-fixture" ? L"decoded-fixture" : L""; };
+    Check(ResolveConfiguredToken(L" plaintext-fixture ", L"", fakeDecoder, selectedToken, credentialError) &&
+        selectedToken == L"plaintext-fixture" && decodes == 0, "legacy plaintext works only when protected input is absent and performs no decoding or migration");
+    Check(ResolveConfiguredToken(L"plaintext-fixture", L"opaque-fixture", fakeDecoder, selectedToken, credentialError) &&
+        selectedToken == L"decoded-fixture" && decodes == 1, "protected input remains authoritative when both representations are configured");
+    Check(!ResolveConfiguredToken(L"plaintext-fixture", L"invalid-protected-fixture", fakeDecoder, selectedToken, credentialError) &&
+        selectedToken.empty() && decodes == 2, "empty protected decode never falls back to plaintext");
+    Check(!ResolveConfiguredToken(L"plaintext-fixture", L"opaque-fixture", [](const std::wstring&) -> std::wstring { throw std::runtime_error("private-fixture-do-not-echo"); },
+        selectedToken, credentialError) && selectedToken.empty() && credentialError.find(L"private-fixture") == std::wstring::npos,
+        "a failed protected decoder returns a value-free error and never chooses legacy plaintext");
+    Check(!ResolveConfiguredToken(L"plaintext-fixture", L"opaque-fixture", {}, selectedToken, credentialError) && selectedToken.empty(),
+        "missing protected decoder never permits a plaintext downgrade");
+    Check(!ResolveConfiguredToken(L"", L"", fakeDecoder, selectedToken, credentialError) && selectedToken.empty() && decodes == 2,
+        "missing synthetic credentials perform no decode and publish no previous token");
     const auto options = ProfileOptions();
     const auto* activity = Find(options, L"general", L"activity_type");
     const auto* cadence = Find(options, L"general", L"update_interval");
@@ -44,6 +60,31 @@ int wmain()
     const std::wstring original = L"; preserved comment\r\n[general]\r\nactivity_name=Fixture\r\ntoken=legacy-untouched\r\ntoken_protected=dpapi:v1:utf8:0102ABCD\r\n[app]\r\nrun_at_startup=true\r\n[unrelated]\r\nvalue=preserve-me\r\n";
     std::wstring candidate;
     ProfileEditResult result;
+    policy.allowPrivateSecretEdits = true;
+    Check(ApplyProfileEditsToText(original, {{L"general", L"token", L"new-plaintext-fixture"}}, policy, candidate, result, error) &&
+        result.profile.values[{L"general", L"token_protected"}].empty() &&
+        ResolveConfiguredToken(result.profile.values[{L"general", L"token"}], result.profile.values[{L"general", L"token_protected"}],
+            fakeDecoder, selectedToken, credentialError) && selectedToken == L"new-plaintext-fixture" && decodes == 2,
+        "an authorized plaintext replacement clears old protected data and is the effective selected token without decoding");
+    Check(ApplyProfileEditsToText(original, {{L"general", L"token_protected", L"opaque-fixture"}}, policy, candidate, result, error) &&
+        result.profile.values[{L"general", L"token"}].empty() &&
+        ResolveConfiguredToken(result.profile.values[{L"general", L"token"}], result.profile.values[{L"general", L"token_protected"}],
+            fakeDecoder, selectedToken, credentialError) && selectedToken == L"decoded-fixture" && decodes == 3,
+        "an authorized protected replacement clears old plaintext and selects only the injected decoded replacement");
+    Check(!ApplyProfileEditsToText(original, {{L"general", L"token", L"ambiguous-plain"}, {L"general", L"token_protected", L"opaque-fixture"}},
+        policy, candidate, result, error) && candidate.empty() && !result.changed,
+        "two nonempty private credential choices reject the full batch rather than silently choosing one");
+    for (const auto* key : {L"token", L"token_protected"}) {
+        Check(ApplyProfileEditsToText(original, {{L"general", key, L""}}, policy, candidate, result, error) &&
+            result.profile.values[{L"general", L"token"}].empty() && result.profile.values[{L"general", L"token_protected"}].empty() &&
+            !ResolveConfiguredToken(result.profile.values[{L"general", L"token"}], result.profile.values[{L"general", L"token_protected"}],
+                fakeDecoder, selectedToken, credentialError) && selectedToken.empty() && decodes == 3,
+            "explicit blank credential edits clear both representations and cannot reactivate old fallback data");
+    }
+    Check(ApplyProfileEditsToText(original, {{L"general", L"token", L"new-plaintext-fixture"}, {L"general", L"token_protected", L""}},
+        policy, candidate, result, error) && result.profile.values[{L"general", L"token"}] == L"new-plaintext-fixture" &&
+        result.profile.values[{L"general", L"token_protected"}].empty(), "one nonempty explicit choice with an opposite explicit clear is coherent");
+    policy.allowPrivateSecretEdits = false;
     const std::wstring decoded = L"First line\nC:\\new\\target\\tail\tSecond line";
     Check(ApplyProfileEditsToText(original, {{L"GENERAL", L"details_template", decoded}, {L"layout", L"show_buttons", L"1"}, {L"general", L"activity_type", L"3"}},
         policy, candidate, result, error) && result.changed, "a valid complete advanced batch stages atomically");
@@ -121,6 +162,37 @@ int wmain()
             "fresh locked updates retain every independent writer's final field instead of losing unrelated changes");
     Check(document.profile.values[{L"general", L"token_protected"}] == L"dpapi:v1:utf8:0102ABCD" &&
         document.profile.values[{L"general", L"token"}] == L"legacy-untouched", "concurrent updates never alter either credential representation");
+    const auto boundedPath = directory + L"\\bounded-source.ini";
+    std::atomic<bool> entered{false}; bool boundedCommitted = false;
+    std::thread waitingEditor;
+    std::vector<BYTE> oversizedBytes{0xff, 0xfe};
+    const auto oversizedText = L";" + std::wstring(600000, L'x') + L"\r\n[general]\r\nactivity_name=Oversized fixture\r\n";
+    const auto* oversizedData = reinterpret_cast<const BYTE*>(oversizedText.data());
+    oversizedBytes.insert(oversizedBytes.end(), oversizedData, oversizedData + oversizedText.size() * sizeof(wchar_t));
+    {
+        aip::IniWriteMutexGuard held(boundedPath, 2000);
+        Check(held.IsLocked() && aip::WriteTextFileUtf8Bom(boundedPath, original), "prepare a locked small synthetic profile for the input-byte-bound regression");
+        waitingEditor = std::thread([&] {
+            entered = true; ProfileEditResult committed; std::wstring issue;
+            boundedCommitted = CommitProfileEdits(boundedPath, {{L"general", L"activity_name", L"must reject fresh oversized bytes"}}, policy, committed, issue);
+        });
+        Check(Wait([&] { return entered.load(); }), "a cooperating editor starts while the profile mutation mutex is held");
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        HANDLE replacement = CreateFileW(boundedPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        const bool replaced = replacement != INVALID_HANDLE_VALUE && aip::WriteAllBytes(replacement, oversizedBytes.data(), static_cast<DWORD>(oversizedBytes.size()));
+        if (replacement != INVALID_HANDLE_VALUE) CloseHandle(replacement);
+        Check(replaced, "the cooperating lock owner publishes a 1.2 MiB UTF-16 input whose decoded/output size would fit");
+    }
+    waitingEditor.join();
+    std::vector<BYTE> oversizedAfter;
+    Check(!boundedCommitted && aip::ReadWholeFileBytes(boundedPath, oversizedAfter) && oversizedAfter == oversizedBytes,
+        "the fresh locked byte cap rejects a cooperating oversized replacement without rewriting any bytes");
+    {
+        aip::IniWriteMutexGuard held(boundedPath, 2000);
+        Check(held.IsLocked() && aip::WriteTextFileUtf8Bom(boundedPath, original) &&
+            CommitProfileEdits(boundedPath, {{L"general", L"activity_name", L"recursive-owner"}}, policy, result, error),
+            "bounded capture and native fresh mutation support recursive same-thread mutex ownership");
+    }
     std::atomic<int> transports{0};
     Service first, second;
     Options preview;
@@ -133,6 +205,7 @@ int wmain()
     Check(first.Stop(2000) && second.Stop(2000), "injected preview workers stop within the fixture deadline");
     DeleteFileW(path.c_str());
     DeleteFileW(createdPath.c_str());
+    DeleteFileW(boundedPath.c_str());
     Check(RemoveDirectoryW(directory.c_str()) != FALSE, "fixture leaves no profile or temporary sibling behind");
     std::cout << checks << " Discord profile edit checks; " << failures << " failures\n";
     return failures ? 1 : 0;

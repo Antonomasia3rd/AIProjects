@@ -45,6 +45,8 @@ bool ReadProfileOptionForEditor(const Profile& profile, const ProfileOptionDescr
 bool NormalizeProfileSetting(aip::IniSetting& decodedSetting, const ProfileEditPolicy& policy, std::wstring& error);
 // decodedSettings contain editor/CLI text, not Discord's serialized escape
 // layer. Only selected fields are re-encoded; opaque/untouched data is preserved.
+// Explicit private credential edits choose one nonempty representation and clear
+// the opposite field. Two nonempty choices reject; blank-only edits clear both.
 bool ApplyProfileEditsToText(const std::wstring& original, const std::vector<aip::IniSetting>& decodedSettings,
     const ProfileEditPolicy& policy, std::wstring& candidate, ProfileEditResult& result, std::wstring& error);
 bool CommitProfileEdits(const std::wstring& absolutePath, const std::vector<aip::IniSetting>& decodedSettings,
@@ -53,4 +55,5 @@ bool CommitProfileEdits(const std::wstring& absolutePath, const std::vector<aip:
 // replaces an existing file. Ordinary read/edit paths still cannot create one.
 bool CreateProfileDocument(const std::wstring& absolutePath, const ProfileEditPolicy& policy,
     ProfileEditResult& result, std::wstring& error);
+bool MakeDefaultProfileDocument(std::wstring& text, ProfileEditResult& result, std::wstring& error);
 } }

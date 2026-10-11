@@ -22,6 +22,17 @@ static int RunRenderOnlyCommand()
             return fail(L"the obsolete Manifest INI section cannot be changed; use Settings.Manifest* keys.");
         if (CommandLineSettingChangesManifest(setting)) g_commandLine.regenerateManifest = true;
     }
+    if (!g_commandLine.discordProfileSettings.empty() || !g_commandLine.discordCreatePath.empty()) {
+        if (!g_commandLine.configureOnly || !g_commandLine.notesImports.empty() || !g_commandLine.hardwareImports.empty() || !g_commandLine.nowPlayingImports.empty())
+            return fail(L"advanced Discord edits are configuration-only and cannot be combined with other donor imports.");
+        DiscordHostEditOptions options;
+        options.privateInput = g_commandLine.discordPrivateInput;
+        options.create = !g_commandLine.discordCreatePath.empty(); options.createPath = g_commandLine.discordCreatePath;
+        std::wstring error;
+        if (!CommitDiscordHostProfile(g_commandLine.settings, g_commandLine.discordProfileSettings, options, error)) return fail(error);
+        aip::WriteCommandLineText(L"Saved Discord profile and host preferences; no provider or Startup operation was performed.", false); return 0;
+    }
+    if (g_commandLine.discordPrivateInput) return fail(L"--discord-private-input requires an explicit advanced profile edit.");
     const bool manifestOnly = !g_commandLine.configureOnly && g_commandLine.regenerateManifest &&
         !g_commandLine.wallpaperSpecified && !g_commandLine.generateOnce && !g_commandLine.forceGenerateOnStartup;
 

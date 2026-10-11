@@ -150,8 +150,12 @@ class StartupShortcutMutationLock
 public:
     explicit StartupShortcutMutationLock(const std::wstring& shortcutPath)
     {
-        std::wstring name = L"Local\\AIProjects.StartupShortcut." +
-            StableHashHex64(NormalizeShortcutComparisonPath(shortcutPath));
+        std::wstring name;
+        if (!named_objects::CurrentUserScopedName(L"StartupShortcut", NormalizeShortcutComparisonPath(shortcutPath), name)) {
+            error_ = GetLastError();
+            if (error_ == ERROR_SUCCESS) error_ = ERROR_INVALID_NAME;
+            return;
+        }
         handle_.Reset(CreateMutexW(nullptr, FALSE, name.c_str()));
         if (!handle_)
         {

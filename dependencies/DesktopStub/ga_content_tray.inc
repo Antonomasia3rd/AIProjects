@@ -10,6 +10,7 @@ static constexpr UINT ID_CONTENT_ENTRY_OPTIONS = 20000;
 static constexpr UINT CONTENT_ENTRY_COMMANDS = 64;
 static constexpr UINT ID_NOTES_SETTINGS = 24000;
 static constexpr UINT ID_DISCORD_SETTINGS = 25000;
+static constexpr UINT ID_DISCORD_PROFILE_OPTION = 25500;
 static constexpr UINT ID_CAPS_SETTINGS = 26000;
 static constexpr UINT ID_ASUS_SETTINGS = 27000;
 static const wchar_t* g_notesOptionKeys[] = {L"RefreshSeconds", L"HttpTimeoutSeconds", L"MaximumBytes"};
@@ -136,8 +137,29 @@ static void AppendContentEngineMenu(HMENU menu)
     }
     HMENU discord = CreatePopupMenu();
     if (discord) {
-        for (UINT option = 0; option < _countof(g_discordOptions); ++option)
-            append(discord, ID_DISCORD_SETTINGS + option, L"Discord", g_discordOptions[option]);
+        const auto activeProfile = TrimCopy(IniReadS(L"Discord", L"ProfilePath", L""));
+        if (!activeProfile.empty()) {
+            aip::AppendTrayMenuItem(discord, 0, L"Active advanced profile: " + ContentMenuValue(activeProfile), false, false);
+            aip::AppendTrayMenuItem(discord, 0, L"Actual host refresh: " + IniReadS(L"Discord", L"RefreshSeconds", L"5") + L" seconds", false, false);
+        }
+        for (UINT option = 0; option < _countof(g_discordOptions); ++option) {
+            const auto& item = g_discordOptions[option];
+            const bool inlineOnly = IEquals(item.key, L"Name") || IEquals(item.key, L"Details") || IEquals(item.key, L"State") || IEquals(item.key, L"ClientId");
+            if (!activeProfile.empty() && inlineOnly) {
+                auto storedOption = item;
+                const auto storedLabel = std::wstring(item.label) + L" (used without advanced profile)";
+                storedOption.label = storedLabel.c_str();
+                append(discord, ID_DISCORD_SETTINGS + option, L"Discord", storedOption);
+            } else append(discord, ID_DISCORD_SETTINGS + option, L"Discord", item);
+        }
+        HMENU advanced = CreatePopupMenu();
+        if (advanced) {
+            const auto options = aip::discord::ProfileOptions();
+            for (UINT index = 0; index < options.size(); ++index)
+                aip::AppendTrayMenuItem(advanced, ID_DISCORD_PROFILE_OPTION + index, options[index].label, false, true);
+            AppendContentSubmenu(discord, advanced, L"Edit advanced profile options");
+        }
+        aip::AppendTrayMenuItem(discord, ID_DISCORD_SETTINGS + 80, L"Create new advanced INI...", false, true);
         AppendContentSubmenu(menu, discord, L"Discord presence settings (preview until sending enabled)");
     }
     HMENU caps = CreatePopupMenu();
@@ -343,6 +365,47 @@ static bool SaveContentAsusEventSetting(HWND owner, const std::wstring& key, con
 
 static bool DispatchContentEngineCommand(HWND owner, UINT command)
 {
+    if (command == ID_DISCORD_SETTINGS + 80) {
+        wchar_t path[32768]{};
+        OPENFILENAMEW dialog{}; dialog.lStructSize = sizeof(dialog); dialog.hwndOwner = owner;
+        dialog.lpstrFile = path; dialog.nMaxFile = _countof(path); dialog.lpstrDefExt = L"ini";
+        dialog.lpstrFilter = L"INI profiles\0*.ini\0All files\0*.*\0\0";
+        dialog.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if (!GetSaveFileNameW(&dialog)) return true;
+        DiscordHostEditOptions options; options.create = true; options.createPath = path;
+        std::wstring error;
+        if (!CommitDiscordHostProfile({}, {}, options, error)) DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Discord profile setup", MB_OK | MB_ICONWARNING);
+        else WakePollThread();
+        return true;
+    }
+    if (command >= ID_DISCORD_PROFILE_OPTION && command < ID_DISCORD_PROFILE_OPTION + 256) {
+        const auto options = aip::discord::ProfileOptions(); const auto index = command - ID_DISCORD_PROFILE_OPTION;
+        if (index >= options.size()) return false;
+        DiscordRawFileSnapshot host;
+        std::wstring reference, path, error;
+        aip::discord::ProfileDocument document;
+        if (!CaptureDiscordRawFile(g_iniPath, host, error) ||
+            !aip::ReadIniValueFromDoc(aip::ParseIniDocument(host.text), L"Discord", L"ProfilePath", reference) || reference.empty() ||
+            !aip::discord::ResolveProfileReference(reference, g_iniPath, path, error) || !aip::discord::ReadProfileDocument(path, document, error)) {
+            if (error.empty()) error = L"Choose or create an advanced INI before editing its options.";
+            DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Advanced Discord profile", MB_OK | MB_ICONWARNING); return true;
+        }
+        const auto& option = options[index];
+        std::wstring value, label = option.label;
+        if (option.Sensitive()) label += L" (private replacement; blank clears the configured credential)";
+        else if (option.hostCadence) {
+            if (!aip::ReadIniValueFromDoc(aip::ParseIniDocument(host.text), L"Discord", L"RefreshSeconds", value)) value = L"5";
+        } else aip::discord::ReadProfileOptionForEditor(document.profile, option, value);
+        if (option.hostCadence) label += L" (also updates this source's host refresh interval)";
+        if (ShowTextInputDialog(owner, L"Advanced Discord profile", label, value, true, option.Sensitive()) != IDOK) return true;
+        DiscordHostEditOptions edit;
+        edit.privateInput = option.Sensitive(); edit.optimistic = true;
+        edit.expectedHost = host.text; edit.expectedProfile = document.text;
+        if (!CommitDiscordHostProfile({}, {{option.section, option.key, value}}, edit, error))
+            DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Advanced Discord profile", MB_OK | MB_ICONWARNING);
+        else WakePollThread();
+        return true;
+    }
     if (command == ID_CONTENT_NOW_PLAYING_IMPORT) {
         wchar_t path[32768]{};
         OPENFILENAMEW dialog{}; dialog.lStructSize = sizeof(dialog); dialog.hwndOwner = owner;

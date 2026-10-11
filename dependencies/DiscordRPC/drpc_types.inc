@@ -1,33 +1,3 @@
-using CommandLineSetting = aip::IniSetting;
-
-struct AppOptions
-{
-    bool showHelp = false;
-    bool showVersion = false;
-    bool dryRun = false;
-    bool dryRunFull = false;
-    bool verbose = false;
-    bool once = false;
-    bool forceNoTray = false;
-    bool forceTray = false;
-    bool forceShowConsole = false;
-    bool forceHideConsole = false;
-    bool requestExit = false;
-    bool protectToken = false;
-    bool reloadExistingInstance = false;
-    bool tokenProvided = false;
-    std::wstring tokenToProtect;
-    std::wstring configPath;
-    std::vector<CommandLineSetting> settings;
-};
-
-enum SingleInstanceRequest : WPARAM
-{
-    DRPC_INSTANCE_SHOW = 0,
-    DRPC_INSTANCE_EXIT = 1,
-    DRPC_INSTANCE_RELOAD = 2
-};
-
 struct IpcOptions
 {
     int connectTimeoutMs = 250;
@@ -94,25 +64,4 @@ struct GatewayOptions
     int closeTimeoutMs = 2000;
     int assetFetchTimeoutMs = 10000;
     std::wstring assetFetchUserAgent;
-};
-
-struct TrayNotification
-{
-    std::wstring title;
-    std::wstring message;
-    DWORD icon = NIIF_INFO;
-};
-
-struct RuntimeContext
-{
-    HWND hwnd = nullptr;
-    NOTIFYICONDATAW nid = {};
-    bool trayCreated = false;
-    bool trayEnabled = false;
-    bool acceptingNotifications = true;
-    aip::ResidentShutdownState shutdown;
-    std::mutex notificationMutex;
-    std::deque<TrayNotification> pendingNotifications;
-    std::thread worker;
-    DWORD workerExitCode = 0;
 };

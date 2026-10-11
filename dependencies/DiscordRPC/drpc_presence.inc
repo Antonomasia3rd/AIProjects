@@ -900,37 +900,3 @@ static std::string BuildClearActivityPayload(const std::wstring& nonce)
     payload.push_back('}');
     return payload;
 }
-
-static bool IsSensitiveTokenKey(const std::wstring& key)
-{
-    return key == L"win_title" ||
-        key == L"win_exe_path" ||
-        key == L"win_pid" ||
-        key == L"computer" ||
-        key == L"username" ||
-        key == L"exe_path";
-}
-
-static int RunDryRun(bool full)
-{
-    PresencePayload payload = BuildPresencePayload();
-    PrintLine(GetUiString(L"dry_run_header", L"=== Discord activity JSON ==="));
-    PrintLine(Utf8ToWide(payload.activityJson));
-    PrintLine(L"");
-    PrintLine(GetUiString(L"dry_run_tokens", L"=== Available template tokens ==="));
-    if (!full && IniReadB(L"app", L"dry_run_redact_sensitive", true))
-    {
-        PrintLine(GetUiString(L"dry_run_redacted_note", L"Sensitive local tokens are redacted. Use --dry-run-full to show raw values."));
-    }
-
-    for (const auto& entry : payload.context.tokens)
-    {
-        std::wstring value = entry.second;
-        if (!full && IniReadB(L"app", L"dry_run_redact_sensitive", true) && IsSensitiveTokenKey(entry.first) && !value.empty())
-        {
-            value = L"<redacted:" + entry.first + L">";
-        }
-        PrintLine(L"  {" + entry.first + L"} = " + value);
-    }
-    return 0;
-}

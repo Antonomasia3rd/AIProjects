@@ -40,6 +40,19 @@ static bool WriteContentFixture(const std::wstring& text)
     return ReadIniFileForMutation(loaded) && loaded == text;
 }
 
+static bool SeedContentFixtureDefaults()
+{
+    std::wstring original;
+    if (!ReadIniFileForMutation(original)) return false;
+    auto complete = BuildInitialIniTemplate();
+    for (const auto& section : aip::ParseIniDocument(original))
+        for (const auto& entry : section.entries)
+            if (!aip::WriteIniValueToText(complete, section.name.c_str(), entry.key.c_str(), entry.value)) return false;
+    // Import behavior uses the effective source/host values above. Missing
+    // default initialization is exercised separately by the persistence group.
+    return WriteContentFixture(complete);
+}
+
 template<class Ready> static bool HostUntil(Ready ready)
 {
     const auto deadline = steady_clock::now() + milliseconds(2500);
@@ -427,6 +440,7 @@ static void TestNotesImportsAndHost()
     Check(ReadIniFileForMutation(after) && after == original && IniReadS(section, L"LTokenProtected", L"") == before,
         "a malformed source causes zero target-byte changes");
     Check(WriteUtf8BomTextFile(source, donor), "restore synthetic donor profile");
+    Check(SeedContentFixtureDefaults(), "seed real host defaults before configure-only Notes import behavior");
     const auto savedCommand = g_commandLine;
     g_commandLine = {}; g_commandLine.configureOnly = true;
     g_commandLine.notesImports.push_back({-1, source});
@@ -529,6 +543,7 @@ static void TestNowPlayingProfileHostImports(const std::vector<BYTE>& artworkByt
     }
     std::wstring error, before, after;
     Check(WriteContentFixture(base), "restore stale content before configure-only projection preflight");
+    Check(SeedContentFixtureDefaults(), "seed real host defaults while retaining stale NowPlaying entries for configure-only import");
     g_commandLine = {}; g_commandLine.configureOnly = true; g_commandLine.nowPlayingImports = {source};
     g_commandLine.settings = {{L"Content", L"RefreshSeconds", L"9"}, {L"Content.1", L"Name", L"Explicit name"}};
     const auto beforeReads = reads;
@@ -582,6 +597,7 @@ static void TestHardwareProfileHostImports()
     Check(!ImportContentHardwareFile(nullptr, true, asusSource) && ReadIniFileForMutation(after) && before == after,
         "malformed donor replacement cannot remove existing events or publish a partial map");
     Check(WriteUtf8BomTextFile(asusSource, asusText), "restore synthetic modern/legacy donor source");
+    Check(SeedContentFixtureDefaults(), "seed real host defaults before configure-only hardware import behavior");
     const auto savedCommand = g_commandLine;
     g_commandLine = {}; g_commandLine.configureOnly = true;
     g_commandLine.hardwareImports = {{true, asusSource}, {false, capsSource}};
@@ -617,6 +633,120 @@ static void TestHardwareProfileHostImports()
     provider.Stop();
     Check(ReadTextFile(asusSource, asusAfter) && asusAfter == asusText, "external profile runtime also leaves the donor source unchanged");
     DeleteFileW(capsSource.c_str()); DeleteFileW(asusSource.c_str());
+}
+
+static void TestDiscordAdvancedHost()
+{
+    const auto directory = aip::GetDirectoryName(g_iniPath);
+    const auto profile = directory + L"\\discord-advanced.ini";
+    const auto created = directory + L"\\discord-created.ini";
+    const auto savedCommand = g_commandLine;
+    const std::wstring hostText = L"[Content]\r\nEnabled=0\r\n[Discord]\r\nProfilePath=discord-advanced.ini\r\nRefreshSeconds=5\r\nSendPresence=0\r\n";
+    const std::wstring profileText = L"; untouched source comment\r\n[general]\r\nactivity_name=Fixture\r\ntoken=private-legacy-preserve\r\ntoken_protected=dpapi:012345\r\n[app]\r\nrun_at_startup=true\r\n";
+    Check(WriteContentFixture(hostText) && WriteUtf8BomTextFile(profile, profileText), "prepare isolated Discord host/profile pair");
+    std::wstring error;
+    DiscordHostEditOptions options;
+    Check(CommitDiscordHostProfile({}, {{L"general", L"update_interval", L"17"}, {L"general", L"activity_type", L"2"}}, options, error) &&
+        IniReadS(L"Discord", L"RefreshSeconds", L"") == L"17", "advanced cadence and profile edits commit together with deliberate host mapping");
+    aip::discord::ProfileDocument document;
+    Check(aip::discord::ReadProfileDocument(profile, document, error) && document.profile.values[{L"general", L"activity_type"}] == L"2" &&
+        document.profile.values[{L"general", L"token"}] == L"private-legacy-preserve" && document.profile.values[{L"general", L"token_protected"}] == L"dpapi:012345",
+        "host advanced edit preserves both credential representations and donor host metadata without applying it");
+    std::vector<BYTE> hostBefore, profileBefore, after;
+    ReadWholeFileBytes(g_iniPath, hostBefore); ReadWholeFileBytes(profile, profileBefore);
+    Check(!CommitDiscordHostProfile({{L"Discord", L"RefreshSeconds", L"9"}}, {{L"general", L"update_interval", L"17"}}, options, error) &&
+        ReadWholeFileBytes(g_iniPath, after) && after == hostBefore && ReadWholeFileBytes(profile, after) && after == profileBefore,
+        "conflicting explicit host/profile cadence is rejected with zero changes to either file");
+    Check(!CommitDiscordHostProfile({{L"CustomText", L"Text", L"partial host"}},
+        {{L"general", L"activity_name", L"partial profile"}, {L"general", L"activity_type", L"4"}}, options, error) &&
+        ReadWholeFileBytes(g_iniPath, after) && after == hostBefore && ReadWholeFileBytes(profile, after) && after == profileBefore,
+        "late advanced validation failure publishes neither staged host nor profile changes");
+    Check(CommitDiscordHostProfile({{L"Discord", L"RefreshSeconds", L"13"}}, {{L"general", L"update_interval", L"13"}}, options, error) &&
+        IniReadS(L"Discord", L"RefreshSeconds", L"") == L"13" && aip::discord::ReadProfileDocument(profile, document, error) &&
+        document.profile.values[{L"general", L"update_interval"}] == L"13", "matching explicit cadences commit one coherent preference");
+    ReadWholeFileBytes(profile, profileBefore);
+    Check(!CommitDiscordHostProfile({}, {{L"general", L"token", L"not-logged"}}, options, error) &&
+        ReadWholeFileBytes(profile, after) && after == profileBefore, "unacknowledged private CLI/API edit writes no credential data");
+    options.privateInput = true;
+    std::wstring effectiveToken, credentialError; int decodes = 0;
+    const aip::discord::CredentialDecoder fixtureDecoder = [&](const std::wstring&) { ++decodes; return L"decoded-host-fixture"; };
+    Check(CommitDiscordHostProfile({}, {{L"general", L"token", L"fixture-explicit-private"}}, options, error) &&
+        aip::discord::ReadProfileDocument(profile, document, error) && document.profile.values[{L"general", L"token_protected"}].empty() &&
+        aip::discord::ResolveConfiguredToken(document.profile.values[{L"general", L"token"}], document.profile.values[{L"general", L"token_protected"}],
+            fixtureDecoder, effectiveToken, credentialError) && effectiveToken == L"fixture-explicit-private" && decodes == 0,
+        "explicit private plaintext replacement becomes effective without encryption or decoding the old protected value");
+    ReadWholeFileBytes(g_iniPath, hostBefore); ReadWholeFileBytes(profile, profileBefore);
+    Check(!CommitDiscordHostProfile({}, {{L"general", L"token", L"ambiguous-private"}, {L"general", L"token_protected", L"opaque-fixture"}}, options, error) &&
+        ReadWholeFileBytes(g_iniPath, after) && after == hostBefore && ReadWholeFileBytes(profile, after) && after == profileBefore,
+        "ambiguous nonempty private choices preserve exact host/profile bytes");
+    Check(CommitDiscordHostProfile({}, {{L"general", L"token_protected", L"opaque-fixture"}}, options, error) &&
+        aip::discord::ReadProfileDocument(profile, document, error) && document.profile.values[{L"general", L"token"}].empty() &&
+        aip::discord::ResolveConfiguredToken(document.profile.values[{L"general", L"token"}], document.profile.values[{L"general", L"token_protected"}],
+            fixtureDecoder, effectiveToken, credentialError) && effectiveToken == L"decoded-host-fixture" && decodes == 1,
+        "explicit protected replacement selects the fake decoded value and clears the stale plaintext");
+    Check(CommitDiscordHostProfile({}, {{L"general", L"token_protected", L""}}, options, error) &&
+        aip::discord::ReadProfileDocument(profile, document, error) && document.profile.values[{L"general", L"token"}].empty() &&
+        document.profile.values[{L"general", L"token_protected"}].empty(), "blank private replacement clears the configured credential family");
+    const auto staleInlineHost = hostText + L"ClientId=stale-invalid-inline\r\n";
+    Check(WriteContentFixture(staleInlineHost) && CommitDiscordHostProfile({}, {{L"general", L"activity_name", L"active advanced"}}, options, error) &&
+        IniReadS(L"Discord", L"ClientId", L"") == L"stale-invalid-inline", "advanced host editing preserves inactive invalid inline credentials without blocking reload");
+    HMENU discordMenu = CreatePopupMenu(); AppendContentEngineMenu(discordMenu);
+    const auto inlineClientState = GetMenuState(discordMenu, ID_DISCORD_SETTINGS + 2, MF_BYCOMMAND);
+    Check(inlineClientState != 0xffffffffu && !(inlineClientState & (MF_DISABLED | MF_GRAYED)),
+        "inactive inline client control stays editable for repair before switching back");
+    DestroyMenu(discordMenu);
+    ReadWholeFileBytes(g_iniPath, hostBefore); ReadWholeFileBytes(profile, profileBefore);
+    Check(!CommitDiscordHostProfile({{L"Discord", L"ProfilePath", L""}}, {{L"general", L"activity_name", L"cannot switch"}}, options, error) &&
+        ReadWholeFileBytes(g_iniPath, after) && after == hostBefore && ReadWholeFileBytes(profile, after) && after == profileBefore,
+        "switching back to invalid stored inline settings rejects the complete host/profile batch");
+    Check(CommitDiscordHostProfile({{L"Discord", L"ClientId", L"12345678901234567"}}, {{L"general", L"activity_name", L"repair prepared"}}, options, error),
+        "inactive inline values can be repaired explicitly while retaining the advanced profile");
+    Check(SaveContentMenuSettings(nullptr, {{L"Discord", L"ProfilePath", L""}}) && IniReadS(L"Discord", L"ProfilePath", L"active").empty(),
+        "the shared tray save route can switch to inline after explicit stored-value repair");
+    // Preserve non-default encodings as raw bytes when the second save fails.
+    const auto utf16 = [](const std::wstring& value) {
+        std::vector<BYTE> bytes{0xff, 0xfe};
+        const auto* data = reinterpret_cast<const BYTE*>(value.data());
+        bytes.insert(bytes.end(), data, data + value.size() * sizeof(wchar_t)); return bytes;
+    };
+    hostBefore = utf16(hostText); profileBefore = utf16(profileText);
+    Check(WriteWholeFileBytes(g_iniPath, hostBefore) && WriteWholeFileBytes(profile, profileBefore), "prepare exact UTF-16 rollback fixtures");
+    options.privateInput = false;
+    const auto invalidHost = utf16(hostText + L"; unrelated invalid UTF-16 comment " + std::wstring(1, static_cast<wchar_t>(0xd800)) + L"\r\n");
+    Check(WriteWholeFileBytes(g_iniPath, invalidHost) &&
+        !CommitDiscordHostProfile({}, {{L"general", L"activity_name", L"cannot publish"}}, options, error) &&
+        ReadWholeFileBytes(g_iniPath, after) && after == invalidHost && ReadWholeFileBytes(profile, after) && after == profileBefore,
+        "invalid Unicode in an unrelated host comment rejects both staged byte sequences before any publication");
+    Check(WriteWholeFileBytes(g_iniPath, hostBefore), "restore valid exact-byte fixture after Unicode rejection");
+    options.failHostWrite = [&] { const std::vector<BYTE> partial{0xef, 0xbb, 0xbf, 'x'}; WriteWholeFileBytes(g_iniPath, partial); return true; };
+    Check(!CommitDiscordHostProfile({}, {{L"general", L"update_interval", L"19"}, {L"general", L"activity_name", L"rejected"}}, options, error),
+        "second-file failure aborts the coordinated edit");
+    Check(ReadWholeFileBytes(g_iniPath, after) && after == hostBefore && ReadWholeFileBytes(profile, after) && after == profileBefore,
+        "rollback restores exact raw host/profile bytes including encoding and protected blob data");
+    options.failHostWrite = {};
+    options.optimistic = true; options.expectedHost = hostText; options.expectedProfile = profileText;
+    Check(WriteUtf8BomTextFile(profile, profileText + L"; concurrent change\r\n") &&
+        !CommitDiscordHostProfile({}, {{L"general", L"activity_name", L"stale editor"}}, options, error), "optimistic tray snapshot refuses to overwrite a concurrent profile edit");
+    options = {}; options.create = true; options.createPath = created;
+    Check(!CommitDiscordHostProfile({{L"Discord", L"ProfilePath", L"different-profile.ini"}}, {}, options, error) &&
+        GetFileAttributesW(created.c_str()) == INVALID_FILE_ATTRIBUTES,
+        "explicit setup rejects a contradictory host binding before creating a profile");
+    options.failHostWrite = [] { return true; };
+    Check(!CommitDiscordHostProfile({}, {}, options, error) && GetFileAttributesW(created.c_str()) == INVALID_FILE_ATTRIBUTES,
+        "failed host binding removes a profile created by this transaction");
+    options.failHostWrite = {};
+    Check(CommitDiscordHostProfile({{L"Discord", L"RefreshSeconds", L"11"}}, {}, options, error) && IniReadS(L"Discord", L"ProfilePath", L"") == created &&
+        IniReadS(L"Discord", L"RefreshSeconds", L"") == L"11" && aip::discord::ReadProfileDocument(created, document, error) &&
+        document.profile.values[{L"general", L"update_interval"}] == L"11", "explicit setup stages normal host overrides and one coherent source cadence");
+    ReadWholeFileBytes(created, profileBefore);
+    Check(!CommitDiscordHostProfile({}, {}, options, error) && ReadWholeFileBytes(created, after) && after == profileBefore,
+        "host explicit creation cannot replace an existing profile");
+    g_commandLine = {}; g_commandLine.configureOnly = true;
+    g_commandLine.discordProfileSettings = {{L"general", L"activity_name", L"passive command"}};
+    Check(RunRenderOnlyCommand() == 0, "advanced command uses the passive configuration-only transaction path");
+    Check(!g_contentDiscord.service || !g_contentDiscord.service->Read().running, "advanced edit/setup opens no Discord provider or transport");
+    g_commandLine = savedCommand;
+    DeleteFileW(profile.c_str()); DeleteFileW(created.c_str());
 }
 
 static void TestContentConfigurationSnapshots()
@@ -703,13 +833,23 @@ int wmain()
 {
     struct FixtureDeadline {
         std::atomic<bool> finished{false};
+        const steady_clock::time_point expires = steady_clock::now() + std::chrono::seconds(45);
         std::thread thread;
         FixtureDeadline() : thread([this] {
-            for (int tick = 0; tick < 450 && !finished; ++tick) std::this_thread::sleep_for(milliseconds(100));
+            while (!finished && steady_clock::now() < expires) {
+                const auto remaining = duration_cast<milliseconds>(expires - steady_clock::now());
+                if (remaining.count() > 0) std::this_thread::sleep_for(std::min(milliseconds(100), remaining));
+            }
             if (!finished) { std::cerr << "Inert host fixture exceeded 45 seconds.\n"; std::_Exit(124); }
         }) {}
         ~FixtureDeadline() { finished = true; thread.join(); }
     } fixtureDeadline;
+    const auto fixtureStarted = steady_clock::now();
+    const auto fixtureGroup = [&](const char* group) {
+        std::cerr << "Host fixture group: " << group << "; " << duration_cast<milliseconds>(steady_clock::now() - fixtureStarted).count()
+            << " ms; " << checks << " checks\n";
+    };
+    fixtureGroup("setup/menu");
     wchar_t temporary[MAX_PATH]{};
     if (!GetTempPathW(_countof(temporary), temporary)) return 2;
     const auto directory = std::wstring(temporary) + L"DesktopStubContentTest-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
@@ -892,14 +1032,23 @@ int wmain()
         Check(fixtureService.Stop(2000), "linked fixture service stops within deadline");
     }
     Check(contentDialogs == 0, "routine settings do not produce modal prompts");
+    fixtureGroup("SMTC artwork");
     TestSmtcArtworkHost(bytes);
+    fixtureGroup("Notes imports");
     TestNotesImportsAndHost();
+    fixtureGroup("hardware imports");
     TestHardwareProfileHostImports();
+    fixtureGroup("configuration snapshots");
     TestContentConfigurationSnapshots();
+    fixtureGroup("NowPlaying imports");
     TestNowPlayingProfileHostImports(bytes);
+    fixtureGroup("Discord advanced profile");
+    TestDiscordAdvancedHost();
+    fixtureGroup("service lifecycles");
     Check(WriteContentFixture(config) && ContentEngineTick(true), "media fixtures restore the original custom-image profile");
     TestServiceHostLifecycles();
     TestCapsHostAndShutdownCache();
+    fixtureGroup("snapshot stress");
     DestroyMenu(menu);
 
     aip::content::Snapshot stable;
@@ -930,7 +1079,9 @@ int wmain()
     Check(IniReadS(L"Content.1", L"Text", L"") == L"alpha", "providers do not overwrite configured custom text");
     StopContentProviders();
     PublishContentSnapshot({});
+    fixtureGroup("offline persistence");
     TestOfflineConfigurationPersistence(directory);
+    fixtureGroup("complete");
     DeleteFileW(ini.c_str()); DeleteFileW(bitmapPath.c_str()); DeleteFileW(g_logPath.c_str());
     RemoveDirectoryW(directory.c_str());
     std::cout << checks << " content runtime/menu checks; " << failures << " failures\n";

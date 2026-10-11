@@ -1,6 +1,8 @@
 #ifndef AIP_DEPENDENCIES_CONFIG_INI_INC
 #define AIP_DEPENDENCIES_CONFIG_INI_INC
 
+#include "named_objects.inc"
+
 namespace aip
 {
 inline constexpr size_t kMaxIniFileBytes = 16u * 1024u * 1024u;
@@ -27,7 +29,12 @@ class IniWriteMutexGuard
 public:
     explicit IniWriteMutexGuard(const std::wstring& path, DWORD waitMs = INFINITE)
     {
-        std::wstring name = L"Local\\AIP.ConfigIni." + StableHashHex64(MakeAbsolutePath(path));
+        std::wstring name;
+        if (!named_objects::IniMutationName(path, name)) {
+            error_ = GetLastError();
+            if (error_ == ERROR_SUCCESS) error_ = ERROR_INVALID_NAME;
+            return;
+        }
         handle_ = CreateMutexW(nullptr, FALSE, name.c_str());
         if (handle_ == nullptr)
         {

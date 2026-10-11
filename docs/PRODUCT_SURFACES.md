@@ -10,23 +10,25 @@ may need an interactive companion. See [the requirements review](REVIEW_2026-09-
 | Product | Shared implementation | INI / CLI / tray | Startup | Status |
 | --- | --- | --- | --- | --- |
 | DesktopStub | `dependencies/DesktopStub` and the native baseline | Yes | Startup-folder shortcut, plus separately named packaged StartupTask | Reference source host |
-| DiscordRPC | `dependencies/DiscordRPC` and the native baseline | Yes | Startup-folder shortcut | Resident app |
 | ADBController | `dependencies/ADBController` and the native baseline | Yes | Startup-folder shortcut | Resident app |
 | CharmTray | `dependencies/CharmTray` and the native baseline | Yes | Startup-folder shortcut | Resident app |
-| NowPlayingTile | `dependencies/NowPlayingTile` and the native baseline | Yes | Packaged StartupTask | Resident app with optional widget |
-| asusblink | `dependencies/asusblink` and managed baseline helpers | Yes | Startup-folder shortcut | Hardware source remains until DesktopStub parity |
-| capsblink | `dependencies/capsblink` and managed baseline helpers | Yes | Startup-folder shortcut | Hardware source remains until DesktopStub parity |
 | DNSAutoUpdate | `dependencies/DNSAutoUpdate` and managed baseline helpers | Yes | Startup-folder shortcut | Resident app |
 | AllowContentAboveLock | Shared registry policy engine and managed resident configuration host | Yes | Startup-folder shortcut | Current-user tray app; manual legacy service remains explicit |
 | YourPhoneHideBanner | Shared registry policy engine and managed resident configuration host | Yes | Startup-folder shortcut | Current-user tray app; manual legacy service remains explicit |
 
 All of these use the shared tooltip policy. Native apps call `RegisterTrayIcon` and `ModifyTrayIconTooltip`; managed apps call `ManagedTrayBaseline`. Version-4 native icons retain normal hover text through `NIF_SHOWTIP`.
 
+DiscordRPC, NowPlayingTile, RealTimeNotesDeskband, asusblink and capsblink are retired
+standalone products. DesktopStub supplies their tile/source outcomes, configuration
+imports and necessary data/hardware actions through shared native implementations.
+Its own INI/CLI/tray and two explicit Startup controls own those preferences.
+The former widget and Explorer toolbar are not recreated. Existing installations
+are not uninstalled by a source update; see [migration](donor-retirement-2026-10-11.md).
+
 ## Host-specific and one-shot products
 
 | Product | Actual host | Current surface | Work still required for the common interactive contract |
 | --- | --- | --- | --- |
-| RealTimeNotesDeskband | Explorer COM deskband donor | Shared Notes data/detail provider, profile/cookie import, clear and refresh actions now exposed in DesktopStub | Source integration uses tile content and configuration actions. Reconstructing the old Explorer toolbar is not a retirement requirement. Donor build/source retirement remains open while the combined host checkpoint is validated. |
 | SecureDesktopLauncher | User configuration tray plus explicit native service/password helpers | Shared whole-document INI/CLI/editor/tray and per-user Startup | Default/sign-in opens configuration only. Manual native actions preserve secure-desktop capability and require matching sibling profiles; isolated controller tests pass. Actual elevation/service/password UI acceptance is not claimed. |
 | PhotoCollage | Image utility with optional configuration tray | CLI, shared logging/INI profile/editor and per-user Startup preference | Startup wiring has injected tests; real-folder and visible tray acceptance remain open. Sign-in starts configuration only, never an image job. |
 | TaskSchedulerMigration | Task Scheduler utility with optional configuration tray | CLI, shared INI profile/editor and per-user Startup preference | Startup wiring has injected tests; real-folder and visible tray acceptance remain open. Sign-in never invokes a migration. |

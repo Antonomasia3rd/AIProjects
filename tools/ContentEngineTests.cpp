@@ -254,6 +254,39 @@ void TestTextAndWarnings() {
     Require(!discordConfig.discord.send && discordConfig.discord.details == L"A preview", "Discord defaults to configurable preview without sending");
     std::wstring badClient = L"invalid", discordError;
     Require(!NormalizeSetting(L"Discord", L"ClientId", badClient, discordError), "Discord sender ID is typed consistently");
+    Profile advancedDiscord = discord;
+    advancedDiscord.Set(L"Discord", L"ProfilePath", L"advanced.ini");
+    advancedDiscord.Set(L"Discord", L"ClientId", L"stale-invalid-inline-client");
+    advancedDiscord.Set(L"Discord", L"Name", std::wstring(MaxText + 1, L'n'));
+    advancedDiscord.Set(L"Discord", L"Details", std::wstring(MaxText + 2, L'd'));
+    advancedDiscord.Set(L"Discord", L"State", std::wstring(MaxText + 3, L's'));
+    Configuration externalDiscord;
+    Require(ReadConfiguration(advancedDiscord, externalDiscord, discordError) &&
+        externalDiscord.discord.clientId == L"stale-invalid-inline-client" && externalDiscord.discord.name.size() == MaxText + 1 &&
+        externalDiscord.discord.details.size() == MaxText + 2 && externalDiscord.discord.state.size() == MaxText + 3,
+        "an active advanced Discord profile preserves dormant invalid inline fields without using their semantics");
+    auto unchangedDiscord = externalDiscord;
+    advancedDiscord.Set(L"Discord", L"ProfilePath", L"");
+    Require(!ReadConfiguration(advancedDiscord, unchangedDiscord, discordError) && Same(unchangedDiscord, externalDiscord),
+        "switching to inline rejects retained invalid fields without partial configuration replacement");
+    advancedDiscord.Set(L"Discord", L"ProfilePath", L" \t ");
+    Require(!ReadConfiguration(advancedDiscord, unchangedDiscord, discordError) && Same(unchangedDiscord, externalDiscord),
+        "a whitespace-only advanced reference uses inline validation");
+    for (const auto* key : {L"Name", L"Details", L"State"}) {
+        auto invalidInlineText = discord;
+        invalidInlineText.Set(L"Discord", key, std::wstring(MaxText + 1, L'x'));
+        Require(!ReadConfiguration(invalidInlineText, unchangedDiscord, discordError) && Same(unchangedDiscord, externalDiscord),
+            "each restored inline text field regains its own semantic validation");
+    }
+    advancedDiscord.Set(L"Discord", L"ProfilePath", L"advanced.ini");
+    for (const auto& item : std::vector<std::pair<std::wstring, std::wstring>>{
+        {L"SendPresence", L"invalid"}, {L"ClearOnStop", L"invalid"}, {L"RefreshSeconds", L"0"},
+        {L"OperationTimeoutMs", L"99"}, {L"ProfilePath", std::wstring(MaxText + 1, L'p')}}) {
+        auto invalidHostControl = advancedDiscord;
+        invalidHostControl.Set(L"Discord", item.first, item.second);
+        Require(!ReadConfiguration(invalidHostControl, unchangedDiscord, discordError) && Same(unchangedDiscord, externalDiscord),
+            "advanced Discord references still validate every active host control and the profile path");
+    }
     Profile notes;
     notes.Set(L"Content.1", L"TextSources", L"Notes");
     notes.Set(L"Content.1", L"NotesResource", L"charge");

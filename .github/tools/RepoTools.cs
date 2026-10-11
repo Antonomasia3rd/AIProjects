@@ -549,7 +549,11 @@ static class RepoTools
         string relative = normalized.Substring(prefix.Length);
         // Providers are reusable across products. A dependency subdirectory
         // is not necessarily a product overlay.
-        if (relative.Equals("content_sources", StringComparison.OrdinalIgnoreCase) ||
+        if (relative.Equals("DiscordRPC", StringComparison.OrdinalIgnoreCase) ||
+            relative.StartsWith("DiscordRPC/", StringComparison.OrdinalIgnoreCase) ||
+            relative.Equals("asusblink", StringComparison.OrdinalIgnoreCase) ||
+            relative.StartsWith("asusblink/", StringComparison.OrdinalIgnoreCase) ||
+            relative.Equals("content_sources", StringComparison.OrdinalIgnoreCase) ||
             relative.StartsWith("content_sources/", StringComparison.OrdinalIgnoreCase) ||
             relative.Equals("hardware", StringComparison.OrdinalIgnoreCase) ||
             relative.StartsWith("hardware/", StringComparison.OrdinalIgnoreCase))
@@ -680,9 +684,6 @@ static class RepoTools
             "ADBController",
             "CharmTray",
             "DesktopStub",
-            "DiscordRPC",
-            "NowPlayingTile",
-            "RealTimeNotesDeskband",
             "SecureDesktopLauncher"
         };
         if (!commandLineConsumers.SequenceEqual(expectedConsumers.OrderBy(k => k, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase))
@@ -712,21 +713,21 @@ static class RepoTools
         ValidateSmokeProjectSelection(projects);
         var discordServiceConsumers = ProjectsUsingChangedDependencies(root, projects,
             new List<string> { "dependencies/DiscordRPC/service.cpp" }).Select(p => p.key).OrderBy(k => k).ToArray();
-        if (!discordServiceConsumers.SequenceEqual(new[] { "DesktopStub", "DiscordRPC" }))
+        if (!discordServiceConsumers.SequenceEqual(new[] { "DesktopStub" }))
             throw new InvalidOperationException("Shared Discord service consumers: " + String.Join(", ", discordServiceConsumers));
         var discordEditorConsumers = ProjectsUsingChangedDependencies(root, projects,
             new List<string> { "dependencies/DiscordRPC/profile_edit.cpp" }).Select(p => p.key).OrderBy(k => k).ToArray();
-        if (!discordEditorConsumers.SequenceEqual(new[] { "DesktopStub", "DiscordRPC" }))
+        if (!discordEditorConsumers.SequenceEqual(new[] { "DesktopStub" }))
             throw new InvalidOperationException("Shared Discord profile editor consumers: " + String.Join(", ", discordEditorConsumers));
-        var discordTrayConsumers = ProjectsUsingChangedDependencies(root, projects,
-            new List<string> { "dependencies/DiscordRPC/drpc_tray.inc" }).Select(p => p.key).ToArray();
-        if (discordTrayConsumers.Length != 1 || discordTrayConsumers[0] != "DiscordRPC")
-            throw new InvalidOperationException("Standalone Discord tray changes must stay owned by DiscordRPC.");
         var asusConsumers = ProjectsUsingChangedDependencies(root, projects,
             new List<string> { "dependencies/asusblink/service.cpp" }).Select(p => p.key);
-        if (!new HashSet<string>(asusConsumers, StringComparer.OrdinalIgnoreCase).SetEquals(new[] { "DesktopStub", "asusblink" }))
+        if (!new HashSet<string>(asusConsumers, StringComparer.OrdinalIgnoreCase).SetEquals(new[] { "DesktopStub" }))
             throw new InvalidOperationException("Shared ASUS engine consumers are incorrect.");
-        if (ProductOwnedDependencyOwner("dependencies/content_sources") != null ||
+        if (ProductOwnedDependencyOwner("dependencies/DiscordRPC") != null ||
+            ProductOwnedDependencyOwner("dependencies/DiscordRPC/profile_edit.cpp") != null ||
+            ProductOwnedDependencyOwner("dependencies/asusblink") != null ||
+            ProductOwnedDependencyOwner("dependencies/asusblink/service.cpp") != null ||
+            ProductOwnedDependencyOwner("dependencies/content_sources") != null ||
             ProductOwnedDependencyOwner("dependencies/content_sources/smtc.inc") != null ||
             ProductOwnedDependencyOwner("dependencies/content_sources_other/module.inc") != "content_sources_other")
             throw new InvalidOperationException("Shared content-source namespace classification is incorrect.");
@@ -755,22 +756,6 @@ static class RepoTools
                         "Batch command can expand ERRORLEVEL before the preceding command runs: " +
                         Rel(root, file) + ":" + lineNumber);
                 }
-            }
-        }
-
-        foreach (string relativePath in new[]
-        {
-            "legacy/NowPlayingTile/BuildNowPlayingTile.cmd"
-        })
-        {
-            string script = ReadAll(Path.Combine(
-                root,
-                relativePath.Replace('/', Path.DirectorySeparatorChar)));
-            if (!script.Contains("set \"STATUS=!ERRORLEVEL!\""))
-            {
-                throw new InvalidOperationException(
-                    relativePath +
-                    " check mode must capture compiler failure with delayed expansion.");
             }
         }
 
@@ -1272,8 +1257,6 @@ static class RepoTools
             .Where(p => p.StartsWith("dependencies/", StringComparison.OrdinalIgnoreCase))
             // Known engine consumers are declared above. Do not infer another
             // engine from a same-named service.cpp in a different directory.
-            .Where(p => !IsSharedDiscordServiceFile(p) || project.key == "DiscordRPC" || project.key == "DesktopStub")
-            .Where(p => !IsSharedAsusEngineFile(p) || project.key == "asusblink" || project.key == "DesktopStub")
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (dependencies.Count == 0)
@@ -1414,13 +1397,13 @@ static class RepoTools
 
     static void ValidateSmokeProjectSelection(List<Project> projects)
     {
-        var selected = SelectSmokeProjects(projects, "desktopstub, DiscordRPC,DesktopStub");
+        var selected = SelectSmokeProjects(projects, "desktopstub, ADBController,DesktopStub");
         if (selected.Count != 2 || !selected.Any(p => p.key == "DesktopStub") ||
-            !selected.Any(p => p.key == "DiscordRPC"))
+            !selected.Any(p => p.key == "ADBController"))
             throw new InvalidOperationException("Smoke project selection must trim, deduplicate and match case-insensitively.");
         if (SelectSmokeProjects(projects, "All").Count != projects.Count)
             throw new InvalidOperationException("Smoke project selection must support All.");
-        foreach (string invalid in new[] { "", "DoesNotExist", "DesktopStub,", "All,DiscordRPC" })
+        foreach (string invalid in new[] { "", "DoesNotExist", "DesktopStub,", "All,ADBController" })
         {
             bool rejected = false;
             try { SelectSmokeProjects(projects, invalid); }
@@ -1464,289 +1447,6 @@ static class RepoTools
             }
         }
         Console.WriteLine("Running Windows build smoke tests...");
-
-        Project asusBlink = projects.FirstOrDefault(p => p.key == "asusblink");
-        if (asusBlink != null)
-        {
-            string sourceExe = Path.Combine(root, asusBlink.artifactPath.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(sourceExe))
-            {
-                VerifyBinaryVersion(sourceExe, "asusblink");
-                string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
-                if (String.IsNullOrWhiteSpace(tempBase))
-                    tempBase = Path.GetTempPath();
-                string tempRoot = Path.Combine(tempBase, "asusblinkSmoke-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(tempRoot);
-                bool deleteTemp = false;
-                try
-                {
-                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
-                    File.Copy(sourceExe, exe, true);
-                    string ini = Path.Combine(tempRoot, "asusblink.ini");
-
-                    ProcessResult helpResult = SmokeProcess(
-                        exe,
-                        new[] { "--help", "--startup", "--set", "Options.run-at-startup=maybe" },
-                        new[] { 0 },
-                        30,
-                        "asusblink help");
-                    if (helpResult.Output.IndexOf("--startup | --no-startup", StringComparison.Ordinal) < 0 ||
-                        helpResult.Output.IndexOf("--set Settings.Key=Value", StringComparison.Ordinal) < 0)
-                        throw new InvalidOperationException("asusblink --help did not expose the common persistent setting surface.");
-                    AssertFileDoesNotExist(ini, "asusblink --help must be side-effect-free");
-
-                    ProcessResult versionResult = SmokeProcess(
-                        exe,
-                        new[] { "--version", "--startup" },
-                        new[] { 0 },
-                        30,
-                        "asusblink version");
-                    if (versionResult.Output.IndexOf("asusblink 1", StringComparison.OrdinalIgnoreCase) < 0)
-                        throw new InvalidOperationException("asusblink --version did not report version 1.");
-                    AssertFileDoesNotExist(ini, "asusblink --version must be side-effect-free");
-
-                    SmokeProcess(
-                        exe,
-                        new[]
-                        {
-                            "--set", "Settings.ShowTrayIcon=false",
-                            "--set", "Settings.RunAtStartup=maybe"
-                        },
-                        new[] { 2 },
-                        30,
-                        "asusblink invalid Startup boolean batch");
-                    AssertFileDoesNotExist(ini, "asusblink must reject an invalid typed batch before creating an INI or changing Startup state");
-
-                    SmokeProcess(
-                        exe,
-                        new[]
-                        {
-                            "--configure-only",
-                            "--set", "Settings.ShowTrayIcon=false",
-                            "--flat-menu",
-                            "--set", "Settings.ErrorRetry=5"
-                        },
-                        new[] { 0 },
-                        30,
-                        "asusblink typed setting batch");
-                    AssertFileContains(ini, "[Settings]", "asusblink must write the canonical Settings section");
-                    AssertFileContains(ini, "ShowTrayIcon=false", "asusblink must persist the canonical tray setting");
-                    AssertFileContains(ini, "ShowMenuAsDropdown=false", "asusblink must persist the canonical tray layout setting");
-                    AssertFileContains(ini, "ErrorRetry=5", "asusblink must persist a typed retry setting in the same batch");
-
-                    SmokeProcess(
-                        exe,
-                        new[]
-                        {
-                            "--configure-only",
-                            "--tray",
-                            "--set", "Settings.ErrorAction=pause"
-                        },
-                        new[] { 0 },
-                        30,
-                        "asusblink valid cross-setting profile");
-                    string validProfile = File.ReadAllText(ini);
-                    SmokeProcess(
-                        exe,
-                        new[] { "--configure-only", "--no-tray" },
-                        new[] { 1 },
-                        30,
-                        "asusblink rejected cross-setting profile");
-                    if (!String.Equals(validProfile, File.ReadAllText(ini), StringComparison.Ordinal))
-                        throw new InvalidOperationException("asusblink persisted an invalid pause-without-tray profile before rejecting it.");
-
-                    File.WriteAllText(
-                        ini,
-                        "[Options]" + Environment.NewLine +
-                        "error-log=off" + Environment.NewLine +
-                        "error-retry=4" + Environment.NewLine +
-                        "no-tray=" + Environment.NewLine,
-                        new UTF8Encoding(false));
-                    SmokeProcess(
-                        exe,
-                        new[] { "--configure-only" },
-                        new[] { 0 },
-                        30,
-                        "asusblink legacy Options migration");
-                    AssertFileContains(ini, "[Settings]", "asusblink must create the canonical section during legacy migration");
-                    AssertFileContains(ini, "ErrorLog=off", "asusblink must migrate the legacy log setting");
-                    AssertFileContains(ini, "ErrorRetry=4", "asusblink must migrate the legacy retry setting");
-                    AssertFileContains(ini, "ShowTrayIcon=false", "asusblink must preserve the legacy empty no-tray flag");
-                    deleteTemp = true;
-                }
-                finally
-                {
-                    if (deleteTemp)
-                    {
-                        try { Directory.Delete(tempRoot, true); } catch { }
-                    }
-                    else
-                    {
-                        Warn("asusblink smoke temp directory preserved for diagnostics: " + tempRoot);
-                    }
-                }
-            }
-            else
-            {
-                Console.WriteLine("skip - asusblink command-line smoke tests not run; artifact not built");
-            }
-        }
-
-        if (ProductOwnedDependencyOwner(
-                "dependencies/DNSAutoUpdate/dns_auto_update_app.cs") !=
-                "DNSAutoUpdate" ||
-            ProductOwnedDependencyOwner("dependencies/DNSAutoUpdate") !=
-                "DNSAutoUpdate" ||
-            ProductOwnedDependencyOwner("dependencies/managed_ini.cs") != null)
-        {
-            throw new InvalidOperationException(
-                "Product-owned dependency classification is incorrect.");
-        }
-        foreach (var project in projects)
-        {
-            foreach (string dependencyPath in
-                project.dependencyPaths ?? new string[0])
-            {
-                string owner = ProductOwnedDependencyOwner(dependencyPath);
-                if (!IsSharedEngineHostDeclaration(project.key, dependencyPath) && owner != null && !owner.Equals(
-                    project.key,
-                    StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidOperationException(
-                        "Workflow dependency ownership test found " +
-                        dependencyPath + " under " + project.key + ".");
-                }
-
-                string normalizedDependency = dependencyPath
-                    .Replace('\\', '/')
-                    .TrimEnd('/');
-                string fullDependency = Path.Combine(
-                    root,
-                    normalizedDependency.Replace(
-                        '/',
-                        Path.DirectorySeparatorChar));
-                if (owner != null && Directory.Exists(fullDependency))
-                {
-                    string probeFile = IsSharedEngineHostDeclaration(project.key, dependencyPath)
-                        ? Path.Combine(fullDependency, "service.cpp") : Directory.EnumerateFiles(
-                        fullDependency,
-                        "*",
-                        SearchOption.AllDirectories).FirstOrDefault();
-                    if (probeFile == null)
-                    {
-                        throw new InvalidOperationException(
-                            "Product dependency directory is empty: " +
-                            dependencyPath);
-                    }
-
-                    string changedPath = Rel(root, probeFile)
-                        .Replace('\\', '/');
-                    List<Project> consumers =
-                        ProjectsUsingChangedDependencies(
-                            root,
-                            projects,
-                            new List<string> { changedPath });
-                    var expectedConsumers = projects.Where(p => p.key.Equals(owner, StringComparison.OrdinalIgnoreCase) ||
-                        ((IsSharedDiscordServiceFile(changedPath) || IsSharedAsusEngineFile(changedPath)) && p.key == "DesktopStub"))
-                        .Select(p => p.key).OrderBy(key => key).ToArray();
-                    if (!consumers.Select(p => p.key).OrderBy(key => key).SequenceEqual(expectedConsumers))
-                    {
-                        throw new InvalidOperationException(
-                            "Dependency consumer selection does not match the declared owners for " + project.key + ": " +
-                            dependencyPath);
-                    }
-                }
-            }
-        }
-
-        Project capsBlink = projects.FirstOrDefault(p => p.key == "capsblink");
-        if (capsBlink != null)
-        {
-            string sourceExe = Path.Combine(root, capsBlink.artifactPath.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(sourceExe))
-            {
-                VerifyBinaryVersion(sourceExe, "capsblink");
-                string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
-                if (String.IsNullOrWhiteSpace(tempBase))
-                    tempBase = Path.GetTempPath();
-                string tempRoot = Path.Combine(tempBase, "capsblinkSmoke-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(tempRoot);
-                bool deleteTemp = false;
-                try
-                {
-                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
-                    File.Copy(sourceExe, exe, true);
-                    string ini = Path.Combine(tempRoot, "capsblink.ini");
-                    string log = Path.Combine(tempRoot, "capsblink.log");
-
-                    ProcessResult helpResult = SmokeProcess(
-                        exe,
-                        new[] { "--help", "--startup", "--set", "Settings.BlinkIntervalMs=invalid" },
-                        new[] { 0 },
-                        30,
-                        "capsblink help");
-                    if (helpResult.Output.IndexOf("--set Settings.Key=Value", StringComparison.Ordinal) < 0 ||
-                        helpResult.Output.IndexOf("--configure-only", StringComparison.Ordinal) < 0)
-                        throw new InvalidOperationException("capsblink --help did not expose its persistent setting surface.");
-                    AssertFileDoesNotExist(ini, "capsblink --help must be side-effect-free");
-                    AssertFileDoesNotExist(log, "capsblink --help must not create a log");
-
-                    ProcessResult versionResult = SmokeProcess(
-                        exe,
-                        new[] { "--version", "--startup" },
-                        new[] { 0 },
-                        30,
-                        "capsblink version");
-                    if (versionResult.Output.IndexOf("capsblink 1", StringComparison.OrdinalIgnoreCase) < 0)
-                        throw new InvalidOperationException("capsblink --version did not report version 1.");
-                    AssertFileDoesNotExist(ini, "capsblink --version must be side-effect-free");
-                    AssertFileDoesNotExist(log, "capsblink --version must not create a log");
-
-                    SmokeProcess(
-                        exe,
-                        new[] { "--configure-only", "--no-tray", "--blink-interval-ms", "49" },
-                        new[] { 2 },
-                        30,
-                        "capsblink invalid typed setting batch");
-                    AssertFileDoesNotExist(ini, "capsblink must reject an invalid typed batch before creating its INI");
-                    AssertFileDoesNotExist(log, "capsblink invalid syntax must not create a log");
-
-                    SmokeProcess(
-                        exe,
-                        new[]
-                        {
-                            "--configure-only",
-                            "--no-startup",
-                            "--no-tray",
-                            "--flat-menu",
-                            "--blink-interval-ms", "750"
-                        },
-                        new[] { 0 },
-                        30,
-                        "capsblink configure-only setting batch");
-                    AssertFileContains(ini, "BlinkIntervalMs=750", "capsblink must persist its typed interval");
-                    AssertFileContains(ini, "RunAtStartup=false", "capsblink must persist its Startup preference");
-                    AssertFileContains(ini, "ShowTrayIcon=false", "capsblink must persist its tray preference");
-                    AssertFileContains(ini, "ShowMenuAsDropdown=false", "capsblink must persist its tray layout");
-                    deleteTemp = true;
-                }
-                finally
-                {
-                    if (deleteTemp)
-                    {
-                        try { Directory.Delete(tempRoot, true); } catch { }
-                    }
-                    else
-                    {
-                        Warn("capsblink smoke temp directory preserved for diagnostics: " + tempRoot);
-                    }
-                }
-            }
-            else
-            {
-                Console.WriteLine("skip - capsblink command-line smoke tests not run; artifact not built");
-            }
-        }
 
         Project dnsAutoUpdate = projects.FirstOrDefault(p => p.key == "DNSAutoUpdate");
         if (dnsAutoUpdate != null)
@@ -1884,92 +1584,6 @@ static class RepoTools
             else
             {
                 Console.WriteLine("skip - DNSAutoUpdate command-line/tray smoke tests not run; artifact not built");
-            }
-        }
-
-        Project nowPlayingTile = projects.FirstOrDefault(p => p.key == "NowPlayingTile");
-        if (nowPlayingTile != null)
-        {
-            string sourceExe = Path.Combine(root, nowPlayingTile.artifactPath.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(sourceExe))
-            {
-                string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
-                if (String.IsNullOrWhiteSpace(tempBase))
-                    tempBase = Path.GetTempPath();
-                string tempRoot = Path.Combine(tempBase, "NowPlayingTileSmoke-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(tempRoot);
-                bool deleteTemp = false;
-                try
-                {
-                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
-                    File.Copy(sourceExe, exe, true);
-                    string ini = Path.Combine(tempRoot, "NowPlayingTile.ini");
-
-                    ProcessResult helpResult = SmokeProcess(
-                        exe,
-                        new[] { "--help", "--startup", "--set", "Settings.TileLayout=invalid" },
-                        new[] { 0 },
-                        30,
-                        "NowPlayingTile help");
-                    if (helpResult.Output.IndexOf("--startup", StringComparison.Ordinal) < 0 ||
-                        helpResult.Output.IndexOf("--set Settings.Key=Value", StringComparison.Ordinal) < 0)
-                        throw new InvalidOperationException("NowPlayingTile --help did not expose the common typed setting surface.");
-                    AssertFileDoesNotExist(ini, "NowPlayingTile --help must be side-effect-free");
-
-                    ProcessResult versionResult = SmokeProcess(
-                        exe,
-                        new[] { "--version", "--startup" },
-                        new[] { 0 },
-                        30,
-                        "NowPlayingTile version");
-                    if (versionResult.Output.IndexOf("NowPlayingTile 1", StringComparison.Ordinal) < 0)
-                        throw new InvalidOperationException("NowPlayingTile --version did not report version 1.");
-                    AssertFileDoesNotExist(ini, "NowPlayingTile --version must be side-effect-free");
-
-                    SmokeProcess(
-                        exe,
-                        new[] { "--set", "Settings.RunAtStartup=maybe", "--exit" },
-                        new[] { 2 },
-                        30,
-                        "NowPlayingTile invalid Startup boolean");
-                    AssertFileDoesNotExist(ini, "NowPlayingTile must reject invalid Startup values before creating an INI or changing StartupTask state");
-
-                    SmokeProcess(
-                        exe,
-                        new[]
-                        {
-                            "--set", "Settings.TileLayout=combined",
-                            "--tray",
-                            "--dropdown",
-                            "--update-interval", "5",
-                            "--tile-refresh", "120",
-                            "--exit"
-                        },
-                        new[] { 2 },
-                        30,
-                        "NowPlayingTile typed setting batch");
-                    AssertFileContains(ini, "\"TileLayout\" = \"Combined\"", "NowPlayingTile must canonicalize and persist TileLayout");
-                    AssertFileContains(ini, "\"ShowTrayIcon\" = \"true\"", "NowPlayingTile --tray must persist the tray setting");
-                    AssertFileContains(ini, "\"ShowMenuAsDropdown\" = \"true\"", "NowPlayingTile --dropdown must persist the tray layout setting");
-                    AssertFileContains(ini, "\"UpdateIntervalSeconds\" = \"5\"", "NowPlayingTile must persist its polling interval");
-                    AssertFileContains(ini, "\"TileRefreshSeconds\" = \"120\"", "NowPlayingTile must persist its tile refresh interval");
-                    deleteTemp = true;
-                }
-                finally
-                {
-                    if (deleteTemp)
-                    {
-                        try { Directory.Delete(tempRoot, true); } catch { }
-                    }
-                    else
-                    {
-                        Warn("NowPlayingTile smoke temp directory preserved for diagnostics: " + tempRoot);
-                    }
-                }
-            }
-            else
-            {
-                Console.WriteLine("skip - NowPlayingTile command-line smoke tests not run; artifact not built");
             }
         }
 
@@ -2207,98 +1821,6 @@ static class RepoTools
             }
         }
 
-        Project discordRpc = projects.FirstOrDefault(p => p.key == "DiscordRPC");
-        if (discordRpc != null)
-        {
-            string sourceExe = Path.Combine(root, discordRpc.artifactPath.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(sourceExe))
-            {
-                string discordVersion = VerifyBinaryVersion(sourceExe, "DiscordRPC");
-                string tempBase = Environment.GetEnvironmentVariable("RUNNER_TEMP");
-                if (String.IsNullOrWhiteSpace(tempBase))
-                    tempBase = Path.GetTempPath();
-                string tempRoot = Path.Combine(tempBase, "DiscordRPCSmoke-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(tempRoot);
-                bool deleteTemp = false;
-                try
-                {
-                    string exe = Path.Combine(tempRoot, Path.GetFileName(sourceExe));
-                    File.Copy(sourceExe, exe, true);
-                    string helpIni = Path.Combine(tempRoot, "HelpSideEffect.ini");
-                    string customHelpIni = Path.Combine(tempRoot, "CustomHelp.ini");
-                    string versionIni = Path.Combine(tempRoot, "VersionSideEffect.ini");
-                    string redactIni = Path.Combine(tempRoot, "Redact.ini");
-                    string redactLog = Path.Combine(tempRoot, "Redact.log");
-                    string dottedIni = Path.Combine(tempRoot, "DottedSet.ini");
-                    string typedBooleanIni = Path.Combine(tempRoot, "TypedBoolean.ini");
-                    string invalidBooleanIni = Path.Combine(tempRoot, "InvalidBoolean.ini");
-                    string trailingSpaces = new string(' ', 2);
-
-                    SmokeProcess(exe, new[] { "--help", "--ini", helpIni, "--startup", "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC help");
-                    AssertFileDoesNotExist(helpIni, "DiscordRPC --help must be side-effect-free");
-                    File.WriteAllText(
-                        customHelpIni,
-                        "[CommandLineHelp]\r\n\"Template\" = \"CUSTOM_DISCORD_HELP {exe}\\\\nSecond line\"\r\n",
-                        new UnicodeEncoding(false, true));
-                    byte[] customHelpBefore = File.ReadAllBytes(customHelpIni);
-                    ProcessResult customHelpResult = SmokeProcess(exe, new[] { "--help", "--ini", customHelpIni }, new[] { 0 }, 30, "DiscordRPC custom help");
-                    if (customHelpResult.Output.IndexOf("CUSTOM_DISCORD_HELP " + Path.GetFileName(exe), StringComparison.Ordinal) < 0 ||
-                        customHelpResult.Output.IndexOf("Second line", StringComparison.Ordinal) < 0)
-                        throw new InvalidOperationException("DiscordRPC --help did not use the configured INI template.");
-                    if (!customHelpBefore.SequenceEqual(File.ReadAllBytes(customHelpIni)))
-                        throw new InvalidOperationException("DiscordRPC --help modified its configured INI.");
-                    ProcessResult versionResult = SmokeProcess(exe, new[] { "--version", "--ini", versionIni, "--startup", "--set", "general.token=should-not-be-written" }, new[] { 0 }, 30, "DiscordRPC version");
-                    string expectedTag = "DiscordRPC-v" + discordVersion.Split('.')[0];
-                    if (versionResult.Output.IndexOf(expectedTag + " (" + discordVersion + ")", StringComparison.Ordinal) < 0)
-                        throw new InvalidOperationException("DiscordRPC --version did not report the expected release tag/version: " + expectedTag + " (" + discordVersion + ")");
-                    AssertFileDoesNotExist(versionIni, "DiscordRPC --version must be side-effect-free");
-                    SmokeProcess(exe, new[] { "--tokenXYZ", "abc" }, new[] { 2 }, 30, "DiscordRPC strict option parsing");
-                    SmokeProcess(exe, new[] { "--ini", redactIni, "--client-id", "123456789012345678", "--token", "super-secret-smoke-token", "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC token redaction");
-                    AssertFileDoesNotContain(redactLog, "super-secret-smoke-token", "DiscordRPC command-line token must not be written to the log");
-                    SmokeProcess(exe, new[] { "--ini", tempRoot, "--set", "general.client_id=123456789012345678", "--dry-run", "--no-tray" }, new[] { 2 }, 30, "DiscordRPC directory config path validation");
-                    SmokeProcess(exe, new[] { "--ini", dottedIni, "--set", "section.with.dot.key=value" + trailingSpaces, "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dotted --set parsing");
-                    AssertFileContains(dottedIni, "[section.with.dot]", "DiscordRPC --set must split Section.Key at the last dot before '='");
-                    AssertFileContains(dottedIni, "\"key\" = \"value" + trailingSpaces + "\"", "DiscordRPC --set must preserve dotted section names and trailing value spaces");
-                    SmokeProcess(exe, new[] { "--ini", typedBooleanIni, "--set", "app.show_tray=YES", "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC typed boolean canonicalization");
-                    AssertFileContains(typedBooleanIni, "\"show_tray\" = \"true\"", "DiscordRPC must canonicalize known boolean --set values");
-                    SmokeProcess(exe, new[] { "--ini", invalidBooleanIni, "--set", "app.run_at_startup=maybe", "--dry-run", "--no-tray" }, new[] { 2 }, 30, "DiscordRPC invalid known boolean rejection");
-                    AssertFileDoesNotExist(invalidBooleanIni, "DiscordRPC must reject invalid known booleans before creating an INI or Startup shortcut");
-                    SmokeProcess(exe, new[] { "--dry-run", "--no-tray" }, new[] { 0 }, 30, "DiscordRPC dry-run");
-                    if (allowPackageIntegration) VerifyDiscordRpcNoTrayControl(exe, tempRoot);
-                    else Console.WriteLine("skip - Discord IPC resident integration is excluded from default offline smoke");
-                    deleteTemp = true;
-                }
-                finally
-                {
-                    if (deleteTemp)
-                    {
-                        try { Directory.Delete(tempRoot, true); } catch { }
-                    }
-                    else
-                    {
-                        Warn("DiscordRPC smoke temp directory preserved for diagnostics: " + tempRoot);
-                    }
-                }
-            }
-        }
-
-        foreach (var p in projects.Where(p => p.key != "DesktopStub"))
-        {
-            string path = Path.Combine(root, p.artifactPath.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(path))
-            {
-                var item = new FileInfo(path);
-                if (item.Length <= 0)
-                    throw new InvalidOperationException("Smoke test failed: empty artifact " + p.artifactPath);
-                Console.WriteLine("ok - " + p.label + " artifact exists (" + item.Length + " bytes)");
-            }
-            else
-            {
-                Console.WriteLine("skip - " + p.label + " not built");
-            }
-        }
-
-        Console.WriteLine("Windows build smoke tests completed.");
         return 0;
     }
 

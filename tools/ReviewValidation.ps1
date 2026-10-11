@@ -27,6 +27,10 @@ function Invoke-ReviewProcess {
         if (-not $p.WaitForExit($Seconds * 1000)) {
             $p.Kill($true)
             $null = $p.WaitForExit(5000)
+            if ($stdout.Wait(3000) -and $stderr.Wait(3000)) {
+                [IO.File]::WriteAllText((Join-Path $ReviewLogs ($Label + '.log')),
+                    $stdout.Result + $stderr.Result + "`nStage timed out after $Seconds seconds: $Label`n")
+            }
             throw "Stage timed out after $Seconds seconds: $Label"
         }
         if (-not $stdout.Wait(3000) -or -not $stderr.Wait(3000)) { throw "Output timeout: $Label" }

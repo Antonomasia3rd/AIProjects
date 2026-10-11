@@ -24,7 +24,6 @@ if /i "%~1"=="SmtcSourceTests" goto Smtc
 if /i "%~1"=="DiscordProfileEditTests" goto Discord
 if /i "%~1"=="ContentRuntimeTests" goto Runtime
 if /i "%~1"=="ContentRuntimeNoHardwareTests" goto Unavailable
-if /i "%~1"=="NowPlayingArtworkTests" goto Artwork
 echo Unknown content fixture stage. This script compiles only.
 set "CONTENT_STATUS=2"
 goto Done
@@ -58,8 +57,6 @@ goto Result
 :Unavailable
 cl %CONTENT_FLAGS% DesktopStub\tools\ContentRuntimeNoHardwareTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj /Fe:%CONTENT_OUT%\ContentRuntimeNoHardwareTests.exe /Fo:%CONTENT_OUT%\ContentRuntimeNoHardwareTests.obj /link %CONTENT_NATIVE_LIBS%
 goto Result
-:Artwork
-cl %CONTENT_FLAGS% legacy\NowPlayingTile\tools\NowPlayingArtworkTests.cpp /Fe:%CONTENT_OUT%\NowPlayingArtworkTests.exe /Fo:%CONTENT_OUT%\NowPlayingArtworkTests.obj /link %CONTENT_NATIVE_LIBS%
 :Result
 set "CONTENT_STATUS=%ERRORLEVEL%"
 :Done

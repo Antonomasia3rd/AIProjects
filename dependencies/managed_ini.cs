@@ -796,8 +796,8 @@ namespace AIProjects.Dependencies
         {
             return new Mutex(
                 false,
-                ManagedNamedObjects.CurrentUserScopedName(
-                    "ManagedIni",
+                ManagedNamedObjects.MachineScopedName(
+                    "ConfigIni",
                     NormalizePath(spec.FilePath)));
         }
 
@@ -1126,16 +1126,7 @@ namespace AIProjects.Dependencies
 
         static string NormalizePath(string path)
         {
-            try
-            {
-                return Path.GetFullPath(path ?? "").TrimEnd(
-                    Path.DirectorySeparatorChar,
-                    Path.AltDirectorySeparatorChar).ToUpperInvariant();
-            }
-            catch
-            {
-                return (path ?? "").ToUpperInvariant();
-            }
+            return ManagedNamedObjects.NormalizeFileIdentity(path);
         }
 
         static void SafeLog(ManagedIniFileSpec spec, string message)

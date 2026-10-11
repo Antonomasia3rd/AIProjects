@@ -35,3 +35,26 @@ Experiments may use only isolated renderer harnesses or the existing render-only
 Final native renderer suite passed **18,826 checks, zero failures**. Its 600-render resource stress still measured GDI handles **3 → 3** and USER handles **4 → 4**. Log: `DesktopStub/build/render-determinism-final-tests.log`. `git diff --check` passed. Production renderer behavior is unchanged by this investigation.
 
 Last pre-test quota checkpoint: five-hour 69%, weekly 47%; zero reset credits. No reset, Windows settings, package operation or normal app launch was performed by this investigation.
+
+## Recurrence after source consolidation, 2026-10-11
+
+A fresh normal DesktopStub v27 review host and broker compiled from the current
+consolidated source both scanned clean. Isolated copied-binary offline smoke
+passed the passive CLI/manifest/static-image steps, then reproduced the exact
+four-pixel medium discrepancy on the secondary IIII-to-MMMM step. The current
+comparison still requires zero changed pixels for this unsupported field.
+
+Preserved fixture:
+`C:/Users/Amiya/AppData/Local/Temp/DesktopStubSmoke-36b6e37b3d9844c3b08d4d59a12a4a84`.
+Evidence log: `build/review-validation/desktop-full-offline-smoke-final-oct11.log`.
+Scanned review inputs: `DesktopStub/build/DesktopStubReviewOct11.exe` and
+`DesktopStub/build/DesktopStubReviewOct11LiveTileBroker.exe`. The earlier Microsoft
+submission comparison file was not overwritten. No package, Startup, source
+account, media or hardware integration was enabled. The smoke runner ended and
+its Job Object contained the children.
+
+This is a reproduced unresolved defect, not a passing rerun or evidence that the
+assertion should be relaxed. Next work compares exact saved assets and effective
+configuration/cache/scale inputs, then the production drawing path. Verified
+source consolidation is checkpointed separately so this investigation cannot
+lose it if quota is exhausted.

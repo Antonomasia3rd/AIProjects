@@ -977,3 +977,81 @@ remains advisory and the content guide separates polling, source retrieval,
 composition and visible delivery. The exact four-pixel renderer discrepancy,
 donor retirement, remaining duplicate mechanics and controlled target-OS UI/
 hardware/account acceptance remain open; passing inert checks does not close them.
+
+### Donor host retirement checkpoint
+
+After the frozen integration gates, 32 tracked donor files were removed for
+NowPlayingTile, RealTimeNotesDeskband, CapsBlink and AsusBlink. Native providers,
+hardware engines, profile importers and their behavioral fixtures remain. The
+pipeline catalog now excludes their four artifact/release entries; source checks
+and dedicated app smoke blocks are being replaced by the source integration
+fixtures. Ignored personal/generated files in those folders were preserved.
+No installed app, deskband, package, StartupTask or Startup shortcut was removed.
+See the [exact retirement and migration record](donor-retirement-2026-10-11.md).
+
+Discord's nine donor source/build/UI files are also removed after its advanced
+host/editor gates. Shared fragments retain presence/context/transport grammar
+and have been pruned of standalone lifecycle, Startup, automatic defaults,
+logging sinks and token migration. Explicit plain tokens now work for actual
+sends only when protected data is absent; protected decode failures never fall
+back. Private edits replace the effective credential family, and blank clears
+cannot reactivate stale values. Inactive inline fields remain editable for repair
+but are not validated/applied while an advanced ProfilePath is selected.
+
+The five retired donors account for 41 tracked deletions. The map/selector passes
+for 11 active products plus All. Source libraries are reusable declared inputs;
+the old host/donor consumer filters and standalone smoke blocks are removed.
+Updated shared source contracts pass 275 checks, including actual locked-read
+call ordering rather than an obsolete exact assignment spelling. Smoke guards
+confirm missing executables fail and both normal/forced runner exit reap child
+and grandchild processes.
+
+Shared native/managed INI locks now have one normalized global file identity;
+native Startup uses a global per-user identity. Standard permissions are retained.
+See [locking validation](shared-ini-lock-validation-2026-10-11.md): 21 mixed-process
+checks with 100 mutations per language, 50 document checks, 29 transaction checks
+and 114 native baseline checks pass. The pruned managed utility fixture passes
+216 scoped checks with real Startup integration disabled. Existing hardware
+engine fixtures remain; deleting old GUI tests is not hardware acceptance.
+
+Independent review closed three additional Discord gaps: effective credential
+selection after private replacement, stale inactive inline validation/GUI repair,
+and the profile input-byte bound being checked before the file lock. Strict UTF-8
+staging also prevents an invalid surrogate in an unrelated host comment from
+publishing BOM-only data. [Final Discord validation](discord-profile-editor-validation-2026-10-11.md)
+records 282,209 model assertions, 55 editor/credential/bound checks, 239 runtime/
+menu checks, 140 injected service checks, three omitted-hardware checks, 1,750
+source checks and 24 passive CLI cases, all fresh-scanned.
+
+The first enlarged runtime fixture reached exit 124. Diagnostic groups and an
+independent read-only review found cumulative sparse-profile default expansion,
+with no modal or lock hang. Import-focused cases now seed the real initial
+template, retaining stale values, byte preservation and rejection assertions;
+dedicated sparse/default failure cases remain. The fixture now measures a true
+steady-clock deadline and passed in 9.82 seconds without production changes or a
+longer time limit. Repeated expansion of sparse older profiles is a performance
+observation for future optimization, not a proven normal steady-state hang.
+
+The final common recipe passed all seven fresh-scanned fixtures: 40 hardware
+imports, 111 media imports, 58 Notes, 38 injected SMTC/artwork, 55 Discord editor,
+239 host/runtime and three omitted-hardware checks. A separately named normal
+DesktopStub v27 host/broker pair built and scanned clean. The build initially
+reached its 60-second compiler timeout; the tree was stopped before any product
+execution. A bounded 180-second build completed. Runtime limits were unchanged.
+The public runner now retains partial output on timeout; a one-second inert
+sleeping-process probe confirmed termination and diagnostic preservation.
+
+The full isolated offline Job Object smoke reproduced the original four-pixel
+medium-tile discrepancy when only unsupported secondary text changed. Its exact
+comparison remains unchanged. Fixture:
+`C:/Users/Amiya/AppData/Local/Temp/DesktopStubSmoke-36b6e37b3d9844c3b08d4d59a12a4a84`;
+log: `build/review-validation/desktop-full-offline-smoke-final-oct11.log`.
+No package/Startup/provider integration was enabled. The runner ended and its
+children were contained. Root is checkpointing verified consolidation work before
+further renderer diagnosis; this failure prevents claiming all original gaps clear.
+
+Two-file Discord saves provide locked validation and exact
+ordinary-failure rollback, not power-loss atomicity across two publications.
+Real target-OS shell/Startup, hardware/account acceptance and the historical
+four-pixel renderer intermittency remain unverified. Windhawk files remain outside
+this work and the deferred Microsoft case has not been rechecked.
