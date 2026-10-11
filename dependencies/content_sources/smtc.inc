@@ -13,6 +13,7 @@
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include "../winrt_activation.h"
 #include "smtc_artwork.inc"
 
 namespace aip { namespace content {
@@ -122,7 +123,9 @@ inline SmtcSessionData ReadNativeSmtcSession(
 {
     using Manager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
     if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
-    const auto manager = smtc_detail::Await(Manager::RequestAsync(), deadline);
+    const auto factory = aip::AcquireUncachedActivationFactory<Manager,
+        winrt::Windows::Media::Control::IGlobalSystemMediaTransportControlsSessionManagerStatics>();
+    const auto manager = smtc_detail::Await(factory.RequestAsync(), deadline);
     const auto session = manager.GetCurrentSession();
     SmtcSessionData data;
     if (session == nullptr) return data;
@@ -142,7 +145,9 @@ inline SmtcSessionData ReadNativeSmtcSession(
             const auto size = stream.Size();
             if (size > SmtcMaximumArtworkBytes) data.artworkError = L"The media artwork exceeds the encoded byte limit.";
             else if (size != 0) {
-                winrt::Windows::Storage::Streams::DataReader reader(stream.GetInputStreamAt(0));
+                using namespace winrt::Windows::Storage::Streams;
+                const auto readerFactory = aip::AcquireUncachedActivationFactory<DataReader, IDataReaderFactory>();
+                const auto reader = readerFactory.CreateDataReader(stream.GetInputStreamAt(0));
                 const auto loaded = smtc_detail::Await(reader.LoadAsync(static_cast<std::uint32_t>(size)), deadline);
                 if (loaded != size) data.artworkError = L"The media artwork stream was incomplete.";
                 else {

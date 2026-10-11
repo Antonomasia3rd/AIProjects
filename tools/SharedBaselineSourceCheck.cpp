@@ -356,7 +356,15 @@ int main()
             "shared packaged startup helper uses the manifest StartupTask API",
             "dependencies/packaged_startup.inc",
             packagedStartup,
-            "Windows::ApplicationModel::StartupTask::GetAsync");
+            "AwaitPackagedStartupOperation(factory.GetAsync(taskId))");
+        RequireContains(
+            "shared packaged startup factory is apartment-local",
+            "dependencies/packaged_startup.inc", packagedStartup,
+            "AcquireUncachedActivationFactory<StartupTask");
+        RequireNotContains(
+            "shared packaged startup does not cache proxies across worker exit",
+            "dependencies/packaged_startup.inc", packagedStartup,
+            "StartupTask::GetAsync");
         RequireContains(
             "shared packaged startup helper enables through its bounded await",
             "dependencies/packaged_startup.inc",

@@ -1084,3 +1084,21 @@ account acceptance remain separate unperformed stages; do not claim them as
 passing. New credential protection remains deferred under the user's security-last
 rule. All agents and owned validation processes are stopped; findings, binary
 identities and failed/passing scopes are saved, and Windhawk remains untouched.
+
+### Packaged Live Tile enable crash, 2026-10-11
+
+The user supplied a full v27 crash dump after switching Live Tile mode to Enabled.
+Exact application frames recovered from retained objects with an identical code
+section identify `WinrtApartmentGuard` clearing a stale **StartupTask** factory
+proxy after its temporary MTA worker exits. COM dereferences the dump's unloaded
+`OneCoreCommonProxyStub.dll`; the tile update itself had logged success.
+Both packaged Startup lookup paths now use an apartment-local uncached factory.
+SMTC's analogous temporary-MTA manager/DataReader activations share that helper.
+No external DLL split or feature disablement was introduced. See the
+[crash evidence and validation](live-tile-enable-crash-2026-10-11.md).
+
+The rebuilt host/broker scan clean; the factory lifetime fixture passes 601
+checks, packaged Startup fake tests 13, shared source checks 277, and injected
+SMTC tests 38. Actual packaged mode-switch acceptance remains pending the user's
+retry. This crash takes priority over the separate unresolved renderer variation;
+the renderer comparison remains exact and unchanged. Windhawk remains untouched.

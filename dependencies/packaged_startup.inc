@@ -8,6 +8,7 @@
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.ApplicationModel.h>
+#include "winrt_activation.h"
 
 #include <chrono>
 #include <exception>
@@ -262,7 +263,9 @@ inline bool QueryPackagedStartupTask(
     return RunPackagedStartupOperationOnMta(
         [&](std::wstring& workerError)
         {
-            auto task = AwaitPackagedStartupOperation(winrt::Windows::ApplicationModel::StartupTask::GetAsync(taskId));
+            using namespace winrt::Windows::ApplicationModel;
+            auto factory = AcquireUncachedActivationFactory<StartupTask, IStartupTaskStatics>();
+            auto task = AwaitPackagedStartupOperation(factory.GetAsync(taskId));
             if (!task)
             {
                 workerError = L"The package manifest does not declare StartupTask id '" +
@@ -293,7 +296,9 @@ inline bool SetPackagedStartupTaskEnabled(
             using winrt::Windows::ApplicationModel::StartupTask;
             using winrt::Windows::ApplicationModel::StartupTaskState;
 
-            StartupTask task = AwaitPackagedStartupOperation(StartupTask::GetAsync(taskId));
+            auto factory = AcquireUncachedActivationFactory<StartupTask,
+                winrt::Windows::ApplicationModel::IStartupTaskStatics>();
+            StartupTask task = AwaitPackagedStartupOperation(factory.GetAsync(taskId));
             if (!task)
             {
                 workerError = L"The package manifest does not declare StartupTask id '" +
