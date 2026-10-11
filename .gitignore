@@ -24,5 +24,6 @@ LOCAL_TOOL_INVENTORY.md
 # Project-specific local/runtime files outside build/
 legacy/TaskSchedulerMigration/TaskSchedulerMigrationBackup/
 legacy/SecureDesktopLauncher/*.ini
+!legacy/SecureDesktopLauncher/*.example.ini
 legacy/RealTimeNotesDeskband/*.dll
 legacy/RealTimeNotesDeskband/*_cookie.json
