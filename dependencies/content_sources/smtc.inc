@@ -13,6 +13,7 @@
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include <atomic>
 #include "../winrt_activation.h"
 #include "smtc_artwork.inc"
 
@@ -131,11 +132,11 @@ inline SmtcManager AcquireNativeSmtcManager(smtc_detail::Clock::time_point deadl
     return manager;
 }
 
-inline SmtcSessionData ReadSmtcManagerSession(const SmtcManager& manager,
+inline SmtcSessionData ReadSmtcSessionProperties(
+    const winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession& session,
     smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled)
 {
     if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
-    const auto session = manager.GetCurrentSession();
     SmtcSessionData data;
     if (session == nullptr) return data;
     const auto properties = smtc_detail::Await(session.TryGetMediaPropertiesAsync(), deadline);
@@ -172,6 +173,12 @@ inline SmtcSessionData ReadSmtcManagerSession(const SmtcManager& manager,
     return data;
 }
 
+inline SmtcSessionData ReadSmtcManagerSession(const SmtcManager& manager,
+    smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled)
+{
+    return ReadSmtcSessionProperties(manager.GetCurrentSession(), deadline, includeArtwork, canceled);
+}
+
 inline SmtcSessionData ReadNativeSmtcSession(
     smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled)
 {
@@ -183,20 +190,117 @@ inline SmtcSessionData ReadNativeSmtcSession(
 // Read lazily pins that worker's MTA for the retained media-service client.
 // The owner's worker-cleanup hook MUST call Reset on cancellation/profile
 // changes and Stop before this object is destroyed on another thread.
+struct SmtcEventState {
+    std::mutex gate;
+    std::atomic<bool> dirty{false}, supported{false};
+    bool closed = false;
+    std::function<void()> wake;
+    void Close() noexcept {
+        std::lock_guard<std::mutex> lock(gate);
+        closed = true; wake = {}; dirty = false; supported = false;
+    }
+    static void Notify(const std::weak_ptr<SmtcEventState>& weak) noexcept {
+        if (auto state = weak.lock()) {
+            std::lock_guard<std::mutex> lock(state->gate);
+            if (state->closed || state->dirty.exchange(true)) return;
+            // Wake is a nonreentrant, non-COM host notification. Closing this
+            // gate waits for the last in-flight wake before clearing it.
+            if (state->wake) { try { state->wake(); } catch (...) {} }
+        }
+    }
+};
+struct SmtcSessionEventEpoch {
+    std::mutex gate;
+    bool closed = false;
+    std::weak_ptr<SmtcEventState> destination;
+    void Close() noexcept { std::lock_guard<std::mutex> lock(gate); closed = true; destination.reset(); }
+    static void Notify(const std::weak_ptr<SmtcSessionEventEpoch>& weak) noexcept {
+        if (auto state = weak.lock()) {
+            std::lock_guard<std::mutex> lock(state->gate);
+            if (!state->closed) SmtcEventState::Notify(state->destination);
+        }
+    }
+};
 class SmtcWorkerSession {
+    using Session = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession;
     std::unique_ptr<smtc_detail::Apartment> apartment_;
     SmtcManager manager_{nullptr};
     SmtcManagerFactory factory_;
+    Session watchedSession_{nullptr};
+    winrt::event_token currentToken_{}, mediaToken_{}, playbackToken_{};
+    bool managerSubscribed_ = false, mediaSubscribed_ = false, playbackSubscribed_ = false;
+    bool managerEventsAttempted_ = false, sessionEventsAttempted_ = false;
+    std::shared_ptr<SmtcEventState> eventState_;
+    std::shared_ptr<SmtcSessionEventEpoch> sessionEpoch_;
+    void RevokeSession() noexcept {
+        if (sessionEpoch_) sessionEpoch_->Close();
+        if (watchedSession_ != nullptr) {
+            if (mediaSubscribed_) { try { watchedSession_.MediaPropertiesChanged(mediaToken_); } catch (...) {} }
+            if (playbackSubscribed_) { try { watchedSession_.PlaybackInfoChanged(playbackToken_); } catch (...) {} }
+        }
+        mediaSubscribed_ = playbackSubscribed_ = sessionEventsAttempted_ = false;
+        watchedSession_ = nullptr;
+        sessionEpoch_.reset();
+    }
+    void DisableEvents() noexcept {
+        if (auto state = std::atomic_load(&eventState_)) state->Close();
+        RevokeSession();
+        if (manager_ != nullptr && managerSubscribed_) { try { manager_.CurrentSessionChanged(currentToken_); } catch (...) {} }
+        managerSubscribed_ = managerEventsAttempted_ = false;
+        std::atomic_store(&eventState_, std::shared_ptr<SmtcEventState>{});
+    }
+    void Watch(const Session& session, bool useEvents, const std::function<void()>& wake) {
+        if (!useEvents) { DisableEvents(); return; }
+        auto state = std::atomic_load(&eventState_);
+        if (!state) {
+            state = std::make_shared<SmtcEventState>(); state->wake = wake;
+            std::atomic_store(&eventState_, state);
+        }
+        const std::weak_ptr<SmtcEventState> weak = state;
+        if (!managerEventsAttempted_) {
+            managerEventsAttempted_ = true;
+            try {
+                currentToken_ = manager_.CurrentSessionChanged([weak](const auto&, const auto&) { SmtcEventState::Notify(weak); });
+                managerSubscribed_ = true;
+            } catch (...) { managerSubscribed_ = false; }
+        }
+        if (winrt::get_abi(watchedSession_) != winrt::get_abi(session)) { RevokeSession(); watchedSession_ = session; }
+        if (session != nullptr && !sessionEventsAttempted_) {
+            sessionEventsAttempted_ = true;
+            sessionEpoch_ = std::make_shared<SmtcSessionEventEpoch>(); sessionEpoch_->destination = state;
+            const std::weak_ptr<SmtcSessionEventEpoch> sessionWeak = sessionEpoch_;
+            try {
+                mediaToken_ = session.MediaPropertiesChanged([sessionWeak](const auto&, const auto&) { SmtcSessionEventEpoch::Notify(sessionWeak); });
+                mediaSubscribed_ = true;
+                playbackToken_ = session.PlaybackInfoChanged([sessionWeak](const auto&, const auto&) { SmtcSessionEventEpoch::Notify(sessionWeak); });
+                playbackSubscribed_ = true;
+            } catch (...) {
+                if (mediaSubscribed_) { try { session.MediaPropertiesChanged(mediaToken_); } catch (...) {} }
+                mediaSubscribed_ = playbackSubscribed_ = false;
+            }
+        }
+        state->supported = managerSubscribed_ && (session == nullptr || (mediaSubscribed_ && playbackSubscribed_));
+    }
 public:
     explicit SmtcWorkerSession(SmtcManagerFactory factory = {}) : factory_(std::move(factory)) {}
     SmtcWorkerSession(const SmtcWorkerSession&) = delete;
     SmtcWorkerSession& operator=(const SmtcWorkerSession&) = delete;
     void Reset() noexcept {
         // Release all manager proxies while their owning MTA still exists.
+        DisableEvents();
         manager_ = nullptr;
         apartment_.reset();
     }
-    SmtcSessionData Read(smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled) {
+    bool ReportEventsSupported() const noexcept {
+        const auto state = std::atomic_load(&eventState_);
+        return state && state->supported.load();
+    }
+    bool ConsumeDirty() noexcept {
+        const auto state = std::atomic_load(&eventState_);
+        return state && state->dirty.exchange(false);
+    }
+    SmtcSessionData Read(smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled,
+        bool useEvents = false, const std::function<void()>& wake = {}) {
         if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
         if (!apartment_) {
             auto apartment = std::make_unique<smtc_detail::Apartment>();
@@ -207,7 +311,9 @@ public:
             if (manager_ == nullptr) manager_ = factory_ ? factory_(deadline, canceled) : AcquireNativeSmtcManager(deadline, canceled);
             if (manager_ == nullptr) throw winrt::hresult_error(E_UNEXPECTED, L"The media session manager is unavailable.");
             if (canceled && canceled()) { Reset(); throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED)); }
-            return ReadSmtcManagerSession(manager_, deadline, includeArtwork, canceled);
+            const auto session = manager_.GetCurrentSession();
+            Watch(session, useEvents, wake);
+            return ReadSmtcSessionProperties(session, deadline, includeArtwork, canceled);
         } catch (const winrt::hresult_error& exception) {
             const auto code = static_cast<HRESULT>(exception.code());
             if (code == RPC_E_DISCONNECTED || code == RPC_E_SERVER_DIED || code == RPC_E_SERVER_DIED_DNE ||

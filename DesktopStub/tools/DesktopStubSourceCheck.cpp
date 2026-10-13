@@ -868,7 +868,7 @@ int main(int argc, char** argv)
             "DesktopStub command-line/INI sources",
             commandLine + "\n" + core,
             {
-                "if (g_commandLine.settings.empty())",
+                "if (g_commandLine.settings.empty() && g_commandLine.presetName.empty())",
                 "FindDesktopStubStartupPreference(",
                 "CommitDesktopStubStartupIniState(",
                 "aip::CommitStartupShortcutIniState(",

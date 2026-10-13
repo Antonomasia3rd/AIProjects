@@ -110,9 +110,10 @@ process identity or sustained stability proof.
    observation. A ten-second passive sample during the user's test recorded
    DesktopStub at 2.13% of one core and the NPSMSvc process at zero measured CPU;
    this did not capture a high-CPU episode and is not a service-wide guarantee.
-3. `PrintWindow` is synchronous. Retry/overlap scheduling does not make a hung
-   foreign window's individual capture cancellable. A future bounded capture
-   process requires separate implementation and acceptance.
+3. The main-process `PrintWindow` hang gap was closed in the later
+   [bounded capture/queue checkpoint](queue-presets-validation-2026-10-13.md).
+   Fresh synthetic process deadline, cancellation and parent-death tests pass;
+   actual live-window capture still requires local acceptance.
 4. Native target-Windows appearance, branding, RTL/DPI, visible tray/dialog
    usability, actual Startup-folder/StartupTask and account/hardware behavior
    remain acceptance stages. Adaptive fields/styles now agree, while exact shell

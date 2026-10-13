@@ -420,6 +420,11 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
     if (m == WM_APP_CONTENT_LOGICAL_CAPS) {
         return CaptureContentLogicalCapsState();
     }
+    if (m == WM_APP_CONTENT_FRAME_READY) {
+        g_contentFrameReadyPosted = false;
+        if (!g_shutdownState.IsRequested()) QueueLiveTileRuntimeConditionRelaunch(h);
+        return 0;
+    }
     if (m == WM_CLOSE || m == WM_QUERYENDSESSION || m == WM_APP_REQUEST_SHUTDOWN)
         CaptureContentLogicalCapsState();
     if (g_singleInstanceMessage && m == g_singleInstanceMessage)
@@ -1425,6 +1430,24 @@ static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) noexcept
 
 int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 {
+    // Capture children inherit only their private output/reply handles. Handle
+    // this isolated endpoint before sidecars, resident signaling or integration.
+    int captureArgc = 0;
+    LPWSTR* captureArgv = CommandLineToArgvW(GetCommandLineW(), &captureArgc);
+    if (!captureArgv) return 2;
+    std::vector<std::wstring> captureArguments;
+    for (int argument = 0; argument < captureArgc; ++argument)
+        captureArguments.emplace_back(captureArgv[argument] ? captureArgv[argument] : L"");
+    LocalFree(captureArgv);
+    aip::capture::HelperRequest captureRequest;
+    bool captureRecognized = false;
+    const bool captureValid = aip::capture::ParseHelperArguments(captureArguments, captureRequest, captureRecognized);
+    if (captureRecognized)
+    {
+        if (!captureValid) return 2;
+        ConfigureDpiAwareness();
+        return RunLiveWallpaperCaptureHelper(captureRequest);
+    }
     auto appStart = steady_clock::now();
     ConfigureDpiAwareness();
 
@@ -1474,7 +1497,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         aip::WriteCommandLineText(notesImportError, true); return 2;
     }
     if (g_commandLine.notesRefresh >= 0) {
-        if (g_commandLine.renderOnly || g_commandLine.configureOnly || !g_commandLine.settings.empty() ||
+        if (g_commandLine.renderOnly || g_commandLine.configureOnly || !g_commandLine.settings.empty() || !g_commandLine.presetName.empty() ||
             g_commandLine.generateOnce || g_commandLine.forceGenerateOnStartup || g_commandLine.exitRequested ||
             g_commandLine.regenerateManifest || g_commandLine.appxActivationServer || g_commandLine.comRegistrationHelper) {
             aip::WriteCommandLineText(L"--notes-refresh cannot be combined with settings, offline, activation, or rendering commands.", true); return 2;

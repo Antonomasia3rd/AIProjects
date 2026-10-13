@@ -17,6 +17,7 @@
 #include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.Notifications.h>
 #include <winrt/Windows.Storage.h>
+#include "../tile_notification_winrt.inc"
 
 static std::wstring ModulePath()
 {
@@ -301,7 +302,8 @@ static bool ReadUtf8BomTextFile(const std::wstring& path, std::wstring& out)
         return false;
 
     LARGE_INTEGER li{};
-    if (!GetFileSizeEx(h, &li) || li.QuadPart < 0 || li.QuadPart > 16 * 1024 * 1024)
+    if (!GetFileSizeEx(h, &li) || li.QuadPart < 0 || li.QuadPart >
+        static_cast<LONGLONG>(aip::tile_notification::MaximumXmlUtf8Bytes + aip::tile_notification::MaximumHeaderCharacters + 3u))
     {
         CloseHandle(h);
         return false;
@@ -386,28 +388,24 @@ static bool UpdateLiveTileFromPendingXml(std::wstring& failure)
     failure.clear();
     std::wstring xmlText;
     std::wstring localPending = LocalStatePendingXmlPath();
-    std::wstring sourcePath = localPending.empty() ? PendingXmlPath() : localPending;
-    if (!ReadUtf8BomTextFile(sourcePath, xmlText) || TrimCopy(xmlText).empty())
-    {
-        sourcePath = PendingXmlPath();
-        if (!ReadUtf8BomTextFile(sourcePath, xmlText) || TrimCopy(xmlText).empty())
-        {
-            failure = L"No pending Live Tile XML was found for the packaged broker.";
+    std::wstring sourcePath = PendingXmlPath();
+    if (!localPending.empty()) {
+        const auto attributes = GetFileAttributesW(localPending.c_str());
+        const auto queryError = attributes == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
+        if (attributes != INVALID_FILE_ATTRIBUTES) sourcePath = localPending;
+        else if (queryError != ERROR_FILE_NOT_FOUND && queryError != ERROR_PATH_NOT_FOUND) {
+            failure = L"The LocalState tile notification payload could not be inspected.";
             return false;
         }
+    }
+    if (!ReadUtf8BomTextFile(sourcePath, xmlText) || TrimCopy(xmlText).empty()) {
+        failure = L"The pending tile notification payload could not be read or was empty.";
+        return false;
     }
 
     try
     {
-        using namespace winrt::Windows::Data::Xml::Dom;
-        using namespace winrt::Windows::UI::Notifications;
-
-        XmlDocument xml;
-        xml.LoadXml(winrt::hstring(xmlText));
-        TileNotification notification(xml);
-        TileUpdater updater = TileUpdateManager::CreateTileUpdaterForApplication();
-        updater.EnableNotificationQueue(false);
-        updater.Update(notification);
+        if (!aip::tile_notification::DeliverWinrt(xmlText, failure)) return false;
         DeleteFileW(PendingXmlPath().c_str());
         std::wstring localPendingAfterUpdate = LocalStatePendingXmlPath();
         if (!localPendingAfterUpdate.empty())

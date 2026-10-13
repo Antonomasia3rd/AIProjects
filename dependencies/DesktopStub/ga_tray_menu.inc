@@ -61,25 +61,33 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     const auto& updatesTitle = g_ui.trayUpdatesTitle;
     HMENU contentSourceMenu = beginSection(contentsTitle);
     AppendContentEngineMenu(contentSourceMenu, ContentMenuPart::Contents);
-    HMENU quickLayoutsMenu = beginNestedMenu(contentSourceMenu, L"CreatePopupMenu(Quick layouts)");
+    HMENU quickLayoutsMenu = beginNestedMenu(contentSourceMenu, L"CreatePopupMenu(Presets and imports)");
+    AppendMenuChecked(quickLayoutsMenu, MF_STRING | MF_DISABLED, 0, L"Built-in presets add new contents and keep previous entries");
+    addTo(quickLayoutsMenu, ID_CONTENT_BUILTIN_PRESET, aip::content::WallpaperPreset().label);
+    addTo(quickLayoutsMenu, ID_CONTENT_BUILTIN_PRESET + 1, L"Wallpaper with RSS headlines...");
+    addTo(quickLayoutsMenu, ID_CONTENT_BUILTIN_PRESET + 2, L"Wallpaper and now playing (two-item cycle)...");
+    aip::AppendMenuSeparator(quickLayoutsMenu);
+    HMENU compatibilityPresetsMenu = beginNestedMenu(quickLayoutsMenu, L"CreatePopupMenu(Compatibility presets)");
+    AppendMenuChecked(compatibilityPresetsMenu, MF_STRING | MF_DISABLED, 0, L"Older modes turn off tile contents; saved entries stay available");
     ContentSource configuredContentSource = ParseContentSourceValue(
         IniReadS(L"Settings", L"ContentSource", L"Wallpaper"),
         static_cast<ContentSource>(-1));
     bool layeredContent = false;
     aip::content::ParseBool(IniReadS(L"Content", L"Enabled", L"0"), layeredContent);
     addTo(
-        quickLayoutsMenu,
+        compatibilityPresetsMenu,
         ID_CONTENT_SOURCE_WALLPAPER,
         g_ui.contentSourceWallpaper,
         !layeredContent && configuredContentSource == ContentSource::Wallpaper);
     addTo(
-        quickLayoutsMenu,
+        compatibilityPresetsMenu,
         ID_CONTENT_SOURCE_RSS_FEED,
         g_ui.contentSourceRssFeed,
         !layeredContent && configuredContentSource == ContentSource::RssFeed);
 
+    endNestedMenu(quickLayoutsMenu, compatibilityPresetsMenu, L"Compatibility modes");
     aip::AppendMenuSeparator(quickLayoutsMenu);
-    addTo(quickLayoutsMenu, ID_CONTENT_NOW_PLAYING_IMPORT, L"Import NowPlayingTile layout...");
+    addTo(quickLayoutsMenu, ID_CONTENT_NOW_PLAYING_IMPORT, L"Import old NowPlayingTile profile (replace contents)...");
     endNestedMenu(contentSourceMenu, quickLayoutsMenu, g_ui.trayQuickLayoutsTitle);
     endSection(contentSourceMenu, contentsTitle);
 

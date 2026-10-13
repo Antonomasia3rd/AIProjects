@@ -129,6 +129,10 @@ public:
         if (!result_) return false;
         result = *result_; return true;
     }
+    bool HasPendingWork() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return busy_ || pending_;
+    }
     // Explicit one-shot callers can wait, while normal UI/poll code only reads
     // the cache. The timeout never detaches the worker or invalidates its data.
     // True means terminal completion (possibly failure), NOT a successful Read.

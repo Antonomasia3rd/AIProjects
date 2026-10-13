@@ -47,20 +47,22 @@ static int RunRenderOnlyCommand()
     aip::content::Snapshot snapshot;
     aip::content::Entry selectedEntry;
     std::wstring source;
+    const auto selectOfflineInput = [&]() {
+    snapshot = {}; selectedEntry = {}; source.clear();
     CommandLineWallpaper(source);
     if (!g_commandLine.configureOnly && !manifestOnly && composition.enabled)
     {
         const auto selected = std::find_if(composition.entries.begin(), composition.entries.end(),
             [](const aip::content::Entry& entry) { return entry.enabled; });
-        if (selected == composition.entries.end()) return fail(L"no content entry is enabled.");
+        if (selected == composition.entries.end()) { error = L"no content entry is enabled."; return false; }
         for (const auto& provider : selected->sources)
             if (aip::content::SourceIdFor(provider) != aip::content::SourceId::CustomText)
-                return fail(L"offline rendering supports CustomText only; external providers are not started.");
+                { error = L"offline rendering supports CustomText only; external providers are not started."; return false; }
         const auto background = aip::content::BackgroundIdFor(selected->background);
         if (background != aip::content::BackgroundId::Image &&
             background != aip::content::BackgroundId::None &&
             background != aip::content::BackgroundId::Transparent && source.empty())
-            return fail(L"supply --wallpaper explicitly, or select an Image/None/Transparent background.");
+            { error = L"supply --wallpaper explicitly, or select an Image/None/Transparent background."; return false; }
         snapshot.active = true;
         snapshot.name = selected->name;
         snapshot.textMode = composition.textMode;
@@ -76,7 +78,10 @@ static int RunRenderOnlyCommand()
         }
     }
     else if (!g_commandLine.configureOnly && !manifestOnly && source.empty())
-        return fail(L"--wallpaper is required when composition is disabled.");
+        { error = L"--wallpaper is required when composition is disabled."; return false; }
+    return true;
+    };
+    if (!selectOfflineInput()) return fail(error);
 
     // Persist only the requested local INI values. Deliberately do not call the
     // normal settings transaction, which also owns external Startup changes.
@@ -84,7 +89,8 @@ static int RunRenderOnlyCommand()
     if (!TryEnsureInitialIniTemplate(initialIniCreated) ||
         !EnsureIniDefaults() || !EnsureIniStringDefaults())
         return fail(L"could not initialize or update the local configuration file: " + g_iniPath);
-    if (!g_commandLine.settings.empty() && !MutateDesktopStubIniWithWait([](std::wstring& text) {
+    if ((!g_commandLine.settings.empty() || !g_commandLine.presetName.empty()) && !MutateDesktopStubIniWithWait([](std::wstring& text) {
+            if (!ApplyCommandLinePresetToDocument(text, g_commandLine.applyError)) return false;
             if (!g_commandLine.nowPlayingImports.empty() && !aip::now_playing_profile::RemoveContentEntriesFromText(text)) return false;
             if (ReplacesCommandLineAsusEvents() && !RemoveContentAsusEvents(text)) return false;
             for (const auto& setting : g_commandLine.settings)
@@ -100,8 +106,22 @@ static int RunRenderOnlyCommand()
                     std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
                 }, prospective, issue, ContentAsusEventsFromDocument(document))) return false;
             }
+            if (!ValidateCommandLinePresetDocument(text, g_commandLine.applyError)) return false;
+            if (!g_commandLine.presetName.empty()) {
+                g_commandLine.presetPreviewDocument = text;
+                g_commandLine.presetPreviewLoaded = true;
+            }
             return true;
-        }, CurrentIniWriteLockWaitMs())) return fail(L"could not save the local setting batch.");
+        }, CurrentIniWriteLockWaitMs())) return fail(g_commandLine.applyError.empty() ? L"could not save the local setting batch." : g_commandLine.applyError);
+    // A preset can copy fields/allocate slots differently if another writer
+    // changed the profile after preflight. Use the exact committed snapshot,
+    // not its earlier preview, for this offline rendering request.
+    if (!g_commandLine.presetName.empty() && !g_commandLine.configureOnly && !manifestOnly) {
+        const auto document = aip::ParseIniDocument(g_commandLine.presetPreviewDocument);
+        if (!aip::content::ReadConfiguration([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+            std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+        }, composition, error, ContentAsusEventsFromDocument(document)) || !selectOfflineInput()) return fail(error);
+    }
     if (g_commandLine.configureOnly)
     {
         for (const auto& issue : g_commandLine.nowPlayingImportDiagnostics)

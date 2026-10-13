@@ -31,6 +31,9 @@ add_portable_test(AdaptiveTileTextLayoutTests DesktopStub/tools/AdaptiveTileText
 add_portable_test(TileTextTemplateTests DesktopStub/tools/TileTextTemplateTests.cpp .)
 add_portable_test(ContentEngineTests tools/ContentEngineTests.cpp .)
 add_portable_test(ContentSourceHostTests tools/ContentSourceHostTests.cpp .)
+add_portable_test(ContentPresetTests tools/ContentPresetTests.cpp .)
+add_portable_test(ContentQueueTests tools/ContentQueueTests.cpp .)
+add_portable_test(TileNotificationPayloadTests tools/TileNotificationPayloadTests.cpp .)
 add_portable_test(PngCrc32Tests tools/PngCrc32Tests.cpp .)
 add_portable_test(CaptureAttemptTests tools/CaptureAttemptTests.cpp .)
 add_portable_test(AsusEngineTests tools/AsusEngineTests.cpp .)
@@ -45,6 +48,14 @@ target_link_libraries(CapsBlinkEngineTests PRIVATE Threads::Threads)
 
 if(WIN32)
     # Data/profile fixtures never start the product entry point or real sources.
+    # This fixture creates only its own sleeping/synthetic child executables;
+    # no actual window/screen capture or product entry point is used.
+    add_portable_test(BoundedCaptureProcessTests tools/BoundedCaptureProcessTests.cpp .)
+    target_compile_definitions(BoundedCaptureProcessTests PRIVATE UNICODE _UNICODE)
+    target_link_libraries(BoundedCaptureProcessTests PRIVATE user32 shell32 shlwapi advapi32 ole32 uuid crypt32)
+    if(MINGW)
+        target_link_options(BoundedCaptureProcessTests PRIVATE -municode)
+    endif()
     add_portable_test(HardwareProfileImportTests tools/HardwareProfileImportTests.cpp .)
     add_portable_test(NowPlayingProfileImportTests tools/NowPlayingProfileImportTests.cpp .)
     add_portable_test(NotesSourceTests tools/NotesSourceTests.cpp .)

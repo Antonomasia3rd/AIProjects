@@ -1217,3 +1217,23 @@ remain durable. The historical four-pixel preset difference, actual CPU episode,
 native UI/Startup/account/hardware acceptance and security-last deferral remain
 open. Windhawk and the untracked user bot are untouched; no dump upload, service
 change, Defender bypass or Microsoft-case refresh occurred.
+
+## 2026-10-13 later checkpoint: presets and Windows rotation
+
+The user's Wallpaper/CustomText then transparent SMTC topology now has a built-in
+preset, shared INI/tray/CLI cycle-driver choices and direct Windows notification
+queue delivery. Queue deltas, successful acknowledgments and retained image
+assets avoid unchanged updates. SMTC events use a worker-owned subscription with
+a polling fallback. Live capture moved into a bounded child of the same binary,
+closing the synchronous main-process capture hang gap without new installed
+provider DLLs.
+
+Review also fixed background-cache growth, missed queue departure/empty-selection
+updates, failed departure retries, mode-registration/reset ordering and helper
+clear-success being mistaken for update-success. Unpackaged compatibility helper
+queues remain deferred until request/lifetime correlation is reliable; they keep
+the existing app timer. Final host tests pass 9,144 checks, the copied normal
+binary full smoke passes exact gates, and the installed build is relaunched with
+the user's preferences preserved. [Final validation and remaining acceptance](queue-presets-validation-2026-10-13.md)
+record the counts, binary identities, backup and historical failures. A retained
+passing raster witness is DARK/DARK; the old four-pixel variation is still open.

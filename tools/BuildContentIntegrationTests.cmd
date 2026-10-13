@@ -27,6 +27,10 @@ if /i "%~1"=="AdaptiveTileTextLayoutTests" goto AdaptiveLayout
 if /i "%~1"=="AdaptiveTileTextRenderTests" goto AdaptiveRender
 if /i "%~1"=="PngCrc32Tests" goto PngCrc
 if /i "%~1"=="CaptureAttemptTests" goto CaptureAttempt
+if /i "%~1"=="ContentPresetTests" goto ContentPreset
+if /i "%~1"=="ContentQueueTests" goto ContentQueue
+if /i "%~1"=="TileNotificationPayloadTests" goto TilePayload
+if /i "%~1"=="BoundedCaptureProcessTests" goto BoundedCapture
 if /i "%~1"=="DiscordProfileEditTests" goto Discord
 if /i "%~1"=="ContentRuntimeTests" goto Runtime
 if /i "%~1"=="ContentRuntimeNoHardwareTests" goto Unavailable
@@ -71,6 +75,18 @@ cl %CONTENT_FLAGS% /WX tools\PngCrc32Tests.cpp /Fe:%CONTENT_OUT%\PngCrc32Tests.e
 goto Result
 :CaptureAttempt
 cl %CONTENT_FLAGS% /WX tools\CaptureAttemptTests.cpp /Fe:%CONTENT_OUT%\CaptureAttemptTests.exe /Fo:%CONTENT_OUT%\CaptureAttemptTests.obj
+goto Result
+:ContentPreset
+cl %CONTENT_FLAGS% /WX tools\ContentPresetTests.cpp /Fe:%CONTENT_OUT%\ContentPresetTests.exe /Fo:%CONTENT_OUT%\ContentPresetTests.obj
+goto Result
+:ContentQueue
+cl %CONTENT_FLAGS% /WX tools\ContentQueueTests.cpp /Fe:%CONTENT_OUT%\ContentQueueTests.exe /Fo:%CONTENT_OUT%\ContentQueueTests.obj
+goto Result
+:TilePayload
+cl %CONTENT_FLAGS% /WX tools\TileNotificationPayloadTests.cpp /Fe:%CONTENT_OUT%\TileNotificationPayloadTests.exe /Fo:%CONTENT_OUT%\TileNotificationPayloadTests.obj
+goto Result
+:BoundedCapture
+cl %CONTENT_FLAGS% /WX tools\BoundedCaptureProcessTests.cpp /Fe:%CONTENT_OUT%\BoundedCaptureProcessTests.exe /Fo:%CONTENT_OUT%\BoundedCaptureProcessTests.obj /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib uuid.lib crypt32.lib
 goto Result
 :Discord
 cl %CONTENT_FLAGS% /WX tools\DiscordProfileEditTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj /Fe:%CONTENT_OUT%\DiscordProfileEditTests.exe /Fo:%CONTENT_OUT%\DiscordProfileEditTests.obj /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib uuid.lib winhttp.lib crypt32.lib

@@ -6,6 +6,13 @@
 #include <commdlg.h>
 #include <string>
 #include <vector>
+#include "../../dependencies/content_engine.h"
+static bool contentNativeQueueAvailable = false, contentNativeQueueTestActive = false, contentQueueNormalAckEnabled = true;
+static std::vector<std::vector<aip::content::Snapshot>> contentQueueBatches;
+static void ContentTestQueueAcknowledgeNormal();
+static unsigned long long ContentTestQueueBatch(std::vector<aip::content::Snapshot>, std::wstring);
+#define DESKTOPSTUB_TEST_NATIVE_QUEUE_AVAILABLE() contentNativeQueueAvailable
+#define DESKTOPSTUB_CONTENT_QUEUE_BATCH_GENERATE ContentTestQueueBatch
 static std::vector<std::wstring> contentFileDialogFilters;
 static BOOL ContentTestOpenFileName(OPENFILENAMEW* dialog)
 {
@@ -34,6 +41,7 @@ static std::wstring contentQueuedBackground;
 static unsigned long long ContentTestQueueGenerate(std::wstring background, std::wstring)
 {
     contentQueuedBackground = std::move(background);
+    if (contentNativeQueueTestActive) ContentTestQueueAcknowledgeNormal();
     return ++contentGenerationRequests;
 }
 #define DESKTOPSTUB_CONTENT_QUEUE_GENERATE ContentTestQueueGenerate
@@ -52,6 +60,13 @@ static void Check(bool value, const char* name)
 {
     ++checks;
     if (!value) { ++failures; std::cerr << "FAIL: " << name << '\n'; }
+}
+static void ContentTestQueueAcknowledgeNormal() { if (contentQueueNormalAckEnabled) AcknowledgeContentQueueFrame({}); }
+static unsigned long long ContentTestQueueBatch(std::vector<aip::content::Snapshot> snapshots, std::wstring)
+{
+    contentQueueBatches.push_back(snapshots);
+    for (const auto& snapshot : snapshots) AcknowledgeContentQueueFrame(snapshot);
+    return ++contentGenerationRequests;
 }
 
 struct TrayMenuProbe { std::wstring path; UINT state = 0; };
@@ -82,6 +97,8 @@ static bool WriteContentFixture(const std::wstring& text)
 }
 
 #include "DisplaySettingsTests.inc"
+#include "ContentPresetHostTests.inc"
+#include "NativeQueueHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
@@ -1112,7 +1129,7 @@ int wmain()
         inCategory(ID_RSS_FEED_URL, L"Sources and accounts"), "provider setup is separated from content editing");
     Check(inCategory(ID_CONTENT_OPTIONS + 3, L"Updates and cycling"), "rotation timing has its own category");
     Check(inCategory(ID_CONTENT_TEXT_MODE, L"Tile display"), "text display lives with tile appearance");
-    Check(inCategory(ID_CONTENT_NOW_PLAYING_IMPORT, L"Quick layouts"), "layout import lives with quick layouts");
+    Check(inCategory(ID_CONTENT_NOW_PLAYING_IMPORT, L"Presets and imports"), "layout import lives with presets and imports");
     Check(inCategory(ID_MANIFEST_EDIT_IDENTITY_NAME, L"Advanced") &&
         inCategory(ID_GENERATED_ASSET_CACHE, L"Advanced"), "package and cache internals stay in Advanced");
     HMENU flatMenu = CreatePopupMenu();
@@ -1281,6 +1298,9 @@ int wmain()
     TestContentConfigurationSnapshots();
     fixtureGroup("NowPlaying imports");
     TestNowPlayingProfileHostImports(bytes);
+    fixtureGroup("presets and import confirmations");
+    TestNativeQueueHost(bitmapPath);
+    TestContentPresetsAndImportConfirmation();
     fixtureGroup("Discord advanced profile");
     TestDiscordAdvancedHost();
     fixtureGroup("service lifecycles");

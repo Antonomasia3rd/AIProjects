@@ -19,6 +19,7 @@ namespace aip { namespace content {
 constexpr int MaxEntries = 32;
 constexpr std::size_t MaxText = 4096;
 enum class TextMode { Auto, Overlay, Off };
+enum class CycleDriver { DesktopStub, Auto, Windows };
 struct Choice { const wchar_t* value; const wchar_t* label; };
 enum class BackgroundId {
     Wallpaper,
@@ -59,6 +60,11 @@ inline constexpr Choice TextModes[] = {
     {L"Auto", L"Windows text with bitmap fallback"},
     {L"Overlay", L"Text over the background image"},
     {L"Off", L"Hide text"},
+};
+inline constexpr Choice CycleDrivers[] = {
+    {L"DesktopStub", L"DesktopStub timer (chosen interval)"},
+    {L"Auto", L"Windows when available, otherwise DesktopStub"},
+    {L"Windows", L"Windows Live Tile queue (up to five items)"},
 };
 inline constexpr BackgroundDescriptor Backgrounds[] = {
     {L"Wallpaper", L"Desktop wallpaper", BackgroundId::Wallpaper},
@@ -113,6 +119,7 @@ struct Configuration {
     bool enabled = false, cycle = false;
     int cycleSeconds = 10, refreshSeconds = 2;
     TextMode textMode = TextMode::Auto;
+    CycleDriver cycleDriver = CycleDriver::DesktopStub;
     std::vector<Entry> entries;
     NotesConfiguration notes;
     DiscordConfiguration discord;
@@ -125,6 +132,8 @@ struct Snapshot {
     Text text;
     TextMode textMode = TextMode::Auto;
     BackgroundId backgroundId = BackgroundId::Wallpaper;
+    bool nativeQueue = false, nativeQueueReset = false;
+    std::wstring nativeQueueTag, nativeQueueLayout, nativeQueueFrameKey;
     // Keep an immutable source asset alive while a published/render snapshot
     // still reads it. The portable composition model does not own its files.
     std::shared_ptr<const void> backgroundLease;
@@ -368,6 +377,12 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
         else if (mode == L"overlay") value = L"Overlay";
         else if (mode == L"off") value = L"Off";
         else { error += L"expected Auto, Overlay, or Off."; return false; }
+    } else if (root && k == L"cycledriver") {
+        auto driver = Lower(Trim(value));
+        if (driver == L"desktopstub") value = L"DesktopStub";
+        else if (driver == L"auto") value = L"Auto";
+        else if (driver == L"windows") value = L"Windows";
+        else { error += L"expected DesktopStub, Auto, or Windows."; return false; }
     } else if (!root && k == L"background") {
         const auto* background = FindBackgroundDescriptor(value);
         if (!background) {
@@ -404,6 +419,8 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
     ParseInt(get(L"Content", L"RefreshSeconds", L"2"), 1, 86400, cfg.refreshSeconds);
     auto mode = get(L"Content", L"TextMode", L"Auto");
     cfg.textMode = mode == L"Overlay" ? TextMode::Overlay : mode == L"Off" ? TextMode::Off : TextMode::Auto;
+    const auto driver = get(L"Content", L"CycleDriver", L"DesktopStub");
+    cfg.cycleDriver = driver == L"Auto" ? CycleDriver::Auto : driver == L"Windows" ? CycleDriver::Windows : CycleDriver::DesktopStub;
     int count = 1;
     ParseInt(get(L"Content", L"Count", L"1"), 1, MaxEntries, count);
     for (int i = 1; i <= count; ++i) {
@@ -521,9 +538,31 @@ public:
         return enabled_.empty() ? static_cast<std::size_t>(-1) : enabled_[position_];
     }
 };
+inline bool NativeQueueEligible(const Configuration& cfg, bool nativeLiveTile) {
+    const auto count = std::count_if(cfg.entries.begin(), cfg.entries.end(), [](const Entry& entry) { return entry.enabled; });
+    if (!cfg.enabled || !cfg.cycle || cfg.cycleDriver == CycleDriver::DesktopStub || !nativeLiveTile || count < 2 || count > 5) return false;
+    for (const auto& entry : cfg.entries) if (entry.enabled) {
+        // Windows does not report which queued item is currently visible. Keep
+        // actuator timing under the host when visibility controls its actions.
+        if ((EntryUsesSource(entry, SourceId::DiscordRpc) && cfg.discord.send) ||
+            (EntryUsesSource(entry, SourceId::CapsBlink) && cfg.caps.actionsEnabled) ||
+            (EntryUsesSource(entry, SourceId::AsusBlink) && cfg.asus.hardwareEnabled)) return false;
+    }
+    return true;
+}
+inline std::wstring NativeQueueLayoutKey(const Configuration& cfg) {
+    std::wstring key = std::to_wstring(static_cast<int>(cfg.textMode));
+    for (std::size_t index = 0; index < cfg.entries.size(); ++index)
+        if (cfg.entries[index].enabled) key += L":" + std::to_wstring(index + 1);
+    return key;
+}
+inline std::wstring NativeQueueTag(std::size_t index) { return L"Content" + std::to_wstring(index + 1); }
 inline std::wstring TimingWarning(const Configuration& cfg, bool nativeLiveTile) {
     const auto count = std::count_if(cfg.entries.begin(), cfg.entries.end(), [](const Entry& e) { return e.enabled; });
     if (!cfg.cycle || count < 2) return {};
+    if (NativeQueueEligible(cfg, nativeLiveTile)) return L"Windows manages Live Tile rotation timing. The app cycle interval is used only if DesktopStub must handle rotation instead.";
+    if (cfg.cycleDriver != CycleDriver::DesktopStub && nativeLiveTile)
+        return L"Windows queues support at most five enabled contents and cannot follow which content is visible for hardware/presence actions. DesktopStub will use its own cycle timer for this layout.";
     if (!nativeLiveTile) return L"Cycling in registration mode can repeatedly render assets and register the package, causing CPU and disk spikes. Cached images do not eliminate registration cost.";
     if (cfg.cycleSeconds < 10) return L"Windows controls visible Live Tile timing. Cycles below 10 seconds may be skipped. 10 seconds is an advisory threshold, not a guaranteed Windows minimum.";
     return {};

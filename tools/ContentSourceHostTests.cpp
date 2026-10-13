@@ -30,12 +30,14 @@ static void TestRefreshReadContract() {
         return 20;
     }, {}, true);
     Require(Until([&] { return started.load(); }), "forced refresh starts");
+    Require(source.HasPendingWork(), "read-only work-state reports a blocked active fetch");
     Require(source.Read(L"cached", result, error) && result == 10 && error.empty(),
         "same-key refresh retains last published cache while pending");
     Require(!source.Wait(L"cached", 1ms), "old same-key cache does not satisfy fresh completion wait");
     release = true;
     Require(source.Wait(L"cached", 2s) && source.Read(L"cached", result, error) && result == 20,
         "completed refresh replaces old same-key cache");
+    Require(!source.HasPendingWork(), "read-only work-state clears after terminal publication");
     source.Request(L"cached", 1h, [](const Source::Cancel&) -> int { throw std::runtime_error("refresh failed"); }, {}, true);
     Require(source.Wait(L"cached", 2s), "Wait reports terminal failure as completed work");
     Require(!source.Read(L"cached", result, error) && error == "refresh failed",

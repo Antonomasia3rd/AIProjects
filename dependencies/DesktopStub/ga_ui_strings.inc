@@ -173,7 +173,7 @@ void LoadUiStrings()
     g_ui.trayContentsTitle = IniReadS(L"Strings", L"TrayContentsTitle", L"Tile contents");
     g_ui.traySourcesTitle = IniReadS(L"Strings", L"TraySourcesTitle", L"Sources and accounts");
     g_ui.trayUpdatesTitle = IniReadS(L"Strings", L"TrayUpdatesTitle", L"Updates and cycling");
-    g_ui.trayQuickLayoutsTitle = IniReadS(L"Strings", L"TrayQuickLayoutsTitle", L"Quick layouts");
+    g_ui.trayQuickLayoutsTitle = IniReadS(L"Strings", L"TrayQuickLayoutsTitle", L"Presets and imports");
     g_ui.trayStartupTitle = IniReadS(L"Strings", L"TrayStartupTitle", L"Launch at sign-in");
     g_ui.trayInterfaceTitle = IniReadS(L"Strings", L"TrayInterfaceTitle", L"Tray and console");
     g_ui.trayPackageTitle = IniReadS(L"Strings", L"TrayPackageTitle", L"Package registration and compatibility");

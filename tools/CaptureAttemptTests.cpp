@@ -1,6 +1,7 @@
 // No Windows/window/image/provider APIs. Synthetic clocks and callbacks cover
 // capture retry cadence, startup bursts, overlap, reset and exception cleanup.
 #include "../dependencies/capture_attempt.h"
+#include "../dependencies/live_capture_protocol.h"
 #include <iostream>
 #include <stdexcept>
 #include <atomic>
@@ -11,6 +12,38 @@ static int checks = 0;
 static void Check(bool ok, const char* message) { ++checks; if (!ok) throw std::runtime_error(message); }
 int main() {
     try {
+        {
+            using namespace aip::capture;
+            HelperRequest request;
+            bool recognized = false;
+            std::vector<std::wstring> arguments = {L"fixture.exe", HelperArgument, L"123", L"10", L"7", L"8", L"320", L"180", L"0", L"99"};
+            Check(ParseHelperArguments(arguments, request, recognized) && recognized && request.window == 123 &&
+                request.windowProcessId == 10 && !request.screenFallback && request.minimumWidth == 320 && request.requestId == 99,
+                "isolated helper arguments parse without platform or sidecar operations");
+            const auto original = request;
+            const auto valid = arguments;
+            for (unsigned field = 2; field < valid.size(); ++field) {
+                arguments = valid; arguments[field] = L"-1";
+                Check(!ParseHelperArguments(arguments, request, recognized) && recognized && request.requestId == original.requestId,
+                    "signed helper fields reject before capture and leave the prior request untouched");
+            }
+            arguments = valid; arguments.push_back(L"--startup");
+            Check(!ParseHelperArguments(arguments, request, recognized) && recognized, "helper mode cannot combine with normal application options");
+            arguments = valid; arguments.insert(arguments.begin() + 1, L"--configure-only");
+            Check(!ParseHelperArguments(arguments, request, recognized) && recognized, "a displaced reserved helper marker still rejects before normal startup");
+            arguments = valid; arguments[9] = L"18446744073709551616";
+            Check(!ParseHelperArguments(arguments, request, recognized), "64-bit request overflow rejects instead of wrapping");
+            arguments = valid; arguments[8] = L"2";
+            Check(!ParseHelperArguments(arguments, request, recognized), "screen fallback requires an explicit boolean bit");
+            arguments = valid; arguments[4] = arguments[5];
+            Check(!ParseHelperArguments(arguments, request, recognized), "output and response handle identities must differ");
+            arguments = {L"fixture.exe", L"--version"};
+            Check(!ParseHelperArguments(arguments, request, recognized) && !recognized, "ordinary commands do not enter helper mode");
+            auto reply = MakeReply(original, Status::Success); reply.width = 640; reply.height = 360;
+            Check(ValidReply(original, reply), "fixed reply validates its request and minimum-size metadata");
+            ++reply.requestId;
+            Check(!ValidReply(original, reply), "a mismatched response cannot publish another attempt's bitmap");
+        }
         using aip::CaptureAttemptSchedule;
         CaptureAttemptSchedule schedule;
         auto first = schedule.Begin(0, 10000);

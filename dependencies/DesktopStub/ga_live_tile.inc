@@ -1,6 +1,7 @@
 // -----------------------------------------------------------------------------
 // Live Tile update
 // -----------------------------------------------------------------------------
+#include "../tile_notification_winrt.inc"
 static bool CurrentProcessPackageFullName(std::wstring& packageFullName)
 {
     packageFullName.clear();
@@ -274,7 +275,18 @@ static std::wstring BuildLiveTileXml(
 
     xml += L"  </visual>\r\n";
     xml += L"</tile>";
-    return xml;
+    aip::tile_notification::Options options;
+    if (g_renderContent) {
+        options.queued = g_renderContent->nativeQueue;
+        options.tag = g_renderContent->nativeQueueTag;
+        options.reset = g_renderContent->nativeQueueReset;
+    }
+    std::wstring transport, error;
+    if (!aip::tile_notification::Encode(xml, options, transport, error)) {
+        Log(L"[!] Could not prepare the private tile notification payload: %ls", error.c_str());
+        return {};
+    }
+    return transport;
 }
 
 
@@ -295,8 +307,12 @@ static bool WritePendingLiveTileClearRequest()
 
 static bool WritePendingLiveTileXml(const std::wstring& tileXml)
 {
-    if (tileXml.empty())
+    aip::tile_notification::Payload payload;
+    std::wstring error;
+    if (!aip::tile_notification::Decode(tileXml, payload, error)) {
+        SetLastError(ERROR_INVALID_DATA);
         return false;
+    }
     return WriteUtf8BomTextFile(PendingLiveTileXmlPath(), tileXml);
 }
 
@@ -322,17 +338,7 @@ static bool Appx_Update_LiveTileXmlBare(const std::wstring& tileXml, std::wstrin
     {
         WinrtApartmentGuard apartment(winrt::apartment_type::single_threaded);
 
-        using namespace winrt::Windows::Data::Xml::Dom;
-        using namespace winrt::Windows::UI::Notifications;
-
-        XmlDocument xml;
-        xml.LoadXml(winrt::hstring(tileXml));
-
-        TileNotification notification(xml);
-        TileUpdater updater = TileUpdateManager::CreateTileUpdaterForApplication();
-        updater.EnableNotificationQueue(false);
-        updater.Update(notification);
-        return true;
+        return aip::tile_notification::DeliverWinrt(tileXml, failureMessage);
     }
     catch (const winrt::hresult_error& e)
     {
@@ -401,8 +407,21 @@ static bool Appx_Update_LiveTileFromPendingXmlForActivationStub(std::wstring& fa
     failureMessage.clear();
 
     std::wstring tileXml;
-    if (ReadTextFile(PendingLiveTileXmlPath(), tileXml) && !TrimCopy(tileXml).empty())
+    const auto pendingPath = PendingLiveTileXmlPath();
+    const auto pendingAttributes = GetFileAttributesW(pendingPath.c_str());
+    const auto pendingError = pendingAttributes == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
+    if (pendingAttributes != INVALID_FILE_ATTRIBUTES ||
+        (pendingError != ERROR_FILE_NOT_FOUND && pendingError != ERROR_PATH_NOT_FOUND)) {
+        std::vector<BYTE> pendingBytes;
+        const auto maximumLegacyBytes = 2u *
+            (aip::tile_notification::MaximumXmlUtf8Bytes + aip::tile_notification::MaximumHeaderCharacters) + 4u;
+        if (!aip::ReadWholeFileBytes(pendingPath, pendingBytes, maximumLegacyBytes) ||
+            !DecodeTextBytes(pendingBytes, tileXml) || TrimCopy(tileXml).empty()) {
+            failureMessage = L"The pending tile notification payload could not be read or was empty.";
+            return false;
+        }
         return Appx_Update_LiveTileXmlBare(tileXml, failureMessage);
+    }
 
     // Manual tile clicks can happen without a freshly queued XML request. In
     // that case, update from the latest stable live-tile asset names if present,
@@ -684,7 +703,10 @@ static bool WaitForPackagedLiveTileHelperSuccess(
 
 static bool WaitForPackagedLiveTileHelperSuccess(const std::vector<LiveTileSuccessLogWatch>& watches, DWORD timeoutMs)
 {
-    return WaitForPackagedLiveTileHelperSuccess(watches, timeoutMs, nullptr, nullptr);
+    // Update callers must not acknowledge a broker that only consumed an old
+    // clear request. Clear callers pass their own required success text.
+    return WaitForPackagedLiveTileHelperSuccess(watches, timeoutMs,
+        L"Live Tile update completed under package identity", nullptr);
 }
 
 static bool WaitForPackagedLiveTileHelperSuccess(unsigned long long previousLogSize, DWORD timeoutMs)
@@ -1574,16 +1596,10 @@ static bool Appx_Update_LiveTile(
     {
         WinrtApartmentGuard apartment(winrt::apartment_type::single_threaded);
 
-        using namespace winrt::Windows::Data::Xml::Dom;
-        using namespace winrt::Windows::UI::Notifications;
-
-        XmlDocument xml;
-        xml.LoadXml(winrt::hstring(tileXml));
-
-        TileNotification notification(xml);
-        TileUpdater updater = TileUpdateManager::CreateTileUpdaterForApplication();
-        updater.EnableNotificationQueue(false);
-        updater.Update(notification);
+        if (!aip::tile_notification::DeliverWinrt(tileXml, failureMessage)) {
+            LogText(failureMessage);
+            return false;
+        }
 
         LogText(g_ui.liveTileUpdateSuccess);
         return true;

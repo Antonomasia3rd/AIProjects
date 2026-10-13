@@ -16,6 +16,7 @@
 #include <winrt/Windows.ApplicationModel.Background.h>
 #include <winrt/Windows.Data.Xml.Dom.h>
 #include <winrt/Windows.UI.Notifications.h>
+#include "../tile_notification_winrt.inc"
 
 static HMODULE g_module = nullptr;
 
@@ -272,7 +273,8 @@ static bool ReadUtf8BomTextFile(const std::wstring& path, std::wstring& out)
         return false;
 
     LARGE_INTEGER li{};
-    if (!GetFileSizeEx(h, &li) || li.QuadPart < 0 || li.QuadPart > 16 * 1024 * 1024)
+    if (!GetFileSizeEx(h, &li) || li.QuadPart < 0 || li.QuadPart >
+        static_cast<LONGLONG>(aip::tile_notification::MaximumXmlUtf8Bytes + aip::tile_notification::MaximumHeaderCharacters + 3u))
     {
         CloseHandle(h);
         return false;
@@ -320,15 +322,7 @@ static bool UpdateLiveTileFromPendingXml(std::wstring& failure)
 
     try
     {
-        using namespace winrt::Windows::Data::Xml::Dom;
-        using namespace winrt::Windows::UI::Notifications;
-
-        XmlDocument xml;
-        xml.LoadXml(winrt::hstring(xmlText));
-        TileNotification notification(xml);
-        TileUpdater updater = TileUpdateManager::CreateTileUpdaterForApplication();
-        updater.EnableNotificationQueue(false);
-        updater.Update(notification);
+        if (!aip::tile_notification::DeliverWinrt(xmlText, failure)) return false;
         DeleteFileW(PendingXmlPath().c_str());
         return true;
     }

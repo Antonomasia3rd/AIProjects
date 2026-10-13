@@ -63,6 +63,9 @@ static std::atomic<unsigned long long> g_generationNextRequestId(1);
 static std::mutex g_generationCompletionMutex;
 static std::vector<GenerationCompletionRecord> g_generationCompletions;
 static unsigned long long g_generationQueuedId = 0;
+static std::vector<aip::content::Snapshot> g_generationQueuedSnapshots;
+static std::map<std::wstring, std::vector<LiveTileUpdateAsset>> g_nativeQueueAssets;
+static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath);
 static std::mutex g_generatedAssetPrecacheMutex;
 static std::condition_variable g_generatedAssetPrecacheCv;
 static std::thread g_generatedAssetPrecacheThread;
@@ -132,6 +135,8 @@ static bool IsHexToken(const std::wstring& value)
 
 static std::wstring NewLiveTileAssetToken()
 {
+    if (g_renderContent && g_renderContent->nativeQueue)
+        return BuildGenerationStateKey(g_renderContent->backgroundPath);
     FILETIME ft{};
     GetSystemTimeAsFileTime(&ft);
     wchar_t token[32];
@@ -171,6 +176,9 @@ static bool IsKeptLiveTileAssetPath(
         if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file)))
             return true;
     }
+    for (const auto& item : g_nativeQueueAssets)
+        for (const auto& asset : item.second)
+            if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file))) return true;
     return false;
 }
 
@@ -1181,12 +1189,16 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
 {
     std::wstring state;
     state += L"v=9;";
+    const bool bakedText = !UseExperimentalLiveTileUpdate() ||
+        ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10 ||
+        (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
     if (g_renderContent)
     {
         state += L"contentMode=" + std::to_wstring(static_cast<int>(g_renderContent->textMode)) + L";";
         state += L"contentBackground=" + std::to_wstring(static_cast<int>(g_renderContent->backgroundId)) + L";";
-        for (const auto& field : {g_renderContent->text.primary, g_renderContent->text.secondary, g_renderContent->text.badge, g_renderContent->activationArguments})
-            state += std::to_wstring(field.size()) + L":" + field;
+        if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off)
+            for (const auto& field : {g_renderContent->text.primary, g_renderContent->text.secondary, g_renderContent->text.badge})
+                state += std::to_wstring(field.size()) + L":" + field;
     }
     state += L"wallpaper=" + FileFingerprint(wallpaperPath) + L";";
     state += L"wallpaperDecodeLowMemory=" + IntToWString(IniReadI(L"Settings", L"WallpaperDecodeLowMemory", 1) ? 1 : 0) + L";";
@@ -1225,9 +1237,11 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
         state += std::wstring(t.name) + L"=" + IntToWString(IniReadI(L"Assets", t.name, 0) ? 1 : 0) + L";";
 
     state += L"tileTextEnabled=" + IntToWString(IniReadI(L"TileText", L"Enabled", 0) ? 1 : 0) + L";";
-    state += L"tileText=" + IniReadS(L"TileText", L"Text", L"") + L";";
-    state += L"tileTextSecondary=" + IniReadS(L"TileText", L"SecondaryText", L"") + L";";
-    state += L"tileTextBadge=" + IniReadS(L"TileText", L"BadgeText", L"") + L";";
+    if (bakedText) {
+        state += L"tileText=" + IniReadS(L"TileText", L"Text", L"") + L";";
+        state += L"tileTextSecondary=" + IniReadS(L"TileText", L"SecondaryText", L"") + L";";
+        state += L"tileTextBadge=" + IniReadS(L"TileText", L"BadgeText", L"") + L";";
+    }
     state += L"tileTextBackground=" + EffectiveManifestBackgroundColor() + L";";
     state += L"tileTextApplyMedium=" + IntToWString(IniReadI(L"TileText", L"ApplyToMediumTile", 1) ? 1 : 0) + L";";
     state += L"tileTextApplyWide=" + IntToWString(IniReadI(L"TileText", L"ApplyToWideTile", 1) ? 1 : 0) + L";";
@@ -1997,7 +2011,8 @@ static std::wstring CleanGenerationReasonForSentence(const wchar_t* reason)
     return text.empty() ? g_ui.unspecifiedReason : text;
 }
 
-bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnly = false)
+bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnly = false,
+    const aip::content::Snapshot* suppliedContent = nullptr)
 {
     auto generationStart = steady_clock::now();
     std::unique_lock<std::mutex> opLock(g_generationMutex, std::defer_lock);
@@ -2023,19 +2038,22 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         return false;
     }
     const bool composedContent = CompositionRequested();
+    aip::content::Configuration currentContentConfiguration;
     if (composedContent)
     {
         // A live INI edit can arrive before the poller clears its old frame.
         // Validate one current document before accepting that published frame.
-        aip::content::Configuration configuration;
-        if (!ReadContentConfiguration(configuration, configurationError) || !configuration.enabled)
+        if (!ReadContentConfiguration(currentContentConfiguration, configurationError) || !currentContentConfiguration.enabled)
         {
             Log(L"[!] Tile update skipped: %s", configurationError.empty()
                 ? L"the content configuration changed before this frame was ready." : configurationError.c_str());
             return false;
         }
     }
-    ContentRenderScope contentScope;
+    if (suppliedContent && suppliedContent->nativeQueue &&
+        (!ContentNativeQueueAvailable(currentContentConfiguration) ||
+            suppliedContent->nativeQueueLayout != ContentNativeQueueLayout(currentContentConfiguration))) return false;
+    ContentRenderScope contentScope(suppliedContent);
     if (composedContent && !contentScope.snapshot.active)
     {
         Log(L"[!] Tile update skipped: no current content frame is available. Check the tile contents configuration.");
@@ -2064,6 +2082,14 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     bool liveTileUpdateMode = UseExperimentalLiveTileUpdate();
     bool liveTileModeReregistrationPending = LiveTileModeReregistrationPending();
     bool useLiveTileUpdateForThisRun = liveTileUpdateMode && !liveTileModeReregistrationPending;
+    // A frozen native batch cannot consume its reset-bearing first slot as a
+    // registration-only frame, then send later slots into an uncleared queue.
+    if (suppliedContent && suppliedContent->nativeQueue && !useLiveTileUpdateForThisRun) return false;
+    if (!useLiveTileUpdateForThisRun) {
+        contentScope.snapshot.nativeQueue = false;
+        contentScope.snapshot.nativeQueueTag.clear();
+        contentScope.snapshot.nativeQueueReset = false;
+    }
     bool assetsOk = true;
     bool restoredFromGeneratedAssetCache = false;
     std::vector<LiveTileUpdateAsset> liveTileUpdateAssets;
@@ -2460,6 +2486,10 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     {
         if (liveTileUpdateMode)
         {
+            if (contentScope.snapshot.nativeQueue) {
+                if (contentScope.snapshot.nativeQueueReset) g_nativeQueueAssets.clear();
+                g_nativeQueueAssets[contentScope.snapshot.nativeQueueTag] = liveTileUpdateAssets;
+            } else g_nativeQueueAssets.clear();
             CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
             DeleteOldVersionedLiveTileAssets(exeDir, liveTileUpdateAssets);
         }
@@ -2467,6 +2497,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
             SaveGeneratedAssetCache(exeDir, BuildGenerationStateKey(wp), generatedAssetCacheFiles);
         StoreSuccessfulGenerationState(wp);
         SetLiveTileClearedOnShutdown(false);
+        AcknowledgeContentQueueFrame(contentScope.snapshot);
         LogText(liveTileUpdateMode ? g_ui.assetGenerationLiveTileFinished : g_ui.assetGenerationFinished);
         if (g_notifyOnSuccess)
             NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationSuccess, NIIF_INFO);
@@ -2687,6 +2718,7 @@ static void GenerationWorkerThread()
         std::wstring wallpaper;
         std::wstring reason;
         unsigned long long requestId = 0;
+        std::vector<aip::content::Snapshot> snapshots;
 
         {
             std::unique_lock<std::mutex> lk(g_generationQueueMutex);
@@ -2698,6 +2730,7 @@ static void GenerationWorkerThread()
             wallpaper = std::move(g_generationQueuedWallpaper);
             reason = std::move(g_generationQueuedReason);
             requestId = g_generationQueuedId;
+            snapshots = std::move(g_generationQueuedSnapshots);
             MarkGenerationActive(true, reason);
             g_generationQueued = false;
             g_generationQueuedId = 0;
@@ -2706,7 +2739,15 @@ static void GenerationWorkerThread()
         bool ok = false;
         try
         {
-            ok = Generate(wallpaper.c_str(), reason.c_str());
+            if (snapshots.empty()) ok = Generate(wallpaper.c_str(), reason.c_str());
+            else {
+                ok = true;
+                for (const auto& snapshot : snapshots) {
+                    if (g_shutdownState.IsRequested() || !Generate(snapshot.backgroundPath.c_str(), reason.c_str(), false, &snapshot)) {
+                        ok = false; break;
+                    }
+                }
+            }
         }
         catch (const std::exception& ex)
         {
@@ -2723,6 +2764,9 @@ static void GenerationWorkerThread()
                 NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationFailed, NIIF_ERROR);
         }
         RecordGenerationCompletion(requestId, ok);
+        if (ok) g_contentQueueRetryAfter = 0;
+        else if (!snapshots.empty() || ContentQueueHasAcknowledgedFrames())
+            g_contentQueueRetryAfter = GetTickCount64() + 10000;
         MarkGenerationActive(false);
         if (ok && !GenerationWorkPending())
             QueueGeneratedAssetPrecache(wallpaper);
@@ -2732,10 +2776,13 @@ static void GenerationWorkerThread()
     }
 }
 
-static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring reason)
+static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring reason,
+    std::vector<aip::content::Snapshot> snapshots = {})
 {
     if (g_shutdownState.IsRequested())
         return 0;
+    if (snapshots.empty() && UseExperimentalLiveTileUpdate() && !LiveTileModeReregistrationPending())
+        snapshots = PrepareContentQueueBatch(CurrentContentQueueSnapshots(), true);
 
     bool startWorker = false;
     unsigned long long requestId = g_generationNextRequestId.fetch_add(1, std::memory_order_relaxed);
@@ -2754,6 +2801,7 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
             droppedRequestId = g_generationQueuedId;
         g_generationQueuedWallpaper = std::move(wallpaper);
         g_generationQueuedReason = std::move(reason);
+        g_generationQueuedSnapshots = std::move(snapshots);
         g_generationQueuedId = requestId;
         g_generationQueued = true;
 
@@ -2780,6 +2828,7 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
                 g_generationQueuedId = 0;
                 g_generationQueuedWallpaper.clear();
                 g_generationQueuedReason.clear();
+                g_generationQueuedSnapshots.clear();
             }
             RecordGenerationCompletion(requestId, false);
             Log(g_ui.generationThreadStartFailed.c_str(), message.c_str());
@@ -2798,6 +2847,7 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
                 g_generationQueuedId = 0;
                 g_generationQueuedWallpaper.clear();
                 g_generationQueuedReason.clear();
+                g_generationQueuedSnapshots.clear();
             }
             RecordGenerationCompletion(requestId, false);
             Log(g_ui.generationThreadStartFailed.c_str(), message.c_str());
@@ -2812,6 +2862,12 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
         RecordGenerationCompletion(droppedRequestId, false);
     g_generationQueueCv.notify_one();
     return requestId;
+}
+static unsigned long long QueueGenerateContentBatch(std::vector<aip::content::Snapshot> snapshots, std::wstring reason)
+{
+    if (snapshots.empty()) return 0;
+    auto background = snapshots.front().backgroundPath;
+    return QueueGenerate(std::move(background), std::move(reason), std::move(snapshots));
 }
 
 static bool QueueLiveTileModeReregistration()

@@ -2,6 +2,9 @@
 #ifndef DESKTOPSTUB_CONTENT_QUEUE_GENERATE
 #define DESKTOPSTUB_CONTENT_QUEUE_GENERATE QueueGenerate
 #endif
+#ifndef DESKTOPSTUB_CONTENT_QUEUE_BATCH_GENERATE
+#define DESKTOPSTUB_CONTENT_QUEUE_BATCH_GENERATE QueueGenerateContentBatch
+#endif
 #include "../content_sources/smtc.inc"
 #include "../content_source_host.h"
 #include "../content_sources/notes.inc"
@@ -204,24 +207,37 @@ struct ContentSmtcProvider
     ContentSmtcProvider()
         : nativeSession(std::make_shared<aip::content::SmtcWorkerSession>()),
           source([session = nativeSession] { session->Reset(); }) {}
-    void Refresh(int seconds, bool synchronous, bool artworkNeeded = false)
+    void Refresh(int seconds, bool synchronous, bool artworkNeeded = false, bool useEvents = false)
     {
         waitExpired = false;
         std::wstring currentProfile;
         { std::lock_guard<std::mutex> lock(g_pathMutex); currentProfile = aip::MakeAbsolutePath(g_iniPath); }
         if (profile != currentProfile) { profile = currentProfile; cache = std::make_shared<aip::content::SmtcArtworkCache>(L"DesktopStub", profile); }
-        key = L"SMTC:" + profile + (artworkNeeded ? L":artwork" : L":text");
+        const auto requestedKey = L"SMTC:" + profile + (artworkNeeded ? L":artwork" : L":text") + (useEvents ? L":events" : L":poll");
+        const bool changed = requestedKey != key;
+        key = requestedKey;
+        // An event storm must never force-cancel the fetch already obtaining a
+        // coherent text/artwork pair. Dirty stays set until a later idle tick.
+        if (useEvents && !changed && !synchronous && source.HasPendingWork()) return;
+        int effectiveSeconds = seconds;
+        if (useEvents) {
+            aip::content::SmtcMediaSnapshot cached;
+            std::string cachedError;
+            const bool haveCached = source.Read(key, cached, cachedError);
+            if (!haveCached || nativeSession->ReportEventsSupported()) effectiveSeconds = (std::max)(30, seconds);
+        }
+        const bool eventRefresh = useEvents && nativeSession->ConsumeDirty();
         aip::content::SmtcSessionReader reader;
 #ifdef DESKTOPSTUB_INERT_HARDWARE
         reader = testReader ? testReader : [](auto, bool, const auto&) -> aip::content::SmtcSessionData {
             throw std::runtime_error("The inert host has no system SMTC reader.");
         };
 #else
-        reader = [session = nativeSession](auto deadline, bool artwork, const auto& canceled) {
-            return session->Read(deadline, artwork, canceled);
+        reader = [session = nativeSession, useEvents](auto deadline, bool artwork, const auto& canceled) {
+            return session->Read(deadline, artwork, canceled, useEvents, WakePollThread);
         };
 #endif
-        source.Request(key, milliseconds(static_cast<long long>(seconds) * 1000),
+        source.Request(key, milliseconds(static_cast<long long>(effectiveSeconds) * 1000),
             [reader, artworkNeeded, artworkCache = cache](const aip::content::AsyncSource<aip::content::SmtcMediaSnapshot>::Cancel& canceled) {
                 aip::content::SmtcMediaSnapshot result;
                 if (canceled()) return result;
@@ -230,7 +246,7 @@ struct ContentSmtcProvider
                     result.text.primary = L"Media source unavailable"; result.text.secondary = error;
                 }
                 return result;
-            }, WakePollThread, synchronous);
+            }, WakePollThread, synchronous || eventRefresh);
         if (synchronous && !source.Wait(key, milliseconds(3000))) { waitExpired = true; source.CancelPending(); }
     }
     aip::content::SmtcMediaSnapshot Read()
@@ -411,9 +427,12 @@ static std::wstring ContentBackgroundPath(const aip::content::Entry& entry, cons
 
 static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
 {
+    ContentRenderScope scope(&snapshot);
     std::wstring key = FileFingerprint(snapshot.backgroundPath) + L":" + std::to_wstring(static_cast<int>(snapshot.textMode));
-    for (const auto& value : {snapshot.text.primary, snapshot.text.secondary, snapshot.text.badge, snapshot.activationArguments})
-        key += L":" + std::to_wstring(value.size()) + L":" + value;
+    if (snapshot.textMode != aip::content::TextMode::Off)
+        for (const auto& value : {snapshot.text.primary, snapshot.text.secondary, snapshot.text.badge})
+            key += L":" + std::to_wstring(value.size()) + L":" + value;
+    key += L":" + std::to_wstring(snapshot.activationArguments.size()) + L":" + snapshot.activationArguments;
     // Include render settings to update static content after an INI/tray edit.
     key += L":" + BuildGenerationStateKey(snapshot.backgroundPath);
     return key;
@@ -422,10 +441,12 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
 static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 {
     static aip::content::Cycle cycle;
-    static std::wstring lastFrame, lastError, lastWarning, lastBackgroundEntry;
-    static std::wstring cachedBackground;
-    static ULONGLONG nextBackgroundRead = 0;
+    static std::wstring lastFrame, lastError, lastWarning;
+    struct BackgroundCache { std::wstring path; ULONGLONG nextRead = 0; };
+    static std::map<std::wstring, BackgroundCache> backgroundCache;
     static int backgroundRefreshSeconds = 0;
+    static bool frameReadySeen = false;
+    static bool wasNativeQueue = false;
     if (g_shutdownState.IsRequested()) return false;
     aip::content::Configuration cfg;
     std::wstring error;
@@ -433,7 +454,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
         // Invalid edits must not leave a previously enabled actuator running.
         g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel();
         g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
-        PublishContentSnapshot({}); lastFrame.clear();
+        PublishContentSnapshot({}); lastFrame.clear(); frameReadySeen = false; backgroundCache.clear();
         if (error != lastError) {
             Log(L"Content configuration: %s", error.c_str());
             NotifyTrayBalloon(g_ui.notificationTitle, error, NIIF_WARNING);
@@ -442,8 +463,15 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
         return false;
     }
     lastError.clear();
-    if (!cfg.enabled) { g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel(); g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel(); PublishContentSnapshot({}); lastFrame.clear(); cycle = {}; return true; }
-    auto warning = aip::content::TimingWarning(cfg, UseExperimentalLiveTileUpdate());
+    if (!cfg.enabled) {
+        g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel(); g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
+        PublishContentSnapshot({}); lastFrame.clear(); cycle = {}; frameReadySeen = false; backgroundCache.clear();
+        if ((wasNativeQueue || ContentQueueHasAcknowledgedFrames()) && queueGeneration && !synchronous &&
+            !GenerationWorkPending() && GetTickCount64() >= g_contentQueueRetryAfter.load())
+            wasNativeQueue = DESKTOPSTUB_CONTENT_QUEUE_GENERATE(CurrentGenerationBackground(), L"Content queue disabled") == 0;
+        return true;
+    }
+    auto warning = ContentTimingWarning(cfg);
     if (warning != lastWarning) {
         lastWarning = warning;
         if (!warning.empty()) {
@@ -451,20 +479,43 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
             NotifyTrayBalloon(g_ui.notificationTitle, warning, NIIF_WARNING);
         }
     }
-    auto index = cycle.Select(cfg, GetTickCount64());
+    const bool nativeQueue = ContentNativeQueueAvailable(cfg);
+    // An identical first frame must still replace and disable the OS queue
+    // when returning to app-managed rotation.
+    if (nativeQueue != wasNativeQueue) frameReadySeen = false;
+    if (nativeQueue != wasNativeQueue || (!nativeQueue && ContentQueueHasAcknowledgedFrames())) lastFrame.clear();
+    wasNativeQueue = nativeQueue;
+    auto selection = cfg;
+    if (nativeQueue) selection.cycle = false;
+    auto index = cycle.Select(selection, GetTickCount64());
     if (index == static_cast<std::size_t>(-1)) {
         g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel(); g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
-        PublishContentSnapshot({}); lastFrame.clear();
+        frameReadySeen = false; backgroundCache.clear();
+        // Turning off every item replaces the prior queue with an empty tile.
+        // Keep a renderable blank frame until the ordinary update succeeds;
+        // otherwise Windows would keep showing the last enabled items.
+        aip::content::Entry blank; blank.background = L"None";
+        aip::content::Snapshot emptyFrame;
+        emptyFrame.active = true; emptyFrame.textMode = aip::content::TextMode::Off;
+        emptyFrame.backgroundId = aip::content::BackgroundId::None;
+        emptyFrame.backgroundPath = ContentBackgroundPath(blank);
+        PublishContentSnapshot(emptyFrame);
+        const auto blankKey = ContentSnapshotKey(emptyFrame);
+        if ((blankKey != lastFrame || ContentQueueHasAcknowledgedFrames()) && queueGeneration && !synchronous &&
+            !GenerationWorkPending() && GetTickCount64() >= g_contentQueueRetryAfter.load() &&
+            IsUsableWallpaperPath(emptyFrame.backgroundPath) &&
+            DESKTOPSTUB_CONTENT_QUEUE_GENERATE(emptyFrame.backgroundPath, L"All contents disabled") != 0)
+            lastFrame = blankKey;
         return true;
     }
-    const auto& entry = cfg.entries[index];
+    const auto& selectedEntry = cfg.entries[index];
     const auto usesSmtc = [](const aip::content::Entry& candidate) {
         return aip::content::EntryUsesSource(candidate, aip::content::SourceId::Smtc) ||
             aip::content::BackgroundIdFor(candidate.background) == aip::content::BackgroundId::SmtcArtwork;
     };
     const auto sourceNeeded = [&](aip::content::SourceId id) {
-        if (!aip::content::SourceRefreshesWhileInactive(id))
-            return aip::content::EntryUsesSource(entry, id);
+        if (!nativeQueue && !aip::content::SourceRefreshesWhileInactive(id))
+            return aip::content::EntryUsesSource(selectedEntry, id);
         return std::any_of(cfg.entries.begin(), cfg.entries.end(), [id, &usesSmtc](const aip::content::Entry& candidate) {
             return candidate.enabled && (id == aip::content::SourceId::Smtc ? usesSmtc(candidate) : aip::content::EntryUsesSource(candidate, id));
         });
@@ -475,12 +526,12 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     const bool needsCaps = sourceNeeded(aip::content::SourceId::CapsBlink);
     const bool needsAsus = sourceNeeded(aip::content::SourceId::AsusBlink);
     std::array<bool, 3> needsNotes{};
-    if (aip::content::SourceRefreshesWhileInactive(aip::content::SourceId::Notes)) {
+    if (nativeQueue || aip::content::SourceRefreshesWhileInactive(aip::content::SourceId::Notes)) {
         for (const auto& candidate : cfg.entries)
             if (candidate.enabled && aip::content::EntryUsesSource(candidate, aip::content::SourceId::Notes))
                 needsNotes[candidate.notesResource] = true;
-    } else if (aip::content::EntryUsesSource(entry, aip::content::SourceId::Notes)) {
-        needsNotes[entry.notesResource] = true;
+    } else if (aip::content::EntryUsesSource(selectedEntry, aip::content::SourceId::Notes)) {
+        needsNotes[selectedEntry.notesResource] = true;
     }
     RssFeedSettings rssSettings;
     if (needsRss) { rssSettings = ReadRssFeedSettings(); g_contentRss.Refresh(rssSettings, synchronous); }
@@ -488,7 +539,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     const bool needsArtwork = std::any_of(cfg.entries.begin(), cfg.entries.end(), [](const aip::content::Entry& candidate) {
         return candidate.enabled && aip::content::BackgroundIdFor(candidate.background) == aip::content::BackgroundId::SmtcArtwork;
     });
-    if (needsSmtc) g_contentSmtc.Refresh(cfg.refreshSeconds, synchronous, needsArtwork);
+    if (needsSmtc) g_contentSmtc.Refresh(cfg.refreshSeconds, synchronous, needsArtwork, nativeQueue);
     else g_contentSmtc.Cancel();
     // Read once so a worker publication cannot pair one track's text with
     // another track's background while this frame is composed.
@@ -502,6 +553,17 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     if (needsCaps) g_contentCaps.Refresh(cfg.caps); else g_contentCaps.Cancel();
     if (needsAsus) g_contentAsus.Refresh(cfg.asus); else g_contentAsus.Cancel();
 
+    std::set<std::wstring> usedBackgroundKeys;
+    struct PruneBackgroundCache {
+        std::map<std::wstring, BackgroundCache>& cache;
+        const std::set<std::wstring>& used;
+        ~PruneBackgroundCache() {
+            for (auto item = cache.begin(); item != cache.end();)
+                if (!used.count(item->first)) item = cache.erase(item); else ++item;
+        }
+    } pruneBackgroundCache{backgroundCache, usedBackgroundKeys};
+    const auto compose = [&](std::size_t contentIndex) {
+    const auto& entry = cfg.entries[contentIndex];
     aip::content::Snapshot snapshot;
     snapshot.active = true; snapshot.name = entry.name; snapshot.textMode = cfg.textMode;
     snapshot.backgroundId = aip::content::BackgroundIdFor(entry.background);
@@ -513,14 +575,15 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     }
     if (backgroundRefreshSeconds != cfg.refreshSeconds) {
         backgroundRefreshSeconds = cfg.refreshSeconds;
-        nextBackgroundRead = 0;
+        backgroundCache.clear();
     }
-    if (backgroundKey != lastBackgroundEntry || GetTickCount64() >= nextBackgroundRead || synchronous) {
-        cachedBackground = ContentBackgroundPath(entry, &media);
-        lastBackgroundEntry = backgroundKey;
-        nextBackgroundRead = GetTickCount64() + static_cast<ULONGLONG>(cfg.refreshSeconds) * 1000;
+    usedBackgroundKeys.insert(backgroundKey);
+    auto& cachedBackground = backgroundCache[backgroundKey];
+    if (GetTickCount64() >= cachedBackground.nextRead || synchronous) {
+        cachedBackground.path = ContentBackgroundPath(entry, &media);
+        cachedBackground.nextRead = GetTickCount64() + static_cast<ULONGLONG>(cfg.refreshSeconds) * 1000;
     }
-    snapshot.backgroundPath = cachedBackground;
+    snapshot.backgroundPath = cachedBackground.path;
     if (artworkBackground && !media.artwork && !aip::content::EntryUsesSource(entry, aip::content::SourceId::Smtc))
         snapshot.text = media.text; // Artwork-only entries also retain a useful fallback.
     for (const auto& source : entry.sources) {
@@ -556,7 +619,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
             if (feed.ok && !feed.items.empty()) {
                 bool numberedProfile = false;
                 aip::content::ParseBool(IniReadS(L"Content", L"Enabled", L"0"), numberedProfile);
-                const auto itemIndex = numberedProfile ? static_cast<std::size_t>(entry.rssItem - 1) : index % feed.items.size();
+                const auto itemIndex = numberedProfile ? static_cast<std::size_t>(entry.rssItem - 1) : contentIndex % feed.items.size();
                 if (itemIndex >= feed.items.size()) {
                     text.primary = L"RSS headline unavailable";
                     text.secondary = L"The feed has " + std::to_wstring(feed.items.size()) + L" items; content selects item " + std::to_wstring(entry.rssItem) + L".";
@@ -582,15 +645,49 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
         aip::content::Overlay(snapshot.text, text);
     }
     if (artworkBackground && !media.artworkError.empty()) aip::content::AppendBounded(snapshot.text.secondary, media.artworkError);
+    snapshot.nativeQueue = nativeQueue;
+    if (nativeQueue) {
+        snapshot.nativeQueueTag = aip::content::NativeQueueTag(contentIndex);
+        snapshot.nativeQueueLayout = ContentNativeQueueLayout(cfg);
+        snapshot.nativeQueueFrameKey = ContentSnapshotKey(snapshot);
+    }
+    return snapshot;
+    };
+    auto snapshot = compose(index);
+    if (nativeQueue) {
+        std::vector<aip::content::Snapshot> frames;
+        for (std::size_t contentIndex = 0; contentIndex < cfg.entries.size(); ++contentIndex)
+            if (cfg.entries[contentIndex].enabled) {
+                auto frame = contentIndex == index ? snapshot : compose(contentIndex);
+                if (!IsUsableWallpaperPath(frame.backgroundPath)) {
+                    PublishContentQueueSnapshots({}); frameReadySeen = false;
+                    const auto unavailable = L"Content background is unavailable: " + frame.backgroundPath;
+                    if (lastFrame != unavailable) { LogText(unavailable); lastFrame = unavailable; }
+                    return false;
+                }
+                frames.push_back(std::move(frame));
+            }
+        PublishContentQueueSnapshots(frames);
+        if (synchronous || !queueGeneration) return true;
+        auto changed = PrepareContentQueueBatch(frames);
+        if (!changed.empty() && !GenerationWorkPending() && GetTickCount64() >= g_contentQueueRetryAfter.load())
+            DESKTOPSTUB_CONTENT_QUEUE_BATCH_GENERATE(std::move(changed), L"Changed Windows queue contents");
+        return true;
+    }
     PublishContentSnapshot(snapshot);
     if (!IsUsableWallpaperPath(snapshot.backgroundPath)) {
         auto message = L"Content background is unavailable: " + snapshot.backgroundPath;
         if (lastFrame != message) { LogText(message); NotifyTrayBalloon(g_ui.notificationTitle, message, NIIF_WARNING); lastFrame = message; }
         return false;
     }
+    if (!frameReadySeen) {
+        frameReadySeen = true;
+        if (g_hwnd && !g_contentFrameReadyPosted.exchange(true) &&
+            !PostMessageW(g_hwnd, WM_APP_CONTENT_FRAME_READY, 0, 0)) g_contentFrameReadyPosted = false;
+    }
     auto frame = ContentSnapshotKey(snapshot);
     if (synchronous || !queueGeneration) return true; // Caller queues its own generation.
-    if (frame != lastFrame && !GenerationWorkPending()) {
+    if (frame != lastFrame && !GenerationWorkPending() && GetTickCount64() >= g_contentQueueRetryAfter.load()) {
         if (DESKTOPSTUB_CONTENT_QUEUE_GENERATE(snapshot.backgroundPath, L"Content source update") != 0) lastFrame = frame;
     }
     return true;

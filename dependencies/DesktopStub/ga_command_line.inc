@@ -2,6 +2,8 @@
 // Command-line parsing and persisted INI setting changes
 // -----------------------------------------------------------------------------
 using CommandLineIniSetting = aip::IniSetting;
+#include "../live_capture_protocol.h"
+#include "../content_presets.h"
 #include "../content_sources/notes_profile.inc"
 #include "../hardware/hardware_profile_import.inc"
 #include "../content_sources/now_playing_profile.inc"
@@ -41,6 +43,8 @@ struct CommandLineOptions
     std::vector<CommandLineNotesImport> notesImports;
     std::vector<CommandLineHardwareImport> hardwareImports;
     std::vector<std::wstring> nowPlayingImports;
+    std::wstring presetName, presetPreviewDocument;
+    bool presetPreviewLoaded = false;
     aip::now_playing_profile::ImportPlan nowPlayingImportPlan;
     std::vector<std::wstring> nowPlayingImportDiagnostics;
     std::vector<aip::IniSetting> discordProfileSettings;
@@ -49,6 +53,21 @@ struct CommandLineOptions
 };
 
 static CommandLineOptions g_commandLine;
+static bool NormalizeCommandLinePresetName(std::wstring& value)
+{
+    for (const auto* name : {L"Wallpaper", L"WallpaperRSS", L"WallpaperSMTC"})
+        if (aip::content::Lower(aip::content::Trim(value)) == aip::content::Lower(name)) { value = name; return true; }
+    return false;
+}
+static bool ValidateCommandLinePresetCombination(std::wstring& error)
+{
+    if (g_commandLine.presetName.empty()) return true;
+    if (!g_commandLine.notesImports.empty() || !g_commandLine.hardwareImports.empty() || !g_commandLine.nowPlayingImports.empty() ||
+        !g_commandLine.discordProfileSettings.empty() || !g_commandLine.discordCreatePath.empty()) {
+        error = L"--preset cannot be combined with profile imports or advanced Discord edits. Apply them in separate commands."; return false;
+    }
+    return true;
+}
 void Log(const wchar_t* fmt, ...);
 std::wstring FormatWide(const wchar_t* fmt, ...);
 int IniReadI(const wchar_t* s, const wchar_t* k, int d);
@@ -1193,6 +1212,19 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--preset", value, error, matched)) return fail(error);
+        if (matched) {
+            if (!NormalizeCommandLinePresetName(value)) return fail(L"--preset expects Wallpaper, WallpaperRSS, or WallpaperSMTC.");
+            g_commandLine.presetName = value;
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--cycle-driver", value, error, matched)) return fail(error);
+        if (matched) {
+            if (!aip::content::NormalizeSetting(L"Content", L"CycleDriver", value, error)) return fail(error);
+            AddCommandLineIniSetting(L"Content", L"CycleDriver", value);
+            continue;
+        }
+
         if (IEquals(arg, L"--discord-private-input")) { g_commandLine.discordPrivateInput = true; g_commandLine.configureOnly = true; continue; }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--discord-create-profile", value, error, matched)) return fail(error);
         if (matched) { if (value.empty()) return fail(L"--discord-create-profile requires a path."); g_commandLine.discordCreatePath = value; g_commandLine.configureOnly = true; continue; }
@@ -1955,6 +1987,8 @@ static bool ParseCommandLineOptions()
         return fail(L"Unknown command-line option: " + arg + L". Use --help for supported options.");
     }
 
+    std::wstring combinationError;
+    if (!ValidateCommandLinePresetCombination(combinationError)) return fail(combinationError);
     LocalFree(argv);
     return true;
 }
@@ -1996,7 +2030,9 @@ static std::wstring CommandLineUsageText()
         L"\nNotes: --notes-import-profile INI; --notes-import-cookie GAME=JSON; --notes-clear GAME (configuration only).\n"
         L"       --notes-refresh GAME|All (existing resident only; no new process).\n"
         L"Hardware profiles: --caps-import-profile INI; --asus-import-profile INI (configuration only).\n"
-        L"Now playing: --now-playing-import-profile INI (configuration only; donor Startup is reported and deferred).\n"
+        L"Now playing: --now-playing-import-profile INI (replaces Content.*; donor Startup is reported and deferred).\n"
+        L"Presets: --preset Wallpaper|WallpaperRSS|WallpaperSMTC (applied before explicit settings; imports require a separate command).\n"
+        L"Rotation: --cycle-driver DesktopStub|Auto|Windows (Windows controls native queue display timing).\n"
         L"Discord advanced profile: --discord-set Section.Key=Value; --discord-create-profile INI (configuration only).\n"
         L"  Credential replacements require masked tray input or explicit --discord-private-input; values are never echoed.\n"
         L"ASUS numbered fields: --set AsusBlink.Event001HddState=128,129 (hardware and disk flags stay explicit).\n";
@@ -2200,7 +2236,7 @@ static void ShowCommandLineMessage(const std::wstring& text, bool error)
 
 static bool CommandLineHasPersistentSettings()
 {
-    return !g_commandLine.settings.empty();
+    return !g_commandLine.settings.empty() || !g_commandLine.presetName.empty();
 }
 
 static bool CommandLineShouldExit()
@@ -2357,6 +2393,85 @@ static bool CommandLineSettingTargetsObsoleteManifestSection(const CommandLineIn
     return IEquals(entry.section, L"Manifest");
 }
 
+static bool ApplyCommandLinePresetToDocument(std::wstring& text, std::wstring& error)
+{
+    if (g_commandLine.presetName.empty()) return true;
+    if (!ValidateCommandLinePresetCombination(error)) return false;
+    const auto document = aip::ParseIniDocument(text);
+    const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+    };
+    aip::content::Configuration current;
+    const bool currentValid = aip::content::ReadConfiguration(read, current, error, ContentAsusEventsFromDocument(document));
+    aip::content::PresetDefinition preset;
+    if (g_commandLine.presetName == L"Wallpaper") preset = aip::content::WallpaperPreset();
+    else if (g_commandLine.presetName == L"WallpaperRSS") {
+        int items = 0;
+        if (!aip::content::ParseInt(read(L"RssFeed", L"MaxItems", L"5"), 1, 20, items)) {
+            error = L"RssFeed.MaxItems must be 1 through 20 before applying WallpaperRSS."; return false;
+        }
+        preset = aip::content::WallpaperRssPreset(items);
+    } else if (g_commandLine.presetName == L"WallpaperSMTC") {
+        const aip::content::Entry* wallpaper = nullptr;
+        if (currentValid) {
+            for (const auto& entry : current.entries)
+                if (entry.enabled && aip::content::BackgroundIdFor(entry.background) == aip::content::BackgroundId::Wallpaper) { wallpaper = &entry; break; }
+            if (!wallpaper) for (const auto& entry : current.entries)
+                if (aip::content::BackgroundIdFor(entry.background) == aip::content::BackgroundId::Wallpaper) { wallpaper = &entry; break; }
+        }
+        preset = aip::content::WallpaperAndSmtcCycle(wallpaper);
+    } else { error = L"--preset expects Wallpaper, WallpaperRSS, or WallpaperSMTC."; return false; }
+    // Compare the effective layout, including explicit global overrides, so
+    // repeating a preset with the same driver/text preferences cannot consume
+    // another pair of preserved slots on every invocation.
+    for (const auto& setting : g_commandLine.settings) if (IEquals(setting.section, L"Content")) {
+        auto value = setting.value;
+        if (!aip::content::NormalizeSetting(setting.section, setting.key, value, error)) return false;
+        if (IEquals(setting.key, L"CycleDriver")) preset.cycleDriver = value == L"Auto" ? aip::content::CycleDriver::Auto :
+            value == L"Windows" ? aip::content::CycleDriver::Windows : aip::content::CycleDriver::DesktopStub;
+        else if (IEquals(setting.key, L"TextMode")) preset.textMode = value == L"Overlay" ? aip::content::TextMode::Overlay :
+            value == L"Off" ? aip::content::TextMode::Off : aip::content::TextMode::Auto;
+        else if (IEquals(setting.key, L"CycleEnabled")) aip::content::ParseBool(value, preset.cycle);
+    }
+    if (currentValid && aip::content::ActivePresetMatches(current, preset)) { error.clear(); return true; }
+    int count = 0, highest = 0;
+    if (!aip::content::ParseInt(read(L"Content", L"Count", L"1"), 1, aip::content::MaxEntries, count)) {
+        error = L"Content.Count must be 1 through 32 before applying a preset."; return false;
+    }
+    for (const auto& section : document) if (aip::content::EntrySection(section.name)) {
+        int index = 0; aip::content::ParseInt(section.name.substr(8), 1, aip::content::MaxEntries, index);
+        highest = std::max(highest, index);
+    }
+    aip::content::PresetPlan plan;
+    if (!aip::content::PlanAppendPreset(preset, count, highest, plan, error)) return false;
+    auto candidate = text;
+    for (const auto& setting : plan.settings)
+        if (!WriteContentProfileSetting(candidate, {setting.section, setting.key, setting.value})) {
+            error = L"The preset could not be represented in the selected INI."; return false;
+        }
+    text = std::move(candidate); error.clear(); return true;
+}
+
+static bool PrepareCommandLinePresetPreview(std::wstring& error)
+{
+    g_commandLine.presetPreviewLoaded = false;
+    g_commandLine.presetPreviewDocument.clear();
+    if (g_commandLine.presetName.empty()) return true;
+    if (!ValidateCommandLinePresetCombination(error)) return false;
+    std::wstring text;
+    if (!ReadIniFileForMutation(text)) {
+        const auto attributes = GetFileAttributesW(g_iniPath.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES || GetLastError() != ERROR_FILE_NOT_FOUND) {
+            error = L"The preset target INI could not be read."; return false;
+        }
+        text = BuildInitialIniTemplate();
+    }
+    if (!ApplyCommandLinePresetToDocument(text, error)) return false;
+    g_commandLine.presetPreviewDocument = std::move(text);
+    g_commandLine.presetPreviewLoaded = true;
+    return true;
+}
+
 static std::wstring DesktopStubContentProfileValue(
     const wchar_t* section,
     const wchar_t* key,
@@ -2371,6 +2486,12 @@ static std::wstring DesktopStubContentProfileValue(
         ? std::wstring(fallback ? fallback : L"") : IniReadS(section, key, fallback);
     if (!includeCommandLineOverrides)
         return value;
+
+    if (g_commandLine.presetPreviewLoaded) {
+        const auto document = aip::ParseIniDocument(g_commandLine.presetPreviewDocument);
+        std::wstring preview;
+        value = aip::ReadIniValueFromDoc(document, section, key, preview) ? preview : std::wstring(fallback ? fallback : L"");
+    }
 
     for (const auto& entry : g_commandLine.settings)
     {
@@ -2446,6 +2567,28 @@ static bool ValidateDesktopStubContentProfileValues(
     return true;
 }
 
+static bool ValidateCommandLinePresetDocument(const std::wstring& text, std::wstring& error)
+{
+    if (g_commandLine.presetName.empty()) return true;
+    const auto document = aip::ParseIniDocument(text);
+    const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+    };
+    for (const auto& setting : g_displaySettings) {
+        auto value = read(setting.section, setting.key, setting.fallback);
+        if (!NormalizeDesktopStubDisplaySettingValue(setting, value, error)) return false;
+    }
+    aip::content::Configuration configuration;
+    if (!aip::content::ReadConfiguration(read, configuration, error, ContentAsusEventsFromDocument(document))) return false;
+    const bool rss = std::any_of(configuration.entries.begin(), configuration.entries.end(), [&](const auto& entry) {
+        return configuration.enabled && entry.enabled && aip::content::EntryUsesSource(entry, aip::content::SourceId::RssFeed);
+    });
+    return ValidateDesktopStubContentProfileValues(rss ? L"RssFeed" : configuration.enabled ? L"Wallpaper" : read(L"Settings", L"ContentSource", L"Wallpaper"),
+        read(L"RssFeed", L"FeedUrl", L""), read(L"RssFeed", L"UserAgent", L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)"),
+        read(L"RssFeed", L"UpdateIntervalSeconds", L"900"), read(L"RssFeed", L"MaxItems", L"5"),
+        read(L"RssFeed", L"HttpTimeoutSeconds", L"20"), read(L"RssFeed", L"MaxFeedBytes", L"2097152"), error);
+}
+
 static bool ValidateDesktopStubDisplayProfile(bool includeCommandLineOverrides, std::wstring& error)
 {
     for (const auto& setting : g_displaySettings) {
@@ -2460,6 +2603,7 @@ static bool ValidateDesktopStubContentProfile(
     bool includeCommandLineOverrides,
     std::wstring& error)
 {
+    if (includeCommandLineOverrides && !PrepareCommandLinePresetPreview(error)) return false;
     if (!ValidateDesktopStubDisplayProfile(includeCommandLineOverrides, error)) return false;
     aip::content::Configuration composition;
     if (!aip::content::ReadConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
@@ -2564,7 +2708,7 @@ static bool ApplyCommandLinePersistentSettings()
             g_commandLine.applyError;
         return false;
     }
-    if (g_commandLine.settings.empty())
+    if (g_commandLine.settings.empty() && g_commandLine.presetName.empty())
         return true;
 
     std::wstring packagedStartupTarget = IniReadS(L"Settings", L"AppxManifestTarget", L"Windows10");
@@ -2614,6 +2758,7 @@ static bool ApplyCommandLinePersistentSettings()
 
     auto mutateSettings = [&](std::wstring& text)
     {
+        if (!ApplyCommandLinePresetToDocument(text, g_commandLine.applyError)) return false;
         for (const auto& entry : g_commandLine.settings)
         {
             const wchar_t* value = entry.value.c_str();
@@ -2632,7 +2777,7 @@ static bool ApplyCommandLinePersistentSettings()
                 std::wstring read; return aip::ReadIniValueFromDoc(document, section, key, read) ? read : std::wstring(fallback);
             }, prospective, issue, ContentAsusEventsFromDocument(document))) return false;
         }
-        return true;
+        return ValidateCommandLinePresetDocument(text, g_commandLine.applyError);
     };
 
     std::wstring startupTransactionError;
@@ -2654,6 +2799,7 @@ static bool ApplyCommandLinePersistentSettings()
                 L"shell:startup shortcut: " + startupTransactionError;
             return false;
         }
+        if (!g_commandLine.applyError.empty()) return false;
         if (saveError == ERROR_SUCCESS)
             saveError = ERROR_WRITE_FAULT;
         g_commandLine.applyError = L"Failed to save the command-line setting batch (error " +

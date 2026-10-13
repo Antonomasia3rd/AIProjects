@@ -2,10 +2,13 @@
 #ifndef DESKTOPSTUB_CONTENT_MESSAGEBOX
 #define DESKTOPSTUB_CONTENT_MESSAGEBOX MessageBoxW
 #endif
+#include "../content_presets.h"
 static constexpr UINT ID_CONTENT_OPTIONS = 19000;
 static constexpr UINT ID_CONTENT_ADD = 19010;
 static constexpr UINT ID_CONTENT_NOW_PLAYING_IMPORT = 19011;
 static constexpr UINT ID_CONTENT_TEXT_MODE = 19020;
+static constexpr UINT ID_CONTENT_BUILTIN_PRESET = 19030;
+static constexpr UINT ID_CONTENT_CYCLE_DRIVER = 19040;
 static constexpr UINT ID_CONTENT_ENTRY_OPTIONS = 20000;
 static constexpr UINT CONTENT_ENTRY_COMMANDS = 64;
 static constexpr UINT ID_NOTES_SETTINGS = 24000;
@@ -52,9 +55,10 @@ static const ContentTrayOption g_contentOptions[] = {
     {L"Enabled", L"Use tile contents", L"0", true},
     {L"Count", L"Content slots (1-32)", L"1", false},
     {L"CycleEnabled", L"Rotate through enabled contents", L"0", true},
-    {L"CycleSeconds", L"Show each content for (seconds)", L"10", false},
+    {L"CycleSeconds", L"App / fallback cycle interval (seconds)", L"10", false},
     {L"RefreshSeconds", L"Check for source updates every (seconds)", L"2", false},
     {L"TextMode", L"Text delivery", L"Auto", false},
+    {L"CycleDriver", L"Who rotates contents", L"DesktopStub", false},
 };
 static const ContentTrayOption g_contentEntryOptions[] = {
     {L"Enabled", L"Use this content", L"1", true},
@@ -119,8 +123,19 @@ static void AppendContentEngineMenu(HMENU menu, ContentMenuPart part = ContentMe
         if (i < 2 && part != ContentMenuPart::Contents) continue;
         if (i >= 2 && i <= 4 && part != ContentMenuPart::Timing) continue;
         if (i == 5 && part != ContentMenuPart::TextDelivery) continue;
+        if (i == 6 && part != ContentMenuPart::Timing) continue;
         if (i == 1) continue; // List size belongs next to the entries, below.
-        if (IEquals(g_contentOptions[i].key, L"TextMode")) {
+        if (IEquals(g_contentOptions[i].key, L"CycleDriver")) {
+            HMENU choices = CreatePopupMenu();
+            if (!choices) continue;
+            const auto value = IniReadS(L"Content", L"CycleDriver", L"DesktopStub");
+            for (UINT choice = 0; choice < _countof(aip::content::CycleDrivers); ++choice)
+                aip::AppendTrayMenuItem(choices, ID_CONTENT_CYCLE_DRIVER + choice,
+                    aip::content::CycleDrivers[choice].label, IEquals(value, aip::content::CycleDrivers[choice].value), true);
+            aip::AppendMenuSeparator(choices);
+            aip::AppendTrayMenuItem(choices, 0, L"Windows chooses queue display order and timing", false, false);
+            AppendContentSubmenu(menu, choices, L"Who rotates contents");
+        } else if (IEquals(g_contentOptions[i].key, L"TextMode")) {
             HMENU choices = CreatePopupMenu();
             if (!choices) continue;
             const auto value = IniReadS(L"Content", L"TextMode", L"Auto");
@@ -312,7 +327,8 @@ static void AppendContentEngineMenu(HMENU menu, ContentMenuPart part = ContentMe
 
 // A menu action works from one file snapshot and commits once. Concurrent
 // writers cannot get half of an image/path update or overwrite a reorder.
-template<class Mutator> static bool CommitContentMenuMutation(HWND owner, Mutator mutate)
+using ContentMenuConfirmation = std::function<bool(const std::wstring&, const aip::content::Configuration&, const std::wstring&)>;
+template<class Mutator> static bool CommitContentMenuMutation(HWND owner, Mutator mutate, const ContentMenuConfirmation& confirm = {})
 {
     std::wstring original, error;
     if (!ReadIniFileForMutation(original)) {
@@ -323,6 +339,7 @@ template<class Mutator> static bool CommitContentMenuMutation(HWND owner, Mutato
         if (!error.empty()) DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Invalid content setting", MB_OK | MB_ICONWARNING);
         return false;
     }
+    if (candidate == original) return true;
     auto readConfig = [](const std::wstring& text, aip::content::Configuration& cfg, std::wstring& issue) {
         const auto doc = aip::ParseIniDocument(text);
         return aip::content::ReadConfiguration([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
@@ -343,8 +360,10 @@ template<class Mutator> static bool CommitContentMenuMutation(HWND owner, Mutato
             DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"RSS configuration", MB_OK | MB_ICONWARNING); return false;
         }
     }
-    const auto warning = aip::content::TimingChangeWarning(before, after, UseExperimentalLiveTileUpdate());
-    if (!warning.empty() && DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, (warning + L"\r\n\r\nApply this setting?").c_str(), L"Content cycling", MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) != IDYES) return false;
+    const auto warning = ContentTimingChangeWarning(before, after);
+    if (confirm) {
+        if (!confirm(original, after, warning)) return false;
+    } else if (!warning.empty() && DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, (warning + L"\r\n\r\nApply this setting?").c_str(), L"Content cycling", MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) != IDYES) return false;
     if (!MutateDesktopStubIniWithWait([&](std::wstring& current) {
         if (current != original) { SetLastError(ERROR_RETRY); return false; }
         current = candidate; return true;
@@ -356,7 +375,8 @@ template<class Mutator> static bool CommitContentMenuMutation(HWND owner, Mutato
     return true;
 }
 
-static bool SaveContentMenuSettings(HWND owner, const std::vector<aip::IniSetting>& settings, bool replaceAsusEvents = false, bool replaceContentEntries = false)
+static bool SaveContentMenuSettings(HWND owner, const std::vector<aip::IniSetting>& settings, bool replaceAsusEvents = false,
+    bool replaceContentEntries = false, const ContentMenuConfirmation& confirm = {})
 {
     return CommitContentMenuMutation(owner, [&](std::wstring& text, std::wstring& error) {
         if (replaceAsusEvents && !RemoveContentAsusEvents(text)) return false;
@@ -371,6 +391,56 @@ static bool SaveContentMenuSettings(HWND owner, const std::vector<aip::IniSettin
             }
         }
         return true;
+    }, confirm);
+}
+
+static bool ApplyContentPreset(HWND owner, const aip::content::PresetDefinition& preset)
+{
+    auto requested = preset;
+    aip::content::PresetPlan planned;
+    return CommitContentMenuMutation(owner, [&](std::wstring& text, std::wstring& error) {
+        const auto document = aip::ParseIniDocument(text);
+        aip::content::Configuration current;
+        std::wstring ignored;
+        if (aip::content::ReadConfiguration([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+                std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+            }, current, ignored, ContentAsusEventsFromDocument(document))) {
+            if (requested.value == L"WallpaperSMTC") {
+                const aip::content::Entry* wallpaper = nullptr;
+                for (const auto& entry : current.entries)
+                    if (entry.enabled && aip::content::BackgroundIdFor(entry.background) == aip::content::BackgroundId::Wallpaper) { wallpaper = &entry; break; }
+                if (!wallpaper) for (const auto& entry : current.entries)
+                    if (aip::content::BackgroundIdFor(entry.background) == aip::content::BackgroundId::Wallpaper) { wallpaper = &entry; break; }
+                requested = aip::content::WallpaperAndSmtcCycle(wallpaper);
+            }
+            if (aip::content::ActivePresetMatches(current, requested)) return true;
+        }
+        std::wstring countValue;
+        int count = 1, highest = 0;
+        if (aip::ReadIniValueFromDoc(document, L"Content", L"Count", countValue) &&
+            !aip::content::ParseInt(countValue, 1, aip::content::MaxEntries, count)) {
+            error = L"Content.Count must be from 1 through 32 before adding a preset."; return false;
+        }
+        for (const auto& section : document) if (aip::content::EntrySection(section.name)) {
+            int index = 0;
+            aip::content::ParseInt(section.name.substr(8), 1, aip::content::MaxEntries, index);
+            highest = std::max(highest, index);
+        }
+        if (!aip::content::PlanAppendPreset(requested, count, highest, planned, error)) return false;
+        for (const auto& setting : planned.settings)
+            if (!WriteContentProfileSetting(text, {setting.section, setting.key, setting.value})) {
+                error = L"The preset could not be stored in the selected INI."; return false;
+            }
+        return true;
+    }, [&](const std::wstring&, const aip::content::Configuration&, const std::wstring& warning) {
+        std::wstring summary = L"Apply " + requested.label + L"?\r\n\r\n";
+        summary += L"This adds new contents in slots " + std::to_wstring(planned.firstEntry) + L" through " +
+            std::to_wstring(planned.lastEntry) + L" and makes them active.\r\n";
+        summary += L"The " + std::to_wstring(planned.previousSlots) + L" previous slots stay saved but become inactive; re-enable them from Content list.\r\n";
+        summary += L"\r\nWindows handles rotation when available; otherwise DesktopStub uses the configured app cycle interval. Provider/accounts and Startup settings stay configured.";
+        if (!warning.empty()) summary += L"\r\n\r\n" + warning;
+        return DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, summary.c_str(), L"Apply content preset",
+            MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) == IDYES;
     });
 }
 
@@ -438,7 +508,20 @@ static bool ImportContentNowPlayingFile(HWND owner, const std::wstring& path)
     if (!ReadContentNowPlayingImport(path, plan, projection, error)) {
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"NowPlayingTile import", MB_OK | MB_ICONWARNING); return false;
     }
-    if (!SaveContentMenuSettings(owner, projection.settings, false, true)) return false;
+    const auto confirm = [&](const std::wstring& original, const aip::content::Configuration& after, const std::wstring& warning) {
+        std::size_t removed = 0;
+        for (const auto& section : aip::ParseIniDocument(original))
+            if (aip::ToLower(section.name).compare(0, 8, L"content.") == 0) ++removed;
+        std::wstring summary = L"Import this NowPlayingTile profile?\r\n\r\nThe imported layout creates " +
+            std::to_wstring(after.entries.size()) + L" media content entries and replaces the entire current Content list.\r\n";
+        if (removed) summary += L"This removes " + std::to_wstring(removed) + L" saved Content.* sections, including inactive or unused entries.\r\n";
+        summary += L"\r\nIt also applies the profile's text delivery, source refresh, tray preference (next launch) and menu grouping. Startup preferences and the cycle interval stay as configured.\r\n";
+        if (!warning.empty()) summary += L"\r\n" + warning;
+        summary += L"\r\nContinue with replacement?";
+        return DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, summary.c_str(), L"Replace contents from NowPlayingTile profile",
+            MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) == IDYES;
+    };
+    if (!SaveContentMenuSettings(owner, projection.settings, false, true, confirm)) return false;
     std::wstring report = L"NowPlayingTile content was imported.\r\n";
     for (const auto& issue : projection.diagnostics) report += L"\r\n" + issue;
     DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, report.c_str(), L"NowPlayingTile import", MB_OK | MB_ICONINFORMATION);
@@ -457,6 +540,18 @@ static bool SaveContentAsusEventSetting(HWND owner, const std::wstring& key, con
 
 static bool DispatchContentEngineCommand(HWND owner, UINT command)
 {
+    if (command >= ID_CONTENT_CYCLE_DRIVER && command < ID_CONTENT_CYCLE_DRIVER + _countof(aip::content::CycleDrivers)) {
+        SaveContentMenuSettings(owner, {{L"Content", L"CycleDriver", aip::content::CycleDrivers[command - ID_CONTENT_CYCLE_DRIVER].value}}); return true;
+    }
+    if (command == ID_CONTENT_BUILTIN_PRESET) {
+        ApplyContentPreset(owner, aip::content::WallpaperPreset()); return true;
+    }
+    if (command == ID_CONTENT_BUILTIN_PRESET + 1) {
+        ApplyContentPreset(owner, aip::content::WallpaperRssPreset(IniReadClampedI(L"RssFeed", L"MaxItems", 5, 1, 20))); return true;
+    }
+    if (command == ID_CONTENT_BUILTIN_PRESET + 2) {
+        ApplyContentPreset(owner, aip::content::WallpaperAndSmtcCycle()); return true;
+    }
     if (command == ID_DISCORD_SETTINGS + 80) {
         wchar_t path[32768]{};
         OPENFILENAMEW dialog{}; dialog.lStructSize = sizeof(dialog); dialog.hwndOwner = owner;

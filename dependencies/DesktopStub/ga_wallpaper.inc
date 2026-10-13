@@ -1,6 +1,8 @@
 ﻿// -----------------------------------------------------------------------------
 // Wallpaper
 // -----------------------------------------------------------------------------
+#include "../live_capture_protocol.h"
+#include "../bounded_capture_process.inc"
 
 enum class WallpaperDetectionMethod
 {
@@ -486,9 +488,9 @@ static bool WriteFileExact(HANDLE file, const void* data, DWORD bytes)
     return true;
 }
 
-static bool SaveHBitmapAsBmpFile(HBITMAP hBitmap, int width, int height, const std::wstring& path)
+static bool SaveHBitmapAsBmpHandle(HBITMAP hBitmap, int width, int height, HANDLE file)
 {
-    if (!hBitmap || width <= 0 || height <= 0 || path.empty())
+    if (!hBitmap || width <= 0 || height <= 0 || !file || file == INVALID_HANDLE_VALUE)
         return false;
 
     const size_t stride = static_cast<size_t>(width) * 4u;
@@ -509,10 +511,6 @@ static bool SaveHBitmapAsBmpFile(HBITMAP hBitmap, int width, int height, const s
     bih.biBitCount = 32;
     bih.biCompression = BI_RGB;
     bih.biSizeImage = static_cast<DWORD>(imageSize);
-
-    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE)
-        return false;
 
     BITMAPFILEHEADER bfh{};
     bfh.bfType = 0x4D42;
@@ -564,55 +562,39 @@ static bool SaveHBitmapAsBmpFile(HBITMAP hBitmap, int width, int height, const s
 
     if (hdc)
         ReleaseDC(nullptr, hdc);
-    CloseHandle(file);
-    if (!ok)
-        DeleteFileW(path.c_str());
     return ok;
 }
 
-static bool CaptureWindowToBmpFile(
-    HWND hwnd,
-    const std::wstring& path,
-    bool& rejectedBlank,
-    bool& rejectedTooSmall,
-    int& rejectedWidth,
-    int& rejectedHeight,
-    int& rejectedMinWidth,
-    int& rejectedMinHeight)
+// The raw window/screen operations are called only by the isolated helper.
+static aip::capture::Reply CaptureWindowToHandle(const aip::capture::HelperRequest& request)
 {
-    rejectedBlank = false;
-    rejectedTooSmall = false;
-    rejectedWidth = 0;
-    rejectedHeight = 0;
-    rejectedMinWidth = 0;
-    rejectedMinHeight = 0;
-    if (!hwnd || path.empty())
-        return false;
-
-    RECT rc{};
-    if (!GetWindowRect(hwnd, &rc))
-        return false;
-
-    int width = rc.right - rc.left;
-    int height = rc.bottom - rc.top;
-    if (width <= 0 || height <= 0)
-        return false;
-
-    int minWidth = 0;
-    int minHeight = 0;
-    if (!LiveWallpaperCaptureRectLooksLargeEnough(width, height, minWidth, minHeight))
-    {
-        rejectedTooSmall = true;
-        rejectedWidth = width;
-        rejectedHeight = height;
-        rejectedMinWidth = minWidth;
-        rejectedMinHeight = minHeight;
-        return false;
+    auto reply = aip::capture::MakeReply(request, aip::capture::Status::CaptureFailed);
+    const auto hwnd = reinterpret_cast<HWND>(request.window);
+    DWORD owner = 0;
+    if (!hwnd || !GetWindowThreadProcessId(hwnd, &owner) || owner != request.windowProcessId) {
+        reply.status = aip::capture::Status::WindowChanged; reply.error = ERROR_INVALID_WINDOW_HANDLE; return reply;
     }
 
+    RECT rc{};
+    if (!GetWindowRect(hwnd, &rc)) { reply.error = GetLastError(); return reply; }
+
+    const auto wideWidth = static_cast<long long>(rc.right) - rc.left;
+    const auto wideHeight = static_cast<long long>(rc.bottom) - rc.top;
+    if (wideWidth <= 0 || wideHeight <= 0 || wideWidth > INT_MAX || wideHeight > INT_MAX) return reply;
+    int width = static_cast<int>(wideWidth);
+    int height = static_cast<int>(wideHeight);
+    if (width <= 0 || height <= 0) return reply;
+    reply.width = width; reply.height = height;
+
+    if (width < request.minimumWidth || height < request.minimumHeight)
+    {
+        reply.flags |= aip::capture::RejectedTooSmall; return reply;
+    }
+    if (static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) * 4 > aip::capture::MaximumBitmapBytes)
+        { reply.error = ERROR_NOT_ENOUGH_MEMORY; return reply; }
+
     HDC screenDc = GetDC(nullptr);
-    if (!screenDc)
-        return false;
+    if (!screenDc) { reply.error = GetLastError(); return reply; }
 
     HDC memDc = CreateCompatibleDC(screenDc);
     HBITMAP bitmap = CreateCompatibleBitmap(screenDc, width, height);
@@ -621,16 +603,21 @@ static bool CaptureWindowToBmpFile(
         if (bitmap) DeleteObject(bitmap);
         if (memDc) DeleteDC(memDc);
         ReleaseDC(nullptr, screenDc);
-        return false;
+        return reply;
     }
 
     HGDIOBJ oldObj = SelectObject(memDc, bitmap);
+    if (!GetWindowThreadProcessId(hwnd, &owner) || owner != request.windowProcessId) {
+        if (oldObj && oldObj != HGDI_ERROR) SelectObject(memDc, oldObj);
+        DeleteObject(bitmap); DeleteDC(memDc); ReleaseDC(nullptr, screenDc);
+        reply.status = aip::capture::Status::WindowChanged; reply.error = ERROR_INVALID_WINDOW_HANDLE; return reply;
+    }
     BOOL captured = PrintWindow(hwnd, memDc, 2);
 
     bool haveSurface = captured != FALSE;
     bool blank = !haveSurface || SurfaceLooksBlankOrBlack(memDc, width, height);
 
-    if (blank && LiveWallpaperCaptureScreenFallbackEnabled())
+    if (blank && request.screenFallback)
     {
         // Unsafe/debug fallback: PrintWindow often returns a formally
         // successful but black image for GPU/WebView/DirectX wallpaper
@@ -653,16 +640,78 @@ static bool CaptureWindowToBmpFile(
 
     bool ok = false;
     if (haveSurface && !blank)
-        ok = SaveHBitmapAsBmpFile(bitmap, width, height, path);
+        ok = SaveHBitmapAsBmpHandle(bitmap, width, height, reinterpret_cast<HANDLE>(request.outputHandle));
     else
-        rejectedBlank = true;
+        reply.flags |= aip::capture::RejectedBlank;
 
     if (oldObj && oldObj != HGDI_ERROR)
         SelectObject(memDc, oldObj);
     DeleteObject(bitmap);
     DeleteDC(memDc);
     ReleaseDC(nullptr, screenDc);
-    return ok;
+    if (ok) reply.status = aip::capture::Status::Success;
+    else reply.error = GetLastError();
+    return reply;
+}
+
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+static std::function<aip::capture::Reply(const aip::capture::HelperRequest&)> g_testLiveCapture;
+static aip::capture::ProcessRunner g_testLiveCaptureProcess;
+#endif
+
+static int RunLiveWallpaperCaptureHelper(const aip::capture::HelperRequest& request)
+{
+    const auto output = reinterpret_cast<HANDLE>(request.outputHandle), response = reinterpret_cast<HANDLE>(request.replyHandle);
+    if (!output || !response || GetFileType(output) != FILE_TYPE_DISK || GetFileType(response) != FILE_TYPE_PIPE) return 2;
+    auto reply = aip::capture::MakeReply(request, aip::capture::Status::CaptureFailed);
+    try {
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+        reply = g_testLiveCapture ? g_testLiveCapture(request) : aip::capture::MakeReply(request, aip::capture::Status::InvalidRequest, ERROR_NOT_SUPPORTED);
+#else
+        reply = CaptureWindowToHandle(request);
+#endif
+    } catch (...) { reply = aip::capture::MakeReply(request, aip::capture::Status::CaptureFailed, ERROR_NOT_ENOUGH_MEMORY); }
+    DWORD written = 0;
+    const bool sent = WriteFile(response, &reply, sizeof(reply), &written, nullptr) && written == sizeof(reply);
+    CloseHandle(output); CloseHandle(response);
+    return sent && reply.status == aip::capture::Status::Success ? 0 : 1;
+}
+
+static bool CaptureWindowToBmpFile(HWND hwnd, const std::wstring& path, bool& rejectedBlank, bool& rejectedTooSmall,
+    int& rejectedWidth, int& rejectedHeight, int& rejectedMinWidth, int& rejectedMinHeight, ULONGLONG deadline)
+{
+    rejectedBlank = rejectedTooSmall = false;
+    rejectedWidth = rejectedHeight = rejectedMinWidth = rejectedMinHeight = 0;
+    aip::capture::ProcessRequest options;
+    options.destination = path; options.deadline = deadline;
+    { std::lock_guard<std::mutex> lock(g_pathMutex); options.executable = g_exePath; }
+    options.helper.window = reinterpret_cast<std::uintptr_t>(hwnd);
+    LiveWallpaperMinimumCaptureSize(options.helper.minimumWidth, options.helper.minimumHeight);
+    options.helper.screenFallback = LiveWallpaperCaptureScreenFallbackEnabled();
+    static std::atomic<std::uint64_t> sequence{0};
+    options.helper.requestId = ++sequence;
+    if (!options.helper.requestId) options.helper.requestId = ++sequence;
+    options.canceled = [] { return !g_running.load() || g_shutdownState.IsRequested(); };
+    aip::capture::Reply reply;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    options.helper.windowProcessId = 1; // No real HWND/PID lookup in an inert host.
+    reply = g_testLiveCaptureProcess ? g_testLiveCaptureProcess(options) :
+        aip::capture::MakeReply(options.helper, aip::capture::Status::InvalidRequest, ERROR_NOT_SUPPORTED);
+#else
+    DWORD owner = 0;
+    if (!GetWindowThreadProcessId(hwnd, &owner)) return false;
+    options.helper.windowProcessId = owner;
+    reply = aip::capture::RunOwnedProcess(options);
+#endif
+    rejectedBlank = (reply.flags & aip::capture::RejectedBlank) != 0;
+    rejectedTooSmall = (reply.flags & aip::capture::RejectedTooSmall) != 0;
+    if (rejectedTooSmall) {
+        rejectedWidth = reply.width; rejectedHeight = reply.height;
+        rejectedMinWidth = reply.minimumWidth; rejectedMinHeight = reply.minimumHeight;
+    }
+    if (reply.status == aip::capture::Status::TimedOut || reply.status == aip::capture::Status::Canceled)
+        Log(L"[!] Live wallpaper capture helper stopped: %s (error %lu).", reply.status == aip::capture::Status::TimedOut ? L"deadline" : L"shutdown", static_cast<unsigned long>(reply.error));
+    return reply.status == aip::capture::Status::Success;
 }
 
 static void AddUniqueWindowCandidate(std::vector<HWND>& candidates, HWND hwnd)
@@ -843,13 +892,10 @@ static std::wstring TryGetLiveWallpaperSnapshot()
         long long elapsedMs = duration_cast<milliseconds>(now - s_activeSince).count();
         if (elapsedMs < delayMs)
         {
-            steady_clock::time_point activeSinceBeforeDelay = s_activeSince;
-            lk.unlock();
-            Sleep(static_cast<DWORD>(delayMs - elapsedMs));
-            lk.lock();
-            now = steady_clock::now();
-            if (provider != s_activeProvider || activeSinceBeforeDelay != s_activeSince)
-                return L"";
+            // Defer until a later poll instead of sleeping on a UI/registration
+            // caller. Pending suppresses premature static wallpaper fallback.
+            g_liveWallpaperCapturePending = true;
+            return IsUsableWallpaperPath(s_snapshotPath) ? s_snapshotPath : L"";
         }
     }
 
@@ -862,6 +908,7 @@ static std::wstring TryGetLiveWallpaperSnapshot()
             LiveWallpaperCaptureRefreshMs(), startupRefreshMs, s_startupSettleActive));
         if (!token) return false;
         aip::CaptureAttemptScope<decltype(clock)> attempt(s_captureAttempts, token, lk, clock);
+        const ULONGLONG captureDeadline = GetTickCount64() + 3000;
         std::wstring path = GetLiveWallpaperSnapshotPath(provider, ++s_captureSequence);
         steady_clock::time_point activeSinceBeforeCapture = s_activeSince;
         if (path.empty())
@@ -883,6 +930,7 @@ static std::wstring TryGetLiveWallpaperSnapshot()
         bool captured = false;
         for (HWND candidate : candidates)
         {
+            if (!g_running.load() || g_shutdownState.IsRequested() || GetTickCount64() >= captureDeadline) break;
             bool thisRejectedBlank = false;
             bool thisRejectedTooSmall = false;
             int thisRejectedWidth = 0;
@@ -897,7 +945,8 @@ static std::wstring TryGetLiveWallpaperSnapshot()
                 thisRejectedWidth,
                 thisRejectedHeight,
                 thisRejectedMinWidth,
-                thisRejectedMinHeight))
+                thisRejectedMinHeight,
+                captureDeadline))
             {
                 captured = true;
                 rejectedBlank = false;

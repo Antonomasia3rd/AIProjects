@@ -192,6 +192,12 @@ struct FakeManagerState {
     std::atomic<int> created{0}, released{0}, reads{0}, invalidRelease{0}, acquisitionAttempts{0};
     std::atomic<HRESULT> readFailure{S_OK}, acquisitionFailure{S_OK};
     DWORD thread = 0;
+    std::mutex eventMutex;
+    winrt::Windows::Foundation::TypedEventHandler<aip::content::SmtcManager,
+        winrt::Windows::Media::Control::CurrentSessionChangedEventArgs> handler{nullptr};
+    std::atomic<int> subscriptions{0}, revocations{0};
+    std::atomic<bool> rejectEvents{false};
+    winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession current{nullptr};
 };
 struct FakeSmtcManager : winrt::implements<FakeSmtcManager,
     winrt::Windows::Media::Control::IGlobalSystemMediaTransportControlsSessionManager> {
@@ -206,18 +212,197 @@ struct FakeSmtcManager : winrt::implements<FakeSmtcManager,
     winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession GetCurrentSession() {
         ++state->reads;
         winrt::check_hresult(state->readFailure.exchange(S_OK));
-        return nullptr;
+        std::lock_guard<std::mutex> lock(state->eventMutex); return state->current;
     }
     winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession> GetSessions() {
         return winrt::single_threaded_vector<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession>().GetView();
     }
     winrt::event_token CurrentSessionChanged(const winrt::Windows::Foundation::TypedEventHandler<aip::content::SmtcManager,
-        winrt::Windows::Media::Control::CurrentSessionChangedEventArgs>&) { return {}; }
-    void CurrentSessionChanged(winrt::event_token) noexcept {}
+        winrt::Windows::Media::Control::CurrentSessionChangedEventArgs>& handler) {
+        if (state->rejectEvents) throw winrt::hresult_error(E_NOTIMPL);
+        std::lock_guard<std::mutex> lock(state->eventMutex); state->handler = handler; ++state->subscriptions; return {1};
+    }
+    void CurrentSessionChanged(winrt::event_token) noexcept {
+        std::lock_guard<std::mutex> lock(state->eventMutex); state->handler = nullptr; ++state->revocations;
+    }
     winrt::event_token SessionsChanged(const winrt::Windows::Foundation::TypedEventHandler<aip::content::SmtcManager,
         winrt::Windows::Media::Control::SessionsChangedEventArgs>&) { return {}; }
     void SessionsChanged(winrt::event_token) noexcept {}
 };
+
+using FakeSession = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession;
+using FakeMediaHandler = winrt::Windows::Foundation::TypedEventHandler<FakeSession, winrt::Windows::Media::Control::MediaPropertiesChangedEventArgs>;
+using FakePlaybackHandler = winrt::Windows::Foundation::TypedEventHandler<FakeSession, winrt::Windows::Media::Control::PlaybackInfoChangedEventArgs>;
+struct FakeSessionState {
+    std::mutex gate;
+    FakeMediaHandler media{nullptr}; FakePlaybackHandler playback{nullptr};
+    std::atomic<int> propertyReads{0}, mediaAdds{0}, playbackAdds{0}, mediaRemoves{0}, playbackRemoves{0}, timelineAdds{0};
+};
+struct FakeEventSession : winrt::implements<FakeEventSession,
+    winrt::Windows::Media::Control::IGlobalSystemMediaTransportControlsSession> {
+    std::shared_ptr<FakeSessionState> state;
+    explicit FakeEventSession(std::shared_ptr<FakeSessionState> value) : state(std::move(value)) {}
+    winrt::hstring SourceAppUserModelId() { return L"Fixture.Player"; }
+    winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties> TryGetMediaPropertiesAsync() {
+        ++state->propertyReads;
+        // The event-binding fixture deliberately has no system property API.
+        // Snapshot/text/artwork behavior is covered by the injected data tests.
+        throw winrt::hresult_error(E_ACCESSDENIED);
+    }
+    winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionTimelineProperties GetTimelineProperties() { return nullptr; }
+    winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackInfo GetPlaybackInfo() { return nullptr; }
+#define FAKE_UNUSED_ACTION(name) winrt::Windows::Foundation::IAsyncOperation<bool> name() { return nullptr; }
+    FAKE_UNUSED_ACTION(TryPlayAsync) FAKE_UNUSED_ACTION(TryPauseAsync) FAKE_UNUSED_ACTION(TryStopAsync)
+    FAKE_UNUSED_ACTION(TryRecordAsync) FAKE_UNUSED_ACTION(TryFastForwardAsync) FAKE_UNUSED_ACTION(TryRewindAsync)
+    FAKE_UNUSED_ACTION(TrySkipNextAsync) FAKE_UNUSED_ACTION(TrySkipPreviousAsync)
+    FAKE_UNUSED_ACTION(TryChangeChannelUpAsync) FAKE_UNUSED_ACTION(TryChangeChannelDownAsync) FAKE_UNUSED_ACTION(TryTogglePlayPauseAsync)
+#undef FAKE_UNUSED_ACTION
+    winrt::Windows::Foundation::IAsyncOperation<bool> TryChangeAutoRepeatModeAsync(winrt::Windows::Media::MediaPlaybackAutoRepeatMode) { return nullptr; }
+    winrt::Windows::Foundation::IAsyncOperation<bool> TryChangePlaybackRateAsync(double) { return nullptr; }
+    winrt::Windows::Foundation::IAsyncOperation<bool> TryChangeShuffleActiveAsync(bool) { return nullptr; }
+    winrt::Windows::Foundation::IAsyncOperation<bool> TryChangePlaybackPositionAsync(std::int64_t) { return nullptr; }
+    winrt::event_token TimelinePropertiesChanged(const winrt::Windows::Foundation::TypedEventHandler<FakeSession,
+        winrt::Windows::Media::Control::TimelinePropertiesChangedEventArgs>&) { ++state->timelineAdds; return {3}; }
+    void TimelinePropertiesChanged(winrt::event_token) noexcept {}
+    winrt::event_token MediaPropertiesChanged(const FakeMediaHandler& callback) {
+        std::lock_guard<std::mutex> lock(state->gate); state->media = callback; ++state->mediaAdds; return {1};
+    }
+    void MediaPropertiesChanged(winrt::event_token) noexcept {
+        std::lock_guard<std::mutex> lock(state->gate); state->media = nullptr; ++state->mediaRemoves;
+    }
+    winrt::event_token PlaybackInfoChanged(const FakePlaybackHandler& callback) {
+        std::lock_guard<std::mutex> lock(state->gate); state->playback = callback; ++state->playbackAdds; return {2};
+    }
+    void PlaybackInfoChanged(winrt::event_token) noexcept {
+        std::lock_guard<std::mutex> lock(state->gate); state->playback = nullptr; ++state->playbackRemoves;
+    }
+};
+
+void TestSelectedSessionEvents()
+{
+    using namespace aip::content;
+    using Source = AsyncSource<SmtcMediaSnapshot>;
+    auto manager = std::make_shared<FakeManagerState>();
+    auto first = std::make_shared<FakeSessionState>(), second = std::make_shared<FakeSessionState>();
+    manager->current = winrt::make<FakeEventSession>(first).as<FakeSession>();
+    std::atomic<int> wakes{0};
+    auto reader = std::make_shared<SmtcWorkerSession>([manager](auto, const auto&) -> SmtcManager {
+        manager->thread = GetCurrentThreadId(); return winrt::make<FakeSmtcManager>(manager).as<SmtcManager>();
+    });
+    Source source([reader] { reader->Reset(); });
+    const auto fetch = [reader, &wakes](const auto& cancel) {
+        SmtcMediaSnapshot snapshot; std::wstring error;
+        ReadSmtcMedia(snapshot, error, std::chrono::milliseconds(500), false,
+            [reader, &wakes](auto deadline, bool art, const auto& stop) { return reader->Read(deadline, art, stop, true, [&wakes] { ++wakes; }); }, cancel);
+        return snapshot;
+    };
+    source.Request(L"selected", std::chrono::hours(1), fetch);
+    Check(source.Wait(L"selected", std::chrono::seconds(2)) && reader->ReportEventsSupported() &&
+        first->mediaAdds == 1 && first->playbackAdds == 1 && first->timelineAdds == 0,
+        "selected session subscribes metadata and playback while avoiding timeline-progress events");
+    FakeMediaHandler oldMedia{nullptr}; FakePlaybackHandler oldPlayback{nullptr};
+    { std::lock_guard<std::mutex> lock(first->gate); oldMedia = first->media; oldPlayback = first->playback; }
+    const int before = first->propertyReads;
+    oldMedia(nullptr, nullptr); oldPlayback(nullptr, nullptr);
+    Check(wakes == 1 && first->propertyReads == before && reader->ConsumeDirty(),
+        "metadata and playback callbacks coalesce without reading session properties");
+    { std::lock_guard<std::mutex> lock(manager->eventMutex); manager->current = winrt::make<FakeEventSession>(second).as<FakeSession>(); }
+    source.Request(L"selected", std::chrono::hours(1), fetch, {}, true);
+    Check(source.Wait(L"selected", std::chrono::seconds(2)) && first->mediaRemoves == 1 && first->playbackRemoves == 1 &&
+        second->mediaAdds == 1 && second->playbackAdds == 1 && second->timelineAdds == 0,
+        "current-session replacement revokes old tokens before registering the replacement");
+    oldMedia(nullptr, nullptr); oldPlayback(nullptr, nullptr);
+    Check(wakes == 1 && !reader->ConsumeDirty(), "late callbacks from the prior selected session are permanently closed");
+    source.Stop();
+    Check(second->mediaRemoves == 1 && second->playbackRemoves == 1 && manager->invalidRelease == 0,
+        "Stop revokes selected-session tokens on its original worker before apartment teardown");
+}
+
+void TestEventEpochCoalescing()
+{
+    using namespace aip::content;
+    std::atomic<int> wakes{0};
+    auto state = std::make_shared<SmtcEventState>(); state->wake = [&] { ++wakes; };
+    const std::weak_ptr<SmtcEventState> weak = state;
+    for (int n = 0; n < 10000; ++n) SmtcEventState::Notify(weak);
+    Check(wakes == 1 && state->dirty.exchange(false), "ten thousand duplicate events coalesce into one dirty wake without any media read");
+    auto epoch = std::make_shared<SmtcSessionEventEpoch>(); epoch->destination = state;
+    const std::weak_ptr<SmtcSessionEventEpoch> oldSession = epoch;
+    SmtcSessionEventEpoch::Notify(oldSession);
+    Check(wakes == 2 && state->dirty.exchange(false), "session metadata/playback callbacks feed the same coalesced dirty state");
+    epoch->Close(); SmtcSessionEventEpoch::Notify(oldSession);
+    Check(wakes == 2 && !state->dirty, "a callback queued by a replaced session cannot wake the new session");
+    std::atomic<bool> ready{false}, release{false};
+    state->wake = [&] {
+        ready = true;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!release && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        ++wakes;
+    };
+    std::thread callback([&] { SmtcEventState::Notify(weak); });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!ready && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::atomic<bool> closed{false}, closeEntered{false};
+    std::thread closing([&] { closeEntered = true; state->Close(); closed = true; });
+    const auto closeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!closeEntered && std::chrono::steady_clock::now() < closeDeadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const bool waited = !closed.load();
+    release = true; callback.join(); closing.join();
+    const auto before = wakes.load();
+    for (int n = 0; n < 10000; ++n) SmtcEventState::Notify(weak);
+    Check(ready && closeEntered && waited && closed && wakes == before && !state->dirty,
+        "closing a callback epoch waits for its old wake and permanently blocks late notifications");
+}
+
+void TestRetainedManagerEvents()
+{
+    using namespace aip::content;
+    using Source = AsyncSource<SmtcMediaSnapshot>;
+    const auto manager = std::make_shared<FakeManagerState>();
+    std::atomic<int> wakes{0};
+    const auto session = std::make_shared<SmtcWorkerSession>([manager](auto, const auto&) -> SmtcManager {
+        manager->thread = GetCurrentThreadId();
+        return winrt::make<FakeSmtcManager>(manager).as<SmtcManager>();
+    });
+    Source source([session] { session->Reset(); });
+    const auto fetch = [session, &wakes](const Source::Cancel& canceled) {
+        SmtcMediaSnapshot media; std::wstring error;
+        ReadSmtcMedia(media, error, std::chrono::milliseconds(500), false,
+            [session, &wakes](auto deadline, bool artwork, const auto& cancel) {
+                return session->Read(deadline, artwork, cancel, true, [&wakes] { ++wakes; });
+            }, canceled);
+        return media;
+    };
+    Check(source.Request(L"events", std::chrono::hours(1), fetch) && source.Wait(L"events", std::chrono::seconds(2)) &&
+        session->ReportEventsSupported() && manager->subscriptions == 1, "idle media retains one worker-owned current-session subscription");
+    decltype(manager->handler) oldHandler{nullptr};
+    { std::lock_guard<std::mutex> lock(manager->eventMutex); oldHandler = manager->handler; }
+    const int reads = manager->reads;
+    for (int n = 0; n < 10000; ++n) oldHandler(nullptr, nullptr);
+    Check(wakes == 1 && manager->reads == reads && session->ConsumeDirty() && !session->ConsumeDirty(),
+        "current-session notifications only mark dirty and wake; callbacks never query the COM manager");
+    source.Request(L"events", std::chrono::hours(1), fetch, {}, true);
+    Check(source.Wait(L"events", std::chrono::seconds(2)) && manager->subscriptions == 1,
+        "ordinary snapshots reuse existing event tokens instead of subscribing again");
+    source.Stop();
+    oldHandler(nullptr, nullptr);
+    Check(manager->revocations == 1 && !session->ReportEventsSupported() && !session->ConsumeDirty() && manager->invalidRelease == 0 && wakes == 1,
+        "worker Stop closes the epoch, revokes the manager and releases proxies before its MTA ends");
+    auto unsupported = std::make_shared<FakeManagerState>(); unsupported->rejectEvents = true;
+    auto unavailable = std::make_shared<SmtcWorkerSession>([unsupported](auto, const auto&) -> SmtcManager {
+        unsupported->thread = GetCurrentThreadId(); return winrt::make<FakeSmtcManager>(unsupported).as<SmtcManager>();
+    });
+    Source fallback([unavailable] { unavailable->Reset(); });
+    fallback.Request(L"unsupported", std::chrono::hours(1), [unavailable](const auto& cancel) {
+        SmtcMediaSnapshot result; std::wstring error;
+        ReadSmtcMedia(result, error, std::chrono::milliseconds(500), false,
+            [unavailable](auto deadline, bool artwork, const auto& stop) { return unavailable->Read(deadline, artwork, stop, true); }, cancel);
+        return result;
+    });
+    Check(fallback.Wait(L"unsupported", std::chrono::seconds(2)) && !unavailable->ReportEventsSupported(),
+        "unsupported event interfaces retain valid polling snapshots without claiming event coverage");
+    fallback.Stop();
+}
 
 void TestPersistentWorkerManager()
 {
@@ -332,6 +517,9 @@ int main(int argc, char** argv)
     TestContract();
     TestInjectedMediaAndArtwork();
     TestPersistentWorkerManager();
+    TestEventEpochCoalescing();
+    TestRetainedManagerEvents();
+    TestSelectedSessionEvents();
     if (allowSystemMedia) TestSystemReadOnly();
     std::cout << checks << " checks; " << failures << " failures; system media reads " <<
         (allowSystemMedia ? "explicitly enabled" : "disabled") << ".\n";

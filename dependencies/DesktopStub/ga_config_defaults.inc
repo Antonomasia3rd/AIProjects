@@ -111,6 +111,7 @@ static const IniDefault g_defaults[] = {
     {L"Content", L"Count", L"1"},
     {L"Content", L"CycleEnabled", L"0"},
     {L"Content", L"CycleSeconds", L"10"},
+    {L"Content", L"CycleDriver", L"DesktopStub"},
     {L"Content", L"RefreshSeconds", L"2"},
     {L"Content", L"TextMode", L"Auto"},
     {L"Content.1", L"Enabled", L"1"},
@@ -293,6 +294,9 @@ static const IniDefault g_powerShellErrorMessageDefaults[] = {
 
 static constexpr const wchar_t* COMMAND_LINE_HELP_SECTION = L"CommandLineHelp";
 static constexpr const wchar_t* COMMAND_LINE_HELP_TEMPLATE_KEY = L"Template";
+#define DESKTOPSTUB_PRESET_HELP_LINES \
+    L"  --preset <Wallpaper|WallpaperRSS|WallpaperSMTC>  Apply a built-in layout; keep previous saved entries.\\r\\n" \
+    L"  --cycle-driver <DesktopStub|Auto|Windows>        Choose app timer or Windows queue rotation.\\r\\n"
 
 static const IniDefault g_commandLineHelpDefaults[] = {
     {COMMAND_LINE_HELP_SECTION, COMMAND_LINE_HELP_TEMPLATE_KEY,
@@ -303,6 +307,7 @@ static const IniDefault g_commandLineHelpDefaults[] = {
         L"  --version, -v                       Show build and package version.\\r\\n"
         L"  --ini <path>                        Use an alternate INI file.\\r\\n"
         L"  --set Section.Key=Value             Set and save any INI value.\\r\\n"
+        DESKTOPSTUB_PRESET_HELP_LINES
         L"  --exit, --quit                      Ask the running instance to exit.\\r\\n"
         L"  --once                              Generate once, then exit.\\r\\n"
         L"  --render-only                       Write local tile assets from --wallpaper or Image/None content; no registration, publishing or providers.\\r\\n"
@@ -654,7 +659,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"TrayContentsTitle", L"Tile contents"},
     {L"TraySourcesTitle", L"Sources and accounts"},
     {L"TrayUpdatesTitle", L"Updates and cycling"},
-    {L"TrayQuickLayoutsTitle", L"Quick layouts"},
+    {L"TrayQuickLayoutsTitle", L"Presets and imports"},
     {L"TrayStartupTitle", L"Launch at sign-in"},
     {L"TrayInterfaceTitle", L"Tray and console"},
     {L"TrayPackageTitle", L"Package registration and compatibility"},
@@ -1235,7 +1240,17 @@ static void UpgradeCommandLineHelpDefaultIfUnmodified()
     if (current.empty() || current == g_commandLineHelpDefaults[0].value)
         return;
 
-    std::wstring previousPresetHelp = g_commandLineHelpDefaults[0].value;
+    std::wstring beforePresetFlags = g_commandLineHelpDefaults[0].value;
+    const auto newFlags = beforePresetFlags.find(DESKTOPSTUB_PRESET_HELP_LINES);
+    if (newFlags != std::wstring::npos) {
+        beforePresetFlags.erase(newFlags, std::wstring(DESKTOPSTUB_PRESET_HELP_LINES).size());
+        if (current == beforePresetFlags) {
+            IniWrite(COMMAND_LINE_HELP_SECTION, COMMAND_LINE_HELP_TEMPLATE_KEY, g_commandLineHelpDefaults[0].value);
+            return;
+        }
+    }
+
+    std::wstring previousPresetHelp = beforePresetFlags;
     const std::wstring newPresetHelp = L"Select a legacy preset; disable layered content but keep its entries.";
     const auto presetHelpPosition = previousPresetHelp.find(newPresetHelp);
     if (presetHelpPosition != std::wstring::npos)
@@ -1344,6 +1359,7 @@ static void UpgradePowerShellExeDefault()
 
 static void UpgradeRenamedStringDefaults()
 {
+    UpgradeStringDefaultIfUnmodified(L"TrayQuickLayoutsTitle", L"Quick layouts", L"Presets and imports");
     UpgradeStringDefaultIfUnmodified(L"GenerateNow", L"Generate now", L"Update tile now");
     UpgradeStringDefaultIfUnmodified(L"ShowMenuAsDropdown", L"Show menu as dropdown", L"Group settings into submenus");
     UpgradeStringDefaultIfUnmodified(L"GeneralTitle", L"General:", L"Application:");
