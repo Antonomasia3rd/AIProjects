@@ -118,14 +118,23 @@ struct SmtcMediaSnapshot {
 using SmtcSessionReader = std::function<SmtcSessionData(
     smtc_detail::Clock::time_point, bool, const SmtcCancel&)>;
 
-inline SmtcSessionData ReadNativeSmtcSession(
+using SmtcManager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
+using SmtcManagerFactory = std::function<SmtcManager(smtc_detail::Clock::time_point, const SmtcCancel&)>;
+
+inline SmtcManager AcquireNativeSmtcManager(smtc_detail::Clock::time_point deadline, const SmtcCancel& canceled)
+{
+    if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+    const auto factory = aip::AcquireUncachedActivationFactory<SmtcManager,
+        winrt::Windows::Media::Control::IGlobalSystemMediaTransportControlsSessionManagerStatics>();
+    auto manager = smtc_detail::Await(factory.RequestAsync(), deadline);
+    if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+    return manager;
+}
+
+inline SmtcSessionData ReadSmtcManagerSession(const SmtcManager& manager,
     smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled)
 {
-    using Manager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
     if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
-    const auto factory = aip::AcquireUncachedActivationFactory<Manager,
-        winrt::Windows::Media::Control::IGlobalSystemMediaTransportControlsSessionManagerStatics>();
-    const auto manager = smtc_detail::Await(factory.RequestAsync(), deadline);
     const auto session = manager.GetCurrentSession();
     SmtcSessionData data;
     if (session == nullptr) return data;
@@ -162,6 +171,54 @@ inline SmtcSessionData ReadNativeSmtcSession(
     }
     return data;
 }
+
+inline SmtcSessionData ReadNativeSmtcSession(
+    smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled)
+{
+    const auto manager = AcquireNativeSmtcManager(deadline, canceled);
+    return ReadSmtcManagerSession(manager, deadline, includeArtwork, canceled);
+}
+
+// One instance belongs to one AsyncSource worker. Constructing it is inert;
+// Read lazily pins that worker's MTA for the retained media-service client.
+// The owner's worker-cleanup hook MUST call Reset on cancellation/profile
+// changes and Stop before this object is destroyed on another thread.
+class SmtcWorkerSession {
+    std::unique_ptr<smtc_detail::Apartment> apartment_;
+    SmtcManager manager_{nullptr};
+    SmtcManagerFactory factory_;
+public:
+    explicit SmtcWorkerSession(SmtcManagerFactory factory = {}) : factory_(std::move(factory)) {}
+    SmtcWorkerSession(const SmtcWorkerSession&) = delete;
+    SmtcWorkerSession& operator=(const SmtcWorkerSession&) = delete;
+    void Reset() noexcept {
+        // Release all manager proxies while their owning MTA still exists.
+        manager_ = nullptr;
+        apartment_.reset();
+    }
+    SmtcSessionData Read(smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled) {
+        if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+        if (!apartment_) {
+            auto apartment = std::make_unique<smtc_detail::Apartment>();
+            winrt::check_hresult(apartment->Result());
+            apartment_ = std::move(apartment);
+        }
+        try {
+            if (manager_ == nullptr) manager_ = factory_ ? factory_(deadline, canceled) : AcquireNativeSmtcManager(deadline, canceled);
+            if (manager_ == nullptr) throw winrt::hresult_error(E_UNEXPECTED, L"The media session manager is unavailable.");
+            if (canceled && canceled()) { Reset(); throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED)); }
+            return ReadSmtcManagerSession(manager_, deadline, includeArtwork, canceled);
+        } catch (const winrt::hresult_error& exception) {
+            const auto code = static_cast<HRESULT>(exception.code());
+            if (code == RPC_E_DISCONNECTED || code == RPC_E_SERVER_DIED || code == RPC_E_SERVER_DIED_DNE ||
+                code == HRESULT_FROM_WIN32(RPC_S_SERVER_UNAVAILABLE) || code == HRESULT_FROM_WIN32(RPC_S_CALL_FAILED) ||
+                code == HRESULT_FROM_WIN32(ERROR_CANCELLED)) Reset();
+            // No immediate reconnect loop: the source's next configured
+            // refresh is the only retry, including acquisition failures.
+            throw;
+        }
+    }
+};
 
 inline bool ReadSmtcMedia(
     SmtcMediaSnapshot& media,

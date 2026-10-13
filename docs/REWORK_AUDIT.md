@@ -1122,3 +1122,53 @@ Two independent-review allocation fallback findings were corrected. See the
 [settings validation](desktopstub-settings-validation-2026-10-11.md) and
 [navigation guide](desktopstub-settings.md). Visible menu/dialog acceptance still
 requires user feedback. The renderer discrepancy remains separate and unchanged.
+
+### Transparent backgrounds, CPU costs and remaining configuration gates, 2026-10-13
+
+The user's high-CPU dump was analyzed locally and preserved. Exact application
+frames recovered through identical original code sections show UI, generation,
+Startup, SMTC and polling workers waiting at capture. Per-thread CPU history is
+absent, and the DesktopStub dump does not establish which svchost function was
+busy. NPSMSvc is the media-session service; WpnUserService owns notification/tile
+handling. The user's two-second SMTC refresh previously created about 30 new
+session managers per minute. The new lazy worker-owned manager retains its MTA
+across reads and releases on cancellation/profile replacement/shutdown; invalid
+configuration cancels every data provider as well as actuator providers.
+
+`Background=Transparent` adds no app background while preserving existing
+`None=solid` and old command IDs. Bitmap overlays keep alpha; native Windows 10
+adaptive text omits the image; explicit preset/older targets retain alpha-image
+fallbacks. Windows still owns the final tile plate. PNG CRC validation now uses
+an equivalent shared lookup table, keeping all structural/CRC checks; the local
+16 MiB checksum fixture is about 6.2x faster. A copied static cache benchmark
+averaged 295.3ms old versus 198.7ms current warm wall time, not a service CPU claim.
+
+The shared native INI writer now rejects unsupported stored control characters
+and non-roundtripping names before mutating documents; empty names and benign
+quoted/backslash names remain supported. Managed section/document formatting
+agrees. Offscreen configuration UI and fake Startup tests are scheduled in CI
+through a build-only, scan-gated wrapper. TaskScheduler's product recipe adds a
+build-only option so validation need not execute its default test implicitly.
+
+Coordinated passes: 282,215 model assertions; 10,215 source lifecycle checks;
+150 fake SMTC checks; 331 alpha checks; 6,563 host/menu checks; 2,004 CRC checks;
+588 native baseline checks; 277 shared and 1,764 DesktopStub source checks;
+33 offscreen UI, 29 managed transactions, 76 managed document, 13 fake Startup,
+and 21 mixed native/managed lock checks. All 11 mapped products compile. Normal
+DesktopStub host/broker and installed paths scan clean; copied content and full
+exact offline smoke pass. A direct new-binary CLI alpha render also has zero
+border alpha on Medium/Wide/Large. Existing user INI and contents are unchanged.
+
+The original-machine-code debugger observation captures matching native font,
+brush, rectangle and FP arguments on four successful bounded controls. Both
+secondary variants remain identical darker rasters; no lighter state was
+captured. The original four-pixel defect and its exact gate stay open. Real
+service CPU follow-up, target-Windows appearance, accounts/hardware and Startup
+acceptance remain distinct from inert passes. Source records:
+[CPU](desktopstub-cpu-validation-2026-10-13.md),
+[alpha](transparent-tile-background-2026-10-13.md),
+[PNG cost](png-validation-performance-2026-10-13.md),
+[configuration](configuration-consistency-validation-2026-10-13.md),
+[native renderer observation](renderer-debug-observation-2026-10-13.md).
+Windhawk and the user's untracked Discord bot are untouched. Microsoft review
+remains deferred; no dump was uploaded, protection bypassed, or service changed.

@@ -1,7 +1,10 @@
 # DesktopStub topology
 
-Verified against the source at `53d9e32` on 2026-10-03. The source engine is
-built into the host; there is no external plugin DLL loading interface yet.
+Source topology updated on 2026-10-13, including the current transparent
+background and media-worker lifecycle changes. The earlier `53d9e32` snapshot
+described the October 3 checkpoint. The source engine is built into the host;
+there is no external plugin DLL loading interface. Current source/inert test
+results do not imply that a newly built product has passed real shell acceptance.
 
 ## Build-time composition
 
@@ -45,8 +48,9 @@ remain ordinary Windows runtime dependencies.
 
 The canonical catalog is in [`content_engine.h`](../dependencies/content_engine.h):
 
-- Background: desktop wallpaper, live wallpaper capture, custom image, or solid
-  color, plus current-session SMTC artwork.
+- Background: desktop wallpaper, live wallpaper capture, custom image, solid
+  color (`None`), current-session SMTC artwork, or no app background
+  (`Transparent`).
 - Text/data: custom text, RSS/Atom, Caps Lock state, SMTC, Notes, Discord Rich
   Presence, CapsBlink, and AsusBlink.
 - Up to 32 entries can each combine a background and ordered text/data sources.
@@ -57,6 +61,12 @@ The legacy Wallpaper/RSS choice is a preset. RSS can appear over wallpaper;
 selecting it does not imply that the wallpaper feature has been removed.
 See [the content guide](content-engine.md) for configuration and remaining UI
 limitations.
+
+`Transparent` is a separate choice from the existing solid-color `None`.
+Adaptive automatic text can omit the image, while bitmap/static delivery keeps
+PNG alpha through the shared image pipeline. Windows controls the final tile
+plate; no desktop-through-tile transparency is promised. See
+[transparent background behavior](transparent-tile-background-2026-10-13.md).
 
 Notes uses `dependencies/content_sources/notes.inc` directly. DesktopStub does
 not load `RealTimeNotesDeskband.dll`. Its former Explorer host and the standalone
@@ -71,11 +81,28 @@ off. `DESKTOPSTUB_ENABLE_HARDWARE_SOURCES=0` can omit those backends at build
 time; this is an existing build boundary, not a finding about the Defender
 detection.
 
+## Media worker ownership
+
+SMTC retains one native session manager on the existing asynchronous source
+worker. The worker lazily initializes and pins its MTA; subsequent snapshots
+reuse that connection. A shared worker-cleanup hook releases the manager on its
+owning thread before uninitializing COM when disabled, when the profile changes,
+or during Stop. Disconnected managers are released and reconnect only on a later
+configured refresh. Text and artwork still come from one frozen media snapshot.
+The host, helper and provider modules remain portable files in the existing
+layout; this change introduces no runtime source DLL.
+
+The CPU investigation and fake-manager/lifecycle checks are recorded in
+[the October 13 validation](desktopstub-cpu-validation-2026-10-13.md). They support
+the lifetime/reuse correction, but do not prove that the reported NPSMSvc CPU
+episode is fixed on the user's installation.
+
 ## Current direction
 
 The user's preference is to preserve the current portable layout and introduce
 compiled source DLLs only if the detection investigation establishes a need.
 No provider was converted to a DLL during this investigation. Detection logs
 identify an executable and classification, not a responsible C++ module; they
-do not currently justify a DLL split. The detection remains under investigation
-in [the incident record](audit-defender-detection.md).
+do not currently justify a DLL split. The historical Microsoft submission was
+deferred by the user and has not been rechecked; its evidence remains in
+[the incident record](audit-defender-detection.md).

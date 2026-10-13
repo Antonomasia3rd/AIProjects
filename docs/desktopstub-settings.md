@@ -19,7 +19,9 @@ uncheck it for the existing flat view. Both views expose the same controls.
 Open **Tile contents > Content list**, then select an entry. Its controls are:
 
 - **Use this content** and **Name**: enable it and give it a recognizable name.
-- **Background**: choose wallpaper, an image, media artwork or a solid background.
+- **Background**: choose wallpaper, an image, media artwork, a solid background,
+  or **Nothing / transparent**. The last removes DesktopStub's background while
+  Windows controls the tile plate; see [transparency and delivery](transparent-tile-background-2026-10-13.md).
 - **Text sources**: choose providers; **Edit source order** determines how their
   fields are combined.
 - **Custom text**: primary, secondary and badge fields contributed by CustomText.

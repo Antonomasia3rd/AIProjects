@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ReviewValidation.ps1')
 $contentBuild = Join-Path $ReviewRoot 'build/content-integration'
 $targets = @('HardwareProfileImportTests','NowPlayingProfileImportTests',
-    'NotesSourceTests','SmtcSourceTests','WinrtFactoryLifetimeTests','DiscordProfileEditTests',
+    'NotesSourceTests','SmtcSourceTests','WinrtFactoryLifetimeTests','TransparentBackgroundTests','PngCrc32Tests','DiscordProfileEditTests',
     'ContentRuntimeTests','ContentRuntimeNoHardwareTests')
 foreach ($target in (@('DiscordService','DiscordEditor','AsusService') + $targets)) {
     $built = Invoke-ReviewProcess -File $env:ComSpec -Parameters @('/d','/c',

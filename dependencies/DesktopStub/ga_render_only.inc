@@ -45,6 +45,7 @@ static int RunRenderOnlyCommand()
         }, composition, error, ReadContentAsusEvents(true))) return fail(error);
 
     aip::content::Snapshot snapshot;
+    aip::content::Entry selectedEntry;
     std::wstring source;
     CommandLineWallpaper(source);
     if (!g_commandLine.configureOnly && !manifestOnly && composition.enabled)
@@ -57,16 +58,21 @@ static int RunRenderOnlyCommand()
                 return fail(L"offline rendering supports CustomText only; external providers are not started.");
         const auto background = aip::content::BackgroundIdFor(selected->background);
         if (background != aip::content::BackgroundId::Image &&
-            background != aip::content::BackgroundId::None && source.empty())
-            return fail(L"supply --wallpaper explicitly, or select an Image/None background.");
+            background != aip::content::BackgroundId::None &&
+            background != aip::content::BackgroundId::Transparent && source.empty())
+            return fail(L"supply --wallpaper explicitly, or select an Image/None/Transparent background.");
         snapshot.active = true;
         snapshot.name = selected->name;
         snapshot.textMode = composition.textMode;
+        snapshot.backgroundId = background;
+        selectedEntry = *selected;
         if (aip::content::EntryUsesSource(*selected, aip::content::SourceId::CustomText))
             snapshot.text = selected->custom;
         if (background == aip::content::BackgroundId::Image) {
             source = TrimCopy(selected->imagePath);
             if (PathIsRelativeW(source.c_str())) source = ParentDirectoryOfPath(g_iniPath) + L"\\" + source;
+        } else if (background == aip::content::BackgroundId::Transparent) {
+            source.clear(); // Explicit transparency takes priority over --wallpaper.
         }
     }
     else if (!g_commandLine.configureOnly && !manifestOnly && source.empty())
@@ -112,8 +118,7 @@ static int RunRenderOnlyCommand()
     g_notificationsEnabled = false;
     g_notifyOnStart = g_notifyOnSuccess = g_notifyOnFailure = g_notifyOnBusy = false;
     if (snapshot.active && source.empty()) {
-        aip::content::Entry blank; blank.background = L"None";
-        source = ContentBackgroundPath(blank); // only synthesizes a local BMP
+        source = ContentBackgroundPath(selectedEntry); // only synthesizes a local BMP/PNG
     }
     if (!manifestOnly && !IsUsableWallpaperPath(source)) return fail(L"the explicit image is unavailable.");
     snapshot.backgroundPath = source;

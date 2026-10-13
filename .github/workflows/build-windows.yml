@@ -126,6 +126,10 @@ jobs:
         shell: pwsh
         run: tools\TestManagedIniInteropTests.ps1 -Run
 
+      - name: Test offscreen configuration UI and fake packaged Startup
+        shell: pwsh
+        run: tools\TestConfigurationFixtures.ps1 -Run
+
       - name: Test shared media source
         shell: cmd
         run: tools\TestSmtcSource.cmd

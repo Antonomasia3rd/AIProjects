@@ -128,32 +128,36 @@ static void AppendLiveTileImageBinding(
     int overlay,
     const wchar_t* assetName)
 {
-    if (!templateName || !*templateName || imageUri.empty())
+    const std::wstring tileText = TileTextAppliesToTileName(assetName) ? TileTextXmlText() : L"";
+    const std::wstring secondaryText = TileTextAppliesToTileName(assetName) ? TileTextXmlSecondaryText() : L"";
+    const std::wstring badgeText = TileTextAppliesToTileName(assetName) ? TileTextXmlBadgeText() : L"";
+    const bool omitBackgroundImage = LiveTileUsesAdaptiveXml() && ContentHasTransparentBackground() &&
+        (!tileText.empty() || !secondaryText.empty() || !badgeText.empty());
+    if (!templateName || !*templateName || (imageUri.empty() && !omitBackgroundImage))
         return;
 
     xml += L"    <binding template=\"";
     xml += templateName;
     xml += L"\">\r\n";
-    xml += L"      <image ";
-    if (LiveTileUsesAdaptiveXml())
-    {
-        xml += L"src=\"";
-        xml += XmlEscape(imageUri);
-        xml += L"\" placement=\"background\" hint-overlay=\"";
-        xml += IntToWString(overlay);
-        xml += L"\"";
+    if (!omitBackgroundImage) {
+        xml += L"      <image ";
+        if (LiveTileUsesAdaptiveXml())
+        {
+            xml += L"src=\"";
+            xml += XmlEscape(imageUri);
+            xml += L"\" placement=\"background\" hint-overlay=\"";
+            xml += IntToWString(overlay);
+            xml += L"\"";
+        }
+        else
+        {
+            xml += L"id=\"1\" src=\"";
+            xml += XmlEscape(imageUri);
+            xml += L"\"";
+        }
+        xml += L"/>\r\n";
     }
-    else
-    {
-        xml += L"id=\"1\" src=\"";
-        xml += XmlEscape(imageUri);
-        xml += L"\"";
-    }
-    xml += L"/>\r\n";
 
-    std::wstring tileText = TileTextXmlText();
-    std::wstring secondaryText = TileTextXmlSecondaryText();
-    std::wstring badgeText = TileTextXmlBadgeText();
     if (LiveTileUsesAdaptiveXml() && TileTextAppliesToTileName(assetName) &&
         (!tileText.empty() || !secondaryText.empty() || !badgeText.empty()))
     {
@@ -255,7 +259,10 @@ static std::wstring BuildLiveTileXml(
         }
 
         const wchar_t* templateName = LiveTileTemplateForTarget(asset.binding);
-        if (!templateName || uri.empty())
+        const bool nativeTransparentText = LiveTileUsesAdaptiveXml() && ContentHasTransparentBackground() &&
+            TileTextAppliesToTileName(asset.name) &&
+            (!TileTextXmlText().empty() || !TileTextXmlSecondaryText().empty() || !TileTextXmlBadgeText().empty());
+        if (!templateName || (uri.empty() && !nativeTransparentText))
             continue;
 
         AppendLiveTileImageBinding(xml, templateName, uri, 0, asset.name);

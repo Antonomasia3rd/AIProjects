@@ -1,4 +1,7 @@
 // Built-in data providers share one asynchronous lifecycle and result cache.
+#ifndef DESKTOPSTUB_CONTENT_QUEUE_GENERATE
+#define DESKTOPSTUB_CONTENT_QUEUE_GENERATE QueueGenerate
+#endif
 #include "../content_sources/smtc.inc"
 #include "../content_source_host.h"
 #include "../content_sources/notes.inc"
@@ -188,6 +191,9 @@ static void RequestContentNotesRefresh(int resource)
 
 struct ContentSmtcProvider
 {
+    // Declared before source: source joins/cleans its worker before the last
+    // host-side owner of the (already reset) native session can be destroyed.
+    std::shared_ptr<aip::content::SmtcWorkerSession> nativeSession;
     aip::content::AsyncSource<aip::content::SmtcMediaSnapshot> source;
     bool waitExpired = false;
     std::wstring key, profile;
@@ -195,6 +201,9 @@ struct ContentSmtcProvider
 #ifdef DESKTOPSTUB_INERT_HARDWARE
     aip::content::SmtcSessionReader testReader;
 #endif
+    ContentSmtcProvider()
+        : nativeSession(std::make_shared<aip::content::SmtcWorkerSession>()),
+          source([session = nativeSession] { session->Reset(); }) {}
     void Refresh(int seconds, bool synchronous, bool artworkNeeded = false)
     {
         waitExpired = false;
@@ -206,6 +215,10 @@ struct ContentSmtcProvider
 #ifdef DESKTOPSTUB_INERT_HARDWARE
         reader = testReader ? testReader : [](auto, bool, const auto&) -> aip::content::SmtcSessionData {
             throw std::runtime_error("The inert host has no system SMTC reader.");
+        };
+#else
+        reader = [session = nativeSession](auto deadline, bool artwork, const auto& canceled) {
+            return session->Read(deadline, artwork, canceled);
         };
 #endif
         source.Request(key, milliseconds(static_cast<long long>(seconds) * 1000),
@@ -340,6 +353,7 @@ static std::wstring ContentBackgroundPath(const aip::content::Entry& entry, cons
         return {};
     }
     case aip::content::BackgroundId::None:
+    case aip::content::BackgroundId::Transparent:
         break;
     case aip::content::BackgroundId::SmtcArtwork:
         if (media && media->artwork) return media->artwork->path;
@@ -349,9 +363,8 @@ static std::wstring ContentBackgroundPath(const aip::content::Entry& entry, cons
         return {};
     }
 
-    // A solid-color desktop has no source file. Supply a tiny BMP so text-only
-    // content and RSS still use the established image pipeline.
-    auto color = SimulatedTileBackgroundColor();
+    // Blank backgrounds have no source file. Supply a tiny local image so
+    // text-only content still uses the established image pipeline.
     std::wstring profile;
     { std::lock_guard<std::mutex> lock(g_pathMutex); profile = g_iniPath; }
     std::uint64_t hash = 14695981039346656037ull;
@@ -359,6 +372,28 @@ static std::wstring ContentBackgroundPath(const aip::content::Entry& entry, cons
     if (aip::GetTemporaryDirectoryPath().empty()) return {};
     const auto directory = GetLiveWallpaperSnapshotDirectory();
     if (directory.empty()) return {};
+    if (background == aip::content::BackgroundId::Transparent) {
+        // One RGBA pixel with zero alpha. A stored DEFLATE block keeps this
+        // deterministic and avoids loading an image encoder on each refresh.
+        const std::vector<BYTE> bytes = {
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+            0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
+            0x00, 0x00, 0x00, 0x10, 0x49, 0x44, 0x41, 0x54,
+            0x78, 0x01, 0x01, 0x05, 0x00, 0xfa, 0xff,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x01,
+            0x64, 0x78, 0x95, 0x38,
+            0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+            0xae, 0x42, 0x60, 0x82,
+        };
+        const auto path = directory + L"\\ContentTransparent-" + Hex64(hash) + L".png";
+        std::vector<BYTE> previous;
+        if ((!ReadWholeFileBytes(path, previous) || previous != bytes) && !WriteWholeFileBytes(path, bytes))
+            return {};
+        return path;
+    }
+    const auto color = SimulatedTileBackgroundColor();
     const auto path = directory + L"\\ContentSolid-" + Hex64(hash) + L".bmp";
     BITMAPFILEHEADER file{};
     file.bfType = 0x4d42; file.bfSize = 58; file.bfOffBits = 54;
@@ -397,6 +432,7 @@ static bool ContentEngineTick(bool synchronous)
     if (!ReadContentConfiguration(cfg, error)) {
         // Invalid edits must not leave a previously enabled actuator running.
         g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel();
+        g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
         if (error != lastError) {
             Log(L"Content configuration: %s", error.c_str());
             NotifyTrayBalloon(g_ui.notificationTitle, error, NIIF_WARNING);
@@ -467,6 +503,7 @@ static bool ContentEngineTick(bool synchronous)
 
     aip::content::Snapshot snapshot;
     snapshot.active = true; snapshot.name = entry.name; snapshot.textMode = cfg.textMode;
+    snapshot.backgroundId = aip::content::BackgroundIdFor(entry.background);
     auto backgroundKey = entry.background + L"\n" + entry.imagePath;
     const bool artworkBackground = aip::content::BackgroundIdFor(entry.background) == aip::content::BackgroundId::SmtcArtwork;
     if (artworkBackground) {
@@ -553,7 +590,7 @@ static bool ContentEngineTick(bool synchronous)
     auto frame = ContentSnapshotKey(snapshot);
     if (synchronous) return true; // --once invokes Generate exactly once itself.
     if (frame != lastFrame && !GenerationWorkPending()) {
-        if (QueueGenerate(snapshot.backgroundPath, L"Content source update") != 0) lastFrame = frame;
+        if (DESKTOPSTUB_CONTENT_QUEUE_GENERATE(snapshot.backgroundPath, L"Content source update") != 0) lastFrame = frame;
     }
     return true;
 }

@@ -39,6 +39,8 @@ private:
     std::string error_;
     Fetch fetch_;
     Wake wake_;
+    Wake workerCleanup_;
+    bool cleanupPending_ = false, workerEpochActive_ = false;
     Clock::time_point next_{};
     std::chrono::milliseconds interval_{0};
 
@@ -47,15 +49,29 @@ private:
             Fetch fetch;
             Wake wake;
             std::wstring key;
-            std::uint64_t revision;
+            std::uint64_t revision = 0;
+            bool runCleanup = false;
+            bool stopping = false;
             {
                 std::unique_lock<std::mutex> lock(mutex_);
-                changed_.wait(lock, [&] { return control_->stop.load() || pending_; });
-                if (control_->stop.load()) return;
-                fetch = fetch_; wake = wake_; key = key_;
-                revision = control_->revision.load();
-                pending_ = false; busy_ = true;
+                changed_.wait(lock, [&] { return control_->stop.load() || pending_ || cleanupPending_; });
+                stopping = control_->stop.load();
+                if (stopping || cleanupPending_) {
+                    runCleanup = workerEpochActive_ && static_cast<bool>(workerCleanup_);
+                    workerEpochActive_ = false;
+                    cleanupPending_ = false;
+                } else {
+                    fetch = fetch_; wake = wake_; key = key_;
+                    revision = control_->revision.load();
+                    pending_ = false; busy_ = true; workerEpochActive_ = true;
+                }
             }
+            // Cleanup follows the canceled fetch and precedes the replacement
+            // fetch. It runs on the same worker with no source mutex held, so
+            // COM clients/apartments never escape to the requesting/UI thread.
+            if (runCleanup) { try { workerCleanup_(); } catch (...) {} }
+            if (stopping) return;
+            if (!fetch) continue;
             const auto control = control_;
             Cancel canceled = [control, revision] { return control->stop.load() || control->revision.load() != revision; };
             std::optional<Result> result;
@@ -77,7 +93,11 @@ private:
         }
     }
 public:
-    AsyncSource() = default;
+    // The optional callback owns worker-local resources. It must release them
+    // without throwing and must not capture references to shorter-lived data.
+    // It runs after a canceled fetch, before a new profile, and during Stop;
+    // other sources retain their original behavior when no callback is given.
+    explicit AsyncSource(Wake workerCleanup = {}) : workerCleanup_(std::move(workerCleanup)) {}
     ~AsyncSource() { Stop(); }
     AsyncSource(const AsyncSource&) = delete;
     AsyncSource& operator=(const AsyncSource&) = delete;
@@ -88,6 +108,7 @@ public:
         if (interval < std::chrono::milliseconds(1)) interval = std::chrono::milliseconds(1);
         const bool changed = key != key_ || interval != interval_;
         if (!changed && !force && (busy_ || pending_ || Clock::now() < next_)) return true;
+        if (key != key_ && workerEpochActive_ && workerCleanup_) cleanupPending_ = true;
         key_ = key; interval_ = interval; fetch_ = std::move(fetch); wake_ = std::move(wake);
         next_ = Clock::now() + interval;
         ++control_->revision;
@@ -119,6 +140,7 @@ public:
     }
     void CancelPending() {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (workerEpochActive_ && workerCleanup_) cleanupPending_ = true;
         ++control_->revision; pending_ = false; key_.clear(); resultKey_.clear(); result_.reset(); error_.clear();
         changed_.notify_all();
     }

@@ -22,6 +22,8 @@ if /i "%~1"=="NowPlayingProfileImportTests" goto NowPlaying
 if /i "%~1"=="NotesSourceTests" goto Notes
 if /i "%~1"=="SmtcSourceTests" goto Smtc
 if /i "%~1"=="WinrtFactoryLifetimeTests" goto WinrtLifetime
+if /i "%~1"=="TransparentBackgroundTests" goto Transparent
+if /i "%~1"=="PngCrc32Tests" goto PngCrc
 if /i "%~1"=="DiscordProfileEditTests" goto Discord
 if /i "%~1"=="ContentRuntimeTests" goto Runtime
 if /i "%~1"=="ContentRuntimeNoHardwareTests" goto Unavailable
@@ -51,6 +53,12 @@ cl %CONTENT_FLAGS% tools\SmtcSourceTests.cpp /Fe:%CONTENT_OUT%\SmtcSourceTests.e
 goto Result
 :WinrtLifetime
 cl %CONTENT_FLAGS% /WX tools\WinrtFactoryLifetimeTests.cpp /Fe:%CONTENT_OUT%\WinrtFactoryLifetimeTests.exe /Fo:%CONTENT_OUT%\WinrtFactoryLifetimeTests.obj /link windowsapp.lib runtimeobject.lib ole32.lib
+goto Result
+:Transparent
+call tools\BuildTransparentBackgroundTests.cmd
+goto Result
+:PngCrc
+cl %CONTENT_FLAGS% /WX tools\PngCrc32Tests.cpp /Fe:%CONTENT_OUT%\PngCrc32Tests.exe /Fo:%CONTENT_OUT%\PngCrc32Tests.obj
 goto Result
 :Discord
 cl %CONTENT_FLAGS% /WX tools\DiscordProfileEditTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj /Fe:%CONTENT_OUT%\DiscordProfileEditTests.exe /Fo:%CONTENT_OUT%\DiscordProfileEditTests.obj /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib uuid.lib winhttp.lib crypt32.lib

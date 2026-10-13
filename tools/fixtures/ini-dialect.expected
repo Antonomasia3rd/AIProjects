@@ -14,3 +14,7 @@ DoubleQuote	say "hello"
 Empty	
 Unicode	café 亚洲 😀
 Duplicate	latest
+Key\Path	backslash key
+Trailing\	trailing backslash key
+Quote"Name	quoted key
+Slash\"Name	slash and quote key

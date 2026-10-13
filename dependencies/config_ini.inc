@@ -592,7 +592,42 @@ inline std::wstring QuoteIniString(const std::wstring& text)
 
 inline std::wstring FormatIniAssignment(const std::wstring& key, const std::wstring& value)
 {
-    return QuoteIniString(key) + L" = " + QuoteIniString(value);
+    // Names and values use different legacy parsers. ParseIniName unescapes
+    // quotes only; doubling a name's backslashes would change the stored key.
+    std::wstring quotedKey = L"\"";
+    for (wchar_t ch : key)
+    {
+        if (ch == L'\"') quotedKey.push_back(L'\\');
+        quotedKey.push_back(ch);
+    }
+    quotedKey.push_back(L'\"');
+    return quotedKey + L" = " + QuoteIniString(value);
+}
+
+inline bool ValidateIniAssignmentInput(
+    const std::wstring& section,
+    const std::wstring& key,
+    const std::wstring& value)
+{
+    // The dialect stores one assignment per physical line. Literal backslash-n
+    // remains literal; encoding CR/LF as that sequence would lose user data.
+    const auto hasLineBreakOrNul = [](const std::wstring& input) {
+        return input.find_first_of(L"\r\n") != std::wstring::npos ||
+            input.find(L'\0') != std::wstring::npos;
+    };
+    std::wstring parsedSection;
+    const auto assignment = FormatIniAssignment(key, L"");
+    const auto equals = assignment.find(L'=');
+    if (hasLineBreakOrNul(section) || hasLineBreakOrNul(key) ||
+        hasLineBreakOrNul(value) || key.find(L'=') != std::wstring::npos ||
+        !TryParseIniSectionHeader(L"[" + section + L"]", parsedSection) ||
+        parsedSection != section ||
+        ParseIniName(assignment.substr(0, equals)) != key)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
+    }
+    return true;
 }
 
 inline std::vector<IniSectionData> ParseIniDocument(const std::wstring& text)
@@ -1034,6 +1069,10 @@ inline bool WriteIniValueToText(std::wstring& text, const wchar_t* section, cons
 {
     std::wstring sectionName = section ? section : L"";
     std::wstring keyName = key ? key : L"";
+    if (!ValidateIniAssignmentInput(sectionName, keyName, value))
+    {
+        return false;
+    }
 
     if (text.empty() && !header.empty())
     {

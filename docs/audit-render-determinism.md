@@ -128,3 +128,10 @@ Final report: `build/review-validation/renderer-probe-oct11-full/outcome.md`;
 captured log: `renderer-probe-oct11-full-exact-version-smoke.log`.
 All owned processes ended. No renderer behavior, tolerance or protection change
 is supported by these results, and none was made.
+
+The October 13 current normal build passed the full exact offline smoke once.
+A separate [original-binary hardware-breakpoint observation](renderer-debug-observation-2026-10-13.md)
+captured native font/brush/rectangle/FP arguments on unchanged copies of both
+historical executables. Both secondary-text pairs produced identical darker
+rasters; no lighter state was captured. The historical failure remains open,
+with original pixel comparisons and artifacts preserved.

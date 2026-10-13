@@ -124,6 +124,61 @@ static void TestConcurrentStop() {
             "concurrent Stop calls serialize with worker creation and reject later requests");
     }
 }
+static void TestOwningWorkerCleanup() {
+    std::atomic<int> live{0}, created{0}, released{0}, wrongThread{0};
+    std::thread::id owner;
+    Source source([&] {
+        if (std::this_thread::get_id() != owner) ++wrongThread;
+        if (live.exchange(0)) ++released;
+    });
+    const auto fetch = [&](const Source::Cancel&) {
+        owner = std::this_thread::get_id();
+        if (!live.exchange(1)) ++created;
+        return created.load();
+    };
+    Require(source.Request(L"first", 1h, fetch) && source.Wait(L"first", 2s), "cleanup fixture initializes on its worker");
+    for (int i = 0; i < 100; ++i) {
+        source.Request(L"first", 1h, fetch, {}, true);
+        Require(source.Wait(L"first", 2s), "same-profile refresh completes without releasing worker resources");
+    }
+    Require(created == 1 && released == 0, "same-profile refresh reuses one worker resource");
+    source.Request(L"second", 1h, fetch);
+    Require(source.Wait(L"second", 2s) && created == 2 && released == 1, "profile replacement cleans old resources before fetching its replacement");
+    source.CancelPending();
+    Require(Until([&] { return released == 2; }), "source disable releases its resource on the owning worker without another fetch");
+    for (int i = 0; i < 100; ++i) source.CancelPending();
+    source.Request(L"second", 1h, fetch);
+    Require(source.Wait(L"second", 2s) && created == 3 && released == 2, "repeated disable is inert and reenable constructs exactly one new resource");
+    source.Stop();
+    Require(released == 3 && live == 0 && wrongThread == 0, "Stop releases the last resource once on its worker before joining");
+    source.Stop();
+    Require(released == 3, "repeat Stop does not release resources twice");
+}
+static void TestCleanupAfterCanceledFetch() {
+    std::atomic<bool> started{false}, release{false};
+    std::atomic<int> cleanup{0}, replacementCalls{0}, lateWakes{0};
+    Source source([&] { ++cleanup; });
+    source.Request(L"old", 1h, [&](const Source::Cancel&) {
+        started = true;
+        const auto deadline = Source::Clock::now() + 2s;
+        while (!release && Source::Clock::now() < deadline) std::this_thread::sleep_for(1ms);
+        return 10;
+    }, [&] { ++lateWakes; });
+    Require(Until([&] { return started.load(); }), "cleanup cancellation fixture enters its bounded fetch");
+    const auto before = Source::Clock::now();
+    source.CancelPending();
+    source.Request(L"replacement", 1h, [&](const Source::Cancel&) {
+        Require(cleanup == 1, "old worker resource is cleaned before its replacement callback");
+        ++replacementCalls; return 20;
+    });
+    Require(cleanup == 0 && replacementCalls == 0 && Source::Clock::now() - before < 500ms,
+        "cancel and reenable do not clean resources or wait on the requesting thread");
+    release = true;
+    Require(source.Wait(L"replacement", 2s) && replacementCalls == 1 && lateWakes == 0,
+        "canceled work finishes before cleanup and cannot publish or wake stale results");
+    source.Stop();
+    Require(cleanup == 2, "the replacement worker resource is cleaned once at Stop");
+}
 int main() {
     try {
         std::atomic<int> calls{0}, wakes{0};
@@ -178,6 +233,8 @@ int main() {
         TestPendingCoalescing();
         TestWaitSupersessionAndWakeFailure();
         TestConcurrentStop();
+        TestOwningWorkerCleanup();
+        TestCleanupAfterCanceledFetch();
         std::cout << "Content source host: " << checks << " checks passed\n";
         return 0;
     } catch (const std::exception& ex) {

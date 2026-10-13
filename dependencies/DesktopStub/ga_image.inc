@@ -608,6 +608,17 @@ static Color SimulatedTileBackgroundColor()
     return ParseTileColor(EffectiveManifestBackgroundColor(), Color(255, 0, 120, 215));
 }
 
+static Color ContentCanvasBackgroundColor()
+{
+    return ContentHasTransparentBackground() ? Color(0, 0, 0, 0) : Color(255, 0, 0, 0);
+}
+
+static bool PreserveContentBackgroundForText()
+{
+    return ContentHasTransparentBackground() ||
+        (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
+}
+
 #include "tile_text_render.inc"
 
 static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int logicalWidth, int logicalHeight)
@@ -646,13 +657,13 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
     {
     case SimulatedTileTextLayout::Medium:
         return RenderMediumTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale,
-            g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
+            PreserveContentBackgroundForText());
     case SimulatedTileTextLayout::Wide:
         return RenderWideTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale,
-            g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
+            PreserveContentBackgroundForText());
     case SimulatedTileTextLayout::Large:
         return RenderLargeTileTextSimulation(graphics, primaryText, secondaryText, badgeText, scale,
-            g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
+            PreserveContentBackgroundForText());
     case SimulatedTileTextLayout::None:
     default:
         return true;

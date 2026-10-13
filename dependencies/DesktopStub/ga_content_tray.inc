@@ -363,8 +363,12 @@ static bool SaveContentMenuSettings(HWND owner, const std::vector<aip::IniSettin
         if (replaceContentEntries && !aip::now_playing_profile::RemoveContentEntriesFromText(text)) return false;
         for (const auto& setting : settings) {
             auto value = setting.value;
-            if (!aip::content::NormalizeSetting(setting.section, setting.key, value, error) ||
-                !WriteContentProfileSetting(text, {setting.section, setting.key, value})) return false;
+            if (!aip::content::NormalizeSetting(setting.section, setting.key, value, error)) return false;
+            if (!WriteContentProfileSetting(text, {setting.section, setting.key, value})) {
+                error = L"Could not store " + setting.section + L"." + setting.key +
+                    L" in the single-line INI format. Stored fields cannot contain actual line breaks or NUL characters.";
+                return false;
+            }
         }
         return true;
     });

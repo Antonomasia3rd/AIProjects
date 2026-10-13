@@ -189,6 +189,8 @@
       "dependencies/http_fetch.inc",
       "dependencies/content_engine.h",
       "dependencies/content_source_host.h",
+      "dependencies/png_crc32.h",
+      "dependencies/winrt_activation.h",
       "dependencies/startup_shortcut.inc",
       "dependencies/content_sources",
       "dependencies/hardware",

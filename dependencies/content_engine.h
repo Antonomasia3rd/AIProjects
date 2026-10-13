@@ -26,6 +26,7 @@ enum class BackgroundId {
     Image,
     None,
     SmtcArtwork,
+    Transparent,
     Unknown,
 };
 struct BackgroundDescriptor {
@@ -65,6 +66,7 @@ inline constexpr BackgroundDescriptor Backgrounds[] = {
     {L"Image", L"Custom image", BackgroundId::Image},
     {L"None", L"Solid color", BackgroundId::None},
     {L"SMTCArtwork", L"Now playing artwork (SMTC)", BackgroundId::SmtcArtwork},
+    {L"Transparent", L"Nothing / transparent", BackgroundId::Transparent},
 };
 inline constexpr SourceDescriptor Sources[] = {
     {L"CustomText", L"Custom text", SourceId::CustomText, false},
@@ -122,6 +124,7 @@ struct Snapshot {
     std::wstring name, backgroundPath, activationArguments;
     Text text;
     TextMode textMode = TextMode::Auto;
+    BackgroundId backgroundId = BackgroundId::Wallpaper;
     // Keep an immutable source asset alive while a published/render snapshot
     // still reads it. The portable composition model does not own its files.
     std::shared_ptr<const void> backgroundLease;

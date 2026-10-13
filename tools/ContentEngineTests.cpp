@@ -56,12 +56,13 @@ Configuration Read(const Profile& p) {
 }
 void TestSourceCatalog() {
     constexpr std::size_t backgroundCount = sizeof(Backgrounds) / sizeof(Backgrounds[0]);
-    Require(backgroundCount == 5 &&
-            SupportedBackgroundNames() == L"Wallpaper, LiveWallpaper, Image, None, SMTCArtwork",
+    Require(backgroundCount == 6 &&
+            SupportedBackgroundNames() == L"Wallpaper, LiveWallpaper, Image, None, SMTCArtwork, Transparent",
         "the built-in background catalog has the expected stable public names");
     Require(BackgroundIdFor(L" livewallpaper ") == BackgroundId::LiveWallpaper &&
             BackgroundIdFor(L"Image") == BackgroundId::Image &&
             BackgroundIdFor(L" smtcartwork ") == BackgroundId::SmtcArtwork &&
+            BackgroundIdFor(L" transparent ") == BackgroundId::Transparent &&
             BackgroundIdFor(L"unsupported") == BackgroundId::Unknown,
         "background identifiers canonicalize case and whitespace while unknown names stay explicit");
     for (std::size_t left = 0; left < backgroundCount; ++left) {

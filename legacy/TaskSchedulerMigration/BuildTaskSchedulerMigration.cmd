@@ -28,8 +28,10 @@ for %%I in ("%ROOT%..\..") do set "REPO=%%~fI"
   "%ROOT%TaskSchedulerMigration.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
+if /i "%~1"=="/build-only" goto Built
 call "%ROOT%TestTaskSchedulerMigration.cmd"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
+:Built
 echo Built "%OUT%"
 exit /b 0

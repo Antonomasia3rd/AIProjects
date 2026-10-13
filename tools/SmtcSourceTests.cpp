@@ -1,5 +1,7 @@
 #define NOMINMAX
 #include "../dependencies/content_sources/smtc.inc"
+#include <winrt/Windows.Foundation.Collections.h>
+#include "../dependencies/content_source_host.h"
 #include <iostream>
 #include <atomic>
 #include <thread>
@@ -186,6 +188,97 @@ void TestContract()
     }
 }
 
+struct FakeManagerState {
+    std::atomic<int> created{0}, released{0}, reads{0}, invalidRelease{0}, acquisitionAttempts{0};
+    std::atomic<HRESULT> readFailure{S_OK}, acquisitionFailure{S_OK};
+    DWORD thread = 0;
+};
+struct FakeSmtcManager : winrt::implements<FakeSmtcManager,
+    winrt::Windows::Media::Control::IGlobalSystemMediaTransportControlsSessionManager> {
+    std::shared_ptr<FakeManagerState> state;
+    explicit FakeSmtcManager(std::shared_ptr<FakeManagerState> value) : state(std::move(value)) { ++state->created; }
+    ~FakeSmtcManager() {
+        APTTYPE type{}; APTTYPEQUALIFIER qualifier{};
+        if (state->thread != GetCurrentThreadId() || FAILED(CoGetApartmentType(&type, &qualifier)) || type != APTTYPE_MTA)
+            ++state->invalidRelease;
+        ++state->released;
+    }
+    winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession GetCurrentSession() {
+        ++state->reads;
+        winrt::check_hresult(state->readFailure.exchange(S_OK));
+        return nullptr;
+    }
+    winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession> GetSessions() {
+        return winrt::single_threaded_vector<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession>().GetView();
+    }
+    winrt::event_token CurrentSessionChanged(const winrt::Windows::Foundation::TypedEventHandler<aip::content::SmtcManager,
+        winrt::Windows::Media::Control::CurrentSessionChangedEventArgs>&) { return {}; }
+    void CurrentSessionChanged(winrt::event_token) noexcept {}
+    winrt::event_token SessionsChanged(const winrt::Windows::Foundation::TypedEventHandler<aip::content::SmtcManager,
+        winrt::Windows::Media::Control::SessionsChangedEventArgs>&) { return {}; }
+    void SessionsChanged(winrt::event_token) noexcept {}
+};
+
+void TestPersistentWorkerManager()
+{
+    using namespace aip::content;
+    using Source = AsyncSource<SmtcMediaSnapshot>;
+    const auto state = std::make_shared<FakeManagerState>();
+    const auto session = std::make_shared<SmtcWorkerSession>([state](auto, const auto&) -> SmtcManager {
+        state->thread = GetCurrentThreadId();
+        ++state->acquisitionAttempts;
+        winrt::check_hresult(state->acquisitionFailure.load());
+        return winrt::make<FakeSmtcManager>(state).as<SmtcManager>();
+    });
+    Source source([session] { session->Reset(); });
+    const auto fetch = [session](const Source::Cancel& canceled) {
+        SmtcMediaSnapshot media;
+        std::wstring error;
+        const bool ok = ReadSmtcMedia(media, error, std::chrono::milliseconds(500), false,
+            [session](auto deadline, bool artwork, const auto& cancel) { return session->Read(deadline, artwork, cancel); }, canceled);
+        if (!ok) media.text = {L"Error", error, L""};
+        return media;
+    };
+    Check(state->created == 0 && state->acquisitionAttempts == 0, "constructing a persistent SMTC reader never activates system media");
+    Check(source.Request(L"profile-one", std::chrono::hours(1), fetch) && source.Wait(L"profile-one", std::chrono::seconds(2)),
+        "the persistent reader creates its fake manager lazily on the source worker");
+    for (int n = 0; n < 100; ++n) {
+        source.Request(L"profile-one", std::chrono::hours(1), fetch, {}, true);
+        Check(source.Wait(L"profile-one", std::chrono::seconds(2)), "repeated media snapshots finish under the inert deadline");
+    }
+    Check(state->created == 1 && state->acquisitionAttempts == 1 && state->reads == 101 && state->released == 0,
+        "101 media refreshes retain one manager and one owning apartment");
+    state->readFailure = RPC_E_DISCONNECTED;
+    source.Request(L"profile-one", std::chrono::hours(1), fetch, {}, true);
+    Check(source.Wait(L"profile-one", std::chrono::seconds(2)) && state->released == 1 && state->acquisitionAttempts == 1,
+        "a disconnected manager is released without an inline reconnect loop");
+    for (int n = 0; n < 1000; ++n) source.Request(L"profile-one", std::chrono::hours(1), fetch);
+    Check(state->acquisitionAttempts == 1, "poll wakes after disconnect cannot bypass the configured refresh interval");
+    source.Request(L"profile-one", std::chrono::hours(1), fetch, {}, true);
+    Check(source.Wait(L"profile-one", std::chrono::seconds(2)) && state->created == 2,
+        "a later explicit refresh reconnects once after the manager failure");
+    source.Request(L"profile-two", std::chrono::hours(1), fetch);
+    Check(source.Wait(L"profile-two", std::chrono::seconds(2)) && state->created == 3 && state->released == 2,
+        "changing profiles releases the old manager before obtaining the new one");
+    source.CancelPending();
+    const auto cleanupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (state->released != 3 && std::chrono::steady_clock::now() < cleanupDeadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    Check(state->released == 3 && state->invalidRelease == 0, "disabling media releases its manager on the original MTA worker");
+    state->acquisitionFailure = E_ACCESSDENIED;
+    source.Request(L"denied", std::chrono::hours(1), fetch);
+    Check(source.Wait(L"denied", std::chrono::seconds(2)), "an acquisition error completes as an ordinary media error");
+    const int attempts = state->acquisitionAttempts;
+    for (int n = 0; n < 1000; ++n) source.Request(L"denied", std::chrono::hours(1), fetch);
+    Check(state->acquisitionAttempts == attempts, "acquisition failures remain bounded by the source cadence");
+    state->acquisitionFailure = S_OK;
+    source.Request(L"denied", std::chrono::hours(1), fetch, {}, true);
+    Check(source.Wait(L"denied", std::chrono::seconds(2)) && state->created == 4,
+        "reenabling a repaired reader creates exactly one replacement manager");
+    source.Stop();
+    Check(state->created == state->released && state->invalidRelease == 0,
+        "source Stop releases all manager references before the worker uninitializes its MTA");
+}
+
 bool ReadOnlySmoke()
 {
     aip::content::Text text;
@@ -238,6 +331,7 @@ int main(int argc, char** argv)
     TestDeadline();
     TestContract();
     TestInjectedMediaAndArtwork();
+    TestPersistentWorkerManager();
     if (allowSystemMedia) TestSystemReadOnly();
     std::cout << checks << " checks; " << failures << " failures; system media reads " <<
         (allowSystemMedia ? "explicitly enabled" : "disabled") << ".\n";

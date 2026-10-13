@@ -113,7 +113,7 @@ static void TestIniBehavior()
             fixtureDocument, L"Options", key.c_str(), dialectValue) &&
             dialectValue == line.substr(separator + 1) && sharedDialectOk;
     }
-    Check(sharedDialectOk && fixtureCount == 16,
+    Check(sharedDialectOk && fixtureCount == 20,
         "native INI reads the shared managed/native quote/comment/Unicode/path fixture");
 
     text.clear();
@@ -121,6 +121,64 @@ static void TestIniBehavior()
         aip::WriteIniValueToText(text, L"App", L"Path", L"C:\\Users\\Amiya\\Desktop\\file.txt") &&
             text == L"[App]\r\n\"Path\" = \"C:\\\\Users\\\\Amiya\\\\Desktop\\\\file.txt\"\r\n",
         "INI writer uses DesktopStub quoted assignment and escaped path style");
+
+    const std::vector<std::wstring> sections = {
+        L"", L"General", L"Content.1", L"Folder\\Name", L"Part[Inner",
+        L"semi;#=name", L"Unicode \u65e5\u672c\u8a9e"
+    };
+    const std::vector<std::wstring> keys = {
+        L"", L"Key", L"  space key  ", L"#;[Bracket]", L"Quote\"Name",
+        L"Key\\Path", L"Trailing\\", L"Slash\\\"Name"
+    };
+    const std::vector<std::wstring> values = {
+        L"", L" leading and trailing ", L"literal\\n C:\\path\\ \"quote\" 'single' #;= []",
+        L"Unicode \u65e5\u672c\u8a9e\tvalue"
+    };
+    for (const auto& section : sections) for (const auto& key : keys) for (const auto& value : values)
+    {
+        std::wstring candidate;
+        std::wstring roundtrip;
+        const bool wroteName = aip::WriteIniValueToText(candidate, section.c_str(), key.c_str(), value);
+        auto parsed = aip::ParseIniDocument(candidate);
+        Check(wroteName && aip::ReadIniValueFromDoc(parsed, section.c_str(), key.c_str(), roundtrip) &&
+            roundtrip == value, "native INI supported names/value round-trip through the full parser");
+        Check(aip::WriteIniValueToText(candidate, section.c_str(), key.c_str(), L"updated") &&
+            aip::ReadIniValueFromDoc(aip::ParseIniDocument(candidate), section.c_str(), key.c_str(), roundtrip) &&
+            roundtrip == L"updated" && aip::ParseIniDocument(candidate).front().entries.size() == 1,
+            "native INI name update preserves one canonical key instead of adding an escaped alias");
+    }
+    std::wstring oldNameText = L"[\"Options\"]\r\n\"Old\\\\Name\" = \"legacy\"\r\n";
+    Check(aip::ReadIniValueFromDoc(aip::ParseIniDocument(oldNameText), L"Options", L"Old\\\\Name", parsedValue) &&
+        parsedValue == L"legacy", "legacy name parsing retains literal doubled backslashes");
+
+    struct InvalidAssignment { std::wstring section, key, value; };
+    const std::vector<InvalidAssignment> invalidAssignments = {
+        {L"General\r\n[Injected]", L"Key", L"value"},
+        {L"General]", L"Key", L"value"}, {L" General", L"Key", L"value"},
+        {L"\"General\"", L"Key", L"value"}, {L"Unclosed\"", L"Key", L"value"},
+        {L"General", L"a=b", L"value"}, {L"General", L"Key\nInjected", L"value"},
+        {L"General", L"Key", L"line1\nline2"}, {L"General", L"Key", L"line1\rline2"},
+        {L"General", L"Key", std::wstring(L"before\0after", 12)}
+    };
+    for (const auto& invalid : invalidAssignments)
+    {
+        for (const auto& original : {std::wstring(), std::wstring(L"; keep\r\n[General]\r\nKey=before\r\n")})
+        {
+            auto candidate = original;
+            SetLastError(ERROR_SUCCESS);
+            const bool result = aip::WriteIniValueToText(candidate, invalid.section.c_str(), invalid.key.c_str(), invalid.value,
+                L"; header must not be inserted on failure\r\n");
+            Check(!result && GetLastError() == ERROR_INVALID_PARAMETER && candidate == original,
+                "unsupported native INI assignment fails explicitly before mutating either empty or existing text");
+        }
+    }
+    Check(!aip::ValidateIniAssignmentInput(std::wstring(L"Sec\0tion", 8), L"Key", L"value") &&
+        !aip::ValidateIniAssignmentInput(L"Section", std::wstring(L"Key\0name", 8), L"value"),
+        "length-aware native assignment validation rejects embedded NUL names");
+    text.clear();
+    Check(aip::WriteIniValueToText(text, nullptr, nullptr, L"value") &&
+        aip::ReadIniValueFromDoc(aip::ParseIniDocument(text), L"", L"", parsedValue) && parsedValue == L"value",
+        "null native section/key pointers retain the supported empty-name convention");
 
     std::vector<BYTE> utf8Bom = { 0xef, 0xbb, 0xbf, 'A', 0xc3, 0xa9 };
     std::wstring decoded;
@@ -139,6 +197,26 @@ static void TestIniBehavior()
     bool wrote = store.WriteRaw(L"General", L"Name", L"Value");
     std::wstring persisted = store.ReadRaw(L"General", L"Name", L"");
     Check(wrote && persisted == L"Value", "INI file write/read round trip");
+
+    std::vector<BYTE> beforeRejectedWrite, afterRejectedWrite;
+    Check(aip::ReadWholeFileBytes(path, beforeRejectedWrite) &&
+        !store.WriteRaw(L"General", L"Name", L"corrupt\nvalue") &&
+        GetLastError() == ERROR_INVALID_PARAMETER && aip::ReadWholeFileBytes(path, afterRejectedWrite) &&
+        beforeRejectedWrite == afterRejectedWrite,
+        "native persistent writer propagates invalid assignment and preserves exact original file bytes");
+    const std::wstring absentInvalidPath = path + L".invalid-assignment";
+    DeleteFileW(absentInvalidPath.c_str());
+    const aip::IniDefaultValue invalidDefaults[] = {
+        {L"General", L"Valid", L"staged only"}, {L"General", L"Invalid", L"bad\nvalue"}
+    };
+    Check(!aip::IniEnsureDefaultsRaw(absentInvalidPath, invalidDefaults, ARRAYSIZE(invalidDefaults), L"; header\r\n") &&
+        GetLastError() == ERROR_INVALID_PARAMETER && !aip::FileExists(absentInvalidPath),
+        "invalid later native default prevents publishing an earlier valid default or creating a profile");
+    Check(!store.MutateFresh([](std::wstring& candidate) {
+        return aip::WriteIniValueToText(candidate, L"General", L"Staged", L"before failure") &&
+            aip::WriteIniValueToText(candidate, L"General", L"Invalid", L"bad\rvalue");
+    }) && aip::ReadWholeFileBytes(path, afterRejectedWrite) && beforeRejectedWrite == afterRejectedWrite,
+        "native fresh transaction rejects invalid later assignment without publishing earlier staged edits");
 
     std::wstring invalidIniText;
     invalidIniText.push_back(0xD800);

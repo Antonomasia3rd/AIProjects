@@ -30,6 +30,7 @@ static class ManagedIniDocumentTests
                 TestSnapshots(root);
                 TestPureSnapshotChanges(root);
                 TestPreservationAndDialect(root);
+                TestNameCompatibility(root);
                 TestProspectiveValidation(root);
                 TestFrozenInputs(root);
                 TestEncodingAndRollback(root);
@@ -169,6 +170,38 @@ static class ManagedIniDocumentTests
         saved = ManagedIniFile.LoadDocument(spec);
         Check(Value(saved, "Section.With.Dot", "Key.With.Dot") == "value" && Value(saved, "Quoted'Name", "Back\\Slash") == "named key" &&
             File.ReadAllText(spec.FilePath).Contains("; path comment"), "separate section and key names support dots, quoted sections and native backslash names");
+    }
+
+    static void TestNameCompatibility(string root)
+    {
+        var spec = Spec(root, "names.ini");
+        var sectionSpec = new ManagedIniFileSpec { FilePath = spec.FilePath, SectionName = "Names" };
+        string[] names = { "Key\\Path", "Trailing\\", "Quote\"Name", "Slash\\\"Name", "Unicode 亚洲", "normal.dot#;" };
+        foreach (string name in names)
+        {
+            string error;
+            Check(ManagedIniFile.SaveSectionBatch(sectionSpec,
+                new Dictionary<string, string> { { name, "section value" } }, out error),
+                "managed section writer supports native-compatible backslash, quote and punctuation names");
+            var section = ManagedIniFile.ParseSectionText(File.ReadAllText(spec.FilePath), "Names");
+            Check(section.ContainsKey(name) && section[name] == "section value" &&
+                Value(ManagedIniFile.LoadDocument(spec), "Names", name) == "section value",
+                "section-only and document readers agree on the exact serialized key name");
+            Save(spec, Change("Names", name, "document value"));
+            Check(ManagedIniFile.ParseSectionText(File.ReadAllText(spec.FilePath), "Names")[name] == "document value",
+                "managed document writer updates the same section-written name without creating an escaped alias");
+            Check(ManagedIniFile.SaveSectionBatch(sectionSpec,
+                new Dictionary<string, string> { { name, "section retry" } }, out error) &&
+                Value(ManagedIniFile.LoadDocument(spec), "Names", name) == "section retry",
+                "managed section writer updates the same document-written name");
+        }
+        Check(ManagedIniFile.LoadDocument(spec).GetSection("Names").Count == names.Length,
+            "mixed section/document name writes retain exactly one entry per key");
+        const string oldName = "Old\\\\Name";
+        File.AppendAllText(spec.FilePath, "\r\n[Names]\r\n\"Old\\\\Name\" = \"legacy\"\r\n");
+        Save(spec, Change("Names", "Unrelated", "changed"));
+        Check(Value(ManagedIniFile.LoadDocument(spec), "Names", oldName) == "legacy",
+            "legacy name parsing keeps literal doubled backslashes after unrelated writes");
     }
 
     static void TestProspectiveValidation(string root)

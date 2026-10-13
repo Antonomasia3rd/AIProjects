@@ -14,6 +14,9 @@ static int ContentTestMessageBox(HWND, LPCWSTR text, LPCWSTR, UINT flags)
     return (flags & MB_YESNO) ? contentDialogResponse : IDOK;
 }
 #define DESKTOPSTUB_CONTENT_MESSAGEBOX ContentTestMessageBox
+static unsigned long long contentGenerationRequests = 0;
+static unsigned long long ContentTestQueueGenerate(std::wstring, std::wstring) { return ++contentGenerationRequests; }
+#define DESKTOPSTUB_CONTENT_QUEUE_GENERATE ContentTestQueueGenerate
 #define DESKTOPSTUB_INERT_HARDWARE
 static int contentLogicalCaps = 0, contentLogicalSamples = 0;
 static int ContentTestLogicalCaps() { ++contentLogicalSamples; return contentLogicalCaps; }
@@ -433,6 +436,49 @@ static void TestSmtcArtworkHost(const std::vector<BYTE>& bytes)
     }
     g_contentSmtc.Cancel();
     g_contentSmtc.testReader = {};
+}
+
+static void TestSmtcCadenceAndInvalidCancellation()
+{
+    std::atomic<int> reads{0};
+    g_contentSmtc.Cancel();
+    g_contentSmtc.testReader = [&](auto, bool, const auto&) {
+        ++reads;
+        aip::content::SmtcSessionData data;
+        data.hasSession = true; data.title = L"Unchanged inert media"; data.artist = L"Fixture artist";
+        data.appId = L"Fixture.Player"; data.status = L"Playing";
+        return data;
+    };
+    const std::wstring configuration =
+        L"[Content]\r\nEnabled=1\r\nCount=1\r\nCycleEnabled=0\r\nRefreshSeconds=86400\r\nTextMode=Auto\r\n"
+        L"[Content.1]\r\nBackground=None\r\nTextSources=SMTC\r\n";
+    Check(WriteContentFixture(configuration) && ContentEngineTick(true), "cadence fixture obtains one injected media snapshot without publishing a tile");
+    const auto before = contentGenerationRequests;
+    Check(ContentEngineTick(), "unchanged media first enters the inert generation queue");
+    for (int n = 0; n < 30; ++n) Check(ContentEngineTick(), "same-frame media poll remains usable");
+    Check(reads == 1 && contentGenerationRequests == before + 1,
+        "31 same-frame polls neither refetch media nor queue duplicate tile generations");
+    const auto mediaKey = g_contentSmtc.key;
+    g_contentRss.source.Request(L"inert-rss", hours(1), [](const auto&) { return RssFeedSnapshot{}; });
+    Check(g_contentRss.source.Wait(L"inert-rss", seconds(2)), "seed an inert pending-source cache for invalid-edit cancellation");
+    for (int resource = 0; resource < 3; ++resource) {
+        const auto key = L"inert-notes-" + std::to_wstring(resource);
+        g_contentNotes.sources[resource].Request(key, hours(1), [](const auto&) { return aip::notes::Snapshot{}; });
+        Check(g_contentNotes.sources[resource].Wait(key, seconds(2)), "seed each inert Notes cache without accessing accounts");
+    }
+    Check(WriteContentFixture(L"[Content]\r\nEnabled=invalid\r\nCount=1\r\n") && !ContentEngineTick(),
+        "an invalid content edit enters the configuration error path");
+    std::string error;
+    RssFeedSnapshot rss;
+    aip::content::SmtcMediaSnapshot media;
+    Check(!g_contentRss.source.Read(L"inert-rss", rss, error) && !g_contentSmtc.source.Read(mediaKey, media, error),
+        "invalid content configuration immediately invalidates RSS and media source caches");
+    for (int resource = 0; resource < 3; ++resource) {
+        aip::notes::Snapshot notes;
+        Check(!g_contentNotes.sources[resource].Read(L"inert-notes-" + std::to_wstring(resource), notes, error),
+            "invalid content configuration cancels every Notes resource");
+    }
+    g_contentSmtc.Cancel(); g_contentSmtc.testReader = {};
 }
 
 static void TestNotesImportsAndHost()
@@ -1138,6 +1184,8 @@ int wmain()
     Check(contentDialogs == 0, "routine settings do not produce modal prompts");
     fixtureGroup("SMTC artwork");
     TestSmtcArtworkHost(bytes);
+    fixtureGroup("SMTC cadence and invalid edits");
+    TestSmtcCadenceAndInvalidCancellation();
     fixtureGroup("Notes imports");
     TestNotesImportsAndHost();
     fixtureGroup("hardware imports");

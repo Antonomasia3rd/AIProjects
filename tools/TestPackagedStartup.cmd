@@ -1,5 +1,9 @@
 @echo off
 setlocal EnableExtensions
+set "STARTUP_BUILD_ONLY="
+if /i "%~1"=="/build-only" set "STARTUP_BUILD_ONLY=1"
+if not "%~1"=="" if not defined STARTUP_BUILD_ONLY exit /b 2
+if not "%~2"=="" exit /b 2
 
 set "ROOT=%~dp0.."
 set "VCVARS="
@@ -46,6 +50,11 @@ set "STATUS=%ERRORLEVEL%"
 if not "%STATUS%"=="0" (
     popd
     exit /b %STATUS%
+)
+if defined STARTUP_BUILD_ONLY (
+    echo Built the fake packaged Startup fixture. Nothing was executed.
+    popd
+    exit /b 0
 )
 build\PackagedStartupTests.exe
 set "STATUS=%ERRORLEVEL%"

@@ -3,6 +3,10 @@
 static std::mutex g_contentSnapshotMutex;
 static aip::content::Snapshot g_contentSnapshot;
 static thread_local const aip::content::Snapshot* g_renderContent = nullptr;
+static bool ContentHasTransparentBackground()
+{
+    return g_renderContent && g_renderContent->backgroundId == aip::content::BackgroundId::Transparent;
+}
 static constexpr UINT WM_APP_CONTENT_LOGICAL_CAPS = WM_APP + 80;
 static std::atomic<int> g_contentLogicalCaps{-1};
 

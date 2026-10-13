@@ -78,7 +78,7 @@ int main()
             "INI writer emits DesktopStub quoted assignment syntax",
             "dependencies/config_ini.inc",
             configIni,
-            "return QuoteIniString(key) + L\" = \" + QuoteIniString(value);");
+            "return quotedKey + L\" = \" + QuoteIniString(value);");
         RequireContains(
             "shared command-line dependency provides baseline primitives",
             "dependencies/command_line.inc",

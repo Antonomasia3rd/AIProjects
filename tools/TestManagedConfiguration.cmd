@@ -1,5 +1,9 @@
 @echo off
 setlocal EnableExtensions
+set "CONFIG_BUILD_ONLY="
+if /i "%~1"=="/build-only" set "CONFIG_BUILD_ONLY=1"
+if not "%~1"=="" if not defined CONFIG_BUILD_ONLY exit /b 2
+if not "%~2"=="" exit /b 2
 set "ROOT=%~dp0.."
 set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 set "OUT=%ROOT%\build"
@@ -10,8 +14,8 @@ if errorlevel 1 exit /b %ERRORLEVEL%
   "%ROOT%\dependencies\managed_ini.cs" ^
   "%ROOT%\dependencies\managed_named_objects.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
-"%OUT%\ManagedIniTransactionTests.exe"
-if errorlevel 1 exit /b %ERRORLEVEL%
+if not defined CONFIG_BUILD_ONLY "%OUT%\ManagedIniTransactionTests.exe"
+if not defined CONFIG_BUILD_ONLY if errorlevel 1 exit /b %ERRORLEVEL%
 "%CSC%" /nologo /warn:4 /warnaserror+ /optimize+ /target:exe /main:ConfigurationTrayUiTests /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /out:"%OUT%\ConfigurationTrayUiTests.exe" ^
   "%ROOT%\tools\ConfigurationTrayUiTests.cs" ^
   "%ROOT%\dependencies\managed_ini.cs" ^
@@ -21,9 +25,13 @@ if errorlevel 1 exit /b %ERRORLEVEL%
   "%ROOT%\dependencies\managed_configuration_startup.cs" ^
   "%ROOT%\dependencies\managed_startup_shortcut.cs"
 if errorlevel 1 exit /b %ERRORLEVEL%
-"%OUT%\ConfigurationTrayUiTests.exe"
-if errorlevel 1 exit /b %ERRORLEVEL%
+if not defined CONFIG_BUILD_ONLY "%OUT%\ConfigurationTrayUiTests.exe"
+if not defined CONFIG_BUILD_ONLY if errorlevel 1 exit /b %ERRORLEVEL%
 call "%~dp0BuildManagedIniDocumentTests.cmd"
 if errorlevel 1 exit /b %ERRORLEVEL%
+if defined CONFIG_BUILD_ONLY (
+    echo Built the inert configuration fixtures. Nothing was executed.
+    exit /b 0
+)
 "%ROOT%\build\review-validation\ManagedIniDocumentTests.exe"
 exit /b %ERRORLEVEL%

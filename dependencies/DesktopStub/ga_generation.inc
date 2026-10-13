@@ -1,6 +1,8 @@
 ﻿// -----------------------------------------------------------------------------
 // Tile generation
 // -----------------------------------------------------------------------------
+#include "../png_crc32.h"
+
 struct Tile { const wchar_t* name; const wchar_t* file; int w,h; };
 static const Tile g_tiles[] = {
     {L"StoreLogo",       L"Assets\\StoreLogo.png", 50,50},
@@ -692,16 +694,7 @@ static uint32_t ReadPngBigEndian32(const BYTE* p)
 
 static uint32_t PngCrc32Update(uint32_t crc, const BYTE* data, size_t len)
 {
-    for (size_t i = 0; i < len; ++i)
-    {
-        crc ^= static_cast<uint32_t>(data[i]);
-        for (int bit = 0; bit < 8; ++bit)
-        {
-            uint32_t mask = 0u - (crc & 1u);
-            crc = (crc >> 1) ^ (0xEDB88320u & mask);
-        }
-    }
-    return crc;
+    return aip::png::Crc32Update(crc, data, len);
 }
 
 static bool PngChunkTypeEquals(const BYTE* type, const char (&name)[5])
@@ -1184,10 +1177,11 @@ static void AppendRectFingerprint(std::wstring& out, const wchar_t* name, const 
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
 {
     std::wstring state;
-    state += L"v=8;";
+    state += L"v=9;";
     if (g_renderContent)
     {
         state += L"contentMode=" + std::to_wstring(static_cast<int>(g_renderContent->textMode)) + L";";
+        state += L"contentBackground=" + std::to_wstring(static_cast<int>(g_renderContent->backgroundId)) + L";";
         for (const auto& field : {g_renderContent->text.primary, g_renderContent->text.secondary, g_renderContent->text.badge, g_renderContent->activationArguments})
             state += std::to_wstring(field.size()) + L":" + field;
     }
@@ -1349,6 +1343,15 @@ static bool PrepareWallpaperRenderSource(
 {
     if (!src)
         return false;
+
+    // A synthetic blank source is independent of the desktop fit setting.
+    // Tile/Span preparation would otherwise introduce an opaque desktop canvas.
+    if (ContentHasTransparentBackground()) {
+        renderSource = src;
+        renderMode = FitMode::Fill;
+        preparedWallpaper.reset();
+        return true;
+    }
 
     FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
     renderSource = src;
@@ -1622,7 +1625,7 @@ static bool RenderWallpaperToGeneratedAssetCache(
         }
 
         std::wstring outPath = GeneratedAssetCacheFilePath(stagingCacheDir, ManifestGeneratedAssetCacheName(t.name));
-        std::unique_ptr<Bitmap> asset(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0)));
+        std::unique_ptr<Bitmap> asset(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, ContentCanvasBackgroundColor()));
         if (asset && ShouldBakeTileTextIntoAssets(liveTileUpdateMode))
             ok = ApplyTileTextOverlay(asset.get(), t.name, t.w, t.h) && ok;
         bool saved = asset && SaveGeneratedAssetCacheBitmap(asset.get(), outPath);
@@ -1636,7 +1639,7 @@ static bool RenderWallpaperToGeneratedAssetCache(
             std::wstring scaledPath = GeneratedAssetCacheFilePath(
                 stagingCacheDir,
                 ScaleAssetPath(ManifestGeneratedAssetCacheName(t.name), scale));
-            std::unique_ptr<Bitmap> scaled(ResizeBitmapToMode(renderSource, scaledW, scaledH, renderMode, Color(255, 0, 0, 0)));
+            std::unique_ptr<Bitmap> scaled(ResizeBitmapToMode(renderSource, scaledW, scaledH, renderMode, ContentCanvasBackgroundColor()));
             if (scaled && ShouldBakeTileTextIntoAssets(liveTileUpdateMode))
                 ok = ApplyTileTextOverlay(scaled.get(), t.name, t.w, t.h) && ok;
             bool scaledSaved = scaled && SaveGeneratedAssetCacheBitmap(scaled.get(), scaledPath);
@@ -1650,7 +1653,7 @@ static bool RenderWallpaperToGeneratedAssetCache(
         for (const auto& t : g_liveTileAssets)
         {
             std::wstring outPath = GeneratedAssetCacheFilePath(stagingCacheDir, LiveGeneratedAssetCacheName(t.name));
-            std::unique_ptr<Bitmap> asset(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0)));
+            std::unique_ptr<Bitmap> asset(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, ContentCanvasBackgroundColor()));
             if (asset && ShouldBakeTileTextIntoAssets(liveTileUpdateMode))
                 ok = ApplyTileTextOverlay(asset.get(), t.name, t.w, t.h) && ok;
             bool saved = asset && SaveGeneratedAssetCacheBitmap(asset.get(), outPath);
@@ -2170,7 +2173,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
             continue;
         }
 
-        std::unique_ptr<Bitmap> o(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0)));
+        std::unique_ptr<Bitmap> o(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, ContentCanvasBackgroundColor()));
         bool saved = false;
         if (o)
         {
@@ -2192,7 +2195,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         {
             int scaledW = ScalePixels(t.w, scale);
             int scaledH = ScalePixels(t.h, scale);
-            std::unique_ptr<Bitmap> scaled(ResizeBitmapToMode(renderSource, scaledW, scaledH, renderMode, Color(255, 0, 0, 0)));
+            std::unique_ptr<Bitmap> scaled(ResizeBitmapToMode(renderSource, scaledW, scaledH, renderMode, ContentCanvasBackgroundColor()));
             std::wstring scaledPath = ScaleAssetPath(outPath, scale);
             if (scaled)
             {
@@ -2243,7 +2246,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
                 }
                 logAssetDirIfNeeded(ParentDirectoryOfPath(outPath));
 
-                std::unique_ptr<Bitmap> o(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, Color(255, 0, 0, 0)));
+                std::unique_ptr<Bitmap> o(ResizeBitmapToMode(renderSource, t.w, t.h, renderMode, ContentCanvasBackgroundColor()));
                 bool saved = false;
                 if (o)
                 {

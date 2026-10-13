@@ -558,7 +558,7 @@ namespace AIProjects.Dependencies
                         matches.Add(i);
                 }
 
-                string assignment = QuoteIniString(setting.Key) + " = " + QuoteIniString(setting.Value);
+                string assignment = QuoteIniName(setting.Key) + " = " + QuoteIniString(setting.Value);
                 if (matches.Count != 0)
                 {
                     lines[matches[0]] = assignment;
