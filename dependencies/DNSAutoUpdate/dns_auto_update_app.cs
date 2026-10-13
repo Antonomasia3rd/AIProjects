@@ -43,10 +43,12 @@ static class DNSAutoUpdate
     static readonly string executablePath = GetExecutablePath();
     static readonly string executableDirectory = GetExecutableDirectory();
     static readonly string executableBaseName = GetExecutableBaseName();
-    static readonly string iniPath = Path.Combine(executableDirectory, executableBaseName + ".ini");
-    static readonly string profileIdentity = ManagedStartupShortcut.StableIdentityHash(iniPath);
-    static readonly ManagedStartupShortcutSpec startupShortcut = BuildStartupShortcutSpec();
-    static readonly ManagedIniFileSpec iniFile = BuildIniFileSpec();
+    // Parse the selected profile before creating profile-dependent specs or
+    // control identities. Help/version leave these uninitialized and inert.
+    static string iniPath;
+    static string profileIdentity;
+    static ManagedStartupShortcutSpec startupShortcut;
+    static ManagedIniFileSpec iniFile;
     static readonly object settingsLock = new object();
     static readonly object statusLock = new object();
 
@@ -98,6 +100,8 @@ static class DNSAutoUpdate
         public readonly Dictionary<string, string> Settings =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public bool ConfigureOnly;
+        public bool ShowConfiguration;
+        public string IniPath;
         public bool Once;
         public bool ReloadRequested;
         public bool ExitRequested;
@@ -122,6 +126,7 @@ static class DNSAutoUpdate
         try
         {
             commandLine = ParseCommandLine(args);
+            InitializeProfile(commandLine.IniPath);
         }
         catch (Exception ex)
         {
@@ -158,6 +163,21 @@ static class DNSAutoUpdate
 
     static int RunApplication(ParsedCommandLine commandLine)
     {
+        if (commandLine.ConfigureOnly || commandLine.ShowConfiguration)
+        {
+            // Passive edits never discover/reconcile the live Startup folder.
+            // They validate and publish only this INI, preserving its existing
+            // launch preference even if the corresponding shortcut is absent.
+            if (commandLine.ConfigureOnly)
+            {
+                string error;
+                if (!PersistConfigurationOnly(commandLine.Settings, out error))
+                    throw new IOException("Could not save configuration: " + error);
+            }
+            if (commandLine.ShowConfiguration) PrintConfiguration();
+            if (commandLine.ConfigureOnly) Console.WriteLine("Settings saved to " + iniPath + ".");
+            return 0;
+        }
         bool iniExisted = File.Exists(iniPath);
         if (!iniExisted && !commandLine.Settings.ContainsKey(StartupKey))
         {
@@ -173,12 +193,6 @@ static class DNSAutoUpdate
 
         Options initialSettings = LoadRuntimeSettings();
         ReconcileStartup();
-        if (commandLine.ConfigureOnly)
-        {
-            Console.WriteLine("Settings saved to " + iniPath + ".");
-            return 0;
-        }
-
         InitializeControlObjects();
         if (!AcquireProfileMutex())
         {
@@ -252,6 +266,22 @@ static class DNSAutoUpdate
             string key;
             string flagValue;
 
+            if (name.Equals("ini", StringComparison.OrdinalIgnoreCase))
+            {
+                string path = inlineValue ?? RequireNextValue(args, ref i, "--ini");
+                // Resolve while parsing so an invalid or explicit empty path
+                // fails before any selected-profile specs or file operations.
+                parsed.IniPath = ManagedProfile.ResolveIniPath(path, executableDirectory, executableBaseName + ".ini");
+                continue;
+            }
+            if (name.Equals("show-config", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("print-config", StringComparison.OrdinalIgnoreCase))
+            {
+                RejectInlineValue(name, inlineValue);
+                parsed.ShowConfiguration = true;
+                continue;
+            }
+
             if (inlineValue == null && TryMapFlag(name, out key, out flagValue))
             {
                 parsed.Settings[key] = flagValue;
@@ -318,6 +348,14 @@ static class DNSAutoUpdate
             throw new ArgumentException("--reload, --run-now, and --exit are mutually exclusive.");
         if (parsed.ConfigureOnly && (controlActions != 0 || parsed.Once))
             throw new ArgumentException("--configure-only cannot be combined with resident or one-shot actions.");
+        if (parsed.ConfigureOnly && parsed.Settings.ContainsKey(StartupKey))
+            throw new ArgumentException("Use --startup or --no-startup separately; --configure-only never changes Startup integration.");
+        if (parsed.ShowConfiguration && (controlActions != 0 || parsed.Once))
+            throw new ArgumentException("Configuration inspection cannot be combined with resident or one-shot actions.");
+        if (parsed.ShowConfiguration && parsed.Settings.ContainsKey(StartupKey))
+            throw new ArgumentException("Configuration inspection never changes Startup integration.");
+        if (parsed.ShowConfiguration && parsed.Settings.Count != 0 && !parsed.ConfigureOnly)
+            throw new ArgumentException("Saving while showing requires --configure-only.");
         if (parsed.Once && controlActions != 0)
             throw new ArgumentException("--once cannot be combined with resident-control actions.");
         if (controlActions != 0 && parsed.Settings.Count != 0)
@@ -472,13 +510,15 @@ static class DNSAutoUpdate
         Console.WriteLine("  --confirm | --no-confirm");
         Console.WriteLine();
         Console.WriteLine("Persistent app settings:");
+        Console.WriteLine("  --ini FILE                    Select a profile (relative to the working directory)");
+        Console.WriteLine("  --show-config | --print-config Inspect without creating files or touching Startup");
         Console.WriteLine("  --startup | --no-startup      --tray | --no-tray");
         Console.WriteLine("  --dropdown | --flat-menu      --set Settings.Key=Value");
-        Console.WriteLine("  --configure-only              Save without reading or changing DNS");
+        Console.WriteLine("  --configure-only              Save without reading/changing DNS or Startup");
         Console.WriteLine();
         Console.WriteLine("Actions: --once | --run-now | --reload | --exit");
         Console.WriteLine("Information: --help | --version");
-        Console.WriteLine("Configuration: " + iniPath);
+        Console.WriteLine("Configuration: " + (iniPath ?? Path.Combine(executableDirectory, executableBaseName + ".ini")));
         Console.WriteLine("Startup: per-user shell:startup shortcut only");
         Console.WriteLine("Requires dnscmd.exe and permission to update the DNS zone.");
     }
@@ -624,6 +664,16 @@ static class DNSAutoUpdate
         return OptionsFromValues(LoadEffectiveSettingValues());
     }
 
+    static void PrintConfiguration()
+    {
+        var values = LoadEffectiveSettingValues();
+        var options = OptionsFromValues(values);
+        values[LogFileKey] = options.LogFile;
+        Console.WriteLine("Configuration: " + iniPath);
+        foreach (var setting in values.OrderBy(value => value.Key, StringComparer.OrdinalIgnoreCase))
+            Console.WriteLine(setting.Key + " = " + setting.Value);
+    }
+
     static Dictionary<string, string> LoadEffectiveSettingValues()
     {
         return LoadEffectiveSettingValues(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
@@ -729,6 +779,27 @@ static class DNSAutoUpdate
         }
     }
 
+    static bool PersistConfigurationOnly(IDictionary<string, string> settings, out string error)
+    {
+        // Keep this path independent of the Startup adapter/platform. The
+        // whole prospective profile is validated under the INI publication lock,
+        // so a failed new-file batch cannot leave a default profile behind.
+        try
+        {
+            var changes = NormalizeSettingBatch(settings);
+            if (changes.ContainsKey(StartupKey))
+                throw new ArgumentException("--configure-only cannot change RunAtStartup.");
+            return ManagedIniFile.SaveSectionBatch(iniFile, changes, prospective =>
+            {
+                var values = ManagedProfile.ResolveSettings(DefaultSettingValues(), prospective,
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                    CanonicalSettingName, NormalizeSettingValue);
+                OptionsFromValues(values);
+            }, out error);
+        }
+        catch (Exception ex) { error = ex.Message; return false; }
+    }
+
     static ManagedConfigurationStartup BuildStartupConfiguration()
     {
         return new ManagedConfigurationStartup(iniFile, startupShortcut,
@@ -802,11 +873,26 @@ static class DNSAutoUpdate
             ProductName = executableBaseName,
             ExecutablePath = executablePath,
             WorkingDirectory = executableDirectory,
-            Arguments = "",
+            Arguments = IsDefaultProfile() ? "" : "--ini " + ManagedConfigurationStartup.QuoteArgument(iniPath),
             IdentityPath = iniPath,
-            LegacyFileName = executableBaseName + ".lnk",
+            LegacyFileName = IsDefaultProfile() ? executableBaseName + ".lnk" : null,
             Log = Diagnostic
         };
+    }
+
+    static bool IsDefaultProfile()
+    {
+        return String.Equals(iniPath,
+            Path.GetFullPath(Path.Combine(executableDirectory, executableBaseName + ".ini")),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    static void InitializeProfile(string supplied)
+    {
+        iniPath = ManagedProfile.ResolveIniPath(supplied, executableDirectory, executableBaseName + ".ini");
+        profileIdentity = ManagedStartupShortcut.StableIdentityHash(iniPath);
+        startupShortcut = BuildStartupShortcutSpec();
+        iniFile = BuildIniFileSpec();
     }
 
     static ManagedIniFileSpec BuildIniFileSpec()

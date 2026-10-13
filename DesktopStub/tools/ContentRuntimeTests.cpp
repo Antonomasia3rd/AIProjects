@@ -3,7 +3,22 @@
 // notifications, playback or network operations are requested.
 #define NOMINMAX
 #include <windows.h>
+#include <commdlg.h>
 #include <string>
+#include <vector>
+static std::vector<std::wstring> contentFileDialogFilters;
+static BOOL ContentTestOpenFileName(OPENFILENAMEW* dialog)
+{
+    contentFileDialogFilters.clear();
+    const wchar_t* current = dialog->lpstrFilter;
+    for (int pairs = 0; current && *current && pairs < 8; ++pairs)
+    {
+        contentFileDialogFilters.emplace_back(current);
+        current += contentFileDialogFilters.back().size() + 1;
+    }
+    return FALSE; // Inspect the actual dialog request; never show a window.
+}
+#define GetOpenFileNameW ContentTestOpenFileName
 static int contentDialogs = 0;
 static int contentDialogResponse = IDNO;
 static std::wstring contentDialogText;
@@ -15,7 +30,12 @@ static int ContentTestMessageBox(HWND, LPCWSTR text, LPCWSTR, UINT flags)
 }
 #define DESKTOPSTUB_CONTENT_MESSAGEBOX ContentTestMessageBox
 static unsigned long long contentGenerationRequests = 0;
-static unsigned long long ContentTestQueueGenerate(std::wstring, std::wstring) { return ++contentGenerationRequests; }
+static std::wstring contentQueuedBackground;
+static unsigned long long ContentTestQueueGenerate(std::wstring background, std::wstring)
+{
+    contentQueuedBackground = std::move(background);
+    return ++contentGenerationRequests;
+}
 #define DESKTOPSTUB_CONTENT_QUEUE_GENERATE ContentTestQueueGenerate
 #define DESKTOPSTUB_INERT_HARDWARE
 static int contentLogicalCaps = 0, contentLogicalSamples = 0;
@@ -60,6 +80,8 @@ static bool WriteContentFixture(const std::wstring& text)
     std::wstring loaded;
     return ReadIniFileForMutation(loaded) && loaded == text;
 }
+
+#include "DisplaySettingsTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
@@ -466,8 +488,21 @@ static void TestSmtcCadenceAndInvalidCancellation()
         g_contentNotes.sources[resource].Request(key, hours(1), [](const auto&) { return aip::notes::Snapshot{}; });
         Check(g_contentNotes.sources[resource].Wait(key, seconds(2)), "seed each inert Notes cache without accessing accounts");
     }
-    Check(WriteContentFixture(L"[Content]\r\nEnabled=invalid\r\nCount=1\r\n") && !ContentEngineTick(),
-        "an invalid content edit enters the configuration error path");
+    const auto previousCacheInterval = g_iniCacheRefreshMs.load();
+    g_iniCacheRefreshMs = 60000;
+    Check(WriteUtf8BomTextFile(g_iniPath, L"[Content]\r\nEnabled=invalid\r\nCount=1\r\n"),
+        "write an external invalid edit without refreshing the host's cached valid document");
+    Check(!Generate(L"fixture desktop wallpaper", L"pre-poll invalid guard", true) && CurrentGenerationBackground().empty(),
+        "generation rejects an external invalid edit before the poll or cache interval expires, despite its old active frame");
+    g_iniCacheRefreshMs = previousCacheInterval;
+    Check(!ContentEngineTick(), "an invalid content edit enters the configuration error path");
+    {
+        ContentRenderScope invalidScope;
+        Check(!invalidScope.snapshot.active && CurrentGenerationBackground().empty(),
+            "invalid content clears the published frame instead of retaining an old generation input");
+        Check(!Generate(L"fixture desktop wallpaper", L"invalid content guard", true),
+            "a queued invalid content generation cannot fall back to desktop wallpaper or register a package");
+    }
     std::string error;
     RssFeedSnapshot rss;
     aip::content::SmtcMediaSnapshot media;
@@ -479,6 +514,55 @@ static void TestSmtcCadenceAndInvalidCancellation()
             "invalid content configuration cancels every Notes resource");
     }
     g_contentSmtc.Cancel(); g_contentSmtc.testReader = {};
+}
+
+static void TestCompositionGenerationRequests(const std::wstring& configuration, const std::wstring& bitmapPath)
+{
+    Check(WriteContentFixture(configuration), "prepare composed generation requests");
+    PublishContentSnapshot({});
+    const auto initialRequests = contentGenerationRequests;
+    Check(CurrentGenerationBackground(bitmapPath).empty(),
+        "unpublished composition never substitutes an explicit desktop wallpaper");
+    Check(ContentEngineTick(false, false) && contentGenerationRequests == initialRequests,
+        "startup priming publishes a composed frame without waiting for providers or queuing generation");
+    Check(CurrentGenerationBackground() == bitmapPath && CurrentGenerationBackground(L"wrong desktop wallpaper") == bitmapPath,
+        "current composed background takes precedence over desktop and command-line wallpaper");
+
+    const auto requests = contentGenerationRequests;
+    DispatchTrayCommand(nullptr, ID_GENERATE_NOW);
+    Check(contentGenerationRequests == requests + 1 && contentQueuedBackground == bitmapPath,
+        "Update tile now queues the composition's image without a desktop wallpaper lookup");
+    QueueCommandLineGenerationRequest();
+    Check(contentGenerationRequests == requests + 2 && contentQueuedBackground == bitmapPath,
+        "resident CLI generation uses the same composed background as the tray");
+    Check(QueueLiveTileModeReregistration() && contentGenerationRequests == requests + 3 && contentQueuedBackground == bitmapPath,
+        "mode re-registration queues the composed background without desktop wallpaper");
+    SetLiveTileModeReregistrationPending(false);
+
+    Check(IniWrite(L"Settings", L"LiveTileTemplateStyle", L"Adaptive"), "prepare template switch fixture");
+    g_liveTileTemplateStyle = static_cast<int>(LiveTileTemplateStyle::Adaptive);
+    DispatchTrayCommand(nullptr, ID_LIVE_TILE_TEMPLATE_WINDOWS81_PRESET);
+    Check(contentGenerationRequests == requests + 4 && contentQueuedBackground == bitmapPath,
+        "template switch queues the content background");
+    Check(IniWrite(L"Settings", L"LiveTileBranding", L"Auto"), "prepare branding switch fixture");
+    g_liveTileBranding = static_cast<int>(LiveTileBranding::Auto);
+    DispatchTrayCommand(nullptr, ID_LIVE_TILE_BRANDING_NONE);
+    Check(contentGenerationRequests == requests + 5 && contentQueuedBackground == bitmapPath,
+        "branding switch queues the content background");
+
+    Check(IniWrite(L"Settings", L"GeneratedAssetCache", L"1") &&
+        IniWrite(L"Settings", L"GeneratedAssetPrecache", L"1") && !GeneratedAssetPrecacheEnabled(),
+        "composition defers a stored optional wallpaper precache preference");
+    QueueGeneratedAssetPrecache(bitmapPath);
+    RunGeneratedAssetPrecache(bitmapPath);
+    Check(!g_generatedAssetPrecacheWorkerStarted && !g_generatedAssetPrecacheThread.joinable() && !g_generatedAssetPrecacheQueued,
+        "composed contents never start the incompatible sibling-wallpaper precache worker");
+    Check(WriteContentFixture(configuration), "restore composition settings after request checks");
+    Check(ContentEngineTick(true), "restore the composed snapshot after request checks");
+
+    ChoosePowerShellExe(nullptr);
+    Check(contentFileDialogFilters == std::vector<std::wstring>{L"Executable files", L"*.exe", L"All files", L"*.*"},
+        "PowerShell picker supplies complete filter name/pattern pairs to the common dialog");
 }
 
 static void TestNotesImportsAndHost()
@@ -988,6 +1072,9 @@ int wmain()
         Check(TileTextPrimaryText() == L"alpha", "nested snapshot restores parent");
     }
     Check(g_renderContent == nullptr, "render scope restores thread-local pointer");
+
+    TestDisplaySettingsParity();
+    TestCompositionGenerationRequests(config, bitmapPath);
 
     HMENU menu = CreatePopupMenu();
     std::vector<BYTE> menuIniBefore, menuIniAfter;

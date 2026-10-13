@@ -28,6 +28,8 @@ static class LegacyUtilitiesTests
         TestConfigurationTrayEditing();
         TestConfigurationStartupIntegration();
         TestResidentStartupTransactions();
+        TestDnsPassiveConfiguration();
+        TestDnsSelectedProfiles();
         TestPhotoCollageAtomicOutput(repositoryRoot);
         TestTaskXmlHardening(repositoryRoot);
         TestManagedTrayTooltip();
@@ -324,6 +326,7 @@ static class LegacyUtilitiesTests
 
     static void TestResidentStartupTransactions()
     {
+        InvokePrivate(typeof(DNSAutoUpdate), "InitializeProfile", new object[] { null });
         string temporary = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
         string root = Path.GetFullPath(Path.Combine(temporary, "AIProjects-ResidentStartup-" + Guid.NewGuid().ToString("N")));
         if (!String.Equals(Path.GetDirectoryName(root), temporary, StringComparison.OrdinalIgnoreCase))
@@ -455,6 +458,193 @@ static class LegacyUtilitiesTests
             ManagedConfigurationStartup.PlatformFactory = previousFactory;
             if (!String.Equals(Path.GetDirectoryName(Path.GetFullPath(root)), temporary, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("Unexpected resident fixture cleanup path.");
+            Directory.Delete(root, true);
+        }
+    }
+
+    static void TestDnsPassiveConfiguration()
+    {
+        string temporary = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
+        string root = Path.GetFullPath(Path.Combine(temporary, "AIProjects-DnsPassive-" + Guid.NewGuid().ToString("N")));
+        if (!String.Equals(Path.GetDirectoryName(root), temporary, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Passive DNS fixture must stay inside its temporary parent.");
+        Directory.CreateDirectory(root);
+        var profile = (ManagedIniFileSpec)typeof(DNSAutoUpdate).GetField("iniFile", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
+        string oldPath = profile.FilePath;
+        var oldLog = profile.Log;
+        string ini = Path.Combine(root, "passive.ini");
+        var previousFactory = ManagedConfigurationStartup.PlatformFactory;
+        int factories = 0;
+        profile.FilePath = ini;
+        profile.Log = null;
+        ManagedConfigurationStartup.PlatformFactory = delegate
+        {
+            ++factories;
+            throw new InvalidOperationException("Passive DNS configuration must not construct a Startup platform.");
+        };
+        try
+        {
+            foreach (string preference in new[] { "true", "false" })
+            {
+                File.WriteAllText(ini, "; keep launch preference\r\n[Settings]\r\nRunAtStartup=" + preference + "\r\nSleepSeconds=60\r\n");
+                object command = InvokePrivate(typeof(DNSAutoUpdate), "ParseCommandLine", new object[] {
+                    new[] { "--configure-only", "--sleep-seconds", "90" }
+                });
+                Check((int)InvokePrivate(typeof(DNSAutoUpdate), "RunApplication", new[] { command }) == 0 && factories == 0 &&
+                    ManagedIniFile.LoadSection(profile, false)["RunAtStartup"] == preference &&
+                    ManagedIniFile.LoadSection(profile, false)["SleepSeconds"] == "90" &&
+                    File.ReadAllText(ini).Contains("; keep launch preference"),
+                    "DNS passive edit preserves saved Startup without constructing/querying/reconciling a platform");
+            }
+            File.Delete(ini);
+            object fresh = InvokePrivate(typeof(DNSAutoUpdate), "ParseCommandLine", new object[] {
+                new[] { "--configure-only", "--sleep-seconds", "120" }
+            });
+            Check((int)InvokePrivate(typeof(DNSAutoUpdate), "RunApplication", new[] { fresh }) == 0 && factories == 0 &&
+                ManagedIniFile.LoadSection(profile, false)["RunAtStartup"] == "false",
+                "DNS first passive profile uses its inert default without legacy Startup discovery");
+            foreach (string[] args in new[] {
+                new[] { "--configure-only", "--startup" },
+                new[] { "--no-startup", "--configure-only" },
+                new[] { "--configure-only", "--set", "Settings.RunAtStartup=true" },
+                new[] { "--configure-only", "--run-at-startup", "true" }
+            })
+            {
+                byte[] original = File.ReadAllBytes(ini);
+                CheckThrows<ArgumentException>(delegate {
+                    InvokePrivate(typeof(DNSAutoUpdate), "ParseCommandLine", new object[] { args });
+                }, "DNS passive parser rejects every explicit Startup setting surface");
+                Check(original.SequenceEqual(File.ReadAllBytes(ini)) && factories == 0,
+                    "rejected DNS passive Startup combinations preserve profile and never construct a platform");
+            }
+            File.WriteAllText(ini, "; preserve invalid original\r\n[Settings]\r\nRunAtStartup=true\r\nSleepSeconds=broken\r\n", Encoding.Unicode);
+            byte[] invalidOriginal = File.ReadAllBytes(ini);
+            object rejected = InvokePrivate(typeof(DNSAutoUpdate), "ParseCommandLine", new object[] {
+                new[] { "--configure-only", "--zone-name", "example.local" }
+            });
+            CheckThrows<IOException>(delegate {
+                InvokePrivate(typeof(DNSAutoUpdate), "RunApplication", new[] { rejected });
+            }, "DNS passive prospective validation rejects an incomplete repair");
+            Check(invalidOriginal.SequenceEqual(File.ReadAllBytes(ini)) && factories == 0,
+                "failed DNS passive validation retains exact original bytes without Startup access");
+            object repair = InvokePrivate(typeof(DNSAutoUpdate), "ParseCommandLine", new object[] {
+                new[] { "--configure-only", "--sleep-seconds", "180" }
+            });
+            Check((int)InvokePrivate(typeof(DNSAutoUpdate), "RunApplication", new[] { repair }) == 0 &&
+                ManagedIniFile.LoadSection(profile, false)["SleepSeconds"] == "180" && factories == 0,
+                "DNS passive replacement repairs a bad saved value before prospective validation");
+            File.Delete(ini);
+            object invalidNew = InvokePrivate(typeof(DNSAutoUpdate), "ParseCommandLine", new object[] {
+                new[] { "--configure-only", "--enabled", "--apply", "--managed-record-name", "app" }
+            });
+            CheckThrows<IOException>(delegate {
+                InvokePrivate(typeof(DNSAutoUpdate), "RunApplication", new[] { invalidNew });
+            }, "DNS passive apply configuration still requires its existing explicit DNS allowlist");
+            Check(!File.Exists(ini) && factories == 0,
+                "invalid DNS passive new-file batch creates no defaults and performs no Startup operation");
+        }
+        finally
+        {
+            ManagedConfigurationStartup.PlatformFactory = previousFactory;
+            profile.FilePath = oldPath;
+            profile.Log = oldLog;
+            if (!String.Equals(Path.GetDirectoryName(Path.GetFullPath(root)), temporary, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Refusing passive fixture cleanup outside its temporary parent.");
+            Directory.Delete(root, true);
+        }
+    }
+
+    static void TestDnsSelectedProfiles()
+    {
+        string temporary = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
+        string root = Path.GetFullPath(Path.Combine(temporary, "AIProjects-DnsProfiles-" + Guid.NewGuid().ToString("N")));
+        if (!String.Equals(Path.GetDirectoryName(root), temporary, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Selected DNS fixtures must stay inside their temporary parent.");
+        Directory.CreateDirectory(root);
+        string[] fieldNames = { "iniPath", "profileIdentity", "startupShortcut", "iniFile" };
+        var fields = fieldNames.Select(name => typeof(DNSAutoUpdate).GetField(name, BindingFlags.NonPublic | BindingFlags.Static)).ToArray();
+        object[] previous = fields.Select(field => field.GetValue(null)).ToArray();
+        var previousFactory = ManagedConfigurationStartup.PlatformFactory;
+        string oldDirectory = Directory.GetCurrentDirectory();
+        int platforms = 0;
+        ManagedConfigurationStartup.PlatformFactory = delegate
+        {
+            ++platforms;
+            throw new InvalidOperationException("Passive profile commands must not construct Startup.");
+        };
+        try
+        {
+            string first = Path.Combine(root, "first profile 亚洲.ini");
+            string second = Path.Combine(root, "second.ini");
+            string output;
+            Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--ini", first, "--show-config" }, out output) == 0 &&
+                !File.Exists(first) && output.Contains("Configuration: " + first) && output.Contains("RunAtStartup = false") && platforms == 0,
+                "DNS selected missing-profile inspection prints defaults without writes or Startup");
+            Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--ini=" + first, "--print-config" }, out output) == 0 &&
+                !File.Exists(first) && output.Contains("SleepSeconds = 20") && platforms == 0,
+                "DNS inline INI and print-config aliases share the read-only selected profile");
+            Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--ini", first, "--configure-only", "--sleep-seconds", "90", "--show-config" }, out output) == 0 &&
+                File.ReadAllText(first).Contains("\"SleepSeconds\" = \"90\"") && output.Contains("SleepSeconds = 90") && platforms == 0,
+                "DNS combined save/show prints the validated committed selected profile");
+            byte[] original = File.ReadAllBytes(first);
+            Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--ini", first, "--show-config", "--sleep-seconds", "120" }, out output) != 0 &&
+                original.SequenceEqual(File.ReadAllBytes(first)) && platforms == 0,
+                "DNS inspection rejects implicit saving without configure-only");
+            foreach (string supplied in new[] { "", root, root + Path.DirectorySeparatorChar })
+                Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--ini", supplied, "--show-config" }, out output) != 0 && platforms == 0,
+                    "DNS rejects explicit empty or directory INI selection before mutation");
+            Directory.SetCurrentDirectory(root);
+            Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--ini", "relative.ini", "--show-config" }, out output) == 0 &&
+                output.Contains("Configuration: " + Path.Combine(root, "relative.ini")) && !File.Exists(Path.Combine(root, "relative.ini")),
+                "DNS explicit relative INI selection follows the working-directory rule");
+            Directory.SetCurrentDirectory(oldDirectory);
+
+            File.WriteAllText(second, "[Settings]\r\nRunAtStartup=true\r\nSleepSeconds=broken\r\n", Encoding.Unicode);
+            byte[] invalidSecond = File.ReadAllBytes(second);
+            Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--ini", second, "--show-config" }, out output) != 0 &&
+                invalidSecond.SequenceEqual(File.ReadAllBytes(second)) && platforms == 0,
+                "DNS invalid selected-profile inspection reports an error without repairing or publishing defaults");
+            Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--ini", second, "--configure-only", "--sleep-seconds", "180", "--print-config" }, out output) == 0 &&
+                output.Contains("SleepSeconds = 180") && output.Contains("RunAtStartup = true") && platforms == 0,
+                "DNS selected save/show repairs the supplied field and prints preserved Startup from the committed profile");
+
+            InvokePrivate(typeof(DNSAutoUpdate), "InitializeProfile", new object[] { first });
+            string[] firstNames = new[] { "ProfileMutexName", "ReloadEventName", "ExitEventName", "RunNowEventName" }
+                .Select(name => (string)InvokePrivate(typeof(DNSAutoUpdate), name, new object[0])).ToArray();
+            var firstShortcut = (ManagedStartupShortcutSpec)fields[2].GetValue(null);
+            Check(firstShortcut.IdentityPath == first && firstShortcut.Arguments == "--ini " + ManagedConfigurationStartup.QuoteArgument(first) &&
+                String.IsNullOrEmpty(firstShortcut.LegacyFileName),
+                "DNS custom Startup carries the exact quoted profile and cannot adopt the default legacy shortcut");
+            Check(((ManagedIniFileSpec)fields[3].GetValue(null)).FilePath == first,
+                "DNS selected INI publication and runtime profile identify the same file");
+            InvokePrivate(typeof(DNSAutoUpdate), "InitializeProfile", new object[] { second });
+            string[] secondNames = new[] { "ProfileMutexName", "ReloadEventName", "ExitEventName", "RunNowEventName" }
+                .Select(name => (string)InvokePrivate(typeof(DNSAutoUpdate), name, new object[0])).ToArray();
+            Check(firstNames.Zip(secondNames, (one, two) => one != two).All(different => different),
+                "DNS resident mutex, reload, exit and run-now names are isolated between selected profiles");
+            InvokePrivate(typeof(DNSAutoUpdate), "InitializeProfile", new object[] { null });
+            var defaultShortcut = (ManagedStartupShortcutSpec)fields[2].GetValue(null);
+            Check(defaultShortcut.Arguments == "" && !String.IsNullOrEmpty(defaultShortcut.LegacyFileName),
+                "DNS default sidecar keeps the legacy empty-argument Startup adoption behavior");
+            foreach (string option in new[] { "--once", "--reload", "--run-now", "--exit", "--startup" })
+                Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--ini", first, "--show-config", option }, out output) != 0 &&
+                    original.SequenceEqual(File.ReadAllBytes(first)) && platforms == 0,
+                    "DNS inspection rejects operational/Startup actions before creating controls or changing profile bytes");
+            object savedSpec = fields[3].GetValue(null);
+            Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--help", "--ini", "" }, out output) == 0 &&
+                Object.ReferenceEquals(savedSpec, fields[3].GetValue(null)) && platforms == 0,
+                "DNS help short-circuits invalid profile arguments before selected-spec initialization");
+            Check(InvokeMainAndCapture(typeof(DNSAutoUpdate), new[] { "--version", "--ini", root }, out output) == 0 &&
+                Object.ReferenceEquals(savedSpec, fields[3].GetValue(null)) && platforms == 0,
+                "DNS version leaves selected-profile specs and Startup untouched");
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(oldDirectory);
+            ManagedConfigurationStartup.PlatformFactory = previousFactory;
+            for (int index = 0; index < fields.Length; ++index) fields[index].SetValue(null, previous[index]);
+            if (!String.Equals(Path.GetDirectoryName(Path.GetFullPath(root)), temporary, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Refusing selected fixture cleanup outside its temporary parent.");
             Directory.Delete(root, true);
         }
     }

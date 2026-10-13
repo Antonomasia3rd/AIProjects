@@ -480,6 +480,141 @@ static bool TryParseCommandLineBoolValue(const std::wstring& rawValue, bool& val
     return aip::ParseBoolValue(rawValue, value);
 }
 
+enum class DesktopStubDisplaySettingType { Boolean, LiveTileMode, TemplateStyle, Branding, Target };
+struct DesktopStubDisplaySetting {
+    const wchar_t* section;
+    const wchar_t* key;
+    const wchar_t* fallback;
+    DesktopStubDisplaySettingType type;
+};
+// CLI overrides and complete profiles use the same explicit schema. Integer
+// settings must not accidentally accept boolean words as an interval of 0/1.
+static constexpr DesktopStubDisplaySetting g_displaySettings[] = {
+    {L"Settings", L"Logging", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"TrayIcon", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"ShowConsole", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"RunAtStartup", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"RunAtStartupPackaged", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GenerateOnStartup", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GenerateOnStartupOnlyWhenChanged", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"ShowMenuAsDropdown", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotificationsEnabled", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotifyOnStart", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotifyOnSuccess", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotifyOnFailure", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotifyOnBusy", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotifyOnAlreadyRunning", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotifyOnSingleInstanceFailure", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"ListenWallpaper", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"WallpaperDetectionFallbackOnInvalid", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"TrimWorkingSetOnIdle", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"CompactCrtHeapOnIdle", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"KeepGdiPlusLoaded", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"Win8LiveTileBrokerApp", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"Win8LiveTileBackgroundTask", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"Win8LiveTileOopHelper", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"LiveWallpaperCapture", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"LiveWallpaperCaptureScreenFallback", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"UsePowerShell", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"ComRegistrationUseHelper", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"ExperimentalLiveTileUpdate", L"Auto", DesktopStubDisplaySettingType::LiveTileMode},
+    {L"Settings", L"LiveTileTemplateStyle", L"Adaptive", DesktopStubDisplaySettingType::TemplateStyle},
+    {L"Settings", L"LiveTileBranding", L"Auto", DesktopStubDisplaySettingType::Branding},
+    {L"Settings", L"AppxManifestTarget", L"Windows10", DesktopStubDisplaySettingType::Target},
+    {L"Settings", L"LiveTileRelaunchOnSwitch", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"ClearLiveTileOnShutdown", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"HideDisabledEntries", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GenerateDesktopIconForDisabledEntries", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"DeleteDisabledAssets", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GenerateScaleAuto", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GenerateScale100", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GenerateScale125", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GenerateScale150", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GenerateScale200", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GenerateScale400", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GeneratedAssetCache", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"GeneratedAssetPrecache", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"WallpaperDecodeLowMemory", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"DisableFitting", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"ListenFit", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"TileText", L"Enabled", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"TileText", L"ApplyToMediumTile", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"TileText", L"ApplyToWideTile", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"TileText", L"ApplyToLargeTile", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Assets", L"StoreLogo", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Assets", L"MediumTile", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Assets", L"Square44x44Logo", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Assets", L"Square30x30Logo", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Assets", L"SmallTile", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"Assets", L"WideTile", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Assets", L"LargeTile", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Assets", L"SplashScreen", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"State", L"LiveTileModeReregistrationPending", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"State", L"LiveTileClearedOnShutdown", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"State", L"ForceShutdownPendingCleanup", L"0", DesktopStubDisplaySettingType::Boolean},
+};
+static const DesktopStubDisplaySetting* FindDesktopStubDisplaySetting(const std::wstring& section, const std::wstring& key)
+{
+    for (const auto& setting : g_displaySettings)
+        if (IEquals(section, setting.section) && IEquals(key, setting.key)) return &setting;
+    return nullptr;
+}
+static bool IsDesktopStubDisplayBoolSetting(const std::wstring& section, const std::wstring& key)
+{
+    const auto* setting = FindDesktopStubDisplaySetting(section, key);
+    return setting && setting->type == DesktopStubDisplaySettingType::Boolean;
+}
+static bool NormalizeDesktopStubDisplaySettingValue(const DesktopStubDisplaySetting& setting,
+    std::wstring& value, std::wstring& error)
+{
+    const auto fail = [&](const wchar_t* expected) {
+        error = std::wstring(setting.section) + L"." + setting.key + L" expects " + expected + L".";
+        return false;
+    };
+    switch (setting.type) {
+    case DesktopStubDisplaySettingType::Boolean: {
+        bool enabled = false;
+        if (!TryParseCommandLineBoolValue(value, enabled)) return fail(L"a true/false value");
+        value = enabled ? L"1" : L"0";
+        break;
+    }
+    case DesktopStubDisplaySettingType::LiveTileMode: {
+        const auto mode = ParseLiveTileUpdateModeValue(value, static_cast<LiveTileUpdateMode>(-1));
+        if (!IsValidLiveTileUpdateMode(mode)) return fail(L"Auto, LiveTile, or Registration");
+        value = LiveTileUpdateModeIniValue(mode);
+        break;
+    }
+    case DesktopStubDisplaySettingType::TemplateStyle: {
+        const auto style = ParseLiveTileTemplateStyleValue(value, static_cast<LiveTileTemplateStyle>(-1));
+        if (!IsValidLiveTileTemplateStyle(style)) return fail(L"Adaptive or Windows81Preset");
+        value = LiveTileTemplateStyleIniValue(style);
+        break;
+    }
+    case DesktopStubDisplaySettingType::Branding: {
+        const auto branding = ParseLiveTileBrandingValue(value, static_cast<LiveTileBranding>(-1));
+        if (!IsValidLiveTileBranding(branding)) return fail(L"Auto, None, Logo, Name, or NameAndLogo");
+        value = LiveTileBrandingIniValue(branding);
+        break;
+    }
+    case DesktopStubDisplaySettingType::Target: {
+        const auto target = ParseManifestCompatibilityTargetValue(value, static_cast<ManifestCompatibilityTarget>(-1));
+        if (!IsValidManifestCompatibilityTarget(target)) return fail(L"Windows10, Windows81, or Windows8");
+        value = ManifestCompatibilityTargetIniValue(target);
+        break;
+    }
+    }
+    error.clear();
+    return true;
+}
+
+static void AddCommandLinePrimaryTileTextSetting(const std::wstring& value)
+{
+    AddCommandLineIniSetting(L"TileText", L"Text", value);
+    // Clearing the primary field preserves a still-visible secondary/badge,
+    // matching the tray editor and the explicit --tile-text-clear action.
+    if (!TrimCopy(value).empty()) AddCommandLineBoolSetting(L"TileText", L"Enabled", true);
+}
+
 static bool IsDesktopStubStartupSetting(
     const std::wstring& section,
     const std::wstring& key)
@@ -612,6 +747,8 @@ static bool NormalizeDesktopStubTypedSetting(
 {
     if (aip::content::KnownSection(section))
         return aip::content::NormalizeSetting(section, key, value, error);
+    if (const auto* display = FindDesktopStubDisplaySetting(section, key))
+        return NormalizeDesktopStubDisplaySettingValue(*display, value, error);
     if (IsDesktopStubStartupSetting(section, key) ||
         (IEquals(section, L"Settings") && IEquals(key, L"RunAtStartupPackaged")))
     {
@@ -1718,8 +1855,7 @@ static bool ParseCommandLineOptions()
             return fail(error);
         if (matched)
         {
-            AddCommandLineIniSetting(L"TileText", L"Text", value);
-            AddCommandLineBoolSetting(L"TileText", L"Enabled", !TrimCopy(value).empty());
+            AddCommandLinePrimaryTileTextSetting(value);
             continue;
         }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-text-secondary", value, error, matched))
@@ -2310,10 +2446,21 @@ static bool ValidateDesktopStubContentProfileValues(
     return true;
 }
 
+static bool ValidateDesktopStubDisplayProfile(bool includeCommandLineOverrides, std::wstring& error)
+{
+    for (const auto& setting : g_displaySettings) {
+        auto value = DesktopStubContentProfileValue(setting.section, setting.key, setting.fallback, includeCommandLineOverrides);
+        if (!NormalizeDesktopStubDisplaySettingValue(setting, value, error)) return false;
+    }
+    error.clear();
+    return true;
+}
+
 static bool ValidateDesktopStubContentProfile(
     bool includeCommandLineOverrides,
     std::wstring& error)
 {
+    if (!ValidateDesktopStubDisplayProfile(includeCommandLineOverrides, error)) return false;
     aip::content::Configuration composition;
     if (!aip::content::ReadConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);

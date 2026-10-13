@@ -285,9 +285,14 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     endNestedMenu(appearanceAssetsMenu, liveTileMenu, g_ui.liveTileTitle);
 
     AppendContentEngineMenu(appearanceAssetsMenu, ContentMenuPart::TextDelivery);
+    HMENU textSizesMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Text tile sizes)");
+    addTo(textSizesMenu, ID_TILE_TEXT_APPLY_MEDIUM, g_ui.tileTextApplyMedium.c_str(), IniReadI(L"TileText", L"ApplyToMediumTile", 1) != 0);
+    addTo(textSizesMenu, ID_TILE_TEXT_APPLY_WIDE, g_ui.tileTextApplyWide.c_str(), IniReadI(L"TileText", L"ApplyToWideTile", 1) != 0);
+    addTo(textSizesMenu, ID_TILE_TEXT_APPLY_LARGE, g_ui.tileTextApplyLarge.c_str(), IniReadI(L"TileText", L"ApplyToLargeTile", 1) != 0);
+    endNestedMenu(appearanceAssetsMenu, textSizesMenu, L"Text on tile sizes");
     HMENU tileTextMenu = beginNestedMenu(appearanceAssetsMenu, L"CreatePopupMenu(Tile Text)");
     {
-        if (layeredContent) AppendMenuChecked(tileTextMenu, MF_STRING | MF_DISABLED, 0, L"Text comes from Tile contents > Content list");
+        if (CompositionRequested()) AppendMenuChecked(tileTextMenu, MF_STRING | MF_DISABLED, 0, L"Text comes from the active content sources");
         HMENU textMenu = tileTextMenu;
         if (!textMenu)
         {
@@ -325,9 +330,6 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
         addTo(textMenu, ID_TILE_TEXT_BADGE_EDIT, g_ui.tileTextBadgeEdit.c_str());
         addTo(textMenu, ID_TILE_TEXT_BADGE_CLEAR, g_ui.tileTextBadgeClear.c_str(), false, !badgeText.empty());
         AppendMenuChecked(textMenu, MF_STRING | MF_DISABLED, 0, badgeLine.c_str());
-        addTo(textMenu, ID_TILE_TEXT_APPLY_MEDIUM, g_ui.tileTextApplyMedium.c_str(), IniReadI(L"TileText", L"ApplyToMediumTile", 1) != 0);
-        addTo(textMenu, ID_TILE_TEXT_APPLY_WIDE, g_ui.tileTextApplyWide.c_str(), IniReadI(L"TileText", L"ApplyToWideTile", 1) != 0);
-        addTo(textMenu, ID_TILE_TEXT_APPLY_LARGE, g_ui.tileTextApplyLarge.c_str(), IniReadI(L"TileText", L"ApplyToLargeTile", 1) != 0);
     }
     endNestedMenu(appearanceAssetsMenu, tileTextMenu, g_ui.tileTextTitle);
 

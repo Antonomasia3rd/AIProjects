@@ -78,9 +78,9 @@ static void ApplySettingsChangedByCommandLine(bool applyTrayIcon)
         Log(g_ui.liveTileBrandingSummary.c_str(), LiveTileBrandingSummaryText().c_str());
     if (templateStyleChanged || brandingChanged)
     {
-        std::wstring wp = GetWallpaper();
+        std::wstring wp = CurrentGenerationBackground();
         if (!wp.empty())
-            QueueGenerate(
+            DESKTOPSTUB_CONTENT_QUEUE_GENERATE(
                 wp,
                 brandingChanged
                     ? g_ui.liveTileBrandingChangedReason
@@ -102,17 +102,17 @@ static std::wstring ConsumeCommandLineWallpaperRequest()
 
 static void QueueCommandLineGenerationRequest()
 {
-    std::wstring wp = ConsumeCommandLineWallpaperRequest();
-    if (wp.empty())
-        wp = GetWallpaper();
+    std::wstring wp = CurrentGenerationBackground(ConsumeCommandLineWallpaperRequest());
 
     if (wp.empty())
     {
-        LogText(g_ui.startupGenerationSkippedNoWallpaper);
+        LogText(CompositionRequested()
+            ? L"[!] Requested tile update skipped: no content background is available."
+            : g_ui.startupGenerationSkippedNoWallpaper);
         return;
     }
 
-    QueueGenerate(wp, g_ui.commandLineGenerationRequestReason);
+    DESKTOPSTUB_CONTENT_QUEUE_GENERATE(wp, g_ui.commandLineGenerationRequestReason);
 }
 
 static void HandleSingleInstanceRequest(WPARAM request)
@@ -1864,6 +1864,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         RequestGracefulShutdown(g_hwnd);
 
     bool queuedLiveTileRuntimeRelaunch = false;
+    // Publish an initial composed frame before mode reconciliation can request
+    // registration/relaunch. This starts asynchronous providers but does not
+    // wait for them or queue a premature tile update. The poller starts later.
+    if (!g_shutdownState.IsRequested() && CompositionRequested())
+        ContentEngineTick(false, false);
     if (!g_shutdownState.IsRequested())
         queuedLiveTileRuntimeRelaunch = QueueLiveTileRuntimeConditionRelaunch(g_hwnd);
 
@@ -1878,12 +1883,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     if (!queuedLiveTileRuntimeRelaunch && CommandLineShouldGenerateOnce())
     {
         bool contentReady = !CompositionRequested() || ContentEngineTick(true);
-        std::wstring wp;
-        if (!CommandLineWallpaper(wp))
-            wp = GetWallpaper();
-
-        ContentRenderScope contentScope;
-        if (contentScope.snapshot.active) wp = contentScope.snapshot.backgroundPath;
+        std::wstring wallpaperOverride;
+        CommandLineWallpaper(wallpaperOverride);
+        std::wstring wp = CurrentGenerationBackground(wallpaperOverride);
 
         bool ok = false;
         if (contentReady && !wp.empty())
@@ -1945,22 +1947,15 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     {
         if (!g_shutdownState.IsRequested() && !queuedLiveTileRuntimeRelaunch && !queuedPendingLiveTileModeReregistration)
         {
-            if (CommandLineShouldSkipMonitor())
-            {
-                if (ContentEngineTick(true))
-                {
-                    ContentRenderScope contentScope;
-                    if (contentScope.snapshot.active)
-                        QueueGenerate(contentScope.snapshot.backgroundPath, L"Content startup generation");
-                }
-            }
-            else ContentEngineTick();
+            ContentEngineTick();
         }
     }
 
     std::thread th;
     QueueDesktopStubPackagedStartupSync();
-    if (!g_shutdownState.IsRequested() && !CommandLineShouldSkipMonitor())
+    // --no-monitor disables desktop wallpaper/fit/DPI observation. Contents
+    // still need their data scheduler, including when enabled later in the tray.
+    if (!g_shutdownState.IsRequested())
     {
         try
         {

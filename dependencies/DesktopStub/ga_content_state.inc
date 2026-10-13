@@ -44,6 +44,36 @@ static void PublishContentSnapshot(aip::content::Snapshot snapshot)
     g_contentSnapshot = std::move(snapshot);
 }
 
+static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error);
+
+static bool RefreshGenerationConfiguration()
+{
+    // Generation is an explicit publication boundary. Observe external edits
+    // even inside the ordinary polling cache's refresh interval, without writes.
+    aip::IniWriteMutexGuard configurationScope(g_iniPath, CurrentIniWriteLockWaitMs());
+    if (!configurationScope.IsLocked()) return false;
+    std::wstring text;
+    return ReadIniFileForMutation(text);
+}
+
+static std::wstring CurrentGenerationBackground(const std::wstring& wallpaperOverride = {})
+{
+    if (!RefreshGenerationConfiguration()) return {};
+    if (CompositionRequested())
+    {
+        // The desktop can have a solid-color background while the tile uses
+        // an image, media artwork, solid color or transparency of its own.
+        // Never substitute desktop wallpaper for an unavailable content frame.
+        aip::content::Configuration configuration;
+        std::wstring error;
+        if (!ReadContentConfiguration(configuration, error) || !configuration.enabled)
+            return {};
+        std::lock_guard<std::mutex> lock(g_contentSnapshotMutex);
+        return g_contentSnapshot.active ? g_contentSnapshot.backgroundPath : std::wstring{};
+    }
+    return wallpaperOverride.empty() ? GetWallpaper() : wallpaperOverride;
+}
+
 struct ContentRenderScope
 {
     aip::content::Snapshot snapshot;
@@ -62,5 +92,5 @@ struct ContentRenderScope
     ContentRenderScope& operator=(const ContentRenderScope&) = delete;
 };
 
-static bool ContentEngineTick(bool synchronous = false);
+static bool ContentEngineTick(bool synchronous = false, bool queueGeneration = true);
 static void StopContentProviders();

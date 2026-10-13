@@ -2,6 +2,13 @@
 
 Updated: 2026-09-08. Renderer and test changes completed; remaining OS/UI validation is listed below.
 
+**2026-10-13 compatibility update:** the preset behavior described below still
+applies to explicitly selected Windows81Preset and Windows 8/8.1 targets.
+Windows 10 Adaptive now has a separate bitmap path for both automatic fallback
+and forced Overlay. It retains the selected image and all three applicable
+fields, including medium secondary text. Overlay selects bitmap delivery, not
+a different template. See the [adaptive fallback guide](adaptive-static-text-gap-2026-10-13.md).
+
 ## Scope and current state
 
 The working tree already contained uncommitted tile layout extraction, declarative region data, and portable tests. Those changes are preserved. This audit owns the renderer, its portable layout model, and isolated render tests; source composition and configuration changes belong to the main repository audit.

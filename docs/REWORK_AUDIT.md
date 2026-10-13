@@ -1172,3 +1172,48 @@ acceptance remain distinct from inert passes. Source records:
 [native renderer observation](renderer-debug-observation-2026-10-13.md).
 Windhawk and the user's untracked Discord bot are untouched. Microsoft review
 remains deferred; no dump was uploaded, protection bypassed, or service changed.
+
+### Remaining findings, adaptive fallback and passive profiles, 2026-10-13
+
+The continuation fixes composed generation requests that still required desktop
+wallpaper, primes the initial frame before mode reconciliation, rejects invalid
+current configuration before accepting an older snapshot, and keeps source
+updates alive under `--no-monitor`. An external-edit regression covers the
+ordinary INI cache interval as well as the pre-poll case. The shared host catalog
+now normalizes four enums and 58 existing boolean keys across direct INI/CLI
+reads; empty primary text preserves enabled secondary/badge content. Text size
+controls are under shared display settings, legacy RSS gets the active-source
+notice, and the PowerShell picker retains its complete filter buffer.
+
+The new Windows10 Adaptive bitmap path retains its source background and all
+selected fields for Auto and Overlay. Overlay controls delivery rather than
+selecting a preset, and native text is not duplicated. Explicit Windows81Preset
+and older targets keep the existing renderer and exact opaque gate. Pure layout,
+renderer/native XML, PNG alpha and Auto/Overlay equality have independent tests.
+Outer padding, branding, RTL and exact native raster appearance remain target-OS
+acceptance, not inferred from synthetic passes.
+
+Live-wallpaper failed attempts now obey retry cadence and cannot overlap; the
+individual synchronous PrintWindow call remains uncancellable. Composition
+already blocked new sibling precaching, so only an older job's between-candidate
+configuration change required a new guard. DNS passive configuration now leaves
+Startup untouched and selected INI/inspection paths share resident identities,
+tray paths and quoted custom Startup metadata. Its normal product compiles and
+scans, with no real DNS or Startup action performed.
+
+Final passing scopes: 8,912 host/menu/configuration checks; 539 adaptive layout;
+5,522 adaptive renderer/host; 331 transparent; 1,014 capture scheduling; 253
+managed utility checks; 1,764 DesktopStub and 277 shared source checks. Map and
+workflow selector pass for 11 products plus All. Fresh normal host/broker scan
+clean; copied content and full exact smoke pass. Two new smoke setup failures
+(manifest-only arguments, then unnecessary target regeneration) and a source
+needle rename were corrected without weakening assertions; records are retained.
+
+The reviewed binaries were installed after graceful close, verified/scanned at
+normal paths, and DesktopStub was relaunched with its existing profile and Live
+Tile preference. Prior binaries/profile are backed up; INI bytes were unchanged
+during installation. [Detailed findings, identities and remaining work](remaining-findings-validation-2026-10-13.md)
+remain durable. The historical four-pixel preset difference, actual CPU episode,
+native UI/Startup/account/hardware acceptance and security-last deferral remain
+open. Windhawk and the untracked user bot are untouched; no dump upload, service
+change, Defender bypass or Microsoft-case refresh occurred.

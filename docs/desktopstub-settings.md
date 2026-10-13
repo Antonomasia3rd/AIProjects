@@ -43,17 +43,45 @@ notifications, **Static tile updates** selects regenerated tile assets, and
 Automatic retains the existing target-dependent behavior. The mode switch still
 uses the existing configured relaunch behavior.
 
-**Text delivery** controls composed source text: automatic delivery, native Live
-Tile text, text baked inside the tile image, or off. Turning native Live Tile
+**Text delivery** offers automatic text (native when available, with bitmap
+fallback), forced Overlay inside the tile image, or off. Turning native Live Tile
 delivery off can still leave bitmap text enabled. **Default text (without tile
 contents)** is the older standalone text configuration; its menu explains when
 the enabled content entries supply the text instead.
+
+For the Windows 10 Adaptive template, automatic bitmap fallback now keeps the
+selected background and all applicable primary, secondary and badge fields.
+The medium secondary field stays visible when native Live Tile updates are
+disabled. Overlay forces bitmap delivery using the selected template, so it
+also retains every adaptive field. Explicit Windows 8.1 presets and older
+targets retain their established geometry. The adaptive fallback follows native field styles and
+grouping but approximates shell margins/rasterization; see the
+[adaptive fallback guide](adaptive-static-text-gap-2026-10-13.md).
+
+**Tile display > Text on tile sizes** controls Medium, Wide and Large text for
+both composed sources and default text. These controls keep the existing
+`TileText.ApplyTo*` INI keys but no longer sit inside the default-text-only group.
+Display enum and boolean values use the same validation through `--set`, dedicated
+flags and INI profile checks. The explicit host catalog covers four display
+enums and 58 existing boolean keys, including logging, tray/console visibility,
+notifications, Startup preferences, text sizes, asset switches, and capture/cache
+options. Integer timing/limit fields remain integers. Invalid modes are rejected
+rather than silently changing to Automatic. Boolean words such as `true`,
+`false`, `yes` and `off` are accepted for these typed switches. `--tile-text ""` clears only
+the primary field, like `--tile-text-clear` and the tray editor; it preserves a
+still-enabled secondary or badge. Use `--tile-text-disable` to hide all default
+text explicitly.
 
 Each provider keeps its own fetch interval where applicable. **Updates and
 cycling > Check for source updates** is the host's scheduler cadence; it does
 not replace RSS/Notes/Discord's individual refresh settings. Existing warnings
 for expensive registration cycles and potentially skipped native notifications
 still apply.
+
+The `--no-monitor` command-line option disables ongoing wallpaper, fit and DPI
+observation. It keeps content source refresh/cycling and later profile edits
+responsive. Switching explicitly from contents to wallpaper can restore the
+wallpaper once.
 
 ## Profiles and compatibility
 

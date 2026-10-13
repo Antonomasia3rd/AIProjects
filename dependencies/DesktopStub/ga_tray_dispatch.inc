@@ -102,9 +102,9 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         Log(g_ui.liveTileTemplateStyleSummary.c_str(), LiveTileTemplateStyleSummaryText().c_str());
         Log(g_ui.liveTileBrandingSummary.c_str(), LiveTileBrandingSummaryText().c_str());
 
-        std::wstring wp = GetWallpaper();
+        std::wstring wp = CurrentGenerationBackground();
         if (!wp.empty())
-            QueueGenerate(wp, g_ui.liveTileTemplateChangedReason);
+            DESKTOPSTUB_CONTENT_QUEUE_GENERATE(wp, g_ui.liveTileTemplateChangedReason);
     }
     break;
 
@@ -140,9 +140,9 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         g_liveTileBranding = static_cast<int>(newBranding);
         Log(g_ui.liveTileBrandingSummary.c_str(), LiveTileBrandingSummaryText().c_str());
 
-        std::wstring wp = GetWallpaper();
+        std::wstring wp = CurrentGenerationBackground();
         if (!wp.empty())
-            QueueGenerate(wp, g_ui.liveTileBrandingChangedReason);
+            DESKTOPSTUB_CONTENT_QUEUE_GENERATE(wp, g_ui.liveTileBrandingChangedReason);
     }
     break;
 
@@ -417,19 +417,20 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
 
     case ID_GENERATE_NOW:
     {
-        std::wstring wp = GetWallpaper();
+        std::wstring wp = CurrentGenerationBackground();
 
         if (wp.empty())
         {
             MessageBoxW(h,
-                g_ui.currentWallpaperNotFound.c_str(),
+                CompositionRequested() ? L"No tile content background is available. Check Tile contents and try again."
+                    : g_ui.currentWallpaperNotFound.c_str(),
                 g_ui.generateNowTitle.c_str(),
                 MB_OK | MB_ICONWARNING);
         }
         else
         {
             LogText(g_ui.manualGenerationRequested);
-            QueueGenerate(wp, g_ui.manualGenerateTriggered);
+            DESKTOPSTUB_CONTENT_QUEUE_GENERATE(wp, g_ui.manualGenerateTriggered);
         }
     }
     break;

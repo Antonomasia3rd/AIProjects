@@ -249,6 +249,11 @@ int IniReadI(const wchar_t* s, const wchar_t* k, int d)
     if (!ReadIniValueCached(s, k, value))
         return d;
 
+    if (s && k && IsDesktopStubDisplayBoolSetting(s, k))
+    {
+        bool enabled = false;
+        return aip::ParseBoolValue(value, enabled) ? (enabled ? 1 : 0) : d;
+    }
     int parsed = 0;
     return aip::ParseIntValue(value, parsed) ? parsed : d;
 }

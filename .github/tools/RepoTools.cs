@@ -1747,6 +1747,7 @@ static class RepoTools
                     else
                         Console.WriteLine("Selected content phase: exact glyph comparisons remain in the separate default all phase.");
                     VerifyDesktopStubComposedContent(exe, ini, wallpaper, tempRoot);
+                    VerifyDesktopStubAdaptiveTextRendering(exe, ini, wallpaper, tempRoot);
                     SmokeProcess(exe, new[] { "--ini", ini, "--wallpaper", Path.Combine(tempRoot, "missing.png"), "--no-tray" }, new[] { 2 }, 30, "DesktopStub invalid wallpaper guard");
                     if (allowPackageIntegration) VerifyDesktopStubSecondLaunchActions(exe, tempRoot);
                     VerifyDesktopStubConcurrentIniWrites(exe, concurrentIni);
@@ -2013,6 +2014,10 @@ static class RepoTools
                 // Registration is the explicit "Live Tile disabled" mode. In
                 // this mode TileText must be baked into static PNG assets.
                 "--no-live-tile",
+                // This gate intentionally exercises the original preset's
+                // unsupported medium secondary slot. Adaptive text has a
+                // separate field-visibility/background-preservation gate.
+                "--live-tile-template", "Windows81Preset",
                 "--asset", "MediumTile=1",
                 "--asset", "WideTile=1",
                 "--asset", "LargeTile=1",
@@ -2173,6 +2178,56 @@ static class RepoTools
         }
         SmokeProcess(exe, new[] { "--ini", ini, "--set", "Content.Enabled=0", "--exit" },
             new[] { 0 }, 30, "DesktopStub leave composition");
+    }
+
+    static void VerifyDesktopStubAdaptiveTextRendering(string exe, string ini, string wallpaper, string tempRoot)
+    {
+        Func<string, string, string, string, Dictionary<string, TilePixelSnapshot>> render = (mode, primary, secondary, badge) => {
+            SmokeProcess(exe, new[] {
+                "--ini", ini, "--no-live-tile", "--no-tray", "--no-monitor",
+                // The main smoke profile already uses Windows10. Setting a
+                // target again would regenerate its deliberately custom manifest.
+                "--live-tile-template", "Adaptive",
+                "--wallpaper", wallpaper,
+                "--asset", "MediumTile=1", "--asset", "WideTile=1", "--asset", "LargeTile=1",
+                "--set", "Content.Enabled=1", "--set", "Content.Count=1", "--set", "Content.CycleEnabled=0",
+                "--set", "Content.1.Background=Image", "--set", "Content.1.ImagePath=" + wallpaper,
+                "--set", "Content.1.TextSources=CustomText", "--set", "Content.1.Text=" + primary,
+                "--set", "Content.1.SecondaryText=" + secondary, "--set", "Content.1.BadgeText=" + badge,
+                "--set", "Content.TextMode=" + mode,
+                allowPackageIntegration ? "--once" : "--render-only"
+            }, new[] { 0 }, 30, "DesktopStub static adaptive " + mode + " fields=" + primary + "/" + secondary + "/" + badge);
+            return CaptureDesktopStubTileAssets(tempRoot, "adaptive static fallback");
+        };
+        var background = render("Off", "AAAA", "IIII", "7");
+        var baseline = render("Auto", "AAAA", "IIII", "7");
+        var forcedOverlay = render("Overlay", "AAAA", "IIII", "7");
+        var variants = new[] {
+            render("Auto", "WWWW", "IIII", "7"),
+            render("Auto", "AAAA", "MMMM", "7"),
+            render("Auto", "AAAA", "IIII", "8")
+        };
+        foreach (string size in new[] { "Medium", "Wide", "Large" })
+        {
+            TilePixelSnapshot image = background[size], text = baseline[size];
+            if (CountPixelDifferences(image, text) == 0)
+                throw new InvalidOperationException("Adaptive static fallback has no visible text on " + size + ".");
+            if (CountPixelDifferences(text, forcedOverlay[size]) != 0)
+                throw new InvalidOperationException("Adaptive static and forced Overlay layouts differ on " + size + ".");
+            for (int field = 0; field < variants.Length; ++field)
+                if (CountPixelDifferences(text, variants[field][size]) == 0)
+                    throw new InvalidOperationException("Adaptive static fallback omits field " + field + " on " + size + ".");
+            // The native adaptive template retains its background. Bitmap
+            // fallback may draw text within margins but must not add a preset
+            // plate, band or whole-image darkener.
+            for (int y = 0; y < image.Height; ++y)
+                foreach (int x in new[] { 0, image.Width - 1 })
+                    if (image.Pixels[y * image.Width + x] != text.Pixels[y * image.Width + x])
+                        throw new InvalidOperationException("Adaptive static fallback replaced its background on " + size + ".");
+            Console.WriteLine("ok - DesktopStub adaptive static " + size + " retains background and all three fields");
+        }
+        SmokeProcess(exe, new[] { "--ini", ini, "--set", "Content.Enabled=0", "--exit" },
+            new[] { 0 }, 30, "DesktopStub leave adaptive composition");
     }
 
     static void VerifyDesktopStubOfflineGuards(string exe, string tempRoot)

@@ -386,18 +386,19 @@ static void RegenerateManifestAndQueueGeneration(HWND owner)
     if (!RegenerateAppxManifestFromConfigAndLog())
         return;
 
-    std::wstring wp = GetWallpaper();
+    std::wstring wp = CurrentGenerationBackground();
     if (wp.empty())
     {
         MessageBoxW(owner,
-            g_ui.currentWallpaperNotFound.c_str(),
+            CompositionRequested() ? L"No tile content background is available. Check Tile contents and try again."
+                : g_ui.currentWallpaperNotFound.c_str(),
             g_ui.generateNowTitle.c_str(),
             MB_OK | MB_ICONWARNING);
         return;
     }
 
     SetLiveTileModeReregistrationPending(true);
-    QueueGenerate(wp, g_ui.manifestRegenerateReason);
+    DESKTOPSTUB_CONTENT_QUEUE_GENERATE(wp, g_ui.manifestRegenerateReason);
 }
 
 static void PromptManifestStringSetting(
@@ -467,8 +468,9 @@ static void ChoosePowerShellExe(HWND owner)
     OPENFILENAMEW ofn{};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = owner;
-    std::wstring filter = L"Executable files\0*.exe\0All files\0*.*\0\0";
-    ofn.lpstrFilter = filter.c_str();
+    // OPENFILENAME consumes the complete double-NUL-terminated filter list.
+    // A wstring constructed from this literal stops at its first embedded NUL.
+    ofn.lpstrFilter = L"Executable files\0*.exe\0All files\0*.*\0\0";
     ofn.lpstrFile = file.data();
     ofn.nMaxFile = static_cast<DWORD>(file.size());
     ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;

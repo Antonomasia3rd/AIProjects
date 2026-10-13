@@ -735,6 +735,8 @@ static std::vector<HWND> FindLiveWallpaperWindowCandidates(LiveWallpaperProvider
     return candidates;
 }
 
+#include "../capture_attempt.h"
+
 static std::wstring TryGetLiveWallpaperSnapshot()
 {
     static std::mutex s_liveWallpaperMutex;
@@ -746,6 +748,7 @@ static std::wstring TryGetLiveWallpaperSnapshot()
     static unsigned long long s_captureSequence = 0;
     static bool s_startupSettleActive = false;
     static bool s_waitingForHostWindow = false;
+    static aip::CaptureAttemptSchedule s_captureAttempts;
 
     auto resetStateUnlocked = [&]()
     {
@@ -758,6 +761,7 @@ static std::wstring TryGetLiveWallpaperSnapshot()
         s_startupSettleActive = false;
         s_waitingForHostWindow = false;
         g_liveWallpaperCapturePending = false;
+        s_captureAttempts.Reset();
     };
 
     LiveWallpaperProvider provider = DetectActiveLiveWallpaperProvider();
@@ -787,6 +791,7 @@ static std::wstring TryGetLiveWallpaperSnapshot()
             s_captureSequence = 0;
             s_startupSettleActive = false;
             s_waitingForHostWindow = true;
+            s_captureAttempts.Reset();
         }
         else
         {
@@ -821,6 +826,15 @@ static std::wstring TryGetLiveWallpaperSnapshot()
         s_startupSettleActive = startupRefreshMs > 0 && startupRefreshDurationMs > 0;
         s_waitingForHostWindow = false;
         g_liveWallpaperCapturePending = s_startupSettleActive;
+        s_captureAttempts.Reset();
+    }
+
+    // Capture releases this mutex while asking another process to paint.
+    // A poll/UI/registration caller must never start an overlapping capture.
+    // Startup settling still suppresses an early static-wallpaper fallback.
+    if (s_captureAttempts.InFlight()) {
+        g_liveWallpaperCapturePending = s_startupSettleActive;
+        return IsUsableWallpaperPath(s_snapshotPath) ? s_snapshotPath : L"";
     }
 
     int delayMs = LiveWallpaperCaptureDelayMs();
@@ -842,6 +856,12 @@ static std::wstring TryGetLiveWallpaperSnapshot()
     auto captureSnapshot = [&](std::wstring& capturedPath) -> bool
     {
         capturedPath.clear();
+        const auto clock = []() noexcept { return static_cast<std::uint64_t>(duration_cast<milliseconds>(
+            steady_clock::now().time_since_epoch()).count()); };
+        const auto token = s_captureAttempts.Begin(clock(), aip::CaptureAttemptRetryMs(
+            LiveWallpaperCaptureRefreshMs(), startupRefreshMs, s_startupSettleActive));
+        if (!token) return false;
+        aip::CaptureAttemptScope<decltype(clock)> attempt(s_captureAttempts, token, lk, clock);
         std::wstring path = GetLiveWallpaperSnapshotPath(provider, ++s_captureSequence);
         steady_clock::time_point activeSinceBeforeCapture = s_activeSince;
         if (path.empty())

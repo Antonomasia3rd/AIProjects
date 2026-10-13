@@ -21,6 +21,7 @@ if errorlevel 1 exit /b %ERRORLEVEL%
   "%REPO%\dependencies\managed_named_objects.cs" ^
   "%REPO%\dependencies\managed_logging.cs" ^
   "%REPO%\dependencies\managed_ini.cs" ^
+  "%REPO%\dependencies\managed_profile.cs" ^
   "%REPO%\dependencies\managed_startup_shortcut.cs" ^
   "%REPO%\dependencies\managed_configuration_startup.cs" ^
   "%REPO%\dependencies\managed_tray.cs" ^

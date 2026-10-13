@@ -34,8 +34,11 @@ with a Run registry value or scheduled task.
 BuildDNSAutoUpdate.cmd
 ```
 
-The output is `build\DNSAutoUpdate.exe`. The INI and default log use the
-executable's current base name beside that executable. Append and configured
+The output is `build\DNSAutoUpdate.exe`. By default, the INI and log use the
+executable's current base name beside that executable. `--ini FILE` selects
+another INI; explicit relative paths resolve from the working directory. An
+explicit empty path or directory is rejected. Relative log paths retain the
+existing executable-directory rule. Append and configured
 rotation are serialized through the shared managed logger.
 
 `DNSAutoUpdate.cs` is intentionally only the product assembly-metadata overlay.
@@ -60,11 +63,27 @@ DNSAutoUpdate.exe --apply --configure-only
 ```
 
 `--configure-only` never enumerates interfaces, starts `dnscmd.exe`, creates a
-tray icon, or enters the resident loop. A valid setting command without
+tray icon, enters the resident loop, or queries/changes Startup shortcuts. It
+preserves the saved Startup preference. Run `--startup` or `--no-startup`
+separately to change that preference and its current-user shortcut; combining
+Startup edits with `--configure-only` is rejected before the INI changes.
+A valid setting command without
 `--configure-only` saves the complete batch and starts the resident process; if
 that profile is already running, it is asked to reload.
 
 ## Configuration surfaces
+
+Inspect defaults or an existing profile without creating a file, accessing DNS,
+or querying/changing Startup:
+
+```cmd
+DNSAutoUpdate.exe --ini "Profiles\office.ini" --show-config
+```
+
+`--print-config` is an alias. Combine `--configure-only` and inspection to print
+the validated committed profile after saving. Inspection alone rejects setting
+changes and operational/Startup actions. Help and version short-circuit profile
+parsing, so they remain usable while diagnosing an invalid profile argument.
 
 Every persistent setting is available in `[Settings]`, through a direct CLI
 option or `--set Settings.Key=Value`, and in the tray menu:
@@ -87,7 +106,10 @@ option or `--set Settings.Key=Value`, and in the tray menu:
   Windows confirmation dialog; one-shot console mode reads the console.
 - `LogFile`, `MaxLogMegabytes`, `LogRetentionCount`: sidecar logging and
   rotation policy. Relative log paths resolve beside the executable.
-- `RunAtStartup`: exact empty-argument, INI-scoped current-user Startup link.
+- `RunAtStartup`: exact INI-scoped current-user Startup link. A custom profile
+  shortcut includes its quoted `--ini` argument. The default sidecar retains
+  its empty-argument shortcut and can adopt its existing legacy filename; a
+  custom profile never adopts that default link.
   The shared direction-safe commit self-reconciles an interrupted enable or
   disable on the next launch.
 - `ShowTrayIcon`, `ShowMenuAsDropdown`: tray visibility/layout.
@@ -107,6 +129,13 @@ Actions are invocation-only:
 - `--reload`: ask an existing resident instance to reload its INI.
 - `--exit`: ask an existing resident instance to stop cooperatively.
 - `--help`, `--version`: side-effect-free information commands.
+
+Use `--ini FILE` with `--reload`, `--run-now`, or `--exit` to address that
+profile's resident instance. Its single-instance lock and control events are
+scoped to the normalized selected path. These control commands do not create
+the INI when no instance is running. The tray's Open configuration action uses
+that same selected file. DNS-zone ownership remains shared across profiles,
+preventing local profiles from alternating conflicting changes to one zone.
 
 ## DNS safety behavior
 

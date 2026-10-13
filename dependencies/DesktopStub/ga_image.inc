@@ -620,6 +620,14 @@ static bool PreserveContentBackgroundForText()
 }
 
 #include "tile_text_render.inc"
+#include "adaptive_tile_text_render.inc"
+
+static bool ShouldUseAdaptiveStaticTextFallback()
+{
+    return ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10 &&
+        ConfiguredLiveTileTemplateStyle() == LiveTileTemplateStyle::Adaptive &&
+        (!g_renderContent || g_renderContent->textMode != aip::content::TextMode::Off);
+}
 
 static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int logicalWidth, int logicalHeight)
 {
@@ -653,6 +661,16 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
 
     if (!ConfigureTileTextGraphics(graphics))
         return false;
+    if (ShouldUseAdaptiveStaticTextFallback()) {
+        const auto layout = SimulatedTileTextLayoutForName(tileName);
+        if (layout == SimulatedTileTextLayout::Medium)
+            return RenderAdaptiveTileTextSimulation(graphics, tiletext::TileSize::Medium, primaryText, secondaryText, badgeText, scale);
+        if (layout == SimulatedTileTextLayout::Wide)
+            return RenderAdaptiveTileTextSimulation(graphics, tiletext::TileSize::Wide, primaryText, secondaryText, badgeText, scale);
+        if (layout == SimulatedTileTextLayout::Large)
+            return RenderAdaptiveTileTextSimulation(graphics, tiletext::TileSize::Large, primaryText, secondaryText, badgeText, scale);
+        return true;
+    }
     switch (SimulatedTileTextLayoutForName(tileName))
     {
     case SimulatedTileTextLayout::Medium:

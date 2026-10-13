@@ -37,12 +37,27 @@ struct RenderSnapshotScope {
 };
 static void InspectAlpha(Bitmap& bitmap, bool expectText, tiletext::TileSize size, double scale)
 {
+    std::vector<RectF> permitted;
+    if (ShouldUseAdaptiveStaticTextFallback()) {
+        Graphics metrics(&bitmap);
+        auto captionFamily = CreateSystemTileFontFamily(L"Segoe UI");
+        auto titleFamily = CreateSystemTileFontFamily(L"Segoe UI Semilight");
+        Font caption(captionFamily.get(), static_cast<REAL>(tiletext::AdaptiveCaptionEm * scale), FontStyleRegular, UnitPixel);
+        Font title(titleFamily.get(), static_cast<REAL>(tiletext::AdaptiveTitleEm * scale), FontStyleRegular, UnitPixel);
+        for (const auto& region : tiletext::ComputeAdaptiveTileTextLayout(size, {true, true, true},
+                caption.GetHeight(&metrics) / scale, title.GetHeight(&metrics) / scale))
+            permitted.emplace_back(static_cast<REAL>(region.x * scale), static_cast<REAL>(region.y * scale),
+                static_cast<REAL>(region.width * scale), static_cast<REAL>(region.height * scale));
+    } else {
+        for (const auto& region : tiletext::ComputeTileTextLayout(size, {true, true, true}))
+            permitted.emplace_back(static_cast<REAL>(region.x * scale), static_cast<REAL>(region.y * scale),
+                static_cast<REAL>(region.width * scale), static_cast<REAL>(region.height * scale));
+    }
     Rect bounds(0, 0, bitmap.GetWidth(), bitmap.GetHeight());
     BitmapData data{};
     const bool locked = bitmap.LockBits(&bounds, ImageLockModeRead, PixelFormat32bppARGB, &data) == Ok;
     Check(locked, "raster can be inspected as RGBA");
     if (!locked) return;
-    const auto regions = tiletext::ComputeTileTextLayout(size, {true, true, true});
     unsigned ink = 0, unexpectedForeground = 0, transparent = 0, outsideLayout = 0, borderInk = 0;
     for (UINT y = 0; y < bitmap.GetHeight(); ++y) {
         const auto* row = static_cast<const BYTE*>(data.Scan0) + static_cast<ptrdiff_t>(y) * data.Stride;
@@ -58,9 +73,8 @@ static void InspectAlpha(Bitmap& bitmap, bool expectText, tiletext::TileSize siz
                 const bool roundedWhiteEdge = pixel[3] < 255 && pixel[0] >= 254 &&
                     pixel[0] == pixel[1] && pixel[1] == pixel[2];
                 if (!whiteCore && !roundedWhiteEdge) ++unexpectedForeground;
-                const bool inside = std::any_of(regions.begin(), regions.end(), [&](const auto& region) {
-                    return x >= region.x * scale && y >= region.y * scale &&
-                        x < (region.x + region.width) * scale && y < (region.y + region.height) * scale;
+                const bool inside = std::any_of(permitted.begin(), permitted.end(), [&](const auto& region) {
+                    return x >= region.X && y >= region.Y && x < region.GetRight() && y < region.GetBottom();
                 });
                 if (!inside) ++outsideLayout;
                 if (!x || !y || x + 1 == bitmap.GetWidth() || y + 1 == bitmap.GetHeight()) ++borderInk;

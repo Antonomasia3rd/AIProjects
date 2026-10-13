@@ -2,6 +2,9 @@
 // Tile generation
 // -----------------------------------------------------------------------------
 #include "../png_crc32.h"
+#ifndef DESKTOPSTUB_CONTENT_QUEUE_GENERATE
+#define DESKTOPSTUB_CONTENT_QUEUE_GENERATE QueueGenerate
+#endif
 
 struct Tile { const wchar_t* name; const wchar_t* file; int w,h; };
 static const Tile g_tiles[] = {
@@ -1195,6 +1198,8 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     state += L"usePowerShell=" + IntToWString(UsePowerShell() ? 1 : 0) + L";";
     state += L"liveTileUpdateMode=" + LiveTileUpdateModeIniValue(ConfiguredLiveTileUpdateMode()) + L";";
     state += L"liveTileTemplateStyle=" + LiveTileTemplateStyleIniValue(ConfiguredLiveTileTemplateStyle()) + L";";
+    if (ShouldUseAdaptiveStaticTextFallback())
+        state += L"adaptiveStaticText=1;";
     state += L"liveTileBranding=" + LiveTileBrandingIniValue(ConfiguredLiveTileBranding()) + L";";
     state += L"effectiveLiveTileUpdate=" + IntToWString(UseExperimentalLiveTileUpdate() ? 1 : 0) + L";";
     state += L"disableFitting=" + IntToWString(g_disableFitting ? 1 : 0) + L";";
@@ -1805,6 +1810,8 @@ static std::vector<std::wstring> EnumerateSiblingWallpaperCandidates(
 
 static void RunGeneratedAssetPrecache(const std::wstring& currentWallpaper)
 {
+    if (CompositionRequested())
+        return;
     ReloadRuntimeSettingsFromIni();
     if (!GeneratedAssetPrecacheEnabled() || g_shutdownState.IsRequested())
         return;
@@ -1824,7 +1831,7 @@ static void RunGeneratedAssetPrecache(const std::wstring& currentWallpaper)
 
     for (const auto& candidate : candidates)
     {
-        if (g_shutdownState.IsRequested() || GenerationWorkPending())
+        if (CompositionRequested() || g_shutdownState.IsRequested() || GenerationWorkPending())
             return;
 
         RenderWallpaperToGeneratedAssetCache(exeDir, manifestInfo, scales, liveTileUpdateMode, candidate);
@@ -2002,9 +2009,38 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         return false;
     }
 
+    if (!RefreshGenerationConfiguration())
+    {
+        Log(L"[!] Tile update skipped: the current configuration could not be read.");
+        return false;
+    }
     if (!renderOnly) ReloadRuntimeSettingsFromIni();
 
+    std::wstring configurationError;
+    if (!ValidateDesktopStubDisplayProfile(false, configurationError))
+    {
+        Log(L"[!] Tile update skipped: %s", configurationError.c_str());
+        return false;
+    }
+    const bool composedContent = CompositionRequested();
+    if (composedContent)
+    {
+        // A live INI edit can arrive before the poller clears its old frame.
+        // Validate one current document before accepting that published frame.
+        aip::content::Configuration configuration;
+        if (!ReadContentConfiguration(configuration, configurationError) || !configuration.enabled)
+        {
+            Log(L"[!] Tile update skipped: %s", configurationError.empty()
+                ? L"the content configuration changed before this frame was ready." : configurationError.c_str());
+            return false;
+        }
+    }
     ContentRenderScope contentScope;
+    if (composedContent && !contentScope.snapshot.active)
+    {
+        Log(L"[!] Tile update skipped: no current content frame is available. Check the tile contents configuration.");
+        return false;
+    }
     if (contentScope.snapshot.active)
         wp = contentScope.snapshot.backgroundPath.c_str();
 
@@ -2782,15 +2818,17 @@ static bool QueueLiveTileModeReregistration()
 {
     SetLiveTileModeReregistrationPending(true);
 
-    std::wstring wp = GetWallpaper();
+    std::wstring wp = CurrentGenerationBackground();
     if (wp.empty())
     {
-        LogText(g_ui.liveTileModeReregistrationQueuedNoWallpaper);
+        LogText(CompositionRequested()
+            ? L"[!] Live Tile mode changed; re-registration is pending until a tile content background is available."
+            : g_ui.liveTileModeReregistrationQueuedNoWallpaper);
         return false;
     }
 
     LogText(g_ui.liveTileModeReregistrationQueued);
-    return QueueGenerate(wp, g_ui.liveTileModeChanged) != 0;
+    return DESKTOPSTUB_CONTENT_QUEUE_GENERATE(wp, g_ui.liveTileModeChanged) != 0;
 }
 
 static void JoinQueuedGenerations()
@@ -2854,6 +2892,15 @@ void PollThread()
             const auto wallpaper = GetWallpaper();
             if (!wallpaper.empty()) QueueGenerate(wallpaper, L"Wallpaper source selected");
             contentWasActive = false;
+        }
+
+        if (CommandLineShouldSkipMonitor())
+        {
+            // Keep source/profile changes responsive without ongoing desktop
+            // wallpaper/fit/DPI observation. An explicit source transition
+            // above can still restore wallpaper once.
+            PollSleepFor(milliseconds(poll));
+            continue;
         }
 
         if (pendingPollGeneration)

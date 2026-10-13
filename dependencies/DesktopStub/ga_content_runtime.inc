@@ -419,7 +419,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
     return key;
 }
 
-static bool ContentEngineTick(bool synchronous)
+static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 {
     static aip::content::Cycle cycle;
     static std::wstring lastFrame, lastError, lastWarning, lastBackgroundEntry;
@@ -433,6 +433,7 @@ static bool ContentEngineTick(bool synchronous)
         // Invalid edits must not leave a previously enabled actuator running.
         g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel();
         g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
+        PublishContentSnapshot({}); lastFrame.clear();
         if (error != lastError) {
             Log(L"Content configuration: %s", error.c_str());
             NotifyTrayBalloon(g_ui.notificationTitle, error, NIIF_WARNING);
@@ -588,7 +589,7 @@ static bool ContentEngineTick(bool synchronous)
         return false;
     }
     auto frame = ContentSnapshotKey(snapshot);
-    if (synchronous) return true; // --once invokes Generate exactly once itself.
+    if (synchronous || !queueGeneration) return true; // Caller queues its own generation.
     if (frame != lastFrame && !GenerationWorkPending()) {
         if (DESKTOPSTUB_CONTENT_QUEUE_GENERATE(snapshot.backgroundPath, L"Content source update") != 0) lastFrame = frame;
     }
