@@ -23,7 +23,7 @@ static const wchar_t* g_notesAccountKeys[] = {L"UID", L"LToken", L"LTUid", L"Ref
 struct ContentTrayOption { const wchar_t* key; const wchar_t* label; const wchar_t* fallback; bool toggle; };
 static const ContentTrayOption g_capsOptions[] = {
     {L"HardwareEnabled", L"Control physical Caps indicator", L"0", true},
-    {L"KeyboardTargetPath", L"Keyboard device", L"\\Device\\KeyboardClass0", false},
+    {L"KeyboardTargetPath", L"Keyboard device (Auto selects all available)", L"Auto", false},
     {L"BlinkIntervalMs", L"Blink interval (milliseconds)", L"500", false},
 };
 static const ContentTrayOption g_asusOptions[] = {

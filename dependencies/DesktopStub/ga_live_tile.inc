@@ -2,6 +2,7 @@
 // Live Tile update
 // -----------------------------------------------------------------------------
 #include "../tile_notification_winrt.inc"
+#include "../media_tile_layout.h"
 static bool CurrentProcessPackageFullName(std::wstring& packageFullName)
 {
     packageFullName.clear();
@@ -261,6 +262,16 @@ static std::wstring BuildLiveTileXml(
         }
 
         const wchar_t* templateName = LiveTileTemplateForTarget(asset.binding);
+        if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->secondaryTileId == L"AipSource_smtc" &&
+            g_renderContent->textMode == aip::content::TextMode::Auto) {
+            aip::tile_visual::Assets icons; std::wstring iconError;
+            const auto key = g_renderContent->text.badge.find(L"Playing") != std::wstring::npos ? L"pause" : L"play";
+            if (aip::tile_visual::EnsureTileTopicAssets(key, exeDir, icons, iconError) &&
+                aip::content::AppendMediaTileBinding(xml, templateName, g_renderContent->text,
+                    aip::tile_visual::PackageUri(icons.smallTile), ContentHasTransparentBackground() ? L"" : uri)) {
+                hasUsableBinding = true; continue;
+            }
+        }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && !g_renderContent->rssHeadlines.empty() &&
             g_renderContent->textMode == aip::content::TextMode::Auto) {
             if (aip::content::AppendRssTileBinding(xml, templateName, asset.h, g_renderContent->rssHeadlines,
@@ -388,6 +399,14 @@ static bool Appx_Clear_LiveTileBare(std::wstring& failureMessage)
 
         TileUpdater updater = TileUpdateManager::CreateTileUpdaterForApplication();
         updater.Clear();
+        // Clean shutdown returns source tiles to their own topic artwork.
+        // A primary clear must not leave secondary live text stuck indefinitely.
+        for (const auto& tile : aip::content::SecondaryTiles) {
+            const auto id = L"AipSource_" + std::wstring(tile.id);
+            if (!SecondaryTileExists(id)) continue;
+            try { TileUpdateManager::CreateTileUpdaterForSecondaryTile(id).Clear(); }
+            catch (...) { Log(L"[!] Could not clear source tile on shutdown: %ls", id.c_str()); }
+        }
         return true;
     }
     catch (const winrt::hresult_error& e)

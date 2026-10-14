@@ -22,17 +22,31 @@ not reported as a completed pin. Repeating pin/update can update an existing
 tile through the shared API. Pin availability/status is separate from source
 configuration and requires the registered app; configuration remains accessible.
 
-For Notes games, Source and sign-in settings opens a small setup menu with the
-official HoYoLAB sign-in website, a manual account editor, existing cookie JSON
-import, individual masked fields, refresh, and clear actions. The manual editor
+For Notes games, Source and sign-in settings opens a small setup menu with
+**Sign in to HoYoLAB inside this app**, a manual account editor, existing cookie
+JSON import, individual masked fields, refresh, and clear actions. Embedded
+sign-in displays the official HoYoLAB site in WebView2. Enter the selected game's
+UID, sign in, then explicitly choose **Use signed-in account** to import the
+supported HoYoLAB cookie pair. The optional protection checkbox stores protected
+credentials; it is off by default. Closing the sign-in window saves no pending
+account fields. WebView2 Runtime availability errors provide installation guidance
+without running an installer. The manual editor
 stages UID and both optional replacement cookie fields together, validates and
 saves once, and cancels without writing. Leaving both credential fields blank
 keeps stored credentials; replacement requires both fields and clears old plain/
 protected aliases through the existing account-family helper. It does not
-decrypt stored credentials, automate browser sign-in, inspect browser cookies,
-or copy data through the clipboard. Plain replacement inputs use masked controls
+decrypt stored credentials, automate browser sign-in, or copy data through the
+clipboard. Plain replacement inputs use masked controls
 and are explicitly described as stored in this INI. Existing protected-field
 editing/import routes remain available.
+
+Embedded sign-in uses only its own profile-scoped browser data and supported
+WebView2 CookieManager calls after the explicit import action; it does not read
+another browser's profile. See
+[the embedded sign-in source checkpoint](notes-embedded-signin-2026-10-14.md)
+for cookie filtering, lifetime, SDK provenance, and the remaining acceptance
+checks. Its new implementation is separate from the earlier inert validation
+and installation results below.
 
 RSS setup reuses the existing URL/refresh/headline handlers. Discord setup reuses
 the existing basic/profile creation/typed advanced editor, including private

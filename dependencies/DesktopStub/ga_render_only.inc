@@ -6,7 +6,7 @@ static int RunRenderOnlyCommand()
         aip::WriteCommandLineText(L"Offline command: " + message, true);
         return 2;
     };
-    if (!g_commandLine.openUrl.empty() || !g_commandLine.tileSetupKey.empty() || g_commandLine.exitRequested || g_commandLine.comRegistrationHelper ||
+    if (!g_commandLine.openUrl.empty() || !g_commandLine.tileSetupKey.empty() || !g_commandLine.mediaAction.empty() || g_commandLine.exitRequested || g_commandLine.comRegistrationHelper ||
         g_commandLine.appxActivationServer || g_commandLine.liveTileClearOnly ||
         g_commandLine.launchedFromAppxStub || g_commandLine.launchedFromModeSwitch ||
         g_commandLine.waitForPid)

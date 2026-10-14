@@ -118,12 +118,21 @@ static void QueueCommandLineGenerationRequest()
 static void HandleSingleInstanceRequest(WPARAM request)
 {
     const auto action = request & SINGLE_INSTANCE_REQUEST_MASK;
+    if (action >= SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE &&
+        action < SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE + aip::content::TileActionCount) {
+        QueueMediaTileAction(g_hwnd, aip::content::TileActions[action - SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE].id); return;
+    }
     if (action >= SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE &&
         action < SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE + aip::content::SecondaryTileCount) {
         const auto& tile = aip::content::SecondaryTiles[action - SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE];
         if ((request & SINGLE_INSTANCE_FLAG_TILE_SIGN_IN) && std::wstring(tile.source) == L"Notes")
-            ShellExecuteW(g_hwnd, L"open", L"https://www.hoyolab.com/", nullptr, nullptr, SW_SHOWNORMAL);
-        else OpenSecondaryTileSetup(g_hwnd, tile.id);
+            OpenEmbeddedNotesSignIn(g_hwnd, tile.notesResource);
+        else {
+            const auto click = IniReadS(aip::content::SecondaryTileSection(tile.id).c_str(), L"ClickAction",
+                std::wstring(tile.id) == L"smtc" ? L"toggle" : L"setup");
+            if (const auto* media = aip::content::FindTileAction(click)) QueueMediaTileAction(g_hwnd, media->id);
+            else OpenSecondaryTileSetup(g_hwnd, tile.id);
+        }
         return;
     }
     if (action >= SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE && action <= SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE + 3) {
@@ -426,6 +435,11 @@ static void ExecutePendingRelaunchAfterExit()
 LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
 {
     if (SecondaryTileHandleMessage(h, m, w, l)) return 0;
+    if (MediaTileActionHandleMessage(h, m)) return 0;
+    if (m == WM_POWERBROADCAST && (w == PBT_APMRESUMEAUTOMATIC || w == PBT_APMRESUMESUSPEND)) {
+        g_contentCaps.restart = true; CaptureContentLogicalCapsState(); WakePollThread(); return TRUE;
+    }
+    if (m == WM_DEVICECHANGE) { g_contentCaps.restart = true; WakePollThread(); }
     if (m == WM_APP_CONTENT_LOGICAL_CAPS) {
         return CaptureContentLogicalCapsState();
     }
@@ -1577,7 +1591,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     {
         WPARAM singleInstanceRequest = SINGLE_INSTANCE_REQUEST_SHOW;
         bool explicitSingleInstanceRequest = false;
-        if (!g_commandLine.tileSetupKey.empty())
+        if (!g_commandLine.mediaAction.empty()) {
+            for (std::size_t index = 0; index < aip::content::TileActionCount; ++index)
+                if (g_commandLine.mediaAction == aip::content::TileActions[index].id)
+                    singleInstanceRequest = SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE + index;
+            explicitSingleInstanceRequest = true;
+        }
+        else if (!g_commandLine.tileSetupKey.empty())
         {
             for (std::size_t index = 0; index < aip::content::SecondaryTileCount; ++index)
                 if (g_commandLine.tileSetupKey == aip::content::SecondaryTiles[index].id)
@@ -1908,6 +1928,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         RequestGracefulShutdown(g_hwnd);
 
     bool queuedLiveTileRuntimeRelaunch = false;
+    if (!g_commandLine.mediaAction.empty()) {
+        for (std::size_t index = 0; index < aip::content::TileActionCount; ++index)
+            if (g_commandLine.mediaAction == aip::content::TileActions[index].id)
+                PostMessageW(g_hwnd, g_singleInstanceMessage, SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE + index, 0);
+    }
     if (!g_commandLine.tileSetupKey.empty()) {
         for (std::size_t index = 0; index < aip::content::SecondaryTileCount; ++index)
             if (g_commandLine.tileSetupKey == aip::content::SecondaryTiles[index].id)
@@ -2043,6 +2068,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     }
 
     ShutdownSecondaryTileUi();
+    CloseEmbeddedNotesSignIns();
+    ShutdownMediaTileActions();
     KillTimer(g_hwnd, APPX_ACTIVATION_REQUEST_TIMER_ID);
     g_running=false;
     WakePollThread();

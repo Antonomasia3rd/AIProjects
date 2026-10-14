@@ -479,7 +479,7 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
     ParseInt(get(L"Discord", L"RefreshSeconds", L"5"), 1, 86400, cfg.discord.refreshSeconds);
     ParseInt(get(L"Discord", L"OperationTimeoutMs", L"5000"), 100, 30000, cfg.discord.timeoutMs);
     cfg.caps.actionsEnabled = get(L"CapsBlink", L"HardwareEnabled", L"0") == L"1";
-    cfg.caps.target = get(L"CapsBlink", L"KeyboardTargetPath", L"\\Device\\KeyboardClass0");
+    cfg.caps.target = get(L"CapsBlink", L"KeyboardTargetPath", L"Auto");
     ParseInt(get(L"CapsBlink", L"BlinkIntervalMs", L"500"), 50, 86400000, cfg.caps.intervalMs);
     cfg.asus.hardwareEnabled = get(L"AsusBlink", L"HardwareEnabled", L"0") == L"1";
     cfg.asus.readDiskActivity = get(L"AsusBlink", L"ReadDiskActivity", L"0") == L"1";

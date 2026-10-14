@@ -488,8 +488,10 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
         return false;
     }
     lastError.clear();
+    // Hardware control is independent of whether indicator text is selected.
+    if (cfg.caps.actionsEnabled) g_contentCaps.Refresh(cfg.caps); else g_contentCaps.Cancel();
     if (!cfg.enabled) {
-        g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel(); g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
+        g_contentAsus.Cancel(); g_contentDiscord.Cancel(); g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
         PublishSecondarySnapshots({}); PublishContentSnapshot({}); lastFrame.clear(); cycle = {}; frameReadySeen = false; backgroundCache.clear();
         if ((wasNativeQueue || ContentQueueHasAcknowledgedFrames()) && queueGeneration && !synchronous &&
             !GenerationWorkPending() && GetTickCount64() >= g_contentQueueRetryAfter.load())
@@ -519,7 +521,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     if (nativeQueue || separateTiles) selection.cycle = false;
     auto index = separateTiles ? std::size_t{0} : cycle.Select(selection, GetTickCount64());
     if (index == static_cast<std::size_t>(-1)) {
-        g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel(); g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
+        g_contentAsus.Cancel(); g_contentDiscord.Cancel(); g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
         frameReadySeen = false; backgroundCache.clear();
         // Turning off every item replaces the prior queue with an empty tile.
         // Keep a renderable blank frame until the ordinary update succeeds;
@@ -591,7 +593,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     }
     if (needsDiscord) g_contentDiscord.Refresh(cfg.discord, synchronous);
     else g_contentDiscord.Cancel();
-    if (needsCaps) g_contentCaps.Refresh(cfg.caps); else g_contentCaps.Cancel();
+    if (needsCaps && !cfg.caps.actionsEnabled) g_contentCaps.Refresh(cfg.caps);
     if (needsAsus) g_contentAsus.Refresh(cfg.asus); else g_contentAsus.Cancel();
     const auto feed = needsRss ? g_contentRss.Read(rssSettings) : RssFeedSnapshot{};
     const auto capsText = needsCaps ? g_contentCaps.Read() : aip::content::Text{};

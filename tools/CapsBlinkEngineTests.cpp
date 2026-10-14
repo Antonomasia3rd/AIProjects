@@ -1,4 +1,5 @@
 #include "../dependencies/hardware/caps_blink_engine.h"
+#include "../dependencies/hardware/caps_blink_group.h"
 #include <atomic>
 #include <iostream>
 #include <stdexcept>
@@ -131,6 +132,10 @@ void TestPurePolicy()
     Check(matches, "all 131072 flag/logical combinations preserve the legacy Caps-only pattern and other LEDs");
     Config config;
     std::wstring error;
+    Check(config.target == L"Auto" && Normalize(config, error) && !config.actionsEnabled,
+        "missing keyboard preference defaults to automatic discovery without enabling hardware");
+    config.target = L"  aUtO  ";
+    Check(Normalize(config, error) && config.target == L"Auto", "automatic target normalizes case and whitespace");
     config.target = L"  \\device\\keyboardclass12  ";
     Check(Normalize(config, error) && config.target == L"\\Device\\KeyboardClass12" && !config.actionsEnabled,
         "configuration normalizes the legacy device prefix without enabling actions");
@@ -299,10 +304,58 @@ void TestLateWriteOwnership()
         controller.GetSnapshot().restoredKnown && state->indicators == Indicators{7, 3} && !state->mapped,
         "restoration happens after late completion and before releasing ownership");
 }
+void TestAutomaticGroup()
+{
+    auto first = std::make_shared<FakeState>(), second = std::make_shared<FakeState>(), denied = std::make_shared<FakeState>();
+    first->indicators = {11, 1}; second->indicators = {23, 6}; denied->failOpen = true;
+    int discoveries = 0;
+    std::vector<std::wstring> paths = {L"first", L"FIRST", L"second", L"denied"};
+    GroupBackend group([&](auto& targets, const auto&, auto&) { ++discoveries; targets = paths; return true; },
+        [&](const auto& target, bool) -> std::unique_ptr<Backend> {
+            return std::make_unique<FakeBackend>(target == L"first" ? first : target == L"second" ? second : denied);
+        });
+    const Cancel notCanceled = [] { return false; };
+    std::wstring error;
+    Indicators current, restored;
+    Check(discoveries == 0 && first->opens == 0 && second->opens == 0, "group construction never discovers or opens a keyboard");
+    Check(group.Open(L"Auto", notCanceled, error) && discoveries == 1 && first->opens == 1 && second->opens == 1 &&
+        denied->opens == 1 && group.Warning().find(L"2 of 3") != std::wstring::npos,
+        "automatic discovery de-duplicates endpoints and retains available keyboards when one open is denied");
+    Check(group.ReadIndicators(current, notCanceled, error) && group.WriteIndicators(Pattern(current, false), notCanceled, error) &&
+        first->indicators == Indicators{11, 5} && second->indicators == Indicators{23, 6},
+        "automatic Caps write preserves each keyboard's unit identifier and Num/Scroll bits");
+    Check(group.ReadIndicators(current, notCanceled, error) && group.WriteIndicators(Pattern(current, false), notCanceled, error) &&
+        first->indicators == Indicators{11, 1} && second->indicators == Indicators{23, 2},
+        "multiple available keyboards blink in the same Caps phase");
+    bool wrote = false;
+    Check(group.RestoreIndicators(current, {}, true, false, false, notCanceled, restored, wrote, error) && wrote &&
+        first->indicators == Indicators{11, 1} && second->indicators == Indicators{23, 6},
+        "unavailable logical state restores each keyboard's own original Caps bit");
+    first->indicators.flags = 5; second->indicators.flags = 2;
+    Check(group.ReadIndicators(current, notCanceled, error) && group.NeedsWrite(current, Restore(current, true)) &&
+        group.WriteIndicators(Restore(current, true), notCanceled, error) && first->indicators.flags == 5 && second->indicators.flags == 6,
+        "logical Caps on updates every endpoint even when another endpoint already had its indicator on");
+    Check(group.RestoreIndicators(current, {}, true, true, false, notCanceled, restored, wrote, error) &&
+        first->indicators == Indicators{11, 1} && second->indicators == Indicators{23, 2},
+        "known logical Caps off restores all keyboards without changing their other LEDs");
+    Check(group.Close(error) && !first->opened && !second->opened && !denied->mapped,
+        "group cleanup closes available and partially acquired endpoints");
+    paths = {L"second"};
+    Check(group.Open(L"Auto", notCanceled, error) && discoveries == 2 && second->opens == 2 && first->opens == 1 &&
+        group.Warning().empty(), "reopening after a device change re-enumerates the currently present endpoints");
+    second->pending = true;
+    Check(!group.Close(error) && second->opened && second->closes == 1,
+        "pending driver operation retains every endpoint until completion before close");
+    second->pending = false;
+    Check(group.Close(error) && second->closes == 2, "settled driver completion permits ordered group release");
+    Check(!group.Open(L"\\Device\\KeyboardClass4", notCanceled, error) && discoveries == 2 && denied->opens == 2,
+        "an explicit numbered target bypasses discovery and reports its individual acquisition failure");
+    group.Close(error);
+}
 }
 int main()
 {
-    TestPurePolicy(); TestPreviewAndLifecycle(); TestTargetAndFailures(); TestCancelAndStress(); TestLateWriteOwnership();
+    TestPurePolicy(); TestPreviewAndLifecycle(); TestTargetAndFailures(); TestCancelAndStress(); TestLateWriteOwnership(); TestAutomaticGroup();
     std::cout << (failures ? "Caps blink engine tests failed.\n" : "Caps blink engine tests passed.\n");
     return failures ? 1 : 0;
 }

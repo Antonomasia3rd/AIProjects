@@ -180,6 +180,7 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "../dependencies/DesktopStub/ga_rss_feed.inc"
 #include "../dependencies/DesktopStub/ga_content_runtime.inc"
 #include "../dependencies/DesktopStub/ga_discord_profile.inc"
+#include "../dependencies/DesktopStub/ga_media_actions.inc"
 #include "../dependencies/DesktopStub/ga_tray.inc"
 #include "../dependencies/DesktopStub/ga_render_only.inc"
 #include "../dependencies/DesktopStub/ga_app.inc"

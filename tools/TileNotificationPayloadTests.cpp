@@ -149,7 +149,9 @@ static void TestSecondaryTargets() {
     const std::wstring xml = L"<tile><visual/></tile>";
     std::wstring error, transport;
     notification::Payload payload;
-    for (const auto* target : {L"AipSource_smtc", L"AipSource_rss", L"AipSource_genshin", L"AipSource_hsr", L"AipSource_zzz", L"AipSource_discord"}) {
+    for (const auto* target : {L"AipSource_smtc", L"AipSource_rss", L"AipSource_genshin", L"AipSource_hsr", L"AipSource_zzz", L"AipSource_discord",
+        L"AipAction_toggle", L"AipAction_play", L"AipAction_pause", L"AipAction_previous", L"AipAction_next",
+        L"AipAction_repeat", L"AipAction_shuffle", L"AipAction_volume_down", L"AipAction_volume_up"}) {
         Check(notification::Encode(xml, {false, {}, false, target}, transport, error) &&
             transport.find(notification::SecondaryMarker) == 0 && notification::Decode(transport, payload, error) &&
             payload.xml == xml && payload.options.secondaryTileId == target && !payload.options.queued,
@@ -175,6 +177,7 @@ static void TestSecondaryTargets() {
     for (const auto& bad : std::vector<std::wstring>{
         prefix + L"0\t0\t\r\n" + xml, prefix + L"0\t0\t\t\r\n" + xml,
         prefix + L"0\t0\t\t_bad\r\n" + xml, prefix + L"0\t0\t\tbad target\r\n" + xml,
+        prefix + L"0\t0\t\tAipAction_volume-down\r\n" + xml,
         prefix + L"0\t0\t\tAipSource_smtc\textra\r\n" + xml,
         prefix + L"0\t0\t\t" + std::wstring(65, L'a') + L"\r\n" + xml }) {
         FakeState state;

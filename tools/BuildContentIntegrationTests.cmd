@@ -30,6 +30,8 @@ if /i "%~1"=="CaptureAttemptTests" goto CaptureAttempt
 if /i "%~1"=="ContentPresetTests" goto ContentPreset
 if /i "%~1"=="ContentQueueTests" goto ContentQueue
 if /i "%~1"=="SecondaryTileTests" goto SecondaryTiles
+if /i "%~1"=="TileVisualAssetsTests" goto TileVisuals
+if /i "%~1"=="CapsBlinkEngineTests" goto CapsEngine
 if /i "%~1"=="TileNotificationPayloadTests" goto TilePayload
 if /i "%~1"=="BoundedCaptureProcessTests" goto BoundedCapture
 if /i "%~1"=="DiscordProfileEditTests" goto Discord
@@ -88,6 +90,12 @@ cl %CONTENT_FLAGS% /WX tools\SecondaryTileTests.cpp /Fe:%CONTENT_OUT%\SecondaryT
 goto Result
 :TilePayload
 cl %CONTENT_FLAGS% /WX tools\TileNotificationPayloadTests.cpp /Fe:%CONTENT_OUT%\TileNotificationPayloadTests.exe /Fo:%CONTENT_OUT%\TileNotificationPayloadTests.obj
+goto Result
+:TileVisuals
+cl %CONTENT_FLAGS% /WX tools\TileVisualAssetsTests.cpp /Fe:%CONTENT_OUT%\TileVisualAssetsTests.exe /Fo:%CONTENT_OUT%\TileVisualAssetsTests.obj
+goto Result
+:CapsEngine
+cl %CONTENT_FLAGS% /WX tools\CapsBlinkEngineTests.cpp /Fe:%CONTENT_OUT%\CapsBlinkEngineTests.exe /Fo:%CONTENT_OUT%\CapsBlinkEngineTests.obj
 goto Result
 :BoundedCapture
 cl %CONTENT_FLAGS% /WX tools\BoundedCaptureProcessTests.cpp /Fe:%CONTENT_OUT%\BoundedCaptureProcessTests.exe /Fo:%CONTENT_OUT%\BoundedCaptureProcessTests.obj /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib uuid.lib crypt32.lib

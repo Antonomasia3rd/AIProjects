@@ -11,6 +11,7 @@ struct ContentCapsProvider
     std::unique_ptr<aip::caps::Controller> controller;
     std::wstring key, error;
     std::atomic<bool> restart{false};
+    ULONGLONG retryAfter = 0;
     void Refresh(const aip::caps::Config& cfg)
     {
         auto validated = cfg;
@@ -33,7 +34,11 @@ struct ContentCapsProvider
             controller->RequestStop(); key.clear(); return; // never join pending driver cleanup on the poll/UI thread
         }
         const auto requested = cfg.target + L":" + std::to_wstring(cfg.intervalMs) + L":" + std::to_wstring(cfg.actionsEnabled);
-        if (key == requested) return;
+        if (key == requested) {
+            if (cfg.actionsEnabled && !state.running && state.phase == aip::caps::Phase::Error &&
+                GetTickCount64() >= retryAfter) { key.clear(); retryAfter = GetTickCount64() + 5000; }
+            else return;
+        }
         key = requested;
         if (controller->Update(cfg, error)) error.clear();
     }
@@ -44,6 +49,7 @@ struct ContentCapsProvider
         const auto state = controller->GetSnapshot();
         aip::content::Text text{L"Caps indicator", std::wstring(state.actionsEnabled ? L"Control: " : L"Preview: ") + aip::caps::PhaseText(state.phase), L""};
         aip::content::AppendBounded(text.secondary, state.error);
+        aip::content::AppendBounded(text.secondary, state.warning);
         aip::content::AppendBounded(text.secondary, state.cleanupError);
         if (state.cleanupPending) aip::content::AppendBounded(text.secondary, L"Waiting for driver completion before restoring/releasing the device.");
         return text;

@@ -1,6 +1,7 @@
 // Secondary tile management shares one INI and the resident content engine.
 // Construction reads configuration/status only; pin and setup require a click.
 #include "../secondary_tiles.h"
+static bool OpenEmbeddedNotesSignIn(HWND owner, int resource);
 
 static constexpr UINT ID_SECONDARY_TILES_ENABLED = 28000;
 static constexpr UINT ID_SECONDARY_TILES_INITIALIZE = 28001;
@@ -96,10 +97,7 @@ static bool SaveSecondaryTileMenuSettings(HWND owner, const std::vector<aip::Ini
         auto candidate = text;
         if (initialize && !StageSecondaryTileDefaultLayout(candidate, activate, error)) return false;
         for (auto setting : settings) {
-            const auto section = aip::content::Lower(setting.section);
-            const bool tile = section == L"tiles" || section.compare(0, 5, L"tile.") == 0;
-            if (!(tile ? aip::content::NormalizeSecondaryTileSetting(setting.section, setting.key, setting.value, error) :
-                aip::content::NormalizeSetting(setting.section, setting.key, setting.value, error)) ||
+            if (!NormalizeDesktopStubTypedSetting(setting.section, setting.key, setting.value, error) ||
                 !WriteContentProfileSetting(candidate, setting)) {
                 if (error.empty()) error = L"A tile or source setting cannot be stored in the single-line INI format.";
                 return false;
@@ -182,14 +180,15 @@ static bool EditSecondaryNotesAccount(HWND owner, int resource)
     RequestContentNotesRefresh(resource); return true;
 }
 
-// Explicit activation/setup route. No browser automation or cookie extraction.
+// Explicit activation/setup route. Cookie import is confined to the dedicated
+// embedded HoYoLAB view after the user's explicit import action.
 static bool OpenSecondaryTileSetup(HWND owner, const std::wstring& key)
 {
     const auto* descriptor = aip::content::FindSecondaryTileDescriptor(key);
     if (!descriptor) return false;
     HMENU menu = CreatePopupMenu(); if (!menu) return false;
     if (std::wstring(descriptor->source) == L"Notes") {
-        aip::AppendTrayMenuItem(menu, ID_SECONDARY_SOURCE_SIGN_IN, L"Sign in on the official HoYoLAB website...", false, true);
+        aip::AppendTrayMenuItem(menu, ID_SECONDARY_SOURCE_SIGN_IN, L"Sign in to HoYoLAB inside this app...", false, true);
         aip::AppendTrayMenuItem(menu, ID_SECONDARY_SOURCE_ACCOUNT, L"Set up this game account...", false, true);
         aip::AppendTrayMenuItem(menu, ID_NOTES_SETTINGS + 64 + descriptor->notesResource, L"Import saved login cookie JSON...", false, true);
         for (UINT field = 0; field < _countof(g_notesAccountKeys); ++field)
@@ -217,8 +216,7 @@ static bool OpenSecondaryTileSetup(HWND owner, const std::wstring& key)
     const UINT command = static_cast<UINT>(TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, 0, owner, nullptr));
     DestroyMenu(menu); if (owner) AfterTrayPopupClosed(owner);
     if (command == ID_SECONDARY_SOURCE_SIGN_IN) {
-        const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(owner, L"open", L"https://www.hoyolab.com/", nullptr, nullptr, SW_SHOWNORMAL));
-        if (result <= 32) DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, L"Open https://www.hoyolab.com/ in your browser to sign in. Then return here to import or enter login details; no browser credentials are read automatically.", L"Game sign-in", MB_OK | MB_ICONINFORMATION);
+        OpenEmbeddedNotesSignIn(owner, descriptor->notesResource);
     } else if (command == ID_SECONDARY_SOURCE_ACCOUNT) EditSecondaryNotesAccount(owner, descriptor->notesResource);
     else if (command) DispatchTrayCommand(owner, command);
     return true;
@@ -283,3 +281,5 @@ static bool DispatchSecondaryTilesCommand(HWND owner, UINT command)
     }
     return false;
 }
+
+#include "ga_notes_signin.inc"

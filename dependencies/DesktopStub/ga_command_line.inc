@@ -15,6 +15,7 @@ struct CommandLineOptions
 {
     bool helpRequested = false;
     std::wstring tileSetupKey;
+    std::wstring windowsTileId, mediaAction;
     bool tileSignIn = false;
     std::wstring openUrl;
     bool versionRequested = false;
@@ -87,6 +88,7 @@ static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_CONSOLE = 6;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE = 7;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MASK = 0x00FF;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE = 32;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE = 64;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_TILE_SIGN_IN = 0x0400;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON = 0x0100;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_REGENERATE_MANIFEST = 0x0200;
@@ -770,6 +772,8 @@ static bool NormalizeDesktopStubTypedSetting(
     std::wstring& value,
     std::wstring& error)
 {
+    if (IEquals(section, L"QuickActions") || IEquals(section, L"MediaActions"))
+        return aip::content::NormalizeTileActionSetting(section, key, value, error);
     if (IEquals(section, L"Tiles") || aip::content::Lower(section).compare(0, 5, L"tile.") == 0)
         return aip::content::NormalizeSecondaryTileSetting(section, key, value, error);
     if (aip::content::KnownSection(section))
@@ -1220,6 +1224,20 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        // The desktop secondary-tile launcher appends this Windows metadata.
+        // Consume the value; never interpret it as an arbitrary command.
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"/tileid", value, error, matched)) return fail(error);
+        if (!matched && !CommandLineTryGetOptionValue(argc, argv, i, L"--tileid", value, error, matched)) return fail(error);
+        if (matched) {
+            if (value.empty() || value.size() > 128) return fail(L"Invalid Windows tile id.");
+            g_commandLine.windowsTileId = value; continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--media-action", value, error, matched)) return fail(error);
+        if (matched) {
+            const auto* action = aip::content::FindTileAction(value);
+            if (!action) return fail(L"Unknown media action.");
+            g_commandLine.mediaAction = action->id; continue;
+        }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--open-url", value, error, matched)) return fail(error);
         if (matched) {
             if (!ValidateRssFeedUrlSetting(value, false, g_commandLine.openUrl, error)) return fail(error);
@@ -2010,6 +2028,15 @@ static bool ParseCommandLineOptions()
 
     std::wstring combinationError;
     if (!ValidateCommandLinePresetCombination(combinationError)) return fail(combinationError);
+    if (g_commandLine.tileSetupKey.empty() && g_commandLine.mediaAction.empty()) {
+        const auto& id = g_commandLine.windowsTileId;
+        if (id.compare(0, 10, L"AipSource_") == 0) {
+            if (const auto* tile = aip::content::FindSecondaryTileDescriptor(id.substr(10))) g_commandLine.tileSetupKey = tile->id;
+        } else if (id.compare(0, 10, L"AipAction_") == 0) {
+            auto key = id.substr(10); std::replace(key.begin(), key.end(), L'_', L'-');
+            if (const auto* action = aip::content::FindTileAction(key)) g_commandLine.mediaAction = action->id;
+        }
+    }
     LocalFree(argv);
     return true;
 }

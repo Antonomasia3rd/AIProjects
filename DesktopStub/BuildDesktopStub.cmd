@@ -196,7 +196,7 @@ if "%DESKTOPSTUB_ENABLE_HARDWARE_SOURCES%"=="1" (
 ) else (
     echo [i] Optional hardware sources are excluded from this host build.
 )
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_FEATURE_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" "build\obj\DesktopStubDiscordService.obj" "build\obj\DesktopStubDiscordProfileEdit.obj" %HARDWARE_OBJECTS% /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib %HARDWARE_LINK_LIBRARIES% windowsapp.lib runtimeobject.lib /SUBSYSTEM:WINDOWS
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_FEATURE_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" "build\obj\DesktopStubDiscordService.obj" "build\obj\DesktopStubDiscordProfileEdit.obj" %HARDWARE_OBJECTS% /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib %HARDWARE_LINK_LIBRARIES% windowsapp.lib runtimeobject.lib version.lib "..\dependencies\third_party\WebView2\x64\WebView2LoaderStatic.lib" /SUBSYSTEM:WINDOWS
 set "STATUS=!ERRORLEVEL!"
 if not "!STATUS!"=="0" (
     popd

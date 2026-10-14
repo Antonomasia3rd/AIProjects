@@ -29,3 +29,6 @@
 **/*.sha256 export-ignore
 **/*.zip export-ignore
 LOCAL_TOOL_INVENTORY.md export-ignore
+
+# Preserve the pinned upstream WebView2 SDK bytes and generated formatting.
+dependencies/third_party/WebView2/** -text -whitespace

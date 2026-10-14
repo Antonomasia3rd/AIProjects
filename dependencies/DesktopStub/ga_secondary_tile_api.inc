@@ -2,6 +2,8 @@
 // creates a window. Native completion delegates post plain mailbox records;
 // all WinRT state/results and owning windows are released on the UI thread.
 #include "../secondary_tiles.h"
+#include "../tile_actions.h"
+#include "../tile_visual_assets.inc"
 #include "../winrt_activation.h"
 #include <winrt/Windows.UI.StartScreen.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -16,6 +18,16 @@ static void WakePollThread();
 [[maybe_unused]] static std::wstring CanonicalSecondaryTileRuntimeId(std::wstring id)
 {
     const std::wstring prefix = L"AipSource_";
+    const std::wstring actionPrefix = L"AipAction_";
+    if (id.compare(0, actionPrefix.size(), actionPrefix) == 0) {
+        auto key = id.substr(actionPrefix.size());
+        std::replace(key.begin(), key.end(), L'_', L'-');
+        const auto* action = aip::content::FindTileAction(key);
+        if (!action) return {};
+        std::wstring runtime = actionPrefix + action->id;
+        std::replace(runtime.begin() + actionPrefix.size(), runtime.end(), L'-', L'_');
+        return runtime;
+    }
     if (id.compare(0, prefix.size(), prefix) == 0) id.erase(0, prefix.size());
     const auto* descriptor = aip::content::FindSecondaryTileDescriptor(id);
     return descriptor ? prefix + descriptor->id : std::wstring{};
@@ -148,29 +160,35 @@ static HWND CreateOwner(HWND parent, const std::wstring& name, bool pin)
     ShowWindow(window, SW_SHOWNORMAL); SetForegroundWindow(window); UpdateWindow(window);
     return window;
 }
-static winrt::Windows::Foundation::Uri AssetUri(const wchar_t* file)
+static winrt::Windows::Foundation::Uri AssetUri(const std::wstring& relative)
 {
     using namespace winrt::Windows::Foundation;
     const auto factory = aip::AcquireUncachedActivationFactory<Uri, IUriRuntimeClassFactory>();
-    return factory.CreateUri(winrt::hstring(std::wstring(L"ms-appx:///Assets/") + file));
+    return factory.CreateUri(winrt::hstring(aip::tile_visual::PackageUri(relative)));
 }
 static NativeTile CreatePinTile(const std::wstring& id, const std::wstring& name)
 {
     using namespace winrt::Windows::UI::StartScreen;
-    if (!aip::FileExists(GetExeDir() + L"\\Assets\\MediumTile.png"))
-        throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), L"Update the main tile once before pinning a source tile so its package logo exists.");
+    aip::tile_visual::Assets logos;
+    std::wstring artworkError;
+    if (!aip::tile_visual::EnsureTileTopicAssets(id, GetExeDir(), logos, artworkError))
+        throw winrt::hresult_error(E_FAIL, winrt::hstring(artworkError));
     const auto factory = aip::AcquireUncachedActivationFactory<NativeTile, ISecondaryTileFactory2>();
     std::wstring profile;
     { std::lock_guard<std::mutex> lock(g_pathMutex); profile = g_iniPath; }
-    const auto arguments = L"--ini " + aip::QuoteCommandLineArg(profile) + L" --tile-setup " + id.substr(std::wstring(L"AipSource_").size());
+    const bool action = id.compare(0, std::wstring(L"AipAction_").size(), L"AipAction_") == 0;
+    auto activationKey = id.substr(10u);
+    if (action) std::replace(activationKey.begin(), activationKey.end(), L'_', L'-');
+    const auto arguments = L"--ini " + aip::QuoteCommandLineArg(profile) +
+        (action ? L" --media-action " : L" --tile-setup ") + activationKey;
     if (arguments.size() > 2048) throw winrt::hresult_error(E_INVALIDARG, L"The profile path is too long for Windows secondary tile activation arguments.");
-    auto tile = factory.CreateMinimalTile(id, name, arguments, AssetUri(L"MediumTile.png"), TileSize::Default);
+    auto tile = factory.CreateMinimalTile(id, name, arguments, AssetUri(logos.medium), TileSize::Default);
     auto visuals = tile.VisualElements();
     visuals.ShowNameOnSquare150x150Logo(true);
-    if (aip::FileExists(GetExeDir() + L"\\Assets\\WideTile.png")) { visuals.Wide310x150Logo(AssetUri(L"WideTile.png")); visuals.ShowNameOnWide310x150Logo(true); }
-    if (aip::FileExists(GetExeDir() + L"\\Assets\\LargeTile.png")) { visuals.Square310x310Logo(AssetUri(L"LargeTile.png")); visuals.ShowNameOnSquare310x310Logo(true); }
-    if (aip::FileExists(GetExeDir() + L"\\Assets\\SmallTile.png")) visuals.Square70x70Logo(AssetUri(L"SmallTile.png"));
-    if (aip::FileExists(GetExeDir() + L"\\Assets\\Square44x44Logo.png")) visuals.Square44x44Logo(AssetUri(L"Square44x44Logo.png"));
+    visuals.Wide310x150Logo(AssetUri(logos.wide)); visuals.ShowNameOnWide310x150Logo(true);
+    visuals.Square310x310Logo(AssetUri(logos.large)); visuals.ShowNameOnSquare310x310Logo(true);
+    visuals.Square70x70Logo(AssetUri(logos.smallTile));
+    visuals.Square44x44Logo(AssetUri(logos.logo44));
     return tile;
 }
 static bool RequestMutation(HWND owner, const std::wstring& supplied, const std::wstring& name, bool pin)

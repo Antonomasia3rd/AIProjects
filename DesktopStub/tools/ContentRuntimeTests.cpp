@@ -55,6 +55,9 @@ static int contentLogicalCaps = 0, contentLogicalSamples = 0;
 static int ContentTestLogicalCaps() { ++contentLogicalSamples; return contentLogicalCaps; }
 #define DESKTOPSTUB_TEST_LOGICAL_CAPS ContentTestLogicalCaps
 #define wWinMain DesktopStubUnusedEntryPoint
+static std::wstring contentTestCommandLine = L"DesktopStub.exe";
+static LPWSTR ContentTestGetCommandLine() { return contentTestCommandLine.data(); }
+#define GetCommandLineW ContentTestGetCommandLine
 #include "../DesktopStub.cpp"
 #undef wWinMain
 #include <iostream>

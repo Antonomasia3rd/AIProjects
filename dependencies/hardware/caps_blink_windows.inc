@@ -2,9 +2,12 @@
 #define AIP_HARDWARE_CAPS_BLINK_WINDOWS_INC
 
 #include "caps_blink_engine.h"
+#include "caps_blink_group.h"
 #include "../desktop_app_baseline.h"
 #include <wincrypt.h>
+#include <setupapi.h>
 #include <atomic>
+#pragma comment(lib, "Setupapi.lib")
 
 namespace aip { namespace caps {
 using LogicalCapsReader = std::function<bool(bool&, std::wstring&)>;
@@ -13,6 +16,43 @@ inline bool Fail(std::wstring& error, const wchar_t* operation, DWORD code = Get
 {
     error = std::wstring(operation) + L": " + aip::GetLastErrorText(code ? code : ERROR_GEN_FAILURE);
     return false;
+}
+inline bool DiscoverKeyboards(std::vector<std::wstring>& paths, const Cancel& canceled, std::wstring& error)
+{
+    if (canceled && canceled()) { error = L"Keyboard discovery canceled"; return false; }
+    // Documented keyboard class-driver interface; do not guess class numbers
+    // or probe nonexistent raw device names. Enumeration itself writes no LEDs.
+    static const GUID keyboardInterface = {0x884b96c3, 0x56ef, 0x11d1, {0xbc, 0x8c, 0x00, 0xa0, 0xc9, 0x14, 0x05, 0xdd}};
+    struct DeviceInfoOwner {
+        HDEVINFO value = INVALID_HANDLE_VALUE;
+        ~DeviceInfoOwner() { if (value != INVALID_HANDLE_VALUE) SetupDiDestroyDeviceInfoList(value); }
+    } devices;
+    devices.value = SetupDiGetClassDevsW(&keyboardInterface, nullptr, nullptr, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    if (devices.value == INVALID_HANDLE_VALUE) return Fail(error, L"Enumerate present keyboard class interfaces");
+    paths.clear();
+    for (DWORD index = 0; ; ++index) {
+        if (canceled && canceled()) { error = L"Keyboard discovery canceled"; return false; }
+        SP_DEVICE_INTERFACE_DATA data{}; data.cbSize = sizeof(data);
+        if (!SetupDiEnumDeviceInterfaces(devices.value, nullptr, &keyboardInterface, index, &data)) {
+            const auto code = GetLastError();
+            if (code == ERROR_NO_MORE_ITEMS) break;
+            return Fail(error, L"Read keyboard interface", code);
+        }
+        DWORD required = 0;
+        SetupDiGetDeviceInterfaceDetailW(devices.value, &data, nullptr, 0, &required, nullptr);
+        if (required < sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) || required > 1024 * 1024)
+            return Fail(error, L"Read keyboard interface size", ERROR_INVALID_DATA);
+        std::vector<BYTE> buffer(required);
+        auto* detail = reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W*>(buffer.data());
+        detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
+        if (!SetupDiGetDeviceInterfaceDetailW(devices.value, &data, detail, required, nullptr, nullptr))
+            return Fail(error, L"Read keyboard interface path");
+        const auto capacity = (required - offsetof(SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath)) / sizeof(wchar_t);
+        const auto end = std::find(detail->DevicePath, detail->DevicePath + capacity, L'\0');
+        if (end == detail->DevicePath + capacity) return Fail(error, L"Validate keyboard interface path", ERROR_INVALID_DATA);
+        paths.emplace_back(detail->DevicePath, end);
+    }
+    error.clear(); return true;
 }
 inline bool DeviceMutexName(const std::wstring& target, std::wstring& name, std::wstring& error)
 {
@@ -78,6 +118,7 @@ class WindowsBackend final : public Backend {
     bool ownsMutex_ = false, mapping_ = false;
     std::wstring mappingName_, target_;
     LogicalCapsReader logical_;
+    bool deviceInterface_ = false;
     std::chrono::milliseconds operationTimeout_{1000};
 
     bool WaitEvent(HANDLE event, const Cancel& canceled, std::wstring& error)
@@ -163,17 +204,21 @@ class WindowsBackend final : public Backend {
         return true;
     }
 public:
-    explicit WindowsBackend(LogicalCapsReader logical = {}) : logical_(std::move(logical)) {}
+    explicit WindowsBackend(LogicalCapsReader logical = {}, bool deviceInterface = false)
+        : logical_(std::move(logical)), deviceInterface_(deviceInterface) {}
     ~WindowsBackend() override { try { std::wstring ignored; Close(ignored); } catch (...) {} }
 
     bool Open(const std::wstring& target, const Cancel& canceled, std::wstring& error) override
     {
         std::wstring previousError;
         if (!Close(previousError)) { error = previousError; return false; }
-        Config validation;
-        validation.target = target;
-        if (!Normalize(validation, error)) return false;
-        target_ = validation.target;
+        if (deviceInterface_) target_ = target; // Only internal discovery supplies these paths.
+        else {
+            Config validation; validation.target = target;
+            if (!Normalize(validation, error)) return false;
+            if (validation.target == L"Auto") { error = L"Automatic keyboard targets require the grouped backend"; return false; }
+            target_ = validation.target;
+        }
         if (canceled && canceled()) { error = L"Keyboard open canceled"; return false; }
         std::wstring mutexName;
         if (!windows_detail::DeviceMutexName(target_, mutexName, error)) return false;
@@ -182,13 +227,17 @@ public:
         const DWORD wait = WaitForSingleObject(mutex_, 0);
         ownsMutex_ = wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED;
         if (!ownsMutex_) { error = L"Another capsblink instance already controls this keyboard target"; return false; }
-        static std::atomic<unsigned long> sequence{0};
-        mappingName_ = L"capsblinkKBD_" + std::to_wstring(GetCurrentProcessId()) + L"_" + std::to_wstring(++sequence);
-        if (!DefineDosDeviceW(DDD_RAW_TARGET_PATH | DDD_NO_BROADCAST_SYSTEM, mappingName_.c_str(), target_.c_str()))
-            return windows_detail::Fail(error, L"Define keyboard device mapping");
-        mapping_ = true;
+        std::wstring openPath = target_;
+        if (!deviceInterface_) {
+            static std::atomic<unsigned long> sequence{0};
+            mappingName_ = L"capsblinkKBD_" + std::to_wstring(GetCurrentProcessId()) + L"_" + std::to_wstring(++sequence);
+            if (!DefineDosDeviceW(DDD_RAW_TARGET_PATH | DDD_NO_BROADCAST_SYSTEM, mappingName_.c_str(), target_.c_str()))
+                return windows_detail::Fail(error, L"Define keyboard device mapping");
+            mapping_ = true;
+            openPath = L"\\\\.\\" + mappingName_;
+        }
         auto handle = std::make_shared<windows_detail::DeviceHandle>();
-        handle->value = CreateFileW((L"\\\\.\\" + mappingName_).c_str(), GENERIC_WRITE, 0, nullptr,
+        handle->value = CreateFileW(openPath.c_str(), GENERIC_WRITE, 0, nullptr,
             OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
         if (handle->value == INVALID_HANDLE_VALUE) return windows_detail::Fail(error, L"Open keyboard class device");
         device_ = std::move(handle);
@@ -242,7 +291,12 @@ public:
     }
 };
 inline std::unique_ptr<Backend> MakeWindowsBackend(LogicalCapsReader logical = {})
-{ return std::make_unique<WindowsBackend>(std::move(logical)); }
+{
+    return std::make_unique<GroupBackend>(windows_detail::DiscoverKeyboards,
+        [logical = std::move(logical)](const std::wstring&, bool discoveredInterface) {
+            return std::make_unique<WindowsBackend>(logical, discoveredInterface);
+        });
+}
 static_assert(sizeof(Indicators) == 4, "Keyboard indicator IOCTL structure must remain two USHORT fields");
 } } // namespace aip::caps
 #endif

@@ -3,6 +3,7 @@
 // Pure per-source secondary tile mapping. This does not pin tiles, contact
 // providers, or load Windows APIs; the host composes and delivers snapshots.
 #include "content_engine.h"
+#include "tile_actions.h"
 #include <set>
 
 namespace aip { namespace content {
@@ -50,6 +51,8 @@ inline bool NormalizeSecondaryTileSetting(const std::wstring& section, const std
         bool enabled = false;
         if (!ParseBool(value, enabled)) { error += L"expected an enabled/disabled boolean."; return false; }
         value = enabled ? L"1" : L"0";
+    } else if (tile && normalizedKey == L"clickaction") {
+        return NormalizeTileActionSetting(section, key, value, error);
     } else if (tile && normalizedKey == L"content") {
         int content = 0;
         if (!ParseInt(value, 1, MaxEntries, content)) { error += L"expected a content number from 1 to 32."; return false; }

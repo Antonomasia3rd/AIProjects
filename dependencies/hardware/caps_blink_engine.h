@@ -29,7 +29,7 @@ inline Indicators Restore(Indicators current, bool logicalOn)
 }
 struct Config {
     bool actionsEnabled = false;
-    std::wstring target = L"\\Device\\KeyboardClass0";
+    std::wstring target = L"Auto";
     int intervalMs = 500;
 };
 inline bool Normalize(Config& config, std::wstring& error)
@@ -39,9 +39,13 @@ inline bool Normalize(Config& config, std::wstring& error)
     if (first == std::wstring::npos) config.target.clear();
     else config.target = config.target.substr(first, config.target.find_last_not_of(L" \t\r\n") - first + 1);
     const std::wstring prefix = L"\\Device\\KeyboardClass";
+    auto normalized = config.target;
+    for (auto& ch : normalized) if (ch >= L'A' && ch <= L'Z') ch += L'a' - L'A';
+    if (normalized == L"auto") config.target = L"Auto";
+    else {
     if (config.target.size() <= prefix.size() || config.target.size() > 1024)
     {
-        error = L"Keyboard target must name a numbered KeyboardClass device.";
+        error = L"Keyboard target must be Auto or a numbered KeyboardClass device.";
         return false;
     }
     for (std::size_t i = 0; i < prefix.size(); ++i)
@@ -49,7 +53,7 @@ inline bool Normalize(Config& config, std::wstring& error)
         const auto lower = [](wchar_t ch) { return ch >= L'A' && ch <= L'Z' ? ch + (L'a' - L'A') : ch; };
         if (lower(config.target[i]) != lower(prefix[i]))
         {
-            error = L"Keyboard target must name a numbered KeyboardClass device.";
+            error = L"Keyboard target must be Auto or a numbered KeyboardClass device.";
             return false;
         }
     }
@@ -60,6 +64,7 @@ inline bool Normalize(Config& config, std::wstring& error)
             return false;
         }
     config.target.replace(0, prefix.size(), prefix);
+    }
     if (config.intervalMs < 50 || config.intervalMs > 86400000)
     {
         error = L"Blink interval must be from 50 through 86400000 milliseconds.";
@@ -87,10 +92,10 @@ struct Snapshot {
     bool logicalKnown = false, logicalOn = false;
     bool originalKnown = false, appliedKnown = false, restoredKnown = false;
     Indicators original, applied, restored;
-    std::wstring target = L"\\Device\\KeyboardClass0";
+    std::wstring target = L"Auto";
     int intervalMs = 500;
     std::uint64_t iterations = 0, writes = 0;
-    std::wstring error, cleanupError;
+    std::wstring error, cleanupError, warning;
 };
 using Cancel = std::function<bool()>;
 
@@ -104,6 +109,17 @@ public:
     virtual bool ReadIndicators(Indicators& value, const Cancel& canceled, std::wstring& error) = 0;
     virtual bool ReadLogicalCaps(bool& enabled, const Cancel& canceled, std::wstring& error) = 0;
     virtual bool WriteIndicators(Indicators value, const Cancel& canceled, std::wstring& error) = 0;
+    virtual bool NeedsWrite(Indicators current, Indicators desired) const { return !(desired == current); }
+    // The default preserves the single-device restoration policy. A grouped
+    // backend can retain each device's own original flags/unit identifier.
+    virtual bool RestoreIndicators(Indicators current, Indicators original, bool currentKnown,
+        bool logicalKnown, bool logical, const Cancel& canceled, Indicators& restored,
+        bool& wrote, std::wstring& error) {
+        restored = Restore(current, logicalKnown ? logical : (original.flags & CapsMask) != 0);
+        wrote = !currentKnown || !(restored == current);
+        return !wrote || WriteIndicators(restored, canceled, error);
+    }
+    virtual std::wstring Warning() const { return {}; }
     // True means canceled I/O still owns kernel-visible storage or could still
     // apply a write. The owner worker must not exit or release target ownership.
     virtual bool HasPendingOperation() const noexcept { return false; }
@@ -171,11 +187,10 @@ class Controller {
                 std::wstring logicalError;
                 const bool logicalKnown = backend_->ReadLogicalCaps(logical, cleanupCanceled, logicalError);
                 if (!logicalKnown) logical = (state.original.flags & CapsMask) != 0;
-                const auto desired = Restore(current, logical);
-                // If a fresh read fails, restore the captured original state
-                // rather than trusting the last blink write as current state.
-                const bool needsWrite = !fresh || !(desired == current);
-                const bool restored = !needsWrite || backend_->WriteIndicators(desired, cleanupCanceled, error);
+                Indicators desired;
+                bool needsWrite = false;
+                const bool restored = backend_->RestoreIndicators(current, state.original, fresh, logicalKnown,
+                    logical, cleanupCanceled, desired, needsWrite, error);
                 if (backend_->HasPendingOperation())
                 {
                     settlePending();
@@ -230,6 +245,7 @@ class Controller {
             {
                 std::wstring error;
                 opened = backend_->Open(session.target, canceled, error);
+                state.warning = backend_->Warning();
                 if (!opened)
                 {
                     if (!canceled()) state.error = error.empty() ? L"Could not open keyboard device" : error;
@@ -266,7 +282,7 @@ class Controller {
                         }
                         if (canceled()) break;
                         const auto desired = Pattern(current, logical);
-                        if (!(desired == current))
+                        if (backend_->NeedsWrite(current, desired))
                         {
                             if (!backend_->WriteIndicators(desired, canceled, error))
                             {
@@ -280,6 +296,7 @@ class Controller {
                         state.applied = desired;
                         ++state.iterations;
                         state.phase = logical ? Phase::LogicalOn : Phase::Blinking;
+                        state.warning = backend_->Warning();
                         Publish(state);
                         std::unique_lock<std::mutex> lock(mutex_);
                         wake_.wait_for(lock, std::chrono::milliseconds(session.intervalMs), [&] { return stop_ || revision_ != revision; });

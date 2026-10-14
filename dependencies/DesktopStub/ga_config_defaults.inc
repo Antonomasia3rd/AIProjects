@@ -146,7 +146,7 @@ static const IniDefault g_defaults[] = {
     {L"Discord", L"OperationTimeoutMs", L"5000"},
     {L"Discord", L"ClearOnStop", L"1"},
     {L"CapsBlink", L"HardwareEnabled", L"0"},
-    {L"CapsBlink", L"KeyboardTargetPath", L"\\Device\\KeyboardClass0"},
+    {L"CapsBlink", L"KeyboardTargetPath", L"Auto"},
     {L"CapsBlink", L"BlinkIntervalMs", L"500"},
     {L"AsusBlink", L"HardwareEnabled", L"0"},
     {L"AsusBlink", L"ReadDiskActivity", L"0"},

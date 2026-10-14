@@ -1,5 +1,6 @@
 static void DispatchTrayCommand(HWND h, UINT cmd)
 {
+    if (DispatchQuickActionsCommand(h, cmd)) return;
     if (DispatchSecondaryTilesCommand(h, cmd)) return;
     if (DispatchContentEngineCommand(h, cmd)) return;
     ManifestDisplayInfo manifestInfo;
