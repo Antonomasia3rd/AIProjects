@@ -152,6 +152,36 @@ static void TestNativeQueueHost(const std::wstring& bitmapPath)
     for (const auto& path : created) if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) DeleteFileW(path.c_str());
     RemoveDirectoryW(ParentDirectoryOfPath(created[0]).c_str()); RemoveDirectoryW(directory.c_str());
 
+    const auto savedSmtcReader = g_contentSmtc.testReader;
+    g_contentSmtc.Cancel();
+    std::atomic<int> singleSmtcReads{0};
+    std::atomic<bool> singleSmtcArtwork{false};
+    g_contentSmtc.testReader = [&](auto, bool artwork, const auto&) {
+        ++singleSmtcReads; singleSmtcArtwork = artwork;
+        aip::content::SmtcSessionData data;
+        data.hasSession = true; data.title = L"Single direct tile fixture";
+        data.artist = L"Fixture artist"; data.appId = L"Fixture.Player"; data.status = L"Playing";
+        return data;
+    };
+    const auto singleSmtcProfile = std::wstring(L"[Content]\r\nEnabled=1\r\nCount=1\r\nCycleEnabled=1\r\nCycleDriver=Windows\r\n"
+        L"RefreshSeconds=86400\r\nTextMode=Auto\r\n[Content.1]\r\nBackground=Image\r\nImagePath=") + bitmapPath + L"\r\nTextSources=SMTC\r\n";
+    const auto beforeSingleBatch = contentQueueBatches.size();
+    const auto beforeSingleRequests = contentGenerationRequests;
+    Check(WriteContentFixture(singleSmtcProfile) && ContentEngineTick(true),
+        "single direct Live Tile reads an explicitly injected SMTC snapshot");
+    aip::content::Configuration singleSmtcConfiguration; std::wstring singleSmtcError;
+    Check(ReadContentConfiguration(singleSmtcConfiguration, singleSmtcError) && ContentDirectLiveDeliveryAvailable() &&
+        !ContentNativeQueueAvailable(singleSmtcConfiguration) && g_contentSmtc.key.find(L":events") != std::wstring::npos,
+        "single direct Live Tile uses SMTC events independently of native queue eligibility");
+    { ContentRenderScope scope;
+        Check(!scope.snapshot.nativeQueue && scope.snapshot.text.primary == L"Single direct tile fixture" &&
+            singleSmtcReads == 1 && !singleSmtcArtwork,
+            "single direct SMTC fixture publishes its ordinary coherent frame"); }
+    Check(ContentEngineTick() && contentQueueBatches.size() == beforeSingleBatch &&
+        contentGenerationRequests == beforeSingleRequests + 1 && singleSmtcReads == 1,
+        "single direct SMTC delivery creates one ordinary update without a native queue batch or repeated read");
+    g_contentSmtc.Cancel(); g_contentSmtc.testReader = savedSmtcReader;
+
     Check(WriteContentFixture(profile(L"DesktopStub", false)) && ContentEngineTick(false, false), "native queue fixture leaves its static host state in app-managed mode");
     Check(WriteContentFixture(original), "native queue fixture restores its original temporary profile");
     g_liveTileUpdateMode = mode; g_manifestCompatibilityTarget = target; g_liveTileTemplateStyle = style;

@@ -539,7 +539,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     const bool needsArtwork = std::any_of(cfg.entries.begin(), cfg.entries.end(), [](const aip::content::Entry& candidate) {
         return candidate.enabled && aip::content::BackgroundIdFor(candidate.background) == aip::content::BackgroundId::SmtcArtwork;
     });
-    if (needsSmtc) g_contentSmtc.Refresh(cfg.refreshSeconds, synchronous, needsArtwork, nativeQueue);
+    if (needsSmtc) g_contentSmtc.Refresh(cfg.refreshSeconds, synchronous, needsArtwork, ContentDirectLiveDeliveryAvailable());
     else g_contentSmtc.Cancel();
     // Read once so a worker publication cannot pair one track's text with
     // another track's background while this frame is composed.

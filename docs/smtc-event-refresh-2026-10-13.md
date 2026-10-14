@@ -1,9 +1,11 @@
 # SMTC event refresh, 2026-10-13
 
 The retained media reader now supports worker-owned event subscriptions when
-the host requests event-driven operation. The current host enables that mode for
-eligible Windows-managed content queues; ordinary app-managed polling preserves
-its existing behavior.
+the host requests event-driven operation. The host enables that mode whenever
+direct Live Tile delivery is available: Live Tile mode is enabled, registration
+is complete, and the resident has package identity. This includes a single SMTC
+content and does not depend on content count or rotation driver. Registration
+mode and compatibility-helper delivery preserve configured polling.
 
 The worker watches the manager's
 [CurrentSessionChanged](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssessionmanager.currentsessionchanged)
@@ -57,6 +59,12 @@ suppression, updating one tag, queue exit with the same first frame, app-managed
 fallback, sparse tags 9/10, native text visual-key reuse versus baked overlay
 keys, and protection of older assets still referenced by queued slots. It never
 calls a real tile updater or starts the product entry point.
+
+The single-content direct-delivery regression uses an injected SMTC reader. It
+checks that event cadence is requested while native queue eligibility remains
+false, that the synthetic media frame stays coherent, and that its delivery
+creates one ordinary update without a queue batch or repeated read. This case
+was added on 2026-10-14; root owns build and execution validation.
 
 Real Windows/player notification behavior and native queue rotation remain
 target-system acceptance, separately from these inert checks.

@@ -8,17 +8,20 @@ static std::mutex g_contentQueueDeliveryMutex;
 static aip::content::QueueDelta g_contentQueueDelivery;
 static std::atomic<ULONGLONG> g_contentQueueRetryAfter{0};
 static bool LiveTileModeReregistrationPending();
-static bool ContentNativeQueueAvailable(const aip::content::Configuration& configuration)
+static bool ContentDirectLiveDeliveryAvailable()
 {
 #ifdef DESKTOPSTUB_TEST_NATIVE_QUEUE_AVAILABLE
-    const bool available = DESKTOPSTUB_TEST_NATIVE_QUEUE_AVAILABLE();
+    return DESKTOPSTUB_TEST_NATIVE_QUEUE_AVAILABLE();
 #else
     // Compatibility helpers acknowledge through a shared pending file and
     // generic trace. They cannot safely acknowledge individual queued slots
     // or fence a late reset after a timeout; use direct updates for batching.
-    const bool available = UseExperimentalLiveTileUpdate() && !LiveTileModeReregistrationPending() && CurrentProcessHasPackageIdentity();
+    return UseExperimentalLiveTileUpdate() && !LiveTileModeReregistrationPending() && CurrentProcessHasPackageIdentity();
 #endif
-    return aip::content::NativeQueueEligible(configuration, available);
+}
+static bool ContentNativeQueueAvailable(const aip::content::Configuration& configuration)
+{
+    return aip::content::NativeQueueEligible(configuration, ContentDirectLiveDeliveryAvailable());
 }
 static std::wstring ContentTimingWarning(const aip::content::Configuration& configuration)
 {
