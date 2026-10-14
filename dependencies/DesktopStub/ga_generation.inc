@@ -65,6 +65,7 @@ static std::vector<GenerationCompletionRecord> g_generationCompletions;
 static unsigned long long g_generationQueuedId = 0;
 static std::vector<aip::content::Snapshot> g_generationQueuedSnapshots;
 static std::map<std::wstring, std::vector<LiveTileUpdateAsset>> g_nativeQueueAssets;
+static std::map<std::wstring, std::vector<LiveTileUpdateAsset>> g_secondaryTileAssets;
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath);
 static std::mutex g_generatedAssetPrecacheMutex;
 static std::condition_variable g_generatedAssetPrecacheCv;
@@ -135,7 +136,7 @@ static bool IsHexToken(const std::wstring& value)
 
 static std::wstring NewLiveTileAssetToken()
 {
-    if (g_renderContent && g_renderContent->nativeQueue)
+    if (g_renderContent && (g_renderContent->nativeQueue || !g_renderContent->secondaryTileId.empty()))
         return BuildGenerationStateKey(g_renderContent->backgroundPath);
     FILETIME ft{};
     GetSystemTimeAsFileTime(&ft);
@@ -177,6 +178,9 @@ static bool IsKeptLiveTileAssetPath(
             return true;
     }
     for (const auto& item : g_nativeQueueAssets)
+        for (const auto& asset : item.second)
+            if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file))) return true;
+    for (const auto& item : g_secondaryTileAssets)
         for (const auto& asset : item.second)
             if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file))) return true;
     return false;
@@ -1196,6 +1200,8 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     {
         state += L"contentMode=" + std::to_wstring(static_cast<int>(g_renderContent->textMode)) + L";";
         state += L"contentBackground=" + std::to_wstring(static_cast<int>(g_renderContent->backgroundId)) + L";";
+        if (bakedText) for (const auto& headline : g_renderContent->rssHeadlines)
+            state += L"rss=" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
         if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off)
             for (const auto& field : {g_renderContent->text.primary, g_renderContent->text.secondary, g_renderContent->text.badge})
                 state += std::to_wstring(field.size()) + L":" + field;
@@ -2039,11 +2045,12 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     }
     const bool composedContent = CompositionRequested();
     aip::content::Configuration currentContentConfiguration;
+    aip::content::SecondaryTileConfiguration currentSecondaryConfiguration;
     if (composedContent)
     {
         // A live INI edit can arrive before the poller clears its old frame.
         // Validate one current document before accepting that published frame.
-        if (!ReadContentConfiguration(currentContentConfiguration, configurationError) || !currentContentConfiguration.enabled)
+        if (!ReadContentConfiguration(currentContentConfiguration, configurationError, &currentSecondaryConfiguration) || !currentContentConfiguration.enabled)
         {
             Log(L"[!] Tile update skipped: %s", configurationError.empty()
                 ? L"the content configuration changed before this frame was ready." : configurationError.c_str());
@@ -2053,6 +2060,14 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     if (suppliedContent && suppliedContent->nativeQueue &&
         (!ContentNativeQueueAvailable(currentContentConfiguration) ||
             suppliedContent->nativeQueueLayout != ContentNativeQueueLayout(currentContentConfiguration))) return false;
+    if (suppliedContent && !suppliedContent->secondaryTileId.empty()) {
+        if (!currentSecondaryConfiguration.enabled) return false;
+        const auto target = std::find_if(currentSecondaryConfiguration.tiles.begin(), currentSecondaryConfiguration.tiles.end(), [&](const auto& tile) {
+            return tile.enabled && L"AipSource_" + tile.id == suppliedContent->secondaryTileId &&
+                currentContentConfiguration.entries[static_cast<std::size_t>(tile.content - 1)].enabled;
+        });
+        if (target == currentSecondaryConfiguration.tiles.end()) return false;
+    }
     ContentRenderScope contentScope(suppliedContent);
     if (composedContent && !contentScope.snapshot.active)
     {
@@ -2085,6 +2100,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     // A frozen native batch cannot consume its reset-bearing first slot as a
     // registration-only frame, then send later slots into an uncleared queue.
     if (suppliedContent && suppliedContent->nativeQueue && !useLiveTileUpdateForThisRun) return false;
+    if (suppliedContent && !suppliedContent->secondaryTileId.empty() &&
+        (!useLiveTileUpdateForThisRun || !ContentDirectLiveDeliveryAvailable())) return false;
     if (!useLiveTileUpdateForThisRun) {
         contentScope.snapshot.nativeQueue = false;
         contentScope.snapshot.nativeQueueTag.clear();
@@ -2360,7 +2377,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         // Offline rendering terminates before manifest registration, package
         // activation, native TileUpdater operations and their state markers.
         if (liveTileUpdateMode)
-            CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
+            if (contentScope.snapshot.secondaryTileId.empty()) CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
         if (!restoredFromGeneratedAssetCache)
             SaveGeneratedAssetCache(exeDir, generationStateKey, generatedAssetCacheFiles);
         return true;
@@ -2486,7 +2503,9 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     {
         if (liveTileUpdateMode)
         {
-            if (contentScope.snapshot.nativeQueue) {
+            if (!contentScope.snapshot.secondaryTileId.empty()) {
+                g_secondaryTileAssets[contentScope.snapshot.secondaryTileId] = liveTileUpdateAssets;
+            } else if (contentScope.snapshot.nativeQueue) {
                 if (contentScope.snapshot.nativeQueueReset) g_nativeQueueAssets.clear();
                 g_nativeQueueAssets[contentScope.snapshot.nativeQueueTag] = liveTileUpdateAssets;
             } else g_nativeQueueAssets.clear();
@@ -2495,9 +2514,10 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         }
         if (!restoredFromGeneratedAssetCache)
             SaveGeneratedAssetCache(exeDir, BuildGenerationStateKey(wp), generatedAssetCacheFiles);
-        StoreSuccessfulGenerationState(wp);
+        if (contentScope.snapshot.secondaryTileId.empty()) StoreSuccessfulGenerationState(wp);
         SetLiveTileClearedOnShutdown(false);
         AcknowledgeContentQueueFrame(contentScope.snapshot);
+        AcknowledgeSecondaryFrame(contentScope.snapshot);
         LogText(liveTileUpdateMode ? g_ui.assetGenerationLiveTileFinished : g_ui.assetGenerationFinished);
         if (g_notifyOnSuccess)
             NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationSuccess, NIIF_INFO);
@@ -2782,7 +2802,10 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
     if (g_shutdownState.IsRequested())
         return 0;
     if (snapshots.empty() && UseExperimentalLiveTileUpdate() && !LiveTileModeReregistrationPending())
-        snapshots = PrepareContentQueueBatch(CurrentContentQueueSnapshots(), true);
+    {
+        snapshots = PrepareSecondaryBatch(CurrentSecondarySnapshots(), true);
+        if (snapshots.empty()) snapshots = PrepareContentQueueBatch(CurrentContentQueueSnapshots(), true);
+    }
 
     bool startWorker = false;
     unsigned long long requestId = g_generationNextRequestId.fetch_add(1, std::memory_order_relaxed);
@@ -2868,6 +2891,10 @@ static unsigned long long QueueGenerateContentBatch(std::vector<aip::content::Sn
     if (snapshots.empty()) return 0;
     auto background = snapshots.front().backgroundPath;
     return QueueGenerate(std::move(background), std::move(reason), std::move(snapshots));
+}
+static unsigned long long QueueGenerateSecondaryBatch(std::vector<aip::content::Snapshot> snapshots, std::wstring reason)
+{
+    return QueueGenerateContentBatch(std::move(snapshots), std::move(reason));
 }
 
 static bool QueueLiveTileModeReregistration()

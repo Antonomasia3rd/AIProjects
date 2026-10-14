@@ -1,117 +1,88 @@
-# Separate DesktopStub tiles
+# Multiple tiles from one DesktopStub
 
-Six separate current-user apps were prepared and registered on 2026-10-14.
-They reuse the same DesktopStub source/binary, with different executable names,
-package identities, settings, image folders and resident scopes. There are no
-standalone donor programs or new provider DLLs.
+DesktopStub manages its primary wallpaper tile and six source tiles from one
+resident process, one tray icon, and one INI. Each source uses a Windows secondary
+tile under the existing DesktopStub package. The six copied-host packages from
+the initial 2026-10-14 setup have been retired on this laptop. Their private INIs
+and backups remain under DesktopStub/build/Tiles for recovery.
 
-| Start app name | Runtime folder below DesktopStub/build/Tiles | Content |
-| --- | --- | --- |
-| Now playing | smtc | SMTC title, artist and session status |
-| BBC Technology | rss | Five headlines rotated by Windows; fetch every 15 minutes |
-| Genshin Impact | genshin | Resin summary; account setup pending |
-| Honkai Star Rail | hsr | Stamina summary; account setup pending |
-| Zenless Zone Zero | zzz | Charge summary; account setup pending |
-| Discord preview | discord | Configured presence preview; sending disabled |
+## Set up and pin
 
-Each app has its own named INI next to its executable, for example
-`smtc/AipSmtcTile.ini`. The old wallpaper/SMTC profile was backed up to
-`DesktopStub/build/BeforeSeparateTiles-20261014-183547.ini`. Its SMTC entry is now
-disabled and cycling is off: the original DesktopStub tile shows wallpaper only.
-The original resident was not stopped by this setup.
+1. Register/run DesktopStub in Live Tile mode. Open its tray menu and choose
+   **Tiles > Set up and enable the six source tiles**.
+2. Open **Tiles > Now playing > Pin**, confirm the Windows prompt, and repeat for
+   RSS, Genshin Impact, Honkai: Star Rail, Zenless Zone Zero, and Discord.
+   The action may be labelled pin/update for an existing tile.
+3. Configure each source through its submenu. Resize RSS to Wide or Large for
+   more text. A Large RSS tile displays up to five headline/summary rows; Medium
+   and Wide display up to three headlines. Windows decides the final visual
+   sizing and truncation.
+4. Use DesktopStub's single **Application** Startup setting for all tiles.
+   Legacy Startup uses the current user's shell:startup folder; packaged Startup
+   uses the existing Windows startup-task option.
 
-## Pin and use the apps
+Content 1 remains the primary tile. The source tiles default to Content 2–7.
+Enabling this layout turns primary cycling off. Source tiles update when their
+composed content changes; unpinned destinations are skipped. The existing Live
+Tile broker is an occasional isolated helper, not another resident tray app.
 
-Open Start, find each name in the app list/search, right-click it and choose
-**Pin to Start**. This pins the registered app, not another copy of the original
-Desktop tile. Resize Now playing/RSS/game tiles to Wide or Large if more text is
-needed. Turn Live Tile on through the tile's Windows context menu if it is off.
+The initializer fills missing fields and preserves existing source settings,
+content fields and credentials. Review mappings if your profile already uses
+Content 2–7 for other layouts. The main INI owns all source/account settings.
 
-All six apps are running and recorded successful Live Tile updates. Pinning is
-still a manual step: both browser and Windows computer-use controls failed to
-initialize in this session. No pinning dialog was started or left unattended.
+## Source setup and clicks
 
-The app tray icons have distinct hover names. Right-click the corresponding icon
-to edit its sources. Sign-in launch is initially off. Each app exposes the normal
-**Application > Run at sign-in (Startup folder)** option; it uses the current
-user's shell:startup folder. The separate Windows startup task option remains
-available for its packaged default profile.
+Now playing uses Windows media sessions. It needs a player that publishes SMTC.
+RSS was configured here with BBC Technology:
+https://feeds.bbci.co.uk/news/technology/rss.xml, refreshed every 15 minutes.
+A configured RSS tile opens the first article. A missing feed opens source setup.
 
-## Accounts and Discord
+Game tiles display setup status until the appropriate game UID and HoYoLAB
+credentials are configured. Clicking a game configuration-error tile opens the
+official HoYoLAB sign-in website. Use its **Source and sign-in settings** tray
+submenu to enter/import the resulting account settings. Signing in to a browser
+alone does not import cookies into DesktopStub. Genshin, HSR and ZZZ have separate
+game UIDs; LTUid identifies the HoYoLAB account. Account setup on this laptop
+remains deferred. No browser cookies were extracted.
 
-Game account setup was deferred at the user's request. The HoYoLAB browser is
-signed in according to the user, but the agent browser bridge remained
-unavailable; no authenticated cookies were read or copied. Game tiles show an
-account-configuration status until their own game UID and the LToken/LTUid cookie
-values are entered/imported through Sources and accounts. Genshin, HSR and ZZZ
-use different game UIDs; LTUid is the HoYoLAB account identifier, not a game UID.
+**Plain credentials are readable in the INI. Anyone who can read it may be able
+to use the account.** Keep profiles, cookie exports, backups and crash dumps
+private. Existing opt-in protected-cookie routes remain available; encryption
+is not mandatory. Masked input prevents casual display, not file access.
 
-**Plain cookies are stored in readable INI files. Anyone who can read those
-files may be able to use the account.** Keep profiles, cookie exports, backups
-and dumps private and out of shared uploads. These runtime folders are ignored
-by Git. Existing protected-cookie imports are supported; this setup adds no
-mandatory encryption or automatic browser credential extraction.
+Discord displays DesktopStub's configured presence preview. Sending remains off
+until explicitly enabled and requires a Discord client and application ClientId.
+Reading an unrelated application's current Rich Presence is not implemented.
 
-Discord's tile previews what DesktopStub is configured to send. Set Details and
-State under Sources and accounts. Sending is disabled, and no Discord connection
-was attempted. The normal IPC transport needs an installed/running Discord
-client and an application ClientId before sending can work. Reading another
-program's current Rich Presence is not implemented.
+## Windows support and recovery
 
-The RSS feed is `https://feeds.bbci.co.uk/news/technology/rss.xml`, verified as
-RSS with 21 items during setup. The tile selects the first five. BBC's official
-[feed information](https://support.bbc.co.uk/platform/feeds/NewsFeeds.htm)
-describes its news feeds.
+Windows controls the pin-confirmation prompt. Pinning requires an explicit
+action for each source; the setup action does not silently create Start pins.
+The native desktop secondary-tile path targets supported Windows 10/11 builds.
+Its availability and Start presentation depend on Windows and any installed
+Start replacement; this session has not yet verified an actual secondary pin.
+Microsoft documents the
+[desktop secondary-tile APIs](https://learn.microsoft.com/en-us/windows/apps/design/shell/tiles-and-notifications/secondary-tiles-desktop-pinning).
 
-## Multiple tiles versus queued contents
+The old PrepareDesktopStubTiles.ps1 and RegisterDesktopStubTile.ps1 scripts are
+compatibility tools requiring an explicit LegacyMultipleHosts switch. New setup
+uses the Tiles menu. Do not use those scripts for one-process operation.
 
-Windows also exposes a secondary-tile API for several tiles under one app.
-DesktopStub currently creates a primary tile per registered app. Its five-item
-notification queue rotates contents within one tile; it does not create five
-separate tiles. The named-host method above uses existing behavior and avoids
-introducing a new renderer/router during this setup. A shared process with
-secondary tiles remains future work; Microsoft's
-[desktop secondary-tile guide](https://learn.microsoft.com/en-us/windows/apps/design/shell/tiles-and-notifications/secondary-tiles-desktop-pinning)
-also requires a window owner for the pin-confirmation dialog.
+The installed binary and INI backup from this migration is
+DesktopStub/build/ReviewBackupOct14OneHost-20261014-194634.
+Six old source INIs were also backed up under
+DesktopStub/build/Tiles/BeforeOneHost-20261014-190621.
+These folders are private, ignored runtime files; they are not committed.
 
-## CapsBlink and wallpaper fallback
+## Caps indicator and wallpaper fallback
 
-The main profile has CapsBlink hardware control enabled, but its contents did not
-select CapsBlink. The controller therefore never started. Choose **Caps
-indicator pattern / CapsBlink** under a content's Text sources. CapsLock is a
-different source that only displays the logical key state. CapsBlink blinks
-while logical Caps Lock is off and stays lit while it is on. For continuous
-control, use a noncycling content or select it on every active cycle item.
-Hardware actions require app-managed rotation. Native keyboard access and
-permissions remain untested; no LED/device operation was performed during setup.
+CapsBlink hardware enablement alone does not select the provider. Select
+CapsBlink in an active content's text sources. CapsLock only displays logical
+state. CapsBlink blinks while Caps Lock is off and stays lit while it is on.
+Native LED/device behavior remains untested here.
 
-Wallpaper selects the ordinary desktop wallpaper without window capture.
-LiveWallpaper tries the existing generic live-window capture when enabled;
-there is no required Wallpaper Engine installation. If no usable live snapshot
-is available, it falls back to ordinary wallpaper after any configured startup
-settling. Live capture is off by default. When Windows has no wallpaper image
-(for example a solid-color desktop), choose None/Transparent explicitly rather
-than expecting an image path.
-
-## Validation and remaining work
-
-The single-content SMTC host now uses media event subscriptions whenever direct
-Live Tile delivery is available, independently of queue eligibility. This fixes
-an unnecessary polling path for the separate Now playing tile. The injected
-host regression suite passes 9,148 checks; normal host/broker and all copied
-hosts scanned clean before execution.
-
-Preparation is reproducible with `tools/PrepareDesktopStubTiles.ps1` (offline
-only, preserves existing profiles). `tools/RegisterDesktopStubTile.ps1 -Key
-smtc` intentionally registers one prepared app for the current user; run it with
-Windows PowerShell 5.1. Six package registrations, Start app entries and normal
-live update logs were verified. A short passive sample measured individual
-residents around 0.47-1.56% of one CPU core and NPSMSvc at zero measured CPU;
-this is not sustained stability proof. The user's normal-CPU observation after
-17 hours is recorded as user acceptance evidence.
-
-Real HoYoLAB endpoint/account compatibility, native Caps/ASUS hardware behavior,
-older-Windows helper queues, exact target-OS presentation and the historical
-four-pixel raster variation remain open. Windhawk and the user's untracked
-Discord bot work were not changed. No Startup entry or security setting was
-changed by this setup.
+Wallpaper uses the ordinary desktop image. LiveWallpaper attempts the existing
+generic live-window capture when enabled; it does not require Wallpaper Engine.
+If no usable live capture is available, it falls back to ordinary wallpaper after
+configured startup settling. For a solid-color desktop without an image path,
+choose None/Transparent explicitly.

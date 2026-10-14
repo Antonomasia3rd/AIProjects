@@ -661,6 +661,24 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
 
     if (!ConfigureTileTextGraphics(graphics))
         return false;
+    if (g_renderContent && !g_renderContent->rssHeadlines.empty() && logicalHeight >= 150 && logicalWidth >= 150) {
+        const auto count = (std::min)(g_renderContent->rssHeadlines.size(), logicalHeight > 200 ? std::size_t(5) : std::size_t(3));
+        const REAL margin = static_cast<REAL>(10 * scale);
+        const REAL rowHeight = static_cast<REAL>((logicalHeight - 30) * scale / count);
+        Font font(L"Segoe UI", static_cast<REAL>(12 * scale), FontStyleRegular, UnitPixel);
+        SolidBrush brush(Color(255, 255, 255, 255));
+        StringFormat format; format.SetTrimming(StringTrimmingEllipsisWord);
+        const auto saved = graphics.Save();
+        for (std::size_t index = 0; index < count; ++index) {
+            RectF row(margin, margin + static_cast<REAL>(index) * rowHeight,
+                static_cast<REAL>(bitmapWidth) - margin * 2, rowHeight - static_cast<REAL>(4 * scale));
+            graphics.SetClip(row, CombineModeReplace);
+            const auto title = std::to_wstring(index + 1) + L". " + g_renderContent->rssHeadlines[index].primary;
+            graphics.DrawString(title.c_str(), static_cast<INT>(title.size()), &font, row, &format, &brush);
+        }
+        graphics.Restore(saved);
+        return graphics.GetLastStatus() == Ok;
+    }
     if (ShouldUseAdaptiveStaticTextFallback()) {
         const auto layout = SimulatedTileTextLayoutForName(tileName);
         if (layout == SimulatedTileTextLayout::Medium)

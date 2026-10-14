@@ -171,6 +171,7 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "../dependencies/DesktopStub/ga_packaged_startup.inc"
 #include "../dependencies/DesktopStub/ga_wallpaper.inc"
 #include "../dependencies/DesktopStub/ga_content_state.inc"
+#include "../dependencies/DesktopStub/ga_secondary_tile_api.inc"
 #include "../dependencies/DesktopStub/tile_text_layout.h"
 #include "../dependencies/DesktopStub/ga_image.inc"
 #include "../dependencies/DesktopStub/ga_registration.inc"

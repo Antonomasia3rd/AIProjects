@@ -14,7 +14,10 @@ inline bool DeliverWinrt(const std::wstring& transport, std::wstring& error)
         [](const std::wstring& text) { XmlDocument xml; xml.LoadXml(winrt::hstring(text)); return xml; },
         [](const XmlDocument& xml) { return TileNotification(xml); },
         [](TileNotification& notification, const std::wstring& tag) { notification.Tag(winrt::hstring(tag)); },
-        [] { return TileUpdateManager::CreateTileUpdaterForApplication(); }, error);
+        [](const std::wstring& target) {
+            return target.empty() ? TileUpdateManager::CreateTileUpdaterForApplication()
+                : TileUpdateManager::CreateTileUpdaterForSecondaryTile(winrt::hstring(target));
+        }, error);
 }
 } }
 #endif

@@ -59,6 +59,9 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     const auto& contentsTitle = g_ui.trayContentsTitle;
     const auto& sourcesTitle = g_ui.traySourcesTitle;
     const auto& updatesTitle = g_ui.trayUpdatesTitle;
+    HMENU secondaryTilesMenu = beginSection(L"Tiles");
+    AppendSecondaryTilesMenu(secondaryTilesMenu);
+    endSection(secondaryTilesMenu, L"Tiles");
     HMENU contentSourceMenu = beginSection(contentsTitle);
     AppendContentEngineMenu(contentSourceMenu, ContentMenuPart::Contents);
     HMENU quickLayoutsMenu = beginNestedMenu(contentSourceMenu, L"CreatePopupMenu(Presets and imports)");

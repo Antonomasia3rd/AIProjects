@@ -6,6 +6,10 @@ and release names. Reusable modules and product implementation bodies live under
 `dependencies/`; project-local source composes them through includes, metadata,
 or declarative policy.
 
+DesktopStub can manage a wallpaper tile and six source tiles through one resident
+and tray icon. See [multiple-tile setup](docs/multiple-tiles-2026-10-14.md) for
+pinning, accounts, stacked RSS and the remaining Windows acceptance checks.
+
 ## Projects
 
 | Folder | Runtime | Purpose |

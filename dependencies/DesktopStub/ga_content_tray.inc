@@ -353,8 +353,11 @@ template<class Mutator> static bool CommitContentMenuMutation(HWND owner, Mutato
     if (!readConfig(candidate, after, error)) {
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Invalid content setting", MB_OK | MB_ICONWARNING); return false;
     }
+    bool separateEnabled = false;
+    { std::wstring enabled; aip::ReadIniValueFromDoc(aip::ParseIniDocument(candidate), L"Tiles", L"Enabled", enabled);
+      aip::content::ParseBool(enabled, separateEnabled); }
     for (const auto& entry : after.entries) {
-        if (after.enabled && entry.enabled &&
+        if (!separateEnabled && after.enabled && entry.enabled &&
             aip::content::EntryUsesSource(entry, aip::content::SourceId::RssFeed) &&
             !ValidateConfiguredRssSettingsForContentSource(ContentSource::RssFeed, error)) {
             DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"RSS configuration", MB_OK | MB_ICONWARNING); return false;

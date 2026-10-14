@@ -134,6 +134,8 @@ struct Snapshot {
     BackgroundId backgroundId = BackgroundId::Wallpaper;
     bool nativeQueue = false, nativeQueueReset = false;
     std::wstring nativeQueueTag, nativeQueueLayout, nativeQueueFrameKey;
+    std::wstring secondaryTileId, secondaryFrameKey;
+    std::vector<Text> rssHeadlines;
     // Keep an immutable source asset alive while a published/render snapshot
     // still reads it. The portable composition model does not own its files.
     std::shared_ptr<const void> backgroundLease;

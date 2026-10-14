@@ -16,6 +16,7 @@ struct FakeState {
     bool queued = false;
     int loads = 0, factories = 0, updaterFactories = 0, clears = 0, updates = 0;
     bool rejectXml = false, rejectNotification = false, rejectTag = false;
+    std::wstring updaterTarget;
     std::vector<std::string> events;
     std::vector<FakeNotification> notifications;
 };
@@ -49,7 +50,7 @@ static bool Deliver(const std::wstring& transport, FakeState& state, std::wstrin
             if (state.rejectTag) throw std::runtime_error("fake tag rejected");
             value.tag = tag;
         },
-        [&] { ++state.updaterFactories; state.events.push_back("updater"); return FakeUpdater{state}; }, error);
+        [&](const std::wstring& target) { ++state.updaterFactories; state.updaterTarget = target; state.events.push_back("updater"); return FakeUpdater{state}; }, error);
 }
 static std::wstring Encode(const std::wstring& xml, bool queued, const std::wstring& tag, bool reset) {
     std::wstring transport, error;
@@ -144,9 +145,48 @@ static void TestDeliveryAndReset() {
             "XML, notification and tag construction failures precede every updater operation");
     }
 }
+static void TestSecondaryTargets() {
+    const std::wstring xml = L"<tile><visual/></tile>";
+    std::wstring error, transport;
+    notification::Payload payload;
+    for (const auto* target : {L"AipSource_smtc", L"AipSource_rss", L"AipSource_genshin", L"AipSource_hsr", L"AipSource_zzz", L"AipSource_discord"}) {
+        Check(notification::Encode(xml, {false, {}, false, target}, transport, error) &&
+            transport.find(notification::SecondaryMarker) == 0 && notification::Decode(transport, payload, error) &&
+            payload.xml == xml && payload.options.secondaryTileId == target && !payload.options.queued,
+            "secondary source target uses strict version-two metadata and unchanged XML body");
+        FakeState state;
+        Check(Deliver(transport, state, error) && state.updaterTarget == target && state.clears == 0,
+            "secondary source uses its own updater without falling back to the primary tile");
+    }
+    Check(notification::Encode(xml, {true, L"Source", true, L"AipSource_smtc"}, transport, error), "secondary queue/reset/tag metadata encodes together");
+    FakeState queued;
+    Check(Deliver(transport, queued, error) && queued.queued && queued.clears == 1 && queued.updaterTarget == L"AipSource_smtc",
+        "secondary queue reset targets only the chosen tile updater");
+    int legacyCalls = 0;
+    Check(!notification::Deliver(transport,
+        [&](const auto& body) { ++legacyCalls; return body; },
+        [&](const auto& body) { ++legacyCalls; return FakeNotification{body, {}}; },
+        [&](auto&, const auto&) { ++legacyCalls; },
+        [&] { ++legacyCalls; return FakeUpdater{queued}; }, error) && legacyCalls == 0 && !error.empty(),
+        "a legacy no-target factory rejects a secondary payload before any call instead of updating primary");
+    FakeState primary;
+    Check(Deliver(xml, primary, error) && primary.updaterTarget.empty(), "raw legacy XML still selects the primary updater");
+    const std::wstring prefix = notification::SecondaryMarker;
+    for (const auto& bad : std::vector<std::wstring>{
+        prefix + L"0\t0\t\r\n" + xml, prefix + L"0\t0\t\t\r\n" + xml,
+        prefix + L"0\t0\t\t_bad\r\n" + xml, prefix + L"0\t0\t\tbad target\r\n" + xml,
+        prefix + L"0\t0\t\tAipSource_smtc\textra\r\n" + xml,
+        prefix + L"0\t0\t\t" + std::wstring(65, L'a') + L"\r\n" + xml }) {
+        FakeState state;
+        Check(!Deliver(bad, state, error) && state.events.empty(), "malformed secondary target cannot load, clear or update either tile");
+    }
+    Check(notification::Encode(xml, {false, {}, false, std::wstring(64, L'a')}, transport, error) &&
+        notification::Decode(transport, payload, error) && payload.options.secondaryTileId.size() == 64,
+        "maximum Windows secondary tile ID fits its bounded private header");
+}
 int main() {
     try {
-        TestLegacyAndRoundTrips(); TestMalformed(); TestXmlBoundsAndUnicode(); TestDeliveryAndReset();
+        TestLegacyAndRoundTrips(); TestMalformed(); TestXmlBoundsAndUnicode(); TestDeliveryAndReset(); TestSecondaryTargets();
         std::cout << "Tile notification payload: " << checks << " checks passed; no Windows APIs invoked\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }

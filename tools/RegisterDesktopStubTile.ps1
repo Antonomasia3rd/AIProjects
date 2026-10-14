@@ -1,6 +1,8 @@
 #requires -Version 5.1
-param([Parameter(Mandatory=$true)][string]$Key)
+param([Parameter(Mandatory=$true)][string]$Key, [switch]$LegacyMultipleHosts)
 # An intentional current-user installation, separate from offline preparation/tests.
+# Compatibility only: new setup is DesktopStub tray > Tiles, with one resident.
+if (-not $LegacyMultipleHosts) { throw 'Use DesktopStub tray > Tiles for one-process setup. This legacy copied-host tool requires -LegacyMultipleHosts.' }
 $ErrorActionPreference='Stop'
 $names=@{smtc='AipSmtcTile';rss='AipRssTile';genshin='AipGenshinTile';hsr='AipHsrTile';zzz='AipZzzTile';discord='AipDiscordTile'}
 if(-not $names.ContainsKey($Key)){throw 'Unknown managed tile key.'}

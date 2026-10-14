@@ -29,6 +29,7 @@ if /i "%~1"=="PngCrc32Tests" goto PngCrc
 if /i "%~1"=="CaptureAttemptTests" goto CaptureAttempt
 if /i "%~1"=="ContentPresetTests" goto ContentPreset
 if /i "%~1"=="ContentQueueTests" goto ContentQueue
+if /i "%~1"=="SecondaryTileTests" goto SecondaryTiles
 if /i "%~1"=="TileNotificationPayloadTests" goto TilePayload
 if /i "%~1"=="BoundedCaptureProcessTests" goto BoundedCapture
 if /i "%~1"=="DiscordProfileEditTests" goto Discord
@@ -81,6 +82,9 @@ cl %CONTENT_FLAGS% /WX tools\ContentPresetTests.cpp /Fe:%CONTENT_OUT%\ContentPre
 goto Result
 :ContentQueue
 cl %CONTENT_FLAGS% /WX tools\ContentQueueTests.cpp /Fe:%CONTENT_OUT%\ContentQueueTests.exe /Fo:%CONTENT_OUT%\ContentQueueTests.obj
+goto Result
+:SecondaryTiles
+cl %CONTENT_FLAGS% /WX tools\SecondaryTileTests.cpp /Fe:%CONTENT_OUT%\SecondaryTileTests.exe /Fo:%CONTENT_OUT%\SecondaryTileTests.obj
 goto Result
 :TilePayload
 cl %CONTENT_FLAGS% /WX tools\TileNotificationPayloadTests.cpp /Fe:%CONTENT_OUT%\TileNotificationPayloadTests.exe /Fo:%CONTENT_OUT%\TileNotificationPayloadTests.obj

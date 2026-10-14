@@ -1,5 +1,6 @@
 static void DispatchTrayCommand(HWND h, UINT cmd)
 {
+    if (DispatchSecondaryTilesCommand(h, cmd)) return;
     if (DispatchContentEngineCommand(h, cmd)) return;
     ManifestDisplayInfo manifestInfo;
     if (cmd >= ID_MANIFEST_EDIT_IDENTITY_NAME &&

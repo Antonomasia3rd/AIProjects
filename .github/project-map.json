@@ -191,6 +191,8 @@
       "dependencies/content_engine.h",
       "dependencies/content_source_host.h",
       "dependencies/content_presets.h",
+      "dependencies/secondary_tiles.h",
+      "dependencies/rss_tile_layout.h",
       "dependencies/content_queue.h",
       "dependencies/tile_notification_payload.h",
       "dependencies/tile_notification_winrt.inc",
@@ -204,6 +206,8 @@
       "dependencies/hardware",
       "dependencies/DiscordRPC",
       "dependencies/asusblink",
+      "dependencies/DesktopStub/ga_secondary_tile_api.inc",
+      "dependencies/DesktopStub/ga_secondary_tile_tray.inc",
       "dependencies/DesktopStub"
     ],
     "releaseTagEnvironment": "DESKTOPSTUB_RELEASE_TAG",

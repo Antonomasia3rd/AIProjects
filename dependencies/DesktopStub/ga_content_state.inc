@@ -4,6 +4,55 @@ static std::mutex g_contentSnapshotMutex;
 static aip::content::Snapshot g_contentSnapshot;
 static std::vector<aip::content::Snapshot> g_contentQueueSnapshots;
 #include "../content_queue.h"
+#include "../secondary_tiles.h"
+static bool SecondaryTileExists(const std::wstring& id);
+static std::mutex g_secondarySnapshotMutex;
+static std::vector<aip::content::Snapshot> g_secondarySnapshots;
+static std::mutex g_secondaryDeliveryMutex;
+static std::map<std::wstring, std::wstring> g_secondaryDelivered;
+static void PublishSecondarySnapshots(std::vector<aip::content::Snapshot> snapshots)
+{
+    std::lock_guard<std::mutex> lock(g_secondarySnapshotMutex);
+    g_secondarySnapshots = std::move(snapshots);
+    std::lock_guard<std::mutex> primaryLock(g_contentSnapshotMutex);
+    const auto primary = std::find_if(g_secondarySnapshots.begin(), g_secondarySnapshots.end(), [](const auto& frame) {
+        return frame.secondaryTileId.empty();
+    });
+    g_contentSnapshot = primary == g_secondarySnapshots.end() ? aip::content::Snapshot{} : *primary;
+    g_contentQueueSnapshots.clear();
+}
+static std::vector<aip::content::Snapshot> CurrentSecondarySnapshots()
+{
+    std::lock_guard<std::mutex> lock(g_secondarySnapshotMutex);
+    return g_secondarySnapshots;
+}
+static std::vector<aip::content::Snapshot> PrepareSecondaryBatch(const std::vector<aip::content::Snapshot>& frames, bool force = false)
+{
+    std::vector<aip::content::Snapshot> changed;
+    std::lock_guard<std::mutex> lock(g_secondaryDeliveryMutex);
+    for (const auto& frame : frames) {
+        if (!frame.active || frame.secondaryFrameKey.empty() || !IsUsableWallpaperPath(frame.backgroundPath)) continue;
+#ifdef DESKTOPSTUB_TEST_SECONDARY_EXISTS
+        if (!frame.secondaryTileId.empty() && !DESKTOPSTUB_TEST_SECONDARY_EXISTS(frame.secondaryTileId)) continue;
+#else
+        if (!frame.secondaryTileId.empty() && !SecondaryTileExists(frame.secondaryTileId)) continue;
+#endif
+        const auto found = g_secondaryDelivered.find(frame.secondaryTileId);
+        if (force || found == g_secondaryDelivered.end() || found->second != frame.secondaryFrameKey) changed.push_back(frame);
+    }
+    return changed;
+}
+static void AcknowledgeSecondaryFrame(const aip::content::Snapshot& frame)
+{
+    if (frame.secondaryFrameKey.empty()) return;
+    std::lock_guard<std::mutex> lock(g_secondaryDeliveryMutex);
+    g_secondaryDelivered[frame.secondaryTileId] = frame.secondaryFrameKey;
+}
+static void ForgetSecondaryTileDelivery(const std::wstring& id)
+{
+    std::lock_guard<std::mutex> lock(g_secondaryDeliveryMutex);
+    g_secondaryDelivered.erase(id);
+}
 static std::mutex g_contentQueueDeliveryMutex;
 static aip::content::QueueDelta g_contentQueueDelivery;
 static std::atomic<ULONGLONG> g_contentQueueRetryAfter{0};
@@ -119,6 +168,7 @@ static bool ContentQueueHasAcknowledgedFrames()
 }
 
 static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error);
+static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error, aip::content::SecondaryTileConfiguration* tiles);
 
 static bool RefreshGenerationConfiguration()
 {

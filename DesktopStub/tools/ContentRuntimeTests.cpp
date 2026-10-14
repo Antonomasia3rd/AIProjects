@@ -8,6 +8,11 @@
 #include <vector>
 #include "../../dependencies/content_engine.h"
 static bool contentNativeQueueAvailable = false, contentNativeQueueTestActive = false, contentQueueNormalAckEnabled = true;
+static std::vector<std::vector<aip::content::Snapshot>> secondaryTestBatches;
+static bool secondaryTestPinned = true;
+static unsigned long long ContentTestSecondaryBatch(std::vector<aip::content::Snapshot>, std::wstring);
+#define DESKTOPSTUB_TEST_SECONDARY_EXISTS(id) secondaryTestPinned
+#define DESKTOPSTUB_SECONDARY_BATCH_GENERATE ContentTestSecondaryBatch
 static std::vector<std::vector<aip::content::Snapshot>> contentQueueBatches;
 static void ContentTestQueueAcknowledgeNormal();
 static unsigned long long ContentTestQueueBatch(std::vector<aip::content::Snapshot>, std::wstring);
@@ -62,6 +67,11 @@ static void Check(bool value, const char* name)
     if (!value) { ++failures; std::cerr << "FAIL: " << name << '\n'; }
 }
 static void ContentTestQueueAcknowledgeNormal() { if (contentQueueNormalAckEnabled) AcknowledgeContentQueueFrame({}); }
+static unsigned long long ContentTestSecondaryBatch(std::vector<aip::content::Snapshot> frames, std::wstring) {
+    secondaryTestBatches.push_back(frames);
+    for (const auto& frame : frames) AcknowledgeSecondaryFrame(frame);
+    return ++contentGenerationRequests;
+}
 static unsigned long long ContentTestQueueBatch(std::vector<aip::content::Snapshot> snapshots, std::wstring)
 {
     contentQueueBatches.push_back(snapshots);
@@ -99,6 +109,7 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "DisplaySettingsTests.inc"
 #include "ContentPresetHostTests.inc"
 #include "NativeQueueHostTests.inc"
+#include "SecondaryTileHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
@@ -1300,6 +1311,7 @@ int wmain()
     TestNowPlayingProfileHostImports(bytes);
     fixtureGroup("presets and import confirmations");
     TestNativeQueueHost(bitmapPath);
+    TestSecondaryTileHost(bitmapPath);
     TestContentPresetsAndImportConfirmation();
     fixtureGroup("Discord advanced profile");
     TestDiscordAdvancedHost();

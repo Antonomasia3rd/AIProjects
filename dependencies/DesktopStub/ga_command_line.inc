@@ -4,6 +4,7 @@
 using CommandLineIniSetting = aip::IniSetting;
 #include "../live_capture_protocol.h"
 #include "../content_presets.h"
+#include "../secondary_tiles.h"
 #include "../content_sources/notes_profile.inc"
 #include "../hardware/hardware_profile_import.inc"
 #include "../content_sources/now_playing_profile.inc"
@@ -13,6 +14,9 @@ struct CommandLineHardwareImport { bool asus = false; std::wstring path; };
 struct CommandLineOptions
 {
     bool helpRequested = false;
+    std::wstring tileSetupKey;
+    bool tileSignIn = false;
+    std::wstring openUrl;
     bool versionRequested = false;
     bool parseFailed = false;
     bool exitRequested = false;
@@ -82,6 +86,8 @@ static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_MESSAGEBOX = 5;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_CONSOLE = 6;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE = 7;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MASK = 0x00FF;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE = 32;
+static constexpr WPARAM SINGLE_INSTANCE_FLAG_TILE_SIGN_IN = 0x0400;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON = 0x0100;
 static constexpr WPARAM SINGLE_INSTANCE_FLAG_REGENERATE_MANIFEST = 0x0200;
 
@@ -764,6 +770,8 @@ static bool NormalizeDesktopStubTypedSetting(
     std::wstring& value,
     std::wstring& error)
 {
+    if (IEquals(section, L"Tiles") || aip::content::Lower(section).compare(0, 5, L"tile.") == 0)
+        return aip::content::NormalizeSecondaryTileSetting(section, key, value, error);
     if (aip::content::KnownSection(section))
         return aip::content::NormalizeSetting(section, key, value, error);
     if (const auto* display = FindDesktopStubDisplaySetting(section, key))
@@ -1212,6 +1220,19 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--open-url", value, error, matched)) return fail(error);
+        if (matched) {
+            if (!ValidateRssFeedUrlSetting(value, false, g_commandLine.openUrl, error)) return fail(error);
+            continue;
+        }
+        if (IEquals(arg, L"--tile-sign-in")) { g_commandLine.tileSignIn = true; continue; }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-setup", value, error, matched)) return fail(error);
+        if (matched) {
+            const auto* tile = aip::content::FindSecondaryTileDescriptor(value);
+            if (!tile) return fail(L"--tile-setup expects smtc, rss, genshin, hsr, zzz or discord.");
+            g_commandLine.tileSetupKey = tile->id;
+            continue;
+        }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--preset", value, error, matched)) return fail(error);
         if (matched) {
             if (!NormalizeCommandLinePresetName(value)) return fail(L"--preset expects Wallpaper, WallpaperRSS, or WallpaperSMTC.");
@@ -2609,13 +2630,17 @@ static bool ValidateDesktopStubContentProfile(
     if (!aip::content::ReadConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
     }, composition, error, ReadContentAsusEvents(includeCommandLineOverrides))) return false;
+    aip::content::SecondaryTileConfiguration separate;
+    if (!aip::content::ReadSecondaryTileConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
+    }, composition.entries.size(), separate, error)) return false;
 
     bool usesRss = false;
     for (const auto& entry : composition.entries)
         if (composition.enabled && entry.enabled &&
             aip::content::EntryUsesSource(entry, aip::content::SourceId::RssFeed)) usesRss = true;
     return ValidateDesktopStubContentProfileValues(
-        usesRss ? L"RssFeed" : composition.enabled ? L"Wallpaper" : DesktopStubContentProfileValue(
+        usesRss && !separate.enabled ? L"RssFeed" : composition.enabled ? L"Wallpaper" : DesktopStubContentProfileValue(
             L"Settings",
             L"ContentSource",
             L"Wallpaper",

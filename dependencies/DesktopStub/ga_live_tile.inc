@@ -214,6 +214,7 @@ static void AppendLiveTileImageBinding(
 
 #include "ga_live_tile_templates.inc"
 
+#include "../rss_tile_layout.h"
 static std::wstring BuildLiveTileXml(
     const std::wstring& exeDir,
     const ManifestDisplayInfo& manifestInfo,
@@ -260,6 +261,12 @@ static std::wstring BuildLiveTileXml(
         }
 
         const wchar_t* templateName = LiveTileTemplateForTarget(asset.binding);
+        if (LiveTileUsesAdaptiveXml() && g_renderContent && !g_renderContent->rssHeadlines.empty() &&
+            g_renderContent->textMode == aip::content::TextMode::Auto) {
+            if (aip::content::AppendRssTileBinding(xml, templateName, asset.h, g_renderContent->rssHeadlines,
+                ContentHasTransparentBackground() ? L"" : uri)) hasUsableBinding = true;
+            continue;
+        }
         const bool nativeTransparentText = LiveTileUsesAdaptiveXml() && ContentHasTransparentBackground() &&
             TileTextAppliesToTileName(asset.name) &&
             (!TileTextXmlText().empty() || !TileTextXmlSecondaryText().empty() || !TileTextXmlBadgeText().empty());
@@ -280,6 +287,7 @@ static std::wstring BuildLiveTileXml(
         options.queued = g_renderContent->nativeQueue;
         options.tag = g_renderContent->nativeQueueTag;
         options.reset = g_renderContent->nativeQueueReset;
+        options.secondaryTileId = g_renderContent->secondaryTileId;
     }
     std::wstring transport, error;
     if (!aip::tile_notification::Encode(xml, options, transport, error)) {

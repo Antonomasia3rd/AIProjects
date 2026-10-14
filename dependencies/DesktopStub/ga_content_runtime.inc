@@ -5,6 +5,10 @@
 #ifndef DESKTOPSTUB_CONTENT_QUEUE_BATCH_GENERATE
 #define DESKTOPSTUB_CONTENT_QUEUE_BATCH_GENERATE QueueGenerateContentBatch
 #endif
+#ifndef DESKTOPSTUB_SECONDARY_BATCH_GENERATE
+#define DESKTOPSTUB_SECONDARY_BATCH_GENERATE QueueGenerateSecondaryBatch
+#endif
+#include "../secondary_tiles.h"
 #include "../content_sources/smtc.inc"
 #include "../content_source_host.h"
 #include "../content_sources/notes.inc"
@@ -164,19 +168,32 @@ struct ContentNotesProvider
             waitExpired[resource] = true; sources[resource].CancelPending();
         }
     }
-    aip::content::Text Read(const aip::content::NotesConfiguration& cfg, int resource, aip::notes::DetailId detail = aip::notes::DetailId::Summary)
+    aip::notes::Snapshot ReadSnapshot(const aip::content::NotesConfiguration& cfg, int resource)
     {
-        if (waitExpired[resource]) return {L"Notes refresh timed out", L"No fresh result before the one-shot deadline.", L""};
         aip::notes::Snapshot snapshot;
+        if (waitExpired[resource]) {
+            snapshot.line1 = L"Notes refresh timed out"; snapshot.line2 = L"No fresh result before the one-shot deadline.";
+            return snapshot;
+        }
         std::string error;
-        if (!sources[resource].Read(Key(cfg, resource), snapshot, error))
-            return {L"Real-Time Notes", error.empty() ? L"Loading resource information..." : L"The notes source could not complete.", L""};
+        if (!sources[resource].Read(Key(cfg, resource), snapshot, error)) {
+            snapshot.line1 = L"Real-Time Notes";
+            snapshot.line2 = error.empty() ? L"Loading resource information..." : L"The notes source could not complete.";
+        }
+        return snapshot;
+    }
+    static aip::content::Text FormatSnapshot(const aip::notes::Snapshot& snapshot, aip::notes::DetailId detail)
+    {
         if (detail == aip::notes::DetailId::Summary || snapshot.state == aip::notes::StateKind::Error || snapshot.state == aip::notes::StateKind::Loading)
             return {snapshot.line1, snapshot.line2, L""};
         const auto* choice = aip::notes::FindDetail(detail);
         const auto found = snapshot.details.find(detail);
         if (!choice || found == snapshot.details.end()) return {L"Notes detail unavailable", choice ? choice->label : L"Unknown detail", L""};
         return {choice->label, found->second, L""};
+    }
+    aip::content::Text Read(const aip::content::NotesConfiguration& cfg, int resource, aip::notes::DetailId detail = aip::notes::DetailId::Summary)
+    {
+        return FormatSnapshot(ReadSnapshot(cfg, resource), detail);
     }
     void Cancel(int resource) { sources[resource].CancelPending(); keys[resource].clear(); }
     void Cancel() { for (auto& source : sources) source.CancelPending(); }
@@ -304,7 +321,8 @@ struct ContentRssProvider
 };
 static ContentRssProvider g_contentRss;
 
-static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error)
+static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error,
+        aip::content::SecondaryTileConfiguration* tiles)
 {
     // Refresh the normal cache once, then copy one complete published document.
     // Subsequent writers may update the cache, but cannot mix versions within
@@ -347,7 +365,11 @@ static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstr
             cfg.entries.push_back(std::move(entry));
         }
     }
-    return true;
+    return !tiles || aip::content::ReadSecondaryTileConfiguration(read, cfg.entries.size(), *tiles, error);
+}
+static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error)
+{
+    return ReadContentConfiguration(cfg, error, nullptr);
 }
 
 static std::wstring ContentBackgroundPath(const aip::content::Entry& entry, const aip::content::SmtcMediaSnapshot* media = nullptr)
@@ -433,6 +455,8 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
         for (const auto& value : {snapshot.text.primary, snapshot.text.secondary, snapshot.text.badge})
             key += L":" + std::to_wstring(value.size()) + L":" + value;
     key += L":" + std::to_wstring(snapshot.activationArguments.size()) + L":" + snapshot.activationArguments;
+    for (const auto& headline : snapshot.rssHeadlines)
+        key += L":" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
     // Include render settings to update static content after an INI/tray edit.
     key += L":" + BuildGenerationStateKey(snapshot.backgroundPath);
     return key;
@@ -441,7 +465,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
 static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 {
     static aip::content::Cycle cycle;
-    static std::wstring lastFrame, lastError, lastWarning;
+    static std::wstring lastFrame, lastError, lastWarning, lastSecondaryBackgroundError;
     struct BackgroundCache { std::wstring path; ULONGLONG nextRead = 0; };
     static std::map<std::wstring, BackgroundCache> backgroundCache;
     static int backgroundRefreshSeconds = 0;
@@ -449,12 +473,13 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     static bool wasNativeQueue = false;
     if (g_shutdownState.IsRequested()) return false;
     aip::content::Configuration cfg;
+    aip::content::SecondaryTileConfiguration tiles;
     std::wstring error;
-    if (!ReadContentConfiguration(cfg, error)) {
+    if (!ReadContentConfiguration(cfg, error, &tiles)) {
         // Invalid edits must not leave a previously enabled actuator running.
         g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel();
         g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
-        PublishContentSnapshot({}); lastFrame.clear(); frameReadySeen = false; backgroundCache.clear();
+        PublishSecondarySnapshots({}); PublishContentSnapshot({}); lastFrame.clear(); frameReadySeen = false; backgroundCache.clear();
         if (error != lastError) {
             Log(L"Content configuration: %s", error.c_str());
             NotifyTrayBalloon(g_ui.notificationTitle, error, NIIF_WARNING);
@@ -465,13 +490,16 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     lastError.clear();
     if (!cfg.enabled) {
         g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel(); g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
-        PublishContentSnapshot({}); lastFrame.clear(); cycle = {}; frameReadySeen = false; backgroundCache.clear();
+        PublishSecondarySnapshots({}); PublishContentSnapshot({}); lastFrame.clear(); cycle = {}; frameReadySeen = false; backgroundCache.clear();
         if ((wasNativeQueue || ContentQueueHasAcknowledgedFrames()) && queueGeneration && !synchronous &&
             !GenerationWorkPending() && GetTickCount64() >= g_contentQueueRetryAfter.load())
             wasNativeQueue = DESKTOPSTUB_CONTENT_QUEUE_GENERATE(CurrentGenerationBackground(), L"Content queue disabled") == 0;
         return true;
     }
-    auto warning = ContentTimingWarning(cfg);
+    const bool separateTiles = tiles.enabled;
+    auto warning = separateTiles ? (ContentDirectLiveDeliveryAvailable() ? std::wstring{} :
+        L"Separate source tiles are waiting for direct Live Tile delivery with package identity and completed registration. Content.1 remains the primary tile.") :
+        ContentTimingWarning(cfg);
     if (warning != lastWarning) {
         lastWarning = warning;
         if (!warning.empty()) {
@@ -479,15 +507,17 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
             NotifyTrayBalloon(g_ui.notificationTitle, warning, NIIF_WARNING);
         }
     }
-    const bool nativeQueue = ContentNativeQueueAvailable(cfg);
+    const auto separateIndices = separateTiles ? aip::content::SecondaryTileContentIndices(tiles, cfg) : std::set<std::size_t>{};
+    if (!separateTiles) PublishSecondarySnapshots({});
+    const bool nativeQueue = !separateTiles && ContentNativeQueueAvailable(cfg);
     // An identical first frame must still replace and disable the OS queue
     // when returning to app-managed rotation.
     if (nativeQueue != wasNativeQueue) frameReadySeen = false;
     if (nativeQueue != wasNativeQueue || (!nativeQueue && ContentQueueHasAcknowledgedFrames())) lastFrame.clear();
     wasNativeQueue = nativeQueue;
     auto selection = cfg;
-    if (nativeQueue) selection.cycle = false;
-    auto index = cycle.Select(selection, GetTickCount64());
+    if (nativeQueue || separateTiles) selection.cycle = false;
+    auto index = separateTiles ? std::size_t{0} : cycle.Select(selection, GetTickCount64());
     if (index == static_cast<std::size_t>(-1)) {
         g_contentCaps.Cancel(); g_contentAsus.Cancel(); g_contentDiscord.Cancel(); g_contentNotes.Cancel(); g_contentRss.Cancel(); g_contentSmtc.Cancel();
         frameReadySeen = false; backgroundCache.clear();
@@ -514,6 +544,10 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
             aip::content::BackgroundIdFor(candidate.background) == aip::content::BackgroundId::SmtcArtwork;
     };
     const auto sourceNeeded = [&](aip::content::SourceId id) {
+        if (separateTiles) return std::any_of(separateIndices.begin(), separateIndices.end(), [&](std::size_t selected) {
+            const auto& candidate = cfg.entries[selected];
+            return id == aip::content::SourceId::Smtc ? usesSmtc(candidate) : aip::content::EntryUsesSource(candidate, id);
+        });
         if (!nativeQueue && !aip::content::SourceRefreshesWhileInactive(id))
             return aip::content::EntryUsesSource(selectedEntry, id);
         return std::any_of(cfg.entries.begin(), cfg.entries.end(), [id, &usesSmtc](const aip::content::Entry& candidate) {
@@ -526,7 +560,12 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     const bool needsCaps = sourceNeeded(aip::content::SourceId::CapsBlink);
     const bool needsAsus = sourceNeeded(aip::content::SourceId::AsusBlink);
     std::array<bool, 3> needsNotes{};
-    if (nativeQueue || aip::content::SourceRefreshesWhileInactive(aip::content::SourceId::Notes)) {
+    if (separateTiles) {
+        for (const auto selected : separateIndices) {
+            const auto& candidate = cfg.entries[selected];
+            if (aip::content::EntryUsesSource(candidate, aip::content::SourceId::Notes)) needsNotes[candidate.notesResource] = true;
+        }
+    } else if (nativeQueue || aip::content::SourceRefreshesWhileInactive(aip::content::SourceId::Notes)) {
         for (const auto& candidate : cfg.entries)
             if (candidate.enabled && aip::content::EntryUsesSource(candidate, aip::content::SourceId::Notes))
                 needsNotes[candidate.notesResource] = true;
@@ -536,7 +575,9 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     RssFeedSettings rssSettings;
     if (needsRss) { rssSettings = ReadRssFeedSettings(); g_contentRss.Refresh(rssSettings, synchronous); }
     else g_contentRss.Cancel();
-    const bool needsArtwork = std::any_of(cfg.entries.begin(), cfg.entries.end(), [](const aip::content::Entry& candidate) {
+    const bool needsArtwork = separateTiles ? std::any_of(separateIndices.begin(), separateIndices.end(), [&](std::size_t selected) {
+        return aip::content::BackgroundIdFor(cfg.entries[selected].background) == aip::content::BackgroundId::SmtcArtwork;
+    }) : std::any_of(cfg.entries.begin(), cfg.entries.end(), [](const aip::content::Entry& candidate) {
         return candidate.enabled && aip::content::BackgroundIdFor(candidate.background) == aip::content::BackgroundId::SmtcArtwork;
     });
     if (needsSmtc) g_contentSmtc.Refresh(cfg.refreshSeconds, synchronous, needsArtwork, ContentDirectLiveDeliveryAvailable());
@@ -552,6 +593,13 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     else g_contentDiscord.Cancel();
     if (needsCaps) g_contentCaps.Refresh(cfg.caps); else g_contentCaps.Cancel();
     if (needsAsus) g_contentAsus.Refresh(cfg.asus); else g_contentAsus.Cancel();
+    const auto feed = needsRss ? g_contentRss.Read(rssSettings) : RssFeedSnapshot{};
+    const auto capsText = needsCaps ? g_contentCaps.Read() : aip::content::Text{};
+    const auto asusText = needsAsus ? g_contentAsus.Read() : aip::content::Text{};
+    const auto discordText = needsDiscord ? g_contentDiscord.Read() : aip::content::Text{};
+    std::array<aip::notes::Snapshot, 3> notesSnapshots;
+    for (int resource = 0; resource < 3; ++resource)
+        if (needsNotes[resource]) notesSnapshots[resource] = g_contentNotes.ReadSnapshot(cfg.notes, resource);
 
     std::set<std::wstring> usedBackgroundKeys;
     struct PruneBackgroundCache {
@@ -566,6 +614,12 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     const auto& entry = cfg.entries[contentIndex];
     aip::content::Snapshot snapshot;
     snapshot.active = true; snapshot.name = entry.name; snapshot.textMode = cfg.textMode;
+    if (separateTiles && !entry.enabled) {
+        aip::content::Entry blank; blank.background = L"None";
+        snapshot.textMode = aip::content::TextMode::Off; snapshot.backgroundId = aip::content::BackgroundId::None;
+        snapshot.backgroundPath = ContentBackgroundPath(blank);
+        return snapshot;
+    }
     snapshot.backgroundId = aip::content::BackgroundIdFor(entry.background);
     auto backgroundKey = entry.background + L"\n" + entry.imagePath;
     const bool artworkBackground = aip::content::BackgroundIdFor(entry.background) == aip::content::BackgroundId::SmtcArtwork;
@@ -593,16 +647,16 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
             text = entry.custom;
             break;
         case aip::content::SourceId::CapsBlink:
-            text = g_contentCaps.Read();
+            text = capsText;
             break;
         case aip::content::SourceId::AsusBlink:
-            text = g_contentAsus.Read();
+            text = asusText;
             break;
         case aip::content::SourceId::DiscordRpc:
-            text = g_contentDiscord.Read();
+            text = discordText;
             break;
         case aip::content::SourceId::Notes:
-            text = g_contentNotes.Read(cfg.notes, entry.notesResource, entry.notesDetail);
+            text = ContentNotesProvider::FormatSnapshot(notesSnapshots[entry.notesResource], entry.notesDetail);
             break;
         case aip::content::SourceId::Smtc:
             text = media.text;
@@ -615,7 +669,6 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
             break;
         }
         case aip::content::SourceId::RssFeed: {
-            const auto feed = g_contentRss.Read(rssSettings);
             if (feed.ok && !feed.items.empty()) {
                 bool numberedProfile = false;
                 aip::content::ParseBool(IniReadS(L"Content", L"Enabled", L"0"), numberedProfile);
@@ -654,6 +707,68 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     return snapshot;
     };
     auto snapshot = compose(index);
+    if (separateTiles) {
+        std::map<std::size_t, aip::content::Snapshot> composed;
+        composed.emplace(index, snapshot);
+        std::vector<aip::content::Snapshot> frames;
+        std::wstring unavailable;
+        const bool primaryReady = IsUsableWallpaperPath(snapshot.backgroundPath);
+        const auto appendReady = [&](aip::content::Snapshot frame) {
+            if (IsUsableWallpaperPath(frame.backgroundPath)) frames.push_back(std::move(frame));
+            else {
+                if (!unavailable.empty()) unavailable += L"; ";
+                unavailable += (frame.secondaryTileId.empty() ? std::wstring(L"primary") : frame.secondaryTileId) +
+                    L": " + frame.backgroundPath;
+            }
+        };
+        snapshot.secondaryFrameKey = ContentSnapshotKey(snapshot);
+        appendReady(snapshot); // Empty ID is the primary application tile.
+        for (const auto& tile : tiles.tiles) {
+            const auto contentIndex = static_cast<std::size_t>(tile.content - 1);
+            if (!tile.enabled || !cfg.entries[contentIndex].enabled) continue;
+            auto found = composed.find(contentIndex);
+            if (found == composed.end()) found = composed.emplace(contentIndex, compose(contentIndex)).first;
+            auto frame = found->second;
+            frame.name = tile.name; frame.secondaryTileId = L"AipSource_" + tile.id;
+            if (tile.id == L"rss" && feed.ok) {
+                for (std::size_t headline = 0; headline < (std::min)(feed.items.size(), std::size_t(5)); ++headline)
+                    frame.rssHeadlines.push_back({feed.items[headline].title, feed.items[headline].summary, L""});
+            }
+            if (frame.activationArguments.empty()) frame.activationArguments = L"--tile-setup " + tile.id;
+            if (std::wstring(aip::content::FindSecondaryTileDescriptor(tile.id)->source) == L"Notes" &&
+                notesSnapshots[cfg.entries[contentIndex].notesResource].state == aip::notes::StateKind::Error)
+                frame.activationArguments = L"--tile-setup " + tile.id + L" --tile-sign-in";
+            frame.secondaryFrameKey = ContentSnapshotKey(frame);
+            appendReady(std::move(frame));
+        }
+        if (unavailable != lastSecondaryBackgroundError) {
+            lastSecondaryBackgroundError = unavailable;
+            if (!unavailable.empty()) LogText(L"Separate tile background unavailable: " + unavailable);
+        }
+        PublishSecondarySnapshots(frames);
+        if (primaryReady && !frameReadySeen) {
+            frameReadySeen = true;
+            if (g_hwnd && !g_contentFrameReadyPosted.exchange(true) &&
+                !PostMessageW(g_hwnd, WM_APP_CONTENT_FRAME_READY, 0, 0)) g_contentFrameReadyPosted = false;
+        }
+        if (synchronous || !queueGeneration) return primaryReady || !frames.empty();
+        if (!ContentDirectLiveDeliveryAvailable()) {
+            // Registration/helper fallback keeps only Content.1 on the primary
+            // tile. Source tiles wait for direct delivery rather than cycling
+            // their information onto the wallpaper tile.
+            const auto frame = ContentSnapshotKey(snapshot);
+            if (primaryReady && frame != lastFrame && !GenerationWorkPending() &&
+                GetTickCount64() >= g_contentQueueRetryAfter.load() &&
+                DESKTOPSTUB_CONTENT_QUEUE_GENERATE(snapshot.backgroundPath, L"Primary tile awaiting direct source-tile delivery") != 0)
+                lastFrame = frame;
+            return primaryReady;
+        }
+        if (!GenerationWorkPending() && GetTickCount64() >= g_contentQueueRetryAfter.load()) {
+            auto changed = PrepareSecondaryBatch(frames);
+            if (!changed.empty()) DESKTOPSTUB_SECONDARY_BATCH_GENERATE(std::move(changed), L"Changed separate tile contents");
+        }
+        return primaryReady || !frames.empty();
+    }
     if (nativeQueue) {
         std::vector<aip::content::Snapshot> frames;
         for (std::size_t contentIndex = 0; contentIndex < cfg.entries.size(); ++contentIndex)

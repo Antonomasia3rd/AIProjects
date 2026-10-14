@@ -1,6 +1,8 @@
 #requires -Version 7.0
-param([string]$HostBinary, [string]$BrokerBinary)
+param([string]$HostBinary, [string]$BrokerBinary, [switch]$LegacyMultipleHosts)
 # Prepare only: no package registration, resident, Startup, account or device action.
+# Compatibility only: new setup is DesktopStub tray > Tiles, with one resident.
+if (-not $LegacyMultipleHosts) { throw 'Use DesktopStub tray > Tiles for one-process setup. This legacy copied-host tool requires -LegacyMultipleHosts.' }
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ReviewValidation.ps1')
 if (-not $HostBinary) { $HostBinary=Join-Path $ReviewRoot 'DesktopStub/build/DesktopStub.exe' }
