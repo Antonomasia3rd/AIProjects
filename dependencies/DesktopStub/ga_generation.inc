@@ -66,6 +66,7 @@ static unsigned long long g_generationQueuedId = 0;
 static std::vector<aip::content::Snapshot> g_generationQueuedSnapshots;
 static std::map<std::wstring, std::vector<LiveTileUpdateAsset>> g_nativeQueueAssets;
 static std::map<std::wstring, std::vector<LiveTileUpdateAsset>> g_secondaryTileAssets;
+static std::vector<LiveTileUpdateAsset> g_primaryTileAssets;
 static void RetainSecondaryTileAssets(const aip::content::Snapshot& frame, const std::vector<LiveTileUpdateAsset>& assets)
 {
     if (frame.galleryFrame && frame.nativeQueueReset) {
@@ -75,6 +76,18 @@ static void RetainSecondaryTileAssets(const aip::content::Snapshot& frame, const
         }
     }
     g_secondaryTileAssets[SecondaryDeliveryKey(frame)] = assets;
+}
+static void RetainPublishedLiveTileAssets(const aip::content::Snapshot& frame, const std::vector<LiveTileUpdateAsset>& assets)
+{
+    if (!frame.secondaryTileId.empty()) RetainSecondaryTileAssets(frame, assets);
+    else if (frame.nativeQueue) {
+        g_primaryTileAssets.clear();
+        if (frame.nativeQueueReset) g_nativeQueueAssets.clear();
+        g_nativeQueueAssets[frame.nativeQueueTag] = assets;
+    } else {
+        g_nativeQueueAssets.clear();
+        g_primaryTileAssets = assets;
+    }
 }
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath);
 static std::mutex g_generatedAssetPrecacheMutex;
@@ -190,6 +203,8 @@ static bool IsKeptLiveTileAssetPath(
     for (const auto& item : g_nativeQueueAssets)
         for (const auto& asset : item.second)
             if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file))) return true;
+    for (const auto& asset : g_primaryTileAssets)
+        if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file))) return true;
     for (const auto& item : g_secondaryTileAssets)
         for (const auto& asset : item.second)
             if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file))) return true;
@@ -2542,12 +2557,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     {
         if (liveTileUpdateMode)
         {
-            if (!contentScope.snapshot.secondaryTileId.empty()) {
-                RetainSecondaryTileAssets(contentScope.snapshot, liveTileUpdateAssets);
-            } else if (contentScope.snapshot.nativeQueue) {
-                if (contentScope.snapshot.nativeQueueReset) g_nativeQueueAssets.clear();
-                g_nativeQueueAssets[contentScope.snapshot.nativeQueueTag] = liveTileUpdateAssets;
-            } else g_nativeQueueAssets.clear();
+            RetainPublishedLiveTileAssets(contentScope.snapshot, liveTileUpdateAssets);
             if (!contentScope.snapshot.galleryFrame) CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
             DeleteOldVersionedLiveTileAssets(exeDir, liveTileUpdateAssets);
         }

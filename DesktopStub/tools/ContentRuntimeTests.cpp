@@ -153,6 +153,7 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "GalleryPinBatchHostTests.inc"
 #include "TileStatusHostTests.inc"
 #include "GalleryUiFlowHostTests.inc"
+#include "PrimaryAssetRetentionHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
@@ -1397,6 +1398,7 @@ int wmain()
     TestGalleryPinBatchHost();
     TestTileStatusHost();
     TestGalleryUiFlowHost();
+    TestPrimaryAssetRetentionHost(directory);
     TestContentPresetsAndImportConfirmation();
     fixtureGroup("Discord advanced profile");
     TestDiscordAdvancedHost();

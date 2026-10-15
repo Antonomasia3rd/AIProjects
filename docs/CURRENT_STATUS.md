@@ -6,6 +6,12 @@ complete does not close the whole repository review.
 
 ## Saved and installed
 
+- Follow-up: the primary tile could lose its referenced images to cleanup after
+  source/gallery updates, despite successful delivery. The cause and regression
+  fix are recorded in [primary image retention](primary-tile-retention-2026-10-15.md).
+  The fix is installed after 14,419 passing host checks and clean scans; its
+  primary files survived subsequent gallery pruning and the resident passed
+  its guarded startup check. Existing settings and pins were preserved.
 - The 2026-10-15 gallery/menu follow-up is built, scanned, validated and installed:
   1,024 configured photo tiles, folder groups, queued pin prompts, pinned-driven
   updates, menu/wording cleanup, prepared status parity and original game-row
