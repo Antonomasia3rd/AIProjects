@@ -10,6 +10,17 @@
 static bool contentNativeQueueAvailable = false, contentNativeQueueTestActive = false, contentQueueNormalAckEnabled = true;
 static std::vector<std::vector<aip::content::Snapshot>> secondaryTestBatches;
 static bool secondaryTestPinned = true;
+static int secondaryAppearancePosts = 0, secondaryAppearanceRefreshes = 0;
+static bool secondaryAppearancePostSucceeds = true;
+static HWND secondaryAppearanceDestination = nullptr;
+static UINT secondaryAppearanceMessage = 0;
+static bool ContentTestAppearancePost(HWND window, UINT message) {
+    ++secondaryAppearancePosts; secondaryAppearanceDestination = window; secondaryAppearanceMessage = message;
+    return secondaryAppearancePostSucceeds;
+}
+static void ContentTestAppearanceRefresh(HWND window) { ++secondaryAppearanceRefreshes; secondaryAppearanceDestination = window; }
+#define DESKTOPSTUB_TEST_APPEARANCE_POST(window, message) ContentTestAppearancePost(window, message)
+#define DESKTOPSTUB_TEST_APPEARANCE_REFRESH(window) ContentTestAppearanceRefresh(window)
 static unsigned long long ContentTestSecondaryBatch(std::vector<aip::content::Snapshot>, std::wstring);
 #define DESKTOPSTUB_TEST_SECONDARY_EXISTS(id) secondaryTestPinned
 #define DESKTOPSTUB_SECONDARY_BATCH_GENERATE ContentTestSecondaryBatch

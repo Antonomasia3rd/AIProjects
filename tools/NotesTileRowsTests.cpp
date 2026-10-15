@@ -29,15 +29,16 @@ int main() {
         data.state = StateKind::Loading;
         Check(BuildNoteTileRows(data).size() == 1, "loading cannot leak stale details");
         data.state = StateKind::Ok; data.resource = ResourceKind::Stamina;
+        data.line1 = L"20/200"; data.line2 = L"2h 0m";
         data.details = {{DetailId::Training,L"100/500"},{DetailId::Expeditions,L"2/4"},
             {DetailId::Reserve,L"12/2400"},{DetailId::EchoOfWar,L"1/3"}};
         rows = BuildNoteTileRows(data);
-        Check(rows.size() == 5 && rows.front().primary.find(L"Trailblaze Power") == 0, "HSR includes its own resource and activities");
+        Check(rows.size() == 5 && rows.front().primary == L"Power 20/200", "HSR uses a short resource heading that keeps its count visible on Medium");
         Check(rows.back().primary == L"Echo of War", "HSR weekly activity remains available");
         data.resource = ResourceKind::Charge;
         data.details = {{DetailId::Engagement,L"20/400"},{DetailId::ScratchCard,L"Incomplete"},{DetailId::VideoStore,L"Open"}};
         rows = BuildNoteTileRows(data);
-        Check(rows.size() == 4 && rows.front().primary.find(L"Battery Charge") == 0, "ZZZ overview has resource and three supported activities");
+        Check(rows.size() == 4 && rows.front().primary == L"Charge 20/200", "ZZZ uses a short resource heading with its three supported activities");
         Check(rows[2].primary == L"Scratch Card" && rows[2].secondary == L"Incomplete", "scratch card state is retained");
         rows = BuildNoteTileRows(data, DetailId::VideoStore);
         Check(rows.size() == 1 && rows[0].primary == L"Video Store", "explicit individual-detail preference remains a single row");

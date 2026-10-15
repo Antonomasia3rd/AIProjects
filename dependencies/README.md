@@ -186,6 +186,16 @@ code for nothing:
   cannot drift. Its inactive-refresh flag
   lets read-only data preload while output/device sources follow the active
   content entry.
+- `tile_appearance.h`: platform-neutral secondary appearance configuration,
+  color/branding normalization and native property plans. Source tile sections
+  and the MediaActions group use the same Transparent/Color background and
+  Auto/None/Logo/Name/NameAndLogo branding choices; defaults are Transparent and
+  Name. `secondary_tiles.h` owns the source mappings, `tile_actions.h` owns the
+  action catalog, and `tile_visual_assets.h/.inc` share versioned topic/glyph
+  artwork with no default painted background. Raw profile loads, staged tray
+  documents, preset candidates and typed CLI changes validate the same fields.
+  DesktopStub's native adapter publishes the appearance plan to existing pins.
+  See [the appearance record](../docs/tile-appearance-2026-10-15.md).
 - `content_sources/notes.inc`: the extracted Real-Time Notes data engine for
   Genshin resin, Star Rail stamina, and ZZZ charge. Hosts supply explicit account
   values and cancellation; `Fetch` returns a typed count/recovery/status

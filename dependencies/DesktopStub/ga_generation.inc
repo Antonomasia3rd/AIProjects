@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Tile generation
 // -----------------------------------------------------------------------------
 #include "../png_crc32.h"
@@ -2970,6 +2970,7 @@ void PollThread()
         int deb = IniReadClampedI(L"Settings", L"DebounceMinMs", 1200, 0, 60000);
         ReloadRuntimeSettingsFromIni();
         QueueDesktopStubPackagedStartupSync();
+        PollSecondaryTileAppearance();
 
         if (CompositionRequested())
         {

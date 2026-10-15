@@ -11,6 +11,14 @@ The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale
 **Tiles** manages the primary wallpaper and six source tiles from one resident.
 Existing pins receive their own static topic logos automatically after an upgrade.
 **Quick Actions** offers direct per-action pinning without an enable switch.
+Source tiles and Quick Actions default to transparent fallback icons and
+name-only branding, hiding the small corner logo while live content is shown.
+Use **Tiles > your source > Appearance** or **Quick Actions > Appearance** to
+choose a solid background, a custom color, or different name/logo branding.
+Each source saves these choices under its `Tile.<source>` INI section; Quick
+Actions share `MediaActions`. The same settings accept `--set`, for example
+`--set Tile.smtc.Branding=None`. See the
+[appearance settings](../docs/tile-appearance-2026-10-15.md) for all values.
 Now playing appearance can use current playback status, the player icon, or no
 icon, with optional repeat/shuffle indicators. Game tiles stack the available
 resource/activity fields. For sign-in, open the game-specific embedded window,

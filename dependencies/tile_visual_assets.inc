@@ -157,12 +157,12 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
 }
 
 inline bool EnsureTileTopicAssets(const std::wstring& key, const std::wstring& directory,
-        Assets& result, std::wstring& error) {
+        Assets& result, std::wstring& error, AssetBackground background = {}) {
     result = {}; error.clear();
     const auto* topic = FindTopic(key);
     if (!topic || directory.empty()) { error = L"Unknown tile artwork topic or empty package directory."; return false; }
     static std::mutex mutex; std::lock_guard<std::mutex> lock(mutex);
-    const auto plan = AssetPlan(*topic, FontForGlyph(topic->glyph));
+    const auto plan = AssetPlan(*topic, FontForGlyph(topic->glyph), background);
     const auto cachedKey = directory + L"/" + plan.front().relative;
     static std::set<std::wstring> ensured;
     const auto publish = [&] { result = {plan[0].relative, plan[1].relative, plan[2].relative, plan[3].relative, plan[4].relative, plan[5].relative}; };
@@ -195,22 +195,15 @@ inline bool EnsureTileTopicAssets(const std::wstring& key, const std::wstring& d
         Bitmap bitmap(static_cast<INT>(asset.width), static_cast<INT>(asset.height), PixelFormat32bppARGB);
         Graphics graphics(&bitmap);
         if (bitmap.GetLastStatus() != Ok || graphics.GetLastStatus() != Ok) { error = L"Could not create tile artwork bitmap."; return false; }
-        graphics.Clear(Color(0, 0, 0, 0)); graphics.SetSmoothingMode(SmoothingModeAntiAlias);
-        const BYTE r = static_cast<BYTE>(topic->rgb >> 16), g = static_cast<BYTE>(topic->rgb >> 8), b = static_cast<BYTE>(topic->rgb);
+        const BYTE r = static_cast<BYTE>(background.rgb >> 16), g = static_cast<BYTE>(background.rgb >> 8), b = static_cast<BYTE>(background.rgb);
+        // Clear paints every pixel exactly, including the boundary. An
+        // antialiased rectangle leaves partially transparent edge pixels.
+        graphics.Clear(asset.transparent ? Color(0, 0, 0, 0) : Color(255, r, g, b));
+        graphics.SetSmoothingMode(SmoothingModeAntiAlias);
         const REAL width = static_cast<REAL>(asset.width), height = static_cast<REAL>(asset.height);
-        if (!asset.transparent) {
-            LinearGradientBrush background(PointF(0, 0), PointF(width, height), Color(255, r, g, b),
-                Color(255, static_cast<BYTE>(r * .66), static_cast<BYTE>(g * .66), static_cast<BYTE>(b * .66)));
-            graphics.FillRectangle(&background, 0.0f, 0.0f, width, height);
-            SolidBrush halo(Color(20, 255, 255, 255));
-            const REAL haloSize = (std::min)(width, height) * .8f;
-            graphics.FillEllipse(&halo, (width - haloSize) / 2, (height - haloSize) / 2, haloSize, haloSize);
-        } else if (!IsMonochromeTopic(*topic)) {
-            SolidBrush badge(Color(255, r, g, b));
-            graphics.FillEllipse(&badge, width * .06f, height * .06f, width * .88f, height * .88f);
-        }
         const REAL side = (std::min)(width, height) * .64f;
-        if (!DrawTileTopicGlyph(graphics, topic->key, RectF((width - side) / 2, (height - side) / 2, side, side))) {
+        const auto ink = DarkArtworkInk(background) ? Color(255, 20, 20, 20) : Color(255, 255, 255, 255);
+        if (!DrawTileTopicGlyph(graphics, topic->key, RectF((width - side) / 2, (height - side) / 2, side, side), ink)) {
             error = L"Could not draw tile topic glyph."; return false;
         }
         const auto temporary = path + L".tmp-" + std::to_wstring(GetCurrentProcessId());

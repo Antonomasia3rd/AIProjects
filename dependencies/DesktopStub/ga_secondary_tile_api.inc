@@ -7,13 +7,49 @@
 #include "../winrt_activation.h"
 #include <winrt/Windows.UI.StartScreen.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.UI.h>
 #include <shobjidl.h>
 #include <deque>
 #include <set>
 
 static constexpr UINT WM_APP_SECONDARY_TILE_COMPLETE = WM_APP + 113;
+static constexpr UINT WM_APP_SECONDARY_APPEARANCE_CHANGED = WM_APP + 115;
 static constexpr int SECONDARY_TILE_CANCEL_ID = 51001;
 static void WakePollThread();
+static bool RequestRefreshExistingSecondaryTileLogos(HWND owner, bool force = false);
+static aip::content::AppearanceRefreshNotice g_secondaryAppearanceNotice;
+
+static bool CurrentSecondaryAppearanceFingerprint(std::wstring& result)
+{
+    // Refresh through the established cache, then use one immutable document
+    // for all 21 fields. Account/text values never enter the fingerprint.
+    std::wstring ignored;
+    ReadIniValueCached(L"MediaActions", L"Branding", ignored);
+    std::vector<IniSectionData> document;
+    { std::lock_guard<std::mutex> lock(g_iniCacheMutex); if (!g_iniCacheLoaded) return false; document = g_iniCacheDoc; }
+    const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        std::wstring value;
+        return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+    };
+    std::wstring error;
+    return aip::content::ReadSecondaryAppearanceFingerprint(read, result, error);
+}
+static void PollSecondaryTileAppearance()
+{
+#if defined(DESKTOPSTUB_INERT_HARDWARE) && !defined(DESKTOPSTUB_TEST_APPEARANCE_POST)
+    return;
+#else
+    if (!g_hwnd) return;
+    std::wstring fingerprint;
+    if (!CurrentSecondaryAppearanceFingerprint(fingerprint) || !g_secondaryAppearanceNotice.Observe(fingerprint)) return;
+#ifdef DESKTOPSTUB_TEST_APPEARANCE_POST
+    const bool posted = DESKTOPSTUB_TEST_APPEARANCE_POST(g_hwnd, WM_APP_SECONDARY_APPEARANCE_CHANGED);
+#else
+    const bool posted = PostMessageW(g_hwnd, WM_APP_SECONDARY_APPEARANCE_CHANGED, 0, 0) != FALSE;
+#endif
+    if (!posted) g_secondaryAppearanceNotice.PostFailed();
+#endif
+}
 
 [[maybe_unused]] static std::wstring CanonicalSecondaryTileRuntimeId(std::wstring id)
 {
@@ -61,6 +97,7 @@ struct Pending {
     BoolOperation mutation{nullptr};
     TileListOperation list{nullptr};
     aip::tile_visual::Assets expectedLogos;
+    aip::content::PublishedTileAppearance expectedAppearance;
 };
 static std::shared_ptr<Apartment> apartment;
 static DWORD uiThread = 0;
@@ -72,9 +109,11 @@ static bool shuttingDown = false;
 static std::mutex pinnedMutex;
 static std::set<std::wstring> pinned;
 static bool logoRefreshAttempted = false;
+static bool logoRefreshAgain = false;
 static std::deque<NativeTile> logoRefreshQueue;
 static bool logoEnumerationCompleted = false, logoVerificationStarted = false;
 static std::map<std::wstring, aip::tile_visual::Assets> logoRefreshExpected;
+static std::map<std::wstring, aip::content::PublishedTileAppearance> appearanceRefreshExpected;
 
 static void Report(HWND owner, const std::wstring& text)
 {
@@ -191,12 +230,48 @@ static void ApplyLogos(NativeTile& tile, const aip::tile_visual::Assets& logos)
     auto visuals = tile.VisualElements();
     aip::tile_visual::ApplyTopicLogos(visuals, logos, AssetUri);
 }
+static aip::content::TileAppearance ConfiguredAppearance(const std::wstring& id)
+{
+    const auto section = id.compare(0, 10, L"AipAction_") == 0 ? std::wstring(L"MediaActions") :
+        aip::content::SecondaryTileSection(id.substr(10));
+    aip::content::TileAppearance appearance; std::wstring error;
+    if (!aip::content::ReadTileAppearance(IniReadS, section, appearance, error))
+        throw winrt::hresult_error(E_INVALIDARG, winrt::hstring(error));
+    return appearance;
+}
+static aip::content::PublishedTileAppearance ReadAppearance(const NativeTile& tile)
+{
+    const auto visuals = tile.VisualElements(); const auto color = visuals.BackgroundColor();
+    return {(static_cast<std::uint32_t>(color.A) << 24) | (static_cast<std::uint32_t>(color.R) << 16) |
+        (static_cast<std::uint32_t>(color.G) << 8) | color.B,
+        visuals.ShowNameOnSquare150x150Logo(), visuals.ShowNameOnWide310x150Logo(), visuals.ShowNameOnSquare310x310Logo(),
+        visuals.ForegroundText() == winrt::Windows::UI::StartScreen::ForegroundText::Dark};
+}
+static void ApplyAppearance(NativeTile& tile, const aip::content::PublishedTileAppearance& appearance)
+{
+    auto visuals = tile.VisualElements();
+    aip::content::ApplyPublishedTileAppearance(visuals, appearance, [](std::uint32_t argb) {
+        return winrt::Windows::UI::Color{static_cast<BYTE>(argb >> 24), static_cast<BYTE>(argb >> 16),
+            static_cast<BYTE>(argb >> 8), static_cast<BYTE>(argb)};
+    }, winrt::Windows::UI::StartScreen::ForegroundText::Dark, winrt::Windows::UI::StartScreen::ForegroundText::Light);
+}
+static bool PrepareAppearanceAssets(const std::wstring& id, aip::tile_visual::Assets& logos,
+    aip::content::PublishedTileAppearance& published, std::wstring& error)
+{
+    const auto configured = ConfiguredAppearance(id);
+    const auto* topic = aip::tile_visual::FindTopic(id);
+    if (!topic) { error = L"Unknown tile artwork topic."; return false; }
+    published = aip::content::PublishTileAppearance(configured, topic->rgb);
+    return aip::tile_visual::EnsureTileTopicAssets(id, GetExeDir(), logos, error,
+        {configured.background == L"Color", aip::content::TileAppearanceRgb(configured, topic->rgb)});
+}
 static NativeTile CreatePinTile(const std::wstring& id, const std::wstring& name)
 {
     using namespace winrt::Windows::UI::StartScreen;
     aip::tile_visual::Assets logos;
+    aip::content::PublishedTileAppearance appearance;
     std::wstring artworkError;
-    if (!aip::tile_visual::EnsureTileTopicAssets(id, GetExeDir(), logos, artworkError))
+    if (!PrepareAppearanceAssets(id, logos, appearance, artworkError))
         throw winrt::hresult_error(E_FAIL, winrt::hstring(artworkError));
     const auto factory = aip::AcquireUncachedActivationFactory<NativeTile, ISecondaryTileFactory2>();
     std::wstring profile;
@@ -209,16 +284,19 @@ static NativeTile CreatePinTile(const std::wstring& id, const std::wstring& name
     if (arguments.size() > 2048) throw winrt::hresult_error(E_INVALIDARG, L"The profile path is too long for Windows secondary tile activation arguments.");
     auto tile = factory.CreateMinimalTile(id, name, arguments, AssetUri(logos.medium), TileSize::Default);
     ApplyLogos(tile, logos);
-    auto visuals = tile.VisualElements();
-    visuals.ShowNameOnSquare150x150Logo(true);
-    visuals.ShowNameOnWide310x150Logo(true);
-    visuals.ShowNameOnSquare310x310Logo(true);
+    ApplyAppearance(tile, appearance);
     return tile;
 }
 static bool UserMutationPending()
 {
     return std::any_of(pending.begin(), pending.end(), [](const auto& item) {
         return item.second.kind == Kind::Pin || item.second.kind == Kind::Unpin;
+    });
+}
+static bool AppearanceRefreshPending()
+{
+    return !logoRefreshQueue.empty() || std::any_of(pending.begin(), pending.end(), [](const auto& item) {
+        return item.second.kind == Kind::RefreshList || item.second.kind == Kind::RefreshLogo || item.second.kind == Kind::VerifyLogos;
     });
 }
 static void StartNextLogoRefresh()
@@ -235,18 +313,22 @@ static void StartNextLogoRefresh()
             state.id = std::wstring(state.tile.TileId());
             if (!aip::tile_visual::IsKnownSecondaryArtworkId(state.id)) continue;
             aip::tile_visual::Assets logos; std::wstring error;
-            if (!aip::tile_visual::EnsureTileTopicAssets(state.id, GetExeDir(), logos, error)) {
+            if (!PrepareAppearanceAssets(state.id, logos, state.expectedAppearance, error)) {
                 Log(L"[!] Source tile %ls artwork refresh skipped: %ls", state.id.c_str(), error.c_str()); continue;
             }
             state.expectedLogos = aip::tile_visual::LogoUris(logos);
             logoRefreshExpected[state.id] = state.expectedLogos;
+            appearanceRefreshExpected[state.id] = state.expectedAppearance;
             const auto before = ReadLogos(state.tile);
             LogLogoMetadata(state.id, before);
-            if (!aip::tile_visual::NeedsTopicLogoUpdate(state.id, before, state.expectedLogos)) continue;
+            if (!aip::tile_visual::NeedsTopicLogoUpdate(state.id, before, state.expectedLogos) &&
+                aip::content::SamePublishedTileAppearance(ReadAppearance(state.tile), state.expectedAppearance)) continue;
             // This is the existing FindAllAsync object. Preserve its ID, name,
-            // arguments, color, branding and current Start placement. No pin or
+            // arguments and current Start placement. Only configured logos,
+            // background and branding are refreshed. No pin or
             // notification API is called by this migration.
             ApplyLogos(state.tile, logos);
+            ApplyAppearance(state.tile, state.expectedAppearance);
             state.mutation = state.tile.UpdateAsync();
             auto inserted = pending.emplace(request, std::move(state));
             const std::weak_ptr<Mailbox> weak = mailbox; const auto destination = host;
@@ -283,6 +365,10 @@ static void StartNextLogoRefresh()
             LogText(L"[!] Could not reread source tile logo metadata after updating existing pins.");
         }
     }
+    if (!shuttingDown && logoRefreshAgain && !AppearanceRefreshPending()) {
+        logoRefreshAgain = false;
+        ::RequestRefreshExistingSecondaryTileLogos(host, true);
+    }
 }
 static bool RequestMutation(HWND owner, const std::wstring& supplied, const std::wstring& name, bool pin)
 {
@@ -290,7 +376,8 @@ static bool RequestMutation(HWND owner, const std::wstring& supplied, const std:
     if (id.empty() || !EnsureUi(owner)) return false;
     const auto keepApartment = apartment;
     if (std::any_of(pending.begin(), pending.end(), [](const auto& item) {
-        return item.second.kind == Kind::Pin || item.second.kind == Kind::Unpin || item.second.kind == Kind::RefreshLogo;
+        return item.second.kind == Kind::Pin || item.second.kind == Kind::Unpin || item.second.kind == Kind::RefreshLogo ||
+            item.second.kind == Kind::RefreshList || item.second.kind == Kind::VerifyLogos;
     })) {
         Report(owner, UserMutationPending() ? L"Finish or cancel the current Start tile confirmation before opening another." :
             L"Windows is finishing the current tile update. Please try this action again in a moment.");
@@ -395,15 +482,20 @@ static bool RequestSecondaryTileList(HWND owner)
 }
 // Normal startup upgrade hook. Existing pins are refreshed in place; missing
 // destinations are never pinned and current notifications are never cleared.
-static bool RequestRefreshExistingSecondaryTileLogos(HWND owner)
+static bool RequestRefreshExistingSecondaryTileLogos(HWND owner, bool force)
 {
 #ifdef DESKTOPSTUB_INERT_HARDWARE
-    (void)owner; return false;
+    (void)owner; (void)force; return false;
 #else
     using namespace secondary_ui;
     if (!EnsureUi(owner, true)) return false;
+    std::wstring scheduledFingerprint;
+    if (CurrentSecondaryAppearanceFingerprint(scheduledFingerprint)) g_secondaryAppearanceNotice.RecordScheduled(scheduledFingerprint);
     const auto keepApartment = apartment;
-    if (logoRefreshAttempted) return true;
+    if (AppearanceRefreshPending() || UserMutationPending()) { if (force) logoRefreshAgain = true; return true; }
+    if (logoRefreshAttempted && !force) return true;
+    logoEnumerationCompleted = false; logoVerificationStarted = false;
+    logoRefreshExpected.clear(); appearanceRefreshExpected.clear();
     const auto request = ++nextId;
     try {
         Pending state; state.kind = Kind::RefreshList;
@@ -434,6 +526,16 @@ static std::vector<std::wstring> ListKnownSecondaryTileIds()
 static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
     (void)wParam; (void)lParam;
+    if (message == WM_APP_SECONDARY_APPEARANCE_CHANGED && window == g_hwnd) {
+        if (g_secondaryAppearanceNotice.Consume()) {
+#ifdef DESKTOPSTUB_TEST_APPEARANCE_REFRESH
+            DESKTOPSTUB_TEST_APPEARANCE_REFRESH(window);
+#elif !defined(DESKTOPSTUB_INERT_HARDWARE)
+            RequestRefreshExistingSecondaryTileLogos(window, true);
+#endif
+        }
+        return true;
+    }
 #ifdef DESKTOPSTUB_INERT_HARDWARE
     (void)window; (void)message; return false;
 #else
@@ -464,10 +566,14 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
                         const auto expected = logoRefreshExpected.find(id);
                         if (expected != logoRefreshExpected.end()) {
                             const auto actual = ReadLogos(tile);
+                            const auto appearance = appearanceRefreshExpected.find(id);
+                            const bool matches = aip::tile_visual::SamePublishedLogos(actual, expected->second) &&
+                                appearance != appearanceRefreshExpected.end() &&
+                                aip::content::SamePublishedTileAppearance(ReadAppearance(tile), appearance->second);
                             LogLogoMetadata(id, actual);
                             Log(L"%ls Source tile %ls topic logo metadata %ls after update.",
-                                aip::tile_visual::SamePublishedLogos(actual, expected->second) ? L"[+]" : L"[!]", id.c_str(),
-                                aip::tile_visual::SamePublishedLogos(actual, expected->second) ? L"verified" : L"did not match the requested assets");
+                                matches ? L"[+]" : L"[!]", id.c_str(),
+                                matches ? L"verified with configured background/branding" : L"did not match the requested appearance");
                         }
                     }
                 }
@@ -514,7 +620,7 @@ static void ShutdownSecondaryTileUi()
         try { if (item.second.mutation) item.second.mutation.Cancel(); if (item.second.list) item.second.list.Cancel(); } catch (...) {}
         if (item.second.owner && IsWindow(item.second.owner)) DestroyWindow(item.second.owner);
     }
-    pending.clear(); logoRefreshQueue.clear(); logoRefreshExpected.clear(); mailbox.reset();
+    pending.clear(); logoRefreshQueue.clear(); logoRefreshExpected.clear(); appearanceRefreshExpected.clear(); mailbox.reset();
     apartment.reset(); uiThread = 0; host = nullptr;
 #endif
 }

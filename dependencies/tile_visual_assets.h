@@ -90,12 +90,23 @@ template<class Available> FontStyle SelectFont(Glyph glyph, Available available)
         if (available(style, native.primary) && (!native.secondary || available(style, native.secondary))) return style;
     return FontStyle::Vector;
 }
-inline std::vector<Asset> AssetPlan(const Topic& topic, FontStyle style = FontStyle::Vector) {
-    const auto base = std::wstring(L"Assets/TopicTiles/v2/") +
-        (style == FontStyle::Fluent ? L"fluent/" : style == FontStyle::Mdl2 ? L"mdl2/" : L"vector/") + topic.key + L"/";
-    const bool plain = IsMonochromeTopic(topic);
-    return {{base + L"Medium.png", 150, 150, plain}, {base + L"Wide.png", 310, 150, plain},
-        {base + L"Large.png", 310, 310, plain}, {base + L"Small.png", 70, 70, true},
+struct AssetBackground { bool colored = false; std::uint32_t rgb = 0; };
+inline std::wstring BackgroundAssetKey(AssetBackground background) {
+    if (!background.colored) return L"transparent";
+    std::wstring hex(6, L'0');
+    for (int i = 5; i >= 0; --i) { hex[static_cast<std::size_t>(i)] = L"0123456789ABCDEF"[background.rgb & 15u]; background.rgb >>= 4; }
+    return L"color" + hex;
+}
+inline bool DarkArtworkInk(AssetBackground background) {
+    return background.colored && (((background.rgb >> 16) & 255u) * 299u +
+        ((background.rgb >> 8) & 255u) * 587u + (background.rgb & 255u) * 114u) >= 160000u;
+}
+inline std::vector<Asset> AssetPlan(const Topic& topic, FontStyle style = FontStyle::Vector, AssetBackground background = {}) {
+    const auto base = std::wstring(L"Assets/TopicTiles/v3/") +
+        (style == FontStyle::Fluent ? L"fluent/" : style == FontStyle::Mdl2 ? L"mdl2/" : L"vector/") +
+        BackgroundAssetKey(background) + L"/" + topic.key + L"/";
+    return {{base + L"Medium.png", 150, 150, !background.colored}, {base + L"Wide.png", 310, 150, !background.colored},
+        {base + L"Large.png", 310, 310, !background.colored}, {base + L"Small.png", 70, 70, !background.colored},
         {base + L"Logo44.png", 44, 44, true}, {base + L"Logo30.png", 30, 30, true}};
 }
 struct Assets { std::wstring medium, wide, large, smallTile, logo44, logo30; };

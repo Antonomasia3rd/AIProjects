@@ -16,8 +16,8 @@ inline const wchar_t* ResourceTileTopic(ResourceKind resource) {
 inline const wchar_t* ResourceTileLabel(ResourceKind resource) {
     switch (resource) {
     case ResourceKind::Resin: return L"Resin";
-    case ResourceKind::Stamina: return L"Trailblaze Power";
-    case ResourceKind::Charge: return L"Battery Charge";
+    case ResourceKind::Stamina: return L"Power";
+    case ResourceKind::Charge: return L"Charge";
     default: return L"Game resource";
     }
 }

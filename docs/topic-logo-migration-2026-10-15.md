@@ -1,5 +1,11 @@
 # Existing tile logos and native icon artwork, 2026-10-15
 
+Later user feedback confirmed the topic fallbacks were visible, then requested
+transparent plates and configurable branding. The current default appearance
+supersedes the colored source-background description below; see
+[tile-appearance-2026-10-15.md](tile-appearance-2026-10-15.md). Historical evidence
+and the earlier validation boundary are retained here.
+
 ## Finding and scope
 
 The user's screenshot shows the six source tiles reverting to the Desktop

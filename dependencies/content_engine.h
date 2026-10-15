@@ -145,6 +145,7 @@ struct Snapshot {
     bool nativeQueue = false, nativeQueueReset = false;
     std::wstring nativeQueueTag, nativeQueueLayout, nativeQueueFrameKey;
     std::wstring secondaryTileId, secondaryFrameKey;
+    std::wstring secondaryBranding;
     std::vector<Text> rssHeadlines;
     std::vector<Text> detailRows;
     std::wstring detailTopic;

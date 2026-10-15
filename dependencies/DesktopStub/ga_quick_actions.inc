@@ -3,9 +3,11 @@ static constexpr UINT ID_QUICK_ACTIONS_VOLUME = 29001;
 static constexpr UINT ID_QUICK_ACTIONS_CLICK = 29100;
 static constexpr UINT ID_QUICK_ACTIONS_SETUP = 29199;
 static constexpr UINT ID_QUICK_ACTIONS_PIN = 29200;
+static constexpr UINT ID_QUICK_ACTIONS_APPEARANCE = 29300;
 static void AppendQuickActionsMenu(HMENU parent)
 {
     HMENU menu = aip::BeginTrayNestedMenu(parent);
+    AppendTileAppearanceMenu(menu, L"MediaActions", ID_QUICK_ACTIONS_APPEARANCE);
     aip::AppendTrayMenuItem(menu, ID_QUICK_ACTIONS_VOLUME, L"Volume step (%)...", false, true);
     HMENU click = aip::BeginTrayNestedMenu(menu);
     const auto current = IniReadS(L"Tile.smtc", L"ClickAction", L"toggle");
@@ -28,6 +30,7 @@ static void AppendQuickActionsMenu(HMENU parent)
 }
 static bool DispatchQuickActionsCommand(HWND owner, UINT command)
 {
+    if (DispatchTileAppearanceCommand(owner, command, ID_QUICK_ACTIONS_APPEARANCE, L"MediaActions")) return true;
     if (command == ID_QUICK_ACTIONS_VOLUME) {
         auto value = IniReadS(L"MediaActions", L"VolumeStepPercent", L"5");
         if (ShowTextInputDialog(owner, L"Media volume", L"Change the default output volume by this many percentage points (1–100)", value, true) == IDOK)

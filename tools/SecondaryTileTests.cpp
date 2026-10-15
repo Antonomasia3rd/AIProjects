@@ -75,6 +75,66 @@ void TestMapping() {
     Check(NormalizeSecondaryTileSetting(L"tile.SMTC", L"enabled", value, error) && value == L"1",
         "generic settings normalization shares mapping boolean semantics");
 }
+void TestAppearance() {
+    Profile profile; SecondaryTileConfiguration tiles; std::wstring error;
+    Check(ReadSecondaryTileConfiguration(profile, 1, tiles, error), "old profiles read secondary appearance defaults");
+    for (const auto& tile : tiles.tiles) Check(tile.appearance.background == L"Transparent" && tile.appearance.branding == L"Name" &&
+        tile.appearance.backgroundColor == L"Auto", "each source defaults to transparent fallback and name-only branding");
+    TileAppearance actionAppearance;
+    Check(ReadTileAppearance(profile, L"MediaActions", actionAppearance, error) && actionAppearance.background == L"Transparent" &&
+        actionAppearance.branding == L"Name", "shared action appearance reader uses the same missing-field defaults");
+    for (const auto& entry : {std::make_pair(L"Background", L"Wallpaper"), std::make_pair(L"Branding", L"BadBranding"),
+            std::make_pair(L"BackgroundColor", L"#GGGGGG")}) {
+        Profile invalid; invalid.Set(L"MediaActions", entry.first, entry.second);
+        Check(!ReadTileAppearance(invalid, L"MediaActions", actionAppearance, error) &&
+            error.find(std::wstring(L"MediaActions.") + entry.first) != std::wstring::npos &&
+            actionAppearance.background == L"Transparent" && actionAppearance.branding == L"Name" && actionAppearance.backgroundColor == L"Auto",
+            "shared action appearance reader rejects invalid raw values without publishing partial state");
+    }
+    profile.Set(L"Tile.smtc", L"Background", L" color "); profile.Set(L"Tile.smtc", L"Branding", L"none");
+    profile.Set(L"Tile.smtc", L"BackgroundColor", L"a1b2c3");
+    Check(ReadSecondaryTileConfiguration(profile, 1, tiles, error) && tiles.tiles[0].appearance.background == L"Color" &&
+        tiles.tiles[0].appearance.branding == L"None" && tiles.tiles[0].appearance.backgroundColor == L"#A1B2C3" &&
+        tiles.tiles[1].appearance.background == L"Transparent", "appearance normalizes independently per source");
+    profile.Set(L"Tile.smtc", L"BackgroundColor", L"#12345G");
+    Check(!ReadSecondaryTileConfiguration(profile, 1, tiles, error) && tiles.tiles[0].appearance.backgroundColor == L"#A1B2C3",
+        "invalid appearance rejects without partially replacing prior configuration");
+    for (const auto* branding : TileBrandingChoices) {
+        std::wstring value = branding;
+        Check(NormalizeSecondaryTileSetting(L"Tile.rss", L"Branding", value, error) && value == branding,
+            "INI/CLI source branding supports the same five primary choices");
+        Check(NormalizeTileActionSetting(L"MediaActions", L"Branding", value, error), "action branding shares the typed normalizer");
+    }
+    for (const auto* invalid : {L"#1234", L"#12345678", L"blue", L"#12 456"}) {
+        std::wstring value = invalid;
+        Check(!NormalizeTileAppearanceSetting(L"BackgroundColor", value, error), "unsupported or alpha colors reject explicitly");
+    }
+    TileAppearance appearance;
+    auto published = PublishTileAppearance(appearance, 0x123456);
+    Check(published.argb == 0 && published.nameMedium && published.nameWide && published.nameLarge && !published.darkText,
+        "transparent publication explicitly clears inherited color and keeps white/name defaults");
+    appearance.background = L"Color"; appearance.backgroundColor = L"#FFFFFF"; appearance.branding = L"Logo";
+    published = PublishTileAppearance(appearance, 0x123456);
+    Check(published.argb == 0xffffffffu && !published.nameMedium && !published.nameWide && !published.nameLarge && published.darkText,
+        "colored publication selects readable text and honors logo-only name suppression");
+    struct Visuals {
+        std::uint32_t argb = 123; bool medium = false, wide = false, large = false, dark = true;
+        void BackgroundColor(std::uint32_t color) { argb = color; }
+        void ForegroundText(bool value) { dark = value; }
+        void ShowNameOnSquare150x150Logo(bool value) { medium = value; }
+        void ShowNameOnWide310x150Logo(bool value) { wide = value; }
+        void ShowNameOnSquare310x310Logo(bool value) { large = value; }
+    } visuals;
+    ApplyPublishedTileAppearance(visuals, published, [](std::uint32_t color) { return color; }, true, false);
+    Check(visuals.argb == 0xffffffffu && !visuals.medium && !visuals.wide && !visuals.large && visuals.dark,
+        "fake native visuals receive background, foreground and all branding flags");
+    auto mismatched = published; mismatched.nameWide = true;
+    Check(!SamePublishedTileAppearance(mismatched, published), "one stale name flag triggers appearance repair");
+    mismatched = published; mismatched.argb = 0;
+    Check(!SamePublishedTileAppearance(mismatched, published), "stale shell background color triggers appearance repair");
+    mismatched = published; mismatched.darkText = !published.darkText;
+    Check(!SamePublishedTileAppearance(mismatched, published), "stale shell foreground selection triggers appearance repair");
+}
 void TestProviderSelection() {
     Profile profile;
     profile.Set(L"Tiles", L"Enabled", L"1");
@@ -99,8 +159,30 @@ void TestProviderSelection() {
     content.enabled = false;
     Check(SecondaryTileContentIndices(tiles, content).empty(), "disabled content engine requests no source providers");
 }
+void TestAppearanceNotices() {
+    Profile profile; std::wstring first, changed, issue;
+    Check(ReadSecondaryAppearanceFingerprint(profile, first, issue), "default appearance fingerprint reads all destinations");
+    profile.Set(L"Tile.smtc", L"Branding", L" name "); profile.Set(L"Tile.smtc", L"Name", L"Renamed");
+    profile.Set(L"Notes.Resin", L"UID", L"123456789"); profile.Set(L"Content.1", L"Text", L"Different text");
+    Check(ReadSecondaryAppearanceFingerprint(profile, changed, issue) && changed == first,
+        "canonical appearance key ignores names/accounts/text and case-only edits");
+    AppearanceRefreshNotice notice; notice.RecordScheduled(first);
+    Check(!notice.Observe(first), "startup scheduling suppresses duplicate initial migration");
+    profile.Set(L"Tile.smtc", L"Branding", L"None");
+    Check(ReadSecondaryAppearanceFingerprint(profile, changed, issue) && changed != first && notice.Observe(changed),
+        "source appearance change requests one UI notice");
+    profile.Set(L"MediaActions", L"Background", L"Color");
+    Check(ReadSecondaryAppearanceFingerprint(profile, changed, issue) && !notice.Observe(changed) && notice.Consume() && !notice.Consume(),
+        "action appearance edits coalesce while a source change is pending");
+    Check(!notice.Observe(changed), "native failure cannot produce continual same-key enumeration");
+    Check(notice.Observe(first), "later semantic change posts a new notice"); notice.PostFailed();
+    Check(notice.Observe(first) && notice.Consume(), "failed message posting remains retryable");
+    profile.Set(L"MediaActions", L"Branding", L"invalid"); changed = L"preserved";
+    Check(!ReadSecondaryAppearanceFingerprint(profile, changed, issue) && changed == L"preserved",
+        "invalid partial raw edits never replace a valid appearance fingerprint");
+}
 }
 int main() {
-    try { TestMapping(); TestProviderSelection(); std::cout << checks << " secondary tile checks passed\n"; return 0; }
+    try { TestMapping(); TestAppearance(); TestProviderSelection(); TestAppearanceNotices(); std::cout << checks << " secondary tile checks passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << "After " << checks << " checks: " << error.what() << '\n'; return 1; }
 }

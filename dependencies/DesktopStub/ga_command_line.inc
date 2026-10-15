@@ -2620,11 +2620,15 @@ static bool ValidateDesktopStubContentProfileValues(
 
 static bool ValidateCommandLinePresetDocument(const std::wstring& text, std::wstring& error)
 {
-    if (g_commandLine.presetName.empty()) return true;
     const auto document = aip::ParseIniDocument(text);
     const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
     };
+    // This callback also validates an ordinary CLI mutation under the INI
+    // lock. Preserve action-appearance parity even without a preset request.
+    aip::content::TileAppearance actionAppearance;
+    if (!aip::content::ReadTileAppearance(read, L"MediaActions", actionAppearance, error)) return false;
+    if (g_commandLine.presetName.empty()) return true;
     for (const auto& setting : g_displaySettings) {
         auto value = read(setting.section, setting.key, setting.fallback);
         if (!NormalizeDesktopStubDisplaySettingValue(setting, value, error)) return false;
@@ -2683,6 +2687,10 @@ static bool ValidateDesktopStubContentProfile(
     if (!aip::content::ReadSecondaryTileConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
     }, composition.entries.size(), separate, error)) return false;
+    aip::content::TileAppearance actionAppearance;
+    if (!aip::content::ReadTileAppearance([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
+    }, L"MediaActions", actionAppearance, error)) return false;
 
     bool usesRss = false;
     for (const auto& entry : composition.entries)

@@ -193,6 +193,7 @@
       "dependencies/content_presets.h",
       "dependencies/secondary_tiles.h",
       "dependencies/tile_actions.h",
+      "dependencies/tile_appearance.h",
       "dependencies/tile_visual_assets.h",
       "dependencies/tile_visual_assets.inc",
       "dependencies/media_tile_layout.h",

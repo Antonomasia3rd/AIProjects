@@ -1,5 +1,6 @@
 #pragma once
 #include "content_engine.h"
+#include "tile_appearance.h"
 namespace aip { namespace content {
 struct TileActionDescriptor { const wchar_t* id; const wchar_t* label; };
 inline constexpr TileActionDescriptor TileActions[] = {
@@ -23,6 +24,8 @@ inline bool NormalizeTileActionSetting(const std::wstring& section, const std::w
     } else if (s == L"mediaactions" && k == L"volumesteppercent") {
         int step = 0;
         if (ParseInt(value, 1, 100, step)) { value = std::to_wstring(step); return true; }
+    } else if (s == L"mediaactions" && (k == L"background" || k == L"branding" || k == L"backgroundcolor")) {
+        return NormalizeTileAppearanceSetting(key, value, error);
     } else if (s.compare(0, 5, L"tile.") == 0 && k == L"clickaction") {
         value = Lower(Trim(value));
         if (value == L"setup" || FindTileAction(value)) return true;

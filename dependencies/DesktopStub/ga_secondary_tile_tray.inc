@@ -25,8 +25,10 @@ static bool ReadSecondaryTileMenuText(const std::wstring& text,
         std::wstring value;
         return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
     };
+    aip::content::TileAppearance actionAppearance;
     return aip::content::ReadConfiguration(read, content, error, ContentAsusEventsFromDocument(document)) &&
-        aip::content::ReadSecondaryTileConfiguration(read, content.entries.size(), tiles, error);
+        aip::content::ReadSecondaryTileConfiguration(read, content.entries.size(), tiles, error) &&
+        aip::content::ReadTileAppearance(read, L"MediaActions", actionAppearance, error);
 }
 
 // Pure staging: add absent fields, grow Count only as required by saved mappings,
@@ -59,7 +61,9 @@ static bool StageSecondaryTileDefaultLayout(std::wstring& text, bool activate, s
     for (const auto& descriptor : aip::content::SecondaryTiles) {
         const auto section = aip::content::SecondaryTileSection(descriptor.id);
         if (!missing(section, L"Enabled", L"1") || !missing(section, L"Name", descriptor.name) ||
-            !missing(section, L"Content", std::to_wstring(descriptor.content))) {
+            !missing(section, L"Content", std::to_wstring(descriptor.content)) ||
+            !missing(section, L"Background", L"Transparent") || !missing(section, L"Branding", L"Name") ||
+            !missing(section, L"BackgroundColor", L"Auto")) {
             error = L"Could not stage a source tile mapping."; return false;
         }
         std::wstring mapping;
@@ -112,7 +116,43 @@ static bool SaveSecondaryTileMenuSettings(HWND owner, const std::vector<aip::Ini
         if (error.empty()) error = L"The tile configuration could not be saved; no partial change was applied.";
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Tiles", MB_OK | MB_ICONWARNING); return false;
     }
+    const bool appearanceChanged = std::any_of(settings.begin(), settings.end(), [](const auto& setting) {
+        const auto section = aip::content::Lower(setting.section), key = aip::content::Lower(setting.key);
+        return (section.compare(0, 5, L"tile.") == 0 || section == L"mediaactions") &&
+            (key == L"background" || key == L"branding" || key == L"backgroundcolor");
+    });
+    if (appearanceChanged) RequestRefreshExistingSecondaryTileLogos(g_hwnd, true);
     WakePollThread(); return true;
+}
+
+static void AppendTileAppearanceMenu(HMENU parent, const std::wstring& section, UINT base)
+{
+    aip::content::TileAppearance appearance; std::wstring error;
+    aip::content::ReadTileAppearance(IniReadS, section, appearance, error);
+    HMENU menu = aip::BeginTrayNestedMenu(parent);
+    aip::AppendTrayMenuItem(menu, base, L"Transparent background", appearance.background == L"Transparent", true);
+    aip::AppendTrayMenuItem(menu, base + 1, L"Color background", appearance.background == L"Color", true);
+    aip::AppendTrayMenuItem(menu, base + 7, L"Custom background color...", false, true);
+    aip::AppendTrayMenuItem(menu, base + 8, L"Use topic color for Color background", appearance.backgroundColor == L"Auto", true);
+    HMENU branding = aip::BeginTrayNestedMenu(menu);
+    for (UINT index = 0; index < _countof(aip::content::TileBrandingChoices); ++index)
+        aip::AppendTrayMenuItem(branding, base + 2 + index, aip::content::TileBrandingChoices[index],
+            appearance.branding == aip::content::TileBrandingChoices[index], true);
+    aip::EndTrayNestedMenu(menu, branding, L"Branding (name and corner icon)");
+    aip::EndTrayNestedMenu(parent, menu, L"Appearance");
+}
+static bool DispatchTileAppearanceCommand(HWND owner, UINT command, UINT base, const std::wstring& section)
+{
+    if (command < base || command > base + 8) return false;
+    const auto action = command - base;
+    if (action < 2) SaveSecondaryTileMenuSettings(owner, {{section, L"Background", action ? L"Color" : L"Transparent"}});
+    else if (action < 7) SaveSecondaryTileMenuSettings(owner, {{section, L"Branding", aip::content::TileBrandingChoices[action - 2]}});
+    else if (action == 7) {
+        auto color = IniReadS(section.c_str(), L"BackgroundColor", L"Auto");
+        if (ShowTextInputDialog(owner, L"Tile background", L"Color as #RRGGBB, or Auto for this tile's topic color", color, true) == IDOK)
+            SaveSecondaryTileMenuSettings(owner, {{section, L"Background", L"Color"}, {section, L"BackgroundColor", color}});
+    } else SaveSecondaryTileMenuSettings(owner, {{section, L"BackgroundColor", L"Auto"}});
+    return true;
 }
 
 static bool SecondaryTilePinUiAvailable()
@@ -149,6 +189,7 @@ static void AppendSecondaryTilesMenu(HMENU menu)
         aip::AppendTrayMenuItem(child, base + 3, L"Status...", false, true);
         aip::AppendTrayMenuItem(child, base + 4, L"Source and sign-in settings...", false, true);
         aip::AppendTrayMenuItem(child, base + 5, L"Rename...", false, true);
+        AppendTileAppearanceMenu(child, section, base + 6);
         HMENU mappings = aip::BeginTrayNestedMenu(child);
         const int mapping = IniReadClampedI(section.c_str(), L"Content", descriptor.content, 1, aip::content::MaxEntries);
         for (int slot = 1; slot <= count; ++slot) {
@@ -254,6 +295,7 @@ static bool DispatchSecondaryTilesCommand(HWND owner, UINT command)
     const UINT action = (command - ID_SECONDARY_TILE_COMMANDS) % SECONDARY_TILE_COMMAND_STRIDE;
     const auto& descriptor = aip::content::SecondaryTiles[index];
     const auto section = aip::content::SecondaryTileSection(descriptor.id);
+    if (DispatchTileAppearanceCommand(owner, command, ID_SECONDARY_TILE_COMMANDS + index * SECONDARY_TILE_COMMAND_STRIDE + 6, section)) return true;
     if (action == 0) {
         bool enabled = true; aip::content::ParseBool(IniReadS(section.c_str(), L"Enabled", L"1"), enabled);
         SaveSecondaryTileMenuSettings(owner, {{section, L"Enabled", enabled ? L"0" : L"1"}}, !enabled); return true;

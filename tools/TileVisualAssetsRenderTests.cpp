@@ -37,8 +37,11 @@ int main() {
                 Check(bitmap.GetLastStatus() == Ok && bitmap.GetWidth() == asset.width && bitmap.GetHeight() == asset.height,
                     "generated PNG has the exact planned dimensions");
                 Color corner;
-                Check(bitmap.GetPixel(0, 0, &corner) == Ok && (!asset.transparent || corner.GetA() == 0),
-                    "transparent action/status logos retain transparent outer margins");
+                Check(bitmap.GetPixel(0, 0, &corner) == Ok && corner.GetA() == 0,
+                    "all default source/action/status logos have no colored plate");
+                Color margin;
+                Check(bitmap.GetPixel(asset.width / 2, 1, &margin) == Ok && margin.GetA() == 0,
+                    "default fallback artwork has no colored halo or circular badge at its margins");
             }
             Bitmap glyph(96, 96, PixelFormat32bppARGB);
             {
@@ -57,6 +60,15 @@ int main() {
             Check(EnsureTileTopicAssets(topic.key, directory, assets, error) && SameLogos(assets, existing), "cached assets preserve their stable versioned paths");
             std::wcout << topic.key << L": " << (style == aip::tile_visual::FontStyle::Fluent ? L"Segoe Fluent Icons" :
                 style == aip::tile_visual::FontStyle::Mdl2 ? L"Segoe MDL2 Assets" : L"vector fallback") << L'\n';
+        }
+        for (const std::uint32_t color : {0x123456u, 0xffffffu}) {
+            Assets colored; std::wstring error;
+            Check(EnsureTileTopicAssets(L"smtc", directory, colored, error, {true, color}), "explicit Color fallback generates independently");
+            Bitmap medium((directory + L"\\" + colored.medium).c_str()); Color corner;
+            Check(medium.GetPixel(0, 0, &corner) == Ok && corner.GetValue() == (0xff000000u | color),
+                "Color is an explicit solid RGB plate without a gradient/halo");
+            Bitmap logo((directory + L"\\" + colored.logo44).c_str());
+            Check(logo.GetPixel(0, 0, &corner) == Ok && corner.GetA() == 0, "branding icons remain transparent even for a color tile");
         }
         // Resolve an encoder only for the contact sheet. All asset writes above
         // exercised the actual shared PNG-generation implementation.

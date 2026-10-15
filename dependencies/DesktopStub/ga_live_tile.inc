@@ -239,6 +239,18 @@ static std::wstring MediaTopicUri(const std::wstring& topic, const std::wstring&
     return aip::tile_visual::EnsureTileTopicAssets(topic, directory, icons, error) ?
         aip::tile_visual::PackageUri(icons.smallTile) : std::wstring{};
 }
+static const wchar_t* ContentLiveTileBrandingXmlValue()
+{
+    if (!g_renderContent || g_renderContent->secondaryTileId.empty()) return LiveTileBrandingXmlValue();
+    const auto value = ParseLiveTileBrandingValue(g_renderContent->secondaryBranding, LiveTileBranding::Name);
+    switch (value) {
+    case LiveTileBranding::None: return L"none";
+    case LiveTileBranding::Logo: return L"logo";
+    case LiveTileBranding::Name: return L"name";
+    case LiveTileBranding::NameAndLogo: return L"nameAndLogo";
+    default: return ConfiguredLiveTileTemplateStyle() == LiveTileTemplateStyle::Windows81Preset ? L"name" : L"nameAndLogo";
+    }
+}
 static std::wstring BuildLiveTileXml(
     const std::wstring& exeDir,
     const ManifestDisplayInfo& manifestInfo,
@@ -252,13 +264,13 @@ static std::wstring BuildLiveTileXml(
     if (LiveTileUsesAdaptiveXml())
     {
         xml += L"  <visual branding=\"";
-        xml += LiveTileBrandingXmlValue();
+        xml += ContentLiveTileBrandingXmlValue();
         xml += L"\">\r\n";
     }
     else if (LiveTileUsesWindows81PresetXml())
     {
         xml += L"  <visual version=\"4\" branding=\"";
-        xml += LiveTileBrandingXmlValue();
+        xml += ContentLiveTileBrandingXmlValue();
         xml += L"\">\r\n";
     }
     else if (ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows81)

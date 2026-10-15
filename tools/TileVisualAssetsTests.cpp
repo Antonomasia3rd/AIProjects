@@ -89,7 +89,7 @@ int main() {
                 plan[4].width == 44 && plan[4].height == 44 && plan[4].transparent &&
                 plan[5].width == 30 && plan[5].height == 30 && plan[5].transparent, "small and branding icons preserve transparent margins");
             for (const auto& asset : plan) Check(paths.insert(asset.relative).second &&
-                asset.relative.find(L"..") == std::wstring::npos && PackageUri(asset.relative).find(L"ms-appx:///Assets/TopicTiles/v2/vector/") == 0,
+                asset.relative.find(L"..") == std::wstring::npos && PackageUri(asset.relative).find(L"ms-appx:///Assets/TopicTiles/v3/vector/transparent/") == 0 && asset.transparent,
                 "topic logos are isolated and use stable package-relative URIs");
         }
         Check(FindTopic(L"AipSource_smtc")->glyph == Glyph::Music && FindTopic(L"SMTC")->glyph == Glyph::Music, "source runtime ID and provider key resolve music glyph");
@@ -110,6 +110,16 @@ int main() {
                 "versioned font-specific paths prevent stale Windows shell artwork after style changes");
         }
         TestFontFallback(); TestExistingLogoRefresh();
+        for (const auto& topic : Topics) {
+            const auto transparent = AssetPlan(topic);
+            const auto colored = AssetPlan(topic, FontStyle::Vector, {true, 0x123456});
+            Check(transparent[0].relative != colored[0].relative && colored[0].relative.find(L"color123456") != std::wstring::npos,
+                "transparent and selected-color assets use distinct versioned paths");
+            Check(!colored[0].transparent && !colored[1].transparent && !colored[2].transparent && !colored[3].transparent &&
+                colored[4].transparent && colored[5].transparent, "Color opts into plates without adding branding-icon circles");
+        }
+        Check(!DarkArtworkInk({}) && !DarkArtworkInk({true, 0x000000}) && DarkArtworkInk({true, 0xffffff}),
+            "glyphs stay white on transparent/dark backgrounds and readable on light colors");
         std::cout << "Tile visual asset plans: " << checks << " checks passed; no files or Windows APIs invoked\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }

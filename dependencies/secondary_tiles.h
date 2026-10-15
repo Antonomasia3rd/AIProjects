@@ -28,6 +28,7 @@ struct SecondaryTile {
     std::wstring id, name;
     bool enabled = true;
     int content = 1; // One-based [Content.N] index.
+    TileAppearance appearance;
 };
 struct SecondaryTileConfiguration {
     bool enabled = false;
@@ -39,6 +40,18 @@ inline const SecondaryTileDescriptor* FindSecondaryTileDescriptor(const std::wst
     return nullptr;
 }
 inline std::wstring SecondaryTileSection(const std::wstring& id) { return L"Tile." + id; }
+template<class Reader> bool ReadSecondaryAppearanceFingerprint(Reader read, std::wstring& result, std::wstring& error) {
+    std::wstring candidate;
+    const auto add = [&](const std::wstring& section) {
+        TileAppearance appearance;
+        if (!ReadTileAppearance(read, section, appearance, error)) return false;
+        candidate += section + L":" + appearance.background + L":" + appearance.branding + L":" + appearance.backgroundColor + L";";
+        return true;
+    };
+    for (const auto& descriptor : SecondaryTiles) if (!add(SecondaryTileSection(descriptor.id))) return false;
+    if (!add(L"MediaActions")) return false;
+    result = std::move(candidate); error.clear(); return true;
+}
 inline bool NormalizeSecondaryTileSetting(const std::wstring& section, const std::wstring& key,
         std::wstring& value, std::wstring& error) {
     const auto normalizedSection = Lower(Trim(section)), normalizedKey = Lower(Trim(key));
@@ -51,6 +64,8 @@ inline bool NormalizeSecondaryTileSetting(const std::wstring& section, const std
         bool enabled = false;
         if (!ParseBool(value, enabled)) { error += L"expected an enabled/disabled boolean."; return false; }
         value = enabled ? L"1" : L"0";
+    } else if (tile && (normalizedKey == L"background" || normalizedKey == L"branding" || normalizedKey == L"backgroundcolor")) {
+        return NormalizeTileAppearanceSetting(key, value, error);
     } else if (tile && normalizedKey == L"clickaction") {
         return NormalizeTileActionSetting(section, key, value, error);
     } else if (tile && normalizedKey == L"content") {
@@ -79,6 +94,12 @@ inline bool ValidateSecondaryTileConfiguration(const SecondaryTileConfiguration&
         if (Trim(tile.name).empty() || tile.name.size() > MaxText || tile.name.find(L'\0') != std::wstring::npos) {
             error = SecondaryTileSection(tile.id) + L".Name is invalid."; return false;
         }
+        auto appearance = tile.appearance;
+        if (!NormalizeTileAppearanceSetting(L"Background", appearance.background, error) ||
+            !NormalizeTileAppearanceSetting(L"Branding", appearance.branding, error) ||
+            !NormalizeTileAppearanceSetting(L"BackgroundColor", appearance.backgroundColor, error)) {
+            error = SecondaryTileSection(tile.id) + L": " + error; return false;
+        }
     }
     if (cfg.tiles.size() != SecondaryTileCount) { error = L"Secondary tile configuration requires the six catalog mappings."; return false; }
     error.clear(); return true;
@@ -105,6 +126,11 @@ template<class Reader> bool ReadSecondaryTileConfiguration(Reader read, std::siz
         const auto defaultContent = std::to_wstring(descriptor.content);
         ParseInt(get(section, L"Content", defaultContent.c_str()), 1, MaxEntries, tile.content);
         tile.name = get(section, L"Name", descriptor.name);
+        std::wstring appearanceError;
+        if (!ReadTileAppearance(read, section, tile.appearance, appearanceError)) {
+            if (valid) error = appearanceError;
+            valid = false;
+        }
         cfg.tiles.push_back(std::move(tile));
     }
     if (!valid || !ValidateSecondaryTileConfiguration(cfg, contentCount, error)) return false;
