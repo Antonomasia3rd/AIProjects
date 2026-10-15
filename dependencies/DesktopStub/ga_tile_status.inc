@@ -3,6 +3,7 @@
 #include "../media_tile_layout.h"
 #include "../rss_tile_layout.h"
 #include <set>
+#include <map>
 struct TileStatusLabels {
     std::wstring primary = L"Primary tile", mediumWide = L"Medium / Wide", large = L"Large";
     std::wstring noSnapshot = L"No prepared tile snapshot. Pin the tile and complete its source settings.";
@@ -69,7 +70,7 @@ static std::wstring BuildTileStatusTextWithLabels(const std::vector<aip::content
     }
     return output.empty() ? labels.noSnapshot : output;
 }
-static std::wstring BuildTileStatusText(const std::vector<aip::content::Snapshot>& frames)
+static TileStatusLabels ReadTileStatusLabels()
 {
     TileStatusLabels labels;
     labels.primary = IniReadS(L"Strings", L"TileStatusPrimary", labels.primary.c_str());
@@ -80,5 +81,31 @@ static std::wstring BuildTileStatusText(const std::vector<aip::content::Snapshot
     labels.image = IniReadS(L"Strings", L"TileStatusImage", labels.image.c_str());
     labels.queue = IniReadS(L"Strings", L"TileStatusQueue", labels.queue.c_str());
     labels.slot = IniReadS(L"Strings", L"TileStatusSlot", labels.slot.c_str());
-    return BuildTileStatusTextWithLabels(frames, labels);
+    return labels;
+}
+static std::vector<std::wstring> BuildTileStatusPagesWithLabels(const std::vector<aip::content::Snapshot>& frames,
+    const TileStatusLabels& labels)
+{
+    std::vector<std::vector<aip::content::Snapshot>> destinations;
+    std::map<std::wstring, std::size_t> indices;
+    for (const auto& frame : frames) {
+        if (!frame.active) continue;
+        const auto found = indices.find(frame.secondaryTileId);
+        if (found == indices.end()) {
+            indices.emplace(frame.secondaryTileId, destinations.size());
+            destinations.push_back({frame});
+        } else destinations[found->second].push_back(frame);
+    }
+    std::vector<std::wstring> pages;
+    for (const auto& destination : destinations) pages.push_back(BuildTileStatusTextWithLabels(destination, labels));
+    if (pages.empty()) pages.push_back(labels.noSnapshot);
+    return pages;
+}
+static std::wstring BuildTileStatusText(const std::vector<aip::content::Snapshot>& frames)
+{
+    return BuildTileStatusTextWithLabels(frames, ReadTileStatusLabels());
+}
+static std::vector<std::wstring> BuildTileStatusPages(const std::vector<aip::content::Snapshot>& frames)
+{
+    return BuildTileStatusPagesWithLabels(frames, ReadTileStatusLabels());
 }

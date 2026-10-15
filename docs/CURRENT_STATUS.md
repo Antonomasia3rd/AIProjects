@@ -6,6 +6,11 @@ complete does not close the whole repository review.
 
 ## Saved and installed
 
+- Tile information pagination replaces the oversized MessageBox with one
+  scrollable page per tile and Previous/Next controls; see
+  [paged status validation](tile-status-paging-2026-10-15.md). Installed after
+  14,439 passing host checks, clean scans and the guarded startup check. The
+  user-selected Windhawk Atom URL was saved and preserved through relaunch.
 - Follow-up: the primary tile could lose its referenced images to cleanup after
   source/gallery updates, despite successful delivery. The cause and regression
   fix are recorded in [primary image retention](primary-tile-retention-2026-10-15.md).
@@ -61,6 +66,7 @@ See the [model](gallery-engine-2026-10-15.md),
 | Historical renderer variation | The unexplained four-pixel opaque preset difference remains open. Exact assertions have not been relaxed; current passing renders do not establish its cause. |
 | Media CPU | Cached SMTC lifetime and event scheduling are repaired, and the user reported 17 hours of normal CPU. The original DesktopStub/NPSMSvc episode was not reproduced, so its precise cause remains unproved. |
 | Real integrations | Actual Startup-folder/StartupTask, sleep/wake keyboards, player icons/actions, and HoYoLAB browser/discovery/session behavior still need local acceptance beyond injected fixtures. Preserve existing accounts while testing. |
+| Source tile names | A source's saved menu/status name is independent of its RSS URL. Review propagation of source Rename changes to an already-pinned Windows DisplayName; current artwork migration intentionally preserves native names. |
 | Older delivery paths | Unpackaged/older-Windows helper queue correlation remains conservative; those paths keep app-managed rotation where individual delivery cannot be acknowledged safely. |
 | Notes compatibility | The current v2 account flow works in the user's screenshots. Older credential/import aliases still need protocol review; role discovery alone is not daily-notes acceptance for every alias. |
 | Windhawk | The source catalog and the syntax-check scope are corrected. Functional hooks were not reviewed or loaded in this pass; build-specific work requires current local binaries and matching symbols first. |

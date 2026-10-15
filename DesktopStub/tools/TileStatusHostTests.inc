@@ -88,6 +88,43 @@ static void TestTileStatusHost()
         BuildTileStatusTextWithLabels({rss}, labels).find(L"Custom compact size") != std::wstring::npos,
         "status wording can be supplied through the same configurable label model");
     Check(!BuildTileStatusText({}).empty(), "host status hook resolves its configured labels without source calls");
+    Check(BuildTileStatusPagesWithLabels({}, labels) == std::vector<std::wstring>{labels.noSnapshot},
+        "paged status provides one configurable empty page");
+    auto inactive = rss; inactive.active = false;
+    Check(BuildTileStatusPagesWithLabels({inactive}, labels) == std::vector<std::wstring>{labels.noSnapshot},
+        "inactive-only status does not create empty destination pages");
+    Check(BuildTileStatusPagesWithLabels({media}, labels) == std::vector<std::wstring>{BuildTileStatusTextWithLabels({media}, labels)},
+        "a single destination page preserves the existing exact status formatter output");
+    std::vector<Snapshot> many;
+    auto primary = media; primary.name = L"Primary"; primary.secondaryTileId.clear();
+    primary.text.primary = L"Long complete data: " + std::wstring(12000, L'x') + L" :retained end";
+    many.push_back(primary);
+    for (int destination = 0; destination < 6; ++destination) {
+        auto source = media; source.secondaryTileId = L"AipSource_test" + std::to_wstring(destination);
+        source.name = L"Source " + std::to_wstring(destination); source.text.primary = L"Source data " + std::to_wstring(destination);
+        many.push_back(source);
+    }
+    for (int destination = 0; destination < 28; ++destination) for (unsigned slot = 0; slot < 5; ++slot) {
+        auto gallery = image; gallery.secondaryTileId = L"AipGallery_pages.tile" + std::to_wstring(destination);
+        gallery.name = L"Gallery " + std::to_wstring(destination); gallery.gallerySlot = slot;
+        gallery.nativeQueueTag = L"g" + std::to_wstring(slot);
+        gallery.backgroundPath = L"C:\\private-cache\\photo-" + std::to_wstring(destination) + L"-" + std::to_wstring(slot) + L".png";
+        many.push_back(gallery);
+    }
+    const auto pages = BuildTileStatusPagesWithLabels(many, labels);
+    Check(pages.size() == 35 && pages.front().find(primary.text.primary) != std::wstring::npos,
+        "twenty-eight gallery destinations plus sources and primary get individual pages without text truncation");
+    bool allData = pages.size() == 35;
+    for (int destination = 0; destination < 6 && allData; ++destination)
+        allData = pages[1 + destination].find(L"Source data " + std::to_wstring(destination)) != std::wstring::npos;
+    for (int destination = 0; destination < 28 && allData; ++destination) {
+        const auto& page = pages[7 + destination]; const auto title = L"Gallery " + std::to_wstring(destination) + L"\r\n";
+        allData = page.find(title) == 0 && page.find(title, title.size()) == std::wstring::npos;
+        for (unsigned slot = 0; slot < 5 && allData; ++slot)
+            allData = page.find(L"photo-" + std::to_wstring(destination) + L"-" + std::to_wstring(slot) + L".png") != std::wstring::npos;
+    }
+    Check(allData, "gallery pages group all five slots once per destination and retain every prepared queue filename and source value");
+    Check(BuildTileStatusPages({}).size() == 1, "paged host hook resolves configurable empty wording without source calls");
     TestTileIconUriLifetime();
     ScopedGdiPlus gdiplus;
     Check(gdiplus.ok(), "Notes icon fixture acquires only offscreen GDI+");

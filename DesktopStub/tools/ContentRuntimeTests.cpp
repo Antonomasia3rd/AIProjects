@@ -72,6 +72,8 @@ static int ContentTestMessageBox(HWND, LPCWSTR text, LPCWSTR, UINT flags)
     return (flags & MB_YESNO) ? contentDialogResponse : IDOK;
 }
 #define DESKTOPSTUB_CONTENT_MESSAGEBOX ContentTestMessageBox
+static int ContentTestPagedDialog(HWND, const wchar_t*, const std::vector<std::wstring>&) { return IDOK; }
+#define DESKTOPSTUB_TEST_PAGED_TEXT_DIALOG ContentTestPagedDialog
 static unsigned long long contentGenerationRequests = 0;
 static std::wstring contentQueuedBackground;
 static unsigned long long ContentTestQueueGenerate(std::wstring background, std::wstring)
@@ -154,6 +156,7 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "TileStatusHostTests.inc"
 #include "GalleryUiFlowHostTests.inc"
 #include "PrimaryAssetRetentionHostTests.inc"
+#include "PagedTextDialogHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
@@ -1399,6 +1402,7 @@ int wmain()
     TestTileStatusHost();
     TestGalleryUiFlowHost();
     TestPrimaryAssetRetentionHost(directory);
+    TestPagedTextDialogHost();
     TestContentPresetsAndImportConfirmation();
     fixtureGroup("Discord advanced profile");
     TestDiscordAdvancedHost();

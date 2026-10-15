@@ -537,3 +537,5 @@ INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
     return ShowTextInputDialog(parent, g_ui.renameDialogTitle, g_ui.renameDialogPrompt, path, false);
 }
 
+#include "ga_paged_text_dialog.inc"
+

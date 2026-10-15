@@ -273,8 +273,13 @@ static bool DispatchSecondaryTilesCommand(HWND owner, UINT command)
     }
     if (command == ID_SECONDARY_TILES_ENABLED) return true; // Retired UI command; pin membership determines updates.
     if (command == ID_SECONDARY_TILES_STATUS) {
-        const auto status = BuildTileStatusText(CurrentSecondarySnapshots());
-        DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, status.c_str(), L"Tiles", MB_OK | MB_ICONINFORMATION); return true;
+        const auto pages = BuildTileStatusPages(CurrentSecondarySnapshots());
+#ifdef DESKTOPSTUB_TEST_PAGED_TEXT_DIALOG
+        DESKTOPSTUB_TEST_PAGED_TEXT_DIALOG(owner, L"Tiles", pages);
+#else
+        ShowPagedTextDialog(owner, L"Tiles", pages);
+#endif
+        return true;
     }
     if (command < ID_SECONDARY_TILE_COMMANDS || command >= ID_SECONDARY_TILE_COMMANDS + aip::content::SecondaryTileCount * SECONDARY_TILE_COMMAND_STRIDE) return false;
     const UINT index = (command - ID_SECONDARY_TILE_COMMANDS) / SECONDARY_TILE_COMMAND_STRIDE;
