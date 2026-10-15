@@ -4,6 +4,11 @@ This is the current index for the repository rework. Dated audit files retain
 their historical results; a passing test or an old statement that a slice was
 complete does not close the whole repository review.
 
+The prioritized next-reset fixes and the user/agent acceptance split are saved
+in [NEXT_PASS.md](NEXT_PASS.md). The user reported the delayed gallery update
+coincided with Battery Saver delaying all applications' tiles; recursive scanning
+is enabled and its focused native recheck passed.
+
 ## Saved and installed
 
 - Tile information pagination replaces the oversized MessageBox with one
