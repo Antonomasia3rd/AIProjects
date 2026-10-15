@@ -35,6 +35,8 @@ add_portable_test(ContentPresetTests tools/ContentPresetTests.cpp .)
 add_portable_test(ContentQueueTests tools/ContentQueueTests.cpp .)
 add_portable_test(SecondaryTileTests tools/SecondaryTileTests.cpp .)
 add_portable_test(TileVisualAssetsTests tools/TileVisualAssetsTests.cpp .)
+add_portable_test(NotesTileRowsTests tools/NotesTileRowsTests.cpp .)
+add_portable_test(MediaTileLayoutTests tools/MediaTileLayoutTests.cpp .)
 add_portable_test(TileNotificationPayloadTests tools/TileNotificationPayloadTests.cpp .)
 add_portable_test(PngCrc32Tests tools/PngCrc32Tests.cpp .)
 add_portable_test(CaptureAttemptTests tools/CaptureAttemptTests.cpp .)
@@ -49,6 +51,9 @@ target_link_libraries(AsusEngineTests PRIVATE Threads::Threads)
 target_link_libraries(CapsBlinkEngineTests PRIVATE Threads::Threads)
 
 if(WIN32)
+    add_portable_test(TileVisualAssetsRenderTests tools/TileVisualAssetsRenderTests.cpp .)
+    target_compile_definitions(TileVisualAssetsRenderTests PRIVATE UNICODE _UNICODE)
+    target_link_libraries(TileVisualAssetsRenderTests PRIVATE gdiplus gdi32 user32 shell32 shlwapi advapi32)
     # Data/profile fixtures never start the product entry point or real sources.
     # This fixture creates only its own sleeping/synthetic child executables;
     # no actual window/screen capture or product entry point is used.

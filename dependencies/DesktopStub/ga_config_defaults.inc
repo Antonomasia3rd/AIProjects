@@ -114,6 +114,8 @@ static const IniDefault g_defaults[] = {
     {L"Content", L"CycleDriver", L"DesktopStub"},
     {L"Content", L"RefreshSeconds", L"2"},
     {L"Content", L"TextMode", L"Auto"},
+    {L"SMTC", L"Indicator", L"Status"},
+    {L"SMTC", L"ShowRepeatShuffle", L"0"},
     {L"Content.1", L"Enabled", L"1"},
     {L"Content.1", L"Name", L"Wallpaper"},
     {L"Content.1", L"Background", L"Wallpaper"},
@@ -1114,7 +1116,7 @@ static std::wstring BuildInitialIniTemplate()
         if (IEquals(d.section, L"RssFeed"))
             lines.push_back(FormatIniAssignment(d.key, d.value));
     }
-    for (const wchar_t* section : {L"Content", L"Content.1", L"Notes", L"Notes.Resin", L"Notes.Stamina", L"Notes.Charge", L"Discord", L"CapsBlink", L"AsusBlink"})
+    for (const wchar_t* section : {L"Content", L"Content.1", L"SMTC", L"Notes", L"Notes.Resin", L"Notes.Stamina", L"Notes.Charge", L"Discord", L"CapsBlink", L"AsusBlink"})
     {
         lines.push_back(L"");
         lines.push_back(L"[" + std::wstring(section) + L"]");

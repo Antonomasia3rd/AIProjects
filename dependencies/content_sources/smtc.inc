@@ -11,6 +11,8 @@
 #include <cwchar>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.Media.h>
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <atomic>
@@ -105,6 +107,11 @@ struct SmtcSessionData {
     std::wstring title, artist, albumArtist, subtitle, appId, status;
     std::vector<std::uint8_t> artworkBytes;
     std::wstring artworkError;
+    MediaPlaybackState playbackState = MediaPlaybackState::Unknown;
+    MediaRepeatMode repeat = MediaRepeatMode::Unknown;
+    MediaToggleState shuffle = MediaToggleState::Unknown;
+    std::vector<std::uint8_t> appIconBytes;
+    std::wstring appIconError;
 };
 struct SmtcMediaSnapshot {
     bool hasSession = false;
@@ -112,6 +119,11 @@ struct SmtcMediaSnapshot {
     std::wstring title, artist, source, status, artworkError;
     std::vector<std::uint8_t> artworkBytes;
     std::shared_ptr<const SmtcArtworkFile> artwork;
+    MediaPlaybackState playbackState = MediaPlaybackState::Unknown;
+    MediaRepeatMode repeat = MediaRepeatMode::Unknown;
+    MediaToggleState shuffle = MediaToggleState::Unknown;
+    std::wstring appIconError;
+    std::shared_ptr<const SmtcArtworkFile> appIcon;
 };
 // Injection replaces the complete session/property read, so fixtures never
 // request real system media sessions. Native text and thumbnail use one session,
@@ -148,6 +160,30 @@ inline SmtcSessionData ReadSmtcSessionProperties(
     data.appId = std::wstring(session.SourceAppUserModelId());
     const auto playback = session.GetPlaybackInfo();
     data.status = playback == nullptr ? L"" : smtc_detail::PlaybackStatus(playback.PlaybackStatus());
+    if (playback != nullptr) {
+        using Status = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus;
+        switch (playback.PlaybackStatus()) {
+        case Status::Playing: data.playbackState = MediaPlaybackState::Playing; break;
+        case Status::Paused: data.playbackState = MediaPlaybackState::Paused; break;
+        case Status::Stopped: case Status::Closed: data.playbackState = MediaPlaybackState::Stopped; break;
+        default: break;
+        }
+        // Nullable playback metadata is optional. A player omitting it must
+        // not be represented as repeat/shuffle off.
+        try {
+            if (const auto repeat = playback.AutoRepeatMode()) {
+                using Mode = winrt::Windows::Media::MediaPlaybackAutoRepeatMode;
+                switch (repeat.Value()) {
+                case Mode::None: data.repeat = MediaRepeatMode::Off; break;
+                case Mode::List: data.repeat = MediaRepeatMode::List; break;
+                case Mode::Track: data.repeat = MediaRepeatMode::Track; break;
+                default: break;
+                }
+            }
+        } catch (const winrt::hresult_error&) {}
+        try { if (const auto shuffle = playback.IsShuffleActive()) data.shuffle = shuffle.Value() ? MediaToggleState::On : MediaToggleState::Off; }
+        catch (const winrt::hresult_error&) {}
+    }
     if (includeArtwork && properties.Thumbnail() != nullptr) {
         try {
             if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
@@ -232,6 +268,40 @@ class SmtcWorkerSession {
     bool managerEventsAttempted_ = false, sessionEventsAttempted_ = false;
     std::shared_ptr<SmtcEventState> eventState_;
     std::shared_ptr<SmtcSessionEventEpoch> sessionEpoch_;
+    std::wstring appIconKey_, appIconError_;
+    std::vector<std::uint8_t> appIconBytes_;
+    smtc_detail::Clock::time_point appIconRetryAfter_{};
+    void ReadAppIcon(SmtcSessionData& data, smtc_detail::Clock::time_point deadline, const SmtcCancel& canceled) {
+        if (appIconKey_ != data.appId) {
+            appIconKey_ = data.appId; appIconBytes_.clear(); appIconError_.clear(); appIconRetryAfter_ = {};
+        }
+        if (appIconBytes_.empty() && smtc_detail::Clock::now() >= appIconRetryAfter_) {
+            appIconRetryAfter_ = smtc_detail::Clock::now() + std::chrono::minutes(5);
+            try {
+                if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+                using namespace winrt::Windows::ApplicationModel;
+                const auto factory = aip::AcquireUncachedActivationFactory<AppInfo, IAppInfoStatics>();
+                const auto app = factory.GetFromAppUserModelId(data.appId);
+                if (app == nullptr) throw winrt::hresult_error(E_FAIL);
+                const auto logo = app.DisplayInfo().GetLogo({48, 48});
+                const auto stream = smtc_detail::Await(logo.OpenReadAsync(), deadline);
+                const auto size = stream.Size();
+                if (!size || size > 1024 * 1024) throw winrt::hresult_error(E_INVALIDARG);
+                using namespace winrt::Windows::Storage::Streams;
+                const auto readerFactory = aip::AcquireUncachedActivationFactory<DataReader, IDataReaderFactory>();
+                const auto reader = readerFactory.CreateDataReader(stream.GetInputStreamAt(0));
+                const auto loaded = smtc_detail::Await(reader.LoadAsync(static_cast<std::uint32_t>(size)), deadline);
+                if (loaded != size) throw winrt::hresult_error(E_FAIL);
+                std::vector<std::uint8_t> bytes(loaded);
+                reader.ReadBytes(winrt::array_view<std::uint8_t>(bytes));
+                if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+                appIconBytes_ = std::move(bytes); appIconError_.clear();
+            } catch (const winrt::hresult_error&) {
+                appIconError_ = L"The player's application icon is unavailable; showing playback status.";
+            }
+        }
+        data.appIconBytes = appIconBytes_; data.appIconError = appIconError_;
+    }
     void RevokeSession() noexcept {
         if (sessionEpoch_) sessionEpoch_->Close();
         if (watchedSession_ != nullptr) {
@@ -289,6 +359,7 @@ public:
         // Release all manager proxies while their owning MTA still exists.
         DisableEvents();
         manager_ = nullptr;
+        appIconKey_.clear(); appIconBytes_.clear(); appIconError_.clear(); appIconRetryAfter_ = {};
         apartment_.reset();
     }
     bool ReportEventsSupported() const noexcept {
@@ -300,7 +371,7 @@ public:
         return state && state->dirty.exchange(false);
     }
     SmtcSessionData Read(smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled,
-        bool useEvents = false, const std::function<void()>& wake = {}) {
+        bool useEvents = false, const std::function<void()>& wake = {}, bool includeAppIcon = false) {
         if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
         if (!apartment_) {
             auto apartment = std::make_unique<smtc_detail::Apartment>();
@@ -313,7 +384,9 @@ public:
             if (canceled && canceled()) { Reset(); throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED)); }
             const auto session = manager_.GetCurrentSession();
             Watch(session, useEvents, wake);
-            return ReadSmtcSessionProperties(session, deadline, includeArtwork, canceled);
+            auto data = ReadSmtcSessionProperties(session, deadline, includeArtwork, canceled);
+            if (includeAppIcon && data.hasSession) ReadAppIcon(data, deadline, canceled);
+            return data;
         } catch (const winrt::hresult_error& exception) {
             const auto code = static_cast<HRESULT>(exception.code());
             if (code == RPC_E_DISCONNECTED || code == RPC_E_SERVER_DIED || code == RPC_E_SERVER_DIED_DNE ||
@@ -333,7 +406,7 @@ inline bool ReadSmtcMedia(
     bool includeArtwork = true,
     const SmtcSessionReader& reader = {},
     const SmtcCancel& canceled = {},
-    SmtcArtworkCache* cache = nullptr)
+    SmtcArtworkCache* cache = nullptr, bool includeAppIcon = false)
 {
     media = {};
     error.clear();
@@ -360,6 +433,7 @@ inline bool ReadSmtcMedia(
         {
             media.text = {L"No media playing", L"SMTC", L""};
             media.title = media.text.primary; media.source = L"SMTC"; media.status = L"Idle";
+            media.playbackState = MediaPlaybackState::Stopped;
             return true;
         }
         SmtcMediaSnapshot snapshot;
@@ -371,6 +445,16 @@ inline bool ReadSmtcMedia(
         if (snapshot.artist.empty()) snapshot.artist = smtc_detail::Clean(std::move(data.subtitle));
         snapshot.source = smtc_detail::SourceName(std::move(data.appId));
         snapshot.status = smtc_detail::Clean(std::move(data.status));
+        snapshot.playbackState = data.playbackState;
+        // Reader injection and legacy adapters may supply only the provider's
+        // canonical status. The renderer never infers state from visible text.
+        if (snapshot.playbackState == MediaPlaybackState::Unknown) {
+            const auto status = Lower(snapshot.status);
+            if (status == L"playing") snapshot.playbackState = MediaPlaybackState::Playing;
+            else if (status == L"paused") snapshot.playbackState = MediaPlaybackState::Paused;
+            else if (status == L"stopped" || status == L"closed") snapshot.playbackState = MediaPlaybackState::Stopped;
+        }
+        snapshot.repeat = data.repeat; snapshot.shuffle = data.shuffle;
         snapshot.text = {snapshot.title, snapshot.artist, L""};
         AppendBounded(snapshot.text.secondary, snapshot.status.empty() ? snapshot.source : snapshot.status + L" - " + snapshot.source);
         if (includeArtwork) {
@@ -383,6 +467,12 @@ inline bool ReadSmtcMedia(
                 snapshot.artworkBytes.clear();
                 snapshot.artworkBytes.shrink_to_fit();
             }
+        }
+        if (includeAppIcon) {
+            snapshot.appIconError = smtc_detail::Clean(std::move(data.appIconError));
+            if (data.appIconBytes.size() > 1024 * 1024) snapshot.appIconError = L"The application icon exceeds its byte limit.";
+            else if (cache && !data.appIconBytes.empty())
+                snapshot.appIcon = cache->Store(data.appIconBytes, snapshot.appIconError, deadline, canceled, true);
         }
         media = std::move(snapshot);
         return true;

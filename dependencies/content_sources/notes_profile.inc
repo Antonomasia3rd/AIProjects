@@ -14,7 +14,7 @@ inline bool ParseHostResource(const std::wstring& value, int& result, bool allow
 inline std::vector<aip::IniSetting> ClearAccountSettings(int resource) {
     std::vector<aip::IniSetting> result;
     if (resource < 0 || resource >= 3) return result;
-    for (const auto* key : {L"UID", L"LToken", L"LTUid", L"LTokenV2", L"LTuidV2", L"ltoken_v2", L"ltuid_v2", L"LTokenProtected", L"LTUidProtected", L"LTokenV2Protected", L"LTuidV2Protected"})
+    for (const auto* key : {L"UID", L"Server", L"LToken", L"LTUid", L"LTokenV2", L"LTuidV2", L"ltoken_v2", L"ltuid_v2", L"LTokenProtected", L"LTUidProtected", L"LTokenV2Protected", L"LTuidV2Protected"})
         result.push_back({HostAccountSection(resource), key, L""});
     return result;
 }
@@ -33,6 +33,7 @@ inline std::wstring CredentialField(std::wstring name) {
     name = aip::ToLower(aip::Trim(name));
     name.erase(std::remove_if(name.begin(), name.end(), [](wchar_t c) { return c == L'_' || c == L'-'; }), name.end());
     if (name == L"uid") return L"UID";
+    if (name == L"server" || name == L"region") return L"Server";
     if (name == L"ltoken" || name == L"ltokenv2") return L"LToken";
     if (name == L"ltuid" || name == L"ltuidv2") return L"LTUid";
     if (name == L"ltokenprotected" || name == L"ltokenv2protected") return L"LTokenProtected";
@@ -90,6 +91,7 @@ inline bool ImportAccountProfile(const std::wstring& text, std::vector<aip::IniS
         };
         std::map<std::wstring, std::wstring> fields;
         fields[L"UID"] = read({L"UID"});
+        fields[L"Server"] = read({L"Server", L"Region"});
         fields[L"LToken"] = read({oldAccount ? L"LTokenV2" : L"LToken", oldAccount ? L"ltoken_v2" : L"LTokenV2", oldAccount ? L"LToken" : L"ltoken_v2"});
         fields[L"LTUid"] = read({oldAccount ? L"LTuidV2" : L"LTUid", oldAccount ? L"ltuid_v2" : L"LTuidV2", oldAccount ? L"LTUid" : L"ltuid_v2"});
         fields[L"LTokenProtected"] = read({oldAccount ? L"LTokenV2Protected" : L"LTokenProtected", oldAccount ? L"LTokenProtected" : L"LTokenV2Protected"});
@@ -178,7 +180,8 @@ inline bool ResolveStoredAccount(const aip::content::NotesAccount& saved, Accoun
             (!saved.userIdProtected.empty() && (!decoder || !decoder(saved.userIdProtected, user)))) {
             error = L"The saved protected account cookies could not be opened for this user."; return false;
         }
-        result.uid = aip::WideToUtf8(saved.uid); result.ltoken = aip::WideToUtf8(token); result.ltuid = aip::WideToUtf8(user);
+        result.uid = aip::WideToUtf8(saved.uid); result.server = saved.server;
+        result.ltoken = aip::WideToUtf8(token); result.ltuid = aip::WideToUtf8(user);
         return true;
     } catch (...) { error = L"The saved account cookies could not be resolved (values are not shown)."; return false; }
 }

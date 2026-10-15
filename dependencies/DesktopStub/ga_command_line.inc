@@ -6,6 +6,7 @@ using CommandLineIniSetting = aip::IniSetting;
 #include "../content_presets.h"
 #include "../secondary_tiles.h"
 #include "../content_sources/notes_profile.inc"
+#include "../content_sources/notes_signin_model.h"
 #include "../hardware/hardware_profile_import.inc"
 #include "../content_sources/now_playing_profile.inc"
 struct CommandLineNotesImport { int resource = -1; std::wstring path; };
@@ -772,6 +773,8 @@ static bool NormalizeDesktopStubTypedSetting(
     std::wstring& value,
     std::wstring& error)
 {
+    if (aip::notes::KnownSignInSection(section))
+        return aip::notes::NormalizeNotesSignInSetting(section, key, value, error);
     if (IEquals(section, L"QuickActions") || IEquals(section, L"MediaActions"))
         return aip::content::NormalizeTileActionSetting(section, key, value, error);
     if (IEquals(section, L"Tiles") || aip::content::Lower(section).compare(0, 5, L"tile.") == 0)
@@ -2647,12 +2650,31 @@ static bool ValidateDesktopStubDisplayProfile(bool includeCommandLineOverrides, 
     return true;
 }
 
+static void PrepareCommandLineNotesServerChanges()
+{
+    for (int resource = 0; resource < 3; ++resource) {
+        const auto section = aip::notes::HostAccountSection(resource);
+        bool uidChanged = false, serverSpecified = false;
+        for (const auto& setting : g_commandLine.settings) {
+            if (!IEquals(setting.section, section)) continue;
+            if (IEquals(setting.key, L"UID")) uidChanged = setting.value != IniReadS(section.c_str(), L"UID", L"");
+            if (IEquals(setting.key, L"Server")) serverSpecified = true;
+        }
+        // An old explicitly discovered region must not follow a replacement UID.
+        // Keep a server supplied anywhere in the same command's atomic batch.
+        if (uidChanged && !serverSpecified) AddCommandLineIniSetting(section, L"Server", L"");
+    }
+}
 static bool ValidateDesktopStubContentProfile(
     bool includeCommandLineOverrides,
     std::wstring& error)
 {
+    if (includeCommandLineOverrides) PrepareCommandLineNotesServerChanges();
     if (includeCommandLineOverrides && !PrepareCommandLinePresetPreview(error)) return false;
     if (!ValidateDesktopStubDisplayProfile(includeCommandLineOverrides, error)) return false;
+    if (!aip::notes::ValidateNotesSignInConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
+    }, error)) return false;
     aip::content::Configuration composition;
     if (!aip::content::ReadConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);

@@ -689,6 +689,8 @@ static bool DispatchContentEngineCommand(HWND owner, UINT command)
         if (secret) label += key.find(L"Protected") != std::wstring::npos ? L" (paste protected blob; blank clears it)." : L" (replace saved cookie; blank clears it). Stored in plain text in this INI.";
         if (ShowTextInputDialog(owner, L"Real-Time Notes", label, value, true, secret) == IDOK) {
             std::vector<aip::IniSetting> changes{{section, key, value}};
+            if (key == L"UID" && value != IniReadS(section.c_str(), L"UID", L""))
+                changes.push_back({section, L"Server", L""});
             if (key == L"LToken" || key == L"LTUid" || key == L"LTokenProtected" || key == L"LTUidProtected") {
                 const bool token = key.find(L"Token") != std::wstring::npos;
                 static constexpr const wchar_t* tokenKeys[] = {L"LToken", L"LTokenV2", L"ltoken_v2", L"LTokenProtected", L"LTokenV2Protected"};

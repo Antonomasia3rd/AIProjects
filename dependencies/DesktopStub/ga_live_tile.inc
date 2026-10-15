@@ -216,6 +216,29 @@ static void AppendLiveTileImageBinding(
 #include "ga_live_tile_templates.inc"
 
 #include "../rss_tile_layout.h"
+static std::wstring MediaAppIconUri(const std::wstring& directory, const aip::content::Snapshot& snapshot)
+{
+    if (snapshot.smtcAppIconPath.empty() || !snapshot.smtcAppIconLease) return {};
+    // Store gives validated logos content-addressed filenames. Keep the
+    // package asset immutable while an older notification can still use it.
+    std::uint64_t hash = 14695981039346656037ULL;
+    const auto leaf = snapshot.smtcAppIconPath.substr(snapshot.smtcAppIconPath.find_last_of(L"\\/") + 1);
+    HashWide(hash, leaf);
+    const auto relative = L"Assets/MediaIndicators/Icon-" + Hex64(hash) + L".png";
+    const auto path = ResolveManifestAssetPath(directory, relative);
+    if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return aip::tile_visual::PackageUri(relative);
+    DWORD error = ERROR_SUCCESS;
+    if (!EnsureParentDirectoryForFile(path, &error)) return {};
+    Bitmap source(snapshot.smtcAppIconPath.c_str());
+    if (source.GetLastStatus() != Ok || !SavePNG(&source, path.c_str())) return {};
+    return aip::tile_visual::PackageUri(relative);
+}
+static std::wstring MediaTopicUri(const std::wstring& topic, const std::wstring& directory)
+{
+    aip::tile_visual::Assets icons; std::wstring error;
+    return aip::tile_visual::EnsureTileTopicAssets(topic, directory, icons, error) ?
+        aip::tile_visual::PackageUri(icons.smallTile) : std::wstring{};
+}
 static std::wstring BuildLiveTileXml(
     const std::wstring& exeDir,
     const ManifestDisplayInfo& manifestInfo,
@@ -262,15 +285,35 @@ static std::wstring BuildLiveTileXml(
         }
 
         const wchar_t* templateName = LiveTileTemplateForTarget(asset.binding);
-        if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->secondaryTileId == L"AipSource_smtc" &&
+        if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->smtcSource &&
             g_renderContent->textMode == aip::content::TextMode::Auto) {
-            aip::tile_visual::Assets icons; std::wstring iconError;
-            const auto key = g_renderContent->text.badge.find(L"Playing") != std::wstring::npos ? L"pause" : L"play";
-            if (aip::tile_visual::EnsureTileTopicAssets(key, exeDir, icons, iconError) &&
-                aip::content::AppendMediaTileBinding(xml, templateName, g_renderContent->text,
-                    aip::tile_visual::PackageUri(icons.smallTile), ContentHasTransparentBackground() ? L"" : uri)) {
+            std::wstring icon;
+            if (g_renderContent->smtcIndicator == aip::content::MediaIndicatorMode::AppIcon) icon = MediaAppIconUri(exeDir, *g_renderContent);
+            const bool appIcon = !icon.empty();
+            if (icon.empty() && g_renderContent->smtcIndicator != aip::content::MediaIndicatorMode::None)
+                icon = MediaTopicUri(aip::content::MediaStatusTopic(g_renderContent->smtcState), exeDir);
+            std::vector<aip::content::MediaIndicatorImage> extras;
+            for (const auto& topic : aip::content::MediaExtraTopics(*g_renderContent)) {
+                const auto extra = MediaTopicUri(topic, exeDir);
+                if (!extra.empty()) extras.push_back({extra, topic});
+            }
+            if (aip::content::AppendMediaTileBinding(xml, templateName, g_renderContent->text,
+                    icon, ContentHasTransparentBackground() ? L"" : uri, extras,
+                    appIcon ? g_renderContent->smtcAppName : aip::content::MediaStatusLabel(g_renderContent->smtcState))) {
                 hasUsableBinding = true; continue;
             }
+        }
+        if (LiveTileUsesAdaptiveXml() && g_renderContent && !g_renderContent->detailRows.empty() &&
+            g_renderContent->textMode == aip::content::TextMode::Auto) {
+            if (aip::content::AppendDetailRowsBinding(xml, templateName, asset.h, g_renderContent->detailRows,
+                ContentHasTransparentBackground() ? L"" : uri, MediaTopicUri(g_renderContent->detailTopic, exeDir))) {
+                hasUsableBinding = true; continue;
+            }
+        }
+        if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->wrapSourceText &&
+            g_renderContent->textMode == aip::content::TextMode::Auto) {
+            if (aip::content::AppendWrappedSourceBinding(xml, templateName, g_renderContent->text,
+                ContentHasTransparentBackground() ? L"" : uri)) { hasUsableBinding = true; continue; }
         }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && !g_renderContent->rssHeadlines.empty() &&
             g_renderContent->textMode == aip::content::TextMode::Auto) {

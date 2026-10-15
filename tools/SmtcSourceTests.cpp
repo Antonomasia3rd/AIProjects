@@ -506,6 +506,50 @@ void TestSystemReadOnly()
 }
 }
 
+static void TestExplicitPresentationMetadata()
+{
+    using namespace aip::content;
+    SmtcSessionData data;
+    data.hasSession = true; data.title = L"Fixture song"; data.appId = L"Fixture.Player";
+    data.status = L"localized metadata"; data.playbackState = MediaPlaybackState::Paused;
+    data.repeat = MediaRepeatMode::Track; data.shuffle = MediaToggleState::On;
+    data.appIconBytes = BitmapBytes(3, 2, 96);
+    const auto reader = [&](auto, bool, const auto&) { return data; };
+    SmtcArtworkCache cache(L"SmtcIconFixture", L"C:\\fixture-only\\media-icons.ini");
+    SmtcMediaSnapshot media; std::wstring error;
+    Check(ReadSmtcMedia(media, error, std::chrono::milliseconds(2000), false, reader, {}, &cache, true) &&
+        media.playbackState == MediaPlaybackState::Paused && media.repeat == MediaRepeatMode::Track &&
+        media.shuffle == MediaToggleState::On && media.appIcon && !media.artwork,
+        "explicit current playback/repeat/shuffle and an application icon share one injected media snapshot");
+    auto icon = media.appIcon;
+    std::vector<BYTE> saved(data.appIconBytes.size()); DWORD copied = 0;
+    const auto file = icon ? CreateFileW(icon->path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr) : INVALID_HANDLE_VALUE;
+    const bool identical = file != INVALID_HANDLE_VALUE && ReadFile(file, saved.data(), static_cast<DWORD>(saved.size()), &copied, nullptr) &&
+        copied == saved.size() && saved == data.appIconBytes;
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    Check(identical, "validated icon storage retains its original encoding instead of discarding source alpha");
+    data.playbackState = MediaPlaybackState::Unknown; data.status = L"Not Playing";
+    data.repeat = MediaRepeatMode::Unknown; data.shuffle = MediaToggleState::Unknown;
+    Check(ReadSmtcMedia(media, error, std::chrono::milliseconds(2000), false, reader, {}, &cache) &&
+        media.playbackState == MediaPlaybackState::Unknown && media.repeat == MediaRepeatMode::Unknown &&
+        media.shuffle == MediaToggleState::Unknown && !media.appIcon,
+        "missing metadata stays unknown and disabled app-icon mode performs no icon cache work");
+    data.appIconBytes.assign(1024 * 1024 + 1, 0);
+    Check(ReadSmtcMedia(media, error, std::chrono::milliseconds(2000), false, reader, {}, &cache, true) &&
+        !media.appIcon && !media.appIconError.empty() && media.title == L"Fixture song",
+        "oversized application icons fail independently of usable media text");
+    data.appIconBytes = BitmapBytes(257, 1);
+    Check(ReadSmtcMedia(media, error, std::chrono::milliseconds(2000), false, reader, {}, &cache, true) &&
+        !media.appIcon && !media.appIconError.empty(), "large raw application logos are rejected before the renderer can decode them");
+    data.appIconBytes = {1, 2, 3};
+    Check(ReadSmtcMedia(media, error, std::chrono::milliseconds(2000), false, reader, {}, &cache, true) &&
+        !media.appIcon && !media.appIconError.empty(), "invalid application icons leave an honest status fallback");
+    data.hasSession = false;
+    Check(ReadSmtcMedia(media, error, std::chrono::milliseconds(2000), false, reader, {}, &cache, true) &&
+        !media.hasSession && media.playbackState == MediaPlaybackState::Stopped && !media.appIcon &&
+        media.repeat == MediaRepeatMode::Unknown, "an absent session clears old icon/metadata and reports no active playback");
+}
+
 int main(int argc, char** argv)
 {
     bool allowSystemMedia = false;
@@ -516,6 +560,7 @@ int main(int argc, char** argv)
     TestDeadline();
     TestContract();
     TestInjectedMediaAndArtwork();
+    TestExplicitPresentationMetadata();
     TestPersistentWorkerManager();
     TestEventEpochCoalescing();
     TestRetainedManagerEvents();

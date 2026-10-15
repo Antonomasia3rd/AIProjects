@@ -62,6 +62,8 @@ Start replacement; this session has not yet verified an actual secondary pin.
 Microsoft documents the
 [desktop secondary-tile APIs](https://learn.microsoft.com/en-us/windows/apps/design/shell/tiles-and-notifications/secondary-tiles-desktop-pinning).
 
+Existing source/action pins receive topic-logo metadata automatically on startup, without creating new pins. Quick Actions offers direct pin/unpin choices; its former enable switch is retired.
+
 The old PrepareDesktopStubTiles.ps1 and RegisterDesktopStubTile.ps1 scripts are
 compatibility tools requiring an explicit LegacyMultipleHosts switch. New setup
 uses the Tiles menu. Do not use those scripts for one-process operation.
@@ -82,4 +84,6 @@ generic live-window capture when enabled; it does not require Wallpaper Engine.
 If no usable live capture is available, it falls back to ordinary wallpaper after
 configured startup settling. For a solid-color desktop without an image path,
 choose None/Transparent explicitly.
-Now playing clicks toggle playback by default. Tiles > Quick Actions configures the click action, volume step, and optional individual action tiles. Use Pin/update on existing source tiles to install their topic logos. See tile-actions-validation-2026-10-14.md for behavior and acceptance limits.
+Now playing clicks toggle playback by default. Tiles > Quick Actions configures the click action, volume step, and optional individual action tiles. Existing pins receive topic logos automatically; Pin/update remains available for explicit changes. See tile-actions-validation-2026-10-14.md for behavior and acceptance limits.
+
+Game sign-in opens that game's Battle Chronicle page. Use Find game accounts to discover UID/server choices, then Save selected account. Fresh private sessions are default; Remember sign-in is a per-game option. Local cleanup preserves imported INI credentials and does not call Logout. See notes-signin-ux-2026-10-15.md.

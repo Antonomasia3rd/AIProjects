@@ -74,7 +74,12 @@ void PreviewAndReload() {
     Check(first.name == L"Fixture app" && first.details == L"ALPHA" && first.state == L"fixture state", "actual presence builder supplies preview fields");
     Check(traffic->created == 0 && traffic->sent == 0, "network-off default never constructs any transport");
     auto text = aip::content::DiscordContent(first);
-    Check(text.primary == L"ALPHA" && text.secondary == L"Preview\nfixture state" && text.badge.empty(), "tile adapter preserves preview and state in the medium text layout");
+    Check(text.primary == L"Fixture app" && text.secondary == L"Preview\nALPHA\nfixture state" && text.badge.empty(), "tile adapter keeps a compact headline and preserves preview/details/state in the wrapped description");
+    auto setup = first;
+    setup.name = L"DesktopStub"; setup.details = L"Configure Details and State under Tiles > Sources and accounts > Discord";
+    const auto setupText = aip::content::DiscordContent(setup);
+    Check(setupText.primary == L"Discord presence" && setupText.secondary.find(L"Set Details and State in Discord settings.") != std::wstring::npos &&
+        setupText.secondary.find(L"under Tiles") == std::wstring::npos, "legacy setup placeholders use a short headline and compact lower instruction");
     first.details = L"changed copy";
     Check(service.Read().details == L"ALPHA", "mutating a returned snapshot cannot alter service state");
     Options invalid = options; invalid.refreshMs = 0;

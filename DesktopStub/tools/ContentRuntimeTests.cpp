@@ -1279,7 +1279,9 @@ int wmain()
     preview.phase = aip::discord::Phase::Preview;
     preview.details = L"fixture details"; preview.state = L"fixture state";
     const auto previewText = aip::content::DiscordContent(preview);
-    Check(previewText.primary == L"fixture details" && previewText.secondary.find(L"fixture state") != std::wstring::npos && previewText.secondary.find(L"Preview") != std::wstring::npos && previewText.badge.empty(), "Discord snapshot maps to tile preview without transport");
+    Check(previewText.primary == L"Discord presence" && previewText.secondary.find(L"fixture details") != std::wstring::npos &&
+        previewText.secondary.find(L"fixture state") != std::wstring::npos && previewText.secondary.find(L"Preview") != std::wstring::npos &&
+        previewText.badge.empty(), "Discord preview keeps a compact headline and preserves wrapped details and state without transport");
     {
         // Construct the separately linked service after all module globals.
         // This catches the host's earlier static-initialization crash without

@@ -1192,7 +1192,7 @@ static void AppendRectFingerprint(std::wstring& out, const wchar_t* name, const 
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
 {
     std::wstring state;
-    state += L"v=9;";
+    state += L"v=10;";
     const bool bakedText = !UseExperimentalLiveTileUpdate() ||
         ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10 ||
         (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
@@ -1202,6 +1202,20 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
         state += L"contentBackground=" + std::to_wstring(static_cast<int>(g_renderContent->backgroundId)) + L";";
         if (bakedText) for (const auto& headline : g_renderContent->rssHeadlines)
             state += L"rss=" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
+        if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off) {
+            state += L"wrapSourceText=" + std::to_wstring(g_renderContent->wrapSourceText) + L";";
+            state += L"detailTopic=" + g_renderContent->detailTopic + L";";
+            for (const auto& row : g_renderContent->detailRows)
+                for (const auto& field : {row.primary, row.secondary, row.badge})
+                    state += L"detail=" + std::to_wstring(field.size()) + L":" + field;
+            state += L"smtc=" + std::to_wstring(g_renderContent->smtcSource) + L":" +
+                std::to_wstring(static_cast<int>(g_renderContent->smtcState)) + L":" +
+                std::to_wstring(static_cast<int>(g_renderContent->smtcIndicator)) + L":" +
+                std::to_wstring(g_renderContent->smtcShowRepeatShuffle) + L":" +
+                std::to_wstring(static_cast<int>(g_renderContent->smtcRepeat)) + L":" +
+                std::to_wstring(static_cast<int>(g_renderContent->smtcShuffle)) + L":" +
+                FileFingerprint(g_renderContent->smtcAppIconPath) + L";";
+        }
         if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off)
             for (const auto& field : {g_renderContent->text.primary, g_renderContent->text.secondary, g_renderContent->text.badge})
                 state += std::to_wstring(field.size()) + L":" + field;

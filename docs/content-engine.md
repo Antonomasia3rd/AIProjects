@@ -22,9 +22,9 @@ Each `[Content.N]` has `Enabled`, `Name`, `Background`, `ImagePath`, `TextSource
 
 `TextSources` is an ordered comma-separated list: `CustomText`, `RssFeed`, `CapsLock`, `SMTC`, `Notes`, `DiscordRPC`, `CapsBlink`, `AsusBlink`. The shared source catalog owns these canonical names, their display labels, normalization, tray order, and host dispatch. Names are case-insensitive when read and are saved in the canonical form above. CustomText reads the entry's three text fields. Sources contribute corresponding text fields in order, joined by newlines and bounded to 4096 characters. Display regions still wrap/clip to their supported size. An entry's image remains its background; another content entry is a separate cycle item. Empty TextSources means image-only content.
 
-`RssFeed`, `SMTC`, and `Notes` can refresh while an enabled entry waits for its next cycle slot, so a cycle can display cached data promptly. In app-managed rotation, `DiscordRPC`, `CapsBlink`, and `AsusBlink` run only while the selected entry uses them; changing away cancels the provider. Windows rotation can refresh their read-only previews across enabled entries. Turning on presence sending or hardware actions requires app-managed rotation, since Windows does not report which queued item is visible.
+`RssFeed`, `SMTC`, and `Notes` can refresh while an enabled entry waits for its next cycle slot, so a cycle can display cached data promptly. In app-managed rotation, Discord sending and ASUS actions follow the selected source. CapsBlink hardware is independent of tile text and stays enabled according to its own HardwareEnabled setting; selecting its text source only adds status to the tile. Windows rotation can refresh their read-only previews across enabled entries. Turning on presence sending or hardware actions requires app-managed rotation, since Windows does not report which queued item is visible.
 
-SMTC supplies title/artist/session status on supported Windows 10 1809+ systems. `Background=SMTCArtwork` adds the current media artwork from the same immutable session snapshot; select `TextSources=SMTC` for a combined entry or leave it empty for artwork only. Missing, idle or invalid artwork clears the prior track's image and uses the normal solid/text fallback. The host stores bounded artwork in a writable profile-scoped temporary cache. It does not control playback. CapsLock reports the logical toggle state; `CapsBlink` supplies the separate opt-in indicator controller. `RssItem` chooses headline 1–20 for a numbered RSS entry, default 1; the legacy RSS preset cycles parsed headlines. A missing selected headline or feed failure appears as status text. Background errors produce diagnostics instead of silently replacing a custom image.
+SMTC supplies title/artist/session status on supported Windows 10 1809+ systems. `Background=SMTCArtwork` adds the current media artwork from the same immutable session snapshot; select `TextSources=SMTC` for a combined entry or leave it empty for artwork only. Missing, idle or invalid artwork clears the prior track's image and uses the normal solid/text fallback. The host stores bounded artwork in a writable profile-scoped temporary cache. Explicit tile-click and Quick Actions controls can request playback, repeat/shuffle changes and default-output volume changes; unsupported player controls report their limits. CapsLock reports the logical toggle state; `CapsBlink` supplies the separate opt-in indicator controller. `RssItem` chooses headline 1–20 for a numbered RSS entry, default 1; the legacy RSS preset cycles parsed headlines. A missing selected headline or feed failure appears as status text. Background errors produce diagnostics instead of silently replacing a custom image.
 
 Timing warnings appear when enabling or accelerating risky cycling. Editing text/names does not ask to approve the same unchanged timing again. A tray edit refuses to overwrite another writer's simultaneous configuration change; reopen the menu and retry if that occurs.
 
@@ -86,7 +86,7 @@ This is a built-in source host. Shared providers cover Notes data/details/action
 
 ## Real-Time Notes
 
-Enable the Notes source on an entry and select `NotesResource=Resin`, `Stamina`, or `Charge`. `NotesDetail=Summary` shows the usual summary; the tray detail picker also offers the metrics available for that game. Separate entries can cycle through those metrics. The tray offers corresponding game/account settings, profile/cookie import, clear and refresh actions. Each game has its own `[Notes.Resin]`, `[Notes.Stamina]`, or `[Notes.Charge]` section with `UID`, `LToken`, and `LTUid`. Use cookie **values**, not an entire Cookie header. Empty credentials produce a configuration status on the tile without sending a request. `[Notes] RefreshSeconds=300`, `HttpTimeoutSeconds=15`, and `MaximumBytes=1048576` control fetching independently of content cycling. Per-account `RefreshSeconds=0` inherits the global interval.
+Enable the Notes source on an entry and select `NotesResource=Resin`, `Stamina`, or `Charge`. `NotesDetail=Summary` shows a stacked resource/activity overview when Notes is the only text source; the tray detail picker also offers the metrics available for that game. Separate entries can cycle through those metrics. The tray offers corresponding game/account settings, profile/cookie import, clear and refresh actions. Each game has its own `[Notes.Resin]`, `[Notes.Stamina]`, or `[Notes.Charge]` section with `UID`, `LToken`, and `LTUid`. Use cookie **values**, not an entire Cookie header. Empty credentials produce a configuration status on the tile without sending a request. `[Notes] RefreshSeconds=300`, `HttpTimeoutSeconds=15`, and `MaximumBytes=1048576` control fetching independently of content cycling. Per-account `RefreshSeconds=0` inherits the global interval.
 
 **Cookies entered as plain values are stored in plaintext in the selected INI. Anyone who can read it can obtain them.** Cookie entry is masked and values are hidden in menus/logs, but that does not encrypt the file. Keep the INI private and do not share it in bug reports. Existing protected values can be explicitly imported into `LTokenProtected`/`LTUidProtected`; the old `LTokenV2Protected`/`LTuidV2Protected` aliases are also readable. Import copies the opaque values without decoding or rewriting the source. The fetch worker decodes protected values only when that account is used, so a copied protected profile may be unusable under another Windows user or machine. There is no mandatory encryption or automatic registry discovery. Creating new opt-in protected values remains deferred until functional consolidation. Live HoYoLAB endpoint/account compatibility has not been verified; tests use synthetic responses.
 
@@ -182,3 +182,31 @@ An optional `ProfilePath` reads an existing asusblink INI's `[Settings]` section
 An entry with `Background=SMTCArtwork` uses artwork from the current Windows media session. Add `TextSources=SMTC` for title/artist/status and choose `TextMode=Overlay` to retain artwork behind text. Artwork-only entries can leave `TextSources` empty. Missing artwork, an idle session or a decoding error clears the old image and falls back to the existing solid background/status. One immutable media snapshot supplies text and artwork for a composed frame.
 
 `--now-playing-import-profile OldNowPlaying.ini` and the corresponding tray action import Text, Artwork, Combined or Cycle layouts. Existing `Content.*` entries are replaced atomically; explicit `--set` overrides apply last. Source files, hardware activation and existing Startup configuration are preserved. The donor Startup preference is diagnosed and deferred to DesktopStub's explicit Startup controls. Its tile republish interval has no exact host equivalent and is not used as `CycleSeconds`. The Cycle layout uses the existing host cycle interval; its shared global text mode cannot reproduce per-frame native/overlay switching exactly. Imports default to configuration-only and never query a media session.
+
+### Media presentation and game account setup
+
+[SMTC] Indicator=Status|AppIcon|None selects the displayed indicator;
+ShowRepeatShuffle=0|1 adds known repeat/shuffle states. These settings are
+under the Now playing tile's Source and sign-in settings > Now playing appearance
+menu and accept generic CLI --set. Text stays top-aligned. Status icons reflect
+current metadata, not the click action. AppIcon uses a bounded source-worker cache
+and falls back to status when the app/Windows cannot provide a logo.
+
+Each game's Notes.Resin, Notes.Stamina or Notes.Charge section can store
+an explicit Server, chosen automatically with a discovered account. Empty Server
+preserves the older UID-prefix inference. Changing a UID through the tray/CLI
+clears a stale Server unless the same CLI batch supplies a replacement.
+
+Embedded sign-in is game-specific. Choose Find game accounts after signing in,
+select a UID/server when multiple roles exist, then Save selected account.
+Manual UID entry remains a fallback with a clear game heading.
+Notes.SignIn.Resin, Notes.SignIn.Stamina and Notes.SignIn.Charge sections accept
+RetainSession=0|1 through INI/CLI and the window's Remember sign-in checkbox.
+Default 0 uses a fresh private session; remembered profiles are separate per game.
+Local browser-data cleanup never calls server Logout or clears imported INI
+credentials. It waits for a blank page before clearing and reports success only
+after the browser confirms completion. Runtime failure, explicit cancellation,
+forced shutdown or power loss can still interrupt erasure.
+
+Plain saved tokens, exports and backups remain readable unless opt-in protection
+is selected. Protect these files and browser data from shared uploads.

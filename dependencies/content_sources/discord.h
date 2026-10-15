@@ -7,8 +7,7 @@ namespace aip { namespace content {
 // another application's files, spawn DiscordRPC, or create a second transport.
 inline Text DiscordContent(const aip::discord::Snapshot& snapshot) {
     Text text;
-    text.primary = snapshot.details.empty() ? snapshot.name : snapshot.details;
-    if (text.primary.empty()) text.primary = L"Discord presence";
+    text.primary = snapshot.name.empty() || snapshot.name == L"DesktopStub" ? L"Discord presence" : snapshot.name;
     // A nonempty badge selects the medium counter template, which has no
     // secondary region. Status belongs in normal text so state/errors survive.
     if (snapshot.phase == aip::discord::Phase::Preview) text.secondary = L"Preview";
@@ -18,6 +17,9 @@ inline Text DiscordContent(const aip::discord::Snapshot& snapshot) {
     else if (!snapshot.running) text.secondary = L"Stopped";
     else text.secondary = L"Loading";
     if (!snapshot.error.empty()) AppendBounded(text.secondary, snapshot.error);
+    const auto details = Lower(Trim(snapshot.details)).find(L"configure details and state") == 0 ?
+        std::wstring(L"Set Details and State in Discord settings.") : snapshot.details;
+    AppendBounded(text.secondary, details);
     AppendBounded(text.secondary, snapshot.state);
     return text;
 }

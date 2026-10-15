@@ -1927,6 +1927,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     if (g_consoleControlShutdownPending.exchange(false))
         RequestGracefulShutdown(g_hwnd);
 
+    // Existing pins need their own static logos after a program upgrade. This
+    // refresh updates known destinations only and never opens a pin prompt.
+    if (!g_shutdownState.IsRequested()) RequestRefreshExistingSecondaryTileLogos(g_hwnd);
     bool queuedLiveTileRuntimeRelaunch = false;
     if (!g_commandLine.mediaAction.empty()) {
         for (std::size_t index = 0; index < aip::content::TileActionCount; ++index)

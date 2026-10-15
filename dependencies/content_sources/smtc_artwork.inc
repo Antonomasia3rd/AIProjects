@@ -152,7 +152,7 @@ public:
     SmtcArtworkCache(const std::wstring& product, const std::wstring& absoluteProfile)
         : directory_(std::make_shared<smtc_artwork_detail::Directory>(product + L"\n" + absoluteProfile)) {}
     std::shared_ptr<const SmtcArtworkFile> Store(const std::vector<std::uint8_t>& bytes,
-        std::wstring& error, smtc_artwork_detail::Clock::time_point deadline, const SmtcCancel& canceled = {}) {
+        std::wstring& error, smtc_artwork_detail::Clock::time_point deadline, const SmtcCancel& canceled = {}, bool retainEncoded = false) {
         error.clear();
         if (bytes.empty()) return {};
         if (bytes.size() > SmtcMaximumArtworkBytes) { error = L"The media artwork exceeds the encoded byte limit."; return {}; }
@@ -162,25 +162,28 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto iterator = files_.begin(); iterator != files_.end();)
             if (iterator->second.expired()) iterator = files_.erase(iterator); else ++iterator;
-        const auto found = files_.find(hash);
+        const auto cacheKey = hash + (retainEncoded ? L":encoded" : L":bitmap");
+        const auto found = files_.find(cacheKey);
         if (found != files_.end()) if (auto asset = found->second.lock()) return asset;
         std::vector<BYTE> bitmap;
         UINT width = 0, height = 0;
         if (!smtc_artwork_detail::Decode(bytes, bitmap, width, height, error, deadline, canceled)) return {};
+        if (retainEncoded && (width > 256 || height > 256)) { error = L"The application icon exceeds its decoded dimension limit."; return {}; }
         if (!directory_->Prepare()) { error = L"Could not create the profile's temporary artwork cache."; return {}; }
         auto asset = std::make_shared<SmtcArtworkFile>();
-        const auto path = directory_->path + L"\\" + hash + L".bmp";
+        const auto path = directory_->path + L"\\" + hash + (retainEncoded ? L"-icon.img" : L".bmp");
         const auto temporary = path + L".tmp";
         HANDLE file = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE) { error = L"Could not create the media artwork file."; return {}; }
         DWORD written = 0;
-        const bool saved = WriteFile(file, bitmap.data(), static_cast<DWORD>(bitmap.size()), &written, nullptr) && written == bitmap.size();
+        const auto& output = retainEncoded ? bytes : bitmap;
+        const bool saved = WriteFile(file, output.data(), static_cast<DWORD>(output.size()), &written, nullptr) && written == output.size();
         CloseHandle(file);
         const bool complete = saved && smtc_artwork_detail::Continue(deadline, canceled) &&
             MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
         if (!complete) { DeleteFileW(temporary.c_str()); error = L"Could not finish storing the media artwork."; return {}; }
         asset->path = path; asset->hash = hash; asset->width = width; asset->height = height; asset->directory = directory_;
-        files_[hash] = asset;
+        files_[cacheKey] = asset;
         return asset;
     }
 };

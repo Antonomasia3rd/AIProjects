@@ -127,7 +127,7 @@ build/review-validation/Feedback-20261014-2104/Screenshot-5-static-fallback.png.
 ### Requested folder galleries (after bug fixes)
 
 Example folder supplied by the user:
-D:UsersAmiyaPicturesArtworksScreenLandscapeProject SEKAINene Kusanagi
+D:/Users/Amiya/Pictures/Artworks/Screen/Landscape/Project SEKAI/Nene Kusanagi
 
 Create multiple gallery tiles with Photos-style image rotation, all managed by
 the existing process/tray/configuration/Startup. Hard requirement: no two tiles
@@ -204,3 +204,22 @@ review. New user findings above are additional open bugs, not evidence that the
 original review is complete. Security additions remain opt-in and secondary to
 functional fixes. Update older docs that still describe SMTC as read-only or
 CapsBlink hardware as dependent on visible text when doing the closure pass.
+## 2026-10-15 resumed work and gallery decision
+
+Usage reset was verified (0% used at start). DesktopStub defects have priority;
+changes and validation are in progress. The native computer-use bridge now
+initializes and lists windows successfully, replacing the earlier bridge failure.
+
+The user selected **Separate pools per tile** for gallery rotation. This permits
+disjoint queue contents and cheap Windows-managed animation without predicting
+the currently visible/fifth notification. Preserve reservations across restart
+and membership changes; a directory reshuffle must not move a still-visible
+image to another tile. Gallery implementation/setup is still pending this
+DesktopStub UX validation pass. The example folder path above is corrected from
+a checkpoint escaping error; no artwork files have been inspected or changed.
+
+Read-only low-priority audits found restart/lease timeout and publication-ignore
+issues in the bot, and chunk/capture stream/publication issues in Minecraft.
+Isolated fixes/tests are proceeding in those untracked source folders without
+starting services, bots, game clients or authenticated sessions. Keep runtime
+history, diagnostic login captures and auth caches out of any eventual push.

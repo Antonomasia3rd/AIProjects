@@ -12,6 +12,7 @@
 #include "../content_sources/smtc.inc"
 #include "../content_source_host.h"
 #include "../content_sources/notes.inc"
+#include "../content_sources/notes_tile_rows.h"
 #include "../content_sources/notes_profile.inc"
 #include "../content_sources/discord.h"
 
@@ -128,7 +129,7 @@ struct ContentNotesProvider
     static std::wstring Key(const aip::content::NotesConfiguration& cfg, int resource)
     {
         const auto& account = cfg.accounts[resource];
-        return std::to_wstring(resource) + L":" + account.uid + L"\n" + account.token + L"\n" + account.userId +
+        return std::to_wstring(resource) + L":" + account.uid + L"\n" + account.server + L"\n" + account.token + L"\n" + account.userId +
             L"\n" + account.tokenProtected + L"\n" + account.userIdProtected + L"\n" + std::to_wstring(account.refreshSeconds) +
             L"\n" + std::to_wstring(cfg.refreshSeconds) + L":" + std::to_wstring(cfg.timeoutSeconds) + L":" + std::to_wstring(cfg.maximumBytes);
     }
@@ -162,6 +163,7 @@ struct ContentNotesProvider
                 if (!aip::notes::ResolveStoredAccount(account, resolved, error, decoder))
                     return aip::notes::MakeError(settings.resource, L"Configuration error", error, settings.refreshSeconds);
                 settings.uid = resolved.uid; settings.ltoken = resolved.ltoken; settings.ltuid = resolved.ltuid;
+                settings.server = resolved.server;
                 return aip::notes::Fetch(settings, transport);
             }, WakePollThread, synchronous || force);
         if (synchronous && !sources[resource].Wait(key, settings.timeout + milliseconds(1000))) {
@@ -171,9 +173,10 @@ struct ContentNotesProvider
     aip::notes::Snapshot ReadSnapshot(const aip::content::NotesConfiguration& cfg, int resource)
     {
         aip::notes::Snapshot snapshot;
+        snapshot.resource = static_cast<aip::notes::ResourceKind>(resource);
         if (waitExpired[resource]) {
-            snapshot.line1 = L"Notes refresh timed out"; snapshot.line2 = L"No fresh result before the one-shot deadline.";
-            return snapshot;
+            return aip::notes::MakeError(snapshot.resource, L"Notes refresh timed out", L"No fresh result before the one-shot deadline.",
+                static_cast<UINT>(cfg.accounts[resource].refreshSeconds ? cfg.accounts[resource].refreshSeconds : cfg.refreshSeconds));
         }
         std::string error;
         if (!sources[resource].Read(Key(cfg, resource), snapshot, error)) {
@@ -224,13 +227,13 @@ struct ContentSmtcProvider
     ContentSmtcProvider()
         : nativeSession(std::make_shared<aip::content::SmtcWorkerSession>()),
           source([session = nativeSession] { session->Reset(); }) {}
-    void Refresh(int seconds, bool synchronous, bool artworkNeeded = false, bool useEvents = false)
+    void Refresh(int seconds, bool synchronous, bool artworkNeeded = false, bool useEvents = false, bool appIconNeeded = false)
     {
         waitExpired = false;
         std::wstring currentProfile;
         { std::lock_guard<std::mutex> lock(g_pathMutex); currentProfile = aip::MakeAbsolutePath(g_iniPath); }
         if (profile != currentProfile) { profile = currentProfile; cache = std::make_shared<aip::content::SmtcArtworkCache>(L"DesktopStub", profile); }
-        const auto requestedKey = L"SMTC:" + profile + (artworkNeeded ? L":artwork" : L":text") + (useEvents ? L":events" : L":poll");
+        const auto requestedKey = L"SMTC:" + profile + (artworkNeeded ? L":artwork" : L":text") + (useEvents ? L":events" : L":poll") + (appIconNeeded ? L":appicon" : L"");
         const bool changed = requestedKey != key;
         key = requestedKey;
         // An event storm must never force-cancel the fetch already obtaining a
@@ -250,16 +253,16 @@ struct ContentSmtcProvider
             throw std::runtime_error("The inert host has no system SMTC reader.");
         };
 #else
-        reader = [session = nativeSession, useEvents](auto deadline, bool artwork, const auto& canceled) {
-            return session->Read(deadline, artwork, canceled, useEvents, WakePollThread);
+        reader = [session = nativeSession, useEvents, appIconNeeded](auto deadline, bool artwork, const auto& canceled) {
+            return session->Read(deadline, artwork, canceled, useEvents, WakePollThread, appIconNeeded);
         };
 #endif
         source.Request(key, milliseconds(static_cast<long long>(effectiveSeconds) * 1000),
-            [reader, artworkNeeded, artworkCache = cache](const aip::content::AsyncSource<aip::content::SmtcMediaSnapshot>::Cancel& canceled) {
+            [reader, artworkNeeded, appIconNeeded, artworkCache = cache](const aip::content::AsyncSource<aip::content::SmtcMediaSnapshot>::Cancel& canceled) {
                 aip::content::SmtcMediaSnapshot result;
                 if (canceled()) return result;
                 std::wstring error;
-                if (!aip::content::ReadSmtcMedia(result, error, milliseconds(2500), artworkNeeded, reader, canceled, artworkCache.get())) {
+                if (!aip::content::ReadSmtcMedia(result, error, milliseconds(2500), artworkNeeded, reader, canceled, artworkCache.get(), appIconNeeded)) {
                     result.text.primary = L"Media source unavailable"; result.text.secondary = error;
                 }
                 return result;
@@ -455,8 +458,19 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
         for (const auto& value : {snapshot.text.primary, snapshot.text.secondary, snapshot.text.badge})
             key += L":" + std::to_wstring(value.size()) + L":" + value;
     key += L":" + std::to_wstring(snapshot.activationArguments.size()) + L":" + snapshot.activationArguments;
+    if (snapshot.textMode != aip::content::TextMode::Off) {
     for (const auto& headline : snapshot.rssHeadlines)
         key += L":" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
+    for (const auto& row : snapshot.detailRows)
+        for (const auto& field : {row.primary, row.secondary}) key += L":detail:" + std::to_wstring(field.size()) + L":" + field;
+    key += L":detailTopic:" + snapshot.detailTopic + L":wrap:" + std::to_wstring(snapshot.wrapSourceText);
+    if (snapshot.smtcSource) {
+        key += L":smtc:" + std::to_wstring(static_cast<int>(snapshot.smtcState)) + L":" +
+            std::to_wstring(static_cast<int>(snapshot.smtcIndicator)) + L":" + std::to_wstring(snapshot.smtcShowRepeatShuffle) + L":" +
+            std::to_wstring(static_cast<int>(snapshot.smtcRepeat)) + L":" + std::to_wstring(static_cast<int>(snapshot.smtcShuffle)) + L":" +
+            snapshot.smtcAppName + L":" + FileFingerprint(snapshot.smtcAppIconPath);
+    }
+    }
     // Include render settings to update static content after an INI/tray edit.
     key += L":" + BuildGenerationStateKey(snapshot.backgroundPath);
     return key;
@@ -582,7 +596,8 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     }) : std::any_of(cfg.entries.begin(), cfg.entries.end(), [](const aip::content::Entry& candidate) {
         return candidate.enabled && aip::content::BackgroundIdFor(candidate.background) == aip::content::BackgroundId::SmtcArtwork;
     });
-    if (needsSmtc) g_contentSmtc.Refresh(cfg.refreshSeconds, synchronous, needsArtwork, ContentDirectLiveDeliveryAvailable());
+    if (needsSmtc) g_contentSmtc.Refresh(cfg.refreshSeconds, synchronous, needsArtwork, ContentDirectLiveDeliveryAvailable(),
+        cfg.smtc.indicatorMode == aip::content::MediaIndicatorMode::AppIcon);
     else g_contentSmtc.Cancel();
     // Read once so a worker publication cannot pair one track's text with
     // another track's background while this frame is composed.
@@ -656,9 +671,14 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
             break;
         case aip::content::SourceId::DiscordRpc:
             text = discordText;
+            snapshot.wrapSourceText = entry.sources.size() == 1;
             break;
         case aip::content::SourceId::Notes:
             text = ContentNotesProvider::FormatSnapshot(notesSnapshots[entry.notesResource], entry.notesDetail);
+            if (entry.sources.size() == 1) {
+                snapshot.detailRows = aip::notes::BuildNoteTileRows(notesSnapshots[entry.notesResource], entry.notesDetail);
+                snapshot.detailTopic = aip::notes::ResourceTileTopic(notesSnapshots[entry.notesResource].resource);
+            }
             break;
         case aip::content::SourceId::Smtc:
             text = media.text;
@@ -698,6 +718,15 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
             break;
         }
         aip::content::Overlay(snapshot.text, text);
+    }
+    if ((entry.sources.size() == 1 && aip::content::EntryUsesSource(entry, aip::content::SourceId::Smtc)) ||
+        (entry.sources.empty() && artworkBackground && !media.artwork)) {
+        snapshot.smtcSource = true; snapshot.smtcState = media.playbackState;
+        snapshot.smtcIndicator = cfg.smtc.indicatorMode; snapshot.smtcShowRepeatShuffle = cfg.smtc.showRepeatShuffle;
+        snapshot.smtcRepeat = media.repeat; snapshot.smtcShuffle = media.shuffle; snapshot.smtcAppName = media.source;
+        if (media.appIcon) { snapshot.smtcAppIconPath = media.appIcon->path; snapshot.smtcAppIconLease = media.appIcon; }
+        if (media.hasSession) snapshot.text = {media.title, media.artist, aip::content::MediaStatusCaption(snapshot)};
+        else snapshot.text.badge = aip::content::MediaStatusCaption(snapshot);
     }
     if (artworkBackground && !media.artworkError.empty()) aip::content::AppendBounded(snapshot.text.secondary, media.artworkError);
     snapshot.nativeQueue = nativeQueue;

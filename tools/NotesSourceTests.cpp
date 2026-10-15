@@ -1,4 +1,6 @@
 #include "../dependencies/content_sources/notes_profile.inc"
+#include "../dependencies/content_sources/notes_accounts.inc"
+#include "../dependencies/content_sources/notes_signin_workers.h"
 #include <iostream>
 #include <thread>
 #include <atomic>
@@ -230,6 +232,208 @@ void TestDetailsAndImports()
     Check(aip::content::SensitiveSetting(L"Notes.Resin", L"LTokenV2Protected") &&
         aip::content::SensitiveSetting(L"Notes.Resin", L"LTUidProtected"), "all protected and legacy credential fields share log redaction");
 }
+void TestBoundGameAccounts()
+{
+    const std::string regions = R"({"retcode":0,"data":{"list":[{"region":"os_asia"},{"region":"os_usa"}]}})";
+    const std::string asia = R"({"retcode":0,"data":{"list":[{"game_biz":"hk4e_global","game_uid":"800000001","region":"os_asia","region_name":"Asia","nickname":"Fixture A"}]}})";
+    const std::string america = R"({"retcode":0,"data":{"list":[{"game_biz":"hk4e_global","game_uid":"600000001","region":"os_usa","region_name":"America","nickname":"Fixture B"}]}})";
+    std::vector<BoundGameAccount> accounts;
+    std::vector<std::wstring> servers;
+    std::wstring error;
+    Check(ParseBoundGameRegions(ResourceKind::Resin, regions, servers, error) && servers.size() == 2 && servers[1] == L"os_usa",
+        "official getAllRegions grammar yields separate known servers");
+    Check(ParseBoundGameAccounts(ResourceKind::Resin, asia, accounts, error) && accounts.size() == 1 &&
+        accounts[0].uid == L"800000001" && accounts[0].server == L"os_asia" && accounts[0].nickname == L"Fixture A",
+        "official role-list grammar preserves UID server and nickname for selection");
+    for (const auto& input : std::vector<std::string>{"", "[]", R"({"retcode":-100,"message":"fixture-secret"})",
+        R"({"retcode":0,"data":{"list":[{"game_uid":"x","region":"os_asia"}]}})",
+        R"({"retcode":0,"data":{"list":[{"game_uid":"800000001","region":"unsupported"}]}})",
+        R"({"retcode":0,"data":{"list":[{"game_uid":"800000001","region":"os_asia"},{}]}})",
+        R"({"retcode":0,"data":{"list":[{"game_uid":"800000001","region":"os_asia"}],"other":"\q"}})"}) {
+        accounts.push_back({L"stale", L"stale", L"", L""});
+        Check(!ParseBoundGameAccounts(ResourceKind::Resin, input, accounts, error) && accounts.empty() &&
+            error.find(L"fixture-secret") == std::wstring::npos,
+            "invalid or API-error account responses publish no partial accounts or untrusted diagnostics");
+    }
+    Check(!ParseBoundGameRegions(ResourceKind::Resin, R"({"retcode":0,"data":{"list":[{"region":"os_asia"},{"region":"prod_gf_us"}]}})", servers, error) && servers.empty(),
+        "a different game's server cannot enter the requested game's account choices");
+    Check(ParseBoundGameAccounts(ResourceKind::Charge, R"({"retcode":0,"data":{"list":[{"game_biz":"hk4e_global","game_uid":"800000001","region":"os_asia"}]}})", accounts, error) && accounts.empty(),
+        "cross-game roles are excluded rather than guessed as this game's UID");
+    Check(ParseBoundGameAccounts(ResourceKind::Resin, R"({"retcode":0,"data":{"list":[{"game_uid":"800000001","region":"os_asia"},{"game_uid":"800000001","region":"os_asia"}]}})", accounts, error) && accounts.size() == 1,
+        "duplicate UID-server rows do not create ambiguous duplicate choices");
+    std::string many = R"({"retcode":0,"data":{"list":[)";
+    for (int i = 0; i < 65; ++i) { if (i) many += ','; many += R"({"game_uid":"800000001","region":"os_asia"})"; }
+    many += "]}}";
+    Check(!ParseBoundGameAccounts(ResourceKind::Resin, many, accounts, error) && accounts.empty(), "role parsing has a hard input row bound even for duplicates");
+    aip::HttpFetchOptions request;
+    Check(BuildBoundGameAccountsRequest(ResourceKind::Resin, L"fixture-token", L"fixture-user", true, request, error) &&
+        request.url == L"https://api-account-os.hoyolab.com/account/binding/api/getAllRegions?game_biz=hk4e_global" &&
+        request.maximumBytes == 1048576 && request.timeout.count() == 15000,
+        "discovery starts at the verified official region endpoint with bounded limits");
+    int calls = 0; bool bounded = true, cookie = false;
+    const auto fake = [&](const aip::HttpFetchOptions& next, aip::HttpFetchResponse& response, std::wstring&) {
+        ++calls; bounded = bounded && next.maximumBytes <= 1048576 && next.timeout.count() > 0 && next.timeout.count() <= 15000;
+        for (const auto& header : next.headers) if (header.first == L"Cookie") cookie = header.second == L"ltoken_v2=fixture-token; ltuid_v2=fixture-user";
+        const auto body = calls == 1 ? regions : calls == 2 ? asia : america;
+        if (calls == 2) bounded = bounded && next.url == L"https://api-account-os.hoyolab.com/binding/api/getUserGameRolesByLtoken?game_biz=hk4e_global&region=os_asia";
+        if (calls == 3) bounded = bounded && next.url.find(L"&region=os_usa") != std::wstring::npos;
+        response.statusCode = 200; response.body.assign(body.begin(), body.end()); return true;
+    };
+    Check(FetchBoundGameAccounts(request, ResourceKind::Resin, accounts, error, fake) && calls == 3 && bounded && cookie && accounts.size() == 2,
+        "injected discovery follows regions then each server within one time and aggregate byte budget");
+    bool canceled = false; calls = 0; request.canceled = [&] { return canceled; };
+    const auto canceling = [&](const auto& next, auto& response, auto& issue) {
+        const auto result = fake(next, response, issue); if (calls == 2) canceled = true; return result;
+    };
+    Check(!FetchBoundGameAccounts(request, ResourceKind::Resin, accounts, error, canceling) && calls == 2 && accounts.empty(),
+        "cancellation between server replies discards all old-account results");
+    request.canceled = {}; calls = 0;
+    const auto inconsistent = [&](const auto& next, auto& response, auto& issue) {
+        const auto result = fake(next, response, issue); if (calls == 3) response.body.assign(asia.begin(), asia.end()); return result;
+    };
+    Check(!FetchBoundGameAccounts(request, ResourceKind::Resin, accounts, error, inconsistent) && accounts.empty(),
+        "a server-mismatched role reply cannot publish a guessed selection");
+    const auto oversized = [](const auto&, auto& response, auto&) { response.statusCode = 200; response.body.assign(1048577, 'x'); return true; };
+    Check(!FetchBoundGameAccounts(request, ResourceKind::Resin, accounts, error, oversized) && accounts.empty(), "oversize injected replies cannot bypass the total byte limit");
+    const auto throwing = [](const auto&, auto&, auto&) -> bool { throw std::runtime_error("fixture-secret"); };
+    Check(!FetchBoundGameAccounts(request, ResourceKind::Resin, accounts, error, throwing) && accounts.empty() && error.find(L"fixture-secret") == std::wstring::npos,
+        "transport exceptions cannot leak authentication data or publish partial choices");
+    request.url = L"https://example.invalid/"; calls = 0;
+    Check(!FetchBoundGameAccounts(request, ResourceKind::Resin, accounts, error, fake) && calls == 0, "discovery rejects an unrelated request before invoking transport");
+    Check(!BuildBoundGameAccountsRequest(ResourceKind::Resin, L"fixture\r\nInjected: value", L"user", true, request, error), "cookie header injection is rejected before transport");
+    Check(BuildBoundGameAccountsRequest(ResourceKind::Stamina, L"plain", L"user", false, request, error) &&
+        request.headers.back().second == L"ltoken=plain; ltuid=user" && request.url.find(L"hkrpg_global") != std::wstring::npos,
+        "legacy cookie pairs and the selected game retain explicit protocol identity");
+    auto configuration = FixtureConfiguration(); configuration.server = L"os_usa";
+    Check(BuildRequest(configuration, request, error) && request.url.find(L"server=os_usa") != std::wstring::npos,
+        "an explicitly selected supported server takes precedence over a UID-prefix guess");
+    configuration.server = L"prod_gf_us";
+    Check(!BuildRequest(configuration, request, error), "the Notes fetch rejects a server belonging to another game");
+    configuration.server.clear();
+    Check(BuildRequest(configuration, request, error) && request.url.find(L"server=os_asia") != std::wstring::npos,
+        "old accounts without Server keep UID-prefix inference");
+    std::vector<aip::IniSetting> changes;
+    Check(ImportCookieJson(0, L"{\"uid\":\"800000001\",\"region\":\"os_usa\",\"ltoken_v2\":\"fixture\",\"ltuid_v2\":\"fixture-user\"}", changes, error) &&
+        std::any_of(changes.begin(), changes.end(), [](const auto& item) { return item.key == L"Server" && item.value == L"os_usa"; }),
+        "cookie import stages the selected server atomically with account fields");
+    Check(!ImportCookieJson(0, L"{\"uid\":\"800000001\",\"region\":\"prod_gf_us\",\"ltoken_v2\":\"fixture\",\"ltuid_v2\":\"fixture-user\"}", changes, error) && changes.empty(),
+        "an invalid selected server rejects the entire account import");
+    changes = ClearAccountSettings(0);
+    Check(std::any_of(changes.begin(), changes.end(), [](const auto& item) { return item.key == L"Server" && item.value.empty(); }),
+        "explicit account replacement or clearing removes an old discovered server");
+    aip::content::NotesAccount saved; saved.uid = L"800000001"; saved.server = L"os_usa"; saved.token = L"fixture"; saved.userId = L"fixture-user";
+    Account resolved;
+    Check(ResolveStoredAccount(saved, resolved, error, {}) && resolved.server == L"os_usa", "stored server selection survives fetch-time account resolution without credential decoding");
+}
+void TestSignInPolicy()
+{
+    std::wstring error, value = L" yes ";
+    Check(NormalizeNotesSignInSetting(L"notes.signin.resin", L"RetainSession", value, error) && value == L"1", "retained browser sessions are an explicit typed per-game preference");
+    value = L"0";
+    Check(NormalizeNotesSignInSetting(L"Notes.SignIn.Charge", L"RetainSession", value, error) && value == L"0", "fresh private sign-in is available independently for each game");
+    value = L"perhaps";
+    Check(!NormalizeNotesSignInSetting(L"Notes.SignIn.Stamina", L"RetainSession", value, error), "invalid browser retention preferences cannot silently become retained mode");
+    Check(!KnownSignInSection(L"Notes.SignIn.Unknown") && !KnownSignInSection(L"Notes.Resin"), "browser preference sections cannot alias credential or unknown game sections");
+    Check(ValidateNotesSignInConfiguration([](const auto*, const auto*, const auto* fallback) { return std::wstring(fallback); }, error), "absent retention preferences select fresh sessions without rewriting an INI");
+    Check(!ValidateNotesSignInConfiguration([](const wchar_t* section, const auto*, const auto* fallback) { return std::wstring(section) == L"Notes.SignIn.Stamina" ? std::wstring(L"invalid") : std::wstring(fallback); }, error), "whole-document preference validation catches a bad inactive game's retention setting");
+    Check(IsHoYoLabCookieDomain(L".hoyolab.com") && IsHoYoLabCookieDomain(L"act.hoyolab.com") &&
+        !IsHoYoLabCookieDomain(L"evilhoyolab.com") && !IsHoYoLabCookieDomain(L"hoyolab.com.example.invalid") && !IsHoYoLabCookieDomain(L"hoyoverse.com"),
+        "cookie import accepts only the exact HoYoLAB domain or proper subdomains");
+    Check(SignInResultCurrent(3, 3, false, false) && !SignInResultCurrent(2, 3, false, false) &&
+        !SignInResultCurrent(3, 3, true, false) && !SignInResultCurrent(3, 3, false, true),
+        "closed reset or canceled session generations cannot publish stale account results");
+    Check(std::wstring(SignInGames[0].name) == L"Genshin Impact" && std::wstring(SignInGames[1].page).find(L"#/hsr") != std::wstring::npos &&
+        std::wstring(SignInGames[2].profile) == L"zzz", "game context binds names official pages API business IDs and isolated browser profile keys");
+}
+void TestLocalBrowserCleanup()
+{
+    LocalBrowserCleanup cleanup;
+    Check(cleanup.Begin(1) && cleanup.Pending() && !cleanup.Begin(2), "cleanup cannot restart over a pending clear operation");
+    Check(!cleanup.Complete(1, true), "browser data cannot be declared cleared before blank navigation completes");
+    Check(!cleanup.AllowNavigation(1, L"https://act.hoyolab.com/", 9) && !cleanup.AllowNavigation(2, L"about:blank", 10),
+        "ordinary page navigation and stale browser generations are blocked during cleanup");
+    Check(cleanup.AllowNavigation(1, L"about:blank", 10) && !cleanup.AllowNavigation(1, L"about:blank", 11),
+        "cleanup binds one exact blank navigation rather than accepting a later unrelated completion");
+    Check(cleanup.NavigationCompleted(1, 9, true) == LocalCleanupStep::None && cleanup.NavigationCompleted(2, 10, true) == LocalCleanupStep::None,
+        "old page completions cannot trigger clearing for a current session");
+    Check(!cleanup.RequestClose() && cleanup.CloseRequested(), "normal Close is deferred while browser cleanup is pending");
+    Check(cleanup.NavigationCompleted(1, 10, true) == LocalCleanupStep::ClearData && cleanup.Phase() == LocalCleanupPhase::Clearing,
+        "successful completion of the expected blank page authorizes the clear API exactly once");
+    Check(cleanup.NavigationCompleted(1, 10, true) == LocalCleanupStep::None && !cleanup.AllowNavigation(1, L"https://act.hoyolab.com/", 12),
+        "clearing neither starts twice nor allows page navigation to refill browser storage");
+    Check(!cleanup.Complete(2, true) && cleanup.Pending(), "an old cleanup callback cannot complete another browser generation");
+    Check(cleanup.Complete(1, true) && !cleanup.Pending() && cleanup.CloseRequested() && cleanup.RequestClose(),
+        "confirmed terminal cleanup releases a previously deferred close");
+    Check(cleanup.Begin(3) && cleanup.AllowNavigation(3, L"about:blank", 30) &&
+        cleanup.NavigationCompleted(3, 30, false) == LocalCleanupStep::Failed && !cleanup.Pending(),
+        "failed blank navigation terminates cleanup without claiming browser data was cleared");
+    Check(cleanup.Begin(4) && cleanup.AllowNavigation(4, L"about:blank", 40) &&
+        cleanup.NavigationCompleted(4, 40, true) == LocalCleanupStep::ClearData && cleanup.Complete(4, false) && cleanup.Phase() == LocalCleanupPhase::Failed,
+        "failed clear completion remains a terminal failure rather than a success");
+    Check(cleanup.Begin(5), "cleanup can be explicitly retried after a terminal failure");
+    cleanup.Abandon();
+    Check(!cleanup.Pending() && cleanup.Phase() == LocalCleanupPhase::Abandoned && !cleanup.Complete(5, true) &&
+        cleanup.NavigationCompleted(5, 50, true) == LocalCleanupStep::None,
+        "explicit cancellation or forced shutdown rejects late navigation and cleanup callbacks without waiting");
+    Check(cleanup.Begin(6) && cleanup.Fail(6) && !cleanup.Pending() && !cleanup.Complete(6, true),
+        "synchronous navigation or API failure is terminal and cannot later become success");
+}
+void TestOwnedSignInWorkers()
+{
+    std::mutex mutex; std::condition_variable changed;
+    bool started = false;
+    std::atomic<bool> canceled{false}, exited{false};
+    SignInWorkers workers;
+    Check(workers.Start([&] { { std::lock_guard<std::mutex> lock(mutex); canceled = true; } changed.notify_all(); }, [&] {
+        std::unique_lock<std::mutex> lock(mutex); started = true; changed.notify_all();
+        changed.wait_for(lock, std::chrono::seconds(2), [&] { return canceled.load(); });
+        exited = true;
+    }), "lookup worker ownership is published before its thread starts");
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        changed.wait_for(lock, std::chrono::seconds(1), [&] { return started; });
+    }
+    Check(started && workers.ReapCompleted() == 0 && workers.Size() == 1 && !exited.load() && !canceled.load(),
+        "ordinary UI reaping neither joins nor cancels a still-running lookup");
+    workers.CancelAndJoin();
+    Check(canceled.load() && exited.load() && workers.Size() == 0,
+        "global shutdown returns only after the owned lookup observes cancellation and exits");
+    int finishedCancelCalls = 0;
+    Check(workers.Start([&] { ++finishedCancelCalls; }, [] {}), "worker owner can start a new lookup after a completed shutdown cycle");
+    std::size_t reaped = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (workers.Size() && std::chrono::steady_clock::now() < deadline) {
+        reaped += workers.ReapCompleted();
+        if (workers.Size()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    Check(reaped == 1 && workers.Size() == 0 && finishedCancelCalls == 0,
+        "completed thread records are joined and released without canceling a finished lookup");
+    int cancelCalls = 0, taskCalls = 0;
+    SignInWorkers failed([](SignInWorkers::Task) -> std::thread { throw std::runtime_error("injected thread-start failure"); });
+    Check(!failed.Start([&] { ++cancelCalls; }, [&] { ++taskCalls; }) && cancelCalls == 1 && taskCalls == 0 && failed.Size() == 0,
+        "thread construction failure cancels the lookup and leaves no owned record or task behind");
+    std::atomic<bool> destructorCanceled{false}, destructorExited{false};
+    {
+        SignInWorkers scoped;
+        Check(scoped.Start([&] { { std::lock_guard<std::mutex> lock(mutex); destructorCanceled = true; } changed.notify_all(); }, [&] {
+            std::unique_lock<std::mutex> lock(mutex);
+            changed.wait_for(lock, std::chrono::seconds(1), [&] { return destructorCanceled.load(); });
+            destructorExited = true;
+        }), "scope teardown fixture starts an owned cancellable lookup");
+    }
+    Check(destructorCanceled.load() && destructorExited.load(), "owner destruction joins work before captured state can leave scope");
+    std::atomic<int> allCanceled{0}, allExited{0}, missedCancellation{0};
+    SignInWorkers batch;
+    bool batchStarted = true;
+    for (int i = 0; i < 2; ++i) batchStarted = batch.Start([&] { { std::lock_guard<std::mutex> lock(mutex); ++allCanceled; } changed.notify_all(); }, [&] {
+        std::unique_lock<std::mutex> lock(mutex);
+        if (!changed.wait_for(lock, std::chrono::seconds(1), [&] { return allCanceled.load() == 2; })) ++missedCancellation;
+        ++allExited;
+    }) && batchStarted;
+    batch.CancelAndJoin();
+    Check(batchStarted && allCanceled == 2 && allExited == 2 && missedCancellation == 0 && batch.Size() == 0,
+        "shutdown cancels every lookup before joining any lookup rather than serializing cancellation behind an active join");
+}
 }
 int main()
 {
@@ -237,6 +441,10 @@ int main()
     TestRequestsAndTransport();
     TestConcurrentSnapshots();
     TestDetailsAndImports();
+    TestBoundGameAccounts();
+    TestSignInPolicy();
+    TestLocalBrowserCleanup();
+    TestOwnedSignInWorkers();
     std::cout << checks << " Notes checks; " << failures << " failures\n";
     std::cout << (failures ? "Notes source tests failed.\n" : "Notes source tests passed.\n");
     return failures ? 1 : 0;

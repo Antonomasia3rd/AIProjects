@@ -176,6 +176,58 @@ int wmain(int argc, wchar_t** argv)
                 "forced adaptive bitmap overlay uses image-only XML with no duplicated text or darkening");
             snapshot.textMode = aip::content::TextMode::Auto;
         }
+        // Actual bitmap delivery of source-specific layouts. These snapshots
+        // are synthetic: account/network/media APIs remain inert.
+        for (int size = 0; size < 3; ++size) {
+            const Color source(255, 21, 63, 117);
+            snapshot.textMode = aip::content::TextMode::Auto;
+            snapshot.secondaryTileId = L"AipSource_genshin";
+            snapshot.text = {L"Resin 20/200", L"Full in 2h 0m", L""};
+            snapshot.detailTopic = L"resin";
+            snapshot.detailRows = {{L"Resin 20/200", L"Full in 2h 0m", L""},
+                {L"Commissions", L"2/4", L""}, {L"Expeditions ready", L"1/5", L""},
+                {L"Realm", L"100/2400", L""}, {L"Weekly Bosses", L"2/3", L""}};
+            auto notes = raster(size, 1, source);
+            const auto notesPixels = Pixels(*notes);
+            snapshot.textMode = aip::content::TextMode::Overlay;
+            Check(Pixels(*raster(size, 1, source)) == notesPixels, "Notes Auto bitmap fallback and Overlay use exactly the same rows and icon");
+            snapshot.detailRows[1].secondary = L"4/4";
+            Check(Pixels(*raster(size, 1, source)) != notesPixels, "a changed activity row is visible without changing the main resource count");
+            snapshot.detailRows[1].secondary = L"2/4";
+            if (output != directory)
+                Check(SavePNG(notes.get(), (output + L"\\Notes-" + names[size] + L".png").c_str()), "source Notes preview is exported");
+            snapshot.textMode = aip::content::TextMode::Off;
+            Inspect(*raster(size, 1, source), {}, source.GetValue());
+
+            snapshot.detailRows.clear(); snapshot.detailTopic.clear();
+            snapshot.secondaryTileId = L"AipSource_smtc";
+            snapshot.smtcSource = true;
+            snapshot.smtcIndicator = aip::content::MediaIndicatorMode::Status;
+            snapshot.smtcState = aip::content::MediaPlaybackState::Playing;
+            snapshot.smtcShowRepeatShuffle = false;
+            snapshot.textMode = aip::content::TextMode::Overlay;
+            snapshot.text = {L"A music title that wraps", L"Fixture artist", L"Fixture player"};
+            auto playing = raster(size, 1, source);
+            const auto playingPixels = Pixels(*playing);
+            unsigned topInk = heights[size];
+            for (int y = 0; y < heights[size]; ++y) for (int x = 0; x < widths[size] * 3 / 5; ++x)
+                if (playingPixels[y * widths[size] + x] != source.GetValue()) topInk = (std::min)(topInk, static_cast<unsigned>(y));
+            Check(topInk <= 24, "Now playing text begins near the top instead of moving to the vertical center");
+            snapshot.smtcState = aip::content::MediaPlaybackState::Paused;
+            Check(Pixels(*raster(size, 1, source)) != playingPixels, "current paused status changes the icon while all text stays identical");
+            snapshot.smtcIndicator = aip::content::MediaIndicatorMode::None;
+            const auto noIcon = Pixels(*raster(size, 1, source));
+            snapshot.smtcState = aip::content::MediaPlaybackState::Stopped;
+            Check(Pixels(*raster(size, 1, source)) == noIcon, "None mode does not paint a hidden playback-status icon");
+            snapshot.smtcIndicator = aip::content::MediaIndicatorMode::Status;
+            snapshot.smtcState = aip::content::MediaPlaybackState::Playing;
+            if (output != directory)
+                Check(SavePNG(playing.get(), (output + L"\\NowPlaying-" + names[size] + L".png").c_str()), "source media preview is exported");
+            snapshot.textMode = aip::content::TextMode::Off;
+            Inspect(*raster(size, 1, source), {}, source.GetValue());
+            snapshot.smtcSource = false;
+        }
+        snapshot.secondaryTileId.clear();
         for (const auto& asset : assets) DeleteFileW((directory + L"\\" + asset.file).c_str());
         RemoveDirectoryW((directory + L"\\Assets").c_str());
     }

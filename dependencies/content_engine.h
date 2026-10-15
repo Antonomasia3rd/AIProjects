@@ -14,12 +14,21 @@
 #include "hardware/caps_blink_engine.h"
 #include "asusblink/pattern.h"
 #include "content_sources/notes_model.h"
+#include "content_sources/notes_signin_model.h"
 
 namespace aip { namespace content {
 constexpr int MaxEntries = 32;
 constexpr std::size_t MaxText = 4096;
 enum class TextMode { Auto, Overlay, Off };
 enum class CycleDriver { DesktopStub, Auto, Windows };
+enum class MediaPlaybackState { Unknown, Playing, Paused, Stopped };
+enum class MediaRepeatMode { Unknown, Off, List, Track };
+enum class MediaToggleState { Unknown, Off, On };
+enum class MediaIndicatorMode { Status, AppIcon, None };
+struct SmtcConfiguration {
+    MediaIndicatorMode indicatorMode = MediaIndicatorMode::Status;
+    bool showRepeatShuffle = false;
+};
 struct Choice { const wchar_t* value; const wchar_t* label; };
 enum class BackgroundId {
     Wallpaper,
@@ -98,7 +107,7 @@ struct DiscordConfiguration {
 };
 inline constexpr Choice NotesResources[] = {{L"Resin", L"Genshin Impact resin"}, {L"Stamina", L"Star Rail stamina"}, {L"Charge", L"Zenless Zone Zero charge"}};
 struct NotesAccount {
-    std::wstring uid, token, userId, tokenProtected, userIdProtected;
+    std::wstring uid, token, userId, tokenProtected, userIdProtected, server;
     int refreshSeconds = 0; // Zero inherits the global refresh preference.
 };
 struct NotesConfiguration {
@@ -122,6 +131,7 @@ struct Configuration {
     CycleDriver cycleDriver = CycleDriver::DesktopStub;
     std::vector<Entry> entries;
     NotesConfiguration notes;
+    SmtcConfiguration smtc;
     DiscordConfiguration discord;
     aip::caps::Config caps;
     AsusConfiguration asus;
@@ -136,6 +146,15 @@ struct Snapshot {
     std::wstring nativeQueueTag, nativeQueueLayout, nativeQueueFrameKey;
     std::wstring secondaryTileId, secondaryFrameKey;
     std::vector<Text> rssHeadlines;
+    std::vector<Text> detailRows;
+    std::wstring detailTopic;
+    bool smtcSource = false, smtcShowRepeatShuffle = false, wrapSourceText = false;
+    MediaPlaybackState smtcState = MediaPlaybackState::Unknown;
+    MediaIndicatorMode smtcIndicator = MediaIndicatorMode::Status;
+    MediaRepeatMode smtcRepeat = MediaRepeatMode::Unknown;
+    MediaToggleState smtcShuffle = MediaToggleState::Unknown;
+    std::wstring smtcAppName, smtcAppIconPath;
+    std::shared_ptr<const void> smtcAppIconLease;
     // Keep an immutable source asset alive while a published/render snapshot
     // still reads it. The portable composition model does not own its files.
     std::shared_ptr<const void> backgroundLease;
@@ -225,7 +244,7 @@ inline bool EntrySection(const std::wstring& section) {
 }
 inline bool KnownSection(const std::wstring& section) {
     auto s = Lower(section);
-    return s == L"content" || s.compare(0, 8, L"content.") == 0 || s == L"notes" || s.compare(0, 6, L"notes.") == 0 || s == L"discord" || s == L"capsblink" || s == L"asusblink";
+    return s == L"content" || s.compare(0, 8, L"content.") == 0 || s == L"notes" || s.compare(0, 6, L"notes.") == 0 || s == L"discord" || s == L"capsblink" || s == L"asusblink" || s == L"smtc";
 }
 inline bool SensitiveSetting(const std::wstring& section, const std::wstring& key) {
     const auto k = Lower(key);
@@ -253,6 +272,20 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
     const bool root = Lower(section) == L"content";
     const auto k = Lower(key);
     error = section + L"." + key + L": ";
+    if (Lower(section) == L"smtc") {
+        if (k == L"indicator") {
+            const auto mode = Lower(Trim(value));
+            if (mode == L"status") value = L"Status";
+            else if (mode == L"appicon") value = L"AppIcon";
+            else if (mode == L"none") value = L"None";
+            else { error += L"expected Status, AppIcon, or None."; return false; }
+        } else if (k == L"showrepeatshuffle") {
+            bool enabled = false;
+            if (!ParseBool(value, enabled)) { error += L"expected true/false."; return false; }
+            value = enabled ? L"1" : L"0";
+        } else { error += L"unknown SMTC setting."; return false; }
+        error.clear(); return true;
+    }
     if (Lower(section) == L"asusblink") {
         if (k == L"hardwareenabled" || k == L"readdiskactivity" || k == L"paused") {
             bool parsed = false;
@@ -326,8 +359,17 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
         bool known = false;
         for (const auto& resource : NotesResources) if (Lower(section.substr(6)) == Lower(resource.value)) known = true;
         const bool protectedValue = accountKey == L"ltokenprotected" || accountKey == L"ltuidprotected" || accountKey == L"ltokenv2protected" || accountKey == L"ltuidv2protected";
-        if (!known || (accountKey != L"uid" && accountKey != L"ltoken" && accountKey != L"ltuid" && accountKey != L"ltokenv2" && accountKey != L"ltuidv2" && !protectedValue && accountKey != L"refreshseconds" && accountKey != L"refreshintervalseconds")) { error += L"unknown account setting."; return false; }
+        if (!known || (accountKey != L"uid" && accountKey != L"server" && accountKey != L"ltoken" && accountKey != L"ltuid" && accountKey != L"ltokenv2" && accountKey != L"ltuidv2" && !protectedValue && accountKey != L"refreshseconds" && accountKey != L"refreshintervalseconds")) { error += L"unknown account setting."; return false; }
         value = Trim(value);
+        if (accountKey == L"server") {
+            value = Lower(value);
+            int resource = 0;
+            for (; resource < 3; ++resource) if (Lower(section.substr(6)) == Lower(NotesResources[resource].value)) break;
+            if (!value.empty() && !aip::notes::ValidAccountServer(static_cast<aip::notes::ResourceKind>(resource), value)) {
+                error += L"server is not supported by this game."; return false;
+            }
+            error.clear(); return true;
+        }
         if (accountKey == L"refreshseconds" || accountKey == L"refreshintervalseconds") {
             int parsed = 0;
             if (!ParseInt(value, 0, 86400, parsed) || (parsed && parsed < 30)) { error += L"expected 0 (inherit) or 30-86400 seconds."; return false; }
@@ -457,6 +499,7 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
     for (int resource = 0; resource < 3; ++resource) {
         const auto section = L"Notes." + std::wstring(NotesResources[resource].value);
         cfg.notes.accounts[resource].uid = get(section, L"UID", L"");
+        cfg.notes.accounts[resource].server = get(section, L"Server", L"");
         cfg.notes.accounts[resource].token = get(section, L"LToken", read(section.c_str(), L"LTokenV2", read(section.c_str(), L"ltoken_v2", L"").c_str()).c_str());
         cfg.notes.accounts[resource].userId = get(section, L"LTUid", read(section.c_str(), L"LTuidV2", read(section.c_str(), L"ltuid_v2", L"").c_str()).c_str());
         cfg.notes.accounts[resource].tokenProtected = get(section, L"LTokenProtected", read(section.c_str(), L"LTokenV2Protected", L"").c_str());
@@ -464,6 +507,10 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
         ParseInt(get(section, L"RefreshSeconds", read(section.c_str(), L"RefreshIntervalSeconds", L"0").c_str()), 0, 86400, cfg.notes.accounts[resource].refreshSeconds);
     }
     cfg.discord.profilePath = get(L"Discord", L"ProfilePath", L"");
+    const auto mediaIndicator = get(L"SMTC", L"Indicator", L"Status");
+    cfg.smtc.indicatorMode = mediaIndicator == L"AppIcon" ? MediaIndicatorMode::AppIcon :
+        mediaIndicator == L"None" ? MediaIndicatorMode::None : MediaIndicatorMode::Status;
+    cfg.smtc.showRepeatShuffle = get(L"SMTC", L"ShowRepeatShuffle", L"0") == L"1";
     const bool externalDiscordProfile = !Trim(cfg.discord.profilePath).empty();
     const auto discordInline = [&](const wchar_t* key, const wchar_t* fallback) {
         // Preserve dormant inline values for repair/switching. Only the active

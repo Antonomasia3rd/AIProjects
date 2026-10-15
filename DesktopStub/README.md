@@ -8,6 +8,18 @@ plugins versus shared source code.
 
 The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale settings, then regenerate assets and re-register the manifest automatically. Most behavior is configurable through the tray menu and generated INI file. The same generation and delivery pipeline now handles composed content.
 
+**Tiles** manages the primary wallpaper and six source tiles from one resident.
+Existing pins receive their own static topic logos automatically after an upgrade.
+**Quick Actions** offers direct per-action pinning without an enable switch.
+Now playing appearance can use current playback status, the player icon, or no
+icon, with optional repeat/shuffle indicators. Game tiles stack the available
+resource/activity fields. For sign-in, open the game-specific embedded window,
+sign in, choose **Find game accounts**, then save the selected UID/server.
+Fresh private browser sessions are the default; remembering a session is optional
+for each game. Clearing local browser data keeps imported Notes credentials and
+does not call HoYoLAB Logout. See [current tile setup](../docs/multiple-tiles-2026-10-14.md)
+and [sign-in details](../docs/notes-signin-ux-2026-10-15.md).
+
 ## Requirements
 
 - Windows 10/11 for the running utility and normal Desktop Bridge registration. The manifest generator can also emit Windows 8 or Windows 8.1-style AppX XML for Start Screen/Live Tile simulator compatibility.

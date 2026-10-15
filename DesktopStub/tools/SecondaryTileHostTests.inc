@@ -13,6 +13,16 @@ static void TestSecondaryTileHost(const std::wstring& bitmapPath)
     contentTestCommandLine = L"DesktopStub.exe /tileid";
     Check(!ParseCommandLineOptions(), "missing Windows tile metadata value is rejected");
     contentTestCommandLine = L"DesktopStub.exe"; g_commandLine = savedOptions;
+    Check(WriteContentFixture(L"[Notes.Resin]\r\nUID=800000001\r\nServer=os_asia\r\n"), "server migration uses a private synthetic profile");
+    g_commandLine.settings = {{L"Notes.Resin", L"UID", L"900000001"}};
+    PrepareCommandLineNotesServerChanges();
+    Check(std::any_of(g_commandLine.settings.begin(), g_commandLine.settings.end(), [](const auto& setting) {
+        return setting.key == L"Server" && setting.value.empty(); }), "a CLI UID replacement clears stale inferred region preference");
+    g_commandLine.settings = {{L"Notes.Resin", L"Server", L"os_cht"}, {L"Notes.Resin", L"UID", L"900000001"}};
+    PrepareCommandLineNotesServerChanges();
+    Check(g_commandLine.settings.size() == 2 && g_commandLine.settings.front().value == L"os_cht", "an explicit server in the same command survives UID order");
+    g_commandLine = savedOptions;
+    Check(WriteContentFixture(original), "server mutation fixture restores original private data");
     Check(aip::content::TileActionCount == 9 && aip::content::FindTileAction(L" NEXT ") != nullptr,
         "nine explicit media actions have one normalized catalog");
     auto actionValue = std::wstring(L"volume-down");
@@ -68,6 +78,18 @@ static void TestSecondaryTileHost(const std::wstring& bitmapPath)
     Check(aip::content::AppendRssTileBinding(large, L"TileLarge", 310, headlines, L"") &&
         large.find(L"5. Title") != std::wstring::npos && large.find(L"captionSubtle") != std::wstring::npos,
         "large RSS stacks five headlines with short summaries");
+    {
+        ContentRenderScope render;
+        render.snapshot.textMode = aip::content::TextMode::Overlay;
+        render.snapshot.detailRows = {{L"Resin", L"20/200", L""}, {L"Expeditions ready", L"1/5", L""}};
+        const auto first = BuildGenerationStateKey(bitmapPath);
+        render.snapshot.detailRows.back().secondary = L"2/5";
+        Check(BuildGenerationStateKey(bitmapPath) != first, "changed secondary Notes detail invalidates baked image cache");
+        const auto second = BuildGenerationStateKey(bitmapPath);
+        render.snapshot.smtcSource = true;
+        render.snapshot.smtcState = aip::content::MediaPlaybackState::Paused;
+        Check(BuildGenerationStateKey(bitmapPath) != second, "explicit playback status invalidates the bitmap cache without parsing caption text");
+    }
     Check(WriteContentFixture(original), "secondary fixture restores private configuration");
     PublishSecondarySnapshots({}); contentNativeQueueAvailable = direct;
     ContentEngineTick(false, false);

@@ -164,14 +164,17 @@ static void AppendSecondaryTilesMenu(HMENU menu)
 static bool EditSecondaryNotesAccount(HWND owner, int resource)
 {
     const auto section = L"Notes." + std::wstring(aip::content::NotesResources[resource].value);
-    std::wstring uid = IniReadS(section.c_str(), L"UID", L""), token, user;
-    if (ShowTextInputDialog(owner, L"Game account", L"Game UID (shown in the game profile)", uid, true) != IDOK ||
-        ShowTextInputDialog(owner, L"Game account", L"HoYoLAB login token: both blank fields keep saved credentials; new values are stored in this INI", token, true, true) != IDOK ||
-        ShowTextInputDialog(owner, L"Game account", L"HoYoLAB account identifier: provide both login fields when replacing credentials", user, true, true) != IDOK) return false;
+    const auto savedUid = IniReadS(section.c_str(), L"UID", L"");
+    std::wstring uid = savedUid, token, user;
+    const auto title = std::wstring(aip::notes::SignInGames[resource].name) + L" account";
+    if (ShowTextInputDialog(owner, title.c_str(), L"This game's UID (shown in the in-game profile; not the HoYoLAB account ID)", uid, true) != IDOK ||
+        ShowTextInputDialog(owner, title.c_str(), L"HoYoLAB login token: both blank fields keep saved credentials; new values are stored in this INI", token, true, true) != IDOK ||
+        ShowTextInputDialog(owner, title.c_str(), L"HoYoLAB account identifier: provide both login fields when replacing credentials", user, true, true) != IDOK) return false;
     if (uid.empty() || token.empty() != user.empty()) {
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, L"Enter a game UID and either both replacement login fields or leave both blank to keep saved credentials.", L"Game account", MB_OK | MB_ICONWARNING); return false;
     }
     std::vector<aip::IniSetting> changes{{section, L"UID", uid}};
+    if (aip::Trim(uid) != aip::Trim(savedUid)) changes.push_back({section, L"Server", L""});
     if (!token.empty()) {
         changes = aip::notes::ClearAccountSettings(resource);
         changes.push_back({section, L"UID", uid}); changes.push_back({section, L"LToken", token}); changes.push_back({section, L"LTUid", user});
@@ -210,6 +213,7 @@ static bool OpenSecondaryTileSetup(HWND owner, const std::wstring& key)
         aip::EndTrayNestedMenu(menu, advanced, L"Advanced profile options");
     } else {
         aip::AppendTrayMenuItem(menu, 0, L"Now playing uses Windows' current media session", false, false);
+        AppendSmtcDisplaySettingsMenu(menu);
         aip::AppendTrayMenuItem(menu, ID_SECONDARY_TILES_STATUS, L"Tile status and setup information...", false, true);
     }
     POINT point{}; GetCursorPos(&point); if (owner) SetForegroundWindow(owner);

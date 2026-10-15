@@ -2,6 +2,8 @@
 #include <string>
 
 namespace aip { namespace notes {
+enum class ResourceKind { Resin, Stamina, Charge };
+enum class StateKind { Loading, Ok, Full, Error };
 enum class DetailId { Summary, Commissions, Expeditions, Realm, WeeklyBosses, Training, Reserve, EchoOfWar, Engagement, ScratchCard, VideoStore };
 struct DetailChoice { const wchar_t* value; const wchar_t* label; DetailId id; unsigned resources; };
 inline constexpr DetailChoice Details[] = {

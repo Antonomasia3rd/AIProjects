@@ -39,7 +39,7 @@ using NativeTile = winrt::Windows::UI::StartScreen::SecondaryTile;
 using BoolOperation = winrt::Windows::Foundation::IAsyncOperation<bool>;
 using TileListOperation = winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Foundation::Collections::IVectorView<NativeTile>>;
 using AsyncStatus = winrt::Windows::Foundation::AsyncStatus;
-enum class Kind { Pin, Unpin, List };
+enum class Kind { Pin, Unpin, List, RefreshList, RefreshLogo, VerifyLogos };
 struct Apartment {
     HRESULT status;
     DWORD thread = GetCurrentThreadId();
@@ -60,8 +60,9 @@ struct Pending {
     NativeTile tile{nullptr};
     BoolOperation mutation{nullptr};
     TileListOperation list{nullptr};
+    aip::tile_visual::Assets expectedLogos;
 };
-static std::unique_ptr<Apartment> apartment;
+static std::shared_ptr<Apartment> apartment;
 static DWORD uiThread = 0;
 static HWND host = nullptr;
 static std::shared_ptr<Mailbox> mailbox;
@@ -70,6 +71,10 @@ static std::uint64_t nextId = 0;
 static bool shuttingDown = false;
 static std::mutex pinnedMutex;
 static std::set<std::wstring> pinned;
+static bool logoRefreshAttempted = false;
+static std::deque<NativeTile> logoRefreshQueue;
+static bool logoEnumerationCompleted = false, logoVerificationStarted = false;
+static std::map<std::wstring, aip::tile_visual::Assets> logoRefreshExpected;
 
 static void Report(HWND owner, const std::wstring& text)
 {
@@ -83,20 +88,20 @@ static std::wstring ErrorText(const winrt::hresult_error& error)
     swprintf_s(code, L"%08X", static_cast<unsigned>(error.code().value));
     return L"Windows could not complete the source tile request (0x" + std::wstring(code) + L"): " + std::wstring(error.message());
 }
-static bool EnsureUi(HWND owner)
+static bool EnsureUi(HWND owner, bool quiet = false)
 {
     DWORD process = 0;
     const auto thread = owner ? GetWindowThreadProcessId(owner, &process) : 0;
     if (!thread || process != GetCurrentProcessId() || thread != GetCurrentThreadId() ||
         (uiThread && uiThread != thread) || shuttingDown) return false;
     if (!CurrentProcessHasPackageIdentity()) {
-        Report(owner, L"Source tiles require the registered, packaged DesktopStub launch. Enable Live Tile delivery and open that registered app first.");
+        if (!quiet) Report(owner, L"Source tiles require the registered, packaged DesktopStub launch. Enable Live Tile delivery and open that registered app first.");
         return false;
     }
     if (!apartment) {
-        auto created = std::make_unique<Apartment>(RO_INIT_SINGLETHREADED);
+        auto created = std::make_shared<Apartment>(RO_INIT_SINGLETHREADED);
         if (FAILED(created->status)) {
-            Report(owner, L"The source tile confirmation requires a Windows Runtime UI apartment.");
+            if (!quiet) Report(owner, L"The source tile confirmation requires a Windows Runtime UI apartment.");
             return false;
         }
         apartment = std::move(created); uiThread = thread; host = owner;
@@ -166,6 +171,26 @@ static winrt::Windows::Foundation::Uri AssetUri(const std::wstring& relative)
     const auto factory = aip::AcquireUncachedActivationFactory<Uri, IUriRuntimeClassFactory>();
     return factory.CreateUri(winrt::hstring(aip::tile_visual::PackageUri(relative)));
 }
+static aip::tile_visual::Assets ReadLogos(const NativeTile& tile)
+{
+    const auto text = [](const winrt::Windows::Foundation::Uri& uri) {
+        return uri ? std::wstring(uri.AbsoluteUri()) : std::wstring{};
+    };
+    const auto visuals = tile.VisualElements();
+    return {text(visuals.Square150x150Logo()), text(visuals.Wide310x150Logo()), text(visuals.Square310x310Logo()),
+        text(visuals.Square70x70Logo()), text(visuals.Square44x44Logo()), text(visuals.Square30x30Logo())};
+}
+static void LogLogoMetadata(const std::wstring& id, const aip::tile_visual::Assets& logos)
+{
+    Log(L"Source tile %ls static logos: medium=%ls; wide=%ls; large=%ls; small=%ls; 44=%ls; 30=%ls",
+        id.c_str(), logos.medium.c_str(), logos.wide.c_str(), logos.large.c_str(),
+        logos.smallTile.c_str(), logos.logo44.c_str(), logos.logo30.c_str());
+}
+static void ApplyLogos(NativeTile& tile, const aip::tile_visual::Assets& logos)
+{
+    auto visuals = tile.VisualElements();
+    aip::tile_visual::ApplyTopicLogos(visuals, logos, AssetUri);
+}
 static NativeTile CreatePinTile(const std::wstring& id, const std::wstring& name)
 {
     using namespace winrt::Windows::UI::StartScreen;
@@ -183,20 +208,92 @@ static NativeTile CreatePinTile(const std::wstring& id, const std::wstring& name
         (action ? L" --media-action " : L" --tile-setup ") + activationKey;
     if (arguments.size() > 2048) throw winrt::hresult_error(E_INVALIDARG, L"The profile path is too long for Windows secondary tile activation arguments.");
     auto tile = factory.CreateMinimalTile(id, name, arguments, AssetUri(logos.medium), TileSize::Default);
+    ApplyLogos(tile, logos);
     auto visuals = tile.VisualElements();
     visuals.ShowNameOnSquare150x150Logo(true);
-    visuals.Wide310x150Logo(AssetUri(logos.wide)); visuals.ShowNameOnWide310x150Logo(true);
-    visuals.Square310x310Logo(AssetUri(logos.large)); visuals.ShowNameOnSquare310x310Logo(true);
-    visuals.Square70x70Logo(AssetUri(logos.smallTile));
-    visuals.Square44x44Logo(AssetUri(logos.logo44));
+    visuals.ShowNameOnWide310x150Logo(true);
+    visuals.ShowNameOnSquare310x310Logo(true);
     return tile;
+}
+static bool UserMutationPending()
+{
+    return std::any_of(pending.begin(), pending.end(), [](const auto& item) {
+        return item.second.kind == Kind::Pin || item.second.kind == Kind::Unpin;
+    });
+}
+static void StartNextLogoRefresh()
+{
+    if (shuttingDown || UserMutationPending() || std::any_of(pending.begin(), pending.end(), [](const auto& item) {
+        return item.second.kind == Kind::RefreshLogo;
+    })) return;
+    const auto keepApartment = apartment;
+    while (!logoRefreshQueue.empty() && !shuttingDown) {
+        Pending state; state.kind = Kind::RefreshLogo;
+        state.tile = std::move(logoRefreshQueue.front()); logoRefreshQueue.pop_front();
+        const auto request = ++nextId;
+        try {
+            state.id = std::wstring(state.tile.TileId());
+            if (!aip::tile_visual::IsKnownSecondaryArtworkId(state.id)) continue;
+            aip::tile_visual::Assets logos; std::wstring error;
+            if (!aip::tile_visual::EnsureTileTopicAssets(state.id, GetExeDir(), logos, error)) {
+                Log(L"[!] Source tile %ls artwork refresh skipped: %ls", state.id.c_str(), error.c_str()); continue;
+            }
+            state.expectedLogos = aip::tile_visual::LogoUris(logos);
+            logoRefreshExpected[state.id] = state.expectedLogos;
+            const auto before = ReadLogos(state.tile);
+            LogLogoMetadata(state.id, before);
+            if (!aip::tile_visual::NeedsTopicLogoUpdate(state.id, before, state.expectedLogos)) continue;
+            // This is the existing FindAllAsync object. Preserve its ID, name,
+            // arguments, color, branding and current Start placement. No pin or
+            // notification API is called by this migration.
+            ApplyLogos(state.tile, logos);
+            state.mutation = state.tile.UpdateAsync();
+            auto inserted = pending.emplace(request, std::move(state));
+            const std::weak_ptr<Mailbox> weak = mailbox; const auto destination = host;
+            inserted.first->second.mutation.Completed([weak, destination, request](const auto&, AsyncStatus status) noexcept {
+                PostCompletion(weak, destination, request, status);
+            });
+            return; // Sequential updates; completion schedules the next tile.
+        } catch (const winrt::hresult_error& error) {
+            const auto found = pending.find(request);
+            if (found != pending.end()) { state = std::move(found->second); pending.erase(found); }
+            try { if (state.mutation) state.mutation.Cancel(); } catch (...) {}
+            Log(L"[!] Static source tile artwork update failed: %ls", ErrorText(error).c_str());
+        } catch (...) {
+            const auto found = pending.find(request);
+            if (found != pending.end()) { state = std::move(found->second); pending.erase(found); }
+            try { if (state.mutation) state.mutation.Cancel(); } catch (...) {}
+            LogText(L"[!] Could not prepare existing source tile artwork update.");
+        }
+    }
+    if (!shuttingDown && logoEnumerationCompleted && !logoVerificationStarted && !logoRefreshExpected.empty()) {
+        logoVerificationStarted = true;
+        const auto request = ++nextId;
+        try {
+            Pending state; state.kind = Kind::VerifyLogos;
+            const auto factory = aip::AcquireUncachedActivationFactory<NativeTile, winrt::Windows::UI::StartScreen::ISecondaryTileStatics>();
+            state.list = factory.FindAllAsync();
+            auto inserted = pending.emplace(request, std::move(state));
+            const std::weak_ptr<Mailbox> weak = mailbox; const auto destination = host;
+            inserted.first->second.list.Completed([weak, destination, request](const auto&, AsyncStatus status) noexcept {
+                PostCompletion(weak, destination, request, status);
+            });
+        } catch (...) {
+            pending.erase(request);
+            LogText(L"[!] Could not reread source tile logo metadata after updating existing pins.");
+        }
+    }
 }
 static bool RequestMutation(HWND owner, const std::wstring& supplied, const std::wstring& name, bool pin)
 {
     const auto id = CanonicalSecondaryTileRuntimeId(supplied);
     if (id.empty() || !EnsureUi(owner)) return false;
-    if (std::any_of(pending.begin(), pending.end(), [](const auto& item) { return item.second.kind != Kind::List; })) {
-        Report(owner, L"Finish or cancel the current Start tile confirmation before opening another.");
+    const auto keepApartment = apartment;
+    if (std::any_of(pending.begin(), pending.end(), [](const auto& item) {
+        return item.second.kind == Kind::Pin || item.second.kind == Kind::Unpin || item.second.kind == Kind::RefreshLogo;
+    })) {
+        Report(owner, UserMutationPending() ? L"Finish or cancel the current Start tile confirmation before opening another." :
+            L"Windows is finishing the current tile update. Please try this action again in a moment.");
         return false;
     }
     const auto request = ++nextId;
@@ -280,6 +377,7 @@ static bool RequestSecondaryTileList(HWND owner)
 #else
     using namespace secondary_ui;
     if (!EnsureUi(owner)) return false;
+    const auto keepApartment = apartment;
     if (std::any_of(pending.begin(), pending.end(), [](const auto& item) { return item.second.kind == Kind::List; })) return true;
     const auto request = ++nextId;
     try {
@@ -292,6 +390,35 @@ static bool RequestSecondaryTileList(HWND owner)
         return true;
     } catch (const winrt::hresult_error& error) { pending.erase(request); Report(owner, ErrorText(error)); }
     catch (...) { pending.erase(request); Report(owner, L"Could not list the pinned source tiles."); }
+    return false;
+#endif
+}
+// Normal startup upgrade hook. Existing pins are refreshed in place; missing
+// destinations are never pinned and current notifications are never cleared.
+static bool RequestRefreshExistingSecondaryTileLogos(HWND owner)
+{
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    (void)owner; return false;
+#else
+    using namespace secondary_ui;
+    if (!EnsureUi(owner, true)) return false;
+    const auto keepApartment = apartment;
+    if (logoRefreshAttempted) return true;
+    const auto request = ++nextId;
+    try {
+        Pending state; state.kind = Kind::RefreshList;
+        const auto factory = aip::AcquireUncachedActivationFactory<NativeTile, winrt::Windows::UI::StartScreen::ISecondaryTileStatics>();
+        state.list = factory.FindAllAsync();
+        auto inserted = pending.emplace(request, std::move(state));
+        const std::weak_ptr<Mailbox> weak = mailbox; const auto destination = host;
+        inserted.first->second.list.Completed([weak, destination, request](const auto&, AsyncStatus status) noexcept {
+            PostCompletion(weak, destination, request, status);
+        });
+        logoRefreshAttempted = true;
+        return true;
+    } catch (const winrt::hresult_error& error) {
+        pending.erase(request); Log(L"[!] Existing source tile artwork enumeration failed: %ls", ErrorText(error).c_str());
+    } catch (...) { pending.erase(request); LogText(L"[!] Could not enumerate existing source tiles for artwork refresh."); }
     return false;
 #endif
 }
@@ -312,33 +439,55 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
 #else
     using namespace secondary_ui;
     if (message != WM_APP_SECONDARY_TILE_COMPLETE || window != host || GetCurrentThreadId() != uiThread || !mailbox) return false;
+    const auto keepApartment = apartment;
     std::deque<Completion> ready;
     { std::lock_guard<std::mutex> lock(mailbox->mutex); ready.swap(mailbox->complete); }
     for (const auto& completion : ready) {
         const auto found = pending.find(completion.id);
         if (found == pending.end()) continue;
-        auto& state = found->second;
+        // A synchronous COM accessor may pump window messages. Keep this
+        // operation and apartment local before reading any completed result so
+        // shutdown cannot invalidate a reference into the pending map.
+        auto state = std::move(found->second); pending.erase(found);
         try {
             if (completion.status != AsyncStatus::Completed && completion.status != AsyncStatus::Error && completion.status != AsyncStatus::Canceled)
                 throw winrt::hresult_error(E_UNEXPECTED, L"Windows returned an unknown secondary tile completion state.");
             if (completion.status == AsyncStatus::Canceled)
                 throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
-            if (state.kind == Kind::List) {
+            if (state.kind == Kind::List || state.kind == Kind::RefreshList || state.kind == Kind::VerifyLogos) {
                 std::set<std::wstring> result;
                 for (const auto& tile : state.list.GetResults()) {
-                    const auto id = CanonicalSecondaryTileRuntimeId(std::wstring(tile.TileId()));
-                    if (!id.empty()) result.insert(id);
+                    const auto id = std::wstring(tile.TileId());
+                    if (!aip::tile_visual::IsKnownSecondaryArtworkId(id) || !result.insert(id).second) continue;
+                    if (state.kind == Kind::RefreshList) logoRefreshQueue.push_back(tile);
+                    if (state.kind == Kind::VerifyLogos) {
+                        const auto expected = logoRefreshExpected.find(id);
+                        if (expected != logoRefreshExpected.end()) {
+                            const auto actual = ReadLogos(tile);
+                            LogLogoMetadata(id, actual);
+                            Log(L"%ls Source tile %ls topic logo metadata %ls after update.",
+                                aip::tile_visual::SamePublishedLogos(actual, expected->second) ? L"[+]" : L"[!]", id.c_str(),
+                                aip::tile_visual::SamePublishedLogos(actual, expected->second) ? L"verified" : L"did not match the requested assets");
+                        }
+                    }
                 }
+                if (state.kind == Kind::RefreshList) logoEnumerationCompleted = true;
+                if (state.kind == Kind::VerifyLogos) for (const auto& expected : logoRefreshExpected)
+                    if (!result.count(expected.first)) Log(L"Source tile %ls is no longer pinned; metadata refresh did not recreate it.", expected.first.c_str());
                 { std::lock_guard<std::mutex> lock(pinnedMutex); pinned = std::move(result); }
                 LogText(L"Pinned source tile list refreshed.");
             } else {
                 const bool accepted = state.mutation.GetResults(); // Terminal only, no blocking wait/get.
                 if (accepted) {
-                    { std::lock_guard<std::mutex> lock(pinnedMutex); if (state.kind == Kind::Pin) pinned.insert(state.id); else pinned.erase(state.id); }
-                    ForgetSecondaryTileDelivery(state.id);
-                    Log(L"Source tile %ls: %ls", state.id.c_str(), state.kind == Kind::Pin ?
-                        (state.updateExisting ? L"updated after the requested metadata change" : L"pinned after Windows confirmation") : L"unpinned after Windows confirmation");
-                } else Log(L"Source tile %ls: Windows confirmation declined; no tile change was reported.", state.id.c_str());
+                    if (state.kind == Kind::RefreshLogo) {
+                        Log(L"Source tile %ls topic artwork metadata published: %ls", state.id.c_str(), state.expectedLogos.medium.c_str());
+                    } else {
+                        { std::lock_guard<std::mutex> lock(pinnedMutex); if (state.kind == Kind::Pin) pinned.insert(state.id); else pinned.erase(state.id); }
+                        ForgetSecondaryTileDelivery(state.id);
+                        Log(L"Source tile %ls: %ls", state.id.c_str(), state.kind == Kind::Pin ?
+                            (state.updateExisting ? L"updated after the requested metadata change" : L"pinned after Windows confirmation") : L"unpinned after Windows confirmation");
+                    }
+                } else Log(L"Source tile %ls: Windows did not apply the requested tile change.", state.id.c_str());
             }
         } catch (const winrt::hresult_error& error) {
             // Completion runs with UI-owned proxies alive. Do not enter a
@@ -347,7 +496,8 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
             else LogText(L"Source tile request cancelled.");
         } catch (...) { LogText(L"[!] Secondary tile: could not retrieve the completed request."); }
         if (state.owner && IsWindow(state.owner)) DestroyWindow(state.owner);
-        pending.erase(found);
+        state.mutation = nullptr; state.tile = nullptr; state.list = nullptr;
+        StartNextLogoRefresh();
         WakePollThread();
     }
     return true;
@@ -364,7 +514,7 @@ static void ShutdownSecondaryTileUi()
         try { if (item.second.mutation) item.second.mutation.Cancel(); if (item.second.list) item.second.list.Cancel(); } catch (...) {}
         if (item.second.owner && IsWindow(item.second.owner)) DestroyWindow(item.second.owner);
     }
-    pending.clear(); mailbox.reset();
+    pending.clear(); logoRefreshQueue.clear(); logoRefreshExpected.clear(); mailbox.reset();
     apartment.reset(); uiThread = 0; host = nullptr;
 #endif
 }

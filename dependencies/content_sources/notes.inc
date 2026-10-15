@@ -6,6 +6,7 @@
 #include "../desktop_app_baseline.h"
 #include "../http_fetch.inc"
 #include "notes_model.h"
+#include "notes_signin_model.h"
 #include <map>
 #include <wincrypt.h>
 #include <ctime>
@@ -13,21 +14,6 @@
 
 namespace aip { namespace notes {
 inline constexpr UINT kDefaultRefreshSeconds = 300;
-enum class ResourceKind
-{
-    Resin,
-    Stamina,
-    Charge
-};
-
-enum class StateKind
-{
-    Loading,
-    Ok,
-    Full,
-    Error
-};
-
 struct Snapshot
 {
     int current = 0;
@@ -46,6 +32,7 @@ struct Snapshot
 struct Account
 {
     std::string uid;
+    std::wstring server;
     std::string ltoken;
     std::string ltuid;
     UINT refreshSeconds = kDefaultRefreshSeconds;
@@ -625,7 +612,8 @@ inline bool BuildRequest(const Configuration& configuration, aip::HttpFetchOptio
         return false;
     }
     std::wstring server;
-    const bool serverOk = configuration.resource == ResourceKind::Resin ? detail::GenshinServer(configuration.uid, server) :
+    const bool serverOk = !configuration.server.empty() ? (server = configuration.server, ValidAccountServer(configuration.resource, server)) :
+        configuration.resource == ResourceKind::Resin ? detail::GenshinServer(configuration.uid, server) :
         (configuration.resource == ResourceKind::Stamina ? detail::HsrServer(configuration.uid, server) : detail::ZzzServer(configuration.uid, server));
     if (!serverOk)
     {

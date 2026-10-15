@@ -1,5 +1,11 @@
 # Embedded Notes sign-in source checkpoint, 2026-10-14
 
+Historical checkpoint: the broader managed-source lookup on 2026-10-15 found
+the original embedded WebView2 login and its cookie clearing/UID behavior. The
+native-only historical conclusion below was incomplete. Current UX, session
+policy, discovery protocol and remaining acceptance checks are recorded in
+[notes-signin-ux-2026-10-15.md](notes-signin-ux-2026-10-15.md).
+
 `ga_notes_signin.inc` provides `OpenEmbeddedNotesSignIn(HWND,int resource)` and
 `CloseEmbeddedNotesSignIns()` (UI-thread shutdown). The dedicated modeless window
 owns its controller/environment; its private WM_SAVE_ACCOUNT requires no ga_app
