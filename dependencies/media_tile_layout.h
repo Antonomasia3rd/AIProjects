@@ -96,17 +96,33 @@ inline bool AppendMediaTileBinding(std::wstring& xml, const wchar_t* tileTemplat
     xml += L"</binding>"; return true;
 }
 inline std::size_t DetailTileRows(int height) { return height > 200 ? 5u : 3u; }
+struct DetailRowGeometry { double iconX = 10, iconY = 10, iconSide = 0, textX = 10, textY = 10, textWidth = 0, bottom = 0; };
+inline DetailRowGeometry ComputeDetailRowGeometry(int width, int height, std::size_t count, std::size_t row, bool icon) {
+    DetailRowGeometry result;
+    if (width <= 20 || height <= 30 || !count || row >= count) return result;
+    const auto rowHeight = static_cast<double>(height - 30) / static_cast<double>(count);
+    result.iconY = result.textY = 10 + static_cast<double>(row) * rowHeight;
+    result.iconSide = icon ? (std::max)(0.0, (std::min)(24.0, rowHeight - 4)) : 0;
+    result.textX = 10 + (result.iconSide > 0 ? result.iconSide + 6 : 0);
+    result.textWidth = (std::max)(0.0, width - 10 - result.textX);
+    result.bottom = result.textY + rowHeight - 3;
+    return result;
+}
 inline bool AppendDetailRowsBinding(std::wstring& xml, const wchar_t* tileTemplate, int height,
-    const std::vector<Text>& rows, const std::wstring& backgroundUri, const std::wstring& topicIconUri = {}) {
+    const std::vector<Text>& rows, const std::wstring& backgroundUri, const std::wstring& topicIconUri = {},
+    const std::vector<MediaIndicatorImage>& rowIcons = {}) {
     if (!tileTemplate || !*tileTemplate || rows.empty()) return false;
     xml += L"<binding template=\"" + std::wstring(tileTemplate) + L"\" hint-textStacking=\"top\">";
     if (!backgroundUri.empty()) xml += L"<image placement=\"background\" src=\"" + MediaXmlEscape(backgroundUri) + L"\"/>";
     for (std::size_t row = 0; row < (std::min)(DetailTileRows(height), rows.size()); ++row) {
-        xml += L"<group><subgroup" + std::wstring(row == 0 && !topicIconUri.empty() ? L" hint-weight=\"80\"" : L"") + L" hint-textStacking=\"top\">";
+        const auto icon = row < rowIcons.size() ? rowIcons[row] : MediaIndicatorImage{row == 0 ? topicIconUri : L"", L""};
+        xml += L"<group>";
+        if (!icon.uri.empty()) xml += L"<subgroup hint-weight=\"16\" hint-textStacking=\"top\"><image src=\"" + MediaXmlEscape(icon.uri) +
+            L"\" alt=\"" + MediaXmlEscape(icon.label) + L"\" hint-removeMargin=\"true\"/></subgroup>";
+        xml += L"<subgroup" + std::wstring(!icon.uri.empty() ? L" hint-weight=\"84\"" : L"") + L" hint-textStacking=\"top\">";
         xml += L"<text hint-style=\"caption\" hint-wrap=\"true\" hint-maxLines=\"1\">" + MediaXmlEscape(rows[row].primary) + L"</text>";
         if (!rows[row].secondary.empty()) xml += L"<text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\"1\">" + MediaXmlEscape(rows[row].secondary) + L"</text>";
         xml += L"</subgroup>";
-        if (row == 0 && !topicIconUri.empty()) xml += L"<subgroup hint-weight=\"20\" hint-textStacking=\"top\"><image src=\"" + MediaXmlEscape(topicIconUri) + L"\" hint-removeMargin=\"true\"/></subgroup>";
         xml += L"</group>";
     }
     xml += L"</binding>"; return true;

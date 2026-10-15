@@ -217,7 +217,7 @@ void TestTypedConfigurationAndDefenses() {
     values.erase({L"Gallery.Tile.1", L"Branding"}); values.erase({L"Gallery.Tile.1", L"Background"}); values.erase({L"Gallery.Tile.1", L"BackgroundColor"});
     Check(ReadConfiguration(read, cfg, error), "appearance fixtures restore canonical defaults");
     const auto saved = cfg;
-    for (const auto& invalid : std::vector<std::pair<std::wstring, std::wstring>>{{L"QueueSize", L"6"}, {L"TileCount", L"9"}, {L"RefreshSeconds", L"1"},
+    for (const auto& invalid : std::vector<std::pair<std::wstring, std::wstring>>{{L"QueueSize", L"6"}, {L"TileCount", L"1025"}, {L"RefreshSeconds", L"1"},
         {L"Seed", L"18446744073709551616"}, {L"Seed", L"-1"}, {L"Order", L"random_device"}, {L"Fit", L"guess"}, {L"GroupId", L"bad-id"}, {L"Enabled", L"maybe"}}) {
         values[{L"Gallery", invalid.first}] = invalid.second;
         Check(!ReadConfiguration(read, cfg, error) && cfg.groupId == saved.groupId && cfg.tiles.size() == saved.tiles.size(), "an invalid gallery option rejects the whole read without publishing a partial configuration");
@@ -226,10 +226,10 @@ void TestTypedConfigurationAndDefenses() {
     }
     values[{L"Gallery.Tile.2", L"Id"}] = L"TILE1";
     Check(!ReadConfiguration(read, cfg, error), "case-only destination aliases cannot create two Windows gallery IDs");
-    auto tooMany = Config(9); Check(!ValidateConfiguration(tooMany, error), "one gallery group cannot exceed eight tiles");
+    auto tooMany = Config(static_cast<unsigned>(MaxTiles + 1)); Check(!ValidateConfiguration(tooMany, error), "one gallery group cannot exceed its explicit1024tile limit");
     auto value = std::wstring(L" sequential ");
     Check(NormalizeSetting(L"gallery", L"Order", value, error) && value == L"Sequential", "typed order names canonicalize without touching source data");
-    Check(!KnownGallerySection(L"Gallery.Tile.09") && !KnownGallerySection(L"Gallery.Tile.9") && KnownGallerySection(L"Gallery.Tile.8"), "numbered gallery sections have a bounded unambiguous grammar");
+    Check(!KnownGallerySection(L"Gallery.Tile.09") && !KnownGallerySection(L"Gallery.Tile.1025") && KnownGallerySection(L"Gallery.Tile.1024"), "numbered gallery sections have a bounded unambiguous grammar up to1024");
     Check(NativeTileId(L"group1", L"tile1") == L"AipGallery_group1.tile1" && NativeTileId(std::wstring(32, L'g'), std::wstring(20, L't')).size() == 64 &&
         NativeTileId(L"bad-id", L"tile1").empty(), "stable bounded IDs map to one native destination without path or punctuation ambiguity");
     Check(MaxCombinedTileIdLength == 52 && NativeTileId(std::wstring(32, L'g'), std::wstring(21, L't')).empty() &&
@@ -245,7 +245,10 @@ void TestTypedConfigurationAndDefenses() {
     Ledger overlong; Check(CreateLedger(std::wstring(32, L'g'), L"epoch", true, overlong, error), "long legal group ID can initialize before member IDs exist");
     overlong.tiles.emplace(std::wstring(21, L't'), TileLedger{});
     Check(!ValidateLedger(overlong, error), "historical ledger owners also obey the native destination length limit");
-    Check(!NormalizeSetting(L"Gallery.Tile.1", L"Folder", value, error), "per-tile settings cannot implicitly change the group's inventory source");
+    value = L"second synthetic folder";
+    Check(NormalizeSetting(L"Gallery.Tile.1", L"Folder", value, error) && value == L"second synthetic folder", "per-tile folders explicitly override the legacy default");
+    value = L"Album two";
+    Check(NormalizeSetting(L"Gallery.Tile.1", L"GalleryName", value, error), "gallery captions share the typed configuration surface");
     const auto initial = NewLedger(); OwnershipPlan plan; auto normal = Config();
     Check(ReconcileOwnership(normal, Images(12), initial, plan, error), "defensive fixture reserves a valid inventory");
     const auto originalWire = Wire(plan.ledger); OwnershipPlan sentinel = plan;
@@ -266,10 +269,45 @@ void TestTypedConfigurationAndDefenses() {
     auto newer = Images(13); Check(ReconcileOwnership(normal, newer, plan.ledger, sentinel, error), "new unowned inventory creates a later ownership generation");
     Check(!PrepareQueueBatch(normal, plan.pools, sentinel.ledger, Due(normal), batch, error), "an older cached pool cannot schedule against newer ownership reservations");
 }
+void TestManyTilesAndFolderEligibility() {
+    auto legacy = Config(8); const auto empty = NewLedger(); OwnershipPlan oldPlan; std::wstring error;
+    Check(ReconcileOwnership(legacy, Images(48), empty, oldPlan, error) && oldPlan.pools.pools.size() == 8,
+        "existing eight-tile default-folder configurations keep the original ownership contract");
+    auto cfg = Config(28); auto first = std::make_shared<std::set<std::wstring>>(), second = std::make_shared<std::set<std::wstring>>();
+    std::vector<std::wstring> all;
+    for (int i = 0; i < 70; ++i) { const auto a = L"a_" + std::to_wstring(i), b = L"b_" + std::to_wstring(i); first->insert(a); second->insert(b); all.push_back(a); all.push_back(b); }
+    for (int i = 0; i < 28; ++i) { const auto shared = L"shared_" + std::to_wstring(i); first->insert(shared); second->insert(shared); all.push_back(shared); }
+    EligibilityMap eligible;
+    for (std::size_t i = 0; i < cfg.tiles.size(); ++i) {
+        auto& tile = cfg.tiles[i]; tile.folder = i < 14 ? L"folder A" : L"folder B"; tile.galleryName = i < 14 ? L"Album A" : L"Album B";
+        eligible[tile.id] = i < 14 ? first : second;
+    }
+    OwnershipPlan plan;
+    Check(ValidateConfiguration(cfg, error) && ReconcileOwnership(cfg, all, empty, plan, error, &eligible) && plan.ledger.images.size() == all.size(),
+        "twenty-eight tiles share one globally deduplicated ownership ledger across two overlapping folders");
+    CheckDisjoint(plan.pools, plan.ledger);
+    for (const auto& pool : plan.pools.pools) for (const auto& id : pool.images)
+        Check(eligible.at(pool.tileId)->count(id) != 0, "each current pool contains only its own folder's available images");
+    QueueBatch batch;
+    Check(PrepareQueueBatch(cfg, plan.pools, plan.ledger, Due(cfg), batch, error) && batch.windows.size() == 28 &&
+        std::all_of(batch.windows.begin(), batch.windows.end(), [](const auto& window) { return window.images.size() == 5; }),
+        "all twenty-eight destinations can plan independent five-slot queues without an eight-tile cap");
+    Ledger restarted; const auto wire = Wire(batch.ledger);
+    Check(ParseLedger(wire, restarted, error) && Wire(restarted) == wire, "multi-folder reservations and pending windows round-trip unchanged after restart");
+    auto changed = cfg; changed.tiles.front().folder = L"folder C";
+    Check(!PrepareQueueBatch(changed, plan.pools, restarted, Due(changed), batch, error), "a folder override change requires new eligibility before publication");
+    const auto owner = plan.ledger.images.at(L"shared_0").owner;
+    auto removed = std::make_shared<std::set<std::wstring>>(*eligible.at(owner)); removed->erase(L"shared_0");
+    eligible[owner] = removed; OwnershipPlan after;
+    Check(ReconcileOwnership(cfg, all, plan.ledger, after, error, &eligible) && after.ledger.images.at(L"shared_0").owner == owner &&
+        std::find(Pool(after.pools, owner).images.begin(), Pool(after.pools, owner).images.end(), L"shared_0") == Pool(after.pools, owner).images.end(),
+        "an image missing from its owner's folder stays reserved and cannot migrate to an overlapping folder's tile");
+    Check(ValidateConfiguration(Config(static_cast<unsigned>(MaxTiles)), error), "the advertised1024configured-row ceiling is accepted");
+}
 }
 int main() {
     try {
-        TestOwnershipAndMembership(); TestQueuePlanningAndFailures(); TestPersistenceAndReset(); TestTypedConfigurationAndDefenses();
+        TestOwnershipAndMembership(); TestQueuePlanningAndFailures(); TestPersistenceAndReset(); TestTypedConfigurationAndDefenses(); TestManyTilesAndFolderEligibility();
         std::cout << checks << " gallery checks passed.\n"; return 0;
     } catch (const std::exception& error) { std::cerr << "FAIL after " << checks << " gallery checks: " << error.what() << '\n'; return 1; }
 }

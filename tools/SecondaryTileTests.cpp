@@ -181,8 +181,39 @@ void TestAppearanceNotices() {
     Check(!ReadSecondaryAppearanceFingerprint(profile, changed, issue) && changed == L"preserved",
         "invalid partial raw edits never replace a valid appearance fingerprint");
 }
+void TestPinnedSelectionAndBatches() {
+    Profile profile; SecondaryTileConfiguration tiles; std::wstring error;
+    Check(ReadSecondaryTileConfiguration(profile, MaxEntries, tiles, error), "pin selection reads saved mappings without activating them");
+    Configuration content; content.enabled = false; content.entries.resize(1); content.entries[0].custom.primary = L"Kept";
+    tiles.enabled = false; for (auto& tile : tiles.tiles) tile.enabled = false;
+    ApplyPinnedSecondaryTiles(content, tiles, {L"AipSource_smtc", L"AipSource_hsr"});
+    Check(content.enabled && tiles.enabled && tiles.tiles[0].enabled && tiles.tiles[3].enabled && !tiles.tiles[1].enabled,
+        "OS pin membership overrides retired source and master enable preferences");
+    Check(content.entries[0].custom.primary == L"Kept" && content.entries[1].sources == std::vector<std::wstring>{L"SMTC"} &&
+        content.entries[4].sources == std::vector<std::wstring>{L"Notes"} && content.entries[4].notesResource == 1,
+        "missing mapped rows receive catalog defaults while saved primary content survives");
+    SecondaryPinInventory inventory;
+    Check(!inventory.Known() && inventory.RequestDue(0) && !inventory.RequestDue(1), "one asynchronous inventory request is coalesced");
+    inventory.Complete(true, {L"AipSource_smtc", L"AipGallery_g.old"}, 100);
+    Check(inventory.Known() && inventory.Contains(L"AipGallery_g.old") && !inventory.RequestDue(30099) && inventory.RequestDue(30100),
+        "confirmed pin inventory includes unknown historical gallery IDs and refreshes at thirty seconds");
+    inventory.Complete(false, {}, 30100);
+    Check(inventory.Contains(L"AipSource_smtc") && !inventory.RequestDue(30101), "enumeration errors retain confirmed pins and back off");
+    inventory.Mutation(L"AipSource_smtc", false); inventory.Mutation(L"AipAction_play", true);
+    Check(!inventory.Contains(L"AipSource_smtc") && inventory.Contains(L"AipAction_play"), "own pin acknowledgements immediately amend cached membership");
+    SecondaryPinBatch batch; std::vector<std::wstring> requests;
+    const auto begin = [&](const auto& request) { requests.push_back(request.first); return request.first != L"bad"; };
+    batch.Enqueue({{L"one", L"A"}, {L"two", L"B"}, {L"one", L"duplicate"}, {L"bad", L"C"}, {L"three", L"D"}});
+    batch.Advance(begin); batch.Advance(begin);
+    Check(requests == std::vector<std::wstring>{L"one"}, "pin batches never overlap confirmations");
+    batch.Complete(L"one"); batch.Advance(begin);
+    Check(requests.back() == L"two", "declining a pin advances to the next requested tile");
+    batch.Complete(L"two"); batch.Advance(begin);
+    Check(requests == std::vector<std::wstring>({L"one", L"two", L"bad", L"three"}), "preparation failures skip only their own item");
+    batch.Complete(L"three"); batch.Advance(begin); Check(!batch.Busy(), "completed pin batch releases all state");
+}
 }
 int main() {
-    try { TestMapping(); TestAppearance(); TestProviderSelection(); TestAppearanceNotices(); std::cout << checks << " secondary tile checks passed\n"; return 0; }
+    try { TestMapping(); TestAppearance(); TestProviderSelection(); TestAppearanceNotices(); TestPinnedSelectionAndBatches(); std::cout << checks << " secondary tile checks passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << "After " << checks << " checks: " << error.what() << '\n'; return 1; }
 }

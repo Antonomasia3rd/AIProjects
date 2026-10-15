@@ -217,6 +217,7 @@
       "dependencies/DesktopStub/ga_secondary_tile_tray.inc",
       "dependencies/DesktopStub/ga_notes_signin.inc",
       "dependencies/third_party/WebView2",
+      "dependencies/third_party/RealTimeNotesAssets",
       "dependencies/DesktopStub"
     ],
     "releaseTagEnvironment": "DESKTOPSTUB_RELEASE_TAG",

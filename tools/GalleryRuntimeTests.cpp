@@ -16,7 +16,11 @@ Configuration Config() {
     Configuration cfg; cfg.enabled = true; cfg.groupId = L"group1"; cfg.folder = L"synthetic folder with spaces\\";
     cfg.tiles = {{L"one", L"Gallery one", true}, {L"two", L"Gallery two", true}}; return cfg;
 }
-runtime::Input Input() { return {L"C:\\synthetic\\DesktopStub.ini", Config(), true, true, true}; }
+runtime::Input Input() {
+    runtime::Input input{L"C:\\synthetic\\DesktopStub.ini", Config(), true, true, true}; input.pinnedKnown = true;
+    for (const auto& tile : input.configuration.tiles) input.pinnedIds.insert(NativeTileId(input.configuration.groupId, tile.id));
+    return input;
+}
 std::vector<InventoryImage> Images(unsigned count, const std::wstring& prefix = L"image_") {
     std::vector<InventoryImage> result;
     for (unsigned i = 0; i < count; ++i) result.push_back({prefix + std::to_wstring(i), L"synthetic cache/" + prefix + std::to_wstring(i) + L".png"});
@@ -173,7 +177,9 @@ void TestPublicationAndSlotAcknowledgements() {
     Check(frames.size() == 4 && ForTile(frames, L"one").front().reset && ForTile(frames, L"two").front().reset,
         "shrinking queue size repairs retained pending windows and resets old extra slots");
     const auto ownership = host.Load().images.size(); smaller.configuration.enabled = false; coordinator.Refresh(smaller);
-    Check(coordinator.CurrentFrames().empty() && host.Load().images.size() == ownership, "disabling gallery publication never releases its historical image reservations");
+    Check(coordinator.CurrentFrames().size() == 4 && host.Load().images.size() == ownership, "legacy enabled flags do not stop already pinned galleries or release historical ownership");
+    smaller.pinnedIds.clear(); coordinator.Refresh(smaller);
+    Check(coordinator.CurrentFrames().empty() && host.Load().images.size() == ownership, "unpinning every destination pauses publication while keeping ownership");
 }
 void TestRestartConflictAndUnavailableMode() {
     Harness host; const auto input = Input(); host.Initialize(input);
@@ -237,9 +243,90 @@ void TestResumableInventoryAndShutdown() {
     noProgress.now = 29999; throttled.Refresh(input);
     Check(noProgress.scans == 1 && throttled.CurrentFrames().empty(), "incomplete inventory with no deferred cursor progress backs off instead of rescanning a permanent listing limit every250ms");
 }
+void TestManyTilesAndFolders() {
+    auto input = Input(); input.configuration.tiles.clear(); input.pinnedIds.clear();
+    input.configuration.enabled = false; input.contentEnabled = input.tilesEnabled = false;
+    for (int i = 0; i < 28; ++i) {
+        TileConfiguration tile; tile.id = L"tile" + std::to_wstring(i + 1); tile.name = L"Photo " + std::to_wstring(i + 1);
+        tile.folder = i < 14 ? L"folder A" : L"folder B"; tile.galleryName = i < 14 ? L"Album A" : L"Album B"; tile.enabled = false;
+        input.configuration.tiles.push_back(std::move(tile));
+    }
+    Harness host; host.Initialize(input); std::atomic<int> firstScans{0}, secondScans{0};
+    host.scanner = [&](const std::wstring& folder, const InventoryIndex& previous, const InventoryCancel&) {
+        InventoryResult result; result.index = previous; result.complete = true;
+        if (folder == L"folder A") { ++firstScans; result.images = Images(70, L"a_"); }
+        else if (folder == L"folder B") { ++secondScans; result.images = Images(70, L"b_"); }
+        else throw std::runtime_error("unexpected synthetic folder");
+        const auto shared = Images(28, L"shared_"); result.images.insert(result.images.end(), shared.begin(), shared.end()); return result;
+    };
+    runtime::Coordinator coordinator(host.Services());
+    for (int i = 0; i < 5; ++i) coordinator.Refresh(input);
+    Check(host.scans == 0 && coordinator.CurrentFrames().empty(), "many configured but unpinned tiles never start a directory scan");
+    input.pinnedIds.insert(NativeTileId(input.configuration.groupId, L"tile1"));
+    Pump(coordinator, input, [&] { return coordinator.CurrentFrames().size() == 5; });
+    auto owned = host.Load();
+    Check(firstScans == 1 && secondScans == 0 && owned.tiles.size() == 14 && owned.images.size() == 98,
+        "the first pin scans one folder once and reserves its photos across all fourteen configured siblings, including unpinned legacy-disabled rows");
+    const auto originalOwners = owned.images;
+    for (const auto& tile : input.configuration.tiles) input.pinnedIds.insert(NativeTileId(input.configuration.groupId, tile.id));
+    Pump(coordinator, input, [&] { return coordinator.CurrentFrames().size() == 140 && firstScans == 2 && secondScans == 1; });
+    owned = host.Load();
+    Check(firstScans == 2 && secondScans == 1 && owned.images.size() == 168 && owned.tiles.size() == 28,
+        "twenty-eight pinned tiles use two distinct folder inventories and deduplicate shared exact image IDs globally");
+    Check(std::all_of(originalOwners.begin(), originalOwners.end(), [&](const auto& old) {
+        return owned.images.at(old.first).owner == old.second.owner;
+    }), "adding another folder never steals an image already reserved by the first folder");
+    const auto frames = coordinator.CurrentFrames();
+    Check(std::all_of(frames.begin(), frames.end(), [&](const auto& frame) {
+        const auto tile = std::find_if(input.configuration.tiles.begin(), input.configuration.tiles.end(), [&](const auto& row) { return row.id == frame.receipt.tileId; });
+        const auto image = owned.tiles.at(frame.receipt.tileId).pending.images.at(frame.receipt.slot);
+        return tile != input.configuration.tiles.end() && frame.activationArguments.find(L"--open-folder \"" + tile->folder + L"\"") != std::wstring::npos &&
+            (image.compare(0, 7, L"shared_") == 0 || image.compare(0, 2, tile->folder == L"folder A" ? L"a_" : L"b_") == 0);
+    }), "every frame uses its own folder's eligible image and folder activation path");
+    const auto plans = host.plans.load();
+    for (int i = 0; i < 10; ++i) coordinator.Refresh(input);
+    Check(host.plans == plans && firstScans == 2 && secondScans == 1, "unchanged pending windows do not restart per-folder scans or full ledger planning");
+    const auto pendingWire = Wire(owned); coordinator.Stop(); runtime::Coordinator restarted(host.Services());
+    Pump(restarted, input, [&] { return restarted.CurrentFrames().size() == 140; });
+    Check(Wire(host.Load()) == pendingWire, "restart retains one global multi-folder ledger and the same twenty-eight pending windows");
+    const auto receipt = restarted.CurrentFrames().front().receipt; restarted.Suspend();
+    Check(restarted.CurrentFrames().empty() && !restarted.Validate(receipt), "redistribution suspension immediately revokes every old publishable receipt");
+    const auto beforeScans = host.scans.load(); restarted.Refresh(input);
+    Check(host.scans == beforeScans && Wire(host.Load()) == pendingWire, "a suspended coordinator neither scans nor modifies durable history");
+    restarted.Resume(); Pump(restarted, input, [&] { return restarted.CurrentFrames().size() == 140; });
+    Check(!restarted.Validate(receipt), "resuming reloads history with fresh attempt keys and keeps old callbacks invalid");
+    std::string bytes = "unchanged"; std::wstring error; const auto fresh = host.Load();
+    Check(runtime::PrepareLedgerReset(fresh, fresh, L"epoch2", false, bytes, error) == runtime::SaveResult::Error && bytes == "unchanged",
+        "partial or unconfirmed queue clearing cannot reset ownership");
+    auto changed = fresh; ++changed.revision;
+    Check(runtime::PrepareLedgerReset(fresh, changed, L"epoch2", true, bytes, error) == runtime::SaveResult::Conflict && bytes == "unchanged",
+        "explicit redistribution still refuses a stale full-ledger comparison");
+    Ledger reset;
+    Check(runtime::PrepareLedgerReset(fresh, fresh, L"epoch2", true, bytes, error) == runtime::SaveResult::Saved && ParseLedger(bytes, reset, error) &&
+        reset.images.empty() && reset.tiles.empty() && reset.groupId == fresh.groupId && reset.epochId == L"epoch2",
+        "confirmed full queue retirement permits an explicit empty new epoch while preserving stable native IDs");
+}
+void TestUnavailableFolderIsolation() {
+    auto input = Input(); input.configuration.tiles[0].folder = L"good folder"; input.configuration.tiles[1].folder = L"unavailable folder";
+    Harness host; host.Initialize(input); std::atomic<int> unavailableScans{0};
+    host.scanner = [&](const std::wstring& folder, const InventoryIndex& previous, const InventoryCancel&) {
+        InventoryResult result; result.index = previous;
+        if (folder == L"good folder") { result.complete = true; result.images = Images(10, L"good_"); }
+        else { ++unavailableScans; result.diagnostics = {L"Synthetic inaccessible folder."}; }
+        return result;
+    };
+    runtime::Coordinator coordinator(host.Services());
+    Pump(coordinator, input, [&] { return coordinator.CurrentFrames().size() == 5 && unavailableScans >= 1; });
+    Check(ForTile(coordinator.CurrentFrames(), L"one").size() == 5 && ForTile(coordinator.CurrentFrames(), L"two").empty() && host.Load().images.size() == 10,
+        "one inaccessible new gallery folder cannot block another folder's usable photo queue");
+    const auto scans = unavailableScans.load();
+    for (int i = 0; i < 5; ++i) coordinator.Refresh(input);
+    Check(unavailableScans == scans && ForTile(coordinator.CurrentFrames(), L"one").size() == 5,
+        "an unavailable folder backs off while the successful folder keeps its pending frames");
+}
 }
 int main() {
-    try { TestExplicitInitializationAndCas(); TestPublicationAndSlotAcknowledgements(); TestRestartConflictAndUnavailableMode(); TestResumableInventoryAndShutdown();
+    try { TestExplicitInitializationAndCas(); TestPublicationAndSlotAcknowledgements(); TestRestartConflictAndUnavailableMode(); TestResumableInventoryAndShutdown(); TestManyTilesAndFolders(); TestUnavailableFolderIsolation();
         std::cout << checks << " gallery runtime checks passed.\n"; return 0;
     } catch (const std::exception& error) { std::cerr << "FAIL after " << checks << " runtime checks: " << error.what() << '\n'; return 1; }
 }

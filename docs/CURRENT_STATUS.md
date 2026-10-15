@@ -6,6 +6,13 @@ complete does not close the whole repository review.
 
 ## Saved and installed
 
+- The 2026-10-15 gallery/menu follow-up is built, scanned, validated and installed:
+  1,024 configured photo tiles, folder groups, queued pin prompts, pinned-driven
+  updates, menu/wording cleanup, prepared status parity and original game-row
+  artwork. A first-start GDI+ lifetime crash was diagnosed locally, rolled back,
+  fixed and covered by a new regression. The corrected resident survived the
+  guarded startup check. User settings/accounts and eight existing photo tiles
+  were preserved. See the [follow-up and final validation](tile-feedback-followup-2026-10-15.md).
 - `2219d24`: transparent source/Quick Action fallback icons, independent
   background/color/branding controls, raw-profile validation and coalesced
   INI/CLI/tray appearance refresh. Installed after scans and bounded validation;
@@ -29,8 +36,9 @@ runtime output were excluded from publication.
 Folder-gallery support uses the user's approved separate pools per tile. The
 ownership model, bounded inventory worker, coordinator, host delivery, setup,
 typed settings and per-tile appearance passed the combined build/scan/smoke gates
-and are installed. Gallery remains disabled until the user chooses setup. No
-user photo folder or gallery pin has been touched. See the
+and are installed. The user has since set up and confirmed eight gallery tiles
+with normal CPU usage. The later follow-up keeps those pins/pools and adds
+scale/multiple-folder controls, without expanding them automatically. See the
 [final validation and installed identities](gallery-validation-2026-10-15.md).
 See the [model](gallery-engine-2026-10-15.md),
 [inventory](gallery-inventory-2026-10-15.md) and
@@ -43,6 +51,7 @@ See the [model](gallery-engine-2026-10-15.md),
 | Original repository review | Reconcile the implemented shared modules and all active/legacy products against the user's current rules. The dated rework log is not an exhaustive closure audit. |
 | Windows presentation | Actual Start appearance, RTL/DPI, theme contrast, static fallback, and branding need target-shell acceptance. Offscreen PNG/XML and native metadata readback do not prove what every shell renders. |
 | Gallery acceptance | The real folder chooser/pin confirmations, Windows animation, actual image sets and nonresponsive native-codec shutdown need local acceptance. Exact copies deduplicate; different encodings of visually identical pictures do not. Pools and cached published images are retained. |
+| Gallery failure recovery | Explicit redistribution clears historical notification queues before a ledger reset, but ledger and INI publication are separate atomic files. Final INI-write failure after reset and concurrent edits during add/resize dialogs need additional cross-file recovery/expected-configuration guards. See the follow-up record; clear failure and ordinary model tests do not close these cases. |
 | Historical renderer variation | The unexplained four-pixel opaque preset difference remains open. Exact assertions have not been relaxed; current passing renders do not establish its cause. |
 | Media CPU | Cached SMTC lifetime and event scheduling are repaired, and the user reported 17 hours of normal CPU. The original DesktopStub/NPSMSvc episode was not reproduced, so its precise cause remains unproved. |
 | Real integrations | Actual Startup-folder/StartupTask, sleep/wake keyboards, player icons/actions, and HoYoLAB browser/discovery/session behavior still need local acceptance beyond injected fixtures. Preserve existing accounts while testing. |

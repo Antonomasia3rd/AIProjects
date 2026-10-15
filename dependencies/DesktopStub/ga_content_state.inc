@@ -6,6 +6,8 @@ static std::vector<aip::content::Snapshot> g_contentQueueSnapshots;
 #include "../content_queue.h"
 #include "../secondary_tiles.h"
 static bool SecondaryTileExists(const std::wstring& id);
+static std::set<std::wstring> CachedSecondaryTileIds();
+static bool SecondaryTileInventoryReady();
 static std::wstring LocalAppDataPath();
 static void WakePollThread();
 static void RefreshGallerySource();
@@ -217,6 +219,8 @@ static int CaptureContentLogicalCapsState()
 
 static bool CompositionRequested()
 {
+    for (const auto& id : CachedSecondaryTileIds())
+        if (id.compare(0, 10, L"AipSource_") == 0 || id.compare(0, 11, L"AipGallery_") == 0) return true;
     bool enabled = false;
     // Invalid live edits must reach the configuration error reporter rather
     // than silently routing into the wallpaper worker.

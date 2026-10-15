@@ -3,6 +3,10 @@
 Right-click the tray icon. **Update tile now** refreshes the tile immediately.
 Keep **Group settings into submenus** checked for the shorter category view;
 uncheck it for the existing flat view. Both views expose the same controls.
+Flat sections have disabled category titles; grouped categories have no internal
+separator rows. **Application > Interface wording** edits named `[Strings]`
+settings and menu/dialog text overrides. Pinned secondary tiles update without
+separate enable checkboxes. See [current changes](tile-feedback-followup-2026-10-15.md).
 
 | Category | Use it for |
 | --- | --- |

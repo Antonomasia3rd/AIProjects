@@ -15,11 +15,18 @@
 static constexpr UINT WM_APP_SECONDARY_TILE_COMPLETE = WM_APP + 113;
 static constexpr UINT WM_APP_SECONDARY_APPEARANCE_CHANGED = WM_APP + 115;
 static constexpr UINT WM_APP_GALLERY_SETUP_READY = WM_APP + 116;
+static constexpr UINT WM_APP_SECONDARY_PIN_INVENTORY = WM_APP + 117;
 static constexpr UINT_PTR GALLERY_HISTORY_TIMER = 0x47414c53;
-static constexpr int SECONDARY_TILE_CANCEL_ID = 51001;
 static void WakePollThread();
 static bool RequestRefreshExistingSecondaryTileLogos(HWND owner, bool force = false);
+static bool RequestSecondaryTileList(HWND owner);
+static void StartNextSecondaryPin();
 static aip::content::AppearanceRefreshNotice g_secondaryAppearanceNotice;
+static aip::content::SecondaryPinBatch g_secondaryPinBatch;
+static aip::content::SecondaryPinInventory g_secondaryPinInventory;
+static std::set<std::wstring> CachedSecondaryTileIds() { return g_secondaryPinInventory.Snapshot(); }
+static bool SecondaryTileInventoryReady() { return g_secondaryPinInventory.Known(); }
+static std::wstring SecondaryTileUiString(const wchar_t* key, const wchar_t* fallback) { return IniReadS(L"Strings", key, fallback); }
 static void CompleteGallerySetup(HWND owner);
 struct GalleryPinHistory {
     bool ready = false, pending = false;
@@ -40,7 +47,7 @@ static bool FindConfiguredGalleryTile(const std::wstring& id, aip::gallery::Conf
 static bool GalleryTilePinReady(const std::wstring& id)
 {
     aip::gallery::Configuration configuration; aip::gallery::TileConfiguration tile;
-    if (!FindConfiguredGalleryTile(id, configuration, tile) || !configuration.enabled || !tile.enabled || configuration.folder.empty()) return false;
+    if (!FindConfiguredGalleryTile(id, configuration, tile) || aip::gallery::EffectiveFolder(configuration, tile).empty()) return false;
     std::wstring profile; { std::lock_guard<std::mutex> lock(g_pathMutex); profile = g_iniPath; }
     aip::gallery::Ledger ledger; std::wstring error;
     return ReadGalleryLedgerNative(aip::gallery::runtime::LedgerPath(aip::MakeAbsolutePath(profile)), ledger, error) ==
@@ -76,6 +83,11 @@ static bool CurrentSecondaryAppearanceFingerprint(std::wstring& result)
 }
 static void PollSecondaryTileAppearance()
 {
+#ifndef DESKTOPSTUB_INERT_HARDWARE
+    if (g_hwnd && g_secondaryPinInventory.RequestDue(GetTickCount64()) &&
+        !PostMessageW(g_hwnd, WM_APP_SECONDARY_PIN_INVENTORY, 0, 0))
+        g_secondaryPinInventory.Complete(false, {}, GetTickCount64());
+#endif
 #if defined(DESKTOPSTUB_INERT_HARDWARE) && !defined(DESKTOPSTUB_TEST_APPEARANCE_POST)
     return;
 #else
@@ -142,7 +154,6 @@ struct Pending {
     Kind kind = Kind::Pin;
     bool updateExisting = false;
     std::wstring id, name;
-    HWND owner = nullptr;
     NativeTile tile{nullptr};
     BoolOperation mutation{nullptr};
     TileListOperation list{nullptr};
@@ -156,8 +167,6 @@ static std::shared_ptr<Mailbox> mailbox;
 static std::map<std::uint64_t, Pending> pending;
 static std::uint64_t nextId = 0;
 static bool shuttingDown = false;
-static std::mutex pinnedMutex;
-static std::set<std::wstring> pinned;
 static bool logoRefreshAttempted = false;
 static bool logoRefreshAgain = false;
 static std::deque<NativeTile> logoRefreshQueue;
@@ -212,47 +221,6 @@ static void PostCompletion(const std::weak_ptr<Mailbox>& weak, HWND destination,
         }
         PostMessageW(destination, WM_APP_SECONDARY_TILE_COMPLETE, 0, 0);
     } catch (...) {}
-}
-static void CancelOwner(HWND owner)
-{
-    for (auto& item : pending) if (item.second.owner == owner) {
-        try { if (item.second.mutation) item.second.mutation.Cancel(); } catch (...) {}
-        item.second.owner = nullptr;
-    }
-    if (IsWindow(owner)) DestroyWindow(owner);
-}
-static LRESULT CALLBACK OwnerProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) noexcept
-{
-    if (message == WM_CLOSE || (message == WM_COMMAND && LOWORD(wParam) == SECONDARY_TILE_CANCEL_ID)) {
-        CancelOwner(window); return 0;
-    }
-    return DefWindowProcW(window, message, wParam, lParam);
-}
-static HWND CreateOwner(HWND parent, const std::wstring& name, bool pin)
-{
-    const wchar_t* className = L"DesktopStubSecondaryTileOwner";
-    WNDCLASSW definition{};
-    definition.lpfnWndProc = OwnerProc; definition.hInstance = GetModuleHandleW(nullptr);
-    definition.lpszClassName = className; definition.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    definition.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    if (!RegisterClassW(&definition) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    auto shownName = name.substr(0, 80);
-    std::replace(shownName.begin(), shownName.end(), L'\r', L' ');
-    std::replace(shownName.begin(), shownName.end(), L'\n', L' ');
-    const auto title = std::wstring(L"DesktopStub - ") + (pin ? L"Pin " : L"Unpin ") + shownName;
-    const auto window = CreateWindowExW(WS_EX_TOOLWINDOW, className, title.c_str(),
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, 430, 145,
-        parent, nullptr, definition.hInstance, nullptr);
-    if (!window) return nullptr;
-    const auto label = CreateWindowExW(0, L"STATIC", L"Confirm or decline the Windows Start tile request. Cancel closes this request.",
-        WS_CHILD | WS_VISIBLE | SS_LEFT, 14, 12, 390, 42, window, nullptr, definition.hInstance, nullptr);
-    const auto cancel = CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        310, 64, 92, 26, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(SECONDARY_TILE_CANCEL_ID)), definition.hInstance, nullptr);
-    if (!label || !cancel) { DestroyWindow(window); return nullptr; }
-    SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
-    SendMessageW(cancel, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
-    ShowWindow(window, SW_SHOWNORMAL); SetForegroundWindow(window); UpdateWindow(window);
-    return window;
 }
 static winrt::Windows::Foundation::Uri AssetUri(const std::wstring& relative)
 {
@@ -339,7 +307,7 @@ static NativeTile CreatePinTile(const std::wstring& id, const std::wstring& name
     std::wstring arguments = L"--ini " + aip::QuoteCommandLineArg(profile);
     aip::gallery::Configuration gallery; aip::gallery::TileConfiguration galleryTile;
     if (FindConfiguredGalleryTile(id, gallery, galleryTile))
-        arguments += L" --open-folder " + aip::QuoteCommandLineArg(gallery.folder);
+        arguments += L" --open-folder " + aip::QuoteCommandLineArg(aip::gallery::EffectiveFolder(gallery, galleryTile));
     else arguments += (action ? L" --media-action " : L" --tile-setup ") + activationKey;
     if (arguments.size() > 2048) throw winrt::hresult_error(E_INVALIDARG, L"The profile path is too long for Windows secondary tile activation arguments.");
     auto tile = factory.CreateMinimalTile(id, name, arguments, AssetUri(logos.medium), TileSize::Default);
@@ -435,7 +403,7 @@ static bool RequestMutation(HWND owner, const std::wstring& supplied, const std:
     const auto id = CanonicalSecondaryTileRuntimeId(supplied);
     if (id.empty() || !EnsureUi(owner)) return false;
     if (pin && id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0 && !GalleryTilePinReady(id)) {
-        Report(owner, L"Set up this gallery and its permanent ownership history before pinning. Enable the gallery and this tile first.");
+        Report(owner, L"Set up this gallery and its permanent ownership history before pinning.");
         return false;
     }
     const auto keepApartment = apartment;
@@ -450,18 +418,18 @@ static bool RequestMutation(HWND owner, const std::wstring& supplied, const std:
     const auto request = ++nextId;
     Pending state; state.kind = pin ? Kind::Pin : Kind::Unpin; state.id = id; state.name = name.empty() ? id : name;
     try {
-        state.owner = CreateOwner(owner, state.name, pin);
-        if (!state.owner || !IsWindowVisible(state.owner)) throw winrt::hresult_error(E_FAIL, L"Could not create a visible owner for the Windows confirmation.");
         if (pin) state.tile = CreatePinTile(id, state.name);
         else {
             const auto factory = aip::AcquireUncachedActivationFactory<NativeTile, winrt::Windows::UI::StartScreen::ISecondaryTileFactory>();
             state.tile = factory.CreateWithId(id);
         }
-        winrt::check_hresult(state.tile.as<IInitializeWithWindow>()->Initialize(state.owner));
+        winrt::check_hresult(state.tile.as<IInitializeWithWindow>()->Initialize(owner));
         if (pin) {
             const auto statics = aip::AcquireUncachedActivationFactory<NativeTile, winrt::Windows::UI::StartScreen::ISecondaryTileStatics>();
             state.updateExisting = statics.Exists(id);
-            state.mutation = state.updateExisting ? state.tile.UpdateAsync() : state.tile.RequestCreateAsync();
+            POINT anchor{}; GetCursorPos(&anchor);
+            state.mutation = state.updateExisting ? state.tile.UpdateAsync() : state.tile.RequestCreateForSelectionAsync(
+                winrt::Windows::Foundation::Rect{static_cast<float>(anchor.x), static_cast<float>(anchor.y), 1.0f, 1.0f});
         } else state.mutation = state.tile.RequestDeleteAsync();
         auto inserted = pending.emplace(request, std::move(state));
         const std::weak_ptr<Mailbox> weak = mailbox; const auto destination = host;
@@ -473,14 +441,12 @@ static bool RequestMutation(HWND owner, const std::wstring& supplied, const std:
         const auto found = pending.find(request);
         if (found != pending.end()) { state = std::move(found->second); pending.erase(found); }
         try { if (state.mutation) state.mutation.Cancel(); } catch (...) {}
-        if (state.owner && IsWindow(state.owner)) DestroyWindow(state.owner);
         state.mutation = nullptr; state.tile = nullptr; state.list = nullptr;
         Report(owner, ErrorText(error));
     } catch (...) {
         const auto found = pending.find(request);
         if (found != pending.end()) { state = std::move(found->second); pending.erase(found); }
         try { if (state.mutation) state.mutation.Cancel(); } catch (...) {}
-        if (state.owner && IsWindow(state.owner)) DestroyWindow(state.owner);
         state.mutation = nullptr; state.tile = nullptr; state.list = nullptr;
         Report(owner, L"Could not prepare the source tile request.");
     }
@@ -494,23 +460,69 @@ static bool SecondaryTileExists(const std::wstring& supplied)
 #ifdef DESKTOPSTUB_INERT_HARDWARE
     (void)supplied; return false;
 #else
-    const auto id = CanonicalSecondaryTileRuntimeId(supplied);
-    if (id.empty() || !CurrentProcessHasPackageIdentity()) return false;
+    return g_secondaryPinInventory.Contains(supplied); // No synchronous COM or full-set copy on poll/menu paths.
+#endif
+}
+static void StartNextSecondaryPin()
+{
+#ifndef DESKTOPSTUB_INERT_HARDWARE
+    if (secondary_ui::shuttingDown || secondary_ui::UserMutationPending() || secondary_ui::AppearanceRefreshPending()) return;
+    g_secondaryPinBatch.Advance([](const auto& item) {
+        return secondary_ui::RequestMutation(secondary_ui::host, item.first, item.second, true);
+    });
+#endif
+}
+static bool RequestSecondaryTilePinBatch(HWND owner, const std::vector<std::pair<std::wstring, std::wstring>>& requests)
+{
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    (void)owner; (void)requests; return false;
+#else
+    if (!secondary_ui::EnsureUi(owner)) return false;
+    aip::gallery::Configuration gallery; std::wstring error;
+    std::set<std::wstring> galleryIds;
+    if (ReadGalleryConfiguration(gallery, error)) for (const auto& tile : gallery.tiles)
+        galleryIds.insert(aip::gallery::NativeTileId(gallery.groupId, tile.id));
+    std::vector<std::pair<std::wstring, std::wstring>> normalized;
+    for (const auto& item : requests) {
+        const bool galleryId = item.first.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0;
+        const auto id = galleryId ? (galleryIds.count(item.first) ? item.first : std::wstring{}) : CanonicalSecondaryTileRuntimeId(item.first);
+        if (id.empty()) return false; // Validate the complete batch before enqueueing anything.
+        normalized.emplace_back(id, item.second.empty() ? id : item.second);
+    }
+    g_secondaryPinBatch.Enqueue(normalized); StartNextSecondaryPin(); return !normalized.empty();
+#endif
+}
+// Explicit redistribution only: the caller has confirmed, paused gallery work
+// and drained generation before calling. Never pin/unpin, rename or move tiles.
+static bool ClearGalleryQueuesForRebalance(const std::vector<std::wstring>& ids, std::wstring& error)
+{
+#ifdef DESKTOPSTUB_TEST_GALLERY_CLEAR_QUEUES
+    return DESKTOPSTUB_TEST_GALLERY_CLEAR_QUEUES(ids, error);
+#elif defined(DESKTOPSTUB_INERT_HARDWARE)
+    (void)ids; error = L"Gallery queue changes are unavailable in inert validation."; return false;
+#else
+    if (!secondary_ui::EnsureUi(g_hwnd, true)) { error = L"Open the registered DesktopStub app before redistributing gallery photos."; return false; }
+    std::set<std::wstring> unique(ids.begin(), ids.end());
+    for (const auto& id : unique) if (id.compare(0, 11, L"AipGallery_") != 0 || id.size() > aip::gallery::NativeTileMaxLength) {
+        error = L"The gallery history contains an invalid native tile ID."; return false;
+    }
     try {
-        secondary_ui::Apartment apartment(RO_INIT_MULTITHREADED);
-        if (FAILED(apartment.status) && apartment.status != RPC_E_CHANGED_MODE) return false;
-        const auto factory = aip::AcquireUncachedActivationFactory<secondary_ui::NativeTile, winrt::Windows::UI::StartScreen::ISecondaryTileStatics>();
-        return factory.Exists(id);
-    } catch (...) { return false; }
+        const auto tiles = aip::AcquireUncachedActivationFactory<secondary_ui::NativeTile, winrt::Windows::UI::StartScreen::ISecondaryTileStatics>();
+        const auto updates = aip::AcquireUncachedActivationFactory<winrt::Windows::UI::Notifications::TileUpdateManager,
+            winrt::Windows::UI::Notifications::ITileUpdateManagerStatics>();
+        for (const auto& id : unique) if (tiles.Exists(id)) {
+            updates.CreateTileUpdaterForSecondaryTile(id).Clear();
+            ForgetSecondaryTileDelivery(id);
+        }
+        error.clear(); return true;
+    } catch (const winrt::hresult_error& failure) { error = secondary_ui::ErrorText(failure); }
+    catch (...) { error = L"Windows could not clear every existing gallery queue. Ownership history was kept."; }
+    return false;
 #endif
 }
 static bool RequestPinSecondaryTile(HWND owner, const std::wstring& id, const std::wstring& displayName)
 {
-#ifdef DESKTOPSTUB_INERT_HARDWARE
-    (void)owner; (void)id; (void)displayName; return false;
-#else
-    return secondary_ui::RequestMutation(owner, id, displayName, true);
-#endif
+    return RequestSecondaryTilePinBatch(owner, {{id, displayName}});
 }
 static bool RequestUnpinSecondaryTile(HWND owner, const std::wstring& id)
 {
@@ -527,9 +539,9 @@ static bool RequestSecondaryTileList(HWND owner)
     (void)owner; return false;
 #else
     using namespace secondary_ui;
-    if (!EnsureUi(owner)) return false;
+    if (!EnsureUi(owner, true)) { g_secondaryPinInventory.Complete(false, {}, GetTickCount64()); return false; }
     const auto keepApartment = apartment;
-    if (std::any_of(pending.begin(), pending.end(), [](const auto& item) { return item.second.kind == Kind::List; })) return true;
+    if (std::any_of(pending.begin(), pending.end(), [](const auto& item) { return item.second.kind == Kind::List || item.second.kind == Kind::RefreshList || item.second.kind == Kind::VerifyLogos; })) return true;
     const auto request = ++nextId;
     try {
         Pending state; state.kind = Kind::List;
@@ -539,9 +551,9 @@ static bool RequestSecondaryTileList(HWND owner)
         const std::weak_ptr<Mailbox> weak = mailbox; const auto destination = host;
         inserted.first->second.list.Completed([weak, destination, request](const auto&, AsyncStatus status) noexcept { PostCompletion(weak, destination, request, status); });
         return true;
-    } catch (const winrt::hresult_error& error) { pending.erase(request); Report(owner, ErrorText(error)); }
-    catch (...) { pending.erase(request); Report(owner, L"Could not list the pinned source tiles."); }
-    return false;
+    } catch (const winrt::hresult_error& error) { pending.erase(request); Log(L"[!] Pin inventory: %ls", ErrorText(error).c_str()); }
+    catch (...) { pending.erase(request); LogText(L"[!] Could not refresh the cached pinned tile list."); }
+    g_secondaryPinInventory.Complete(false, {}, GetTickCount64()); return false;
 #endif
 }
 // Normal startup upgrade hook. Existing pins are refreshed in place; missing
@@ -580,12 +592,7 @@ static bool RequestRefreshExistingSecondaryTileLogos(HWND owner, bool force)
 }
 static std::vector<std::wstring> ListKnownSecondaryTileIds()
 {
-#ifdef DESKTOPSTUB_INERT_HARDWARE
-    return {};
-#else
-    std::lock_guard<std::mutex> lock(secondary_ui::pinnedMutex);
-    return {secondary_ui::pinned.begin(), secondary_ui::pinned.end()};
-#endif
+    const auto ids = CachedSecondaryTileIds(); return {ids.begin(), ids.end()};
 }
 // Unlike the normal source menu cache, first setup must enumerate every
 // gallery-prefixed pin, including IDs absent from the current configuration.
@@ -625,6 +632,12 @@ static bool RequestGalleryPinHistory(HWND owner)
 static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
     (void)wParam; (void)lParam;
+    if (message == WM_APP_SECONDARY_PIN_INVENTORY && window == g_hwnd) {
+#ifndef DESKTOPSTUB_INERT_HARDWARE
+        RequestSecondaryTileList(window);
+#endif
+        return true;
+    }
 #ifndef DESKTOPSTUB_INERT_HARDWARE
     if (message == WM_TIMER && wParam == GALLERY_HISTORY_TIMER && window == secondary_ui::host) {
         KillTimer(window, GALLERY_HISTORY_TIMER);
@@ -686,9 +699,11 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
                 g_galleryPinHistory.ids = std::move(history);
                 g_galleryPinHistory.ready = true; g_galleryPinHistory.error.clear();
             } else if (state.kind == Kind::List || state.kind == Kind::RefreshList || state.kind == Kind::VerifyLogos) {
-                std::set<std::wstring> result;
+                std::set<std::wstring> result, allIds;
                 for (const auto& tile : state.list.GetResults()) {
                     const auto id = std::wstring(tile.TileId());
+                    allIds.insert(id); // Includes historic galleries absent from the current configuration.
+                    if (state.kind == Kind::List) continue; // Ordinary pin reconciliation needs no profile parsing or artwork inspection.
                     if (!IsKnownSecondaryMetadataId(id) || !result.insert(id).second) continue;
                     if (state.kind == Kind::RefreshList) logoRefreshQueue.push_back(tile);
                     if (state.kind == Kind::VerifyLogos) {
@@ -709,7 +724,7 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
                 if (state.kind == Kind::RefreshList) logoEnumerationCompleted = true;
                 if (state.kind == Kind::VerifyLogos) for (const auto& expected : logoRefreshExpected)
                     if (!result.count(expected.first)) Log(L"Source tile %ls is no longer pinned; metadata refresh did not recreate it.", expected.first.c_str());
-                { std::lock_guard<std::mutex> lock(pinnedMutex); pinned = std::move(result); }
+                g_secondaryPinInventory.Complete(true, allIds, GetTickCount64());
                 LogText(L"Pinned source tile list refreshed.");
             } else {
                 const bool accepted = state.mutation.GetResults(); // Terminal only, no blocking wait/get.
@@ -717,7 +732,7 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
                     if (state.kind == Kind::RefreshLogo) {
                         Log(L"Source tile %ls topic artwork metadata published: %ls", state.id.c_str(), state.expectedLogos.medium.c_str());
                     } else {
-                        { std::lock_guard<std::mutex> lock(pinnedMutex); if (state.kind == Kind::Pin) pinned.insert(state.id); else pinned.erase(state.id); }
+                        g_secondaryPinInventory.Mutation(state.id, state.kind == Kind::Pin);
                         ForgetSecondaryTileDelivery(state.id);
                         Log(L"Source tile %ls: %ls", state.id.c_str(), state.kind == Kind::Pin ?
                             (state.updateExisting ? L"updated after the requested metadata change" : L"pinned after Windows confirmation") : L"unpinned after Windows confirmation");
@@ -730,9 +745,15 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
             if (error.code() != HRESULT_FROM_WIN32(ERROR_CANCELLED)) Log(L"[!] Secondary tile: %ls", ErrorText(error).c_str());
             else LogText(L"Source tile request cancelled.");
             if (state.kind == Kind::GalleryHistory) g_galleryPinHistory.error = ErrorText(error);
-        } catch (...) { LogText(L"[!] Secondary tile: could not retrieve the completed request."); }
-        if (state.owner && IsWindow(state.owner)) DestroyWindow(state.owner);
+            if (state.kind == Kind::List || state.kind == Kind::RefreshList || state.kind == Kind::VerifyLogos)
+                g_secondaryPinInventory.Complete(false, {}, GetTickCount64());
+        } catch (...) {
+            LogText(L"[!] Secondary tile: could not retrieve the completed request.");
+            if (state.kind == Kind::List || state.kind == Kind::RefreshList || state.kind == Kind::VerifyLogos)
+                g_secondaryPinInventory.Complete(false, {}, GetTickCount64());
+        }
         state.mutation = nullptr; state.tile = nullptr; state.list = nullptr;
+        if (state.kind == Kind::Pin) g_secondaryPinBatch.Complete(state.id);
         if (state.kind == Kind::GalleryHistory) {
             KillTimer(window, GALLERY_HISTORY_TIMER);
             g_galleryPinHistory.pending = false;
@@ -741,6 +762,7 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
             PostMessageW(window, WM_APP_GALLERY_SETUP_READY, 0, 0);
         }
         StartNextLogoRefresh();
+        StartNextSecondaryPin();
         WakePollThread();
     }
     return true;
@@ -748,6 +770,7 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
 }
 static void ShutdownSecondaryTileUi()
 {
+    g_secondaryPinBatch.Clear();
     g_galleryPinHistory = {};
 #ifndef DESKTOPSTUB_INERT_HARDWARE
     using namespace secondary_ui;
@@ -757,7 +780,6 @@ static void ShutdownSecondaryTileUi()
     { std::lock_guard<std::mutex> lock(mailbox->mutex); mailbox->accepting = false; mailbox->complete.clear(); }
     for (auto& item : pending) {
         try { if (item.second.mutation) item.second.mutation.Cancel(); if (item.second.list) item.second.list.Cancel(); } catch (...) {}
-        if (item.second.owner && IsWindow(item.second.owner)) DestroyWindow(item.second.owner);
     }
     pending.clear(); logoRefreshQueue.clear(); logoRefreshExpected.clear(); appearanceRefreshExpected.clear(); mailbox.reset();
     apartment.reset(); uiThread = 0; host = nullptr;

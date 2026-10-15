@@ -1217,7 +1217,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
             state += L"wrapSourceText=" + std::to_wstring(g_renderContent->wrapSourceText) + L";";
             state += L"detailTopic=" + g_renderContent->detailTopic + L";";
             for (const auto& row : g_renderContent->detailRows)
-                for (const auto& field : {row.primary, row.secondary, row.badge})
+                for (const auto& field : {row.primary, row.secondary, row.badge, row.iconTopic})
                     state += L"detail=" + std::to_wstring(field.size()) + L":" + field;
             state += L"smtc=" + std::to_wstring(g_renderContent->smtcSource) + L":" +
                 std::to_wstring(static_cast<int>(g_renderContent->smtcState)) + L":" +

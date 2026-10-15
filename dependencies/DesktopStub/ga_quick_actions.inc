@@ -4,9 +4,11 @@ static constexpr UINT ID_QUICK_ACTIONS_CLICK = 29100;
 static constexpr UINT ID_QUICK_ACTIONS_SETUP = 29199;
 static constexpr UINT ID_QUICK_ACTIONS_PIN = 29200;
 static constexpr UINT ID_QUICK_ACTIONS_APPEARANCE = 29300;
+static constexpr UINT ID_QUICK_ACTIONS_PIN_ALL = 29320;
 static void AppendQuickActionsMenu(HMENU parent)
 {
     HMENU menu = aip::BeginTrayNestedMenu(parent);
+    aip::AppendTrayMenuItem(menu, ID_QUICK_ACTIONS_PIN_ALL, SecondaryTileUiString(L"QuickActionsPinAll", L"Pin all Quick Actions..."), false, SecondaryTilePinUiAvailable());
     AppendTileAppearanceMenu(menu, L"MediaActions", ID_QUICK_ACTIONS_APPEARANCE);
     aip::AppendTrayMenuItem(menu, ID_QUICK_ACTIONS_VOLUME, L"Volume step (%)...", false, true);
     HMENU click = aip::BeginTrayNestedMenu(menu);
@@ -22,7 +24,7 @@ static void AppendQuickActionsMenu(HMENU parent)
         HMENU tile = aip::BeginTrayNestedMenu(menu);
         const bool available = SecondaryTilePinUiAvailable();
         const auto id = CanonicalSecondaryTileRuntimeId(L"AipAction_" + std::wstring(action.id));
-        aip::AppendTrayMenuItem(tile, ID_QUICK_ACTIONS_PIN + static_cast<UINT>(index) * 2, L"Pin/update tile...", false, available);
+        aip::AppendTrayMenuItem(tile, ID_QUICK_ACTIONS_PIN + static_cast<UINT>(index) * 2, SecondaryTileUiString(L"PinTile", L"Pin tile..."), false, available);
         aip::AppendTrayMenuItem(tile, ID_QUICK_ACTIONS_PIN + static_cast<UINT>(index) * 2 + 1, L"Unpin from Start...", false, available && SecondaryTileExists(id));
         aip::EndTrayNestedMenu(menu, tile, action.label);
     }
@@ -30,6 +32,12 @@ static void AppendQuickActionsMenu(HMENU parent)
 }
 static bool DispatchQuickActionsCommand(HWND owner, UINT command)
 {
+    if (command == ID_QUICK_ACTIONS_PIN_ALL) {
+        std::vector<std::pair<std::wstring, std::wstring>> requests;
+        for (const auto& action : aip::content::TileActions)
+            requests.emplace_back(CanonicalSecondaryTileRuntimeId(L"AipAction_" + std::wstring(action.id)), action.label);
+        RequestSecondaryTilePinBatch(owner, requests); return true;
+    }
     if (DispatchTileAppearanceCommand(owner, command, ID_QUICK_ACTIONS_APPEARANCE, L"MediaActions")) return true;
     if (command == ID_QUICK_ACTIONS_VOLUME) {
         auto value = IniReadS(L"MediaActions", L"VolumeStepPercent", L"5");

@@ -166,6 +166,7 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #endif
 #include "../dependencies/DesktopStub/ga_version.inc"
 #include "../dependencies/DesktopStub/ga_config_defaults.inc"
+#include "../dependencies/DesktopStub/ga_ui_wording.inc"
 #include "../dependencies/DesktopStub/ga_command_line.inc"
 #include "../dependencies/DesktopStub/ga_ui_logging.inc"
 #include "../dependencies/DesktopStub/ga_packaged_startup.inc"
@@ -185,3 +186,6 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "../dependencies/DesktopStub/ga_tray.inc"
 #include "../dependencies/DesktopStub/ga_render_only.inc"
 #include "../dependencies/DesktopStub/ga_app.inc"
+#undef MessageBoxW
+#undef CreateWindowExW
+#undef SetWindowTextW

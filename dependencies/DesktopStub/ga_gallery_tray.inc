@@ -5,7 +5,8 @@ static bool GalleryDirectoryExists(const std::wstring& directory);
 static constexpr UINT ID_GALLERY_SETUP = 30000, ID_GALLERY_ENABLED = 30001,
     ID_GALLERY_FOLDER = 30002, ID_GALLERY_OPEN_FOLDER = 30003, ID_GALLERY_REFRESH = 30004,
     ID_GALLERY_CADENCE = 30005, ID_GALLERY_SEED = 30006, ID_GALLERY_COUNT = 30010, ID_GALLERY_QUEUE = 30020,
-    ID_GALLERY_ORDER = 30030, ID_GALLERY_FIT = 30040, ID_GALLERY_TILE = 30100;
+    ID_GALLERY_ORDER = 30030, ID_GALLERY_FIT = 30040, ID_GALLERY_PIN_ALL = 30042, ID_GALLERY_ADD = 30043,
+    ID_GALLERY_REBALANCE = 30044, ID_GALLERY_TILE = 30100, ID_GALLERY_GROUP = 52000;
 static constexpr UINT GALLERY_TILE_COMMAND_STRIDE = 20;
 
 static std::wstring GalleryProfilePath()
@@ -14,9 +15,14 @@ static std::wstring GalleryProfilePath()
 }
 static void ResolveGalleryConfigurationFolder(aip::gallery::Configuration& configuration, const std::wstring& profile)
 {
-    if (configuration.folder.empty()) return;
-    if (PathIsRelativeW(configuration.folder.c_str())) configuration.folder = ParentDirectoryOfPath(profile) + L"\\" + configuration.folder;
-    configuration.folder = aip::MakeAbsolutePath(configuration.folder);
+    if (!configuration.folder.empty()) {
+        if (PathIsRelativeW(configuration.folder.c_str())) configuration.folder = ParentDirectoryOfPath(profile) + L"\\" + configuration.folder;
+        configuration.folder = aip::MakeAbsolutePath(configuration.folder);
+    }
+    for (auto& tile : configuration.tiles) if (!tile.folder.empty()) {
+        if (PathIsRelativeW(tile.folder.c_str())) tile.folder = ParentDirectoryOfPath(profile) + L"\\" + tile.folder;
+        tile.folder = aip::MakeAbsolutePath(tile.folder);
+    }
 }
 static bool ReadGalleryMenuText(const std::wstring& text, aip::gallery::Configuration& configuration, std::wstring& error)
 {
@@ -32,6 +38,7 @@ static bool SameGalleryConfiguration(const aip::gallery::Configuration& a, const
         a.refreshSeconds != b.refreshSeconds || a.order != b.order || a.fit != b.fit || a.seed != b.seed || a.tiles.size() != b.tiles.size()) return false;
     for (std::size_t i = 0; i < a.tiles.size(); ++i)
         if (a.tiles[i].id != b.tiles[i].id || a.tiles[i].name != b.tiles[i].name || a.tiles[i].enabled != b.tiles[i].enabled ||
+            a.tiles[i].folder != b.tiles[i].folder || a.tiles[i].galleryName != b.tiles[i].galleryName ||
             a.tiles[i].appearance.background != b.tiles[i].appearance.background || a.tiles[i].appearance.branding != b.tiles[i].appearance.branding ||
             a.tiles[i].appearance.backgroundColor != b.tiles[i].appearance.backgroundColor) return false;
     return true;
@@ -208,15 +215,16 @@ static void BeginGallerySetup(HWND owner)
     auto requested = current;
     if (!PickGalleryFolder(owner, requested.folder)) return;
     auto countText = std::wstring(L"3");
-    if (ShowTextInputDialog(owner, L"Photo gallery", L"How many separate gallery tiles? Enter 1 to 8. Photos stay permanently assigned to their first tile.", countText, true) != IDOK) return;
+    if (ShowTextInputDialog(owner, L"Photo gallery", IniReadS(L"Strings", L"GalleryCountPrompt", L"How many tiles? Enter 1 to 1024 (for example, 28). Each tile receives separate photos.").c_str(), countText, true) != IDOK) return;
     std::uint64_t count = 0;
     if (!aip::gallery::detail::UInt(aip::gallery::detail::Trim(countText), aip::gallery::MaxTiles, count) || !count) {
-        DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, L"Choose between 1 and 8 gallery tiles.", L"Photo gallery", MB_OK | MB_ICONWARNING); return;
+        DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, L"Choose between 1 and 1024 gallery tiles.", L"Photo gallery", MB_OK | MB_ICONWARNING); return;
     }
     requested.tiles.clear(); requested.enabled = true;
     for (std::size_t i = 0; i < count; ++i) {
         const auto number = std::to_wstring(i + 1); auto name = L"Gallery " + number;
-        if (ShowTextInputDialog(owner, L"Photo gallery", L"Name for tile " + number, name, true) != IDOK) return;
+        // Large sets get useful numbered names; each remains editable later.
+        if (count <= 8 && ShowTextInputDialog(owner, L"Photo gallery", L"Name for tile " + number, name, true) != IDOK) return;
         auto checked = name;
         if (!aip::gallery::NormalizeSetting(L"Gallery.Tile." + number, L"Name", checked, error)) {
             DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Photo gallery", MB_OK | MB_ICONWARNING); return;
@@ -266,118 +274,139 @@ static void CompleteGallerySetup(HWND owner)
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Photo gallery", MB_OK | MB_ICONWARNING); return;
     }
     RequestGalleryRefresh(true); WakePollThread();
-    DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, L"Your gallery is ready. Open Tiles > Photo gallery, then choose Pin/update for each tile you want on Start. Windows chooses when queued photos rotate. Pausing or unpinning a tile keeps its image reservations.", L"Photo gallery", MB_OK | MB_ICONINFORMATION);
+    std::vector<std::pair<std::wstring,std::wstring>> requests;
+    for(const auto& tile:draft.requested.tiles) requests.push_back({aip::gallery::NativeTileId(draft.requested.groupId,tile.id),tile.name});
+    RequestSecondaryTilePinBatch(owner,requests);
 }
-static void AppendGalleryTilesMenu(HMENU parent)
-{
-    HMENU menu = aip::BeginTrayNestedMenu(parent);
-    aip::gallery::Configuration configuration; std::wstring error;
-    const bool valid = ReadGalleryConfiguration(configuration, error);
-    const bool configured = valid && !configuration.groupId.empty();
-    aip::AppendTrayMenuItem(menu, ID_GALLERY_SETUP, configured ? L"Gallery is configured" : L"Set up gallery...", false,
-        valid && !configured && SecondaryTilePinUiAvailable() && !g_gallerySetupDraft.active && !g_galleryPinHistory.pending);
-    aip::AppendTrayMenuItem(menu, ID_GALLERY_ENABLED, L"Enable photo gallery", configuration.enabled, configured);
-    aip::AppendTrayMenuItem(menu, ID_GALLERY_FOLDER, L"Choose photo folder...", false, configured);
-    aip::AppendTrayMenuItem(menu, ID_GALLERY_OPEN_FOLDER, L"Open photo folder", false, configured && !configuration.folder.empty());
-    aip::AppendTrayMenuItem(menu, ID_GALLERY_REFRESH, L"Refresh gallery now", false, configured);
-    auto status = !valid ? error : configured ? GallerySourceStatus() : L"Set up a folder and tile names; pin tiles manually afterward";
-    aip::AppendTrayMenuItem(menu, 0, status.empty() ? L"Waiting for gallery source" : status, false, false);
-    aip::AppendTrayMenuItem(menu, 0, L"Permanent image pools: pausing/unpinning never reassigns photos", false, false);
-    HMENU count = aip::BeginTrayNestedMenu(menu);
-    for (UINT i = 0; i < aip::gallery::MaxTiles; ++i)
-        aip::AppendTrayMenuItem(count, ID_GALLERY_COUNT + i, std::to_wstring(i + 1), configuration.tiles.size() == i + 1, configured);
-    aip::EndTrayNestedMenu(menu, count, L"Number of tiles");
-    HMENU queue = aip::BeginTrayNestedMenu(menu);
-    for (UINT i = 0; i < aip::gallery::MaxQueue; ++i)
-        aip::AppendTrayMenuItem(queue, ID_GALLERY_QUEUE + i, std::to_wstring(i + 1), configuration.queueSize == i + 1, configured);
-    aip::EndTrayNestedMenu(menu, queue, L"Photos in each Windows queue");
-    aip::AppendTrayMenuItem(menu, ID_GALLERY_CADENCE, L"Queue refresh interval (seconds): " + std::to_wstring(configuration.refreshSeconds) + L"...", false, configured);
-    aip::AppendTrayMenuItem(menu, ID_GALLERY_SEED, L"Shuffle seed: " + std::to_wstring(configuration.seed) + L"...", false, configured);
-    HMENU order = aip::BeginTrayNestedMenu(menu);
-    aip::AppendTrayMenuItem(order, ID_GALLERY_ORDER, L"Shuffle", configuration.order == aip::gallery::Order::Shuffle, configured);
-    aip::AppendTrayMenuItem(order, ID_GALLERY_ORDER + 1, L"Sequential", configuration.order == aip::gallery::Order::Sequential, configured);
-    aip::EndTrayNestedMenu(menu, order, L"Photo order");
-    HMENU fit = aip::BeginTrayNestedMenu(menu);
-    aip::AppendTrayMenuItem(fit, ID_GALLERY_FIT, L"Fill tile (crop edges)", configuration.fit == aip::gallery::Fit::Fill, configured);
-    aip::AppendTrayMenuItem(fit, ID_GALLERY_FIT + 1, L"Fit whole photo", configuration.fit == aip::gallery::Fit::Fit, configured);
-    aip::EndTrayNestedMenu(menu, fit, L"Photo layout");
-    const auto states = valid ? GalleryTileMenuStates() : std::vector<aip::gallery::runtime::MenuState>{};
-    if (valid) for (std::size_t i = 0; i < configuration.tiles.size(); ++i) {
-        const auto& tile = configuration.tiles[i]; const auto id = aip::gallery::NativeTileId(configuration.groupId, tile.id);
-        HMENU item = aip::BeginTrayNestedMenu(menu); const auto base = ID_GALLERY_TILE + static_cast<UINT>(i) * GALLERY_TILE_COMMAND_STRIDE;
-        aip::AppendTrayMenuItem(item, base, L"Enable this gallery tile", tile.enabled, configured);
-        aip::AppendTrayMenuItem(item, base + 1, L"Rename...", false, configured);
-        const auto state = std::find_if(states.begin(), states.end(), [&](const auto& value) { return value.nativeId == id; });
-        const bool ledgerReady = state != states.end() && state->ledgerReady;
-        aip::AppendTrayMenuItem(item, base + 2, L"Pin/update on Start...", false, configured && configuration.enabled && tile.enabled && SecondaryTilePinUiAvailable() && ledgerReady);
-        aip::AppendTrayMenuItem(item, base + 3, L"Unpin from Start...", false, configured && SecondaryTilePinUiAvailable());
-        if (state != states.end()) aip::AppendTrayMenuItem(item, 0, state->status, false, false);
-        AppendTileAppearanceMenu(item, L"Gallery.Tile." + std::to_wstring(i + 1), base + 10);
-        aip::EndTrayNestedMenu(menu, item, tile.name);
+struct GalleryMenuGroup { std::wstring folder, name; std::vector<std::size_t> indices; };
+static std::vector<GalleryMenuGroup> GalleryGroups(const aip::gallery::Configuration& cfg) {
+    std::vector<GalleryMenuGroup> groups;
+    for (std::size_t i=0;i<cfg.tiles.size();++i) {
+        const auto folder=aip::gallery::EffectiveFolder(cfg,cfg.tiles[i]);
+        const auto caption=cfg.tiles[i].galleryName.empty() ? FileNameFromPath(folder) : cfg.tiles[i].galleryName;
+        auto found=std::find_if(groups.begin(),groups.end(),[&](const auto& g){return IEquals(g.folder,folder)&&g.name==caption;});
+        if(found==groups.end()) {groups.push_back({folder,caption.empty()?L"Gallery":caption,{}});found=groups.end()-1;}
+        found->indices.push_back(i);
     }
-    aip::EndTrayNestedMenu(parent, menu, L"Photo gallery");
+    return groups;
 }
-static bool DispatchGalleryTilesCommand(HWND owner, UINT command)
-{
-    const bool global = command >= ID_GALLERY_SETUP && command <= ID_GALLERY_FIT + 1;
-    const bool tileCommand = command >= ID_GALLERY_TILE && command < ID_GALLERY_TILE + aip::gallery::MaxTiles * GALLERY_TILE_COMMAND_STRIDE;
-    if (!global && !tileCommand) return false;
-    if (command == ID_GALLERY_SETUP) { BeginGallerySetup(owner); return true; }
-    aip::gallery::Configuration configuration; std::wstring error;
-    if (!ReadGalleryConfiguration(configuration, error)) {
-        DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Photo gallery", MB_OK | MB_ICONWARNING); return true;
+static bool SaveGalleryConfiguration(HWND owner,const aip::gallery::Configuration& cfg,bool redistribute) {
+    std::vector<aip::IniSetting> settings; std::wstring error;
+    if(!PrepareGalleryConfigurationSettings(cfg,settings,error)) {DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,error.c_str(),L"Photo gallery",MB_OK|MB_ICONWARNING);return false;}
+    if(!redistribute) return SaveGalleryMenuSettings(owner,settings);
+    if(DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,IniReadS(L"Strings",L"GalleryRedistributePrompt",L"Redistribute photos across the configured tiles? Existing photo queues will briefly clear, then refill. Pinned tiles keep their positions and names.").c_str(),L"Photo gallery",MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION)!=IDYES) return false;
+    std::unique_lock<std::mutex> generation(g_generationMutex,std::try_to_lock);
+    if(!generation.owns_lock()) {DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,L"A tile update is finishing. Try changing the gallery count again in a moment.",L"Photo gallery",MB_OK|MB_ICONINFORMATION);return false;}
+    SuspendGalleryPublication();
+    struct Resume {
+        std::unique_lock<std::mutex>& generation;bool active=true;
+        void Finish(){if(!active)return;active=false;if(generation.owns_lock())generation.unlock();ResumeGalleryPublication(true);WakePollThread();}
+        ~Resume(){Finish();}
+    } resume{generation};
+    const auto profile=GalleryProfilePath(); aip::gallery::Ledger ledger;
+    if(ReadGalleryLedgerNative(aip::gallery::runtime::LedgerPath(profile),ledger,error)!=aip::gallery::runtime::ReadResult::Ok) {resume.Finish();DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,error.c_str(),L"Photo gallery",MB_OK|MB_ICONWARNING);return false;}
+    std::vector<std::wstring> history; for(const auto& tile:ledger.tiles) history.push_back(aip::gallery::NativeTileId(ledger.groupId,tile.first));
+    if(!ClearGalleryQueuesForRebalance(history,error)) {resume.Finish();DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,error.c_str(),L"Photo gallery",MB_OK|MB_ICONWARNING);return false;}
+    const auto epoch=NewGalleryIdentity();
+    const bool saved=MutateDesktopStubIniWithWait([&](std::wstring& text) {
+        auto candidate=text;
+        if(!StageGalleryMenuSettings(candidate,settings,error)) return false;
+        if(epoch.empty()||!ResetGalleryLedgerForProfile(profile,cfg,ledger,epoch,true,error)) return false;
+        text=std::move(candidate);return true;
+    },CurrentIniWriteLockWaitMs());
+    if(!saved) {resume.Finish();if(error.empty())error=L"The gallery change could not be saved. Existing configuration was retained; the photo queues will refill.";DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,error.c_str(),L"Photo gallery",MB_OK|MB_ICONWARNING);}
+    return saved;
+}
+static bool AppendGalleryRows(aip::gallery::Configuration& cfg,const std::wstring& folder,const std::wstring& caption,std::size_t count) {
+    if(count> aip::gallery::MaxTiles-cfg.tiles.size()) return false;
+    for(std::size_t n=0;n<count;++n) {
+        std::size_t serial=cfg.tiles.size()+1; std::wstring id;
+        do {id=L"tile"+std::to_wstring(serial++);} while(std::any_of(cfg.tiles.begin(),cfg.tiles.end(),[&](const auto& row){return row.id==id;}));
+        aip::gallery::TileConfiguration row;row.id=id;row.name=caption+L" "+std::to_wstring(n+1);row.folder=folder;row.galleryName=caption;cfg.tiles.push_back(std::move(row));
     }
-    if (command == ID_GALLERY_ENABLED) SaveGalleryMenuSettings(owner, {{L"Gallery", L"Enabled", configuration.enabled ? L"0" : L"1"}});
-    else if (command == ID_GALLERY_FOLDER) {
-        auto folder = configuration.folder;
-        if (PickGalleryFolder(owner, folder)) SaveGalleryMenuSettings(owner, {{L"Gallery", L"Folder", folder}});
-    } else if (command == ID_GALLERY_OPEN_FOLDER) {
-        if (!OpenGalleryFolder(configuration.folder)) DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, L"The gallery folder is unavailable or Windows could not open it.", L"Photo gallery", MB_OK | MB_ICONWARNING);
-    } else if (command == ID_GALLERY_REFRESH) { RequestGalleryRefresh(true); WakePollThread(); }
-    else if (command == ID_GALLERY_CADENCE) {
-        auto value = std::to_wstring(configuration.refreshSeconds);
-        if (ShowTextInputDialog(owner, L"Gallery queue refresh", L"Seconds between queue replacements (60-86400). Windows independently chooses when each queued photo is displayed.", value, true) == IDOK)
-            SaveGalleryMenuSettings(owner, {{L"Gallery", L"RefreshSeconds", value}});
-    } else if (command == ID_GALLERY_SEED) {
-        auto value = std::to_wstring(configuration.seed);
-        if (ShowTextInputDialog(owner, L"Gallery shuffle seed", L"Nonnegative integer used to order this gallery's already reserved photos. Changing it never transfers ownership between tiles.", value, true) == IDOK)
-            SaveGalleryMenuSettings(owner, {{L"Gallery", L"Seed", value}});
-    } else if (command >= ID_GALLERY_COUNT && command < ID_GALLERY_COUNT + aip::gallery::MaxTiles) {
-        const auto count = command - ID_GALLERY_COUNT + 1;
-        std::vector<aip::IniSetting> settings{{L"Gallery", L"TileCount", std::to_wstring(count)}};
-        for (std::size_t i = configuration.tiles.size(); i < count; ++i) {
-            const auto number = std::to_wstring(i + 1), section = L"Gallery.Tile." + number;
-            auto id = IniReadS(section.c_str(), L"Id", L""); if (id.empty()) id = L"tile" + number;
-            settings.push_back({section, L"Id", id});
-            settings.push_back({section, L"Name", IniReadS(section.c_str(), L"Name", (L"Gallery " + number).c_str())});
+    return true;
+}
+static void PinGalleryGroup(HWND owner,const aip::gallery::Configuration& cfg,const std::vector<std::size_t>& indices) {
+    std::vector<std::pair<std::wstring,std::wstring>> pins;
+    for(const auto i:indices) if(i<cfg.tiles.size()) pins.push_back({aip::gallery::NativeTileId(cfg.groupId,cfg.tiles[i].id),cfg.tiles[i].name});
+    RequestSecondaryTilePinBatch(owner,pins);
+}
+static void AddGalleryFolder(HWND owner,aip::gallery::Configuration cfg) {
+    if(cfg.groupId.empty()){BeginGallerySetup(owner);return;}
+    std::wstring folder; if(!PickGalleryFolder(owner,folder)) return;
+    auto caption=FileNameFromPath(folder);if(caption.empty())caption=L"Gallery";
+    if(ShowTextInputDialog(owner,L"Add gallery",L"Gallery name",caption,true)!=IDOK)return;
+    auto countText=std::wstring(L"3");
+    if(ShowTextInputDialog(owner,L"Add gallery",L"Number of tiles for this folder (1-1024 total across galleries)",countText,true)!=IDOK)return;
+    std::uint64_t count=0;if(!aip::gallery::detail::UInt(aip::gallery::detail::Trim(countText),aip::gallery::MaxTiles,count)||!count||!AppendGalleryRows(cfg,folder,caption,static_cast<std::size_t>(count))){DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,L"The combined gallery count must be between 1 and 1024.",L"Photo gallery",MB_OK|MB_ICONWARNING);return;}
+    // A new folder normally brings new images. Explicit redistribution is also
+    // available when that folder overlaps an existing pool.
+    if(SaveGalleryConfiguration(owner,cfg,false)) {std::vector<std::size_t> added;for(std::size_t i=cfg.tiles.size()-static_cast<std::size_t>(count);i<cfg.tiles.size();++i)added.push_back(i);PinGalleryGroup(owner,cfg,added);}
+}
+static void AppendGalleryTilesMenu(HMENU parent) {
+    HMENU menu=aip::BeginTrayNestedMenu(parent);aip::gallery::Configuration cfg;std::wstring error;
+    const bool valid=ReadGalleryConfiguration(cfg,error),configured=valid&&!cfg.groupId.empty();
+    aip::AppendTrayMenuItem(menu,ID_GALLERY_ADD,configured?L"Add another gallery folder...":L"Set up gallery...",false,valid&&SecondaryTilePinUiAvailable());
+    aip::AppendTrayMenuItem(menu,ID_GALLERY_PIN_ALL,L"Pin all gallery tiles...",false,configured&&SecondaryTilePinUiAvailable());
+    aip::AppendTrayMenuItem(menu,ID_GALLERY_REBALANCE,L"Redistribute photos across tiles...",false,configured&&SecondaryTilePinUiAvailable());
+    aip::AppendTrayMenuItem(menu,ID_GALLERY_REFRESH,L"Refresh gallery now",false,configured);
+    HMENU options=aip::BeginTrayNestedMenu(menu);
+    HMENU queue=aip::BeginTrayNestedMenu(options);for(UINT i=0;i<aip::gallery::MaxQueue;++i)aip::AppendTrayMenuItem(queue,ID_GALLERY_QUEUE+i,std::to_wstring(i+1),cfg.queueSize==i+1,configured);
+    aip::EndTrayNestedMenu(options,queue,L"Photos queued per tile");
+    aip::AppendTrayMenuItem(options,ID_GALLERY_CADENCE,L"Replace photo queues every (seconds): "+std::to_wstring(cfg.refreshSeconds)+L"...",false,configured);
+    aip::AppendTrayMenuItem(options,ID_GALLERY_SEED,L"Shuffle seed...",false,configured);
+    HMENU order=aip::BeginTrayNestedMenu(options);aip::AppendTrayMenuItem(order,ID_GALLERY_ORDER,L"Shuffle",cfg.order==aip::gallery::Order::Shuffle,configured);aip::AppendTrayMenuItem(order,ID_GALLERY_ORDER+1,L"Sequential",cfg.order==aip::gallery::Order::Sequential,configured);aip::EndTrayNestedMenu(options,order,L"Photo order");
+    HMENU fit=aip::BeginTrayNestedMenu(options);aip::AppendTrayMenuItem(fit,ID_GALLERY_FIT,L"Fill tile (crop edges)",cfg.fit==aip::gallery::Fit::Fill,configured);aip::AppendTrayMenuItem(fit,ID_GALLERY_FIT+1,L"Fit whole photo",cfg.fit==aip::gallery::Fit::Fit,configured);aip::EndTrayNestedMenu(options,fit,L"Photo layout");
+    aip::EndTrayNestedMenu(menu,options,L"Gallery settings");
+    const auto groups=GalleryGroups(cfg);const auto states=GalleryTileMenuStates();
+    for(std::size_t groupIndex=0;valid&&groupIndex<groups.size();++groupIndex) {
+        const auto& group=groups[groupIndex];HMENU groupMenu=aip::BeginTrayNestedMenu(menu);const auto groupBase=ID_GALLERY_GROUP+static_cast<UINT>(groupIndex)*4;
+        aip::AppendTrayMenuItem(groupMenu,groupBase,L"Pin all tiles in this gallery...",false,configured&&SecondaryTilePinUiAvailable());
+        aip::AppendTrayMenuItem(groupMenu,groupBase+1,L"Number of tiles: "+std::to_wstring(group.indices.size())+L"...",false,configured);
+        aip::AppendTrayMenuItem(groupMenu,groupBase+2,L"Choose photo folder...",false,configured);
+        aip::AppendTrayMenuItem(groupMenu,groupBase+3,L"Open photo folder",false,configured);
+        for(std::size_t first=0;first<group.indices.size();first+=16) {
+            HMENU page=group.indices.size()>16?aip::BeginTrayNestedMenu(groupMenu):groupMenu;
+            for(std::size_t p=first;p<(std::min)(first+16,group.indices.size());++p) {
+                const auto i=group.indices[p];const auto& tile=cfg.tiles[i];const auto base=ID_GALLERY_TILE+static_cast<UINT>(i)*GALLERY_TILE_COMMAND_STRIDE;
+                HMENU item=aip::BeginTrayNestedMenu(page);
+                aip::AppendTrayMenuItem(item,base+1,L"Rename...",false,configured);
+                aip::AppendTrayMenuItem(item,base+2,L"Pin/update on Start...",false,configured&&SecondaryTilePinUiAvailable());
+                aip::AppendTrayMenuItem(item,base+3,L"Unpin from Start...",false,configured&&SecondaryTilePinUiAvailable());
+                AppendTileAppearanceMenu(item,L"Gallery.Tile."+std::to_wstring(i+1),base+10);
+                aip::EndTrayNestedMenu(page,item,tile.name);
+            }
+            if(page!=groupMenu)aip::EndTrayNestedMenu(groupMenu,page,L"Tiles "+std::to_wstring(first+1)+L"-"+std::to_wstring((std::min)(first+16,group.indices.size())));
         }
-        SaveGalleryMenuSettings(owner, settings); // Removed numbered rows/history are retained.
-    } else if (command >= ID_GALLERY_QUEUE && command < ID_GALLERY_QUEUE + aip::gallery::MaxQueue)
-        SaveGalleryMenuSettings(owner, {{L"Gallery", L"QueueSize", std::to_wstring(command - ID_GALLERY_QUEUE + 1)}});
-    else if (command == ID_GALLERY_ORDER || command == ID_GALLERY_ORDER + 1)
-        SaveGalleryMenuSettings(owner, {{L"Gallery", L"Order", command == ID_GALLERY_ORDER ? L"Shuffle" : L"Sequential"}});
-    else if (command == ID_GALLERY_FIT || command == ID_GALLERY_FIT + 1)
-        SaveGalleryMenuSettings(owner, {{L"Gallery", L"Fit", command == ID_GALLERY_FIT ? L"Fill" : L"Fit"}});
-    else if (tileCommand) {
-        const auto index = (command - ID_GALLERY_TILE) / GALLERY_TILE_COMMAND_STRIDE, action = (command - ID_GALLERY_TILE) % GALLERY_TILE_COMMAND_STRIDE;
-        if (index >= configuration.tiles.size()) return true;
-        const auto& tile = configuration.tiles[index]; const auto section = L"Gallery.Tile." + std::to_wstring(index + 1);
-        const auto id = aip::gallery::NativeTileId(configuration.groupId, tile.id);
-        if (action >= 10 && action <= 18) {
-            const auto appearance = action - 10;
-            if (appearance < 2) SaveGalleryMenuSettings(owner, {{section, L"Background", appearance ? L"Color" : L"Transparent"}});
-            else if (appearance < 7) SaveGalleryMenuSettings(owner, {{section, L"Branding", aip::content::TileBrandingChoices[appearance - 2]}});
-            else if (appearance == 7) {
-                auto color = tile.appearance.backgroundColor;
-                if (ShowTextInputDialog(owner, L"Gallery tile background", L"Color as #RRGGBB, or Auto for the gallery topic color", color, true) == IDOK)
-                    SaveGalleryMenuSettings(owner, {{section, L"Background", L"Color"}, {section, L"BackgroundColor", color}});
-            } else SaveGalleryMenuSettings(owner, {{section, L"BackgroundColor", L"Auto"}});
-        } else if (action == 0) SaveGalleryMenuSettings(owner, {{section, L"Enabled", tile.enabled ? L"0" : L"1"}});
-        else if (action == 1) {
-            auto name = tile.name;
-            if (ShowTextInputDialog(owner, L"Gallery tile", L"Tile name", name, true) == IDOK) SaveGalleryMenuSettings(owner, {{section, L"Name", name}});
-        } else if (action == 2) RequestPinSecondaryTile(g_hwnd, id, tile.name);
-        else if (action == 3) RequestUnpinSecondaryTile(g_hwnd, id);
+        aip::EndTrayNestedMenu(menu,groupMenu,group.name);
+    }
+    aip::EndTrayNestedMenu(parent,menu,L"Photo galleries");
+}
+static bool DispatchGalleryTilesCommand(HWND owner,UINT command) {
+    const bool global=command>=ID_GALLERY_SETUP&&command<=ID_GALLERY_REBALANCE;
+    const bool tileCommand=command>=ID_GALLERY_TILE&&command<ID_GALLERY_TILE+aip::gallery::MaxTiles*GALLERY_TILE_COMMAND_STRIDE;
+    const bool groupCommand=command>=ID_GALLERY_GROUP&&command<ID_GALLERY_GROUP+aip::gallery::MaxTiles*4;
+    if(!global&&!tileCommand&&!groupCommand)return false;
+    aip::gallery::Configuration cfg;std::wstring error;if(!ReadGalleryConfiguration(cfg,error)){DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,error.c_str(),L"Photo gallery",MB_OK|MB_ICONWARNING);return true;}
+    if(command==ID_GALLERY_ADD||command==ID_GALLERY_SETUP){AddGalleryFolder(owner,cfg);return true;}
+    if(command==ID_GALLERY_PIN_ALL){std::vector<std::size_t> indices;for(std::size_t i=0;i<cfg.tiles.size();++i)indices.push_back(i);PinGalleryGroup(owner,cfg,indices);}
+    else if(command==ID_GALLERY_REBALANCE)SaveGalleryConfiguration(owner,cfg,true);
+    else if(command==ID_GALLERY_REFRESH){RequestGalleryRefresh(true);WakePollThread();}
+    else if(command==ID_GALLERY_CADENCE||command==ID_GALLERY_SEED){auto value=command==ID_GALLERY_CADENCE?std::to_wstring(cfg.refreshSeconds):std::to_wstring(cfg.seed);if(ShowTextInputDialog(owner,L"Gallery settings",command==ID_GALLERY_CADENCE?L"Seconds between queue replacements (60-86400). Windows chooses animation timing.":L"Shuffle seed (nonnegative integer)",value,true)==IDOK)SaveGalleryMenuSettings(owner,{{L"Gallery",command==ID_GALLERY_CADENCE?L"RefreshSeconds":L"Seed",value}});}
+    else if(command>=ID_GALLERY_QUEUE&&command<ID_GALLERY_QUEUE+aip::gallery::MaxQueue)SaveGalleryMenuSettings(owner,{{L"Gallery",L"QueueSize",std::to_wstring(command-ID_GALLERY_QUEUE+1)}});
+    else if(command==ID_GALLERY_ORDER||command==ID_GALLERY_ORDER+1)SaveGalleryMenuSettings(owner,{{L"Gallery",L"Order",command==ID_GALLERY_ORDER?L"Shuffle":L"Sequential"}});
+    else if(command==ID_GALLERY_FIT||command==ID_GALLERY_FIT+1)SaveGalleryMenuSettings(owner,{{L"Gallery",L"Fit",command==ID_GALLERY_FIT?L"Fill":L"Fit"}});
+    else if(groupCommand) {
+        const auto groups=GalleryGroups(cfg);const auto index=(command-ID_GALLERY_GROUP)/4,action=(command-ID_GALLERY_GROUP)%4;if(index>=groups.size())return true;const auto group=groups[index];
+        if(action==0)PinGalleryGroup(owner,cfg,group.indices);
+        else if(action==3)OpenGalleryFolder(group.folder);
+        else if(action==2){auto folder=group.folder;if(PickGalleryFolder(owner,folder)){for(const auto i:group.indices)cfg.tiles[i].folder=folder;SaveGalleryConfiguration(owner,cfg,false);}}
+        else {auto value=std::to_wstring(group.indices.size());if(ShowTextInputDialog(owner,L"Gallery size",L"Number of tiles for this folder (1-1024 total)",value,true)!=IDOK)return true;std::uint64_t count=0;if(!aip::gallery::detail::UInt(aip::gallery::detail::Trim(value),aip::gallery::MaxTiles,count)||!count||cfg.tiles.size()-group.indices.size()+count>aip::gallery::MaxTiles){DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,L"Enter a valid count within the 1024-tile total limit.",L"Photo gallery",MB_OK|MB_ICONWARNING);return true;}if(count>group.indices.size())AppendGalleryRows(cfg,group.folder,group.name,static_cast<std::size_t>(count)-group.indices.size());else if(count<group.indices.size()){std::set<std::size_t> removed(group.indices.begin()+static_cast<std::size_t>(count),group.indices.end());std::vector<aip::gallery::TileConfiguration> kept;for(std::size_t i=0;i<cfg.tiles.size();++i)if(!removed.count(i))kept.push_back(cfg.tiles[i]);cfg.tiles=std::move(kept);}if(SaveGalleryConfiguration(owner,cfg,true)){const auto updated=GalleryGroups(cfg);for(const auto& g:updated)if(IEquals(g.folder,group.folder)&&g.name==group.name){PinGalleryGroup(owner,cfg,g.indices);break;}}}
+    } else if(tileCommand) {
+        const auto index=(command-ID_GALLERY_TILE)/GALLERY_TILE_COMMAND_STRIDE,action=(command-ID_GALLERY_TILE)%GALLERY_TILE_COMMAND_STRIDE;if(index>=cfg.tiles.size())return true;const auto& tile=cfg.tiles[index];const auto section=L"Gallery.Tile."+std::to_wstring(index+1),id=aip::gallery::NativeTileId(cfg.groupId,tile.id);
+        if(action>=10&&action<=18){const auto a=action-10;if(a<2)SaveGalleryMenuSettings(owner,{{section,L"Background",a?L"Color":L"Transparent"}});else if(a<7)SaveGalleryMenuSettings(owner,{{section,L"Branding",aip::content::TileBrandingChoices[a-2]}});else if(a==7){auto color=tile.appearance.backgroundColor;if(ShowTextInputDialog(owner,L"Gallery background",L"Color as #RRGGBB, or Auto",color,true)==IDOK)SaveGalleryMenuSettings(owner,{{section,L"Background",L"Color"},{section,L"BackgroundColor",color}});}else SaveGalleryMenuSettings(owner,{{section,L"BackgroundColor",L"Auto"}});}
+        else if(action==1){auto name=tile.name;if(ShowTextInputDialog(owner,L"Gallery tile",L"Tile name",name,true)==IDOK)SaveGalleryMenuSettings(owner,{{section,L"Name",name}});}
+        else if(action==2)RequestPinSecondaryTile(owner,id,tile.name);else if(action==3)RequestUnpinSecondaryTile(owner,id);
     }
     return true;
 }

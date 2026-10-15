@@ -453,8 +453,8 @@ INT_PTR ShowTextInputDialog(
     bool allowEmpty,
     bool password = false)
 {
-    std::wstring dialogTitle = title.empty() ? g_ui.renameDialogTitle : title;
-    std::wstring dialogPrompt = prompt.empty() ? dialogTitle : prompt;
+    std::wstring dialogTitle = UiLiteralText(title.empty() ? g_ui.renameDialogTitle : title,true);
+    std::wstring dialogPrompt = UiLiteralText(prompt.empty() ? dialogTitle : prompt,true);
     size_t stringBytes =
         (dialogTitle.size() + dialogPrompt.size() + g_ui.okText.size() + g_ui.cancelText.size() + 64) * sizeof(wchar_t);
     std::vector<BYTE> tmpl(4096 + stringBytes);

@@ -46,7 +46,7 @@ static void TestContentPresetsAndImportConfirmation()
     InspectTrayMenu(timing, commands);
     for (UINT choice = 0; choice < _countof(aip::content::CycleDrivers); ++choice)
         Check(commands.count(ID_CONTENT_CYCLE_DRIVER + choice) == 1, "timing menu exposes each cycle driver exactly once");
-    Check(commands.count(ID_CONTENT_OPTIONS + 3) && commands[ID_CONTENT_OPTIONS + 3].path.find(L"App / fallback") != std::wstring::npos,
+    Check(commands.count(ID_CONTENT_OPTIONS + 3) && commands[ID_CONTENT_OPTIONS + 3].path.find(L"DesktopStub cycle interval") != std::wstring::npos,
         "cycle interval label distinguishes the app timer from Windows-managed timing");
     DestroyMenu(timing);
     Check(WriteContentFixture(base), "replacement callback fixture restores the saved layout");

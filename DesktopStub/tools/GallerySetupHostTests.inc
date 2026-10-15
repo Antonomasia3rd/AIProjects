@@ -174,8 +174,22 @@ static void TestGallerySetupHost()
     g_commandLine = {}; HMENU menu = CreatePopupMenu();
     AppendGalleryTilesMenu(menu);
     std::map<UINT, TrayMenuProbe> commands; InspectTrayMenu(menu, commands);
-    Check(commands.count(ID_GALLERY_FOLDER) && commands.count(ID_GALLERY_SEED) && commands.count(ID_GALLERY_CADENCE) &&
+    Check(commands.count(ID_GALLERY_GROUP + 2) && commands.count(ID_GALLERY_SEED) && commands.count(ID_GALLERY_CADENCE) &&
         commands.count(ID_GALLERY_TILE + 12), "gallery tray contains folder, shuffle seed, cadence and shared per-tile branding controls");
+    Check(commands.count(ID_GALLERY_PIN_ALL) && commands.count(ID_GALLERY_GROUP + 1) && !commands.count(ID_GALLERY_ENABLED),
+        "gallery menu exposes batch pinning and editable counts without an update enable switch");
+    {
+        aip::gallery::Configuration large;large.enabled=true;large.groupId=L"scale";large.folder=L"C:\\synthetic\\first";
+        Check(AppendGalleryRows(large,large.folder,L"First",28) && large.tiles.size()==28,
+            "gallery UI stages twenty-eight stable numbered rows without an eight-item limit");
+        const auto firstId=large.tiles.front().id;
+        Check(AppendGalleryRows(large,L"C:\\synthetic\\second",L"Second",4) && GalleryGroups(large).size()==2 && large.tiles.front().id==firstId,
+            "another gallery folder appends separate grouped rows while preserving existing tile identities");
+        std::vector<aip::IniSetting> fields;
+        Check(PrepareGalleryConfigurationSettings(large,fields,issue) &&
+            std::any_of(fields.begin(),fields.end(),[](const auto& value){return value.key==L"Folder"&&value.value==L"C:\\synthetic\\second";}),
+            "multiple gallery folders survive the shared typed configuration batch");
+    }
     Check((commands.at(ID_GALLERY_TILE + 2).state & (MFS_DISABLED | MFS_GRAYED)) != 0,
         "default inert menus cannot request native pinning even with valid gallery configuration");
     DestroyMenu(menu);

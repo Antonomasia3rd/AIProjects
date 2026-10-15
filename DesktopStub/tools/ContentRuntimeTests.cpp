@@ -18,6 +18,12 @@ static void GalleryTestAck(const aip::content::Snapshot&);
 static void GalleryTestFail(const aip::content::Snapshot&);
 static bool GallerySetupTestOpenFolder(const std::wstring&);
 static bool GallerySetupTestDirectoryExists(const std::wstring&);
+static bool galleryUiClearSucceeds=false;
+static std::vector<std::wstring> galleryUiClearedIds;
+static bool GalleryUiTestClear(const std::vector<std::wstring>& ids,std::wstring& error) {
+    galleryUiClearedIds=ids;if(!galleryUiClearSucceeds){error=L"Synthetic clear failure";return false;}error.clear();return true;
+}
+#define DESKTOPSTUB_TEST_GALLERY_CLEAR_QUEUES GalleryUiTestClear
 #define DESKTOPSTUB_TEST_GALLERY_FRAMES GalleryTestFrames
 #define DESKTOPSTUB_TEST_GALLERY_VALIDATE GalleryTestValidate
 #define DESKTOPSTUB_TEST_GALLERY_ACK GalleryTestAck
@@ -144,6 +150,9 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "GalleryHostTests.inc"
 #include "GalleryLedgerHostTests.inc"
 #include "GallerySetupHostTests.inc"
+#include "GalleryPinBatchHostTests.inc"
+#include "TileStatusHostTests.inc"
+#include "GalleryUiFlowHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
@@ -1181,6 +1190,23 @@ int wmain()
     PopulateDesktopStubTrayMenu(flatMenu, false, false);
     TrayMenuCommands flatCommands; InspectTrayMenu(flatMenu, flatCommands);
     Check(flatCommands.size() == groupedCommands.size(), "flat and grouped menus expose the same command count");
+    for(int i=0;i<GetMenuItemCount(menu);++i) {
+        const auto category=GetSubMenu(menu,i);if(!category)continue;
+        for(int row=0;row<GetMenuItemCount(category);++row) {
+            MENUITEMINFOW item{sizeof(item)};item.fMask=MIIM_FTYPE;
+            Check(GetMenuItemInfoW(category,row,TRUE,&item)&&!(item.fType&MFT_SEPARATOR),
+                "first-level categories contain settings/submenus without unlabeled separators");
+        }
+    }
+    for(int i=0;i<GetMenuItemCount(flatMenu);++i) {
+        MENUITEMINFOW item{sizeof(item)};item.fMask=MIIM_FTYPE;
+        if(!GetMenuItemInfoW(flatMenu,i,TRUE,&item)||!(item.fType&MFT_SEPARATOR))continue;
+        wchar_t title[512]{};MENUITEMINFOW next{sizeof(next)};
+        next.fMask=MIIM_ID|MIIM_STATE|MIIM_STRING;next.dwTypeData=title;next.cch=511;
+        const bool read=GetMenuItemInfoW(flatMenu,i+1,TRUE,&next)!=FALSE;const std::wstring label=title;
+        Check(read&&(next.wID==ID_EXIT||(!label.empty()&&label.back()==L':'&&(next.fState&MFS_DISABLED))),
+            "flat separators introduce a disabled category heading or the final exit action");
+    }
     for (const auto& command : groupedCommands) {
         const auto found = flatCommands.find(command.first);
         if (command.first == ID_SHOW_MENU_DROPDOWN) {
@@ -1192,6 +1218,22 @@ int wmain()
             "flat and grouped menus preserve command IDs, checks and disabled states");
     }
     DestroyMenu(flatMenu);
+    {
+        std::wstring before;Check(ReadIniFileForMutation(before),"wording fixture captures the private profile");
+        Check(!UiIsLabelControl(L"EDIT",WS_CHILD|WS_VISIBLE|WS_BORDER)&&!UiIsLabelControl(WINDOW_CLASS_NAME,WS_OVERLAPPEDWINDOW)&&
+            UiIsLabelControl(L"STATIC",WS_CHILD|WS_VISIBLE)&&UiIsLabelControl(L"DialogWindow",WS_OVERLAPPEDWINDOW),
+            "wording translation excludes editable values and hidden resident identity while recognizing labels and caption windows");
+        auto changed=before;
+        Check(WriteContentProfileSetting(changed,{L"Strings",L"Menu19002",L"My Desktop cycle switch"})&&WriteContentFixture(changed),
+            "menu wording accepts the same Strings key stored by INI/CLI/tray editing");
+        Check(WriteContentProfileSetting(changed,{L"Strings",UiLiteralKey(L"Original dialog wording"),L"Custom dialog wording"})&&WriteContentFixture(changed)&&
+            UiLiteralText(L"Original dialog wording")==L"Custom dialog wording"&&UiLiteralText(L"Unchanged dialog wording")==L"Unchanged dialog wording",
+            "dialog wording uses exact stable Strings overrides without changing unmatched text or configuration data");
+        HMENU custom=CreatePopupMenu();PopulateDesktopStubTrayMenu(custom,true,false);TrayMenuCommands words;InspectTrayMenu(custom,words);
+        Check(words.count(ID_CONTENT_OPTIONS+2)&&words[ID_CONTENT_OPTIONS+2].path.find(L"My Desktop cycle switch")!=std::wstring::npos,
+            "menu wording override changes visible text while preserving its command ID");
+        DestroyMenu(custom);Check(WriteContentFixture(before),"wording fixture restores the original private profile");
+    }
     const DWORD menuResourcesBefore = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
     for (int iteration = 0; iteration < 12; ++iteration) {
         HMENU repeated = CreatePopupMenu();
@@ -1352,6 +1394,9 @@ int wmain()
     TestGalleryHost(bitmapPath);
     TestGalleryLedgerHost(directory);
     TestGallerySetupHost();
+    TestGalleryPinBatchHost();
+    TestTileStatusHost();
+    TestGalleryUiFlowHost();
     TestContentPresetsAndImportConfirmation();
     fixtureGroup("Discord advanced profile");
     TestDiscordAdvancedHost();

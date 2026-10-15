@@ -28,15 +28,21 @@ for each game. Clearing local browser data keeps imported Notes credentials and
 does not call HoYoLAB Logout. See [current tile setup](../docs/multiple-tiles-2026-10-14.md)
 and [sign-in details](../docs/notes-signin-ux-2026-10-15.md).
 
-**Tiles > Photo gallery > Set up gallery...** creates a named set of 1–8 photo
+**Tiles > Photo galleries > Set up gallery...** creates a named set of 1–1,024 photo
 tiles from one folder. Each tile owns a separate image pool, so its photos are
-not assigned to another gallery tile. Pin the tiles individually after setup.
+not assigned to another gallery tile. Setup queues the individual Windows pin
+confirmations automatically; **Pin all...** is also available afterward.
 Windows rotates up to five queued photos per tile; DesktopStub replaces the
 queues at the configured interval, rather than rendering each animation.
 Fit keeps the whole photo with transparent letterboxing; Fill crops its edges.
 Keep the INI and its `.gallery-ledger` together so image ownership survives a
 restart or folder change. See the [gallery setup and limits](../docs/gallery-setup-2026-10-15.md)
 and [current review status](../docs/CURRENT_STATUS.md).
+Use **Add another gallery folder...** for another album, and each gallery's
+**Number of tiles...** to expand it. Setup and **Pin all...** queue native
+confirmations sequentially. Pinned tiles update automatically; Start controls
+whether Live Tile content is displayed. See the
+[current gallery/menu/game changes](../docs/tile-feedback-followup-2026-10-15.md).
 
 ## Requirements
 

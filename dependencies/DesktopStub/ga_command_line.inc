@@ -2113,7 +2113,7 @@ static std::wstring CommandLineUsageText()
         L"Discord advanced profile: --discord-set Section.Key=Value; --discord-create-profile INI (configuration only).\n"
         L"  Credential replacements require masked tray input or explicit --discord-private-input; values are never echoed.\n"
         L"ASUS numbered fields: --set AsusBlink.Event001HddState=128,129 (hardware and disk flags stay explicit).\n"
-        L"Gallery: --set Gallery.Enabled=1; Gallery.Folder, TileCount (1-8), QueueSize (1-5), RefreshSeconds (60-86400), Order, Fit, Seed.\n"
+        L"Gallery: Gallery.Folder, TileCount (1-1024), QueueSize (1-5), RefreshSeconds (60-86400), Order, Fit, Seed; Gallery.Tile.N.Folder/GalleryName select separate folders. Pinned tiles update automatically.\n"
         L"  Use Tiles > Photo gallery > Set up gallery first to create permanent per-tile ownership history; pin each tile manually.\n"
         L"  --open-folder DIRECTORY opens an existing directory; relative paths are beside the selected INI.\n";
 }

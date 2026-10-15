@@ -54,11 +54,11 @@ static const ContentTrayOption g_discordOptions[] = {
 static const ContentTrayOption g_contentOptions[] = {
     {L"Enabled", L"Use tile contents", L"0", true},
     {L"Count", L"Content slots (1-32)", L"1", false},
-    {L"CycleEnabled", L"Rotate through enabled contents", L"0", true},
-    {L"CycleSeconds", L"App / fallback cycle interval (seconds)", L"10", false},
+    {L"CycleEnabled", L"Cycle contents on the Desktop tile", L"0", true},
+    {L"CycleSeconds", L"DesktopStub cycle interval (seconds)", L"10", false},
     {L"RefreshSeconds", L"Check for source updates every (seconds)", L"2", false},
     {L"TextMode", L"Text delivery", L"Auto", false},
-    {L"CycleDriver", L"Who rotates contents", L"DesktopStub", false},
+    {L"CycleDriver", L"Desktop tile cycle method", L"DesktopStub", false},
 };
 static const ContentTrayOption g_contentEntryOptions[] = {
     {L"Enabled", L"Use this content", L"1", true},
@@ -132,9 +132,8 @@ static void AppendContentEngineMenu(HMENU menu, ContentMenuPart part = ContentMe
             for (UINT choice = 0; choice < _countof(aip::content::CycleDrivers); ++choice)
                 aip::AppendTrayMenuItem(choices, ID_CONTENT_CYCLE_DRIVER + choice,
                     aip::content::CycleDrivers[choice].label, IEquals(value, aip::content::CycleDrivers[choice].value), true);
-            aip::AppendMenuSeparator(choices);
             aip::AppendTrayMenuItem(choices, 0, L"Windows chooses queue display order and timing", false, false);
-            AppendContentSubmenu(menu, choices, L"Who rotates contents");
+            AppendContentSubmenu(menu, choices, IniReadS(L"Strings",L"ContentCycleMethodTitle",L"Desktop tile cycle method"));
         } else if (IEquals(g_contentOptions[i].key, L"TextMode")) {
             HMENU choices = CreatePopupMenu();
             if (!choices) continue;

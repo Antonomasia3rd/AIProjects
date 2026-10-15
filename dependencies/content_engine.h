@@ -114,7 +114,7 @@ struct NotesConfiguration {
     int refreshSeconds = 300, timeoutSeconds = 15, maximumBytes = 1048576;
     std::array<NotesAccount, 3> accounts;
 };
-struct Text { std::wstring primary, secondary, badge; };
+struct Text { std::wstring primary, secondary, badge, iconTopic; };
 struct Entry {
     bool enabled = true;
     std::wstring name, background = L"Wallpaper", imagePath;

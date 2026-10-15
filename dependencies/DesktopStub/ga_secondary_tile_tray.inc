@@ -1,6 +1,7 @@
 // Secondary tile management shares one INI and the resident content engine.
 // Construction reads configuration/status only; pin and setup require a click.
 #include "../secondary_tiles.h"
+#include "ga_tile_status.inc"
 static bool OpenEmbeddedNotesSignIn(HWND owner, int resource);
 
 static constexpr UINT ID_SECONDARY_TILES_ENABLED = 28000;
@@ -167,9 +168,7 @@ static bool SecondaryTilePinUiAvailable()
 static void AppendSecondaryTilesMenu(HMENU menu)
 {
     const bool canPin = SecondaryTilePinUiAvailable();
-    bool master = false; aip::content::ParseBool(IniReadS(L"Tiles", L"Enabled", L"0"), master);
-    aip::AppendTrayMenuItem(menu, ID_SECONDARY_TILES_ENABLED, L"Update source tiles from this app", master, true);
-    aip::AppendTrayMenuItem(menu, ID_SECONDARY_TILES_INITIALIZE, L"Set up and enable the six source tiles...", false, true);
+    aip::AppendTrayMenuItem(menu, ID_SECONDARY_TILES_INITIALIZE, SecondaryTileUiString(L"SourceTilesSetup", L"Set up source contents..."), false, true);
     aip::AppendTrayMenuItem(menu, ID_SECONDARY_TILES_STATUS, L"Tile status...", false, true);
     if (!canPin) aip::AppendTrayMenuItem(menu, 0, L"Pinning requires the registered app; setup remains available", false, false);
     aip::AppendMenuSeparator(menu);
@@ -177,14 +176,12 @@ static void AppendSecondaryTilesMenu(HMENU menu)
     for (UINT index = 0; index < aip::content::SecondaryTileCount; ++index) {
         const auto& descriptor = aip::content::SecondaryTiles[index];
         const auto section = aip::content::SecondaryTileSection(descriptor.id);
-        bool enabled = true; aip::content::ParseBool(IniReadS(section.c_str(), L"Enabled", L"1"), enabled);
         const auto name = IniReadS(section.c_str(), L"Name", descriptor.name);
         const bool pinned = canPin && SecondaryTileExists(SecondaryTileApiId(descriptor.id));
         const UINT base = ID_SECONDARY_TILE_COMMANDS + index * SECONDARY_TILE_COMMAND_STRIDE;
         HMENU child = aip::BeginTrayNestedMenu(menu);
         aip::AppendTrayMenuItem(child, 0, canPin ? (pinned ? L"Pinned to Start" : L"Not pinned to Start") : L"Pin status unavailable without app registration", false, false);
-        aip::AppendTrayMenuItem(child, base, L"Update this tile", enabled, true);
-        aip::AppendTrayMenuItem(child, base + 1, L"Pin/update tile...", false, canPin);
+        aip::AppendTrayMenuItem(child, base + 1, SecondaryTileUiString(L"PinTile", L"Pin tile..."), false, canPin);
         aip::AppendTrayMenuItem(child, base + 2, L"Unpin from Start...", false, canPin && pinned);
         aip::AppendTrayMenuItem(child, base + 3, L"Status...", false, true);
         aip::AppendTrayMenuItem(child, base + 4, L"Source and sign-in settings...", false, true);
@@ -270,24 +267,13 @@ static bool OpenSecondaryTileSetup(HWND owner, const std::wstring& key)
 static bool DispatchSecondaryTilesCommand(HWND owner, UINT command)
 {
     if (command == ID_SECONDARY_TILES_INITIALIZE) {
-        if (DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, L"Enable the six source tiles and keep the primary tile on Content 1? Missing content fields are added; existing layout fields and saved login details are kept. Source updates are enabled and cycling is turned off.", L"Source tiles", MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) == IDYES)
-            SaveSecondaryTileMenuSettings(owner, {}, true, true);
+        if (DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, SecondaryTileUiString(L"SourceTilesSetupPrompt", L"Prepare the six source contents? Missing fields are added; existing layout fields and login details are kept. Pin a tile to update it; Windows Start controls whether its Live Tile is shown.").c_str(), L"Source tiles", MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) == IDYES)
+            SaveSecondaryTileMenuSettings(owner, {}, true, false);
         return true;
     }
-    if (command == ID_SECONDARY_TILES_ENABLED) {
-        bool enabled = false; aip::content::ParseBool(IniReadS(L"Tiles", L"Enabled", L"0"), enabled);
-        SaveSecondaryTileMenuSettings(owner, {{L"Tiles", L"Enabled", enabled ? L"0" : L"1"}}, !enabled, !enabled); return true;
-    }
+    if (command == ID_SECONDARY_TILES_ENABLED) return true; // Retired UI command; pin membership determines updates.
     if (command == ID_SECONDARY_TILES_STATUS) {
-        std::wstring status = L"One resident process updates the primary tile and six named source tiles. Pinning still requires Windows confirmation. Missing source sign-in or a feed URL can be configured from each tile's Source and sign-in settings.\r\n";
-        const bool available = SecondaryTilePinUiAvailable();
-        const auto snapshots = CurrentSecondarySnapshots();
-        for (const auto& tile : aip::content::SecondaryTiles) {
-            status += std::wstring(tile.name) + L": " + (available ? (SecondaryTileExists(SecondaryTileApiId(tile.id)) ? L"pinned" : L"not pinned") : L"pin status unavailable") + L"\r\n";
-            const auto frame = std::find_if(snapshots.begin(), snapshots.end(), [&](const auto& snapshot) { return snapshot.secondaryTileId == SecondaryTileApiId(tile.id); });
-            status += frame == snapshots.end() ? L"No prepared source snapshot; enable updates and complete source setup.\r\n" :
-                frame->text.primary + L"\r\n" + frame->text.secondary + L"\r\n";
-        }
+        const auto status = BuildTileStatusText(CurrentSecondarySnapshots());
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, status.c_str(), L"Tiles", MB_OK | MB_ICONINFORMATION); return true;
     }
     if (command < ID_SECONDARY_TILE_COMMANDS || command >= ID_SECONDARY_TILE_COMMANDS + aip::content::SecondaryTileCount * SECONDARY_TILE_COMMAND_STRIDE) return false;
@@ -296,19 +282,9 @@ static bool DispatchSecondaryTilesCommand(HWND owner, UINT command)
     const auto& descriptor = aip::content::SecondaryTiles[index];
     const auto section = aip::content::SecondaryTileSection(descriptor.id);
     if (DispatchTileAppearanceCommand(owner, command, ID_SECONDARY_TILE_COMMANDS + index * SECONDARY_TILE_COMMAND_STRIDE + 6, section)) return true;
-    if (action == 0) {
-        bool enabled = true; aip::content::ParseBool(IniReadS(section.c_str(), L"Enabled", L"1"), enabled);
-        SaveSecondaryTileMenuSettings(owner, {{section, L"Enabled", enabled ? L"0" : L"1"}}, !enabled); return true;
-    }
+    if (action == 0) return true; // Retired checkbox command.
     if (action == 1) {
-        bool mode = false, cycling = false, enabled = true;
-        aip::content::ParseBool(IniReadS(L"Tiles", L"Enabled", L"0"), mode);
-        aip::content::ParseBool(IniReadS(L"Content", L"CycleEnabled", L"0"), cycling);
-        aip::content::ParseBool(IniReadS(section.c_str(), L"Enabled", L"1"), enabled);
-        if ((!mode || cycling || !enabled) && DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,
-            L"Pin/update enables source tile updates and keeps the primary tile on Content 1. Cycling is turned off; existing layout fields and login details are kept. Continue?",
-            L"Source tile mode", MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) != IDYES) return true;
-        if (SaveSecondaryTileMenuSettings(owner, {{section, L"Enabled", L"1"}}, true, true))
+        if (SaveSecondaryTileMenuSettings(owner, {}, true, false))
             RequestPinSecondaryTile(owner, SecondaryTileApiId(descriptor.id), IniReadS(section.c_str(), L"Name", descriptor.name));
         return true;
     }

@@ -5,8 +5,59 @@
 #include "content_engine.h"
 #include "tile_actions.h"
 #include <set>
+#include <deque>
 
 namespace aip { namespace content {
+// A batch has at most one native confirmation in flight. A declined/error
+// completion retires that item; it does not cancel the remaining user request.
+class SecondaryPinBatch {
+    std::deque<std::pair<std::wstring, std::wstring>> waiting_;
+    std::wstring active_;
+public:
+    void Enqueue(const std::vector<std::pair<std::wstring, std::wstring>>& requests) {
+        for (const auto& item : requests) {
+            if (item.first.empty() || item.first == active_ || std::any_of(waiting_.begin(), waiting_.end(), [&](const auto& queued) { return queued.first == item.first; })) continue;
+            waiting_.push_back(item);
+        }
+    }
+    template<class Begin> void Advance(Begin begin) {
+        if (!active_.empty()) return;
+        while (!waiting_.empty()) {
+            auto next = std::move(waiting_.front()); waiting_.pop_front(); active_ = next.first;
+            if (begin(next)) return;
+            active_.clear(); // A preparation failure also advances to the next item.
+        }
+    }
+    void Complete(const std::wstring& id) { if (active_ == id) active_.clear(); }
+    void Clear() { waiting_.clear(); active_.clear(); }
+    bool Busy() const { return !active_.empty() || !waiting_.empty(); }
+    std::size_t Waiting() const { return waiting_.size(); }
+};
+class SecondaryPinInventory {
+    mutable std::mutex mutex_;
+    std::set<std::wstring> ids_;
+    bool known_ = false, requested_ = false;
+    std::uint64_t retryAfter_ = 0;
+public:
+    void Reset() { std::lock_guard<std::mutex> lock(mutex_); ids_.clear(); known_ = false; requested_ = false; retryAfter_ = 0; }
+    bool Known() const { std::lock_guard<std::mutex> lock(mutex_); return known_; }
+    bool Contains(const std::wstring& id) const { std::lock_guard<std::mutex> lock(mutex_); return ids_.count(id) != 0; }
+    std::set<std::wstring> Snapshot() const { std::lock_guard<std::mutex> lock(mutex_); return ids_; }
+    bool RequestDue(std::uint64_t now) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (requested_ || now < retryAfter_) return false;
+        requested_ = true; return true;
+    }
+    void Complete(bool success, const std::set<std::wstring>& ids, std::uint64_t now) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (success) { ids_ = ids; known_ = true; }
+        requested_ = false; retryAfter_ = now + 30000;
+    }
+    void Mutation(const std::wstring& id, bool pinned) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (pinned) ids_.insert(id); else ids_.erase(id);
+    }
+};
 struct SecondaryTileDescriptor {
     const wchar_t* id;
     const wchar_t* name;
@@ -148,5 +199,27 @@ inline std::set<std::size_t> SecondaryTileContentIndices(const SecondaryTileConf
         if (index < content.entries.size() && content.entries[index].enabled) result.insert(index);
     }
     return result;
+}
+inline void ApplyPinnedSecondaryTiles(Configuration& content, SecondaryTileConfiguration& tiles,
+        const std::set<std::wstring>& pinned) {
+    bool sourcePinned = false, galleryPinned = false;
+    const auto previousSize = content.entries.size(); std::set<std::size_t> initialized;
+    for (const auto& id : pinned) if (id.compare(0, 11, L"AipGallery_") == 0) galleryPinned = true;
+    for (auto& tile : tiles.tiles) {
+        tile.enabled = pinned.count(L"AipSource_" + tile.id) != 0;
+        if (!tile.enabled || tile.content < 1 || tile.content > MaxEntries) continue;
+        sourcePinned = true;
+        const auto index = static_cast<std::size_t>(tile.content - 1);
+        if (content.entries.size() <= index) content.entries.resize(index + 1);
+        auto& entry = content.entries[index];
+        if (index >= previousSize && initialized.insert(index).second) {
+            const auto* descriptor = FindSecondaryTileDescriptor(tile.id);
+            entry.name = tile.name; entry.background = descriptor->background;
+            entry.sources = {descriptor->source}; entry.notesResource = descriptor->notesResource;
+        }
+        entry.enabled = true; // Saved enable flags do not pause a pinned source.
+    }
+    tiles.enabled = tiles.enabled || sourcePinned || galleryPinned; // Preserve the saved primary layout while removing its secondary-update gate.
+    if (tiles.enabled) content.enabled = true;
 }
 } }

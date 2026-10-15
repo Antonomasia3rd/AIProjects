@@ -127,7 +127,7 @@ inline InventoryResult ScanGalleryInventoryInjected(std::vector<InventoryEntry> 
     // Dropping absent cache entries never deletes an immutable thumbnail.
     for (auto item = result.index.files.begin(); item != result.index.files.end();)
         if (!present.count(item->first)) item = result.index.files.erase(item); else ++item;
-    if (!listingComplete) diagnostic(L"The flat gallery listing reached its file limit or could not be completed.");
+    if (!listingComplete) diagnostic(L"The gallery listing reached a file, entry, or depth limit, or could not be completed.");
     std::uint64_t listingHash = 14695981039346656037ull;
     for (const auto& entry : entries) { inventory_detail::Mix(listingHash, entry.path); listingHash ^= entry.size; listingHash *= 1099511628211ull; listingHash ^= entry.modified; }
     const auto listingKey = inventory_detail::Hex(listingHash);
@@ -489,28 +489,39 @@ inline InventoryResult ScanGalleryInventory(const std::wstring& folder, const st
     }
     const auto started = GetTickCount64(), deadline = started + options.maxScanMilliseconds;
     std::vector<InventoryEntry> entries; bool complete = true;
-    WIN32_FIND_DATAW data{};
-    const auto pattern = source + (source.back() == L'\\' || source.back() == L'/' ? L"" : L"\\") + L"*";
-    inventory_native::FindHandle find;
-    find.value = FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr, 0);
-    if (find.value == INVALID_HANDLE_VALUE) {
-        InventoryResult result; result.index = previous;
-        if (GetLastError() == ERROR_FILE_NOT_FOUND) { result.complete = true; result.index.files.clear(); }
-        else result.diagnostics.push_back(L"The flat gallery directory could not be enumerated.");
-        return result;
-    }
+    // Windows' Web folder and ordinary albums commonly contain subfolders.
+    // One bounded breadth-first listing follows real directories only; links
+    // and junctions are excluded, and depth/entry limits still bound races.
+    constexpr unsigned maximumDepth = 32;
+    std::vector<std::pair<std::wstring, unsigned>> directories{{source, 0}};
     std::size_t directoryEntries = 0;
-    do {
-        if (cancel && cancel()) { complete = false; break; }
-        if (++directoryEntries > options.maxFiles * 4 || GetTickCount64() >= deadline) { complete = false; break; }
-        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !inventory_native::Extension(data.cFileName)) continue;
-        if (entries.size() >= options.maxFiles) { complete = false; break; }
-        entries.push_back({source + (source.back() == L'\\' || source.back() == L'/' ? L"" : L"\\") + data.cFileName,
-            (static_cast<std::uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow, inventory_native::Time(data.ftLastWriteTime)});
-    } while (FindNextFileW(find.value, &data));
-    const auto enumerationError = GetLastError();
-    find.Close();
-    if (complete && enumerationError != ERROR_NO_MORE_FILES) complete = false;
+    bool exhausted = false;
+    for (std::size_t directoryIndex = 0; directoryIndex < directories.size() && !exhausted; ++directoryIndex) {
+        if ((cancel && cancel()) || GetTickCount64() >= deadline) { complete = false; break; }
+        const auto directory = directories[directoryIndex];
+        const auto prefix = directory.first + (directory.first.back() == L'\\' || directory.first.back() == L'/' ? L"" : L"\\");
+        WIN32_FIND_DATAW data{}; inventory_native::FindHandle find;
+        find.value = FindFirstFileExW((prefix + L"*").c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr, 0);
+        if (find.value == INVALID_HANDLE_VALUE) { if (GetLastError() != ERROR_FILE_NOT_FOUND) complete = false; continue; }
+        do {
+            if ((cancel && cancel()) || ++directoryEntries > options.maxFiles * 4 || GetTickCount64() >= deadline) {
+                complete = false; exhausted = true; break;
+            }
+            if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
+            const auto path = prefix + data.cFileName;
+            if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                if ((data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || _wcsicmp(path.c_str(), canonicalCache.c_str()) == 0) continue;
+                if (directory.second >= maximumDepth) { complete = false; continue; }
+                directories.emplace_back(path, directory.second + 1); continue;
+            }
+            if (!inventory_native::Extension(data.cFileName)) continue;
+            if (entries.size() >= options.maxFiles) { complete = false; exhausted = true; break; }
+            entries.push_back({path, (static_cast<std::uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow,
+                inventory_native::Time(data.ftLastWriteTime)});
+        } while (FindNextFileW(find.value, &data));
+        const auto enumerationError = GetLastError();
+        if (!exhausted && enumerationError != ERROR_NO_MORE_FILES) complete = false;
+    }
     const auto afterListing = GetTickCount64();
     if (afterListing >= deadline) {
         InventoryResult result; result.index = previous; result.cancelled = cancel && cancel();

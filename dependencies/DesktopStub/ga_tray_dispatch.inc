@@ -1,5 +1,6 @@
 static void DispatchTrayCommand(HWND h, UINT cmd)
 {
+    if (DispatchMenuWordingCommand(h, cmd)) return;
     if (DispatchSmtcDisplaySettingsCommand(h, cmd)) return;
     if (DispatchQuickActionsCommand(h, cmd)) return;
     if (DispatchGalleryTilesCommand(h, cmd)) return;

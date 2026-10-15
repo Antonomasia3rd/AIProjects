@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -12,14 +13,17 @@
 #include "tile_appearance.h"
 
 namespace aip { namespace gallery {
-inline constexpr std::size_t MaxTiles = 8, MaxQueue = 5, MaxImages = 65536, MaxHistoricalTiles = 1024;
+inline constexpr std::size_t MaxTiles = 1024, MaxQueue = 5, MaxImages = 65536, MaxHistoricalTiles = 65536;
 inline constexpr std::size_t MaxIdentityUnits = 256, MaxLedgerBytes = 64u * 1024u * 1024u;
 inline constexpr wchar_t NativeTilePrefix[] = L"AipGallery_";
 inline constexpr std::size_t NativeTileMaxLength = 64;
 inline constexpr std::size_t MaxCombinedTileIdLength = NativeTileMaxLength - (sizeof(NativeTilePrefix) / sizeof(wchar_t) - 1) - 1;
 enum class Order { Sequential, Shuffle };
 enum class Fit { Fill, Fit };
-struct TileConfiguration { std::wstring id, name; bool enabled = true; aip::content::TileAppearance appearance{}; };
+struct TileConfiguration {
+    std::wstring id, name; bool enabled = true; aip::content::TileAppearance appearance{};
+    std::wstring folder, galleryName; // Empty folder inherits the legacy group folder.
+};
 struct Configuration {
     bool enabled = false;
     std::wstring groupId, folder;
@@ -29,6 +33,7 @@ struct Configuration {
     std::uint64_t seed = 1;
     std::vector<TileConfiguration> tiles;
 };
+inline const std::wstring& EffectiveFolder(const Configuration& cfg, const TileConfiguration& tile) { return tile.folder.empty() ? cfg.folder : tile.folder; }
 namespace detail {
 inline std::wstring Trim(const std::wstring& value) {
     const auto first = value.find_first_not_of(L" \t\r\n"), last = value.find_last_not_of(L" \t\r\n");
@@ -162,8 +167,11 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
         const auto fit = detail::Lower(normalized);
         if (fit != L"fill" && fit != L"fit") { error = L"Gallery Fit must be Fill or Fit."; return false; }
         normalized = fit == L"fill" ? L"Fill" : L"Fit";
-    } else if (root && name == L"folder") {
+    } else if (name == L"folder") {
         if (!detail::Text(value, 32768)) { error = L"Gallery Folder is invalid single-line text."; return false; }
+        normalized = value;
+    } else if (tile && name == L"galleryname") {
+        if (!detail::Text(value, 256)) { error = L"Gallery name is invalid single-line text."; return false; }
         normalized = value;
     } else if (tile && name == L"name") {
         if (normalized.empty() || !detail::Text(value, 256)) { error = L"Gallery tile Name must be nonempty single-line text."; return false; }
@@ -190,7 +198,8 @@ inline bool ValidateConfiguration(const Configuration& cfg, std::wstring& error)
         }
         if ((!tile.id.empty() && (!StableTileId(tile.id) || !ids.insert(detail::Lower(tile.id)).second)) ||
             (!cfg.groupId.empty() && !tile.id.empty() && NativeTileId(cfg.groupId, tile.id).empty()) ||
-            (cfg.enabled && tile.id.empty()) || detail::Trim(tile.name).empty() || !detail::Text(tile.name, 256)) {
+            (cfg.enabled && tile.id.empty()) || detail::Trim(tile.name).empty() || !detail::Text(tile.name, 256) ||
+            !detail::Text(tile.folder, 32768) || !detail::Text(tile.galleryName, 256)) {
             error = L"Gallery tiles need unique stable IDs, a combined native ID of at most 64 characters, and nonempty names."; return false;
         }
     }
@@ -214,6 +223,7 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
     for (std::uint64_t i = 1; i <= count; ++i) {
         const auto section = L"Gallery.Tile." + std::to_wstring(i), name = L"Gallery " + std::to_wstring(i);
         TileConfiguration tile; tile.id = get(section, L"Id", L""); tile.name = get(section, L"Name", name.c_str());
+        tile.folder = get(section, L"Folder", L""); tile.galleryName = get(section, L"GalleryName", L"");
         tile.enabled = get(section, L"Enabled", L"1") == L"1"; cfg.tiles.push_back(std::move(tile));
         if (!aip::content::ReadTileAppearance(read, section, cfg.tiles.back().appearance, error)) return false;
     }
@@ -285,30 +295,41 @@ struct PoolSnapshot {
     std::uint64_t nextOrdinal = 0, seed = 0;
     Order order = Order::Shuffle;
     std::map<std::wstring, bool> members;
+    std::map<std::wstring, std::wstring> folders;
     std::vector<TilePool> pools;
 };
 struct OwnershipPlan { std::uint64_t expectedRevision = 0; Ledger ledger; PoolSnapshot pools; bool requiresLedgerCommit = false; };
 inline std::map<std::wstring, bool> Membership(const Configuration& cfg) {
     std::map<std::wstring, bool> result; for (const auto& tile : cfg.tiles) result.emplace(tile.id, tile.enabled); return result;
 }
+inline std::map<std::wstring, std::wstring> FolderMembership(const Configuration& cfg) {
+    std::map<std::wstring, std::wstring> result; for (const auto& tile : cfg.tiles) result.emplace(tile.id, EffectiveFolder(cfg, tile)); return result;
+}
+using EligibilityMap = std::map<std::wstring, std::shared_ptr<const std::set<std::wstring>>>;
 inline bool ReconcileOwnership(const Configuration& cfg, const std::vector<std::wstring>& usableImageIds,
-    const Ledger& previous, OwnershipPlan& result, std::wstring& error) {
+    const Ledger& previous, OwnershipPlan& result, std::wstring& error, const EligibilityMap* eligibility = nullptr) {
     if (!ValidateConfiguration(cfg, error) || !ValidateLedger(previous, error)) return false;
     if (cfg.groupId != previous.groupId || usableImageIds.size() > MaxImages) { error = L"Gallery group/ledger identity differs or the inventory exceeds its limit."; return false; }
     std::set<std::wstring> present;
     for (const auto& id : usableImageIds) { if (!OpaqueImageId(id)) { error = L"Gallery inventory contains an invalid stable image identity."; return false; } present.insert(id); }
+    const auto eligible = [&](const std::wstring& tile, const std::wstring& image) {
+        if (!eligibility) return true;
+        const auto found = eligibility->find(tile); return found != eligibility->end() && found->second && found->second->find(image) != found->second->end();
+    };
     OwnershipPlan candidate; candidate.expectedRevision = previous.revision; candidate.ledger = previous;
     std::map<std::wstring, std::size_t> available;
     if (cfg.enabled) for (const auto& tile : cfg.tiles) if (tile.enabled) available.emplace(tile.id, 0);
     for (const auto& id : present) {
         const auto found = previous.images.find(id);
-        if (found != previous.images.end()) { const auto owner = available.find(found->second.owner); if (owner != available.end()) ++owner->second; }
+        if (found != previous.images.end()) { const auto owner = available.find(found->second.owner); if (owner != available.end() && eligible(owner->first, id)) ++owner->second; }
     }
     for (const auto& id : present) {
         if (candidate.ledger.images.find(id) != candidate.ledger.images.end() || available.empty()) continue;
         if (candidate.ledger.images.size() == MaxImages) { error = L"Gallery reservations are full. Retain the ledger; retirement confirmation is required before resetting it."; return false; }
-        auto chosen = available.begin();
-        for (auto owner = available.begin(); owner != available.end(); ++owner) if (owner->second < chosen->second) chosen = owner;
+        auto chosen = available.end();
+        for (auto owner = available.begin(); owner != available.end(); ++owner)
+            if (eligible(owner->first, id) && (chosen == available.end() || owner->second < chosen->second)) chosen = owner;
+        if (chosen == available.end()) continue;
         candidate.ledger.tiles.emplace(chosen->first, TileLedger{});
         candidate.ledger.images.emplace(id, Reservation{chosen->first, candidate.ledger.nextOrdinal++}); ++chosen->second;
         candidate.requiresLedgerCommit = true;
@@ -320,10 +341,13 @@ inline bool ReconcileOwnership(const Configuration& cfg, const std::vector<std::
     if (!ValidateLedger(candidate.ledger, error)) return false;
     auto& snapshot = candidate.pools; snapshot.groupId = cfg.groupId; snapshot.epochId = previous.epochId;
     snapshot.folder = cfg.folder; snapshot.nextOrdinal = candidate.ledger.nextOrdinal; snapshot.order = cfg.order; snapshot.seed = cfg.seed; snapshot.members = Membership(cfg);
+    snapshot.folders = FolderMembership(cfg);
+    std::map<std::wstring, std::vector<std::pair<std::wstring, std::uint64_t>>> owned;
+    for (const auto& image : candidate.ledger.images) owned[image.second.owner].push_back({image.first, image.second.ordinal});
     for (const auto& tile : cfg.tiles) {
         TilePool pool; pool.tileId = tile.id;
-        for (const auto& image : candidate.ledger.images) if (image.second.owner == tile.id) {
-            ++pool.reservedCount; if (present.find(image.first) != present.end()) pool.images.push_back(image.first);
+        for (const auto& image : owned[tile.id]) {
+            ++pool.reservedCount; if (present.find(image.first) != present.end() && eligible(tile.id, image.first)) pool.images.push_back(image.first);
         }
         std::sort(pool.images.begin(), pool.images.end(), [&](const auto& a, const auto& b) {
             if (cfg.order == Order::Sequential) return candidate.ledger.images.at(a).ordinal < candidate.ledger.images.at(b).ordinal;
@@ -355,7 +379,7 @@ inline bool PrepareQueueBatch(const Configuration& cfg, const PoolSnapshot& pool
     const std::set<std::wstring>& dueTileIds, QueueBatch& result, std::wstring& error) {
     if (!ValidateConfiguration(cfg, error) || !ValidateLedger(previous, error)) return false;
     if (pools.groupId != previous.groupId || cfg.groupId != previous.groupId || pools.epochId != previous.epochId ||
-        pools.nextOrdinal != previous.nextOrdinal || pools.folder != cfg.folder || pools.order != cfg.order || pools.seed != cfg.seed || pools.members != Membership(cfg)) {
+        pools.nextOrdinal != previous.nextOrdinal || pools.folder != cfg.folder || pools.order != cfg.order || pools.seed != cfg.seed || pools.members != Membership(cfg) || pools.folders != FolderMembership(cfg)) {
         error = L"Gallery pools must be rebuilt after an ownership, inventory, membership, or order change."; return false;
     }
     for (const auto& id : dueTileIds) if (pools.members.find(id) == pools.members.end()) { error = L"A due gallery tile is not in this group."; return false; }

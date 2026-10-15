@@ -59,11 +59,12 @@ being assigned to two destinations while notifications may still show it.
 
 ## Bounded decoding and orientation
 
-Defaults are 4096 supported flat-folder entries, at most four times that many
+Defaults are 4096 supported images across bounded recursive subfolders, at most four times that many
 visited directory entries, 64 MiB encoded bytes per file, a 16384-pixel source
 dimension cap, 64 MiPixels decoded, 32 changed-file reads per call and a 2500 ms
-cooperative scan interval. The thumbnail long edge defaults to 620 and can be
-set to 310. Diagnostics are limited to 16 unique generic messages, each at most
+cooperative scan interval. The traversal skips directory reparse points and is
+limited to 32 directory levels. The thumbnail long edge defaults to 620 and can
+be set to 310. Diagnostics are limited to 16 unique generic messages, each at most
 256 characters; no photo names or directory listings are logged. Options have
 explicit upper bounds and invalid options fail before source/cache access.
 

@@ -229,6 +229,8 @@ static std::wstring MediaAppIconUri(const std::wstring& directory, const aip::co
     if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return aip::tile_visual::PackageUri(relative);
     DWORD error = ERROR_SUCCESS;
     if (!EnsureParentDirectoryForFile(path, &error)) return {};
+    ScopedGdiPlus gdi;
+    if (!gdi.ok()) return {};
     Bitmap source(snapshot.smtcAppIconPath.c_str());
     if (source.GetLastStatus() != Ok || !SavePNG(&source, path.c_str())) return {};
     return aip::tile_visual::PackageUri(relative);
@@ -238,6 +240,19 @@ static std::wstring MediaTopicUri(const std::wstring& topic, const std::wstring&
     aip::tile_visual::Assets icons; std::wstring error;
     return aip::tile_visual::EnsureTileTopicAssets(topic, directory, icons, error) ?
         aip::tile_visual::PackageUri(icons.smallTile) : std::wstring{};
+}
+static std::wstring NotesTileIconUri(const std::wstring& topic, const std::wstring& directory)
+{
+    if (!aip::notes::assets::Find(topic)) return {};
+    const auto relative = L"Assets/NotesRows/v1/" + topic + L".png";
+    const auto path = ResolveManifestAssetPath(directory, relative);
+    if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return aip::tile_visual::PackageUri(relative);
+    DWORD error = ERROR_SUCCESS;
+    ScopedGdiPlus gdi;
+    if (!gdi.ok()) return {};
+    auto bitmap = LoadNotesTileIcon(topic);
+    if (!bitmap || !EnsureParentDirectoryForFile(path, &error) || !SavePNG(bitmap.get(), path.c_str())) return {};
+    return aip::tile_visual::PackageUri(relative);
 }
 static const wchar_t* ContentLiveTileBrandingXmlValue()
 {
@@ -317,8 +332,14 @@ static std::wstring BuildLiveTileXml(
         }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && !g_renderContent->detailRows.empty() &&
             g_renderContent->textMode == aip::content::TextMode::Auto) {
+            std::vector<aip::content::MediaIndicatorImage> rowIcons;
+            for (const auto& row : g_renderContent->detailRows) {
+                auto icon = NotesTileIconUri(row.iconTopic, exeDir);
+                if (icon.empty() && !row.iconTopic.empty()) icon = MediaTopicUri(g_renderContent->detailTopic, exeDir);
+                rowIcons.push_back({icon, row.primary});
+            }
             if (aip::content::AppendDetailRowsBinding(xml, templateName, asset.h, g_renderContent->detailRows,
-                ContentHasTransparentBackground() ? L"" : uri, MediaTopicUri(g_renderContent->detailTopic, exeDir))) {
+                ContentHasTransparentBackground() ? L"" : uri, L"", rowIcons)) {
                 hasUsableBinding = true; continue;
             }
         }

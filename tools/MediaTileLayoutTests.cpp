@@ -69,6 +69,23 @@ void TestLayouts() {
             xml.find(L"1. Resource") == std::wstring::npos && xml.find(L"Value &lt;&amp;&gt;") != std::wstring::npos,
             "detail rows are bounded for each size, unnumbered, escaped and have one resource icon");
         xml.clear();
+        std::vector<MediaIndicatorImage> rowIcons;
+        for (std::size_t row = 0; row < rows.size(); ++row) rowIcons.push_back({L"ms-appx:///activity" + std::to_wstring(row) + L".png", L"Activity <&>"});
+        Check(AppendDetailRowsBinding(xml, names[size], heights[size], rows, L"", L"", rowIcons) &&
+            Count(xml, L"<image") == DetailTileRows(heights[size]) &&
+            xml.find(L"<image") < xml.find(L"<text") && xml.find(L"alt=\"Activity &lt;&amp;&gt;\"") != std::wstring::npos,
+            "every visible activity row has its own escaped original icon in a consistent left subgroup");
+        for (std::size_t row = 0; row < DetailTileRows(heights[size]); ++row) {
+            const auto geometry = ComputeDetailRowGeometry(widths[size], heights[size], DetailTileRows(heights[size]), row, true);
+            Check(geometry.iconSide > 0 && geometry.iconX + geometry.iconSide < geometry.textX &&
+                geometry.textX + geometry.textWidth <= widths[size] - 10 && geometry.iconY + geometry.iconSide <= geometry.bottom,
+                "bitmap row geometry keeps each left icon and text in disjoint bounded columns at every tile size");
+        }
+        xml.clear();
+        Check(AppendDetailRowsBinding(xml, names[size], heights[size], rows, L"", L"", {}) &&
+            xml.find(L"hint-weight") == std::wstring::npos && xml.find(L"<image") == std::wstring::npos,
+            "absent icons have a clean full-width text fallback with no empty column");
+        xml.clear();
         Check(AppendWrappedSourceBinding(xml, names[size], {L"Discord presence", L"Set Details and State in Discord settings.", L""}) &&
             xml.find(L"hint-wrap=\"true\" hint-maxLines=\"5\"") != std::wstring::npos,
             "compact source headlines keep setup instructions in a wrapped lower field");

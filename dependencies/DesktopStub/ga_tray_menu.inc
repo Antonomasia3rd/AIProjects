@@ -2,6 +2,7 @@
 // so tests can inspect the complete menu without changing live system state.
 static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool startupInstalled)
 {
+    g_menuWordingDefaults.clear();
     auto addTo = [&](HMENU target, UINT id, const std::wstring& t, bool chk=false, bool en=true){
         if (g_hideDisabled && !en)
             return;
@@ -10,9 +11,13 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     };
 
     aip::TraySectionLayout sectionLayout(m, showMenuAsDropdown);
+    std::vector<HMENU> categoryMenus;
+    std::set<std::wstring> categoryHeaders;
     auto beginSection = [&](const std::wstring& title) -> HMENU {
         bool created = false;
-        HMENU section = sectionLayout.Begin(title, &created);
+        const auto heading = aip::TrayMenuTitle(title) + L":";
+        HMENU section = sectionLayout.Begin(showMenuAsDropdown ? title : heading, &created);
+        if(showMenuAsDropdown) categoryMenus.push_back(section); else categoryHeaders.insert(heading);
         if (!created)
             LogWin32Failure(showMenuAsDropdown ? L"CreatePopupMenu(section)" : L"AppendMenuW(section)");
         return section;
@@ -372,13 +377,13 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
 
     HMENU updatesMenu = beginSection(updatesTitle);
     AppendContentEngineMenu(updatesMenu, ContentMenuPart::Timing);
-    aip::AppendMenuSeparator(updatesMenu);
     addTo(updatesMenu, ID_LISTEN_WP, g_ui.listenWallpaper.c_str(), g_listenWallpaper);
     addTo(updatesMenu, ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
     addTo(updatesMenu, ID_GENERATE_STARTUP_CHANGED_ONLY, g_ui.generateOnStartupOnlyWhenChanged.c_str(), g_generateOnStartupOnlyWhenChanged, g_generateOnStartup);
     endSection(updatesMenu, updatesTitle);
 
     HMENU generalMenu = beginSection(g_ui.generalTitle);
+    AppendMenuWordingSettings(generalMenu);
     HMENU startupMenu = beginNestedMenu(generalMenu, L"CreatePopupMenu(Sign-in)");
     addTo(startupMenu, ID_RUN_AT_STARTUP, g_ui.runAtStartup.c_str(), startupInstalled);
     bool packagedStartupDesired = false;
@@ -678,8 +683,19 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     endNestedMenu(advancedMenu, advancedSingleInstanceMenu, g_ui.advancedSingleInstanceTitle);
 
     endSection(advancedMenu, g_ui.advancedTitle);
-    if (showMenuAsDropdown) AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
+    if(showMenuAsDropdown) {for(const auto category:categoryMenus)if(category&&category!=m)RemoveDirectMenuSeparators(category);}
+    else {
+        // Internal separators from individual settings are not category boundaries.
+        for(int i=GetMenuItemCount(m)-1;i>=0;--i) {
+            MENUITEMINFOW item{sizeof(item)};item.fMask=MIIM_FTYPE;
+            if(!GetMenuItemInfoW(m,i,TRUE,&item)||!(item.fType&MFT_SEPARATOR))continue;
+            wchar_t following[512]{};GetMenuStringW(m,i+1,following,512,MF_BYPOSITION);
+            if(!categoryHeaders.count(following))DeleteMenu(m,i,MF_BYPOSITION);
+        }
+    }
+    AppendMenuChecked(m, MF_SEPARATOR, 0, nullptr);
     addTo(m, ID_EXIT, g_ui.exitText.c_str());
+    ApplyMenuWording(m);
 }
 
 void Menu(HWND h)

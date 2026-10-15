@@ -13,7 +13,7 @@ int checks = 0;
 void Check(bool value, const char* message) { ++checks; if (!value) throw std::runtime_error(message); }
 struct Fixture {
     std::wstring root, source, cache;
-    std::vector<std::wstring> ownedFiles;
+    std::vector<std::wstring> ownedFiles, ownedDirectories;
     bool ownsRoot = false;
     Fixture() {
         wchar_t base[32768]{};
@@ -30,6 +30,8 @@ struct Fixture {
         if (!ownsRoot) return true;
         bool ok = true;
         for (const auto& file : ownedFiles) if (!DeleteFileW(file.c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND) ok = false;
+        for (auto directory = ownedDirectories.rbegin(); directory != ownedDirectories.rend(); ++directory)
+            if (!RemoveDirectoryW(directory->c_str()) && GetLastError() != ERROR_PATH_NOT_FOUND && GetLastError() != ERROR_FILE_NOT_FOUND) ok = false;
         if (!RemoveDirectoryW(cache.c_str()) && GetLastError() != ERROR_PATH_NOT_FOUND && GetLastError() != ERROR_FILE_NOT_FOUND) ok = false;
         if (!RemoveDirectoryW(source.c_str()) && GetLastError() != ERROR_PATH_NOT_FOUND && GetLastError() != ERROR_FILE_NOT_FOUND) ok = false;
         if (!RemoveDirectoryW(root.c_str())) ok = false;
@@ -219,6 +221,25 @@ int main() {
         const auto canceled = ScanGalleryInventory(fixture.source, untouched, removed.index, [] { return true; }, options);
         Check(canceled.cancelled && !canceled.complete && GetFileAttributesW(untouched.c_str()) == INVALID_FILE_ATTRIBUTES,
             "early cancellation creates no cache and starts no source inspection");
+        const auto nestedDirectory = fixture.source + L"\\nested";
+        Check(CreateDirectoryW(nestedDirectory.c_str(), nullptr) != FALSE, "create only an owned synthetic album subdirectory");
+        fixture.ownedDirectories.push_back(nestedDirectory);
+        auto nestedBytes = LandscapeBmp(); nestedBytes[54] = 200;
+        fixture.Write(L"nested\\deep.bmp", nestedBytes);
+        const auto loop = nestedDirectory + L"\\back-to-source";
+        // Optional Developer Mode support: no elevation, junction machinery or
+        // external destination. An unavailable link leaves the core case valid.
+        const bool linked = CreateSymbolicLinkW(loop.c_str(), fixture.source.c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | 0x2) != 0;
+        if (linked) fixture.ownedDirectories.push_back(loop);
+        const auto recursive = ScanGalleryInventory(fixture.source, fixture.cache, removed.index, {}, options);
+        fixture.Keep(recursive);
+        const auto nestedId = L"sha256:" + inventory_native::Hash(nestedBytes);
+        Check(recursive.complete && recursive.images.size() == 5 &&
+            std::any_of(recursive.images.begin(), recursive.images.end(), [&](const auto& image) { return image.id == nestedId; }) &&
+            std::any_of(recursive.index.files.begin(), recursive.index.files.end(), [](const auto& item) { return item.first.find(L"\\nested\\deep.bmp") != std::wstring::npos; }),
+            "default recursive inventory includes a generated image below the selected folder without rereading user photos");
+        if (linked) Check(recursive.index.files.size() <= removed.index.files.size() + 1,
+            "a directory symbolic link back to the source is excluded rather than recursively revisited");
         Check(fixture.Cleanup(), "remove only named owned fixture files and their empty private directories");
         std::cout << checks << " native synthetic gallery inventory checks passed; no user photos or app integration\n"; return 0;
     } catch (const std::exception& error) { std::cerr << "After " << checks << " checks: " << error.what() << '\n'; return 1; }

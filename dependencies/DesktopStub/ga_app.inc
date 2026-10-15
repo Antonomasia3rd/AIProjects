@@ -1472,7 +1472,7 @@ static bool ResolveGalleryFolderActivation(const CommandLineOptions& options, st
             error = L"This gallery tile is absent from the selected INI. Unpin the old tile from Start, or restore its original INI and .gallery-ledger. Current gallery settings are under Tiles > Photo gallery.";
             return false;
         }
-        path = configuration.folder;
+        path = aip::gallery::EffectiveFolder(configuration, tile);
     }
     if (path.empty() || !aip::gallery::detail::Text(path, 32768, false)) {
         error = L"The gallery directory is empty or invalid."; return false;

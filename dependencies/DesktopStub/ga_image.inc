@@ -687,25 +687,28 @@ static bool RenderMediaTileSimulation(Graphics& graphics, const aip::content::Sn
     return graphics.GetLastStatus() == Ok;
 }
 
+#include "ga_notes_tile_icons.inc"
 static bool RenderDetailRowsSimulation(Graphics& graphics, const aip::content::Snapshot& snapshot,
     int logicalWidth, int logicalHeight, double scale)
 {
     const auto count = std::min(snapshot.detailRows.size(), aip::content::DetailTileRows(logicalHeight));
     if (!count) return true;
-    const REAL margin = static_cast<REAL>(10 * scale);
-    const REAL rowHeight = static_cast<REAL>((logicalHeight - 30) * scale / count);
     Font font(L"Segoe UI", static_cast<REAL>(12 * scale), FontStyleRegular, UnitPixel);
     if (font.GetLastStatus() != Ok) return false;
     for (std::size_t index = 0; index < count; ++index) {
-        const bool hasIcon = index == 0 && !snapshot.detailTopic.empty();
-        const REAL iconSide = hasIcon ? std::min(static_cast<REAL>(28 * scale), rowHeight - static_cast<REAL>(4 * scale)) : 0;
-        const REAL width = static_cast<REAL>(logicalWidth * scale) - margin * 2 - (hasIcon ? iconSide + static_cast<REAL>(8 * scale) : 0);
-        REAL y = margin + static_cast<REAL>(index) * rowHeight;
-        const REAL bottom = y + rowHeight - static_cast<REAL>(3 * scale);
-        if (!DrawTopSourceField(graphics, snapshot.detailRows[index].primary, font, margin, y, width, bottom, 1, 255, static_cast<REAL>(2 * scale)) ||
-            !DrawTopSourceField(graphics, snapshot.detailRows[index].secondary, font, margin, y, width, bottom, 1, 153, 0)) return false;
-        if (hasIcon && !aip::tile_visual::DrawTileTopicGlyph(graphics, snapshot.detailTopic,
-            RectF(static_cast<REAL>(logicalWidth * scale) - margin - iconSide, margin, iconSide, iconSide))) return false;
+        const auto& row = snapshot.detailRows[index];
+        auto icon = LoadNotesTileIcon(row.iconTopic);
+        const auto fallback = !icon && (!row.iconTopic.empty() || index == 0) ? snapshot.detailTopic : std::wstring{};
+        const bool hasIcon = icon || !fallback.empty();
+        const auto geometry = aip::content::ComputeDetailRowGeometry(logicalWidth, logicalHeight, count, index, hasIcon);
+        REAL y = static_cast<REAL>(geometry.textY * scale);
+        const REAL x = static_cast<REAL>(geometry.textX * scale), width = static_cast<REAL>(geometry.textWidth * scale), bottom = static_cast<REAL>(geometry.bottom * scale);
+        if (!DrawTopSourceField(graphics, row.primary, font, x, y, width, bottom, 1, 255, static_cast<REAL>(2 * scale)) ||
+            !DrawTopSourceField(graphics, row.secondary, font, x, y, width, bottom, 1, 153, 0)) return false;
+        const RectF bounds(static_cast<REAL>(geometry.iconX * scale), static_cast<REAL>(geometry.iconY * scale),
+            static_cast<REAL>(geometry.iconSide * scale), static_cast<REAL>(geometry.iconSide * scale));
+        if (icon && graphics.DrawImage(icon.get(), bounds) != Ok) return false;
+        if (!icon && hasIcon && !aip::tile_visual::DrawTileTopicGlyph(graphics, fallback, bounds)) return false;
     }
     return graphics.GetLastStatus() == Ok;
 }

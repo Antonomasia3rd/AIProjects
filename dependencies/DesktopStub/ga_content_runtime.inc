@@ -368,7 +368,15 @@ static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstr
             cfg.entries.push_back(std::move(entry));
         }
     }
-    return !tiles || aip::content::ReadSecondaryTileConfiguration(read, cfg.entries.size(), *tiles, error);
+    if (!tiles) return true;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    const bool pinnedDriven = SecondaryTileInventoryReady(); // Existing inert fixtures retain their explicit synthetic layout until a pin inventory is injected.
+#else
+    const bool pinnedDriven = true;
+#endif
+    if (!aip::content::ReadSecondaryTileConfiguration(read, pinnedDriven ? aip::content::MaxEntries : cfg.entries.size(), *tiles, error)) return false;
+    if (pinnedDriven) aip::content::ApplyPinnedSecondaryTiles(cfg, *tiles, CachedSecondaryTileIds());
+    return true;
 }
 static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error)
 {
@@ -463,7 +471,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
     for (const auto& headline : snapshot.rssHeadlines)
         key += L":" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
     for (const auto& row : snapshot.detailRows)
-        for (const auto& field : {row.primary, row.secondary}) key += L":detail:" + std::to_wstring(field.size()) + L":" + field;
+        for (const auto& field : {row.primary, row.secondary, row.iconTopic}) key += L":detail:" + std::to_wstring(field.size()) + L":" + field;
     key += L":detailTopic:" + snapshot.detailTopic + L":wrap:" + std::to_wstring(snapshot.wrapSourceText);
     if (snapshot.smtcSource) {
         key += L":smtc:" + std::to_wstring(static_cast<int>(snapshot.smtcState)) + L":" +
@@ -677,7 +685,8 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
         case aip::content::SourceId::Notes:
             text = ContentNotesProvider::FormatSnapshot(notesSnapshots[entry.notesResource], entry.notesDetail);
             if (entry.sources.size() == 1) {
-                snapshot.detailRows = aip::notes::BuildNoteTileRows(notesSnapshots[entry.notesResource], entry.notesDetail);
+                snapshot.detailRows = aip::notes::BuildNoteTileRows(notesSnapshots[entry.notesResource], entry.notesDetail,
+                    [](const wchar_t* key, const wchar_t* fallback) { return IniReadS(L"Strings", key, fallback); });
                 snapshot.detailTopic = aip::notes::ResourceTileTopic(notesSnapshots[entry.notesResource].resource);
             }
             break;
