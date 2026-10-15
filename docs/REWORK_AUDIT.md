@@ -1,5 +1,18 @@
 # Repository rework audit
 
+For the current closure status, read [CURRENT_STATUS.md](CURRENT_STATUS.md).
+The dated entries below retain their historical scope and validation results.
+
+Latest checkpoint, 2026-10-15: transparent per-tile appearance is installed, and
+the shared folder-gallery engine/setup/delivery is implemented and installed
+with its default disabled. Gallery and six-source updates share one resident.
+No actual photo folder or new gallery pin was touched. The combined validation
+passed 12,709 host and 5,630 render checks, native synthetic image/ledger tests,
+clean scans and the copied-binary exact smoke. See
+[the evidence and remaining acceptance](gallery-validation-2026-10-15.md).
+The focused legacy bot fixes are pushed with offline tests; Windhawk's source
+catalog is corrected, while its functional review remains open.
+
 Started 2026-09-07. This file is the durable handoff record. Read it and the linked audit files after any context reset. Findings describe the current working tree, including extensive pre-existing uncommitted changes. **Latest user clarification: prior uncommitted implementations have no exemption from the rules and must be edited when they conflict.** Preserve useful work/data, not incorrect behavior or obsolete policy.
 
 ## User requirements (confirmed in this conversation)

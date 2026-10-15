@@ -199,6 +199,8 @@
       "dependencies/media_tile_layout.h",
       "dependencies/rss_tile_layout.h",
       "dependencies/content_queue.h",
+      "dependencies/gallery_engine.h",
+      "dependencies/gallery_inventory.inc",
       "dependencies/tile_notification_payload.h",
       "dependencies/tile_notification_winrt.inc",
       "dependencies/png_crc32.h",

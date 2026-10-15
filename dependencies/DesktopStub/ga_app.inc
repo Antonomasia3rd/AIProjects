@@ -1451,6 +1451,52 @@ static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType) noexcept
     }
 }
 
+static bool GalleryDirectoryExists(const std::wstring& path)
+{
+#ifdef DESKTOPSTUB_TEST_GALLERY_DIRECTORY_EXISTS
+    return DESKTOPSTUB_TEST_GALLERY_DIRECTORY_EXISTS(path);
+#elif defined(DESKTOPSTUB_INERT_HARDWARE)
+    (void)path; return false;
+#else
+    const auto attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#endif
+}
+static bool ResolveGalleryFolderActivation(const CommandLineOptions& options, std::wstring& result, std::wstring& error)
+{
+    auto path = options.openFolder;
+    const auto& id = options.windowsTileId;
+    if (id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0) {
+        aip::gallery::Configuration configuration; aip::gallery::TileConfiguration tile;
+        if (!FindConfiguredGalleryTile(id, configuration, tile)) {
+            error = L"This gallery tile is absent from the selected INI. Unpin the old tile from Start, or restore its original INI and .gallery-ledger. Current gallery settings are under Tiles > Photo gallery.";
+            return false;
+        }
+        path = configuration.folder;
+    }
+    if (path.empty() || !aip::gallery::detail::Text(path, 32768, false)) {
+        error = L"The gallery directory is empty or invalid."; return false;
+    }
+    std::wstring profile; { std::lock_guard<std::mutex> lock(g_pathMutex); profile = g_iniPath; }
+    if (PathIsRelativeW(path.c_str())) path = ParentDirectoryOfPath(profile) + L"\\" + path;
+    path = aip::MakeAbsolutePath(path);
+    if (path.empty() || !GalleryDirectoryExists(path)) {
+        error = L"The gallery folder is unavailable. Check Tiles > Photo gallery > Choose photo folder in DesktopStub."; return false;
+    }
+    result = std::move(path); error.clear(); return true;
+}
+static bool OpenGalleryFolder(const std::wstring& directory)
+{
+    if (!GalleryDirectoryExists(directory)) return false;
+#ifdef DESKTOPSTUB_TEST_GALLERY_OPEN_FOLDER
+    return DESKTOPSTUB_TEST_GALLERY_OPEN_FOLDER(directory);
+#elif defined(DESKTOPSTUB_INERT_HARDWARE)
+    return false;
+#else
+    return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", directory.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+#endif
+}
+
 int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 {
     // Capture children inherit only their private output/reply handles. Handle
@@ -1513,6 +1559,15 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     {
         ShowCommandLineMessage(CommandLineVersionText(), false);
         return 0;
+    }
+
+    if (g_commandLine.galleryFolderActivation) {
+        std::wstring folder, error;
+        if (!ResolveGalleryFolderActivation(g_commandLine, folder, error) || !OpenGalleryFolder(folder)) {
+            if (error.empty()) error = L"Windows could not open the gallery directory.";
+            ShowCommandLineMessage(error, true); return 2;
+        }
+        return 0; // No resident, INI creation, providers, registration or Startup.
     }
 
     if (!g_commandLine.openUrl.empty()) {

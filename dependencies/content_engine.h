@@ -146,6 +146,10 @@ struct Snapshot {
     std::wstring nativeQueueTag, nativeQueueLayout, nativeQueueFrameKey;
     std::wstring secondaryTileId, secondaryFrameKey;
     std::wstring secondaryBranding;
+    bool galleryFrame = false, galleryContain = false;
+    std::wstring galleryGroupId, galleryTileId, galleryEpoch;
+    std::uint64_t galleryTicket = 0;
+    unsigned gallerySlot = 0, gallerySlotCount = 0;
     std::vector<Text> rssHeadlines;
     std::vector<Text> detailRows;
     std::wstring detailTopic;

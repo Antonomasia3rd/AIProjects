@@ -611,7 +611,8 @@ static Color SimulatedTileBackgroundColor()
 
 static Color ContentCanvasBackgroundColor()
 {
-    return ContentHasTransparentBackground() ? Color(0, 0, 0, 0) : Color(255, 0, 0, 0);
+    return ContentHasTransparentBackground() || (g_renderContent && g_renderContent->galleryFrame)
+        ? Color(0, 0, 0, 0) : Color(255, 0, 0, 0);
 }
 
 static bool PreserveContentBackgroundForText()
@@ -1061,7 +1062,7 @@ static Bitmap* BuildSpannedPrimaryBitmap(Bitmap* src)
 Bitmap* ResizeWithFit(Bitmap* src, int w, int h, FitMode mode)
 {
     if (mode != FitMode::Tile && mode != FitMode::Span)
-        return ResizeBitmapToMode(src, w, h, mode, Color(255, 0, 0, 0));
+        return ResizeBitmapToMode(src, w, h, mode, g_renderContent && g_renderContent->galleryFrame ? Color(0, 0, 0, 0) : Color(255, 0, 0, 0));
 
     std::unique_ptr<Bitmap> primaryWallpaper((mode == FitMode::Tile)
         ? BuildTiledPrimaryBitmap(src)

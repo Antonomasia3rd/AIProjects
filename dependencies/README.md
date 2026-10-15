@@ -186,6 +186,15 @@ code for nothing:
   cannot drift. Its inactive-refresh flag
   lets read-only data preload while output/device sources follow the active
   content entry.
+- `gallery_engine.h`, `gallery_inventory.inc`: portable gallery pool ownership
+  and queue planning, plus injected inventory policy and the Windows thumbnail
+  worker. Separate image pools and a durable ownership ledger prevent exact
+  source images from moving between still-visible gallery destinations. The
+  Windows helper hashes changed files, applies EXIF orientation and caches
+  bounded PNGs; it does not assign owners or delete old published thumbnails.
+  `DesktopStub/ga_gallery_runtime.inc` coordinates persistence, background work
+  and acknowledged queue windows. See the [gallery model](../docs/gallery-engine-2026-10-15.md)
+  and [inventory limits](../docs/gallery-inventory-2026-10-15.md).
 - `tile_appearance.h`: platform-neutral secondary appearance configuration,
   color/branding normalization and native property plans. Source tile sections
   and the MediaActions group use the same Transparent/Color background and

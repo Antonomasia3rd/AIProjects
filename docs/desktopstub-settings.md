@@ -6,6 +6,7 @@ uncheck it for the existing flat view. Both views expose the same controls.
 
 | Category | Use it for |
 | --- | --- |
+| **Tiles** | Set up separate source tiles, choose their content and appearance, sign in for game data, and pin individual Quick Actions. All share one resident and tray icon. |
 | **Tile contents** | Enable composed contents, add/name/edit entries, change their order, or apply a preset. |
 | **Sources and accounts** | Wallpaper detection/fitting/capture, RSS feed setup, Notes accounts, Discord presence, Caps indicators and ASUS patterns. |
 | **Tile display** | Live Tile versus static delivery, native template/branding, text delivery, default text, generated asset sizes and DPI scales. |
@@ -13,6 +14,13 @@ uncheck it for the existing flat view. Both views expose the same controls.
 | **Application** | Launch at sign-in through the user Startup folder or the separate Windows startup task; tray/console visibility and notifications. |
 | **Diagnostics** | Enable/configure logging, inspect the log location and PowerShell status. |
 | **Advanced** | Package registration/Windows compatibility, manifest fields, cache/pre-cache, timing, memory, shutdown, PowerShell and file-save behavior. |
+
+Source fallback icons and Quick Actions default to transparent backgrounds.
+Under **Tiles > your source > Appearance**, choose background/color and
+**Branding (name and corner icon)**. Name-only branding keeps the label and
+hides the corner logo while live content is displayed. Quick Actions have a
+shared Appearance submenu. Primary Desktop branding remains independent under
+Tile display. See [all appearance values](tile-appearance-2026-10-15.md).
 
 ## Build a tile content
 

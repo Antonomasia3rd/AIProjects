@@ -774,6 +774,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
             frame.secondaryFrameKey = ContentSnapshotKey(frame);
             appendReady(std::move(frame));
         }
+        for (auto gallery : ContentGalleryFrames()) appendReady(std::move(gallery));
         if (unavailable != lastSecondaryBackgroundError) {
             lastSecondaryBackgroundError = unavailable;
             if (!unavailable.empty()) LogText(L"Separate tile background unavailable: " + unavailable);
@@ -842,6 +843,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 }
 
 static void StopContentProviders() {
+    StopGallerySource();
     // Request hardware cancellation before waiting on other sources.
     g_contentCaps.Cancel(); g_contentAsus.Cancel();
     g_contentDiscord.Stop(); g_contentNotes.Stop(); g_contentRss.Stop(); g_contentSmtc.Stop();

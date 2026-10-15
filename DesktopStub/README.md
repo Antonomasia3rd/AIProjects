@@ -28,6 +28,16 @@ for each game. Clearing local browser data keeps imported Notes credentials and
 does not call HoYoLAB Logout. See [current tile setup](../docs/multiple-tiles-2026-10-14.md)
 and [sign-in details](../docs/notes-signin-ux-2026-10-15.md).
 
+**Tiles > Photo gallery > Set up gallery...** creates a named set of 1–8 photo
+tiles from one folder. Each tile owns a separate image pool, so its photos are
+not assigned to another gallery tile. Pin the tiles individually after setup.
+Windows rotates up to five queued photos per tile; DesktopStub replaces the
+queues at the configured interval, rather than rendering each animation.
+Fit keeps the whole photo with transparent letterboxing; Fill crops its edges.
+Keep the INI and its `.gallery-ledger` together so image ownership survives a
+restart or folder change. See the [gallery setup and limits](../docs/gallery-setup-2026-10-15.md)
+and [current review status](../docs/CURRENT_STATUS.md).
+
 ## Requirements
 
 - Windows 10/11 for the running utility and normal Desktop Bridge registration. The manifest generator can also emit Windows 8 or Windows 8.1-style AppX XML for Start Screen/Live Tile simulator compatibility.

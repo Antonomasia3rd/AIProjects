@@ -62,6 +62,7 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     HMENU secondaryTilesMenu = beginSection(L"Tiles");
     AppendSecondaryTilesMenu(secondaryTilesMenu);
     AppendQuickActionsMenu(secondaryTilesMenu);
+    AppendGalleryTilesMenu(secondaryTilesMenu);
     endSection(secondaryTilesMenu, L"Tiles");
     HMENU contentSourceMenu = beginSection(contentsTitle);
     AppendContentEngineMenu(contentSourceMenu, ContentMenuPart::Contents);

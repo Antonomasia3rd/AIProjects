@@ -36,6 +36,10 @@ static void TestFontFallback() {
     Check(NativeGlyphFor(Glyph::Stop).primary == 0xe71a && NativeGlyphFor(Glyph::Unknown).primary == 0xe897 &&
         NativeGlyphFor(Glyph::RepeatOff).slash && NativeGlyphFor(Glyph::ShuffleOff).slash &&
         NativeGlyphFor(Glyph::RepeatTrack).primary == 0xe8ed, "status glyphs distinguish stopped/unknown/disabled/single-track states");
+    Check(FindTopic(L"gallery") && NativeGlyphFor(FindTopic(L"gallery")->glyph).primary == 0xe91b,
+        "gallery fallback maps to the documented Photo glyph");
+    Check(!FindTopic(L"AipGallery_unknown.tile") && !IsKnownSecondaryArtworkId(L"AipGallery_unknown.tile"),
+        "pure artwork does not classify arbitrary gallery IDs as pin destinations without host configuration");
 }
 static void TestExistingLogoRefresh() {
     using namespace aip::tile_visual;

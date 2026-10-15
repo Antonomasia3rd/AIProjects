@@ -66,6 +66,16 @@ static unsigned long long g_generationQueuedId = 0;
 static std::vector<aip::content::Snapshot> g_generationQueuedSnapshots;
 static std::map<std::wstring, std::vector<LiveTileUpdateAsset>> g_nativeQueueAssets;
 static std::map<std::wstring, std::vector<LiveTileUpdateAsset>> g_secondaryTileAssets;
+static void RetainSecondaryTileAssets(const aip::content::Snapshot& frame, const std::vector<LiveTileUpdateAsset>& assets)
+{
+    if (frame.galleryFrame && frame.nativeQueueReset) {
+        const auto prefix = frame.secondaryTileId + L"|";
+        for (auto item = g_secondaryTileAssets.begin(); item != g_secondaryTileAssets.end();) {
+            if (item->first.compare(0, prefix.size(), prefix) == 0) item = g_secondaryTileAssets.erase(item); else ++item;
+        }
+    }
+    g_secondaryTileAssets[SecondaryDeliveryKey(frame)] = assets;
+}
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath);
 static std::mutex g_generatedAssetPrecacheMutex;
 static std::condition_variable g_generatedAssetPrecacheCv;
@@ -1199,6 +1209,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     if (g_renderContent)
     {
         state += L"contentMode=" + std::to_wstring(static_cast<int>(g_renderContent->textMode)) + L";";
+        if (g_renderContent->galleryFrame) state += L"galleryFit=" + std::to_wstring(g_renderContent->galleryContain) + L";";
         state += L"contentBackground=" + std::to_wstring(static_cast<int>(g_renderContent->backgroundId)) + L";";
         if (bakedText) for (const auto& headline : g_renderContent->rssHeadlines)
             state += L"rss=" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
@@ -1234,8 +1245,10 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
         state += L"adaptiveStaticText=1;";
     state += L"liveTileBranding=" + LiveTileBrandingIniValue(ConfiguredLiveTileBranding()) + L";";
     state += L"effectiveLiveTileUpdate=" + IntToWString(UseExperimentalLiveTileUpdate() ? 1 : 0) + L";";
-    state += L"disableFitting=" + IntToWString(g_disableFitting ? 1 : 0) + L";";
-    state += L"fit=" + IntToWString(static_cast<int>(g_disableFitting ? FitMode::Fill : GetWallpaperFit())) + L";";
+    const bool galleryFit = g_renderContent && g_renderContent->galleryFrame;
+    state += L"disableFitting=" + IntToWString(!galleryFit && g_disableFitting ? 1 : 0) + L";";
+    state += L"fit=" + IntToWString(static_cast<int>(galleryFit ? (g_renderContent->galleryContain ? FitMode::Fit : FitMode::Fill) :
+        g_disableFitting ? FitMode::Fill : GetWallpaperFit())) + L";";
     state += L"desktopIconForDisabled=" + IntToWString(g_generateDesktopIconForDisabledEntries ? 1 : 0) + L";";
     state += L"deleteDisabledAssets=" + IntToWString(g_deleteDisabledAssets ? 1 : 0) + L";";
     state += L"scaleAuto=" + IntToWString(g_generateScaleAuto ? 1 : 0) + L";";
@@ -1383,6 +1396,11 @@ static bool PrepareWallpaperRenderSource(
     if (!src)
         return false;
 
+    if (g_renderContent && g_renderContent->galleryFrame) {
+        renderSource = src; renderMode = g_renderContent->galleryContain ? FitMode::Fit : FitMode::Fill;
+        preparedWallpaper.reset(); return true; // Independent from desktop Tile/Span/disable-fitting.
+    }
+
     // A synthetic blank source is independent of the desktop fit setting.
     // Tile/Span preparation would otherwise introduce an opaque desktop canvas.
     if (ContentHasTransparentBackground()) {
@@ -1504,7 +1522,7 @@ static int MaxWallpaperDecodeLongEdgeForGeneration(const std::vector<int>& scale
     // to the desktop-backed tile image, but it can cost hundreds of MB when GDI+
     // decodes it at native size. Use the monitor/virtual desktop as the automatic
     // decode ceiling, while still honoring unusually large generated assets.
-    if (!g_disableFitting)
+    if (!g_disableFitting && !(g_renderContent && g_renderContent->galleryFrame))
     {
         FitMode wallpaperFit = GetWallpaperFit();
         if ((wallpaperFit == FitMode::Center || wallpaperFit == FitMode::Tile) &&
@@ -2034,6 +2052,7 @@ static std::wstring CleanGenerationReasonForSentence(const wchar_t* reason)
 bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnly = false,
     const aip::content::Snapshot* suppliedContent = nullptr)
 {
+    GalleryGenerationGuard galleryGuard(suppliedContent, renderOnly);
     auto generationStart = steady_clock::now();
     std::unique_lock<std::mutex> opLock(g_generationMutex, std::defer_lock);
     if (!opLock.try_lock())
@@ -2071,10 +2090,11 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
             return false;
         }
     }
-    if (suppliedContent && suppliedContent->nativeQueue &&
+    if (suppliedContent && suppliedContent->galleryFrame && !ContentGalleryFrameCurrent(*suppliedContent)) return false;
+    if (suppliedContent && suppliedContent->nativeQueue && !suppliedContent->galleryFrame &&
         (!ContentNativeQueueAvailable(currentContentConfiguration) ||
             suppliedContent->nativeQueueLayout != ContentNativeQueueLayout(currentContentConfiguration))) return false;
-    if (suppliedContent && !suppliedContent->secondaryTileId.empty()) {
+    if (suppliedContent && !suppliedContent->secondaryTileId.empty() && !suppliedContent->galleryFrame) {
         if (!currentSecondaryConfiguration.enabled) return false;
         const auto target = std::find_if(currentSecondaryConfiguration.tiles.begin(), currentSecondaryConfiguration.tiles.end(), [&](const auto& tile) {
             return tile.enabled && L"AipSource_" + tile.id == suppliedContent->secondaryTileId &&
@@ -2397,6 +2417,10 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         return true;
     }
 
+    // Rendering/cache work can be expensive. Fence a stale gallery reset again
+    // immediately before any target delivery or manifest/helper work.
+    if (contentScope.snapshot.galleryFrame && !ContentGalleryFrameCurrent(contentScope.snapshot)) return false;
+
     LogText(liveTileModeReregistrationPending
         ? g_ui.reRegisteringManifestForLiveTileModeChange
         : (useLiveTileUpdateForThisRun ? g_ui.updatingLiveTile : g_ui.reRegisteringManifest));
@@ -2487,6 +2511,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     }
     else if (useLiveTileUpdateForThisRun)
     {
+        if (contentScope.snapshot.galleryFrame && !ContentGalleryFrameCurrent(contentScope.snapshot)) return false;
         appUpdateOk = Appx_Update_Or_Request_LiveTile(exeDir, manifestInfo, liveTileUpdateAssets, appUpdateFailureMessage);
         appUpdateFailureIsLiveTile = !appUpdateOk;
         if (!appUpdateOk && appUpdateFailureMessage.empty())
@@ -2518,19 +2543,21 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         if (liveTileUpdateMode)
         {
             if (!contentScope.snapshot.secondaryTileId.empty()) {
-                g_secondaryTileAssets[contentScope.snapshot.secondaryTileId] = liveTileUpdateAssets;
+                RetainSecondaryTileAssets(contentScope.snapshot, liveTileUpdateAssets);
             } else if (contentScope.snapshot.nativeQueue) {
                 if (contentScope.snapshot.nativeQueueReset) g_nativeQueueAssets.clear();
                 g_nativeQueueAssets[contentScope.snapshot.nativeQueueTag] = liveTileUpdateAssets;
             } else g_nativeQueueAssets.clear();
-            CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
+            if (!contentScope.snapshot.galleryFrame) CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
             DeleteOldVersionedLiveTileAssets(exeDir, liveTileUpdateAssets);
         }
         if (!restoredFromGeneratedAssetCache)
             SaveGeneratedAssetCache(exeDir, BuildGenerationStateKey(wp), generatedAssetCacheFiles);
         if (contentScope.snapshot.secondaryTileId.empty()) StoreSuccessfulGenerationState(wp);
         SetLiveTileClearedOnShutdown(false);
-        AcknowledgeContentQueueFrame(contentScope.snapshot);
+        if (contentScope.snapshot.galleryFrame) {
+            ContentAcknowledgeGalleryFrame(contentScope.snapshot); galleryGuard.delivered = true;
+        } else AcknowledgeContentQueueFrame(contentScope.snapshot);
         AcknowledgeSecondaryFrame(contentScope.snapshot);
         LogText(liveTileUpdateMode ? g_ui.assetGenerationLiveTileFinished : g_ui.assetGenerationFinished);
         if (g_notifyOnSuccess)
@@ -2775,9 +2802,12 @@ static void GenerationWorkerThread()
         {
             if (snapshots.empty()) ok = Generate(wallpaper.c_str(), reason.c_str());
             else {
+                GalleryBatchFailureGuard remainder{snapshots};
                 ok = true;
-                for (const auto& snapshot : snapshots) {
-                    if (g_shutdownState.IsRequested() || !Generate(snapshot.backgroundPath.c_str(), reason.c_str(), false, &snapshot)) {
+                for (std::size_t index = 0; index < snapshots.size(); ++index) {
+                    if (g_shutdownState.IsRequested()) { ok = false; break; }
+                    const auto& snapshot = snapshots[index]; remainder.next = index + 1;
+                    if (!Generate(snapshot.backgroundPath.c_str(), reason.c_str(), false, &snapshot)) {
                         ok = false; break;
                     }
                 }
@@ -2813,6 +2843,9 @@ static void GenerationWorkerThread()
 static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring reason,
     std::vector<aip::content::Snapshot> snapshots = {})
 {
+    std::vector<aip::content::Snapshot> submission;
+    for (const auto& snapshot : snapshots) if (snapshot.galleryFrame) submission.push_back(snapshot);
+    GalleryBatchFailureGuard submissionGuard{submission};
     if (g_shutdownState.IsRequested())
         return 0;
     if (snapshots.empty() && UseExperimentalLiveTileUpdate() && !LiveTileModeReregistrationPending())
@@ -2820,6 +2853,7 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
         snapshots = PrepareSecondaryBatch(CurrentSecondarySnapshots(), true);
         if (snapshots.empty()) snapshots = PrepareContentQueueBatch(CurrentContentQueueSnapshots(), true);
     }
+    if (submission.empty()) for (const auto& snapshot : snapshots) if (snapshot.galleryFrame) submission.push_back(snapshot);
 
     bool startWorker = false;
     unsigned long long requestId = g_generationNextRequestId.fetch_add(1, std::memory_order_relaxed);
@@ -2829,13 +2863,16 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
         "QueueGenerate currently implements only the DesktopStub replace-pending policy.");
 
     unsigned long long droppedRequestId = 0;
+    std::vector<aip::content::Snapshot> droppedSnapshots;
     {
         std::lock_guard<std::mutex> lk(g_generationQueueMutex);
         if (g_generationWorkerStop || g_shutdownState.IsRequested())
             return 0;
 
-        if (g_generationQueued && g_generationQueuedId != 0)
+        if (g_generationQueued && g_generationQueuedId != 0) {
             droppedRequestId = g_generationQueuedId;
+            droppedSnapshots = std::move(g_generationQueuedSnapshots);
+        }
         g_generationQueuedWallpaper = std::move(wallpaper);
         g_generationQueuedReason = std::move(reason);
         g_generationQueuedSnapshots = std::move(snapshots);
@@ -2897,6 +2934,10 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
 
     if (droppedRequestId != 0)
         RecordGenerationCompletion(droppedRequestId, false);
+    for (const auto& old : droppedSnapshots) if (old.galleryFrame && !std::any_of(submission.begin(), submission.end(), [&](const auto& current) {
+        return current.secondaryTileId == old.secondaryTileId && current.galleryEpoch == old.galleryEpoch && current.galleryTicket == old.galleryTicket;
+    })) ContentFailGalleryFrame(old);
+    submissionGuard.next = submission.size();
     g_generationQueueCv.notify_one();
     return requestId;
 }
@@ -2971,6 +3012,7 @@ void PollThread()
         ReloadRuntimeSettingsFromIni();
         QueueDesktopStubPackagedStartupSync();
         PollSecondaryTileAppearance();
+        RefreshGallerySource();
 
         if (CompositionRequested())
         {

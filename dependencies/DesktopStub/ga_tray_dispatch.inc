@@ -2,6 +2,7 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
 {
     if (DispatchSmtcDisplaySettingsCommand(h, cmd)) return;
     if (DispatchQuickActionsCommand(h, cmd)) return;
+    if (DispatchGalleryTilesCommand(h, cmd)) return;
     if (DispatchSecondaryTilesCommand(h, cmd)) return;
     if (DispatchContentEngineCommand(h, cmd)) return;
     ManifestDisplayInfo manifestInfo;

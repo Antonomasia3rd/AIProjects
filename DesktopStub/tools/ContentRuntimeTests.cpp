@@ -10,6 +10,20 @@
 static bool contentNativeQueueAvailable = false, contentNativeQueueTestActive = false, contentQueueNormalAckEnabled = true;
 static std::vector<std::vector<aip::content::Snapshot>> secondaryTestBatches;
 static bool secondaryTestPinned = true;
+static int secondaryTestExistsCalls = 0;
+static bool ContentTestSecondaryExists(const std::wstring&) { ++secondaryTestExistsCalls; return secondaryTestPinned; }
+static std::vector<aip::content::Snapshot> GalleryTestFrames();
+static bool GalleryTestValidate(const aip::content::Snapshot&);
+static void GalleryTestAck(const aip::content::Snapshot&);
+static void GalleryTestFail(const aip::content::Snapshot&);
+static bool GallerySetupTestOpenFolder(const std::wstring&);
+static bool GallerySetupTestDirectoryExists(const std::wstring&);
+#define DESKTOPSTUB_TEST_GALLERY_FRAMES GalleryTestFrames
+#define DESKTOPSTUB_TEST_GALLERY_VALIDATE GalleryTestValidate
+#define DESKTOPSTUB_TEST_GALLERY_ACK GalleryTestAck
+#define DESKTOPSTUB_TEST_GALLERY_FAIL GalleryTestFail
+#define DESKTOPSTUB_TEST_GALLERY_OPEN_FOLDER GallerySetupTestOpenFolder
+#define DESKTOPSTUB_TEST_GALLERY_DIRECTORY_EXISTS GallerySetupTestDirectoryExists
 static int secondaryAppearancePosts = 0, secondaryAppearanceRefreshes = 0;
 static bool secondaryAppearancePostSucceeds = true;
 static HWND secondaryAppearanceDestination = nullptr;
@@ -22,7 +36,7 @@ static void ContentTestAppearanceRefresh(HWND window) { ++secondaryAppearanceRef
 #define DESKTOPSTUB_TEST_APPEARANCE_POST(window, message) ContentTestAppearancePost(window, message)
 #define DESKTOPSTUB_TEST_APPEARANCE_REFRESH(window) ContentTestAppearanceRefresh(window)
 static unsigned long long ContentTestSecondaryBatch(std::vector<aip::content::Snapshot>, std::wstring);
-#define DESKTOPSTUB_TEST_SECONDARY_EXISTS(id) secondaryTestPinned
+#define DESKTOPSTUB_TEST_SECONDARY_EXISTS(id) ContentTestSecondaryExists(id)
 #define DESKTOPSTUB_SECONDARY_BATCH_GENERATE ContentTestSecondaryBatch
 static std::vector<std::vector<aip::content::Snapshot>> contentQueueBatches;
 static void ContentTestQueueAcknowledgeNormal();
@@ -83,7 +97,10 @@ static void Check(bool value, const char* name)
 static void ContentTestQueueAcknowledgeNormal() { if (contentQueueNormalAckEnabled) AcknowledgeContentQueueFrame({}); }
 static unsigned long long ContentTestSecondaryBatch(std::vector<aip::content::Snapshot> frames, std::wstring) {
     secondaryTestBatches.push_back(frames);
-    for (const auto& frame : frames) AcknowledgeSecondaryFrame(frame);
+    for (const auto& frame : frames) {
+        if (frame.galleryFrame) ContentAcknowledgeGalleryFrame(frame);
+        AcknowledgeSecondaryFrame(frame);
+    }
     return ++contentGenerationRequests;
 }
 static unsigned long long ContentTestQueueBatch(std::vector<aip::content::Snapshot> snapshots, std::wstring)
@@ -124,6 +141,9 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "ContentPresetHostTests.inc"
 #include "NativeQueueHostTests.inc"
 #include "SecondaryTileHostTests.inc"
+#include "GalleryHostTests.inc"
+#include "GalleryLedgerHostTests.inc"
+#include "GallerySetupHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
@@ -1328,6 +1348,10 @@ int wmain()
     fixtureGroup("presets and import confirmations");
     TestNativeQueueHost(bitmapPath);
     TestSecondaryTileHost(bitmapPath);
+    fixtureGroup("gallery delivery, ledger and setup");
+    TestGalleryHost(bitmapPath);
+    TestGalleryLedgerHost(directory);
+    TestGallerySetupHost();
     TestContentPresetsAndImportConfirmation();
     fixtureGroup("Discord advanced profile");
     TestDiscordAdvancedHost();

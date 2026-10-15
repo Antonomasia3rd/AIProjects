@@ -1,7 +1,7 @@
 # DesktopStub topology
 
-Source topology updated on 2026-10-13, including the current transparent
-background and media-worker lifecycle changes. The earlier `53d9e32` snapshot
+Source topology updated on 2026-10-15, including shared secondary-tile appearance
+and folder-gallery source integration. The earlier `53d9e32` snapshot
 described the October 3 checkpoint. The source engine is built into the host;
 there is no external plugin DLL loading interface. Current source/inert test
 results do not imply that a newly built product has passed real shell acceptance.
@@ -37,6 +37,8 @@ does not mean the entire application has reached the final overlay design.
 | `DesktopStubLiveTileBroker.exe` | Separately built packaged WinRT helper, primarily for Windows 8/8.1 tile delivery. Included in the normal build. |
 | `DesktopStub.ini` | Product configuration, normally beside the host; an explicit custom INI path is supported. |
 | `AppxManifest.xml`, `Assets/` | Generated registration metadata and tile images when those features are used. |
+| `<selected INI>.gallery-ledger` | Persistent gallery image ownership and pending queue state; keep it with its INI. |
+| `LocalAppData/DesktopStub/Gallery/<profile hash>/` | Immutable photo thumbnail cache for that profile. Previously published thumbnails are retained. |
 | `DesktopStubAppxStub.exe` | Compatibility activation helper for the relevant legacy package path. The current implementation copies the host executable under this name; it is not a lean separate plugin. The broker path checks for its separately built broker instead. |
 | `DesktopStubLiveTileTask.dll` | Disabled experimental background-task path. Source remains, but the normal build does not produce this DLL. |
 
@@ -56,6 +58,15 @@ The canonical catalog is in [`content_engine.h`](../dependencies/content_engine.
 - Up to 32 entries can each combine a background and ordered text/data sources.
   Refresh timing, cycling and Auto/Overlay/Off text presentation belong to the
   host.
+
+The primary tile, six named source tiles, optional media Quick Actions and up to
+eight folder-gallery tiles share the same resident and tray icon. Gallery
+inventory uses one owned background worker; its pool planner and durable ledger
+feed the existing secondary notification/rendering pipeline. Native Windows
+queues animate up to five cached photos per destination. The app does not need
+a timer callback for every displayed photo. Gallery defaults are disabled until
+explicit setup; the [current status](CURRENT_STATUS.md) distinguishes source,
+validation, installation and real shell acceptance.
 
 The legacy Wallpaper/RSS choice is a preset. RSS can appear over wallpaper;
 selecting it does not imply that the wallpaper feature has been removed.

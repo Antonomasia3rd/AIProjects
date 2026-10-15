@@ -87,6 +87,14 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
         graphics.FillPolygon(&brush, points, 3);
     };
     switch (topic->glyph) {
+    case Glyph::Photo: {
+        graphics.DrawRectangle(&pen, 16.0f, 20.0f, 68.0f, 60.0f);
+        graphics.FillEllipse(&brush, 57.0f, 30.0f, 12.0f, 12.0f);
+        PointF mountain[3] = {{22, 72}, {43, 45}, {65, 72}};
+        graphics.FillPolygon(&brush, mountain, 3);
+        PointF hill[3] = {{48, 72}, {65, 53}, {78, 72}};
+        graphics.FillPolygon(&brush, hill, 3); break;
+    }
     case Glyph::Music:
         line(40, 24, 40, 70); line(72, 16, 72, 62); line(40, 24, 72, 16); line(40, 34, 72, 26);
         graphics.FillEllipse(&brush, 18.0f, 61.0f, 26.0f, 19.0f); graphics.FillEllipse(&brush, 50.0f, 53.0f, 26.0f, 19.0f); break;

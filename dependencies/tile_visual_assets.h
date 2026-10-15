@@ -7,7 +7,7 @@
 namespace aip { namespace tile_visual {
 enum class Glyph { Music, Feed, Genshin, StarRail, Zenless, Chat, Toggle, Play, Pause,
     Previous, Next, Repeat, Shuffle, VolumeDown, VolumeUp, Stop, Unknown,
-    RepeatOff, RepeatTrack, ShuffleOff, Resin, Stamina, Charge };
+    RepeatOff, RepeatTrack, ShuffleOff, Resin, Stamina, Charge, Photo };
 struct Topic { const wchar_t* key; Glyph glyph; std::uint32_t rgb; };
 inline constexpr Topic Topics[] = {
     {L"smtc", Glyph::Music, 0x159b91}, {L"rss", Glyph::Feed, 0xe77924},
@@ -22,7 +22,8 @@ inline constexpr Topic Topics[] = {
     {L"repeat-off", Glyph::RepeatOff, 0x159b91}, {L"repeat-list", Glyph::Repeat, 0x159b91},
     {L"repeat-track", Glyph::RepeatTrack, 0x159b91}, {L"shuffle-off", Glyph::ShuffleOff, 0x159b91},
     {L"shuffle-on", Glyph::Shuffle, 0x159b91}, {L"resin", Glyph::Resin, 0x397cca},
-    {L"stamina", Glyph::Stamina, 0x7756bd}, {L"charge", Glyph::Charge, 0xbf8c17}
+    {L"stamina", Glyph::Stamina, 0x7756bd}, {L"charge", Glyph::Charge, 0xbf8c17},
+    {L"gallery", Glyph::Photo, 0x477dac}
 };
 inline const Topic* FindTopic(std::wstring key) {
     const std::wstring source = L"AipSource_", action = L"AipAction_";
@@ -80,6 +81,7 @@ inline NativeGlyph NativeGlyphFor(Glyph glyph) {
     case Glyph::Resin: return {0xeb42, 0, false};
     case Glyph::Stamina: return {0xe83f, 0, false};
     case Glyph::Charge: return {0xe83e, 0, false};
+    case Glyph::Photo: return {0xe91b, 0, false};
     default: return {};
     }
 }

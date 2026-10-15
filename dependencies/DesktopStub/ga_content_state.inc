@@ -6,6 +6,76 @@ static std::vector<aip::content::Snapshot> g_contentQueueSnapshots;
 #include "../content_queue.h"
 #include "../secondary_tiles.h"
 static bool SecondaryTileExists(const std::wstring& id);
+static std::wstring LocalAppDataPath();
+static void WakePollThread();
+static void RefreshGallerySource();
+static std::vector<aip::content::Snapshot> CurrentGalleryFrames();
+static bool ValidateGalleryFrame(const aip::content::Snapshot& frame);
+static void AcknowledgeGalleryFrame(const aip::content::Snapshot& frame);
+static void FailGalleryFrame(const aip::content::Snapshot& frame);
+static void StopGallerySource();
+static std::vector<aip::content::Snapshot> ContentGalleryFrames()
+{
+#ifdef DESKTOPSTUB_TEST_GALLERY_FRAMES
+    return DESKTOPSTUB_TEST_GALLERY_FRAMES();
+#else
+    return CurrentGalleryFrames();
+#endif
+}
+static bool ContentGalleryFrameCurrent(const aip::content::Snapshot& frame)
+{
+#ifdef DESKTOPSTUB_TEST_GALLERY_VALIDATE
+    return DESKTOPSTUB_TEST_GALLERY_VALIDATE(frame);
+#else
+    return ValidateGalleryFrame(frame);
+#endif
+}
+static void ContentAcknowledgeGalleryFrame(const aip::content::Snapshot& frame)
+{
+#ifdef DESKTOPSTUB_TEST_GALLERY_ACK
+    DESKTOPSTUB_TEST_GALLERY_ACK(frame);
+#else
+    AcknowledgeGalleryFrame(frame);
+#endif
+}
+static void ContentFailGalleryFrame(const aip::content::Snapshot& frame) noexcept
+{
+    if (!frame.galleryFrame) return;
+    try {
+#ifdef DESKTOPSTUB_TEST_GALLERY_FAIL
+        DESKTOPSTUB_TEST_GALLERY_FAIL(frame);
+#else
+        FailGalleryFrame(frame);
+#endif
+    } catch (...) {} // Failure reporting must not replace the generation error.
+}
+struct GalleryGenerationGuard {
+    const aip::content::Snapshot* frame = nullptr;
+    bool delivered = false;
+    GalleryGenerationGuard(const aip::content::Snapshot* source, bool renderOnly) : frame(!renderOnly && source && source->galleryFrame ? source : nullptr) {}
+    ~GalleryGenerationGuard() { if (frame && !delivered) ContentFailGalleryFrame(*frame); }
+};
+struct GalleryBatchFailureGuard {
+    const std::vector<aip::content::Snapshot>& frames;
+    std::size_t next = 0;
+    ~GalleryBatchFailureGuard() { for (std::size_t index = next; index < frames.size(); ++index) ContentFailGalleryFrame(frames[index]); }
+};
+static std::wstring SecondaryDeliveryKey(const aip::content::Snapshot& frame)
+{
+    return frame.galleryFrame ? frame.secondaryTileId + L"|" + frame.nativeQueueTag : frame.secondaryTileId;
+}
+static bool GalleryWindowComplete(const std::vector<aip::content::Snapshot>& frames, const aip::content::Snapshot& wanted)
+{
+    if (!wanted.gallerySlotCount || wanted.gallerySlotCount > 5) return false;
+    std::set<unsigned> slots;
+    for (const auto& frame : frames) if (frame.galleryFrame && frame.secondaryTileId == wanted.secondaryTileId &&
+        frame.galleryEpoch == wanted.galleryEpoch && frame.galleryTicket == wanted.galleryTicket) {
+        if (frame.gallerySlotCount != wanted.gallerySlotCount || frame.gallerySlot >= frame.gallerySlotCount ||
+            frame.nativeQueueTag != L"g" + std::to_wstring(frame.gallerySlot + 1) || !frame.nativeQueue ||
+            !slots.insert(frame.gallerySlot).second || !IsUsableWallpaperPath(frame.backgroundPath) || !ContentGalleryFrameCurrent(frame)) return false;
+    }
+    return slots.size() == wanted.gallerySlotCount;
+}
 static std::mutex g_secondarySnapshotMutex;
 static std::vector<aip::content::Snapshot> g_secondarySnapshots;
 static std::mutex g_secondaryDeliveryMutex;
@@ -29,16 +99,30 @@ static std::vector<aip::content::Snapshot> CurrentSecondarySnapshots()
 static std::vector<aip::content::Snapshot> PrepareSecondaryBatch(const std::vector<aip::content::Snapshot>& frames, bool force = false)
 {
     std::vector<aip::content::Snapshot> changed;
-    std::lock_guard<std::mutex> lock(g_secondaryDeliveryMutex);
+    std::map<std::wstring, bool> pinned, completeWindows;
     for (const auto& frame : frames) {
-        if (!frame.active || frame.secondaryFrameKey.empty() || !IsUsableWallpaperPath(frame.backgroundPath)) continue;
+        if (!frame.active || frame.secondaryFrameKey.empty()) continue;
+        {
+            std::lock_guard<std::mutex> lock(g_secondaryDeliveryMutex);
+            const auto found = g_secondaryDelivered.find(SecondaryDeliveryKey(frame));
+            if (!force && found != g_secondaryDelivered.end() && found->second == frame.secondaryFrameKey) continue;
+        }
+        if (!IsUsableWallpaperPath(frame.backgroundPath)) { ContentFailGalleryFrame(frame); continue; }
+        if (!frame.secondaryTileId.empty() && pinned.find(frame.secondaryTileId) == pinned.end()) {
 #ifdef DESKTOPSTUB_TEST_SECONDARY_EXISTS
-        if (!frame.secondaryTileId.empty() && !DESKTOPSTUB_TEST_SECONDARY_EXISTS(frame.secondaryTileId)) continue;
+            pinned[frame.secondaryTileId] = DESKTOPSTUB_TEST_SECONDARY_EXISTS(frame.secondaryTileId);
 #else
-        if (!frame.secondaryTileId.empty() && !SecondaryTileExists(frame.secondaryTileId)) continue;
+            pinned[frame.secondaryTileId] = SecondaryTileExists(frame.secondaryTileId);
 #endif
-        const auto found = g_secondaryDelivered.find(frame.secondaryTileId);
-        if (force || found == g_secondaryDelivered.end() || found->second != frame.secondaryFrameKey) changed.push_back(frame);
+        }
+        if (!frame.secondaryTileId.empty() && !pinned[frame.secondaryTileId]) continue;
+        if (frame.galleryFrame) {
+            const auto window = frame.secondaryTileId + L"|" + frame.galleryEpoch + L"|" + std::to_wstring(frame.galleryTicket);
+            auto ready = completeWindows.find(window);
+            if (ready == completeWindows.end()) ready = completeWindows.emplace(window, GalleryWindowComplete(frames, frame)).first;
+            if (!ready->second) { ContentFailGalleryFrame(frame); continue; }
+        }
+        changed.push_back(frame);
     }
     return changed;
 }
@@ -46,12 +130,22 @@ static void AcknowledgeSecondaryFrame(const aip::content::Snapshot& frame)
 {
     if (frame.secondaryFrameKey.empty()) return;
     std::lock_guard<std::mutex> lock(g_secondaryDeliveryMutex);
-    g_secondaryDelivered[frame.secondaryTileId] = frame.secondaryFrameKey;
+    if (frame.galleryFrame && frame.nativeQueueReset) {
+        const auto prefix = frame.secondaryTileId + L"|";
+        for (auto entry = g_secondaryDelivered.begin(); entry != g_secondaryDelivered.end();) {
+            if (entry->first.compare(0, prefix.size(), prefix) == 0) entry = g_secondaryDelivered.erase(entry); else ++entry;
+        }
+    }
+    g_secondaryDelivered[SecondaryDeliveryKey(frame)] = frame.secondaryFrameKey;
 }
 static void ForgetSecondaryTileDelivery(const std::wstring& id)
 {
     std::lock_guard<std::mutex> lock(g_secondaryDeliveryMutex);
     g_secondaryDelivered.erase(id);
+    const auto prefix = id + L"|";
+    for (auto entry = g_secondaryDelivered.begin(); entry != g_secondaryDelivered.end();) {
+        if (entry->first.compare(0, prefix.size(), prefix) == 0) entry = g_secondaryDelivered.erase(entry); else ++entry;
+    }
 }
 static std::mutex g_contentQueueDeliveryMutex;
 static aip::content::QueueDelta g_contentQueueDelivery;
@@ -157,6 +251,7 @@ static std::vector<aip::content::Snapshot> PrepareContentQueueBatch(
 }
 static void AcknowledgeContentQueueFrame(const aip::content::Snapshot& snapshot)
 {
+    if (snapshot.galleryFrame) return; // Gallery tickets never acknowledge/reset the primary queue.
     std::lock_guard<std::mutex> lock(g_contentQueueDeliveryMutex);
     if (snapshot.nativeQueue) g_contentQueueDelivery.Ack(snapshot);
     else g_contentQueueDelivery.LeaveQueue();

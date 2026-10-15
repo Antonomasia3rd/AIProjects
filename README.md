@@ -7,8 +7,12 @@ and release names. Reusable modules and product implementation bodies live under
 or declarative policy.
 
 DesktopStub can manage a wallpaper tile and six source tiles through one resident
-and tray icon. See [multiple-tile setup](docs/multiple-tiles-2026-10-14.md) for
+and tray icon, plus optional media actions and folder galleries. See
+[gallery setup](docs/gallery-setup-2026-10-15.md) and
+[multiple-tile setup](docs/multiple-tiles-2026-10-14.md) for
 pinning, accounts, stacked RSS and the remaining Windows acceptance checks.
+The [current rework status](docs/CURRENT_STATUS.md) distinguishes completed
+repairs from remaining findings and legacy migrations.
 
 ## Projects
 
@@ -18,12 +22,14 @@ pinning, accounts, stacked RSS and the remaining Windows acceptance checks.
 | `legacy/ADBController` | C++ Win32 GUI app | Direct ADB-over-TCP TV controller that keeps the ADB server running while switching selected TVs. |
 | `legacy/CharmTray` | C++ Win32 tray app | Windows 8/8.1 tray launcher for Search, Share, Start, Devices, and Settings charms. |
 | `legacy/ChromeProfileCounter` | C# desktop utility | Shared INI/CLI/configuration tray and per-user Startup; explicit, confirmed Chrome profile-counter repair. |
-| `DesktopStub` | C++ Win32 tray app | Live Tile source engine: wallpaper/images/media artwork with ordered RSS, custom text, SMTC, Notes, Discord and indicator sources. Also a loose Appx registrar. See `docs/content-engine.md`. |
+| `DesktopStub` | C++ Win32 tray app | Live Tile source engine: wallpaper/images/media artwork, folder galleries, RSS, custom text, SMTC, Notes, Discord and indicator sources. Also a loose Appx registrar. See `docs/content-engine.md`. |
+| `legacy/discord-ha-bot-starter` | Node.js / TypeScript | Discord bot with independent gateway/voice leadership, watchdog and offline reliability fixtures. Standalone legacy application; not a native overlay or DesktopStub provider. |
+| `legacy/Minecraft-Bedrock-AFK` | Node.js | Bedrock AFK/protocol experiments with bounded diagnostic capture and offline world/shutdown fixtures. Standalone legacy application. |
 | `legacy/DNSAutoUpdate` | C# DNS updater | Keeps selected Windows DNS Server A records aligned with current server IPv4 addresses. |
 | `legacy/PhotoCollage` | C# console app | Creates a simple JPEG grid/collage from images in a folder. |
 | `legacy/SecureDesktopLauncher` | Shared configuration tray + manual native tools | INI/CLI/tray/Startup controls; explicit service/password actions preserve secure-desktop launching. |
 | `legacy/TaskSchedulerMigration` | C# Task Scheduler utility | Re-registers scheduled tasks from an old SID to a new user/account. |
-| `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local Windhawk mods: Always UIAccess, AppsFolder Unhide Hidden Apps, and Snipping Tool Border Fix. |
+| `legacy/WindhawkMods` | Windhawk C++ mods | Source-only local mods; see the folder's catalog for all 16 distinct IDs and alternative source variants. Windhawk retains its own settings/loading model. |
 | `legacy/WindhawkMods/LockScreenWin10` | Windhawk research mod | Windows 10 lock-screen styling and XAML investigation sources. |
 | `legacy/YourPhoneHideBanner` | C# tray app; optional manual service | Suppresses the current user's Phone Link banners/sounds with shared INI/CLI/tray/Startup controls. |
 | `legacy/YouTubeMusicMigrate` | C# configuration app + PowerShell worker | Shared INI/CLI/tray/Startup; explicit library operations preserve the typed script parameters. |

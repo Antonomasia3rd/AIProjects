@@ -14,15 +14,44 @@
 
 static constexpr UINT WM_APP_SECONDARY_TILE_COMPLETE = WM_APP + 113;
 static constexpr UINT WM_APP_SECONDARY_APPEARANCE_CHANGED = WM_APP + 115;
+static constexpr UINT WM_APP_GALLERY_SETUP_READY = WM_APP + 116;
+static constexpr UINT_PTR GALLERY_HISTORY_TIMER = 0x47414c53;
 static constexpr int SECONDARY_TILE_CANCEL_ID = 51001;
 static void WakePollThread();
 static bool RequestRefreshExistingSecondaryTileLogos(HWND owner, bool force = false);
 static aip::content::AppearanceRefreshNotice g_secondaryAppearanceNotice;
+static void CompleteGallerySetup(HWND owner);
+struct GalleryPinHistory {
+    bool ready = false, pending = false;
+    std::set<std::wstring> ids;
+    std::wstring error;
+};
+static GalleryPinHistory g_galleryPinHistory;
+
+static bool FindConfiguredGalleryTile(const std::wstring& id, aip::gallery::Configuration& configuration,
+    aip::gallery::TileConfiguration& result)
+{
+    std::wstring error;
+    if (!ReadGalleryConfiguration(configuration, error)) return false;
+    for (const auto& tile : configuration.tiles)
+        if (!id.empty() && id == aip::gallery::NativeTileId(configuration.groupId, tile.id)) { result = tile; return true; }
+    return false;
+}
+static bool GalleryTilePinReady(const std::wstring& id)
+{
+    aip::gallery::Configuration configuration; aip::gallery::TileConfiguration tile;
+    if (!FindConfiguredGalleryTile(id, configuration, tile) || !configuration.enabled || !tile.enabled || configuration.folder.empty()) return false;
+    std::wstring profile; { std::lock_guard<std::mutex> lock(g_pathMutex); profile = g_iniPath; }
+    aip::gallery::Ledger ledger; std::wstring error;
+    return ReadGalleryLedgerNative(aip::gallery::runtime::LedgerPath(aip::MakeAbsolutePath(profile)), ledger, error) ==
+        aip::gallery::runtime::ReadResult::Ok && ledger.groupId == configuration.groupId;
+}
 
 static bool CurrentSecondaryAppearanceFingerprint(std::wstring& result)
 {
     // Refresh through the established cache, then use one immutable document
-    // for all 21 fields. Account/text values never enter the fingerprint.
+    // for source/action and configured gallery appearances. Account/text
+    // values never enter the fingerprint.
     std::wstring ignored;
     ReadIniValueCached(L"MediaActions", L"Branding", ignored);
     std::vector<IniSectionData> document;
@@ -32,7 +61,18 @@ static bool CurrentSecondaryAppearanceFingerprint(std::wstring& result)
         return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
     };
     std::wstring error;
-    return aip::content::ReadSecondaryAppearanceFingerprint(read, result, error);
+    std::wstring candidate;
+    if (!aip::content::ReadSecondaryAppearanceFingerprint(read, candidate, error)) return false;
+    aip::gallery::Configuration gallery;
+    if (!aip::gallery::ReadConfiguration(read, gallery, error)) return false;
+    if (!gallery.groupId.empty()) {
+        // Identity selects the existing native destinations. Account fields,
+        // folders, photo order/cadence, and ordinary text never trigger COM.
+        candidate += L"Gallery:" + gallery.groupId + L":" + std::to_wstring(gallery.tiles.size()) + L";";
+        for (const auto& tile : gallery.tiles)
+            candidate += tile.id + L":" + tile.appearance.background + L":" + tile.appearance.branding + L":" + tile.appearance.backgroundColor + L";";
+    }
+    result = std::move(candidate); return true;
 }
 static void PollSecondaryTileAppearance()
 {
@@ -53,6 +93,10 @@ static void PollSecondaryTileAppearance()
 
 [[maybe_unused]] static std::wstring CanonicalSecondaryTileRuntimeId(std::wstring id)
 {
+    if (id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0) {
+        aip::gallery::Configuration configuration; aip::gallery::TileConfiguration tile;
+        return FindConfiguredGalleryTile(id, configuration, tile) ? id : std::wstring{};
+    }
     const std::wstring prefix = L"AipSource_";
     const std::wstring actionPrefix = L"AipAction_";
     if (id.compare(0, actionPrefix.size(), actionPrefix) == 0) {
@@ -68,6 +112,12 @@ static void PollSecondaryTileAppearance()
     const auto* descriptor = aip::content::FindSecondaryTileDescriptor(id);
     return descriptor ? prefix + descriptor->id : std::wstring{};
 }
+static bool IsKnownSecondaryMetadataId(const std::wstring& id)
+{
+    if (aip::tile_visual::IsKnownSecondaryArtworkId(id)) return true;
+    if (id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) != 0) return false;
+    return !CanonicalSecondaryTileRuntimeId(id).empty();
+}
 
 #ifndef DESKTOPSTUB_INERT_HARDWARE
 namespace secondary_ui {
@@ -75,7 +125,7 @@ using NativeTile = winrt::Windows::UI::StartScreen::SecondaryTile;
 using BoolOperation = winrt::Windows::Foundation::IAsyncOperation<bool>;
 using TileListOperation = winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Foundation::Collections::IVectorView<NativeTile>>;
 using AsyncStatus = winrt::Windows::Foundation::AsyncStatus;
-enum class Kind { Pin, Unpin, List, RefreshList, RefreshLogo, VerifyLogos };
+enum class Kind { Pin, Unpin, List, RefreshList, RefreshLogo, VerifyLogos, GalleryHistory };
 struct Apartment {
     HRESULT status;
     DWORD thread = GetCurrentThreadId();
@@ -232,6 +282,11 @@ static void ApplyLogos(NativeTile& tile, const aip::tile_visual::Assets& logos)
 }
 static aip::content::TileAppearance ConfiguredAppearance(const std::wstring& id)
 {
+    if (id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0) {
+        aip::gallery::Configuration gallery; aip::gallery::TileConfiguration tile;
+        if (!FindConfiguredGalleryTile(id, gallery, tile)) throw winrt::hresult_error(E_INVALIDARG, L"Unknown gallery tile appearance.");
+        return tile.appearance;
+    }
     const auto section = id.compare(0, 10, L"AipAction_") == 0 ? std::wstring(L"MediaActions") :
         aip::content::SecondaryTileSection(id.substr(10));
     aip::content::TileAppearance appearance; std::wstring error;
@@ -259,10 +314,12 @@ static bool PrepareAppearanceAssets(const std::wstring& id, aip::tile_visual::As
     aip::content::PublishedTileAppearance& published, std::wstring& error)
 {
     const auto configured = ConfiguredAppearance(id);
-    const auto* topic = aip::tile_visual::FindTopic(id);
+    const bool gallery = id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0;
+    const auto topicKey = gallery ? std::wstring(L"gallery") : id;
+    const auto* topic = aip::tile_visual::FindTopic(topicKey);
     if (!topic) { error = L"Unknown tile artwork topic."; return false; }
     published = aip::content::PublishTileAppearance(configured, topic->rgb);
-    return aip::tile_visual::EnsureTileTopicAssets(id, GetExeDir(), logos, error,
+    return aip::tile_visual::EnsureTileTopicAssets(topicKey, GetExeDir(), logos, error,
         {configured.background == L"Color", aip::content::TileAppearanceRgb(configured, topic->rgb)});
 }
 static NativeTile CreatePinTile(const std::wstring& id, const std::wstring& name)
@@ -279,8 +336,11 @@ static NativeTile CreatePinTile(const std::wstring& id, const std::wstring& name
     const bool action = id.compare(0, std::wstring(L"AipAction_").size(), L"AipAction_") == 0;
     auto activationKey = id.substr(10u);
     if (action) std::replace(activationKey.begin(), activationKey.end(), L'_', L'-');
-    const auto arguments = L"--ini " + aip::QuoteCommandLineArg(profile) +
-        (action ? L" --media-action " : L" --tile-setup ") + activationKey;
+    std::wstring arguments = L"--ini " + aip::QuoteCommandLineArg(profile);
+    aip::gallery::Configuration gallery; aip::gallery::TileConfiguration galleryTile;
+    if (FindConfiguredGalleryTile(id, gallery, galleryTile))
+        arguments += L" --open-folder " + aip::QuoteCommandLineArg(gallery.folder);
+    else arguments += (action ? L" --media-action " : L" --tile-setup ") + activationKey;
     if (arguments.size() > 2048) throw winrt::hresult_error(E_INVALIDARG, L"The profile path is too long for Windows secondary tile activation arguments.");
     auto tile = factory.CreateMinimalTile(id, name, arguments, AssetUri(logos.medium), TileSize::Default);
     ApplyLogos(tile, logos);
@@ -311,7 +371,7 @@ static void StartNextLogoRefresh()
         const auto request = ++nextId;
         try {
             state.id = std::wstring(state.tile.TileId());
-            if (!aip::tile_visual::IsKnownSecondaryArtworkId(state.id)) continue;
+            if (!IsKnownSecondaryMetadataId(state.id)) continue;
             aip::tile_visual::Assets logos; std::wstring error;
             if (!PrepareAppearanceAssets(state.id, logos, state.expectedAppearance, error)) {
                 Log(L"[!] Source tile %ls artwork refresh skipped: %ls", state.id.c_str(), error.c_str()); continue;
@@ -321,7 +381,7 @@ static void StartNextLogoRefresh()
             appearanceRefreshExpected[state.id] = state.expectedAppearance;
             const auto before = ReadLogos(state.tile);
             LogLogoMetadata(state.id, before);
-            if (!aip::tile_visual::NeedsTopicLogoUpdate(state.id, before, state.expectedLogos) &&
+            if (aip::tile_visual::SamePublishedLogos(before, state.expectedLogos) &&
                 aip::content::SamePublishedTileAppearance(ReadAppearance(state.tile), state.expectedAppearance)) continue;
             // This is the existing FindAllAsync object. Preserve its ID, name,
             // arguments and current Start placement. Only configured logos,
@@ -374,6 +434,10 @@ static bool RequestMutation(HWND owner, const std::wstring& supplied, const std:
 {
     const auto id = CanonicalSecondaryTileRuntimeId(supplied);
     if (id.empty() || !EnsureUi(owner)) return false;
+    if (pin && id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0 && !GalleryTilePinReady(id)) {
+        Report(owner, L"Set up this gallery and its permanent ownership history before pinning. Enable the gallery and this tile first.");
+        return false;
+    }
     const auto keepApartment = apartment;
     if (std::any_of(pending.begin(), pending.end(), [](const auto& item) {
         return item.second.kind == Kind::Pin || item.second.kind == Kind::Unpin || item.second.kind == Kind::RefreshLogo ||
@@ -523,9 +587,65 @@ static std::vector<std::wstring> ListKnownSecondaryTileIds()
     return {secondary_ui::pinned.begin(), secondary_ui::pinned.end()};
 #endif
 }
+// Unlike the normal source menu cache, first setup must enumerate every
+// gallery-prefixed pin, including IDs absent from the current configuration.
+// An empty cache or failed enumeration is never evidence of empty history.
+static bool RequestGalleryPinHistory(HWND owner)
+{
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    (void)owner; return false;
+#else
+    using namespace secondary_ui;
+    if (!EnsureUi(owner) || g_galleryPinHistory.pending || UserMutationPending()) return false;
+    g_galleryPinHistory = {}; g_galleryPinHistory.pending = true;
+    if (!SetTimer(host, GALLERY_HISTORY_TIMER, 15000, nullptr)) {
+        g_galleryPinHistory.pending = false; g_galleryPinHistory.error = L"Windows could not start the bounded gallery history check."; return false;
+    }
+    const auto keepApartment = apartment;
+    const auto request = ++nextId;
+    try {
+        Pending state; state.kind = Kind::GalleryHistory;
+        const auto factory = aip::AcquireUncachedActivationFactory<NativeTile, winrt::Windows::UI::StartScreen::ISecondaryTileStatics>();
+        state.list = factory.FindAllAsync();
+        auto inserted = pending.emplace(request, std::move(state));
+        const std::weak_ptr<Mailbox> weak = mailbox; const auto destination = host;
+        inserted.first->second.list.Completed([weak, destination, request](const auto&, AsyncStatus status) noexcept {
+            PostCompletion(weak, destination, request, status);
+        });
+        return true;
+    } catch (const winrt::hresult_error& error) {
+        pending.erase(request); g_galleryPinHistory.pending = false; g_galleryPinHistory.error = ErrorText(error);
+    } catch (...) {
+        pending.erase(request); g_galleryPinHistory.pending = false; g_galleryPinHistory.error = L"Windows could not enumerate existing gallery pins. No history was initialized.";
+    }
+    KillTimer(host, GALLERY_HISTORY_TIMER);
+    return false;
+#endif
+}
 static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
     (void)wParam; (void)lParam;
+#ifndef DESKTOPSTUB_INERT_HARDWARE
+    if (message == WM_TIMER && wParam == GALLERY_HISTORY_TIMER && window == secondary_ui::host) {
+        KillTimer(window, GALLERY_HISTORY_TIMER);
+        if (!g_galleryPinHistory.pending) return true; // An already queued timer cannot invalidate a completed enumeration.
+        // Cancel and release on the owning UI thread before posting a later
+        // UI notification. Late completions cannot satisfy a new setup check.
+        for (auto entry = secondary_ui::pending.begin(); entry != secondary_ui::pending.end();) {
+            if (entry->second.kind != secondary_ui::Kind::GalleryHistory) { ++entry; continue; }
+            auto state = std::move(entry->second); entry = secondary_ui::pending.erase(entry);
+            try { if (state.list) state.list.Cancel(); } catch (...) {}
+        }
+        g_galleryPinHistory = {}; g_galleryPinHistory.error = L"Windows did not finish checking gallery pins within 15 seconds. Try setup again; no ownership history was created.";
+        PostMessageW(window, WM_APP_GALLERY_SETUP_READY, 0, 0); return true;
+    }
+#endif
+    if (message == WM_APP_GALLERY_SETUP_READY && window == g_hwnd) {
+#ifndef DESKTOPSTUB_INERT_HARDWARE
+        CompleteGallerySetup(window);
+#endif
+        return true;
+    }
     if (message == WM_APP_SECONDARY_APPEARANCE_CHANGED && window == g_hwnd) {
         if (g_secondaryAppearanceNotice.Consume()) {
 #ifdef DESKTOPSTUB_TEST_APPEARANCE_REFRESH
@@ -556,11 +676,20 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
                 throw winrt::hresult_error(E_UNEXPECTED, L"Windows returned an unknown secondary tile completion state.");
             if (completion.status == AsyncStatus::Canceled)
                 throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
-            if (state.kind == Kind::List || state.kind == Kind::RefreshList || state.kind == Kind::VerifyLogos) {
+            if (state.kind == Kind::GalleryHistory) {
+                std::set<std::wstring> history;
+                for (const auto& tile : state.list.GetResults()) {
+                    const auto id = std::wstring(tile.TileId());
+                    if (id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0)
+                        history.insert(id);
+                }
+                g_galleryPinHistory.ids = std::move(history);
+                g_galleryPinHistory.ready = true; g_galleryPinHistory.error.clear();
+            } else if (state.kind == Kind::List || state.kind == Kind::RefreshList || state.kind == Kind::VerifyLogos) {
                 std::set<std::wstring> result;
                 for (const auto& tile : state.list.GetResults()) {
                     const auto id = std::wstring(tile.TileId());
-                    if (!aip::tile_visual::IsKnownSecondaryArtworkId(id) || !result.insert(id).second) continue;
+                    if (!IsKnownSecondaryMetadataId(id) || !result.insert(id).second) continue;
                     if (state.kind == Kind::RefreshList) logoRefreshQueue.push_back(tile);
                     if (state.kind == Kind::VerifyLogos) {
                         const auto expected = logoRefreshExpected.find(id);
@@ -600,9 +729,17 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
             // nested modal loop which could dispatch shutdown before release.
             if (error.code() != HRESULT_FROM_WIN32(ERROR_CANCELLED)) Log(L"[!] Secondary tile: %ls", ErrorText(error).c_str());
             else LogText(L"Source tile request cancelled.");
+            if (state.kind == Kind::GalleryHistory) g_galleryPinHistory.error = ErrorText(error);
         } catch (...) { LogText(L"[!] Secondary tile: could not retrieve the completed request."); }
         if (state.owner && IsWindow(state.owner)) DestroyWindow(state.owner);
         state.mutation = nullptr; state.tile = nullptr; state.list = nullptr;
+        if (state.kind == Kind::GalleryHistory) {
+            KillTimer(window, GALLERY_HISTORY_TIMER);
+            g_galleryPinHistory.pending = false;
+            if (!g_galleryPinHistory.ready && g_galleryPinHistory.error.empty())
+                g_galleryPinHistory.error = L"Windows could not confirm gallery pin history. No configuration was saved.";
+            PostMessageW(window, WM_APP_GALLERY_SETUP_READY, 0, 0);
+        }
         StartNextLogoRefresh();
         WakePollThread();
     }
@@ -611,10 +748,12 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
 }
 static void ShutdownSecondaryTileUi()
 {
+    g_galleryPinHistory = {};
 #ifndef DESKTOPSTUB_INERT_HARDWARE
     using namespace secondary_ui;
     shuttingDown = true;
     if (!apartment || GetCurrentThreadId() != uiThread) return;
+    KillTimer(host, GALLERY_HISTORY_TIMER);
     { std::lock_guard<std::mutex> lock(mailbox->mutex); mailbox->accepting = false; mailbox->complete.clear(); }
     for (auto& item : pending) {
         try { if (item.second.mutation) item.second.mutation.Cancel(); if (item.second.list) item.second.list.Cancel(); } catch (...) {}

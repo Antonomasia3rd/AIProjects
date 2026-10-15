@@ -1,0 +1,57 @@
+# Current work and remaining findings
+
+This is the current index for the repository rework. Dated audit files retain
+their historical results; a passing test or an old statement that a slice was
+complete does not close the whole repository review.
+
+## Saved and installed
+
+- `2219d24`: transparent source/Quick Action fallback icons, independent
+  background/color/branding controls, raw-profile validation and coalesced
+  INI/CLI/tray appearance refresh. Installed after scans and bounded validation;
+  the existing six source pins and Previous Track pin passed native property
+  readback. The user's accounts and INI were preserved, and DesktopStub was
+  relaunched. See [appearance validation](tile-appearance-2026-10-15.md).
+- `0c95e6b`: the two user-created legacy bot projects and focused reliability
+  repairs are committed and pushed on the review branch. The parent repeated
+  TypeScript compilation and 27 injected Discord-bot tests, plus 42 injected
+  Minecraft checks. No bot, game, relay, authenticated service, database or
+  Startup action was run. See the [Discord review](../legacy/discord-ha-bot-starter/REVIEW-2026-10-15.md)
+  and [Minecraft review](../legacy/Minecraft-Bedrock-AFK/OFFLINE-AUDIT.md).
+
+These Node projects remain legacy applications. Their publication does not mean
+they already meet the native dependency-overlay, INI/tray or DesktopStub provider
+requirements. Credentials, diagnostic captures, auth caches, dependencies and
+runtime output were excluded from publication.
+
+## Gallery implemented and installed
+
+Folder-gallery support uses the user's approved separate pools per tile. The
+ownership model, bounded inventory worker, coordinator, host delivery, setup,
+typed settings and per-tile appearance passed the combined build/scan/smoke gates
+and are installed. Gallery remains disabled until the user chooses setup. No
+user photo folder or gallery pin has been touched. See the
+[final validation and installed identities](gallery-validation-2026-10-15.md).
+See the [model](gallery-engine-2026-10-15.md),
+[inventory](gallery-inventory-2026-10-15.md) and
+[coordinator](gallery-runtime-2026-10-15.md).
+
+## Still open
+
+| Area | What remains |
+| --- | --- |
+| Original repository review | Reconcile the implemented shared modules and all active/legacy products against the user's current rules. The dated rework log is not an exhaustive closure audit. |
+| Windows presentation | Actual Start appearance, RTL/DPI, theme contrast, static fallback, and branding need target-shell acceptance. Offscreen PNG/XML and native metadata readback do not prove what every shell renders. |
+| Gallery acceptance | The real folder chooser/pin confirmations, Windows animation, actual image sets and nonresponsive native-codec shutdown need local acceptance. Exact copies deduplicate; different encodings of visually identical pictures do not. Pools and cached published images are retained. |
+| Historical renderer variation | The unexplained four-pixel opaque preset difference remains open. Exact assertions have not been relaxed; current passing renders do not establish its cause. |
+| Media CPU | Cached SMTC lifetime and event scheduling are repaired, and the user reported 17 hours of normal CPU. The original DesktopStub/NPSMSvc episode was not reproduced, so its precise cause remains unproved. |
+| Real integrations | Actual Startup-folder/StartupTask, sleep/wake keyboards, player icons/actions, and HoYoLAB browser/discovery/session behavior still need local acceptance beyond injected fixtures. Preserve existing accounts while testing. |
+| Older delivery paths | Unpackaged/older-Windows helper queue correlation remains conservative; those paths keep app-managed rotation where individual delivery cannot be acknowledged safely. |
+| Notes compatibility | The current v2 account flow works in the user's screenshots. Older credential/import aliases still need protocol review; role discovery alone is not daily-notes acceptance for every alias. |
+| Windhawk | The source catalog and the syntax-check scope are corrected. Functional hooks were not reviewed or loaded in this pass; build-specific work requires current local binaries and matching symbols first. |
+| Legacy bots | Focused offline reliability repairs passed. Live HA, database, voice, updater, relay and protocol behavior were not exercised, and full native overlay migration remains separate work. |
+
+Security additions remain opt-in and lower priority than functional repairs.
+Plain credentials, configuration backups and full dumps should stay private.
+The Microsoft comparison submission remains deferred at the user's request;
+no additional file or dump was submitted and Defender was not bypassed.

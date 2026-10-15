@@ -3,5 +3,6 @@
 #include "ga_smtc_settings_tray.inc"
 #include "ga_secondary_tile_tray.inc"
 #include "ga_quick_actions.inc"
+#include "ga_gallery_tray.inc"
 #include "ga_tray_menu.inc"
 #include "ga_tray_dispatch.inc"

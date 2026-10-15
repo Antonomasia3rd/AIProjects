@@ -5,6 +5,7 @@ using CommandLineIniSetting = aip::IniSetting;
 #include "../live_capture_protocol.h"
 #include "../content_presets.h"
 #include "../secondary_tiles.h"
+#include "../gallery_engine.h"
 #include "../content_sources/notes_profile.inc"
 #include "../content_sources/notes_signin_model.h"
 #include "../hardware/hardware_profile_import.inc"
@@ -18,7 +19,8 @@ struct CommandLineOptions
     std::wstring tileSetupKey;
     std::wstring windowsTileId, mediaAction;
     bool tileSignIn = false;
-    std::wstring openUrl;
+    std::wstring openUrl, openFolder;
+    bool galleryFolderActivation = false;
     bool versionRequested = false;
     bool parseFailed = false;
     bool exitRequested = false;
@@ -773,6 +775,8 @@ static bool NormalizeDesktopStubTypedSetting(
     std::wstring& value,
     std::wstring& error)
 {
+    if (aip::gallery::KnownGallerySection(section))
+        return aip::gallery::NormalizeSetting(section, key, value, error);
     if (aip::notes::KnownSignInSection(section))
         return aip::notes::NormalizeNotesSignInSetting(section, key, value, error);
     if (IEquals(section, L"QuickActions") || IEquals(section, L"MediaActions"))
@@ -1244,6 +1248,14 @@ static bool ParseCommandLineOptions()
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--open-url", value, error, matched)) return fail(error);
         if (matched) {
             if (!ValidateRssFeedUrlSetting(value, false, g_commandLine.openUrl, error)) return fail(error);
+            continue;
+        }
+        if (!CommandLineTryGetOptionValue(argc, argv, i, L"--open-folder", value, error, matched)) return fail(error);
+        if (matched) {
+            if (value.empty() || !aip::gallery::detail::Text(value, 32768, false))
+                return fail(L"--open-folder requires a nonempty directory path on one line.");
+            g_commandLine.openFolder = value;
+            g_commandLine.galleryFolderActivation = true;
             continue;
         }
         if (IEquals(arg, L"--tile-sign-in")) { g_commandLine.tileSignIn = true; continue; }
@@ -2031,6 +2043,20 @@ static bool ParseCommandLineOptions()
 
     std::wstring combinationError;
     if (!ValidateCommandLinePresetCombination(combinationError)) return fail(combinationError);
+    if (g_commandLine.windowsTileId.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0)
+        g_commandLine.galleryFolderActivation = true;
+    if (g_commandLine.galleryFolderActivation && !g_commandLine.windowsTileId.empty() &&
+        g_commandLine.windowsTileId.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) != 0 &&
+        !g_commandLine.helpRequested && !g_commandLine.versionRequested)
+        return fail(L"--open-folder cannot be combined with another source's Windows tile id.");
+    if (g_commandLine.galleryFolderActivation && !g_commandLine.helpRequested && !g_commandLine.versionRequested &&
+        (g_commandLine.renderOnly || g_commandLine.configureOnly || !g_commandLine.settings.empty() || !g_commandLine.presetName.empty() ||
+            !g_commandLine.openUrl.empty() || !g_commandLine.mediaAction.empty() || !g_commandLine.tileSetupKey.empty() || g_commandLine.tileSignIn ||
+            g_commandLine.notesRefresh >= 0 || !g_commandLine.notesImports.empty() || !g_commandLine.hardwareImports.empty() ||
+            !g_commandLine.nowPlayingImports.empty() || !g_commandLine.discordProfileSettings.empty() || !g_commandLine.discordCreatePath.empty() ||
+            g_commandLine.generateOnce || g_commandLine.forceGenerateOnStartup || g_commandLine.exitRequested ||
+            g_commandLine.regenerateManifest || g_commandLine.appxActivationServer || g_commandLine.comRegistrationHelper))
+        return fail(L"--open-folder and gallery tile activation cannot be combined with settings, source actions, or rendering commands.");
     if (g_commandLine.tileSetupKey.empty() && g_commandLine.mediaAction.empty()) {
         const auto& id = g_commandLine.windowsTileId;
         if (id.compare(0, 10, L"AipSource_") == 0) {
@@ -2086,7 +2112,10 @@ static std::wstring CommandLineUsageText()
         L"Rotation: --cycle-driver DesktopStub|Auto|Windows (Windows controls native queue display timing).\n"
         L"Discord advanced profile: --discord-set Section.Key=Value; --discord-create-profile INI (configuration only).\n"
         L"  Credential replacements require masked tray input or explicit --discord-private-input; values are never echoed.\n"
-        L"ASUS numbered fields: --set AsusBlink.Event001HddState=128,129 (hardware and disk flags stay explicit).\n";
+        L"ASUS numbered fields: --set AsusBlink.Event001HddState=128,129 (hardware and disk flags stay explicit).\n"
+        L"Gallery: --set Gallery.Enabled=1; Gallery.Folder, TileCount (1-8), QueueSize (1-5), RefreshSeconds (60-86400), Order, Fit, Seed.\n"
+        L"  Use Tiles > Photo gallery > Set up gallery first to create permanent per-tile ownership history; pin each tile manually.\n"
+        L"  --open-folder DIRECTORY opens an existing directory; relative paths are beside the selected INI.\n";
 }
 
 static bool AsusEventKey(const std::wstring& key)
@@ -2618,6 +2647,34 @@ static bool ValidateDesktopStubContentProfileValues(
     return true;
 }
 
+static bool ValidateDesktopStubProfileDocument(const std::wstring& text, std::wstring& error)
+{
+    const auto document = aip::ParseIniDocument(text);
+    const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+    };
+    for (const auto& setting : g_displaySettings) {
+        auto value = read(setting.section, setting.key, setting.fallback);
+        if (!NormalizeDesktopStubDisplaySettingValue(setting, value, error)) return false;
+    }
+    if (!aip::notes::ValidateNotesSignInConfiguration(read, error)) return false;
+    aip::content::Configuration content;
+    aip::content::SecondaryTileConfiguration tiles;
+    aip::content::TileAppearance actions;
+    aip::gallery::Configuration gallery;
+    if (!aip::content::ReadConfiguration(read, content, error, ContentAsusEventsFromDocument(document)) ||
+        !aip::content::ReadSecondaryTileConfiguration(read, content.entries.size(), tiles, error) ||
+        !aip::content::ReadTileAppearance(read, L"MediaActions", actions, error) ||
+        !aip::gallery::ReadConfiguration(read, gallery, error)) return false;
+    const bool rss = content.enabled && std::any_of(content.entries.begin(), content.entries.end(), [](const auto& entry) {
+        return entry.enabled && aip::content::EntryUsesSource(entry, aip::content::SourceId::RssFeed);
+    });
+    return ValidateDesktopStubContentProfileValues(rss && !tiles.enabled ? L"RssFeed" : content.enabled ? L"Wallpaper" : read(L"Settings", L"ContentSource", L"Wallpaper"),
+        read(L"RssFeed", L"FeedUrl", L""), read(L"RssFeed", L"UserAgent", L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)"),
+        read(L"RssFeed", L"UpdateIntervalSeconds", L"900"), read(L"RssFeed", L"MaxItems", L"5"),
+        read(L"RssFeed", L"HttpTimeoutSeconds", L"20"), read(L"RssFeed", L"MaxFeedBytes", L"2097152"), error);
+}
+
 static bool ValidateCommandLinePresetDocument(const std::wstring& text, std::wstring& error)
 {
     const auto document = aip::ParseIniDocument(text);
@@ -2628,6 +2685,8 @@ static bool ValidateCommandLinePresetDocument(const std::wstring& text, std::wst
     // lock. Preserve action-appearance parity even without a preset request.
     aip::content::TileAppearance actionAppearance;
     if (!aip::content::ReadTileAppearance(read, L"MediaActions", actionAppearance, error)) return false;
+    aip::gallery::Configuration gallery;
+    if (!aip::gallery::ReadConfiguration(read, gallery, error)) return false;
     if (g_commandLine.presetName.empty()) return true;
     for (const auto& setting : g_displaySettings) {
         auto value = read(setting.section, setting.key, setting.fallback);
@@ -2691,6 +2750,10 @@ static bool ValidateDesktopStubContentProfile(
     if (!aip::content::ReadTileAppearance([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
     }, L"MediaActions", actionAppearance, error)) return false;
+    aip::gallery::Configuration gallery;
+    if (!aip::gallery::ReadConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
+    }, gallery, error)) return false;
 
     bool usesRss = false;
     for (const auto& entry : composition.entries)

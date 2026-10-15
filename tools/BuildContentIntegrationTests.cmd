@@ -35,6 +35,10 @@ if /i "%~1"=="TileVisualAssetsTests" goto TileVisuals
 if /i "%~1"=="TileVisualAssetsRenderTests" goto TileVisualRender
 if /i "%~1"=="NotesTileRowsTests" goto NoteRows
 if /i "%~1"=="MediaTileLayoutTests" goto MediaTileLayout
+if /i "%~1"=="GalleryEngineTests" goto GalleryEngine
+if /i "%~1"=="GalleryInventoryTests" goto GalleryInventory
+if /i "%~1"=="GalleryInventoryNativeTests" goto GalleryInventoryNative
+if /i "%~1"=="GalleryRuntimeTests" goto GalleryRuntime
 if /i "%~1"=="CapsBlinkEngineTests" goto CapsEngine
 if /i "%~1"=="TileNotificationPayloadTests" goto TilePayload
 if /i "%~1"=="BoundedCaptureProcessTests" goto BoundedCapture
@@ -106,6 +110,18 @@ cl %CONTENT_FLAGS% /WX tools\NotesTileRowsTests.cpp /Fe:%CONTENT_OUT%\NotesTileR
 goto Result
 :MediaTileLayout
 cl %CONTENT_FLAGS% /WX tools\MediaTileLayoutTests.cpp /Fe:%CONTENT_OUT%\MediaTileLayoutTests.exe /Fo:%CONTENT_OUT%\MediaTileLayoutTests.obj
+goto Result
+:GalleryEngine
+cl %CONTENT_FLAGS% /WX tools\GalleryEngineTests.cpp /Fe:%CONTENT_OUT%\GalleryEngineTests.exe /Fo:%CONTENT_OUT%\GalleryEngineTests.obj
+goto Result
+:GalleryInventory
+cl %CONTENT_FLAGS% /WX tools\GalleryInventoryTests.cpp /Fe:%CONTENT_OUT%\GalleryInventoryTests.exe /Fo:%CONTENT_OUT%\GalleryInventoryTests.obj
+goto Result
+:GalleryInventoryNative
+cl %CONTENT_FLAGS% /WX tools\GalleryInventoryNativeTests.cpp /Fe:%CONTENT_OUT%\GalleryInventoryNativeTests.exe /Fo:%CONTENT_OUT%\GalleryInventoryNativeTests.obj /link windowscodecs.lib ole32.lib advapi32.lib shell32.lib
+goto Result
+:GalleryRuntime
+cl %CONTENT_FLAGS% /WX tools\GalleryRuntimeTests.cpp /Fe:%CONTENT_OUT%\GalleryRuntimeTests.exe /Fo:%CONTENT_OUT%\GalleryRuntimeTests.obj
 goto Result
 :TileVisualRender
 cl %CONTENT_FLAGS% tools\TileVisualAssetsRenderTests.cpp /Fe:%CONTENT_OUT%\TileVisualAssetsRenderTests.exe /Fo:%CONTENT_OUT%\TileVisualAssetsRenderTests.obj /link gdiplus.lib gdi32.lib user32.lib shell32.lib shlwapi.lib advapi32.lib
