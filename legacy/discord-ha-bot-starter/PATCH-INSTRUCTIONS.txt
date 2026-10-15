@@ -1,0 +1,12 @@
+Nifibot Logging v0.2.3 hotfix
+
+Overlay this folder onto the existing project root and allow overwrite.
+It replaces only src/discordClient.ts.
+
+Fix: reaction event users may be User | PartialUser. The hydration helper now
+accepts the shared structural shape and resolves partial users before use.
+
+Then run:
+  npm run build
+
+Do not run migrations until the build is clean.

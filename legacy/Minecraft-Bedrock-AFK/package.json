@@ -1,0 +1,30 @@
+{
+  "name": "minecraft-bedrock-afk",
+  "version": "1.7.16-patched",
+  "description": "Minecraft Bedrock AFK/wandering bot - persistent identity + non-destructive safety + protocol-2193 respawn + post-respawn local-player reinitialization/re-arm diagnostics",
+  "main": "bot.js",
+  "scripts": {
+    "test:offline-audit": "node --test --test-timeout=5000 offline-audit-test.js",
+    "start": "node bot.js",
+    "check": "node --check bot.js && node --check world.js && node --check config.js && node --check safety.js && node --check disconnect-blackbox.js && node --check disconnect-blackbox-test.js && node --check protocol-compat.js && node --check post-respawn-sync-test.js && node --check post-respawn-rearm-test.js && node post-respawn-physics-test.js && node post-respawn-reinit-test.js",
+    "test": "node disconnect-blackbox-test.js && node protocol-smoke-test.js && node post-respawn-sync-test.js && node post-respawn-rearm-test.js && node post-respawn-physics-test.js && node post-respawn-reinit-test.js"
+  },
+  "keywords": [
+    "minecraft",
+    "bedrock",
+    "afk",
+    "bot"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "bedrock-protocol": "^3.60.1",
+    "prismarine-chunk": "^1.41.0",
+    "prismarine-registry": "^1.12.0",
+    "vec3": "^0.2.0"
+  }
+}

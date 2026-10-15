@@ -1,0 +1,27 @@
+Nifibot v0.5.1.3 bootstrap hotfix
+
+Fixes two Windows reliability issues:
+1. Self-update staging failed with `spawn EINVAL` when child_process.spawn()
+   attempted to launch npm.cmd directly (seen on Node v24.21.0).
+   The updater now runs npm-cli.js through the current node.exe using
+   process.env.npm_execpath.
+2. Includes the v0.5.1.2 pg.Pool idle ECONNRESET handler so both cluster nodes
+   can receive the same one-time manual bootstrap patch.
+
+IMPORTANT:
+The currently installed self-updater cannot update itself past the spawn EINVAL
+failure, because it fails before the overlay is applied. Apply this ZIP manually
+to every v0.5.1 node ONCE.
+
+Overwrite:
+  src/selfUpdate.ts
+  src/db.ts
+
+Then on each node:
+  npm run build
+  npm start
+
+No migration, npm install, or slash-command redeploy is required.
+
+After BOTH nodes have this bootstrap hotfix, retry /cluster-update with a future
+test patch. The failed command is not partially applied and can be ignored.

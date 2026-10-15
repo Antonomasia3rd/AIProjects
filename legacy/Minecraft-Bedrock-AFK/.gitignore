@@ -1,0 +1,7 @@
+node_modules/
+/diag/
+/.relay-auth/
+.bot-instance-id
+
+disconnect-blackbox.jsonl
+disconnect-blackbox.jsonl.1

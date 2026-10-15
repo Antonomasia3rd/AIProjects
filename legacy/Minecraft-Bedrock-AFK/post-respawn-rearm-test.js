@@ -1,0 +1,35 @@
+'use strict'
+
+const fs = require('fs')
+const path = require('path')
+const assert = require('assert')
+
+const source = fs.readFileSync(path.join(__dirname, 'bot.js'), 'utf8')
+
+assert(source.includes('startGameCurrentTick = packet.current_tick'), 'start_game.current_tick must be captured')
+assert(source.includes('tick = seed'), 'movement tick must be seeded from start_game.current_tick')
+assert(source.includes('function beginPostRespawnRearm'), 'missing post-respawn re-arm entry point')
+assert(source.includes('function completePostRespawnRearm'), 'missing post-respawn re-arm completion')
+assert(source.includes('function notePostRespawnRearmFeedback'), 'missing authoritative re-arm feedback handler')
+assert(source.includes("moveZ = 0.35"), 're-arm must use a small controlled forward probe')
+assert(source.includes('calculatePostRespawnRearmProbe(moveX, moveZ)'), 're-arm probe must use authoritative frozen-physics path')
+assert(source.includes("walking: probing"), 're-arm probe must set walking input only during probe phase')
+assert(source.includes('serverStep >= 0.06 || serverSpeed >= 0.015'), 're-arm must require authoritative movement evidence')
+assert(source.includes("notePostRespawnRearmFeedback(pos, packet.delta || null, 'CorrectPlayerMovePrediction', packet.on_ground)"), 'corrections must feed re-arm acceptance and authoritative ground state')
+assert(source.includes('postRespawnSync.active || postRespawnRearm.active'), 'server rejection detector must be suppressed during re-arm')
+assert(source.includes('ai.swimming || postRespawnSync.active || postRespawnRearm.active'), 'stuck detector must be suppressed during re-arm')
+assert(source.includes("finishRespawn('final PlayerAction grace elapsed'"), 'proven v1.7.11 respawn path must remain')
+
+assert(source.includes("inputData.includes('handled_teleport')"), 'handled_teleport must be emitted through PlayerAuthInput')
+assert(source.includes('Post-respawn teleport-equivalent terdeteksi'), 'large post-respawn correction must queue teleport acknowledgement')
+assert(source.includes("handledTeleportReason = `${source} shift=${shift.toFixed(2)}`"), 'teleport ACK reason must be recorded')
+assert(source.includes('Preserve one-shot movement ACK flags across sync -> re-arm'), 'sync->rearm must preserve pending ACK flags')
+assert(source.includes("consumeMovementAckFlags(inputData, outgoingTick, probing ? 'post-respawn-rearm-probe' : 'post-respawn-rearm-neutral')"), 're-arm packets must consume one-shot ACK flags')
+
+console.log('✅ Post-respawn movement re-arm structural test OK')
+console.log('   tick correlation  : start_game.current_tick seed retained')
+console.log('   re-arm warmup      : neutral input before probe')
+console.log('   movement probe     : controlled forward input from authoritative frozen pose')
+console.log('   acceptance gate    : authoritative server movement required')
+console.log('   teleport ACK       : received_server_data + handled_teleport preserved into re-arm')
+console.log('   respawn handshake  : v1.7.11 path unchanged')

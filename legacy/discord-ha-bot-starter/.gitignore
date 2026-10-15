@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+logs/
+*.log
+.DS_Store
+Thumbs.db
+
+.nifibot-updates/
+history-staging/
+archives/
+.offline-tests/

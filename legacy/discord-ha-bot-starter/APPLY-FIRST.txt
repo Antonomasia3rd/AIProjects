@@ -1,0 +1,25 @@
+Nifibot v0.4.1 — replaces the previously supplied v0.4 ZIP
+
+You said you have NOT applied v0.4 yet. Apply THIS ZIP directly over your
+current v0.3.4/v0.3.3 project instead; do not apply the older v0.4 ZIP first.
+
+Before building, install the local voice dependency:
+  npm install @discordjs/voice@0.19.2
+
+Then:
+  npm run build
+  npm run db:migrate
+  npm run commands:deploy
+  npm start
+
+Expected new migrations:
+  005_computer_control.sql
+  006_startup_lifecycle.sql
+
+After startup:
+  /logging channel kind:everything channel:#nifibot﹒logs
+  /logging startup-log enabled:true
+  /logging startup-voice enabled:true channel:<your VC>
+
+If npm shows a new install-scripts approval warning, do not blanket-approve it;
+review/paste the warning first.

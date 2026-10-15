@@ -1,0 +1,25 @@
+Nifibot v0.5.0 patch
+
+Baseline: the consolidated nifibot-current.zip supplied on 2026-10-13.
+
+1. Stop Nifibot.
+2. Overlay this ZIP into the project root, allowing overwrite.
+3. Run:
+
+   npm run build
+
+   STOP if TypeScript reports an error and send the full output back.
+
+4. If build succeeds:
+
+   npm run db:migrate
+   npm run commands:deploy
+   npm start
+
+Expected new migration:
+  007_reconciliation_and_default_logging.sql
+
+No npm install is required for this release.
+
+First v0.5 startup intentionally establishes an Audit Log baseline instead of
+replaying old pre-v0.5 administrative history. Later downtime is replayed.
