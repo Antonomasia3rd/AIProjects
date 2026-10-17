@@ -190,25 +190,34 @@ static bool IsVersionedLiveTileAssetFileName(const std::wstring& fileName, const
     return token.size() == 16 && IsHexToken(token);
 }
 
+struct LiveTileAssetPathLess {
+    bool operator()(const std::wstring& left, const std::wstring& right) const {
+        return CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) == CSTR_LESS_THAN;
+    }
+};
+using KeptLiveTileAssetPaths = std::set<std::wstring, LiveTileAssetPathLess>;
+static KeptLiveTileAssetPaths BuildKeptLiveTileAssetPaths(
+    const std::wstring& exeDir, const std::vector<LiveTileUpdateAsset>& keepAssets)
+{
+    KeptLiveTileAssetPaths paths;
+    const auto append = [&](const auto& assets) {
+        for (const auto& asset : assets) paths.insert(ResolveManifestAssetPath(exeDir, asset.file));
+    };
+    append(keepAssets);
+    for (const auto& item : g_nativeQueueAssets) append(item.second);
+    append(g_primaryTileAssets);
+    for (const auto& item : g_secondaryTileAssets) append(item.second);
+    return paths;
+}
 static bool IsKeptLiveTileAssetPath(
     const std::wstring& fullPath,
     const std::wstring& exeDir,
-    const std::vector<LiveTileUpdateAsset>& keepAssets)
+    const std::vector<LiveTileUpdateAsset>& keepAssets,
+    const KeptLiveTileAssetPaths* knownPaths = nullptr)
 {
-    for (const auto& asset : keepAssets)
-    {
-        if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file)))
-            return true;
-    }
-    for (const auto& item : g_nativeQueueAssets)
-        for (const auto& asset : item.second)
-            if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file))) return true;
-    for (const auto& asset : g_primaryTileAssets)
-        if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file))) return true;
-    for (const auto& item : g_secondaryTileAssets)
-        for (const auto& asset : item.second)
-            if (IEquals(fullPath, ResolveManifestAssetPath(exeDir, asset.file))) return true;
-    return false;
+    if (knownPaths) return knownPaths->find(fullPath) != knownPaths->end();
+    const auto paths = BuildKeptLiveTileAssetPaths(exeDir, keepAssets);
+    return paths.find(fullPath) != paths.end();
 }
 
 static unsigned long long FileTimeToUInt64(const FILETIME& ft)
@@ -230,6 +239,7 @@ static void DeleteOldVersionedLiveTileAssets(
     };
 
     constexpr size_t retainedVersionedAssetsPerTile = 2;
+    const auto keptPaths = BuildKeptLiveTileAssetPaths(exeDir, keepAssets);
 
     for (const auto& asset : g_liveTileAssets)
     {
@@ -274,12 +284,51 @@ static void DeleteOldVersionedLiveTileAssets(
         for (size_t i = 0; i < candidates.size(); ++i)
         {
             if (i < retainedVersionedAssetsPerTile ||
-                IsKeptLiveTileAssetPath(candidates[i].path, exeDir, keepAssets))
+                IsKeptLiveTileAssetPath(candidates[i].path, exeDir, keepAssets, &keptPaths))
                 continue;
 
             DeleteFileW(candidates[i].path.c_str());
         }
     }
+}
+
+static void RunVersionedLiveTileAssetCleanup(const std::wstring& exeDir, const std::vector<LiveTileUpdateAsset>& keepAssets)
+{
+#ifdef DESKTOPSTUB_TEST_VERSIONED_ASSET_CLEANUP
+    (void)keepAssets; DESKTOPSTUB_TEST_VERSIONED_ASSET_CLEANUP(exeDir);
+#else
+    DeleteOldVersionedLiveTileAssets(exeDir, keepAssets);
+#endif
+}
+struct VersionedLiveTileAssetCleanupBatch;
+static thread_local VersionedLiveTileAssetCleanupBatch* g_liveTileCleanupBatch = nullptr;
+struct VersionedLiveTileAssetCleanupBatch {
+    VersionedLiveTileAssetCleanupBatch* previous = g_liveTileCleanupBatch;
+    std::set<std::wstring, LiveTileAssetPathLess> directories;
+    std::size_t* completedPasses = nullptr;
+    explicit VersionedLiveTileAssetCleanupBatch(std::size_t* passes = nullptr) : completedPasses(passes) { g_liveTileCleanupBatch = this; }
+    ~VersionedLiveTileAssetCleanupBatch() noexcept {
+        g_liveTileCleanupBatch = previous;
+        try {
+            if (previous) { previous->directories.insert(directories.begin(), directories.end()); return; }
+            if (directories.empty()) return;
+            std::lock_guard<std::mutex> lock(g_generationMutex);
+            for (const auto& directory : directories) {
+                RunVersionedLiveTileAssetCleanup(directory, {});
+                if (completedPasses) ++*completedPasses;
+            }
+        } catch (...) {} // Cleanup cannot replace the batch's delivery result.
+    }
+};
+static void RequestVersionedLiveTileAssetCleanup(const std::wstring& exeDir, const std::vector<LiveTileUpdateAsset>& keepAssets)
+{
+    if (g_liveTileCleanupBatch) g_liveTileCleanupBatch->directories.insert(exeDir);
+    else RunVersionedLiveTileAssetCleanup(exeDir, keepAssets);
+}
+
+static bool SecondaryLiveAssetsOnly(bool liveTileUpdateMode)
+{
+    return liveTileUpdateMode && g_renderContent && !g_renderContent->secondaryTileId.empty();
 }
 
 static void CopyLiveTileAssetsToStablePaths(
@@ -473,7 +522,7 @@ static std::vector<GeneratedAssetCacheFile> BuildGeneratedAssetCacheFileList(
     std::vector<GeneratedAssetCacheFile> files;
     liveTileUpdateAssets.clear();
 
-    for (const auto& t : g_tiles)
+    if (!SecondaryLiveAssetsOnly(liveTileUpdateMode)) for (const auto& t : g_tiles)
     {
         std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
         std::wstring outPath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
@@ -554,6 +603,7 @@ static void DeleteDisabledAssetsForCurrentConfig(
     const ManifestDisplayInfo& manifestInfo,
     bool liveTileUpdateMode)
 {
+    if (SecondaryLiveAssetsOnly(liveTileUpdateMode)) return;
     for (const auto& t : g_tiles)
     {
         bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
@@ -1218,6 +1268,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
 {
     std::wstring state;
     state += L"v=10;";
+    if (SecondaryLiveAssetsOnly(UseExperimentalLiveTileUpdate())) state += L"secondaryLiveOnly=1;";
     const bool bakedText = !UseExperimentalLiveTileUpdate() ||
         ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10 ||
         (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
@@ -2136,6 +2187,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
 
     std::wstring why = CleanGenerationReasonForSentence(reason);
     Log(g_ui.startingWallpaperGeneration.c_str(), why.c_str());
+    Log(L"[i] Tile target: %ls", contentScope.snapshot.secondaryTileId.empty() ? L"primary" : contentScope.snapshot.secondaryTileId.c_str());
     Log(g_ui.wallpaperSource.c_str(), wp);
 
     if (g_notifyOnStart)
@@ -2224,7 +2276,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         PrepareWallpaperRenderSource(src.get(), renderMode, preparedWallpaper, renderSource);
         Log(g_ui.renderModeSummary.c_str(), FitModeToString(renderMode));
 
-        for (auto& t : g_tiles)
+        if (!SecondaryLiveAssetsOnly(liveTileUpdateMode)) for (auto& t : g_tiles)
         {
         std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
         std::wstring outPath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
@@ -2559,7 +2611,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         {
             RetainPublishedLiveTileAssets(contentScope.snapshot, liveTileUpdateAssets);
             if (!contentScope.snapshot.galleryFrame) CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
-            DeleteOldVersionedLiveTileAssets(exeDir, liveTileUpdateAssets);
+            RequestVersionedLiveTileAssetCleanup(exeDir, liveTileUpdateAssets);
         }
         if (!restoredFromGeneratedAssetCache)
             SaveGeneratedAssetCache(exeDir, BuildGenerationStateKey(wp), generatedAssetCacheFiles);
@@ -2808,18 +2860,23 @@ static void GenerationWorkerThread()
         }
 
         bool ok = false;
+        const auto batchStart = steady_clock::now();
+        std::size_t attemptedFrames = 0, completedFrames = 0, cleanupPasses = 0;
         try
         {
             if (snapshots.empty()) ok = Generate(wallpaper.c_str(), reason.c_str());
             else {
+                VersionedLiveTileAssetCleanupBatch cleanup(&cleanupPasses);
                 GalleryBatchFailureGuard remainder{snapshots};
                 ok = true;
                 for (std::size_t index = 0; index < snapshots.size(); ++index) {
                     if (g_shutdownState.IsRequested()) { ok = false; break; }
                     const auto& snapshot = snapshots[index]; remainder.next = index + 1;
+                    ++attemptedFrames;
                     if (!Generate(snapshot.backgroundPath.c_str(), reason.c_str(), false, &snapshot)) {
                         ok = false; break;
                     }
+                    ++completedFrames;
                 }
             }
         }
@@ -2837,6 +2894,9 @@ static void GenerationWorkerThread()
             if (g_notifyOnFailure)
                 NotifyTrayBalloon(g_ui.notificationTitle, g_ui.notificationGenerationFailed, NIIF_ERROR);
         }
+        if (!snapshots.empty()) Log(L"[i] Tile batch: frames=%zu attempted=%zu completed=%zu cleanup=%zu success=%d elapsedMs=%lld",
+            snapshots.size(), attemptedFrames, completedFrames, cleanupPasses, ok ? 1 : 0,
+            static_cast<long long>(ElapsedMs(batchStart, steady_clock::now())));
         RecordGenerationCompletion(requestId, ok);
         if (ok) g_contentQueueRetryAfter = 0;
         else if (!snapshots.empty() || ContentQueueHasAcknowledgedFrames())

@@ -1,26 +1,32 @@
 # Next pass: outstanding fixes and acceptance
 
-Checkpoint: 2026-10-15, after `64c3bce`. The user wants the remaining work taken
-up after the next usage reset. No new stress batch is started near the current
-limit. Read CURRENT_STATUS and the referenced implementation records before
-changing source; old chronological audit entries are not a current bug list.
+Checkpoint: 2026-10-18. The gallery recovery, stale-dialog and source Rename
+fixes below are installed with two CPU optimizations. Typed idle parsing
+caches and gallery status retention are validated and installed. The shared
+notification-app live CLI reload repair passed private IPC/fake-runtime checks.
+Read CURRENT_STATUS and the referenced records
+before changing source; old chronological audit entries are not a current bug
+list. Private bounded fixtures remain the default for failure injection.
 
-## Fix and validate first
+## October 18 fixes installed; acceptance remains
 
-1. Gallery redistribution recovery: ledger reset and INI publication are two
-   separate atomic writes. Add recovery for a final INI failure after reset,
-   preserving the no-duplicate invariant and current account/preferences data.
-   Use injected failures and private INI/ledger files; do not interrupt or reset
-   the user's actual gallery to test this. Include process interruption/retry.
-2. Gallery edit conflicts: add/resize/folder dialogs can stage a configuration
-   that becomes stale while open. Compare the expected gallery configuration
-   against the freshly locked document before saving, as first setup does.
-   Include simultaneous private writers and unrelated-setting preservation.
-3. Source Rename propagation: verify and wire explicit Rename to an existing
-   Windows secondary tile's DisplayName while retaining native ID/placement.
-   Feed URL changes alone should preserve a user-chosen tile name. Current
-   artwork migration intentionally preserves native names, and ordinary Name
-   setting persistence does not establish native rename acceptance.
+1. Gallery redistribution recovery: a journal bridges the separate ledger and
+   INI writes; startup/manual recovery rejects ambiguous state. Private tests
+   cover final write failure, rollback, interruption/retry and conflicting
+   ledger/account edits. Do not force failures against the real profile.
+2. Gallery edit conflicts: add/resize/folder and per-row settings compare the
+   expected gallery configuration against the freshly locked document. Stale
+   dialogs reject without losing unrelated settings; injected cases passed.
+3. Source Rename propagation: explicit Rename persists name-only intent for an
+   existing Windows secondary tile's DisplayName, preserving ID/placement.
+   Feed URL and appearance refresh do not create a rename. Private success,
+   missing-pin, failure, retry and stale-revision cases passed. Real Windows
+   pin acceptance remains a normal-use check.
+4. CPU: optimized builds, batched cleanup, secondary-only live assets and idle
+   maintenance budgeting and typed content/appearance caches are installed.
+   The fresh bounded gates passed; short passive mean idle CPU fell from
+   0.454% to about 0.15–0.18%. Gallery-cycle peak, residual poll-thread phase cost and
+   Win+L attribution need separate evidence.
 
 ## Engineering and closure work
 
@@ -84,3 +90,8 @@ keyboard LEDs, real player behavior, sign-in challenges or startup at login.
   status pagination, gallery scale/folder groups, queued pin prompts, automatic
   pinned updates and uniform game icons. The RSS URL is the user-selected
   Windhawk releases Atom feed. These do not need to be reimplemented.
+- October 18 also closes gallery redistribution recovery, stale dialogs,
+  persisted explicit source renaming, repeated gallery/idle parsing work and
+  gallery status loss after delivery. Shared notification-app CLI/tray reload
+  parity is repaired in source and passes injected tests; actual user-policy
+  execution remains ordinary local acceptance.

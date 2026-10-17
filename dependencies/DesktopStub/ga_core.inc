@@ -687,6 +687,8 @@ static bool ReconcileDesktopStubStartupShortcutFromConfig(std::wstring& error)
 static std::mutex g_iniWriteMutex;
 static std::mutex g_iniCacheMutex;
 static bool g_iniCacheLoaded = false;
+static unsigned long long g_iniCacheRevision = 0;
+static std::wstring g_iniCacheProfile;
 static FILETIME g_iniCacheWriteTime{};
 static std::wstring g_iniCacheText;
 static std::vector<IniSectionData> g_iniCacheDoc;
@@ -755,8 +757,20 @@ static bool ReadIniSectionFromDoc(const std::vector<IniSectionData>& doc, const 
 
 static void SetIniCacheUnlocked(const std::wstring& text)
 {
-    g_iniCacheText = text;
-    g_iniCacheDoc = ParseIniDocument(text);
+    auto profile = aip::MakeAbsolutePath(g_iniPath);
+    const bool changed = !g_iniCacheLoaded || g_iniCacheText != text || !IEquals(g_iniCacheProfile, profile);
+    if (!g_iniCacheLoaded || g_iniCacheText != text) {
+        auto document = ParseIniDocument(text);
+        auto capturedText = text;
+        g_iniCacheText.swap(capturedText);
+        g_iniCacheDoc.swap(document);
+    }
+    // Identity is part of a publication even when two profiles have identical
+    // bytes. Prepare allocations above before replacing the published view.
+    g_iniCacheProfile.swap(profile);
+    if (changed) {
+        if (++g_iniCacheRevision == 0) ++g_iniCacheRevision;
+    }
     g_iniCacheLoaded = true;
     g_iniCacheLastCheck = steady_clock::now();
     FILETIME ft{};
@@ -786,13 +800,16 @@ static bool ReadIniFileForMutation(std::wstring& text)
 static bool ReadIniValueCached(const wchar_t* s, const wchar_t* k, std::wstring& out)
 {
     std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+    const auto profile = aip::MakeAbsolutePath(g_iniPath);
+    if (profile.empty()) return false;
 
     int refreshMs = g_iniCacheRefreshMs.load();
     if (refreshMs < 0) refreshMs = 0;
     if (refreshMs > 60000) refreshMs = 60000;
 
     auto now = steady_clock::now();
-    bool cacheFreshEnough = g_iniCacheLoaded && refreshMs > 0 &&
+    const bool sameProfile = IEquals(profile, g_iniCacheProfile);
+    bool cacheFreshEnough = g_iniCacheLoaded && sameProfile && refreshMs > 0 &&
         duration_cast<milliseconds>(now - g_iniCacheLastCheck).count() < refreshMs;
 
     if (!cacheFreshEnough)
@@ -800,28 +817,35 @@ static bool ReadIniValueCached(const wchar_t* s, const wchar_t* k, std::wstring&
         FILETIME ft{};
         bool haveTime = GetFileWriteTime(g_iniPath, ft);
         g_iniCacheLastCheck = now;
-        if (!g_iniCacheLoaded || !haveTime || !FileTimeEquals(ft, g_iniCacheWriteTime))
+        if (!g_iniCacheLoaded || !sameProfile || !haveTime || !FileTimeEquals(ft, g_iniCacheWriteTime))
         {
             std::wstring fresh;
-            if (!ReadTextFile(g_iniPath, fresh))
+            if (!ReadTextFile(g_iniPath, fresh)) {
+                g_iniCacheLastCheck = {};
                 return false;
+            }
             SetIniCacheUnlocked(fresh);
         }
     }
 
+    if (!g_iniCacheLoaded || !IEquals(profile, g_iniCacheProfile)) return false;
     return ReadIniValueFromDoc(g_iniCacheDoc, s, k, out);
 }
 
-static bool ReadIniSectionCached(const wchar_t* s, std::vector<IniEntry>& out)
+static bool ReadIniSectionCached(const wchar_t* s, std::vector<IniEntry>& out, bool* cacheReady = nullptr)
 {
+    if (cacheReady) *cacheReady = false;
     std::lock_guard<std::mutex> lk(g_iniCacheMutex);
+    const auto profile = aip::MakeAbsolutePath(g_iniPath);
+    if (profile.empty()) return false;
 
     int refreshMs = g_iniCacheRefreshMs.load();
     if (refreshMs < 0) refreshMs = 0;
     if (refreshMs > 60000) refreshMs = 60000;
 
     auto now = steady_clock::now();
-    bool cacheFreshEnough = g_iniCacheLoaded && refreshMs > 0 &&
+    const bool sameProfile = IEquals(profile, g_iniCacheProfile);
+    bool cacheFreshEnough = g_iniCacheLoaded && sameProfile && refreshMs > 0 &&
         duration_cast<milliseconds>(now - g_iniCacheLastCheck).count() < refreshMs;
 
     if (!cacheFreshEnough)
@@ -829,15 +853,19 @@ static bool ReadIniSectionCached(const wchar_t* s, std::vector<IniEntry>& out)
         FILETIME ft{};
         bool haveTime = GetFileWriteTime(g_iniPath, ft);
         g_iniCacheLastCheck = now;
-        if (!g_iniCacheLoaded || !haveTime || !FileTimeEquals(ft, g_iniCacheWriteTime))
+        if (!g_iniCacheLoaded || !sameProfile || !haveTime || !FileTimeEquals(ft, g_iniCacheWriteTime))
         {
             std::wstring fresh;
-            if (!ReadTextFile(g_iniPath, fresh))
+            if (!ReadTextFile(g_iniPath, fresh)) {
+                g_iniCacheLastCheck = {};
                 return false;
+            }
             SetIniCacheUnlocked(fresh);
         }
     }
 
+    if (!g_iniCacheLoaded || !IEquals(profile, g_iniCacheProfile)) return false;
+    if (cacheReady) *cacheReady = true;
     return ReadIniSectionFromDoc(g_iniCacheDoc, s, out);
 }
 

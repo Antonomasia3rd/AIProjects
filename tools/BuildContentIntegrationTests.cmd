@@ -12,7 +12,10 @@ if errorlevel 1 exit /b 1
 pushd "%CONTENT_ROOT%" || exit /b 1
 if not exist "build\content-integration" mkdir "build\content-integration"
 set "CONTENT_OUT=build\content-integration"
-set "CONTENT_FLAGS=/nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE"
+set "CONTENT_FLAGS=/nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /fp:precise"
+if "%CONTENT_OPTIMIZE%"=="1" set "CONTENT_OUT=build\content-integration-optimized"
+if "%CONTENT_OPTIMIZE%"=="1" set "CONTENT_FLAGS=%CONTENT_FLAGS% /O2"
+if not exist "%CONTENT_OUT%" mkdir "%CONTENT_OUT%"
 set "CONTENT_NATIVE_LIBS=gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib windowsapp.lib runtimeobject.lib"
 if /i "%~1"=="DiscordService" goto DiscordService
 if /i "%~1"=="DiscordServiceTests" goto DiscordServiceFixture
@@ -39,11 +42,13 @@ if /i "%~1"=="GalleryEngineTests" goto GalleryEngine
 if /i "%~1"=="GalleryInventoryTests" goto GalleryInventory
 if /i "%~1"=="GalleryInventoryNativeTests" goto GalleryInventoryNative
 if /i "%~1"=="GalleryRuntimeTests" goto GalleryRuntime
+if /i "%~1"=="GalleryTransactionTests" goto GalleryTransaction
 if /i "%~1"=="CapsBlinkEngineTests" goto CapsEngine
 if /i "%~1"=="TileNotificationPayloadTests" goto TilePayload
 if /i "%~1"=="BoundedCaptureProcessTests" goto BoundedCapture
 if /i "%~1"=="DiscordProfileEditTests" goto Discord
 if /i "%~1"=="ContentRuntimeTests" goto Runtime
+if /i "%~1"=="ContentRevisionHostTests" goto Revisions
 if /i "%~1"=="ContentRuntimeNoHardwareTests" goto Unavailable
 echo Unknown content fixture stage. This script compiles only.
 set "CONTENT_STATUS=2"
@@ -123,6 +128,9 @@ goto Result
 :GalleryRuntime
 cl %CONTENT_FLAGS% /WX tools\GalleryRuntimeTests.cpp /Fe:%CONTENT_OUT%\GalleryRuntimeTests.exe /Fo:%CONTENT_OUT%\GalleryRuntimeTests.obj
 goto Result
+:GalleryTransaction
+cl %CONTENT_FLAGS% /WX tools\GalleryTransactionTests.cpp /Fe:%CONTENT_OUT%\GalleryTransactionTests.exe /Fo:%CONTENT_OUT%\GalleryTransactionTests.obj
+goto Result
 :TileVisualRender
 cl %CONTENT_FLAGS% tools\TileVisualAssetsRenderTests.cpp /Fe:%CONTENT_OUT%\TileVisualAssetsRenderTests.exe /Fo:%CONTENT_OUT%\TileVisualAssetsRenderTests.obj /link gdiplus.lib gdi32.lib user32.lib shell32.lib shlwapi.lib advapi32.lib
 goto Result
@@ -137,6 +145,9 @@ cl %CONTENT_FLAGS% /WX tools\DiscordProfileEditTests.cpp %CONTENT_OUT%\DiscordSe
 goto Result
 :Runtime
 cl %CONTENT_FLAGS% DesktopStub\tools\ContentRuntimeTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj %CONTENT_OUT%\AsusService.obj /Fe:%CONTENT_OUT%\ContentRuntimeTests.exe /Fo:%CONTENT_OUT%\ContentRuntimeTests.obj /link %CONTENT_NATIVE_LIBS%
+goto Result
+:Revisions
+cl %CONTENT_FLAGS% DesktopStub\tools\ContentRevisionHostTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj %CONTENT_OUT%\AsusService.obj /Fe:%CONTENT_OUT%\ContentRevisionHostTests.exe /Fo:%CONTENT_OUT%\ContentRevisionHostTests.obj /link %CONTENT_NATIVE_LIBS%
 goto Result
 :Unavailable
 cl %CONTENT_FLAGS% DesktopStub\tools\ContentRuntimeNoHardwareTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj /Fe:%CONTENT_OUT%\ContentRuntimeNoHardwareTests.exe /Fo:%CONTENT_OUT%\ContentRuntimeNoHardwareTests.obj /link %CONTENT_NATIVE_LIBS%

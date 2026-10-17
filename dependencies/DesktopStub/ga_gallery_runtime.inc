@@ -2,6 +2,7 @@
 // Gallery source coordinator. The injected core is portable; the host wrappers
 // below perform explicit native INI/ledger work only when called by the host.
 #include "../gallery_engine.h"
+#include "../gallery_transaction.h"
 #if (defined(AIP_GALLERY_RUNTIME_NO_HOST) || defined(DESKTOPSTUB_INERT_HARDWARE)) && !defined(AIP_GALLERY_INVENTORY_PURE)
 #define AIP_GALLERY_INVENTORY_PURE
 #define AIP_GALLERY_RUNTIME_LOCAL_PURE
@@ -76,6 +77,10 @@ struct Frame {
     Receipt receipt;
     std::wstring nativeId, path, name, activationArguments, layout, tag, branding;
     bool reset = false, contain = false;
+};
+struct StatusWindow {
+    std::vector<Frame> frames;
+    bool submitted = false; // Status only; never a source of delivery work.
 };
 struct MenuState {
     std::wstring id, nativeId, name, status;
@@ -159,6 +164,8 @@ class Coordinator {
     // touch the ledger, inventory, worker, or filesystem.
     std::map<std::wstring, Flight> flights_;
     std::vector<Frame> frames_;
+    std::map<std::wstring, std::vector<Frame>> submittedStatus_;
+    std::wstring statusConfigurationKey_;
     std::wstring viewProfile_, viewGroup_;
     std::map<std::wstring, MenuState> menu_;
     void Wake() const { if (services_.wake) services_.wake(); }
@@ -173,6 +180,18 @@ class Coordinator {
     }
     void RemoveFramesUnlocked(const std::wstring& tile) {
         frames_.erase(std::remove_if(frames_.begin(), frames_.end(), [&](const auto& frame) { return frame.receipt.tileId == tile; }), frames_.end());
+    }
+    static bool CompleteStatusWindow(const std::vector<Frame>& frames) {
+        if (frames.empty() || frames.size() > MaxQueue || frames.front().receipt.count != frames.size()) return false;
+        const auto& first = frames.front().receipt;
+        std::vector<bool> slots(frames.size(), false);
+        for (const auto& frame : frames) {
+            const auto& receipt = frame.receipt;
+            if (receipt.groupId != first.groupId || receipt.tileId != first.tileId || receipt.epoch != first.epoch || receipt.ticket != first.ticket ||
+                receipt.count != first.count || receipt.slot >= slots.size() || slots[receipt.slot]) return false;
+            slots[receipt.slot] = true;
+        }
+        return true;
     }
     void PublishStatus(const std::wstring& message, bool clearFrames = false) {
         std::lock_guard<std::mutex> lock(published_);
@@ -197,7 +216,11 @@ class Coordinator {
         }
     }
     void CancelWork() { if (work_) work_->canceled = true; }
-    void InvalidateFlights() { std::lock_guard<std::mutex> lock(published_); frames_.clear(); flights_.clear(); ++flightRevision_; }
+    void InvalidateFlights(bool clearSubmitted = false) {
+        std::lock_guard<std::mutex> lock(published_); frames_.clear(); flights_.clear();
+        if (clearSubmitted) submittedStatus_.clear();
+        ++flightRevision_;
+    }
     bool Save(const Ledger& candidate, std::uint64_t now, std::wstring& error) {
         const auto saved = services_.saveLedger(LedgerPath(profile_), ledger_, candidate, error);
         if (saved == SaveResult::Saved) { ledger_ = candidate; return true; }
@@ -236,6 +259,12 @@ class Coordinator {
             if (desired.find(folder->first) == desired.end()) folder = folders_.erase(folder); else ++folder;
         }
         if (work_ && activeFolders_.find(work_->folderKey) == activeFolders_.end()) CancelWork();
+        {
+            std::lock_guard<std::mutex> lock(published_);
+            for (auto item = submittedStatus_.begin(); item != submittedStatus_.end();) {
+                if (activeTiles_.find(item->first) == activeTiles_.end()) item = submittedStatus_.erase(item); else ++item;
+            }
+        }
         UpdateInventoryView(); return true;
     }
     bool Reap(std::uint64_t now) {
@@ -409,7 +438,7 @@ public:
             CancelWork(); context_ = context; profile_ = input.profile; cacheDirectory_.clear(); inventoryMessage_.clear(); folders_.clear(); paths_.clear();
             eligibility_.clear(); selectionConfig_.clear(); selectionPins_.clear(); activeTiles_.clear(); activeFolders_.clear(); lastScannedFolder_.clear();
             ledger_ = {}; ledgerReady_ = inventoryReady_ = poolsReady_ = false; retryAfter_ = nextScan_ = 0;
-            lastAccepted_.clear(); lastQueueCount_.clear(); InvalidateFlights();
+            lastAccepted_.clear(); lastQueueCount_.clear(); InvalidateFlights(true);
         }
         auto effective = input.configuration;
         effective.enabled = !effective.groupId.empty();
@@ -417,23 +446,30 @@ public:
         const auto newKey = ConfigKey(effective);
         const bool configChanged = !configKey_.empty() && newKey != configKey_;
         cfg_ = std::move(effective); configKey_ = newKey;
-        if (configChanged) {
+        {
             std::lock_guard<std::mutex> lock(published_);
-            for (auto& item : flights_) {
-                item.second.attempt = ++attemptSequence_; item.second.readyToCommit = false;
-                std::fill(item.second.acknowledged.begin(), item.second.acknowledged.end(), false);
+            statusConfigurationKey_ = configKey_;
+            if (configChanged) {
+                for (auto& item : flights_) {
+                    item.second.attempt = ++attemptSequence_; item.second.readyToCommit = false;
+                    std::fill(item.second.acknowledged.begin(), item.second.acknowledged.end(), false);
+                }
+                frames_.clear();
+                submittedStatus_.clear();
+                ++flightRevision_;
             }
-            frames_.clear();
-            ++flightRevision_;
         }
         Reap(now);
         bool force = refreshRequested_.exchange(false) || configChanged;
         if (reloadRequested_.exchange(false)) { ledgerReady_ = poolsReady_ = false; retryAfter_ = nextScan_ = 0; InvalidateFlights(); }
-        if (!ValidateConfiguration(cfg_, error) || profile_.empty()) { CancelWork(); PublishStatus(error.empty() ? L"Gallery profile is unavailable." : error, true); return; }
+        if (!ValidateConfiguration(cfg_, error) || profile_.empty()) {
+            CancelWork(); { std::lock_guard<std::mutex> lock(published_); submittedStatus_.clear(); }
+            PublishStatus(error.empty() ? L"Gallery profile is unavailable." : error, true); return;
+        }
         const bool selectionChanged = SelectFolders(input);
         if (selectionChanged) { InvalidateFlights(); force = true; }
         if (!cfg_.enabled || !input.directAvailable) {
-            CancelWork(); ledgerReady_ = poolsReady_ = eligible_ = false; InvalidateFlights();
+            CancelWork(); ledgerReady_ = poolsReady_ = eligible_ = false; InvalidateFlights(true);
             PublishStatus(!cfg_.enabled ? L"Set up a gallery group to begin. Historical ownership is kept." :
                 L"Gallery queues need direct Live Tile delivery with package identity. No registration changes were requested.", true); return;
         }
@@ -446,6 +482,9 @@ public:
                 retryAfter_ = now + 5000;
                 PublishStatus(read == ReadResult::Missing ? L"Gallery ownership ledger is missing. Use explicit gallery setup; existing queues are not reset." :
                     error.empty() ? L"Gallery ownership does not match this group. Keep the old ledger and retire historical queues before resetting." : error, true); return;
+            }
+            if (!ledger_.epochId.empty() && fresh.epochId != ledger_.epochId) {
+                std::lock_guard<std::mutex> lock(published_); submittedStatus_.clear();
             }
             ledger_ = std::move(fresh); ledgerReady_ = true; poolsReady_ = false;
         }
@@ -467,15 +506,37 @@ public:
     }
     void RequestRefresh(bool reloadLedger = false) { refreshRequested_ = true; if (reloadLedger) reloadRequested_ = true; Wake(); }
     void Suspend() {
-        suspended_ = true; std::lock_guard<std::mutex> operation(operation_); CancelWork(); InvalidateFlights();
+        suspended_ = true; std::lock_guard<std::mutex> operation(operation_); CancelWork(); InvalidateFlights(true);
     }
     void Resume(bool reloadLedger = true) {
         refreshRequested_ = true; if (reloadLedger) reloadRequested_ = true; suspended_ = false; Wake();
     }
     std::vector<Frame> CurrentFrames() const { std::lock_guard<std::mutex> lock(published_); return suspended_ ? std::vector<Frame>() : frames_; }
+    std::vector<StatusWindow> StatusWindows(const std::wstring& configurationKey = {}) const {
+        std::lock_guard<std::mutex> lock(published_); std::vector<StatusWindow> result;
+        if (suspended_ || (!configurationKey.empty() && configurationKey != statusConfigurationKey_)) return result;
+        std::map<std::wstring, std::vector<Frame>> prepared;
+        for (const auto& frame : frames_) prepared[frame.receipt.tileId].push_back(frame);
+        std::set<std::wstring> included;
+        for (auto& item : prepared) if (CompleteStatusWindow(item.second)) {
+            std::sort(item.second.begin(), item.second.end(), [](const auto& left, const auto& right) { return left.receipt.slot < right.receipt.slot; });
+            result.push_back({std::move(item.second), false}); included.insert(item.first);
+        }
+        for (const auto& item : submittedStatus_) if (included.find(item.first) == included.end()) result.push_back({item.second, true});
+        return result;
+    }
     std::wstring Status() const { std::lock_guard<std::mutex> lock(published_); return message_; }
     bool IsProfile(const std::wstring& profile) const { std::lock_guard<std::mutex> lock(published_); return profile == viewProfile_; }
     bool Validate(const Receipt& receipt) const { std::lock_guard<std::mutex> lock(published_); return MatchesUnlocked(receipt); }
+    bool ValidateFrame(const Frame& expected) const {
+        std::lock_guard<std::mutex> lock(published_);
+        if (suspended_.load()) return false;
+        return std::any_of(frames_.begin(), frames_.end(), [&](const auto& frame) {
+            return Same(frame.receipt, expected.receipt) && frame.nativeId == expected.nativeId && frame.path == expected.path &&
+                frame.name == expected.name && frame.activationArguments == expected.activationArguments && frame.layout == expected.layout &&
+                frame.tag == expected.tag && frame.branding == expected.branding && frame.reset == expected.reset && frame.contain == expected.contain;
+        });
+    }
     void Acknowledge(const Receipt& receipt) {
         bool wake = false;
         {
@@ -488,6 +549,13 @@ public:
                 std::fill(flight.acknowledged.begin(), flight.acknowledged.end(), false); flight.acknowledged[0] = true;
             }
             if (std::all_of(flight.acknowledged.begin(), flight.acknowledged.end(), [](bool value) { return value; })) {
+                std::vector<Frame> submitted;
+                for (const auto& frame : frames_) if (frame.receipt.tileId == receipt.tileId && frame.receipt.epoch == receipt.epoch && frame.receipt.ticket == receipt.ticket)
+                    submitted.push_back(frame);
+                if (CompleteStatusWindow(submitted)) {
+                    std::sort(submitted.begin(), submitted.end(), [](const auto& left, const auto& right) { return left.receipt.slot < right.receipt.slot; });
+                    submittedStatus_[receipt.tileId] = std::move(submitted);
+                }
                 flight.readyToCommit = true; RemoveFramesUnlocked(receipt.tileId); ++flightRevision_; wake = true;
             }
         }
@@ -517,7 +585,7 @@ public:
         return result;
     }
     void Stop() {
-        std::lock_guard<std::mutex> operation(operation_); stopped_ = true; CancelWork(); InvalidateFlights();
+        std::lock_guard<std::mutex> operation(operation_); stopped_ = true; CancelWork(); InvalidateFlights(true);
         if (work_ && work_->thread.joinable()) work_->thread.join();
         work_.reset();
     }
@@ -525,42 +593,91 @@ public:
 } } }
 
 #ifndef AIP_GALLERY_RUNTIME_NO_HOST
+static bool GalleryTransactionPending(const std::wstring& profile)
+{
+    const auto attributes = GetFileAttributesW(aip::gallery::transaction::Path(profile).c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES) return true;
+    const auto code = GetLastError();
+    return code != ERROR_FILE_NOT_FOUND && code != ERROR_PATH_NOT_FOUND;
+}
 // Include after ga_live_tile/ga_rss_feed and before ga_content_runtime. Root
 // declares the Snapshot hooks before generation code consumes them.
-static bool CaptureGalleryConfiguration(aip::gallery::runtime::Input& input, std::wstring& error)
+struct GalleryConfigurationView {
+    std::wstring profile;
+    aip::gallery::Configuration configuration;
+    unsigned long long revision = 0;
+    bool contentEnabled = false, tilesEnabled = false;
+};
+static std::mutex g_galleryConfigurationViewMutex;
+static std::shared_ptr<const GalleryConfigurationView> g_galleryConfigurationView;
+static std::shared_ptr<const GalleryConfigurationView> CaptureGalleryConfigurationView(std::wstring& error, bool requireFresh)
 {
     std::wstring profile;
     { std::lock_guard<std::mutex> lock(g_pathMutex); profile = aip::MakeAbsolutePath(g_iniPath); }
-    std::vector<aip::IniSectionData> document;
-    {
-        aip::IniWriteMutexGuard guard(profile, CurrentIniWriteLockWaitMs());
-        if (!guard.IsLocked()) { error = L"Gallery configuration is temporarily locked."; return false; }
-        std::vector<IniEntry> section; const bool refreshed = ReadIniSectionCached(L"Gallery", section);
-        std::lock_guard<std::mutex> lock(g_iniCacheMutex);
-        if (!g_iniCacheLoaded) { error = L"Gallery configuration is unavailable."; return false; }
-        document = g_iniCacheDoc;
-        if (!refreshed) for (const auto& existing : document) if (aip::IniEquals(existing.name, L"Gallery") && !existing.entries.empty()) {
-            error = L"The current gallery configuration could not be refreshed."; return false;
-        }
-    }
-    { std::lock_guard<std::mutex> lock(g_pathMutex); if (!IEquals(profile, aip::MakeAbsolutePath(g_iniPath))) { error = L"The active gallery profile changed."; return false; } }
-    const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
-        std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+    const auto transactionError = [&] {
+        error = L"An interrupted gallery change needs recovery. Open Photo galleries > Recover interrupted change, or restart DesktopStub. Existing ownership is preserved.";
     };
-    aip::gallery::runtime::Input candidate; candidate.profile = profile;
-    if (!aip::gallery::ReadConfiguration(read, candidate.configuration, error) ||
-        !aip::content::ParseBool(read(L"Content", L"Enabled", L"0"), candidate.contentEnabled) ||
-        !aip::content::ParseBool(read(L"Tiles", L"Enabled", L"0"), candidate.tilesEnabled)) {
-        if (error.empty()) error = L"Gallery Content/Tiles enabled flags are invalid."; return false;
+    if (GalleryTransactionPending(profile)) { transactionError(); return {}; }
+    aip::IniWriteMutexGuard guard(profile, CurrentIniWriteLockWaitMs());
+    if (!guard.IsLocked()) { error = L"Gallery configuration is temporarily locked."; return {}; }
+    if (requireFresh) {
+        // Publication fences observe actual bytes, including edits that retain
+        // the old timestamp. Identical bytes reuse the parsed INI document.
+        std::wstring text;
+        if (!aip::IniConfigStore(profile).ReadFreshText(text)) { error = L"Gallery configuration could not be refreshed."; return {}; }
+        std::lock_guard<std::mutex> pathLock(g_pathMutex);
+        if (!IEquals(profile, aip::MakeAbsolutePath(g_iniPath))) { error = L"The active gallery profile changed."; return {}; }
+        std::lock_guard<std::mutex> cacheLock(g_iniCacheMutex); SetIniCacheUnlocked(text);
+    } else {
+        std::vector<IniEntry> section;
+        bool cacheReady = false;
+        ReadIniSectionCached(L"Gallery", section, &cacheReady);
+        if (!cacheReady) { error = L"The current gallery configuration could not be refreshed."; return {}; }
     }
-    if (!candidate.configuration.folder.empty()) {
-        if (PathIsRelativeW(candidate.configuration.folder.c_str())) candidate.configuration.folder = ParentDirectoryOfPath(profile) + L"\\" + candidate.configuration.folder;
-        candidate.configuration.folder = aip::MakeAbsolutePath(candidate.configuration.folder);
+    std::unique_lock<std::mutex> viewLock(g_galleryConfigurationViewMutex);
+    std::vector<aip::IniSectionData> document;
+    unsigned long long revision = 0;
+    std::shared_ptr<const GalleryConfigurationView> view;
+    {
+        std::lock_guard<std::mutex> lock(g_iniCacheMutex);
+        if (!g_iniCacheLoaded || !IEquals(profile, g_iniCacheProfile)) { error = L"Gallery configuration is unavailable."; return {}; }
+        revision = g_iniCacheRevision;
+        if (g_galleryConfigurationView && g_galleryConfigurationView->profile == profile && g_galleryConfigurationView->revision == revision)
+            view = g_galleryConfigurationView;
+        else document = g_iniCacheDoc;
     }
-    for (auto& tile : candidate.configuration.tiles) if (!tile.folder.empty()) {
-        if (PathIsRelativeW(tile.folder.c_str())) tile.folder = ParentDirectoryOfPath(profile) + L"\\" + tile.folder;
-        tile.folder = aip::MakeAbsolutePath(tile.folder);
+    if (!view) {
+#ifdef DESKTOPSTUB_TEST_GALLERY_CONFIGURATION_PARSED
+        DESKTOPSTUB_TEST_GALLERY_CONFIGURATION_PARSED();
+#endif
+        const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+            std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+        };
+        auto candidate = std::make_shared<GalleryConfigurationView>(); candidate->profile = profile; candidate->revision = revision;
+        if (!aip::gallery::ReadConfiguration(read, candidate->configuration, error) ||
+            !aip::content::ParseBool(read(L"Content", L"Enabled", L"0"), candidate->contentEnabled) ||
+            !aip::content::ParseBool(read(L"Tiles", L"Enabled", L"0"), candidate->tilesEnabled)) {
+            if (error.empty()) error = L"Gallery Content/Tiles enabled flags are invalid."; return {};
+        }
+        const auto absoluteFolder = [&](std::wstring& folder) {
+            if (folder.empty()) return;
+            if (PathIsRelativeW(folder.c_str())) folder = ParentDirectoryOfPath(profile) + L"\\" + folder;
+            folder = aip::MakeAbsolutePath(folder);
+        };
+        absoluteFolder(candidate->configuration.folder);
+        for (auto& tile : candidate->configuration.tiles) absoluteFolder(tile.folder);
+        view = std::move(candidate); g_galleryConfigurationView = view;
     }
+    viewLock.unlock();
+    { std::lock_guard<std::mutex> lock(g_pathMutex); if (!IEquals(profile, aip::MakeAbsolutePath(g_iniPath))) { error = L"The active gallery profile changed."; return {}; } }
+    if (GalleryTransactionPending(profile)) { transactionError(); return {}; }
+    error.clear(); return view;
+}
+static bool CaptureGalleryConfiguration(aip::gallery::runtime::Input& input, std::wstring& error)
+{
+    const auto view = CaptureGalleryConfigurationView(error, false); if (!view) return false;
+    aip::gallery::runtime::Input candidate; candidate.profile = view->profile; candidate.configuration = view->configuration;
+    candidate.contentEnabled = view->contentEnabled; candidate.tilesEnabled = view->tilesEnabled;
     candidate.pinnedKnown = SecondaryTileInventoryReady(); candidate.pinnedIds = CachedSecondaryTileIds();
     candidate.directAvailable = ContentDirectLiveDeliveryAvailable();
     input = std::move(candidate); error.clear(); return true;
@@ -648,10 +765,8 @@ static void RefreshGallerySource()
     else { input.configuration.enabled = false; g_galleryRuntime.Refresh(input); }
 #endif
 }
-static std::vector<aip::content::Snapshot> CurrentGalleryFrames()
+static aip::content::Snapshot GallerySnapshotForFrame(const aip::gallery::runtime::Frame& source)
 {
-    std::vector<aip::content::Snapshot> result;
-    for (const auto& source : g_galleryRuntime.CurrentFrames()) {
         aip::content::Snapshot frame; frame.active = true; frame.name = source.name; frame.backgroundPath = source.path;
         frame.backgroundId = aip::content::BackgroundId::Image; frame.textMode = aip::content::TextMode::Off;
         frame.activationArguments = source.activationArguments; frame.nativeQueue = true; frame.nativeQueueReset = source.reset;
@@ -659,27 +774,57 @@ static std::vector<aip::content::Snapshot> CurrentGalleryFrames()
         frame.secondaryTileId = source.nativeId; frame.secondaryFrameKey = source.receipt.frameKey; frame.secondaryBranding = source.branding;
         frame.galleryFrame = true; frame.galleryContain = source.contain; frame.galleryGroupId = source.receipt.groupId;
         frame.galleryTileId = source.receipt.tileId; frame.galleryEpoch = source.receipt.epoch; frame.galleryTicket = source.receipt.ticket;
-        frame.gallerySlot = source.receipt.slot; frame.gallerySlotCount = source.receipt.count; result.push_back(std::move(frame));
+        frame.gallerySlot = source.receipt.slot; frame.gallerySlotCount = source.receipt.count;
+        return frame;
+}
+static std::vector<aip::content::Snapshot> CurrentGalleryFrames()
+{
+    std::vector<aip::content::Snapshot> result;
+    for (const auto& source : g_galleryRuntime.CurrentFrames()) result.push_back(GallerySnapshotForFrame(source));
+    return result;
+}
+struct GalleryStatusSnapshots {
+    std::vector<aip::content::Snapshot> frames;
+    bool submitted = false;
+};
+static std::vector<GalleryStatusSnapshots> CurrentGalleryStatusWindows()
+{
+    std::vector<GalleryStatusSnapshots> result;
+    aip::gallery::runtime::Input input; std::wstring error;
+    if (!CaptureGalleryConfiguration(input, error) || !g_galleryRuntime.IsProfile(input.profile) || !input.pinnedKnown || !input.directAvailable) return result;
+    auto effective = input.configuration; effective.enabled = !effective.groupId.empty();
+    for (auto& tile : effective.tiles) tile.enabled = true;
+    for (const auto& window : g_galleryRuntime.StatusWindows(aip::gallery::runtime::ConfigKey(effective))) {
+        if (window.frames.empty() || input.pinnedIds.find(window.frames.front().nativeId) == input.pinnedIds.end()) continue;
+        GalleryStatusSnapshots item; item.submitted = window.submitted;
+        for (const auto& source : window.frames) {
+            auto frame = GallerySnapshotForFrame(source);
+            // Status records cannot accidentally enter the generation queue.
+            frame.secondaryFrameKey.clear(); frame.nativeQueueFrameKey.clear(); frame.nativeQueue = false; frame.nativeQueueReset = false;
+            item.frames.push_back(std::move(frame));
+        }
+        result.push_back(std::move(item));
     }
     return result;
 }
 static bool ValidateGalleryFrame(const aip::content::Snapshot& frame)
 {
-    if (!frame.galleryFrame || !g_galleryRuntime.Validate(GalleryReceipt(frame))) return false;
-    aip::gallery::runtime::Input input; std::wstring error;
-    if (!CaptureGalleryConfiguration(input, error) || !g_galleryRuntime.IsProfile(input.profile) || !input.directAvailable || !input.pinnedKnown || input.pinnedIds.find(frame.secondaryTileId) == input.pinnedIds.end() ||
-        input.configuration.groupId != frame.galleryGroupId || (input.configuration.fit == aip::gallery::Fit::Fit) != frame.galleryContain ||
-        !frame.gallerySlotCount || frame.gallerySlotCount > input.configuration.queueSize || frame.gallerySlot >= frame.gallerySlotCount) return false;
-    const auto tile = std::find_if(input.configuration.tiles.begin(), input.configuration.tiles.end(), [&](const auto& value) {
+    if (!frame.galleryFrame || !frame.nativeQueue) return false;
+    aip::gallery::runtime::Frame expected;
+    expected.receipt = GalleryReceipt(frame); expected.nativeId = frame.secondaryTileId; expected.path = frame.backgroundPath;
+    expected.name = frame.name; expected.activationArguments = frame.activationArguments; expected.layout = frame.nativeQueueLayout;
+    expected.tag = frame.nativeQueueTag; expected.branding = frame.secondaryBranding; expected.reset = frame.nativeQueueReset; expected.contain = frame.galleryContain;
+    if (!g_galleryRuntime.ValidateFrame(expected)) return false;
+    std::wstring error; const auto view = CaptureGalleryConfigurationView(error, true);
+    if (!view || !g_galleryRuntime.IsProfile(view->profile) || !ContentDirectLiveDeliveryAvailable() || !SecondaryTileInventoryReady() || !SecondaryTileExists(frame.secondaryTileId) ||
+        view->configuration.groupId != frame.galleryGroupId || (view->configuration.fit == aip::gallery::Fit::Fit) != frame.galleryContain ||
+        !frame.gallerySlotCount || frame.gallerySlotCount > view->configuration.queueSize || frame.gallerySlot >= frame.gallerySlotCount) return false;
+    const auto tile = std::find_if(view->configuration.tiles.begin(), view->configuration.tiles.end(), [&](const auto& value) {
         return value.id == frame.galleryTileId && value.name == frame.name && value.appearance.branding == frame.secondaryBranding &&
-            aip::gallery::NativeTileId(input.configuration.groupId, value.id) == frame.secondaryTileId;
+            aip::gallery::NativeTileId(view->configuration.groupId, value.id) == frame.secondaryTileId;
     });
-    if (tile == input.configuration.tiles.end() || frame.activationArguments != L"--ini " + aip::QuoteCommandLineArg(input.profile) + L" --open-folder " + aip::QuoteCommandLineArg(aip::gallery::EffectiveFolder(input.configuration, *tile))) return false;
-    const auto approved = g_galleryRuntime.CurrentFrames();
-    return std::any_of(approved.begin(), approved.end(), [&](const auto& source) {
-        return source.receipt.frameKey == frame.secondaryFrameKey && source.path == frame.backgroundPath && source.nativeId == frame.secondaryTileId &&
-            source.tag == frame.nativeQueueTag && source.layout == frame.nativeQueueLayout && source.reset == frame.nativeQueueReset && frame.nativeQueue;
-    });
+    if (tile == view->configuration.tiles.end() || frame.activationArguments != L"--ini " + aip::QuoteCommandLineArg(view->profile) + L" --open-folder " + aip::QuoteCommandLineArg(aip::gallery::EffectiveFolder(view->configuration, *tile))) return false;
+    return !GalleryTransactionPending(view->profile) && g_galleryRuntime.ValidateFrame(expected);
 }
 static void AcknowledgeGalleryFrame(const aip::content::Snapshot& frame) { if (frame.galleryFrame) g_galleryRuntime.Acknowledge(GalleryReceipt(frame)); }
 static void FailGalleryFrame(const aip::content::Snapshot& frame) { if (frame.galleryFrame) g_galleryRuntime.Fail(GalleryReceipt(frame)); }

@@ -40,6 +40,7 @@ static std::atomic<int> g_trayIconHiddenDelayMs(750);
 static std::atomic<int> g_logBufferLines(1024);
 static std::atomic<bool> g_trimWorkingSetOnIdle(true);
 static std::atomic<bool> g_compactCrtHeapOnIdle(true);
+static std::atomic<int> g_idleTrimIntervalMs(60000);
 static std::atomic<bool> g_keepGdiPlusLoaded(false);
 static std::atomic<int> g_pollInitialDebounceBypassMs(5000);
 static std::atomic<int> g_wallpaperDetectionLogRepeatMs(60000);

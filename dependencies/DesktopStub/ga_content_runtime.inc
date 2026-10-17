@@ -324,58 +324,117 @@ struct ContentRssProvider
 };
 static ContentRssProvider g_contentRss;
 
+struct ContentConfigurationBaseView {
+    std::wstring profile, error;
+    unsigned long long revision = 0;
+    bool valid = false;
+    aip::content::Configuration configuration;
+    std::vector<aip::IniSectionData> document;
+};
+struct ContentSecondaryConfigurationView {
+    bool valid = false;
+    aip::content::SecondaryTileConfiguration configuration;
+    std::wstring error;
+};
+static std::mutex g_contentConfigurationViewMutex;
+static std::shared_ptr<const ContentConfigurationBaseView> g_contentConfigurationView;
+static std::map<std::size_t, ContentSecondaryConfigurationView> g_contentSecondaryConfigurationViews;
 static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error,
         aip::content::SecondaryTileConfiguration* tiles)
 {
-    // Refresh the normal cache once, then copy one complete published document.
-    // Subsequent writers may update the cache, but cannot mix versions within
-    // this configuration's scalar values, numbered events or RSS fallback.
+    std::wstring profile;
+    { std::lock_guard<std::mutex> lock(g_pathMutex); profile = aip::MakeAbsolutePath(g_iniPath); }
+    std::unique_lock<std::mutex> viewLock(g_contentConfigurationViewMutex, std::defer_lock);
     std::vector<aip::IniSectionData> document;
+    unsigned long long revision = 0;
+    std::shared_ptr<const ContentConfigurationBaseView> view;
     {
         // Only the existing named path lock is needed here. Windows mutex
         // ownership is recursive on this thread, so a mutation callback may
         // inspect its last published document without reentering the host's
         // nonrecursive process write mutex. Refresh I/O cannot overlap a
         // cooperating replacement; release before parsing/provider work.
-        aip::IniWriteMutexGuard snapshotScope(g_iniPath, CurrentIniWriteLockWaitMs());
+        aip::IniWriteMutexGuard snapshotScope(profile, CurrentIniWriteLockWaitMs());
         if (!snapshotScope.IsLocked()) { error = L"The content configuration snapshot is temporarily unavailable."; return false; }
+        std::unique_lock<std::mutex> pathLock(g_pathMutex);
+        if (!IEquals(profile, aip::MakeAbsolutePath(g_iniPath))) { error = L"The active content profile changed."; return false; }
         std::vector<IniEntry> refreshed;
-        ReadIniSectionCached(L"Content", refreshed);
+        bool cacheReady = false;
+        ReadIniSectionCached(L"Content", refreshed, &cacheReady);
+        pathLock.unlock();
+        // Acquire after the recursive named lock. A mutation callback may
+        // reenter this reader without deadlocking another thread's parse.
+        viewLock.lock();
         std::lock_guard<std::mutex> lock(g_iniCacheMutex);
-        if (!g_iniCacheLoaded) { error = L"The content configuration could not be read."; return false; }
-        document = g_iniCacheDoc;
+        if (!cacheReady || !g_iniCacheLoaded || !IEquals(profile, g_iniCacheProfile)) { error = L"The content configuration could not be read."; return false; }
+        revision = g_iniCacheRevision;
+        if (g_contentConfigurationView && g_contentConfigurationView->profile == profile && g_contentConfigurationView->revision == revision)
+            view = g_contentConfigurationView;
+        else document = g_iniCacheDoc;
     }
-    const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
-        std::wstring value;
-        return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
-    };
-    if (!aip::content::ReadConfiguration(read, cfg, error, ContentAsusEventsFromDocument(document))) return false;
-
-    // Existing RSS profiles migrate in memory. Keep their INI intact, retain
-    // headline cycling, and provide wallpaper behind the feed by default.
-    if (!cfg.enabled && ParseContentSourceValue(read(L"Settings", L"ContentSource", L"Wallpaper")) == ContentSource::RssFeed)
-    {
-        cfg.enabled = true;
-        cfg.cycle = true;
-        cfg.entries.clear();
-        int count = 5;
-        aip::ParseIntValue(read(L"RssFeed", L"MaxItems", L"5"), count);
-        count = (std::max)(1, (std::min)(20, count));
-        for (int i = 0; i < count; ++i) {
-            aip::content::Entry entry;
-            entry.name = L"RSS " + std::to_wstring(i + 1);
-            entry.sources = {L"RssFeed"};
-            cfg.entries.push_back(std::move(entry));
-        }
-    }
-    if (!tiles) return true;
-#ifdef DESKTOPSTUB_INERT_HARDWARE
-    const bool pinnedDriven = SecondaryTileInventoryReady(); // Existing inert fixtures retain their explicit synthetic layout until a pin inventory is injected.
-#else
-    const bool pinnedDriven = true;
+    if (!view) {
+        auto candidate = std::make_shared<ContentConfigurationBaseView>();
+        candidate->profile = profile; candidate->revision = revision; candidate->document = std::move(document);
+        const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+            std::wstring value;
+            return aip::ReadIniValueFromDoc(candidate->document, section, key, value) ? value : std::wstring(fallback);
+        };
+#ifdef DESKTOPSTUB_TEST_CONTENT_CONFIGURATION_PARSED
+        DESKTOPSTUB_TEST_CONTENT_CONFIGURATION_PARSED(false);
 #endif
-    if (!aip::content::ReadSecondaryTileConfiguration(read, pinnedDriven ? aip::content::MaxEntries : cfg.entries.size(), *tiles, error)) return false;
-    if (pinnedDriven) aip::content::ApplyPinnedSecondaryTiles(cfg, *tiles, CachedSecondaryTileIds());
+        candidate->valid = aip::content::ReadConfiguration(read, candidate->configuration, candidate->error, ContentAsusEventsFromDocument(candidate->document));
+
+        // Existing RSS profiles migrate in memory. Keep their INI intact,
+        // retain headline cycling and wallpaper behind the feed by default.
+        if (candidate->valid && !candidate->configuration.enabled && ParseContentSourceValue(read(L"Settings", L"ContentSource", L"Wallpaper")) == ContentSource::RssFeed)
+        {
+            candidate->configuration.enabled = true;
+            candidate->configuration.cycle = true;
+            candidate->configuration.entries.clear();
+            int count = 5;
+            aip::ParseIntValue(read(L"RssFeed", L"MaxItems", L"5"), count);
+            count = (std::max)(1, (std::min)(20, count));
+            for (int i = 0; i < count; ++i) {
+                aip::content::Entry entry;
+                entry.name = L"RSS " + std::to_wstring(i + 1);
+                entry.sources = {L"RssFeed"};
+                candidate->configuration.entries.push_back(std::move(entry));
+            }
+        }
+        view = std::move(candidate); g_contentConfigurationView = view; g_contentSecondaryConfigurationViews.clear();
+    }
+    if (!view->valid) { error = view->error; return false; }
+    auto content = view->configuration;
+    aip::content::SecondaryTileConfiguration secondary;
+    if (tiles) {
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+        const bool pinnedDriven = SecondaryTileInventoryReady(); // Existing inert fixtures retain their explicit synthetic layout until a pin inventory is injected.
+#else
+        const bool pinnedDriven = true;
+#endif
+        const auto count = pinnedDriven ? aip::content::MaxEntries : content.entries.size();
+        auto cached = g_contentSecondaryConfigurationViews.find(count);
+        if (cached == g_contentSecondaryConfigurationViews.end()) {
+            ContentSecondaryConfigurationView candidate;
+            const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+                std::wstring value;
+                return aip::ReadIniValueFromDoc(view->document, section, key, value) ? value : std::wstring(fallback);
+            };
+#ifdef DESKTOPSTUB_TEST_CONTENT_CONFIGURATION_PARSED
+            DESKTOPSTUB_TEST_CONTENT_CONFIGURATION_PARSED(true);
+#endif
+            candidate.valid = aip::content::ReadSecondaryTileConfiguration(read, count, candidate.configuration, candidate.error);
+            cached = g_contentSecondaryConfigurationViews.emplace(count, std::move(candidate)).first;
+        }
+        if (!cached->second.valid) { error = cached->second.error; return false; }
+        secondary = cached->second.configuration;
+        // Pin state is deliberately outside both caches: mutation callbacks
+        // immediately change provider demand without changing saved INI bytes.
+        if (pinnedDriven) aip::content::ApplyPinnedSecondaryTiles(content, secondary, CachedSecondaryTileIds());
+    }
+    viewLock.unlock();
+    { std::lock_guard<std::mutex> lock(g_pathMutex); if (!IEquals(profile, aip::MakeAbsolutePath(g_iniPath))) { error = L"The active content profile changed."; return false; } }
+    cfg = std::move(content); if (tiles) *tiles = std::move(secondary); error.clear();
     return true;
 }
 static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error)

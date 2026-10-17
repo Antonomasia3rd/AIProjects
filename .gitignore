@@ -1,6 +1,8 @@
 # User-local and generated files
 *.log
 *.ini
+*.gallery-ledger
+*.gallery-transaction*
 !*.example.ini
 *.tmp
 *.bak

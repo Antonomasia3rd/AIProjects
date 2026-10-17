@@ -10,13 +10,16 @@ call "%TRANSPARENT_VS%\VC\Auxiliary\Build\vcvars64.bat" >nul
 if errorlevel 1 exit /b 1
 pushd "%TRANSPARENT_ROOT%" || exit /b 1
 set "TRANSPARENT_OUT=build\content-integration"
+set "TRANSPARENT_OPTIMIZATION=/fp:precise"
+if "%CONTENT_OPTIMIZE%"=="1" set "TRANSPARENT_OUT=build\content-integration-optimized"
+if "%CONTENT_OPTIMIZE%"=="1" set "TRANSPARENT_OPTIMIZATION=/O2 /fp:precise"
 if not exist "%TRANSPARENT_OUT%" mkdir "%TRANSPARENT_OUT%"
 rem Reuse only dependency objects built in this same validation run. The caller
 rem first compiles DiscordService, DiscordEditor and inert AsusService stages.
 if not exist "%TRANSPARENT_OUT%\DiscordService.obj" goto Missing
 if not exist "%TRANSPARENT_OUT%\DiscordEditor.obj" goto Missing
 if not exist "%TRANSPARENT_OUT%\AsusService.obj" goto Missing
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub\tools\TransparentBackgroundTests.cpp "%TRANSPARENT_OUT%\DiscordService.obj" "%TRANSPARENT_OUT%\DiscordEditor.obj" "%TRANSPARENT_OUT%\AsusService.obj" /Fe:"%TRANSPARENT_OUT%\TransparentBackgroundTests.exe" /Fo:"%TRANSPARENT_OUT%\TransparentBackgroundTests.obj" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib windowsapp.lib runtimeobject.lib
+cl /nologo %TRANSPARENT_OPTIMIZATION% /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub\tools\TransparentBackgroundTests.cpp "%TRANSPARENT_OUT%\DiscordService.obj" "%TRANSPARENT_OUT%\DiscordEditor.obj" "%TRANSPARENT_OUT%\AsusService.obj" /Fe:"%TRANSPARENT_OUT%\TransparentBackgroundTests.exe" /Fo:"%TRANSPARENT_OUT%\TransparentBackgroundTests.obj" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib windowsapp.lib runtimeobject.lib
 set "TRANSPARENT_STATUS=%ERRORLEVEL%"
 goto Done
 :Missing

@@ -155,9 +155,18 @@ void LogWin32Failure(const wchar_t* what, DWORD err = GetLastError())
     LogWin32FailureText(what, err);
 }
 
+#include "../idle_maintenance.h"
+static std::atomic<std::uint64_t> g_lastIdleMemoryTrim(aip::idle::Never);
+static bool GenerationWorkPending();
 static void TrimIdleWorkingSetIfConfigured()
 {
-    if (g_compactCrtHeapOnIdle.load())
+    const bool compact = g_compactCrtHeapOnIdle.load(), trim = g_trimWorkingSetOnIdle.load();
+    if ((!compact && !trim) || GenerationWorkPending() || !aip::idle::Claim(g_lastIdleMemoryTrim, GetTickCount64(),
+            static_cast<std::uint64_t>((std::max)(0, g_idleTrimIntervalMs.load())))) return;
+#ifdef DESKTOPSTUB_TEST_IDLE_MEMORY_TRIM
+    DESKTOPSTUB_TEST_IDLE_MEMORY_TRIM(compact, trim);
+#else
+    if (compact)
     {
         errno = 0;
         int heapStatus = _heapmin();
@@ -165,7 +174,7 @@ static void TrimIdleWorkingSetIfConfigured()
             Log(L"[w] _heapmin failed while compacting the idle CRT heap, errno=%d.", errno);
     }
 
-    if (!g_trimWorkingSetOnIdle.load())
+    if (!trim)
         return;
 
     // This trims the resident working set that Task Manager shows as "Memory".
@@ -177,6 +186,7 @@ static void TrimIdleWorkingSetIfConfigured()
         if (err != ERROR_SUCCESS)
             LogWin32FailureText(g_ui.trimWorkingSetOperation.c_str(), err);
     }
+#endif
 }
 
 static void ApplyConsoleSetting(bool enable, bool writeIni, bool logState)
@@ -334,6 +344,7 @@ static void LoadRuntimeSettingsFromIni(bool includeTrayIcon, bool allowConsole =
     g_iniWriteLockWaitMs = IniReadClampedI(L"Settings", L"IniWriteLockWaitMs", 5000, 0, 60000);
     g_trimWorkingSetOnIdle = IniReadI(L"Settings", L"TrimWorkingSetOnIdle", 1) != 0;
     g_compactCrtHeapOnIdle = IniReadI(L"Settings", L"CompactCrtHeapOnIdle", 1) != 0;
+    g_idleTrimIntervalMs = IniReadClampedI(L"Settings", L"IdleTrimIntervalMs", 60000, 0, 3600000);
     g_keepGdiPlusLoaded = IniReadI(L"Settings", L"KeepGdiPlusLoaded", 0) != 0;
     g_pollInitialDebounceBypassMs = IniReadClampedI(L"Settings", L"PollInitialDebounceBypassMs", 5000, 0, 60000);
     g_wallpaperDetectionLogRepeatMs = IniReadClampedI(L"Settings", L"WallpaperDetectionLogRepeatMs", 60000, 0, 3600000);

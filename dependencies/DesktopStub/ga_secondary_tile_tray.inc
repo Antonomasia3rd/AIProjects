@@ -4,6 +4,34 @@
 #include "ga_tile_status.inc"
 static bool OpenEmbeddedNotesSignIn(HWND owner, int resource);
 
+static std::vector<std::wstring> BuildTileStatusPagesIncludingGallery(const std::vector<aip::content::Snapshot>& prepared,
+    const std::vector<GalleryStatusSnapshots>& gallery, const TileStatusLabels& labels, const std::wstring& submittedQueue)
+{
+    std::vector<aip::content::Snapshot> ordinary;
+    for (const auto& frame : prepared) if (frame.active && !frame.galleryFrame) ordinary.push_back(frame);
+    std::vector<std::wstring> pages;
+    if (!ordinary.empty()) pages = BuildTileStatusPagesWithLabels(ordinary, labels);
+    for (const auto& window : gallery) {
+        if (std::none_of(window.frames.begin(), window.frames.end(), [](const auto& frame) { return frame.active; })) continue;
+        auto windowLabels = labels;
+        if (window.submitted) windowLabels.queue = submittedQueue;
+        const auto group = BuildTileStatusPagesWithLabels(window.frames, windowLabels);
+        pages.insert(pages.end(), group.begin(), group.end());
+    }
+    if (pages.empty()) pages.push_back(labels.noSnapshot);
+    return pages;
+}
+static std::vector<std::wstring> BuildCurrentTileStatusPages()
+{
+#ifdef DESKTOPSTUB_TEST_GALLERY_STATUS_WINDOWS
+    const auto gallery = DESKTOPSTUB_TEST_GALLERY_STATUS_WINDOWS();
+#else
+    const auto gallery = CurrentGalleryStatusWindows();
+#endif
+    return BuildTileStatusPagesIncludingGallery(CurrentSecondarySnapshots(), gallery, ReadTileStatusLabels(),
+        IniReadS(L"Strings", L"TileStatusSubmittedQueue", L"Last successfully submitted image queue (Windows chooses the visible image)"));
+}
+
 static constexpr UINT ID_SECONDARY_TILES_ENABLED = 28000;
 static constexpr UINT ID_SECONDARY_TILES_INITIALIZE = 28001;
 static constexpr UINT ID_SECONDARY_TILES_STATUS = 28002;
@@ -108,6 +136,7 @@ static bool SaveSecondaryTileMenuSettings(HWND owner, const std::vector<aip::Ini
                 return false;
             }
         }
+        if (!StageExplicitSourceTileNameIntents(candidate, settings, error)) return false;
         aip::content::Configuration content;
         aip::content::SecondaryTileConfiguration tiles;
         if (!ReadSecondaryTileMenuText(candidate, content, tiles, error)) return false;
@@ -123,6 +152,7 @@ static bool SaveSecondaryTileMenuSettings(HWND owner, const std::vector<aip::Ini
             (key == L"background" || key == L"branding" || key == L"backgroundcolor");
     });
     if (appearanceChanged) RequestRefreshExistingSecondaryTileLogos(g_hwnd, true);
+    ObserveExplicitSourceTileNameSettings(settings);
     WakePollThread(); return true;
 }
 
@@ -273,7 +303,7 @@ static bool DispatchSecondaryTilesCommand(HWND owner, UINT command)
     }
     if (command == ID_SECONDARY_TILES_ENABLED) return true; // Retired UI command; pin membership determines updates.
     if (command == ID_SECONDARY_TILES_STATUS) {
-        const auto pages = BuildTileStatusPages(CurrentSecondarySnapshots());
+        const auto pages = BuildCurrentTileStatusPages();
 #ifdef DESKTOPSTUB_TEST_PAGED_TEXT_DIALOG
         DESKTOPSTUB_TEST_PAGED_TEXT_DIALOG(owner, L"Tiles", pages);
 #else

@@ -39,6 +39,13 @@ and `--disable` are persistent aliases; combine them with `--configure-only`
 to edit without running a tray. An invalid profile remains editable in the
 tray; complete replacement batches are validated before saving.
 
+Ordinary CLI setting changes, such as `--ini .\personal.ini --disable`, also
+apply to an already-running tray for that profile. The command waits up to five
+seconds for acknowledgment. A failed acknowledgment returns a nonzero exit
+code and explains that settings were saved; use **Reload configuration** or
+restart that tray to retry. `--configure-only` deliberately saves without
+signaling the running watcher.
+
 ## Optional legacy all-user service
 
 The remainder describes only the explicitly installed, manually started

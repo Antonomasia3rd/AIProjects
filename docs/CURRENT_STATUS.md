@@ -11,6 +11,35 @@ is enabled and its focused native recheck passed.
 
 ## Saved and installed
 
+- The 2026-10-18 CPU repairs are installed: optimized native builds,
+  one cleanup per generation batch, Live Tile-only secondary assets, exact
+  gallery-frame validation and a shared idle memory-maintenance cooldown.
+  A 74-frame startup batch completed successfully with one cleanup. Short
+  passive samples measured 0.454% mean CPU before versus approximately 0.15–0.18%
+  after the repairs on this 12-thread CPU; they do not measure gallery-cycle or lock-screen
+  peaks. Unchanged content/appearance parsing caches and profile/readiness
+  guards are now validated and installed with preserved settings.
+  See [CPU evidence and validation](gallery-cpu-batch-2026-10-18.md).
+- Gallery pages now stay in Tiles status after a complete successful submission,
+  through a separate status-only record. Prepared and submitted queues have
+  distinct configurable labels; neither claims Windows' currently visible
+  image. The fix passed 95 coordinator and 14,436 core host checks, clean scans,
+  offline smoke and guarded installation. See
+  [gallery status retention](gallery-status-retention-2026-10-18.md).
+- AllowContentAboveLock and YourPhoneHideBanner CLI edits now request an
+  acknowledged reload from an existing tray for the same profile. Offline
+  configuration and utility trays remain inert. All 89 fake-runtime/private-IPC
+  cases and 33 offscreen editor checks passed; those two real policy apps were
+  not launched. See [notification CLI reload](notification-cli-reload-2026-10-18.md).
+- Gallery changes now have a private recovery journal, startup/manual recovery,
+  expected-configuration guards for dialogs and full-ledger compare-and-swap.
+  Explicit source Rename now updates an existing Windows tile's DisplayName
+  through a persisted name-only intent, preserving placement and native ID.
+  These are installed with the first CPU repair after injected recovery and
+  rename checks, clean scans, offline smoke and guarded startup. Actual
+  interactive Windows rename/recovery acceptance remains separate. See
+  [gallery recovery](gallery-recovery-2026-10-18.md) and
+  [source rename](source-tile-rename-2026-10-18.md).
 - Tile information pagination replaces the oversized MessageBox with one
   scrollable page per tile and Previous/Next controls; see
   [paged status validation](tile-status-paging-2026-10-15.md). Installed after
@@ -67,11 +96,11 @@ See the [model](gallery-engine-2026-10-15.md),
 | Original repository review | Reconcile the implemented shared modules and all active/legacy products against the user's current rules. The dated rework log is not an exhaustive closure audit. |
 | Windows presentation | Actual Start appearance, RTL/DPI, theme contrast, static fallback, and branding need target-shell acceptance. Offscreen PNG/XML and native metadata readback do not prove what every shell renders. |
 | Gallery acceptance | The real folder chooser/pin confirmations, Windows animation, actual image sets and nonresponsive native-codec shutdown need local acceptance. Exact copies deduplicate; different encodings of visually identical pictures do not. Pools and cached published images are retained. |
-| Gallery failure recovery | Explicit redistribution clears historical notification queues before a ledger reset, but ledger and INI publication are separate atomic files. Final INI-write failure after reset and concurrent edits during add/resize dialogs need additional cross-file recovery/expected-configuration guards. See the follow-up record; clear failure and ordinary model tests do not close these cases. |
+| Gallery storage and native acceptance | Recovery and stale-dialog guards are installed and pass private failure injection. Real interactive recovery, Windows queue behavior and owner-aware retirement/storage reporting remain acceptance or engineering work. Do not force failures against the user's actual ledger. |
 | Historical renderer variation | The unexplained four-pixel opaque preset difference remains open. Exact assertions have not been relaxed; current passing renders do not establish its cause. |
-| Media CPU | Cached SMTC lifetime and event scheduling are repaired, and the user reported 17 hours of normal CPU. The original DesktopStub/NPSMSvc episode was not reproduced, so its precise cause remains unproved. |
+| CPU attribution and idle work | October 18 gallery bursts were correlated with host logs and passive thread timings; two repairs are installed, with short mean idle CPU samples falling from 0.454% to about 0.15–0.18%. One thread still performs measurable idle work; attribute phases before changing scheduling/intervals. Win+L causality and the older DesktopStub/NPSMSvc episode remain unproved. |
 | Real integrations | Actual Startup-folder/StartupTask, sleep/wake keyboards, player icons/actions, and HoYoLAB browser/discovery/session behavior still need local acceptance beyond injected fixtures. Preserve existing accounts while testing. |
-| Source tile names | A source's saved menu/status name is independent of its RSS URL. Review propagation of source Rename changes to an already-pinned Windows DisplayName; current artwork migration intentionally preserves native names. |
+| Source tile names | Explicit persisted Rename now has name-only native propagation and private injected tests. Confirm a real renamed pin keeps placement and appearance in normal use. Feed changes and artwork migration continue to preserve user-chosen names. |
 | Older delivery paths | Unpackaged/older-Windows helper queue correlation remains conservative; those paths keep app-managed rotation where individual delivery cannot be acknowledged safely. |
 | Notes compatibility | The current v2 account flow works in the user's screenshots. Older credential/import aliases still need protocol review; role discovery alone is not daily-notes acceptance for every alias. |
 | Windhawk | The source catalog and the syntax-check scope are corrected. Functional hooks were not reviewed or loaded in this pass; build-specific work requires current local binaries and matching symbols first. |

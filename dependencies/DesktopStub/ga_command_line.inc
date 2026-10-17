@@ -2,6 +2,7 @@
 // Command-line parsing and persisted INI setting changes
 // -----------------------------------------------------------------------------
 using CommandLineIniSetting = aip::IniSetting;
+static bool StageExplicitSourceTileNameIntents(std::wstring& text, const std::vector<aip::IniSetting>& settings, std::wstring& error);
 #include "../live_capture_protocol.h"
 #include "../content_presets.h"
 #include "../secondary_tiles.h"
@@ -2914,6 +2915,7 @@ static bool ApplyCommandLinePersistentSettings()
                 return false;
             }
         }
+        if (!StageExplicitSourceTileNameIntents(text, g_commandLine.settings, g_commandLine.applyError)) return false;
         if (std::any_of(g_commandLine.settings.begin(), g_commandLine.settings.end(), [](const auto& setting) {
             return IEquals(setting.section, L"AsusBlink") || IEquals(setting.section, L"CapsBlink"); })) {
             const auto document = aip::ParseIniDocument(text);

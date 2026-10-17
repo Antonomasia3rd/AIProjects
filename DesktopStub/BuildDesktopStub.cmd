@@ -8,6 +8,7 @@ if not defined DESKTOPSTUB_PRODUCT_NAME set "DESKTOPSTUB_PRODUCT_NAME=DesktopStu
 if not defined DESKTOPSTUB_HOST_EXE_NAME set "DESKTOPSTUB_HOST_EXE_NAME=%DESKTOPSTUB_PRODUCT_NAME%.exe"
 if not defined DESKTOPSTUB_BROKER_EXE_NAME set "DESKTOPSTUB_BROKER_EXE_NAME=%DESKTOPSTUB_PRODUCT_NAME%LiveTileBroker.exe"
 if not defined DESKTOPSTUB_ENABLE_HARDWARE_SOURCES set "DESKTOPSTUB_ENABLE_HARDWARE_SOURCES=1"
+if not defined DESKTOPSTUB_OPTIMIZE set "DESKTOPSTUB_OPTIMIZE=1"
 if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX set "DESKTOPSTUB_RELEASE_TAG_PRODUCT=!DESKTOPSTUB_PRODUCT_NAME: =!"
 if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX if not defined DESKTOPSTUB_RELEASE_TAG_PRODUCT set "DESKTOPSTUB_RELEASE_TAG_PRODUCT=DesktopStub"
 if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX set "DESKTOPSTUB_RELEASE_TAG_PREFIX=!DESKTOPSTUB_RELEASE_TAG_PRODUCT!-v"
@@ -21,11 +22,18 @@ call :ValidateBuildValue "DESKTOPSTUB_ENABLE_HARDWARE_SOURCES"
 if errorlevel 1 exit /b 1
 call :ValidateBuildBoolean "%DESKTOPSTUB_ENABLE_HARDWARE_SOURCES%"
 if errorlevel 1 exit /b 1
+call :ValidateBuildValue "DESKTOPSTUB_OPTIMIZE"
+if errorlevel 1 exit /b 1
+call :ValidateBuildBoolean "%DESKTOPSTUB_OPTIMIZE%"
+if errorlevel 1 exit /b 1
+set "OPTIMIZATION_FLAGS=/Od /fp:precise /bigobj"
+if "%DESKTOPSTUB_OPTIMIZE%"=="1" set "OPTIMIZATION_FLAGS=/O2 /fp:precise /bigobj"
 call :ValidateBuildValue "DESKTOPSTUB_RELEASE_TAG_PREFIX"
 if errorlevel 1 exit /b 1
 call :StringLength "%DESKTOPSTUB_RELEASE_TAG_PREFIX%" DESKTOPSTUB_RELEASE_TAG_PREFIX_LEN
 for %%F in ("%DESKTOPSTUB_HOST_EXE_NAME%") do set "DESKTOPSTUB_HOST_BASE=%%~nF"
 for %%F in ("%DESKTOPSTUB_BROKER_EXE_NAME%") do set "DESKTOPSTUB_BROKER_BASE=%%~nF"
+set "OBJECT_DIR=build\obj\%DESKTOPSTUB_HOST_BASE%"
 
 if defined VCINSTALLDIR if exist "%VCINSTALLDIR%\Auxiliary\Build\vcvars64.bat" set "VCVARS=%VCINSTALLDIR%\Auxiliary\Build\vcvars64.bat"
 if not defined VCVARS if defined VSINSTALLDIR if exist "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
@@ -70,6 +78,11 @@ if errorlevel 1 (
     popd
     exit /b %errorlevel%
 )
+if not exist "%OBJECT_DIR%" mkdir "%OBJECT_DIR%"
+if errorlevel 1 (
+    popd
+    exit /b %errorlevel%
+)
 
 if /i "%DESKTOPSTUB_REFRESH_TAGS%"=="1" if not defined DESKTOPSTUB_VERSION if not defined DESKTOPSTUB_RELEASE_TAG call :RefreshDesktopStubTags
 call :ResolveDesktopStubVersion
@@ -80,11 +93,11 @@ if errorlevel 1 (
 )
 set "VERSION_DEFINES=/DDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /DDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /DDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /DDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
 set "RC_VERSION_DEFINES=/dDESKTOPSTUB_VERSION_MAJOR=%DESKTOPSTUB_VERSION_MAJOR% /dDESKTOPSTUB_VERSION_MINOR=%DESKTOPSTUB_VERSION_MINOR% /dDESKTOPSTUB_VERSION_BUILD=%DESKTOPSTUB_VERSION_BUILD% /dDESKTOPSTUB_VERSION_REVISION=%DESKTOPSTUB_VERSION_REVISION%"
-set "CPP_INCLUDE_DEFINES=/Ibuild\obj"
+set "CPP_INCLUDE_DEFINES=/I"%OBJECT_DIR%""
 set "CPP_FEATURE_DEFINES=/DDESKTOPSTUB_ENABLE_HARDWARE_SOURCES=%DESKTOPSTUB_ENABLE_HARDWARE_SOURCES%"
-set "CPP_VERSION_DEFINES_FILE=build\obj\DesktopStubVersionDefines.inc"
-set "RC_HOST_DEFINES_FILE=build\obj\DesktopStubHostResourceDefines.rc.inc"
-set "RC_BROKER_DEFINES_FILE=build\obj\DesktopStubBrokerResourceDefines.rc.inc"
+set "CPP_VERSION_DEFINES_FILE=%OBJECT_DIR%\DesktopStubVersionDefines.inc"
+set "RC_HOST_DEFINES_FILE=%OBJECT_DIR%\DesktopStubHostResourceDefines.rc.inc"
+set "RC_BROKER_DEFINES_FILE=%OBJECT_DIR%\DesktopStubBrokerResourceDefines.rc.inc"
 call :WriteCppVersionDefines "%CPP_VERSION_DEFINES_FILE%" "%DESKTOPSTUB_RELEASE_TAG%"
 if errorlevel 1 (
     set "STATUS=!ERRORLEVEL!"
@@ -103,7 +116,7 @@ if errorlevel 1 (
     popd
     exit /b !STATUS!
 )
-set "RC_INCLUDE_DEFINES=/ibuild\obj"
+set "RC_INCLUDE_DEFINES=/i"%OBJECT_DIR%""
 echo %DESKTOPSTUB_PRODUCT_NAME% version: %DESKTOPSTUB_RELEASE_TAG% (%DESKTOPSTUB_VERSION%)
 
 rem ---------------------------------------------------------------------------
@@ -127,11 +140,11 @@ if not "%~1"=="" (
 )
 
 set "OUT_EXE=build\%DESKTOPSTUB_HOST_EXE_NAME%"
-set "OBJ_FILE=build\obj\%DESKTOPSTUB_HOST_BASE%.obj"
-set "RES_FILE=build\obj\DesktopStub.res"
+set "OBJ_FILE=%OBJECT_DIR%\%DESKTOPSTUB_HOST_BASE%.obj"
+set "RES_FILE=%OBJECT_DIR%\DesktopStub.res"
 set "BROKER_EXE=build\%DESKTOPSTUB_BROKER_EXE_NAME%"
-set "BROKER_OBJ=build\obj\%DESKTOPSTUB_BROKER_BASE%.obj"
-set "BROKER_RES=build\obj\LiveTileBroker.res"
+set "BROKER_OBJ=%OBJECT_DIR%\%DESKTOPSTUB_BROKER_BASE%.obj"
+set "BROKER_RES=%OBJECT_DIR%\LiveTileBroker.res"
 
 echo Building packaged Live Tile broker...
 rc /nologo %RC_VERSION_DEFINES% %RC_INCLUDE_DEFINES% /fo"%BROKER_RES%" LiveTileBroker.rc
@@ -140,7 +153,7 @@ if errorlevel 1 (
     popd
     exit /b !STATUS!
 )
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% LiveTileBroker.cpp "%BROKER_RES%" /Fe"%BROKER_EXE%" /Fo"%BROKER_OBJ%" /link windowsapp.lib runtimeobject.lib ole32.lib /SUBSYSTEM:WINDOWS
+cl /nologo %OPTIMIZATION_FLAGS% /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_INCLUDE_DEFINES% LiveTileBroker.cpp "%BROKER_RES%" /Fe"%BROKER_EXE%" /Fo"%BROKER_OBJ%" /link windowsapp.lib runtimeobject.lib ole32.lib /SUBSYSTEM:WINDOWS
 if errorlevel 1 (
     set "STATUS=!ERRORLEVEL!"
     popd
@@ -163,13 +176,13 @@ if errorlevel 1 (
     popd
     exit /b !STATUS!
 )
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\DiscordRPC\service.cpp /Fo"build\obj\DesktopStubDiscordService.obj"
+cl /nologo %OPTIMIZATION_FLAGS% /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\DiscordRPC\service.cpp /Fo"%OBJECT_DIR%\DesktopStubDiscordService.obj"
 if errorlevel 1 (
     set "STATUS=!ERRORLEVEL!"
     popd
     exit /b !STATUS!
 )
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\DiscordRPC\profile_edit.cpp /Fo"build\obj\DesktopStubDiscordProfileEdit.obj"
+cl /nologo %OPTIMIZATION_FLAGS% /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\DiscordRPC\profile_edit.cpp /Fo"%OBJECT_DIR%\DesktopStubDiscordProfileEdit.obj"
 if errorlevel 1 (
     set "STATUS=!ERRORLEVEL!"
     popd
@@ -179,24 +192,24 @@ set "HARDWARE_OBJECTS="
 set "HARDWARE_LINK_LIBRARIES="
 if "%DESKTOPSTUB_ENABLE_HARDWARE_SOURCES%"=="1" (
     echo Building optional hardware source support...
-    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\asusblink\service.cpp /Fo"build\obj\DesktopStubAsusService.obj"
+    cl /nologo %OPTIMIZATION_FLAGS% /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\asusblink\service.cpp /Fo"%OBJECT_DIR%\DesktopStubAsusService.obj"
     if errorlevel 1 (
         set "STATUS=!ERRORLEVEL!"
         popd
         exit /b !STATUS!
     )
-    cl /nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\asusblink\native_backend.cpp /Fo"build\obj\DesktopStubAsusBackend.obj"
+    cl /nologo %OPTIMIZATION_FLAGS% /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c ..\dependencies\asusblink\native_backend.cpp /Fo"%OBJECT_DIR%\DesktopStubAsusBackend.obj"
     if errorlevel 1 (
         set "STATUS=!ERRORLEVEL!"
         popd
         exit /b !STATUS!
     )
-    set "HARDWARE_OBJECTS=build\obj\DesktopStubAsusService.obj build\obj\DesktopStubAsusBackend.obj"
+    set "HARDWARE_OBJECTS="%OBJECT_DIR%\DesktopStubAsusService.obj" "%OBJECT_DIR%\DesktopStubAsusBackend.obj""
     set "HARDWARE_LINK_LIBRARIES=pdh.lib"
 ) else (
     echo [i] Optional hardware sources are excluded from this host build.
 )
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_FEATURE_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" "build\obj\DesktopStubDiscordService.obj" "build\obj\DesktopStubDiscordProfileEdit.obj" %HARDWARE_OBJECTS% /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib %HARDWARE_LINK_LIBRARIES% windowsapp.lib runtimeobject.lib version.lib "..\dependencies\third_party\WebView2\x64\WebView2LoaderStatic.lib" /SUBSYSTEM:WINDOWS
+cl /nologo %OPTIMIZATION_FLAGS% /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE %VERSION_DEFINES% %CPP_FEATURE_DEFINES% %CPP_INCLUDE_DEFINES% DesktopStub.cpp "%RES_FILE%" "%OBJECT_DIR%\DesktopStubDiscordService.obj" "%OBJECT_DIR%\DesktopStubDiscordProfileEdit.obj" %HARDWARE_OBJECTS% /Fe"%OUT_EXE%" /Fo"%OBJ_FILE%" /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib %HARDWARE_LINK_LIBRARIES% windowsapp.lib runtimeobject.lib version.lib "..\dependencies\third_party\WebView2\x64\WebView2LoaderStatic.lib" /SUBSYSTEM:WINDOWS
 set "STATUS=!ERRORLEVEL!"
 if not "!STATUS!"=="0" (
     popd

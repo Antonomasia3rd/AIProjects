@@ -130,6 +130,13 @@ void TestPublicationAndSlotAcknowledgements() {
     host.failSave = false; host.now = 5000;
     Pump(coordinator, input, [&] { return coordinator.CurrentFrames().size() == 10; });
     auto frames = coordinator.CurrentFrames(); const auto durable = host.Load();
+    Check(coordinator.ValidateFrame(frames.front()), "exact frame validation accepts a current immutable receipt without copying the frame vector");
+    auto altered = frames.front(); altered.path += L"-other";
+    Check(!coordinator.ValidateFrame(altered), "a copied receipt cannot authorize a different image path");
+    altered = frames.front(); altered.reset = !altered.reset;
+    Check(!coordinator.ValidateFrame(altered), "a copied receipt cannot change reset semantics");
+    altered = frames.front(); altered.activationArguments += L" other";
+    Check(!coordinator.ValidateFrame(altered), "exact frame validation rejects changed activation arguments");
     const auto pendingPlans = host.plans.load();
     for (int tick = 0; tick < 10; ++tick) coordinator.Refresh(input);
     Check(host.plans == pendingPlans, "unchanged pending windows reuse their cached plan without validating/copying the whole ledger every poll");
@@ -324,9 +331,63 @@ void TestUnavailableFolderIsolation() {
     Check(unavailableScans == scans && ForTile(coordinator.CurrentFrames(), L"one").size() == 5,
         "an unavailable folder backs off while the successful folder keeps its pending frames");
 }
+void TestSubmittedStatusRetention() {
+    auto input = Input(); input.configuration.tiles.resize(1); input.pinnedIds = {NativeTileId(input.configuration.groupId, L"one")};
+    Harness host; host.Initialize(input); runtime::Coordinator coordinator(host.Services());
+    Pump(coordinator, input, [&] { return coordinator.CurrentFrames().size() == 5; });
+    auto frames = coordinator.CurrentFrames(); const auto firstTicket = frames.front().receipt.ticket;
+    auto windows = coordinator.StatusWindows();
+    Check(windows.size() == 1 && !windows.front().submitted && windows.front().frames.size() == 5,
+        "a new complete prepared window is identified separately from submitted status");
+    for (std::size_t slot = 0; slot + 1 < frames.size(); ++slot) coordinator.Acknowledge(frames[slot].receipt);
+    Check(!coordinator.StatusWindows().front().submitted, "partial success cannot become a last-complete submitted window");
+    coordinator.Acknowledge(frames.back().receipt);
+    windows = coordinator.StatusWindows();
+    Check(coordinator.CurrentFrames().empty() && windows.size() == 1 && windows.front().submitted && windows.front().frames.size() == 5 &&
+        !coordinator.Validate(windows.front().frames.front().receipt),
+        "all-slot success retains status while removing every deliverable receipt");
+    coordinator.Refresh(input); windows = coordinator.StatusWindows();
+    Check(host.Load().tiles.at(L"one").pending.ticket == 0 && coordinator.CurrentFrames().empty() &&
+        windows.size() == 1 && windows.front().submitted && windows.front().frames.front().receipt.ticket == firstTicket,
+        "idle durable acknowledgement keeps the complete submitted gallery visible to status only");
+    host.now = 900001; coordinator.Refresh(input); frames = coordinator.CurrentFrames();
+    Check(frames.size() == 5 && !coordinator.StatusWindows().front().submitted,
+        "a new prepared window is labelled prepared without overwriting retained submitted history");
+    coordinator.Acknowledge(frames[0].receipt); coordinator.Acknowledge(frames[1].receipt); coordinator.Fail(frames[2].receipt);
+    windows = coordinator.StatusWindows();
+    Check(coordinator.CurrentFrames().empty() && windows.size() == 1 && windows.front().submitted && windows.front().frames.front().receipt.ticket == firstTicket,
+        "a partial replacement failure falls back to the previous whole successful queue");
+    host.now = 905001; coordinator.Refresh(input); frames = coordinator.CurrentFrames();
+    for (const auto& frame : frames) coordinator.Acknowledge(frame.receipt);
+    coordinator.Refresh(input); windows = coordinator.StatusWindows();
+    Check(frames.size() == 5 && windows.size() == 1 && windows.front().submitted && windows.front().frames.front().receipt.ticket != firstTicket,
+        "the next complete success atomically replaces the retained submitted window");
+    auto changed = input; changed.configuration.tiles.front().name = L"New photo name";
+    Check(coordinator.StatusWindows(runtime::ConfigKey(changed.configuration)).empty(), "a caller with changed configuration cannot read the old status identity");
+    coordinator.Refresh(changed); windows = coordinator.StatusWindows();
+    Check(std::none_of(windows.begin(), windows.end(), [](const auto& window) { return window.submitted; }), "configuration changes invalidate last-submitted status");
+    frames = coordinator.CurrentFrames(); for (const auto& frame : frames) coordinator.Acknowledge(frame.receipt); coordinator.Refresh(changed);
+    Check(coordinator.StatusWindows().size() == 1 && coordinator.StatusWindows().front().submitted, "renamed destinations can establish a fresh complete status");
+    changed.pinnedIds.clear(); coordinator.Refresh(changed);
+    Check(coordinator.StatusWindows().empty(), "unpinning a destination clears its retained status");
+    changed.pinnedIds = input.pinnedIds; coordinator.Refresh(changed);
+    Pump(coordinator, changed, [&] { return coordinator.CurrentFrames().size() == 5; });
+    frames = coordinator.CurrentFrames(); for (const auto& frame : frames) coordinator.Acknowledge(frame.receipt); coordinator.Refresh(changed);
+    auto newProfile = changed; newProfile.profile = L"C:\\synthetic\\another-profile.ini"; host.Initialize(newProfile); coordinator.Refresh(newProfile);
+    Check(coordinator.StatusWindows().empty(), "a profile change never carries the previous profile's submitted status");
+    Pump(coordinator, newProfile, [&] { return coordinator.CurrentFrames().size() == 5; });
+    frames = coordinator.CurrentFrames(); for (const auto& frame : frames) coordinator.Acknowledge(frame.receipt); coordinator.Refresh(newProfile);
+    auto old = host.Load(newProfile.profile); Ledger reset; std::wstring error;
+    Check(ResetLedger(old, L"new_status_epoch", true, reset, error), "epoch fixture explicitly attests historical queue retirement");
+    { std::lock_guard<std::mutex> lock(host.mutex); host.files[runtime::LedgerPath(newProfile.profile)] = Wire(reset); }
+    coordinator.RequestRefresh(true); coordinator.Refresh(newProfile); windows = coordinator.StatusWindows();
+    Check(std::none_of(windows.begin(), windows.end(), [&](const auto& window) { return window.submitted || window.frames.front().receipt.epoch == old.epochId; }),
+        "loading a new ownership epoch invalidates all old submitted status");
+    coordinator.Suspend(); Check(coordinator.StatusWindows().empty(), "redistribution suspension clears and hides all status windows");
+}
 }
 int main() {
-    try { TestExplicitInitializationAndCas(); TestPublicationAndSlotAcknowledgements(); TestRestartConflictAndUnavailableMode(); TestResumableInventoryAndShutdown(); TestManyTilesAndFolders(); TestUnavailableFolderIsolation();
+    try { TestExplicitInitializationAndCas(); TestPublicationAndSlotAcknowledgements(); TestRestartConflictAndUnavailableMode(); TestResumableInventoryAndShutdown(); TestManyTilesAndFolders(); TestUnavailableFolderIsolation(); TestSubmittedStatusRetention();
         std::cout << checks << " gallery runtime checks passed.\n"; return 0;
     } catch (const std::exception& error) { std::cerr << "FAIL after " << checks << " runtime checks: " << error.what() << '\n'; return 1; }
 }

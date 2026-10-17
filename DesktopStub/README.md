@@ -67,6 +67,12 @@ DesktopStub\build\DesktopStubLiveTileBroker.exe
 
 This avoids the old split where a Windows 8/8.1 manifest could be selected at runtime while the broker helper was missing because the build was run without the right argument.
 
+Normal builds optimize the host, broker and built-in provider objects for speed
+with `/O2 /fp:precise`. Set `DESKTOPSTUB_OPTIMIZE=0` for an unoptimized diagnostic
+build. Named builds keep generated headers/resources and objects in their own
+`build/obj/<host-name>` directory. `/bigobj` accommodates the template-heavy
+Windows headers; it adds no runtime file or provider DLL.
+
 The build embeds one version into both EXEs, the generated AppX manifest, startup diagnostics, the tray menu, and `--version`. By default the script reads the local `DesktopStub-vN` Git tag family and builds the next package version as `N.0.0.0`; for example, after `DesktopStub-v17`, an untagged local/CI build reports `DesktopStub-v18 (18.0.0.0)`. CI uses a full checkout, so release builds already have the repository tags. Set `DESKTOPSTUB_REFRESH_TAGS=1` to explicitly fetch tags from `origin` before a local build; this fetch does not force-update or prune local tags. Set `DESKTOPSTUB_VERSION=18.0.0.0` / `DESKTOPSTUB_RELEASE_TAG=DesktopStub-v18` to use an explicit custom version without fetching.
 
 For template reuse, the build names are parameterized without changing the default outputs. Set `DESKTOPSTUB_PRODUCT_NAME`, `DESKTOPSTUB_HOST_EXE_NAME`, `DESKTOPSTUB_BROKER_EXE_NAME`, or `DESKTOPSTUB_RELEASE_TAG_PREFIX` before running the script to reuse the baseline for another project while keeping the same source layout. Ordinary spaces are supported in the product/output names; the default release tag prefix removes spaces from `DESKTOPSTUB_PRODUCT_NAME`, and an explicitly supplied `DESKTOPSTUB_RELEASE_TAG_PREFIX` must not contain whitespace. Command-shell metacharacters, `%`, `!`, and quotes are rejected so the generated compiler/resource commands stay deterministic. Host and broker executable names must be plain file names, not paths.

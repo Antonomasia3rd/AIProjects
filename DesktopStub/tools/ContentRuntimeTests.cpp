@@ -6,13 +6,29 @@
 #include <commdlg.h>
 #include <string>
 #include <vector>
+#include <atomic>
+static std::atomic<unsigned> idleTestTrimCalls(0);
+static void IdleTestTrim(bool, bool) { ++idleTestTrimCalls; }
+#define DESKTOPSTUB_TEST_IDLE_MEMORY_TRIM IdleTestTrim
 #include "../../dependencies/content_engine.h"
 static bool contentNativeQueueAvailable = false, contentNativeQueueTestActive = false, contentQueueNormalAckEnabled = true;
 static std::vector<std::vector<aip::content::Snapshot>> secondaryTestBatches;
 static bool secondaryTestPinned = true;
+static unsigned galleryConfigurationParses = 0;
+#define DESKTOPSTUB_TEST_GALLERY_CONFIGURATION_PARSED() (++galleryConfigurationParses)
+static unsigned contentBaseConfigurationParses = 0, contentSecondaryConfigurationParses = 0;
+static std::wstring contentCacheSwitchProfileOnParse;
+static void ContentTestConfigurationParsed(bool secondary);
+#define DESKTOPSTUB_TEST_CONTENT_CONFIGURATION_PARSED(secondary) ContentTestConfigurationParsed(secondary)
+static std::vector<std::wstring> contentAssetCleanupDirectories;
+static void ContentTestVersionedAssetCleanup(const std::wstring& directory) { contentAssetCleanupDirectories.push_back(directory); }
+#define DESKTOPSTUB_TEST_VERSIONED_ASSET_CLEANUP(directory) ContentTestVersionedAssetCleanup(directory)
 static int secondaryTestExistsCalls = 0;
 static bool ContentTestSecondaryExists(const std::wstring&) { ++secondaryTestExistsCalls; return secondaryTestPinned; }
 static std::vector<aip::content::Snapshot> GalleryTestFrames();
+struct GalleryStatusSnapshots;
+static std::vector<GalleryStatusSnapshots> GalleryTestStatusWindows();
+#define DESKTOPSTUB_TEST_GALLERY_STATUS_WINDOWS() GalleryTestStatusWindows()
 static bool GalleryTestValidate(const aip::content::Snapshot&);
 static void GalleryTestAck(const aip::content::Snapshot&);
 static void GalleryTestFail(const aip::content::Snapshot&);
@@ -97,6 +113,17 @@ static LPWSTR ContentTestGetCommandLine() { return contentTestCommandLine.data()
 #include <map>
 
 static int checks = 0, failures = 0;
+static void ContentTestConfigurationParsed(bool secondary)
+{
+    if (secondary) ++contentSecondaryConfigurationParses;
+    else {
+        ++contentBaseConfigurationParses;
+        if (!contentCacheSwitchProfileOnParse.empty()) {
+            std::lock_guard<std::mutex> lock(g_pathMutex);
+            g_iniPath = std::move(contentCacheSwitchProfileOnParse); contentCacheSwitchProfileOnParse.clear();
+        }
+    }
+}
 static void Check(bool value, const char* name)
 {
     ++checks;
@@ -150,6 +177,7 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "NativeQueueHostTests.inc"
 #include "SecondaryTileHostTests.inc"
 #include "GalleryHostTests.inc"
+#include "GalleryStatusRetentionHostTests.inc"
 #include "GalleryLedgerHostTests.inc"
 #include "GallerySetupHostTests.inc"
 #include "GalleryPinBatchHostTests.inc"
@@ -157,6 +185,10 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "GalleryUiFlowHostTests.inc"
 #include "PrimaryAssetRetentionHostTests.inc"
 #include "PagedTextDialogHostTests.inc"
+#include "IdleMaintenanceHostTests.inc"
+#include "GalleryCpuHostTests.inc"
+#include "ContentCpuCacheHostTests.inc"
+#include "SourceTileRenameHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
@@ -1106,6 +1138,20 @@ int wmain()
         L"[Content.2]\r\nEnabled=false\r\nName=Second\r\nBackground=None\r\nTextSources=CustomText\r\nText=gamma\r\n";
     Check(WriteContentFixture(config), "temporary INI fixture");
     LoadUiStrings();
+#ifdef DESKTOPSTUB_REVISION_HOST_ONLY
+    fixtureGroup("gallery recovery, CPU, idle maintenance and explicit names");
+    TestGalleryUiFlowHost();
+    TestIdleMaintenanceHost();
+    TestGalleryCpuHost(directory, bitmapPath);
+    TestContentCpuCacheHost(directory);
+    TestSourceTileRenameHost();
+    StopContentProviders(); PublishContentSnapshot({});
+    DeleteFileW(ini.c_str()); DeleteFileW(bitmapPath.c_str()); DeleteFileW(g_logPath.c_str());
+    RemoveDirectoryW(directory.c_str());
+    fixtureGroup("complete");
+    std::cout << checks << " extended host checks; " << failures << " failures\n";
+    return failures ? 1 : 0;
+#else
     {
         const auto defaults = aip::ParseIniDocument(BuildInitialIniTemplate());
         std::wstring prompt;
@@ -1396,11 +1442,11 @@ int wmain()
     TestSecondaryTileHost(bitmapPath);
     fixtureGroup("gallery delivery, ledger and setup");
     TestGalleryHost(bitmapPath);
+    TestGalleryStatusRetentionHost(bitmapPath);
     TestGalleryLedgerHost(directory);
     TestGallerySetupHost();
     TestGalleryPinBatchHost();
     TestTileStatusHost();
-    TestGalleryUiFlowHost();
     TestPrimaryAssetRetentionHost(directory);
     TestPagedTextDialogHost();
     TestContentPresetsAndImportConfirmation();
@@ -1448,4 +1494,5 @@ int wmain()
     RemoveDirectoryW(directory.c_str());
     std::cout << checks << " content runtime/menu checks; " << failures << " failures\n";
     return failures ? 1 : 0;
+#endif
 }

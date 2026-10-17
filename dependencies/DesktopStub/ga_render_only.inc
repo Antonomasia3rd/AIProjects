@@ -95,6 +95,7 @@ static int RunRenderOnlyCommand()
             if (ReplacesCommandLineAsusEvents() && !RemoveContentAsusEvents(text)) return false;
             for (const auto& setting : g_commandLine.settings)
                 if (!WriteContentProfileSetting(text, setting)) return false;
+            if (!StageExplicitSourceTileNameIntents(text, g_commandLine.settings, g_commandLine.applyError)) return false;
             // Notes imports/clear validate the complete prospective profile
             // again under the INI mutation lock, including concurrent changes.
             if (!g_commandLine.notesImports.empty() || !g_commandLine.hardwareImports.empty() || !g_commandLine.nowPlayingImports.empty() || std::any_of(g_commandLine.settings.begin(), g_commandLine.settings.end(),

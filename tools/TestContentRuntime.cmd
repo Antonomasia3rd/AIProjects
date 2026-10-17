@@ -31,6 +31,12 @@ set "TEST_STATUS=%ERRORLEVEL%"
 if not "%TEST_STATUS%"=="0" goto Done
 build\ContentRuntimeTests.exe
 set "TEST_STATUS=%ERRORLEVEL%"
+if not "%TEST_STATUS%"=="0" goto Done
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE DesktopStub\tools\ContentRevisionHostTests.cpp build\ContentRuntimeDiscordService.obj build\ContentRuntimeDiscordProfileEdit.obj build\ContentRuntimeAsusService.obj /Fe:build\ContentRevisionHostTests.exe /Fo:build\ContentRevisionHostTests.obj /link gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib windowsapp.lib runtimeobject.lib
+set "TEST_STATUS=%ERRORLEVEL%"
+if not "%TEST_STATUS%"=="0" goto Done
+build\ContentRevisionHostTests.exe
+set "TEST_STATUS=%ERRORLEVEL%"
 :Done
 popd
 exit /b %TEST_STATUS%

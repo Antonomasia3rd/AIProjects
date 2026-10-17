@@ -200,7 +200,12 @@ public static class ManagedRegistryNotificationApp
             if (show && changes.Count != 0 && !configure) throw new ArgumentException("Saving while showing requires --configure-only.");
             string ini = ManagedProfile.ResolveIniPath(suppliedIni, AppDomain.CurrentDomain.BaseDirectory, product + ".ini");
             var spec = BuildSpec(product, ini, createService);
-            if (startup) { spec.SaveSettings(changes); return tray ? TrayRunner(spec) : 0; }
+            spec.ReloadExistingInstance = !configure && !show && changes.Keys.Any(key => key != "RunAtStartup");
+            if (startup)
+            {
+                spec.SaveSettings(changes);
+                return tray ? TrayRunner(spec) : ManagedConfigurationTray.ReloadExistingIfRunning(spec);
+            }
             if (configure)
             {
                 spec.SaveSettings(changes);

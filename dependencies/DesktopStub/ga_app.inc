@@ -1949,6 +1949,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     }
     g_shutdownWindow = g_hwnd;
 
+    // Finish/roll back a proven interrupted gallery transaction before any
+    // gallery provider or initial composed frame can observe the reset ledger.
+    std::wstring galleryRecoveryError;
+    if (!RecoverPendingGalleryTransaction(galleryRecoveryError))
+        Log(L"[!] Gallery recovery: %ls", galleryRecoveryError.c_str());
+
     DeleteFileW(AppxActivationRequestPath().c_str());
     if (!SetTimer(g_hwnd, APPX_ACTIVATION_REQUEST_TIMER_ID, 750, nullptr))
         LogWin32Failure(L"SetTimer(APPX_ACTIVATION_REQUEST_TIMER_ID)");
