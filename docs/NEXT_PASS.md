@@ -30,6 +30,13 @@ list. Private bounded fixtures remain the default for failure injection.
 
 ## Engineering and closure work
 
+- Fix the confirmed 06:45 scheduled gallery refresh burst: 74 jobs and zero
+  cache hits against a 32-entry cache, with 67 render keys repeated from startup.
+  Prefer validating/reusing retained deterministic secondary PNGs before
+  decode/resize/encode, preserving receipt/freshness and delivery timing. Test
+  more than 32 private images plus missing/corrupt/wrong-size output fallback.
+  See [the diagnosis](gallery-refresh-burst-2026-10-18.md). Smoothing native
+  submissions or suppressing identical queues is separate policy work.
 - Review owner-aware thumbnail/versioned-asset retirement and useful storage
   reporting. Historical gallery thumbnails/reservations currently accumulate;
   do not delete caches or ledger history based on guesses about Windows' queue.
