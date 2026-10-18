@@ -1,5 +1,20 @@
 # Next pass: outstanding fixes and acceptance
 
+## Completed text/memory follow-up
+
+Text presentation and primary stable-copy isolation are installed; see
+[the follow-up](tile-text-memory-followup-2026-10-18.md). Media policy passed
+83 checks, extended host passed 457, and source guards passed 1,822/277.
+Full host initially hit C1128; heavy fixture builders now use /bigobj.
+All 24,691 core, 5,630 renderer and 3 no-hardware checks then passed, followed
+by clean product scans, full offline smoke and guarded installation. PID 55592
+passed startup health; backup is ReviewBackupOct18-20261018-102154. The user's
+now-configured Prayer Times location and existing content/pins were preserved.
+The 09:47 burst confirms 67 reused gallery images but substantial remaining
+native submission/validation work. An identical-queue optimization and a fair
+wallpaper-only memory baseline remain follow-up work; no 4 MB guarantee or
+kernel-CPU attribution has been established.
+
 Checkpoint: 2026-10-18. The gallery recovery, stale-dialog and source Rename
 fixes below are installed with two CPU optimizations. Typed idle parsing
 caches and gallery status retention are validated and installed. The shared

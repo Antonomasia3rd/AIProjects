@@ -13,6 +13,8 @@ static constexpr UINT ID_CONTENT_ENTRY_OPTIONS = 20000;
 static constexpr UINT CONTENT_ENTRY_COMMANDS = 64;
 static void AppendPrayerSettingsMenu(HMENU menu);
 static bool DispatchPrayerSettingsCommand(HWND owner, UINT command);
+static void AppendTextPresentationMenu(HMENU parent,const std::wstring& section,UINT slot);
+static bool DispatchTextPresentationCommand(HWND owner,UINT command);
 static constexpr UINT ContentSourceChoiceOffset(UINT choice) { return choice < 8 ? 24 + choice : 34 + choice - 8; }
 static const aip::content::SourceDescriptor* ContentSourceChoiceForOffset(UINT field) {
     static_assert(_countof(aip::content::Sources) <= 14, "Source menu choices exhausted their reserved command offsets.");
@@ -154,6 +156,7 @@ static void AppendContentEngineMenu(HMENU menu, ContentMenuPart part = ContentMe
         } else append(menu, ID_CONTENT_OPTIONS + i, L"Content", g_contentOptions[i]);
     }
     const int count = IniReadClampedI(L"Content", L"Count", 1, 1, aip::content::MaxEntries);
+    if (part == ContentMenuPart::TextDelivery) AppendTextPresentationMenu(menu,L"TileText",0);
     if (part == ContentMenuPart::Sources) {
     HMENU prayer = aip::BeginTrayNestedMenu(menu);
     AppendPrayerSettingsMenu(prayer);
@@ -555,6 +558,7 @@ static bool SaveContentAsusEventSetting(HWND owner, const std::wstring& key, con
 static bool DispatchContentEngineCommand(HWND owner, UINT command)
 {
     if (DispatchPrayerSettingsCommand(owner, command)) return true;
+    if (DispatchTextPresentationCommand(owner, command)) return true;
     if (command >= ID_CONTENT_CYCLE_DRIVER && command < ID_CONTENT_CYCLE_DRIVER + _countof(aip::content::CycleDrivers)) {
         SaveContentMenuSettings(owner, {{L"Content", L"CycleDriver", aip::content::CycleDrivers[command - ID_CONTENT_CYCLE_DRIVER].value}}); return true;
     }
@@ -787,3 +791,4 @@ static bool DispatchContentEngineCommand(HWND owner, UINT command)
     return true;
 }
 #include "ga_prayer_settings_tray.inc"
+#include "ga_text_presentation_tray.inc"

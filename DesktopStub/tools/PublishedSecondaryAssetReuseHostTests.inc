@@ -161,6 +161,51 @@ static void TestPublishedSecondaryAssetReuseHost(const std::wstring& directory)
         Check(changedRows.ok && !changedRows.reused && changedRows.key != structured.key,
             "changed baked prayer rows require new deterministic output assets");
     }
+    {
+        auto styled = frame; styled.textMode = aip::content::TextMode::Overlay; styled.text.primary = L"Presentation key fixture";
+        ContentRenderScope scope(&styled);
+        const auto defaultKey = BuildGenerationStateKey(styled.backgroundPath);
+        scope.snapshot.presentation.primaryStyle = L"title";
+        Check(BuildGenerationStateKey(styled.backgroundPath) == defaultKey,
+            "Default text presentation contributes no key material even when inactive custom fields differ");
+        scope.snapshot.presentation.preset = L"Custom";
+        const auto customKey = BuildGenerationStateKey(styled.backgroundPath);
+        scope.snapshot.presentation.primaryStyle = L"header";
+        Check(customKey != defaultKey && BuildGenerationStateKey(styled.backgroundPath) != customKey,
+            "an active baked text style requires its own deterministic bitmap key");
+        const auto oldTarget = g_manifestCompatibilityTarget.load();
+        g_manifestCompatibilityTarget = static_cast<int>(ManifestCompatibilityTarget::Windows10);
+        scope.snapshot.textMode = aip::content::TextMode::Auto;
+        const auto nativeKey = BuildGenerationStateKey(styled.backgroundPath);
+        scope.snapshot.presentation.primaryStyle = L"caption";
+        Check(BuildGenerationStateKey(styled.backgroundPath) == nativeKey,
+            "native XML-only text style changes do not invalidate unchanged image pixels");
+        scope.snapshot.textMode = aip::content::TextMode::Off;
+        const auto hiddenKey = BuildGenerationStateKey(styled.backgroundPath);
+        scope.snapshot.presentation.preset = L"Default";
+        Check(BuildGenerationStateKey(styled.backgroundPath) == hiddenKey,
+            "hidden text ignores presentation policy in image-cache keys");
+        g_manifestCompatibilityTarget = oldTarget;
+    }
+    {
+        const std::vector<BYTE> stableSentinel{1, 4, 7, 0};
+        for (const auto& type : g_liveTileAssets) Check(WriteWholeFileBytes(ResolveManifestAssetPath(root, type.file), stableSentinel),
+            "seed only owned primary stable-image sentinel bytes");
+        auto secondary = frame; secondary.galleryFrame = false; secondary.secondaryTileId = L"AipSource_prayer";
+        CopyPrimaryLiveTileAssetsToStablePaths(root, assets, secondary);
+        bool preserved = true;
+        for (const auto& type : g_liveTileAssets) {
+            std::vector<BYTE> bytes; preserved = ReadWholeFileBytes(ResolveManifestAssetPath(root, type.file), bytes) && bytes == stableSentinel && preserved;
+        }
+        Check(preserved, "a non-gallery secondary source cannot overwrite the primary stable notification images");
+        auto primary = secondary; primary.secondaryTileId.clear();
+        CopyPrimaryLiveTileAssetsToStablePaths(root, assets, primary);
+        bool copied = true;
+        for (const auto& type : g_liveTileAssets) {
+            std::vector<BYTE> bytes; copied = ReadWholeFileBytes(ResolveManifestAssetPath(root, type.file), bytes) && bytes == png.at(type.name) && copied;
+        }
+        Check(copied, "the same file helper still publishes stable-image copies for a primary generation");
+    }
     std::vector<BYTE> unchanged;
     Check(ReadWholeFileBytes(primaryPath, unchanged) && unchanged == primaryBytes, "eviction and repeated secondary receipts preserve primary/static bytes");
     g_secondaryTileAssets = oldSecondary; g_nativeQueueAssets = oldNative; g_primaryTileAssets = oldPrimary; g_liveTileUpdateMode = oldMode;

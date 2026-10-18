@@ -115,6 +115,7 @@ static const IniDefault g_defaults[] = {
     {L"Content", L"CycleDriver", L"DesktopStub"},
     {L"Content", L"RefreshSeconds", L"2"},
     {L"Content", L"TextMode", L"Auto"},
+    {L"TileText", L"TextPreset", L"Default"},
     {L"PrayerTimes", L"City", L""},
     {L"PrayerTimes", L"Country", L""},
     {L"PrayerTimes", L"State", L""},

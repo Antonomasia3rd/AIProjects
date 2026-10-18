@@ -12,7 +12,7 @@ if errorlevel 1 exit /b 1
 pushd "%CONTENT_ROOT%" || exit /b 1
 if not exist "build\content-integration" mkdir "build\content-integration"
 set "CONTENT_OUT=build\content-integration"
-set "CONTENT_FLAGS=/nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /fp:precise"
+set "CONTENT_FLAGS=/nologo /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /fp:precise /bigobj"
 if "%CONTENT_OPTIMIZE%"=="1" set "CONTENT_OUT=build\content-integration-optimized"
 if "%CONTENT_OPTIMIZE%"=="1" set "CONTENT_FLAGS=%CONTENT_FLAGS% /O2"
 if not exist "%CONTENT_OUT%" mkdir "%CONTENT_OUT%"

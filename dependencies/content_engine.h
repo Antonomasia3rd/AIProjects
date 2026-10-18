@@ -16,6 +16,7 @@
 #include "content_sources/notes_model.h"
 #include "content_sources/notes_signin_model.h"
 #include "content_sources/prayer_times_model.h"
+#include "tile_text_presentation.h"
 
 namespace aip { namespace content {
 constexpr int MaxEntries = 32;
@@ -139,6 +140,7 @@ struct Configuration {
     aip::caps::Config caps;
     AsusConfiguration asus;
     aip::prayer::Configuration prayer;
+    TextPresentation presentation;
 };
 struct Snapshot {
     bool active = false;
@@ -168,6 +170,7 @@ struct Snapshot {
     // Keep an immutable source asset alive while a published/render snapshot
     // still reads it. The portable composition model does not own its files.
     std::shared_ptr<const void> backgroundLease;
+    TextPresentation presentation;
 };
 inline std::wstring Trim(std::wstring s) {
     const auto first = s.find_first_not_of(L" \t\r\n");
@@ -254,7 +257,7 @@ inline bool EntrySection(const std::wstring& section) {
 }
 inline bool KnownSection(const std::wstring& section) {
     auto s = Lower(section);
-    return s == L"content" || s.compare(0, 8, L"content.") == 0 || s == L"notes" || s.compare(0, 6, L"notes.") == 0 || s == L"discord" || s == L"capsblink" || s == L"asusblink" || s == L"smtc" || s == L"prayertimes";
+    return s == L"content" || s.compare(0, 8, L"content.") == 0 || s == L"notes" || s.compare(0, 6, L"notes.") == 0 || s == L"discord" || s == L"capsblink" || s == L"asusblink" || s == L"smtc" || s == L"prayertimes" || s == L"tiletext";
 }
 inline bool SensitiveSetting(const std::wstring& section, const std::wstring& key) {
     const auto k = Lower(key);
@@ -282,6 +285,10 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
     const bool root = Lower(section) == L"content";
     const auto k = Lower(key);
     error = section + L"." + key + L": ";
+    if (Lower(section) == L"tiletext") {
+        if (IsTextPresentationKey(key)) return NormalizeTextPresentationSetting(key, value, error);
+        error.clear(); return true; // Existing TileText content/applicability keys keep their prior policy.
+    }
     if (Lower(section) == L"prayertimes") {
         auto canonicalKey = key;
         return aip::prayer::NormalizeSetting(canonicalKey, value, error);
@@ -566,6 +573,7 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
         if (!aip::asus::ParseConfiguration(cfg.asus.settings, parsed, issue)) { if (valid) error = issue; valid = false; }
     }
     std::wstring prayerError;
+    if (!ReadTextPresentation(read, L"TileText", cfg.presentation, prayerError)) { if (valid) error = prayerError; valid = false; }
     if (!aip::prayer::ReadConfiguration([&](const wchar_t* key, const wchar_t* fallback) {
         return read(L"PrayerTimes", key, fallback);
     }, cfg.prayer, prayerError)) { if (valid) error = prayerError; valid = false; }

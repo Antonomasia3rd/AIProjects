@@ -313,6 +313,11 @@ static std::wstring BuildLiveTileXml(
         }
 
         const wchar_t* templateName = LiveTileTemplateForTarget(asset.binding);
+        if (LiveTileUsesAdaptiveXml() && g_renderContent && !g_renderContent->rssHeadlines.empty() &&
+            g_renderContent->textMode == aip::content::TextMode::Auto && g_renderContent->presentation.preset == L"RssHeadlines" &&
+            aip::content::AppendRssRichTileBinding(xml, templateName, asset.h, g_renderContent->rssHeadlines, ContentHasTransparentBackground() ? L"" : uri)) {
+            hasUsableBinding = true; continue;
+        }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->prayerSource &&
             g_renderContent->textMode == aip::content::TextMode::Auto &&
             aip::content::AppendPrayerTileBinding(xml, templateName, asset.h, g_renderContent->text, g_renderContent->detailRows,
@@ -374,6 +379,8 @@ static std::wstring BuildLiveTileXml(
 
     xml += L"  </visual>\r\n";
     xml += L"</tile>";
+    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active())
+        xml = aip::content::ApplyTextPresentationXml(xml, g_renderContent->presentation);
     aip::tile_notification::Options options;
     if (g_renderContent) {
         options.queued = g_renderContent->nativeQueue;

@@ -192,6 +192,7 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "PublishedSecondaryAssetReuseHostTests.inc"
 #include "PrayerCacheHostTests.inc"
 #include "PrayerTimesHostTests.inc"
+#include "TextPresentationHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
@@ -1151,6 +1152,7 @@ int wmain()
     TestPublishedSecondaryAssetReuseHost(directory);
     TestPrayerCacheHost(directory);
     TestPrayerTimesHost(bitmapPath);
+    TestTextPresentationHost();
     StopContentProviders(); PublishContentSnapshot({});
     DeleteFileW(ini.c_str()); DeleteFileW(bitmapPath.c_str()); DeleteFileW(g_logPath.c_str());
     RemoveDirectoryW(directory.c_str());

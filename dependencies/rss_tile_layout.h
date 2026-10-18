@@ -1,6 +1,16 @@
 #pragma once
 #include "content_engine.h"
 namespace aip { namespace content {
+inline std::wstring RssXmlEscape(const std::wstring& text);
+inline bool AppendRssRichTileBinding(std::wstring& xml, const wchar_t* binding, int height, const std::vector<Text>& headlines, const std::wstring& image) {
+    if (!binding || !*binding || headlines.empty()) return false;
+    xml += L"<binding template=\"" + std::wstring(binding) + L"\" hint-textStacking=\"top\">";
+    if (!image.empty()) xml += L"<image placement=\"background\" src=\"" + RssXmlEscape(image) + L"\"/>";
+    for (std::size_t i = 0; i < (std::min)(headlines.size(), height > 200 ? std::size_t(3) : std::size_t(1)); ++i)
+        xml += L"<group><subgroup><text hint-style=\"body\" hint-wrap=\"true\" hint-maxLines=\"3\">" + RssXmlEscape(std::to_wstring(i+1)+L". "+headlines[i].primary) +
+            L"</text><text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\"2\">" + RssXmlEscape(headlines[i].secondary) + L"</text></subgroup></group>";
+    xml += L"</binding>"; return true;
+}
 inline std::size_t RssTileRows(int height) { return height > 200 ? 5u : 3u; }
 inline std::wstring RssXmlEscape(const std::wstring& text) {
     std::wstring out;

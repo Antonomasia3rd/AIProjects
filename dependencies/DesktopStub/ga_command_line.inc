@@ -784,7 +784,8 @@ static bool NormalizeDesktopStubTypedSetting(
         return aip::content::NormalizeTileActionSetting(section, key, value, error);
     if (IEquals(section, L"Tiles") || aip::content::Lower(section).compare(0, 5, L"tile.") == 0)
         return aip::content::NormalizeSecondaryTileSetting(section, key, value, error);
-    if (aip::content::KnownSection(section))
+    if (aip::content::KnownSection(section) &&
+        (!IEquals(section, L"TileText") || aip::content::IsTextPresentationKey(key)))
         return aip::content::NormalizeSetting(section, key, value, error);
     if (const auto* display = FindDesktopStubDisplaySetting(section, key))
         return NormalizeDesktopStubDisplaySettingValue(*display, value, error);

@@ -270,6 +270,7 @@ static void AppendSecondaryTilesMenu(HMENU menu)
         aip::AppendTrayMenuItem(child, base + 4, L"Source and sign-in settings...", false, true);
         aip::AppendTrayMenuItem(child, base + 5, L"Rename...", false, true);
         AppendTileAppearanceMenu(child, section, base + 6);
+        AppendTextPresentationMenu(child,section,index+1);
         HMENU mappings = aip::BeginTrayNestedMenu(child);
         const int mapping = IniReadClampedI(section.c_str(), L"Content", descriptor.content, 1, aip::content::MaxEntries);
         for (int slot = 1; slot <= count; ++slot) {

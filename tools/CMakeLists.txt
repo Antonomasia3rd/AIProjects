@@ -114,6 +114,9 @@ if(WIN32)
     add_portable_test(TransparentBackgroundTests DesktopStub/tools/TransparentBackgroundTests.cpp .)
     add_portable_test(AdaptiveTileTextRenderTests DesktopStub/tools/AdaptiveTileTextRenderTests.cpp .)
     foreach(fixture ContentRuntimeTests ContentRevisionHostTests ContentRuntimeNoHardwareTests TransparentBackgroundTests AdaptiveTileTextRenderTests)
+        if(MSVC)
+            target_compile_options(${fixture} PRIVATE /bigobj)
+        endif()
         target_compile_definitions(${fixture} PRIVATE UNICODE _UNICODE)
         target_link_libraries(${fixture} PRIVATE ContentIntegrationDiscord
             gdiplus windowscodecs gdi32 user32 shlwapi shell32 ole32 uuid comdlg32

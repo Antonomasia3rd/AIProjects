@@ -36,9 +36,11 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
             AppendTileStatusLine(output, frame.detailRows[i].secondary);
         }
     } else if (frame.textMode == aip::content::TextMode::Auto && !frame.smtcSource && !frame.rssHeadlines.empty()) {
-        for (std::size_t i = 0; i < (std::min)(frame.rssHeadlines.size(), aip::content::RssTileRows(height)); ++i) {
+        const bool rich = frame.presentation.preset == L"RssHeadlines";
+        const auto limit = rich ? (height > 200 ? std::size_t(3) : std::size_t(1)) : aip::content::RssTileRows(height);
+        for (std::size_t i = 0; i < (std::min)(frame.rssHeadlines.size(), limit); ++i) {
             AppendTileStatusLine(output, std::to_wstring(i + 1) + L". " + frame.rssHeadlines[i].primary);
-            if (height > 200) AppendTileStatusLine(output, frame.rssHeadlines[i].secondary);
+            if (rich || height > 200) AppendTileStatusLine(output, frame.rssHeadlines[i].secondary);
         }
     } else {
         AppendTileStatusLine(output, frame.text.primary);

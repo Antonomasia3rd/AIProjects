@@ -634,6 +634,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
             key += L":" + std::to_wstring(value.size()) + L":" + value;
     key += L":" + std::to_wstring(snapshot.activationArguments.size()) + L":" + snapshot.activationArguments;
     key += L":branding:" + snapshot.secondaryBranding;
+    if (snapshot.textMode != aip::content::TextMode::Off && snapshot.presentation.Active()) key += L":presentation:" + aip::content::TextPresentationKey(snapshot.presentation);
     if (snapshot.textMode != aip::content::TextMode::Off) key += L":prayer:" + std::to_wstring(snapshot.prayerSource);
     if (snapshot.textMode != aip::content::TextMode::Off) {
     for (const auto& headline : snapshot.rssHeadlines)
@@ -818,6 +819,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
         return snapshot;
     }
     snapshot.backgroundId = aip::content::BackgroundIdFor(entry.background);
+    snapshot.presentation = cfg.presentation;
     auto backgroundKey = entry.background + L"\n" + entry.imagePath;
     const bool artworkBackground = aip::content::BackgroundIdFor(entry.background) == aip::content::BackgroundId::SmtcArtwork;
     if (artworkBackground) {
@@ -956,6 +958,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
             auto frame = found->second;
             frame.name = tile.name; frame.secondaryTileId = L"AipSource_" + tile.id;
             frame.secondaryBranding = tile.appearance.branding;
+            frame.presentation = tile.presentation;
             if (tile.id == L"rss" && feed.ok) {
                 for (std::size_t headline = 0; headline < (std::min)(feed.items.size(), std::size_t(5)); ++headline)
                     frame.rssHeadlines.push_back({feed.items[headline].title, feed.items[headline].summary, L""});

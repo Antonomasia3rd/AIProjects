@@ -352,6 +352,11 @@ static void CopyLiveTileAssetsToStablePaths(
         }
     }
 }
+static void CopyPrimaryLiveTileAssetsToStablePaths(const std::wstring& exeDir,
+    const std::vector<LiveTileUpdateAsset>& liveTileAssets, const aip::content::Snapshot& snapshot)
+{
+    if (snapshot.secondaryTileId.empty()) CopyLiveTileAssetsToStablePaths(exeDir, liveTileAssets);
+}
 
 static bool GeneratedAssetCacheEnabled()
 {
@@ -1310,6 +1315,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
         if (bakedText) for (const auto& headline : g_renderContent->rssHeadlines)
             state += L"rss=" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
         if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off) {
+            if (g_renderContent->presentation.Active()) state += L"textPresentation=" + aip::content::TextPresentationKey(g_renderContent->presentation) + L";";
             state += L"prayerSource=" + std::to_wstring(g_renderContent->prayerSource) + L";";
             state += L"wrapSourceText=" + std::to_wstring(g_renderContent->wrapSourceText) + L";";
             state += L"detailTopic=" + g_renderContent->detailTopic + L";";
@@ -2505,8 +2511,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     {
         // Offline rendering terminates before manifest registration, package
         // activation, native TileUpdater operations and their state markers.
-        if (liveTileUpdateMode)
-            if (contentScope.snapshot.secondaryTileId.empty()) CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
+        if (liveTileUpdateMode) CopyPrimaryLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets, contentScope.snapshot);
         if (!restoredFromGeneratedAssetCache)
             SaveGeneratedAssetCache(exeDir, generationStateKey, generatedAssetCacheFiles);
         return true;
@@ -2638,7 +2643,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         if (liveTileUpdateMode)
         {
             RetainPublishedLiveTileAssets(contentScope.snapshot, liveTileUpdateAssets);
-            if (!contentScope.snapshot.galleryFrame) CopyLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets);
+            CopyPrimaryLiveTileAssetsToStablePaths(exeDir, liveTileUpdateAssets, contentScope.snapshot);
             RequestVersionedLiveTileAssetCleanup(exeDir, liveTileUpdateAssets);
         }
         if (!restoredFromGeneratedAssetCache)

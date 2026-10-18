@@ -82,6 +82,7 @@ struct SecondaryTile {
     bool enabled = true;
     int content = 1; // One-based [Content.N] index.
     TileAppearance appearance;
+    TextPresentation presentation;
 };
 struct SecondaryTileConfiguration {
     bool enabled = false;
@@ -113,6 +114,7 @@ inline bool NormalizeSecondaryTileSetting(const std::wstring& section, const std
         FindSecondaryTileDescriptor(normalizedSection.substr(5));
     error = section + L"." + key + L": ";
     if (!root && !tile) { error += L"unknown secondary tile section."; return false; }
+    if (tile && IsTextPresentationKey(key)) return NormalizeTextPresentationSetting(key, value, error, true);
     if (normalizedKey == L"enabled") {
         bool enabled = false;
         if (!ParseBool(value, enabled)) { error += L"expected an enabled/disabled boolean."; return false; }
@@ -171,6 +173,9 @@ template<class Reader> bool ReadSecondaryTileConfiguration(Reader read, std::siz
         return value;
     };
     cfg.enabled = get(L"Tiles", L"Enabled", L"0") == L"1";
+    TextPresentation globalPresentation;
+    std::wstring presentationError;
+    if (!ReadTextPresentation(read, L"TileText", globalPresentation, presentationError)) { error = presentationError; return false; }
     for (const auto& descriptor : SecondaryTiles) {
         SecondaryTile tile;
         tile.id = descriptor.id;
@@ -179,6 +184,10 @@ template<class Reader> bool ReadSecondaryTileConfiguration(Reader read, std::siz
         const auto defaultContent = std::to_wstring(descriptor.content);
         ParseInt(get(section, L"Content", defaultContent.c_str()), 1, MaxEntries, tile.content);
         tile.name = get(section, L"Name", descriptor.name);
+        if (!ReadTextPresentation(read, section, tile.presentation, presentationError, &globalPresentation)) {
+            if (valid) error = presentationError;
+            return false;
+        }
         std::wstring appearanceError;
         if (!ReadTileAppearance(read, section, tile.appearance, appearanceError)) {
             if (valid) error = appearanceError;

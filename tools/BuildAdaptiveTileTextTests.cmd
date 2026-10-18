@@ -10,9 +10,9 @@ call "%ADAPTIVE_VS%\VC\Auxiliary\Build\vcvars64.bat" >nul
 if errorlevel 1 exit /b 1
 pushd "%ADAPTIVE_ROOT%" || exit /b 1
 set "ADAPTIVE_OUT=build\content-integration"
-set "ADAPTIVE_OPTIMIZATION=/fp:precise"
+set "ADAPTIVE_OPTIMIZATION=/fp:precise /bigobj"
 if "%CONTENT_OPTIMIZE%"=="1" set "ADAPTIVE_OUT=build\content-integration-optimized"
-if "%CONTENT_OPTIMIZE%"=="1" set "ADAPTIVE_OPTIMIZATION=/O2 /fp:precise"
+if "%CONTENT_OPTIMIZE%"=="1" set "ADAPTIVE_OPTIMIZATION=/O2 /fp:precise /bigobj"
 if not exist "%ADAPTIVE_OUT%" mkdir "%ADAPTIVE_OUT%"
 if /i "%~1"=="Layout" goto Layout
 if /i "%~1"=="Render" goto Render

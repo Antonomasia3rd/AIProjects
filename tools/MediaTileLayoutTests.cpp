@@ -1,5 +1,7 @@
 // Pure presentation and settings policy; no Windows, media, files or tile APIs.
 #include "../dependencies/media_tile_layout.h"
+#include "../dependencies/prayer_tile_layout.h"
+#include "../dependencies/rss_tile_layout.h"
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -117,8 +119,31 @@ void TestSettings() {
     value = L"os_asia";
     Check(!NormalizeSetting(L"Notes.Charge", L"Server", value, error), "a server from a different game is not silently reused");
 }
+void TestPresentation() {
+    TextPresentation p; const std::wstring xml=L"<binding template=\"TileLarge\"><text hint-style=\"caption\">Line one\nLine two &amp;</text><image src=\"icon.png\"/></binding>";
+    Check(!p.Active() && ApplyTextPresentationXml(xml,p)==xml,"Default presentation preserves exact native XML");
+    for(const auto* style:TextPresentationStyles){auto value=std::wstring(style);std::wstring error;Check(NormalizeTextPresentationSetting(L"TextStyle",value,error),"every documented named text style is selectable");}
+    Profile profile;profile.values[{L"TileText",L"TextPreset"}]=L"Custom";profile.values[{L"TileText",L"TextStyle"}]=L"headerNumeral";
+    profile.values[{L"TileText",L"TextAlign"}]=L"center";std::wstring error;
+    Check(ReadTextPresentation(profile,L"TileText",p,error)&&p.Active()&&p.primaryStyle==L"headerNumeral","typed global presentation accepts named numeral size and alignment");
+    auto styled=ApplyTextPresentationXml(xml,p);
+    Check(styled.find(L"headerNumeral")!=std::wstring::npos&&styled.find(L"hint-align=\"center\"")!=std::wstring::npos&&
+        styled.find(L"Line one\nLine two &amp;")!=std::wstring::npos&&styled.find(L"icon.png")!=std::wstring::npos,"custom styling preserves explicit line breaks, escaped data and source images");
+    TextPresentation inherited;Check(ReadTextPresentation(profile,L"Tile.prayer",inherited,error,&p)&&TextPresentationKey(inherited)==TextPresentationKey(p),"per-source presentation inherits global defaults");
+    profile.values[{L"Tile.prayer",L"TextStyle"}]=L"body";
+    Check(ReadTextPresentation(profile,L"Tile.prayer",inherited,error,&p)&&inherited.primaryStyle==L"body"&&p.primaryStyle==L"headerNumeral","per-source overrides do not mutate global settings");
+    profile.values[{L"Tile.prayer",L"TextMaxLines"}]=L"99";const auto before=TextPresentationKey(inherited);
+    Check(!ReadTextPresentation(profile,L"Tile.prayer",inherited,error,&p)&&TextPresentationKey(inherited)==before,"invalid presentation reload leaves prior settings intact");
+    std::vector<Text> prayers;for(const auto* name:{L"Fajr",L"Dhuhr",L"Asr",L"Maghrib",L"Isha"})prayers.push_back({name,L"12:00",L""});
+    std::wstring prayer;AppendPrayerTileBinding(prayer,L"TileLarge",310,{L"Next",L"City",L"Sunrise"},prayers);
+    const auto presented=ApplyTextPresentationXml(prayer,p);
+    Check(Count(presented,L"<group>")==5&&presented.find(L"Isha")!=std::wstring::npos,"font changes retain all five Prayer rows even when selected size must clip within bounds");
+    std::vector<Text> headlines;for(int i=0;i<5;++i)headlines.push_back({L"Wrapped headline\nsecond line "+std::to_wstring(i),L"Description",L""});
+    std::wstring rich;AppendRssRichTileBinding(rich,L"TileMedium",150,headlines,L"");
+    Check(Count(rich,L"<group>")==1&&rich.find(L"\nsecond line")!=std::wstring::npos&&rich.find(L"Description")!=std::wstring::npos,"RSS rich preset explicitly selects one larger wrapped Medium headline with its description");
+}
 }
 int main() {
-    try { TestStatus(); TestLayouts(); TestSettings(); std::cout << checks << " media presentation checks passed\n"; return 0; }
+    try { TestStatus(); TestLayouts(); TestSettings(); TestPresentation(); std::cout << checks << " media presentation checks passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << "After " << checks << " checks: " << error.what() << '\n'; return 1; }
 }

@@ -399,6 +399,22 @@ g++ -std=c++17 -Wall -Wextra -I dependencies/DesktopStub -o /tmp/TileTextLayoutT
 
 Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available. The DesktopStub Windows file/product version and default `AppxManifest.xml` package version are derived from the same `DesktopStub-vN` family used by CI release publishing, so the binary and manifest versions match the release tag. Reused projects can override the local build tag family with `DESKTOPSTUB_RELEASE_TAG_PREFIX`. The repository workflow still publishes the default `DesktopStub` artifact paths; a copied baseline project that changes output names should update `.github/project-map.json`, `.github/workflows/build-windows.yml`, and `.github/scripts/build-windows.cmd` together so CI artifacts and release assets follow the new product names.
 
+## Tile text size, wrapping and layout
+
+Use **Tile display > Text size, wrapping and layout** for global controls, or a
+source tile's **Text size, wrapping and layout** menu for an override. Choosing a style activates
+Custom presentation. Default preserves the existing appearance; source tiles
+can Inherit global choices. RssHeadlines is a separate readable preset with one
+rich item on Medium/Wide and three on Large. Named Windows styles control size
+and weight; larger text leaves less room for content. Wrapping, line limits,
+alignment, stacking and blank-line gaps are also configurable.
+
+The same keys work in `[TileText]` and `[Tile.rss]`, `[Tile.prayer]`, etc. For
+example, `--configure-only --set Tile.rss.TextPreset=RssHeadlines` or
+`--set Tile.prayer.TextPreset=Custom --set Tile.prayer.TextStyle=subtitle`.
+Additional keys are TextSecondaryStyle, TextBadgeStyle, TextWrap, TextMaxLines,
+TextSecondaryMaxLines, TextBadgeMaxLines, TextAlign, TextStacking and TextGapLines.
+
 ## Prayer Times
 
 Prayer Times is an optional built-in source and separate tile, sharing the same

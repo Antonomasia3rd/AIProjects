@@ -11,6 +11,12 @@ is enabled and its focused native recheck passed.
 
 ## Saved and installed
 
+- Text size/wrapping/layout controls and a readable RSS preset are installed,
+  with Default preserving the existing appearance and source-tile inheritance.
+  Non-gallery secondary updates no longer overwrite primary stable PNG paths.
+  Full focused/core/render/source/smoke gates and guarded startup passed. The
+  09:47 burst and memory-counter comparison are recorded in
+  [the text/performance/memory follow-up](tile-text-memory-followup-2026-10-18.md).
 - The later October 18 build adds the optional Prayer Times source/tile and
   reuses retained secondary PNGs after generated-cache eviction. It passed the
   full focused/core/render/source/smoke gates and guarded installation, with

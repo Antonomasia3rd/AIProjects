@@ -3,6 +3,7 @@
 // -----------------------------------------------------------------------------
 #include "../media_tile_layout.h"
 #include "../prayer_tile_layout.h"
+#include "../rss_tile_layout.h"
 static std::mutex g_gdiPlusMutex;
 static ULONG_PTR g_gdiPlusToken = 0;
 static unsigned int g_gdiPlusUseCount = 0;
@@ -636,22 +637,53 @@ static bool DrawTopSourceField(Graphics& graphics, const std::wstring& text, Fon
     REAL x, REAL& y, REAL width, REAL bottom, int maxLines, BYTE alpha, REAL gap)
 {
     if (text.empty() || width <= 0 || y >= bottom) return true;
-    const REAL lineHeight = font.GetHeight(&graphics);
-    if (lineHeight <= 0 || font.GetLastStatus() != Ok) return false;
+    std::unique_ptr<Font> presented;
+    Font* selected = &font;
+    const auto* presentation = g_renderContent && g_renderContent->presentation.Active() ? &g_renderContent->presentation : nullptr;
+    if (presentation) {
+        const bool badge = text == g_renderContent->text.badge && alpha < 255;
+        const auto& style = alpha == 255 ? presentation->primaryStyle : badge ? presentation->badgeStyle : presentation->secondaryStyle;
+        const REAL scale = font.GetSize() / 12;
+        presented = std::make_unique<Font>(L"Segoe UI", static_cast<REAL>(aip::content::TextStylePixels(style)) * scale,
+            style.compare(0,4,L"base") == 0 ? FontStyleBold : FontStyleRegular, UnitPixel);
+        if (presented->GetLastStatus() != Ok) return false;
+        selected = presented.get();
+        maxLines = presentation->wrap ? (alpha == 255 ? presentation->primaryLines : badge ? presentation->badgeLines : presentation->secondaryLines) : 1;
+        alpha = style.find(L"Subtle") == std::wstring::npos ? 255 : 153;
+        gap += static_cast<REAL>(presentation->gapLines * 12) * scale;
+    }
+    const REAL lineHeight = selected->GetHeight(&graphics);
+    if (lineHeight <= 0 || selected->GetLastStatus() != Ok) return false;
     const REAL height = std::min(bottom - y, lineHeight * maxLines + 0.01f);
-    if (height < lineHeight) return true;
+    if (height < lineHeight && !presentation) return true;
     RectF bounds(x, y, width, height), measured;
     StringFormat format;
     format.SetAlignment(StringAlignmentNear); format.SetLineAlignment(StringAlignmentNear);
     format.SetTrimming(StringTrimmingEllipsisWord); format.SetFormatFlags(StringFormatFlagsLineLimit);
-    if (graphics.MeasureString(text.c_str(), static_cast<INT>(text.size()), &font, bounds, &format, &measured) != Ok) return false;
+    if (presentation) {
+        format.SetAlignment(presentation->align == L"center" ? StringAlignmentCenter : presentation->align == L"right" ? StringAlignmentFar : StringAlignmentNear);
+        format.SetLineAlignment(presentation->stacking == L"center" ? StringAlignmentCenter : presentation->stacking == L"bottom" ? StringAlignmentFar : StringAlignmentNear);
+        if (!presentation->wrap) format.SetFormatFlags(StringFormatFlagsLineLimit | StringFormatFlagsNoWrap);
+        if (height < lineHeight) format.SetFormatFlags(presentation->wrap ? 0 : StringFormatFlagsNoWrap);
+    }
+    if (graphics.MeasureString(text.c_str(), static_cast<INT>(text.size()), selected, bounds, &format, &measured) != Ok) return false;
     SolidBrush brush(Color(alpha, 255, 255, 255));
     const auto saved = graphics.Save();
     graphics.SetClip(bounds, CombineModeIntersect);
-    const auto result = graphics.DrawString(text.c_str(), static_cast<INT>(text.size()), &font, bounds, &format, &brush);
+    const auto result = graphics.DrawString(text.c_str(), static_cast<INT>(text.size()), selected, bounds, &format, &brush);
     graphics.Restore(saved);
     y += std::min(height, std::max(lineHeight, measured.Height)) + gap;
     return result == Ok;
+}
+static REAL PresentedTextOffset(const aip::content::Snapshot& frame, int height, double scale)
+{
+    if (!frame.presentation.Active() || frame.presentation.stacking == L"top") return 0;
+    const auto& p = frame.presentation;
+    const int estimate = aip::content::TextStylePixels(p.primaryStyle) * p.primaryLines +
+        aip::content::TextStylePixels(p.secondaryStyle) * p.secondaryLines +
+        (frame.text.badge.empty() ? 0 : aip::content::TextStylePixels(p.badgeStyle) * p.badgeLines) + p.gapLines * 24;
+    const int free = (std::max)(0, height - 30 - estimate);
+    return static_cast<REAL>(free * scale * (p.stacking == L"center" ? .5 : 1));
 }
 
 static bool RenderMediaTileSimulation(Graphics& graphics, const aip::content::Snapshot& snapshot,
@@ -662,7 +694,7 @@ static bool RenderMediaTileSimulation(Graphics& graphics, const aip::content::Sn
     const auto layout = aip::content::ComputeMediaTileGeometry(logicalWidth, logicalHeight, mainIcon || !extras.empty(), extras.size());
     Font font(L"Segoe UI", static_cast<REAL>(12 * scale), FontStyleRegular, UnitPixel);
     if (font.GetLastStatus() != Ok) return false;
-    REAL y = static_cast<REAL>(layout.textY * scale);
+    REAL y = static_cast<REAL>(layout.textY * scale) + PresentedTextOffset(snapshot, logicalHeight, scale);
     const REAL bottom = static_cast<REAL>((layout.textY + layout.textHeight) * scale);
     const REAL x = static_cast<REAL>(layout.textX * scale), width = static_cast<REAL>(layout.textWidth * scale);
     if (!DrawTopSourceField(graphics, snapshot.text.primary, font, x, y, width, bottom, 2, 255, static_cast<REAL>(3 * scale)) ||
@@ -721,11 +753,14 @@ static bool RenderPrayerTileSimulation(Graphics& graphics, const aip::content::S
     if (font.GetLastStatus() != Ok) return false;
     const REAL margin = static_cast<REAL>(10 * scale), textWidth = static_cast<REAL>((width - 20) * scale);
     const REAL bottom = static_cast<REAL>((height - 20) * scale);
+    const bool full = aip::content::PrayerTileShowsSchedule(height, snapshot.detailRows);
+    const REAL headerBottom = snapshot.presentation.Active() && full ? bottom - (bottom - margin) * .65f : bottom;
     REAL y = margin;
-    if (!DrawTopSourceField(graphics, snapshot.text.primary, font, margin, y, textWidth, bottom, 2, 255, static_cast<REAL>(2 * scale)) ||
-        !DrawTopSourceField(graphics, snapshot.text.secondary, font, margin, y, textWidth, bottom, 1, 180, static_cast<REAL>(2 * scale)) ||
-        !DrawTopSourceField(graphics, snapshot.text.badge, font, margin, y, textWidth, bottom, 2, 180, static_cast<REAL>(3 * scale))) return false;
-    if (aip::content::PrayerTileShowsSchedule(height, snapshot.detailRows)) {
+    if (!DrawTopSourceField(graphics, snapshot.text.primary, font, margin, y, textWidth, headerBottom, 2, 255, static_cast<REAL>(2 * scale)) ||
+        !DrawTopSourceField(graphics, snapshot.text.secondary, font, margin, y, textWidth, headerBottom, 1, 180, static_cast<REAL>(2 * scale)) ||
+        !DrawTopSourceField(graphics, snapshot.text.badge, font, margin, y, textWidth, headerBottom, 2, 180, static_cast<REAL>(3 * scale))) return false;
+    if (full) {
+        if (snapshot.presentation.Active()) y = (std::min)(y,headerBottom);
         // Reserve equal space for all five obligatory prayers; Sunrise is in
         // the header, never a sixth row that can push Isha out of the tile.
         const REAL rowHeight = (bottom - y) / 5;
@@ -771,6 +806,15 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
     if (!ConfigureTileTextGraphics(graphics))
         return false;
     if (g_renderContent && logicalWidth >= 150 && logicalHeight >= 150) {
+        if (g_renderContent->presentation.Active() && !g_renderContent->smtcSource && !g_renderContent->prayerSource &&
+            g_renderContent->detailRows.empty() && g_renderContent->rssHeadlines.empty()) {
+            Font font(L"Segoe UI", static_cast<REAL>(12 * scale), FontStyleRegular, UnitPixel);
+            REAL y = static_cast<REAL>(10 * scale) + PresentedTextOffset(*g_renderContent, logicalHeight, scale);
+            const REAL margin = static_cast<REAL>(10 * scale), width = static_cast<REAL>((logicalWidth - 20) * scale), bottom = static_cast<REAL>((logicalHeight - 20) * scale);
+            return DrawTopSourceField(graphics, primaryText, font, margin, y, width, bottom, 2, 255, 0) &&
+                DrawTopSourceField(graphics, secondaryText, font, margin, y, width, bottom, 2, 153, 0) &&
+                DrawTopSourceField(graphics, badgeText, font, margin, y, width, bottom, 2, 153, 0);
+        }
         if (g_renderContent->prayerSource) return RenderPrayerTileSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
         if (g_renderContent->smtcSource) return RenderMediaTileSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
         if (!g_renderContent->detailRows.empty()) return RenderDetailRowsSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
@@ -785,6 +829,21 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
         }
     }
     if (g_renderContent && !g_renderContent->rssHeadlines.empty() && logicalHeight >= 150 && logicalWidth >= 150) {
+        if (g_renderContent->presentation.Active()) {
+            const bool rich = g_renderContent->presentation.preset == L"RssHeadlines";
+            const auto count = (std::min)(g_renderContent->rssHeadlines.size(), rich ? (logicalHeight > 200 ? std::size_t(3) : std::size_t(1)) : aip::content::RssTileRows(logicalHeight));
+            Font font(L"Segoe UI", static_cast<REAL>(12 * scale), FontStyleRegular, UnitPixel);
+            const REAL margin = static_cast<REAL>(10 * scale), width = static_cast<REAL>((logicalWidth - 20) * scale);
+            const REAL rowHeight = static_cast<REAL>((logicalHeight - 30) * scale / count);
+            for (std::size_t row = 0; row < count; ++row) {
+                REAL y = margin + static_cast<REAL>(row) * rowHeight;
+                const REAL bottom = y + rowHeight;
+                const auto& item = g_renderContent->rssHeadlines[row];
+                if (!DrawTopSourceField(graphics, std::to_wstring(row + 1) + L". " + item.primary, font, margin, y, width, bottom, 3, 255, 0) ||
+                    ((rich || logicalHeight > 200) && !DrawTopSourceField(graphics, item.secondary, font, margin, y, width, bottom, 2, 153, 0))) return false;
+            }
+            return graphics.GetLastStatus() == Ok;
+        }
         const auto count = (std::min)(g_renderContent->rssHeadlines.size(), logicalHeight > 200 ? std::size_t(5) : std::size_t(3));
         const REAL margin = static_cast<REAL>(10 * scale);
         const REAL rowHeight = static_cast<REAL>((logicalHeight - 30) * scale / count);
