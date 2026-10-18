@@ -324,6 +324,114 @@ struct ContentRssProvider
 };
 static ContentRssProvider g_contentRss;
 
+#include "../content_sources/prayer_times.inc"
+#include "ga_prayer_cache.inc"
+struct ContentPrayerResult { aip::prayer::Data data; std::uint64_t serial = 0; };
+struct ContentPrayerProvider {
+    using UTC = aip::prayer::UTC;
+    using CancelCheck = aip::content::AsyncSource<ContentPrayerResult>::Cancel;
+    aip::content::AsyncSource<ContentPrayerResult> source;
+    std::atomic<bool> forceRequested{false};
+    std::shared_ptr<std::atomic<bool>> seedGate = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<std::uint64_t>> serial = std::make_shared<std::atomic<std::uint64_t>>(0);
+    std::wstring key, formatKey;
+    UTC viewedMinute = -1;
+    std::uint64_t viewedSerial = 0;
+    bool haveView = false;
+    aip::prayer::View view;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    std::function<UTC()> testClock;
+    std::function<aip::prayer::Data(const aip::prayer::Configuration&, UTC, const aip::prayer::Data&, const CancelCheck&)> testFetch;
+    std::function<bool(const std::wstring&, const aip::prayer::Configuration&, aip::prayer::Data&)> testLoad;
+    std::function<void(const std::wstring&, const aip::prayer::Configuration&, const aip::prayer::Data&)> testSave;
+#endif
+    UTC Now() const {
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+        if (testClock) return testClock();
+#endif
+        return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+    void Refresh(const aip::prayer::Configuration& settings, bool synchronous) {
+        auto cfg = settings; std::wstring error;
+        if (!aip::prayer::Validate(cfg, error) || cfg.city.empty() || cfg.country.empty()) { Cancel(); return; }
+        std::wstring profile; { std::lock_guard<std::mutex> lock(g_pathMutex); profile = aip::MakeAbsolutePath(g_iniPath); }
+        const auto requested = profile + L"|" + aip::prayer::ConfigurationKey(cfg) + L"|" + std::to_wstring(cfg.refreshSeconds) +
+            L":" + std::to_wstring(cfg.timeoutSeconds) + L":" + std::to_wstring(cfg.maximumBytes);
+        const bool changed = key != requested;
+        if (changed) { source.CancelPending(); key = requested; seedGate = std::make_shared<std::atomic<bool>>(false); haveView = false; }
+        const bool force = forceRequested.exchange(false);
+        ContentPrayerResult previous; std::string sourceError;
+        source.Read(key, previous, sourceError);
+        const auto now = Now();
+        if (!force && !changed && (source.HasPendingWork() || previous.data.nextRefreshUtc > now)) return;
+        const auto gate = seedGate;
+        const auto counter = serial;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+        const auto fetch = testFetch;
+        const auto load = testLoad;
+        const auto save = testSave;
+#endif
+        source.Request(key, milliseconds(300000), [cfg, profile, previous, now, force, gate, counter
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+            , fetch, load, save
+#endif
+        ](const CancelCheck& canceled) {
+            auto prior = previous.data;
+            if (canceled()) return ContentPrayerResult{};
+            if (!gate->exchange(true) && prior.schedule.days.empty()) {
+                try {
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+                if (load) load(profile, cfg, prior);
+#else
+                std::wstring ignored; LoadPrayerCache(profile, cfg, prior, ignored);
+#endif
+                } catch (...) {} // Cache failure never disables a network refresh.
+            }
+            if (force) { prior.nextRefreshUtc = 0; for (auto& day : prior.schedule.days) day.fetchedAtUtc = 0; }
+            if (prior.lastSuccessUtc > 0) prior.nextRefreshUtc = (std::min)(prior.nextRefreshUtc, prior.lastSuccessUtc + cfg.refreshSeconds);
+            ContentPrayerResult result;
+            if (canceled()) return result;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+            if (fetch) result.data = fetch(cfg, now, prior, canceled);
+            else { result.data = prior; result.data.configKey = aip::prayer::ConfigurationKey(cfg); result.data.error = L"Prayer source is unavailable in inert validation."; result.data.nextRefreshUtc = now + 300; }
+#else
+            result.data = aip::prayer::Refresh(cfg, now, prior, canceled);
+#endif
+            if (!canceled() && !result.data.schedule.days.empty() && result.data.lastSuccessUtc > prior.lastSuccessUtc) {
+                try {
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+                if (save) save(profile, cfg, result.data);
+#else
+                std::wstring ignored; SavePrayerCache(profile, cfg, result.data, ignored);
+#endif
+                } catch (...) {} // Keep the valid fetched schedule if persistence fails.
+            }
+            result.serial = ++*counter; return result;
+        }, WakePollThread, force);
+        if (synchronous) source.Wait(key, milliseconds(static_cast<long long>(cfg.timeoutSeconds) * 2000 + 2000));
+    }
+    aip::prayer::View Read(const aip::prayer::Configuration& cfg) {
+        ContentPrayerResult captured; std::string error;
+        source.Read(key, captured, error);
+        if (captured.data.configKey.empty()) captured.data.configKey = aip::prayer::ConfigurationKey(cfg);
+        if (captured.data.schedule.days.empty() && captured.data.error.empty() && !cfg.city.empty() && !cfg.country.empty())
+            captured.data.error = error.empty() ? IniReadS(L"Strings", L"PrayerLoading", L"Loading prayer schedule...") : aip::Utf8ToWide(error);
+        auto formatting = aip::prayer::ConfigurationKey(cfg) + L":" + std::to_wstring(cfg.showSunrise) + L":" + std::to_wstring(cfg.twentyFourHour);
+        for (const auto adjustment : cfg.adjustmentsMinutes) formatting += L":" + std::to_wstring(adjustment);
+        const auto now = Now(), minute = now / 60;
+        if (!haveView || minute != viewedMinute || (view.nextUTCDeadline > 0 && now >= view.nextUTCDeadline) || viewedSerial != captured.serial || formatting != formatKey) {
+            view = aip::prayer::Compose(cfg, captured.data, now); haveView = true;
+            viewedMinute = minute; viewedSerial = captured.serial; formatKey = std::move(formatting);
+        }
+        return view;
+    }
+    void CancelPending() { source.CancelPending(); key.clear(); haveView = false; }
+    void Cancel() { if (!key.empty() || source.HasPendingWork()) CancelPending(); }
+    void Stop() { source.Stop(); }
+};
+static ContentPrayerProvider g_contentPrayer;
+static void RequestContentPrayerRefresh() { g_contentPrayer.forceRequested = true; WakePollThread(); }
+
 struct ContentConfigurationBaseView {
     std::wstring profile, error;
     unsigned long long revision = 0;
@@ -526,6 +634,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
             key += L":" + std::to_wstring(value.size()) + L":" + value;
     key += L":" + std::to_wstring(snapshot.activationArguments.size()) + L":" + snapshot.activationArguments;
     key += L":branding:" + snapshot.secondaryBranding;
+    if (snapshot.textMode != aip::content::TextMode::Off) key += L":prayer:" + std::to_wstring(snapshot.prayerSource);
     if (snapshot.textMode != aip::content::TextMode::Off) {
     for (const auto& headline : snapshot.rssHeadlines)
         key += L":" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
@@ -639,6 +748,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
         });
     };
     const bool needsRss = sourceNeeded(aip::content::SourceId::RssFeed);
+    const bool needsPrayer = sourceNeeded(aip::content::SourceId::PrayerTimes);
     const bool needsSmtc = sourceNeeded(aip::content::SourceId::Smtc);
     const bool needsDiscord = sourceNeeded(aip::content::SourceId::DiscordRpc);
     const bool needsCaps = sourceNeeded(aip::content::SourceId::CapsBlink);
@@ -659,6 +769,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     RssFeedSettings rssSettings;
     if (needsRss) { rssSettings = ReadRssFeedSettings(); g_contentRss.Refresh(rssSettings, synchronous); }
     else g_contentRss.Cancel();
+    if (needsPrayer) g_contentPrayer.Refresh(cfg.prayer, synchronous); else g_contentPrayer.Cancel();
     const bool needsArtwork = separateTiles ? std::any_of(separateIndices.begin(), separateIndices.end(), [&](std::size_t selected) {
         return aip::content::BackgroundIdFor(cfg.entries[selected].background) == aip::content::BackgroundId::SmtcArtwork;
     }) : std::any_of(cfg.entries.begin(), cfg.entries.end(), [](const aip::content::Entry& candidate) {
@@ -679,6 +790,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
     if (needsCaps && !cfg.caps.actionsEnabled) g_contentCaps.Refresh(cfg.caps);
     if (needsAsus) g_contentAsus.Refresh(cfg.asus); else g_contentAsus.Cancel();
     const auto feed = needsRss ? g_contentRss.Read(rssSettings) : RssFeedSnapshot{};
+    const auto prayer = needsPrayer ? g_contentPrayer.Read(cfg.prayer) : aip::prayer::View{};
     const auto capsText = needsCaps ? g_contentCaps.Read() : aip::content::Text{};
     const auto asusText = needsAsus ? g_contentAsus.Read() : aip::content::Text{};
     const auto discordText = needsDiscord ? g_contentDiscord.Read() : aip::content::Text{};
@@ -730,6 +842,19 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
         switch (aip::content::SourceIdFor(source)) {
         case aip::content::SourceId::CustomText:
             text = entry.custom;
+            break;
+        case aip::content::SourceId::PrayerTimes:
+            text = prayer.available ? aip::content::Text{prayer.secondary, prayer.title, prayer.badge} :
+                aip::content::Text{prayer.title, prayer.secondary, prayer.badge};
+            if (entry.sources.size() == 1) {
+                snapshot.prayerSource = true;
+                for (const auto& row : prayer.detailRows) snapshot.detailRows.push_back({
+                    IniReadS(L"Strings", (L"PrayerLabel" + std::wstring(aip::prayer::PrayerName(row.id))).c_str(), row.label.c_str()), row.value, L""});
+                if (!prayer.available) {
+                    std::wstring profile; { std::lock_guard<std::mutex> lock(g_pathMutex); profile = g_iniPath; }
+                    snapshot.activationArguments = L"--ini " + aip::QuoteCommandLineArg(profile) + L" --tile-setup prayer";
+                }
+            }
             break;
         case aip::content::SourceId::CapsBlink:
             text = capsText;
@@ -914,6 +1039,6 @@ static void StopContentProviders() {
     StopGallerySource();
     // Request hardware cancellation before waiting on other sources.
     g_contentCaps.Cancel(); g_contentAsus.Cancel();
-    g_contentDiscord.Stop(); g_contentNotes.Stop(); g_contentRss.Stop(); g_contentSmtc.Stop();
+    g_contentDiscord.Stop(); g_contentNotes.Stop(); g_contentRss.Stop(); g_contentSmtc.Stop(); g_contentPrayer.Stop();
     g_contentAsus.Stop(); g_contentCaps.Stop();
 }

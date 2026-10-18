@@ -3,6 +3,7 @@
 // -----------------------------------------------------------------------------
 #include "../tile_notification_winrt.inc"
 #include "../media_tile_layout.h"
+#include "../prayer_tile_layout.h"
 static bool CurrentProcessPackageFullName(std::wstring& packageFullName)
 {
     packageFullName.clear();
@@ -312,6 +313,10 @@ static std::wstring BuildLiveTileXml(
         }
 
         const wchar_t* templateName = LiveTileTemplateForTarget(asset.binding);
+        if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->prayerSource &&
+            g_renderContent->textMode == aip::content::TextMode::Auto &&
+            aip::content::AppendPrayerTileBinding(xml, templateName, asset.h, g_renderContent->text, g_renderContent->detailRows,
+                ContentHasTransparentBackground() ? L"" : uri)) { hasUsableBinding = true; continue; }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->smtcSource &&
             g_renderContent->textMode == aip::content::TextMode::Auto) {
             std::wstring icon;

@@ -15,6 +15,7 @@
 #include "asusblink/pattern.h"
 #include "content_sources/notes_model.h"
 #include "content_sources/notes_signin_model.h"
+#include "content_sources/prayer_times_model.h"
 
 namespace aip { namespace content {
 constexpr int MaxEntries = 32;
@@ -53,6 +54,7 @@ enum class SourceId {
     DiscordRpc,
     CapsBlink,
     AsusBlink,
+    PrayerTimes,
     Unknown,
 };
 // This is the one canonical source catalog. INI normalization, the tray
@@ -92,6 +94,7 @@ inline constexpr SourceDescriptor Sources[] = {
     {L"DiscordRPC", L"Discord Rich Presence", SourceId::DiscordRpc, false},
     {L"CapsBlink", L"Caps indicator pattern", SourceId::CapsBlink, false},
     {L"AsusBlink", L"ASUS indicator patterns", SourceId::AsusBlink, false},
+    {L"PrayerTimes", L"Islamic prayer times", SourceId::PrayerTimes, true},
 };
 inline constexpr const wchar_t* AsusPatternKeys[] = {L"MicState", L"MicInterval", L"MicDuration", L"KeyboardState", L"KeyboardInterval", L"KeyboardDuration", L"ErrorRetry", L"ErrorAction"};
 inline constexpr const wchar_t* AsusPatternDefaults[] = {L"off", L"0", L"once", L"off", L"0", L"once", L"3", L"continue"};
@@ -135,6 +138,7 @@ struct Configuration {
     DiscordConfiguration discord;
     aip::caps::Config caps;
     AsusConfiguration asus;
+    aip::prayer::Configuration prayer;
 };
 struct Snapshot {
     bool active = false;
@@ -152,6 +156,7 @@ struct Snapshot {
     unsigned gallerySlot = 0, gallerySlotCount = 0;
     std::vector<Text> rssHeadlines;
     std::vector<Text> detailRows;
+    bool prayerSource = false;
     std::wstring detailTopic;
     bool smtcSource = false, smtcShowRepeatShuffle = false, wrapSourceText = false;
     MediaPlaybackState smtcState = MediaPlaybackState::Unknown;
@@ -249,7 +254,7 @@ inline bool EntrySection(const std::wstring& section) {
 }
 inline bool KnownSection(const std::wstring& section) {
     auto s = Lower(section);
-    return s == L"content" || s.compare(0, 8, L"content.") == 0 || s == L"notes" || s.compare(0, 6, L"notes.") == 0 || s == L"discord" || s == L"capsblink" || s == L"asusblink" || s == L"smtc";
+    return s == L"content" || s.compare(0, 8, L"content.") == 0 || s == L"notes" || s.compare(0, 6, L"notes.") == 0 || s == L"discord" || s == L"capsblink" || s == L"asusblink" || s == L"smtc" || s == L"prayertimes";
 }
 inline bool SensitiveSetting(const std::wstring& section, const std::wstring& key) {
     const auto k = Lower(key);
@@ -277,6 +282,10 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
     const bool root = Lower(section) == L"content";
     const auto k = Lower(key);
     error = section + L"." + key + L": ";
+    if (Lower(section) == L"prayertimes") {
+        auto canonicalKey = key;
+        return aip::prayer::NormalizeSetting(canonicalKey, value, error);
+    }
     if (Lower(section) == L"smtc") {
         if (k == L"indicator") {
             const auto mode = Lower(Trim(value));
@@ -556,6 +565,10 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
         std::wstring issue;
         if (!aip::asus::ParseConfiguration(cfg.asus.settings, parsed, issue)) { if (valid) error = issue; valid = false; }
     }
+    std::wstring prayerError;
+    if (!aip::prayer::ReadConfiguration([&](const wchar_t* key, const wchar_t* fallback) {
+        return read(L"PrayerTimes", key, fallback);
+    }, cfg.prayer, prayerError)) { if (valid) error = prayerError; valid = false; }
     if (!valid) return false; // failed reload leaves the caller's last configuration intact
     error.clear(); result = std::move(cfg); return true;
 }

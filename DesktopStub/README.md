@@ -8,7 +8,7 @@ plugins versus shared source code.
 
 The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale settings, then regenerate assets and re-register the manifest automatically. Most behavior is configurable through the tray menu and generated INI file. The same generation and delivery pipeline now handles composed content.
 
-**Tiles** manages the primary wallpaper and six source tiles from one resident.
+**Tiles** manages the primary wallpaper and seven optional source tiles from one resident.
 Existing pins receive their own static topic logos automatically after an upgrade.
 **Quick Actions** offers direct per-action pinning without an enable switch.
 Source tiles and Quick Actions default to transparent fallback icons and
@@ -398,6 +398,34 @@ g++ -std=c++17 -Wall -Wextra -I dependencies/DesktopStub -o /tmp/TileTextLayoutT
 ## Release
 
 Prebuilt binaries are published through the repository's Windows build workflow and tagged GitHub releases when available. The DesktopStub Windows file/product version and default `AppxManifest.xml` package version are derived from the same `DesktopStub-vN` family used by CI release publishing, so the binary and manifest versions match the release tag. Reused projects can override the local build tag family with `DESKTOPSTUB_RELEASE_TAG_PREFIX`. The repository workflow still publishes the default `DesktopStub` artifact paths; a copied baseline project that changes output names should update `.github/project-map.json`, `.github/workflows/build-windows.yml`, and `.github/scripts/build-windows.cmd` together so CI artifacts and release assets follow the new product names.
+
+## Prayer Times
+
+Prayer Times is an optional built-in source and separate tile, sharing the same
+resident process. Use **Tiles > Prayer times > Source and sign-in settings** or
+**Sources and accounts > Prayer times settings** to enter a city/country and
+choose a named calculation method, Asr convention and optional minute
+adjustments. Location starts blank; there is no automatic location lookup.
+Select the convention and adjustments used by your local prayer timetable.
+
+Medium/Wide tiles show the next prayer and a minute countdown. Large tiles
+also show all five obligatory prayers; sunrise is an optional header item.
+Both Windows text and image-overlay delivery are supported. The source uses
+[AlAdhan's calculated schedules](https://aladhan.com/prayer-times-api), rather
+than a mosque's Iqamah timetable. Network retrieval runs in the background and
+cached today/tomorrow schedules supply ordinary countdown updates. The selected
+city/country and calculation options are sent to AlAdhan when fetching; no
+account or API key is required.
+
+The same settings are available under `[PrayerTimes]` and through commands such
+as `--configure-only --set PrayerTimes.City="Your city" --set PrayerTimes.Country="Your country"`.
+`Method=Auto`, `School=0`, `ShowSunrise=1` and `TwentyFourHour=1` are the defaults.
+The private `<profile>.prayer-cache` sidecar is bound to the requested location
+and calculation settings. A valid cached schedule remains visible during a
+network failure with a stale/error indication. User data and caches should
+stay private; the cache is ignored by Git. Prayer setup allocates an unused
+content slot, preserving existing contents, or asks which slot to extend when
+all 32 are occupied.
 
 ## Additional Behavior Notes
 

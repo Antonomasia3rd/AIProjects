@@ -1,0 +1,66 @@
+#include "../dependencies/content_sources/prayer_times_model.h"
+#include <iostream>
+#include <map>
+#include <stdexcept>
+using namespace aip::prayer;
+static int checks=0;
+static void Check(bool value,const char* message) { ++checks; if (!value) throw std::runtime_error(message); }
+static Configuration Config() { Configuration cfg; cfg.city=L"Fixture City"; cfg.country=L"ID"; cfg.method=20; cfg.timeZone=L"Asia/Jakarta"; return cfg; }
+static Day Fixture(Date date,int offset=420) {
+    Day day; day.date=date; day.timeZone=L"Asia/Jakarta"; day.hijriDate=L"07-05-1448"; day.offsetMinutes=offset;
+    day.fetchedAtUtc=CivilDay(date)*86400-offset*60;
+    const int hours[]={5,12,15,18,19};
+    for(size_t i=0;i<5;++i) day.prayers[i]={static_cast<PrayerId>(i),CivilDay(date)*86400+hours[i]*3600-offset*60,offset};
+    day.sunrise={PrayerId::Sunrise,CivilDay(date)*86400+6*3600-offset*60,offset};day.hasSunrise=true;return day;
+}
+int main() { try {
+    Configuration empty; std::wstring error;
+    Check(empty.city.empty()&&empty.country.empty()&&Validate(empty,error)&&!Validate(empty,error,true),"location remains unset and requires explicit city/country before fetch");
+    for(int method=-1;method<=24;++method) {
+        std::wstring key=L"method",value=std::to_wstring(method);
+        Check(NormalizeSetting(key,value,error)==(method>=-1&&method<=23&&method!=6),"method range matches supported API IDs");
+    }
+    for(const auto& test:std::vector<std::pair<std::wstring,std::wstring>>{{L"Method",L"99"},{L"School",L"2"},{L"LatitudeAdjustmentMethod",L"0"},
+        {L"FajrAdjustmentMinutes",L"-181"},{L"IshaAdjustmentMinutes",L"181"},{L"RefreshSeconds",L"299"},{L"TimeoutSeconds",L"61"},
+        {L"MaximumBytes",L"1048577"},{L"ShowSunrise",L"sometimes"},{L"City",L"A\nB"},{L"Unknown",L"0"}}) {
+        auto key=test.first,value=test.second;Check(!NormalizeSetting(key,value,error),"invalid typed configuration rejected");
+    }
+    std::map<std::wstring,std::wstring> values{{L"City",L" Fixture City "},{L"Country",L"ID"},{L"Method",L"auto"},{L"ShowSunrise",L"off"}};
+    Configuration read;
+    Check(ReadConfiguration([&](const wchar_t* key,const wchar_t* fallback){auto at=values.find(key);return at==values.end()?std::wstring(fallback):at->second;},read,error)&&
+        read.city==L"Fixture City"&&read.method==-1&&!read.showSunrise,"reader normalizes canonical configuration without host dependencies");
+    Check(ValidDate({2024,2,29})&&!ValidDate({2025,2,29})&&AddDays({2024,12,31},1)==Date{2025,1,1},"civil calendar handles leap years/year rollover");
+    Check(CivilDay({1970,1,1})==0&&FromCivilDay(-1)==Date{1969,12,31},"civil epoch works before and after Unix epoch");
+    for(int year=1970;year<=2100;++year) Check(FromCivilDay(CivilDay({year,3,1}))==Date{year,3,1},"civil conversion roundtrip");
+    IsoTime parsed;
+    Check(ParseIso8601(L"2026-10-18T04:30:00+07:00",parsed)&&parsed.utcSeconds==CivilDay({2026,10,17})*86400+21*3600+30*60,"ISO positive offset rolls UTC into previous date");
+    Check(ParseIso8601(L"2026-10-18T23:30:00-05:30",parsed)&&parsed.utcSeconds==CivilDay({2026,10,19})*86400+5*3600,"ISO negative fractional offset rolls UTC into next date");
+    for(const auto* invalid:{L"04:30",L"2026-10-18T04:30:00",L"2026-10-18T24:00:00Z",L"2026-02-29T04:00:00Z",L"2026-10-18T+1:00:00Z",L"2026-10-18T04:30:00+14:01"})
+        Check(!ParseIso8601(invalid,parsed),"ambiguous or invalid ISO timing rejected");
+    Configuration cfg=Config(); Data data;data.configKey=ConfigurationKey(cfg);
+    data.schedule.days={Fixture({2026,10,18}),Fixture({2026,10,19})};
+    data.lastSuccessUtc=data.schedule.days[0].fetchedAtUtc;data.nextRefreshUtc=data.lastSuccessUtc+43200;
+    const UTC fajr=data.schedule.days[0].prayers[0].utcSeconds;
+    auto view=Compose(cfg,data,fajr-61);
+    Check(view.available&&view.detailRows.size()==5&&view.secondary.find(L"2 min")!=std::wstring::npos&&view.nextUTCDeadline==fajr-60,"countdown rounds up and schedules exact minute transition");
+    Check(view.badge.find(L"Sunrise 06:00")!=std::wstring::npos&&view.timeZone==L"Asia/Jakarta"&&!view.hijriDate.empty(),"optional sunrise/timezone/Hijri metadata remains distinct from five required rows");
+    Check(Compose(cfg,data,fajr).secondary.find(L"0 min")!=std::wstring::npos&&NextUTCDeadline(cfg,data,fajr)==fajr+1,"exact prayer instant is due now then advances");
+    Check(Compose(cfg,data,fajr+1).secondary.find(L"Dhuhr")!=std::wstring::npos,"after prayer instant next mandatory prayer is selected");
+    const UTC isha=data.schedule.days[0].prayers[4].utcSeconds;
+    Check(Compose(cfg,data,isha+1).secondary.find(L"Fajr")!=std::wstring::npos,"after Isha tomorrow Fajr is next");
+    const auto originalKey=ConfigurationKey(cfg);cfg.adjustmentsMinutes[0]=10;cfg.twentyFourHour=false;cfg.showSunrise=false;
+    Check(ConfigurationKey(cfg)==originalKey,"presentation and local minute adjustments do not invalidate network cache");
+    view=Compose(cfg,data,fajr);
+    Check(view.detailRows[0].value==L"5:10 AM"&&view.secondary.find(L"10 min")!=std::wstring::npos&&view.badge.find(L"Sunrise")==std::wstring::npos,"local tuning/display choices apply without changing cached UTC schedule");
+    data.stale=true;data.error=L"Network unavailable";
+    Check(Compose(cfg,data,fajr).available&&Compose(cfg,data,fajr).secondary.find(L"Stale")!=std::wstring::npos,"failed refresh retains usable daily data with explicit stale status");
+    const auto bytes=SerializeCache(data);Data loaded;
+    Check(!bytes.empty()&&ParseCache(bytes,cfg,loaded,error)&&loaded.stale&&loaded.error==data.error&&loaded.schedule.days.size()==2,"private cache roundtrips typed daily data and stale/error state");
+    auto other=cfg;other.city=L"Other City";
+    Check(!ParseCache(bytes,other,loaded,error)&&loaded.schedule.days.empty(),"cache for another city is rejected and output cleared");
+    other=cfg;other.method=3;Check(!ParseCache(bytes,other,loaded,error),"method changes reject old schedule cache");
+    Check(!ParseCache(bytes+"junk",cfg,loaded,error)&&!ParseCache(std::string(65537,'x'),cfg,loaded,error),"trailing/oversized caches are rejected");
+    Check(!Compose(other,data,fajr).available,"another request configuration never displays old city's data");
+    Check(!Compose(cfg,data,CivilDay({2026,10,22})*86400).available,"past cached days are never presented as today's times");
+    std::cout<<"PrayerTimes model: "<<checks<<" checks passed\n";return 0;
+}catch(const std::exception& ex){std::cerr<<"FAIL: "<<ex.what()<<'\n';return 1;} }

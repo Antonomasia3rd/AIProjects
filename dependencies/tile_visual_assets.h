@@ -7,7 +7,7 @@
 namespace aip { namespace tile_visual {
 enum class Glyph { Music, Feed, Genshin, StarRail, Zenless, Chat, Toggle, Play, Pause,
     Previous, Next, Repeat, Shuffle, VolumeDown, VolumeUp, Stop, Unknown,
-    RepeatOff, RepeatTrack, ShuffleOff, Resin, Stamina, Charge, Photo };
+    RepeatOff, RepeatTrack, ShuffleOff, Resin, Stamina, Charge, Photo, Prayer };
 struct Topic { const wchar_t* key; Glyph glyph; std::uint32_t rgb; };
 inline constexpr Topic Topics[] = {
     {L"smtc", Glyph::Music, 0x159b91}, {L"rss", Glyph::Feed, 0xe77924},
@@ -23,7 +23,7 @@ inline constexpr Topic Topics[] = {
     {L"repeat-track", Glyph::RepeatTrack, 0x159b91}, {L"shuffle-off", Glyph::ShuffleOff, 0x159b91},
     {L"shuffle-on", Glyph::Shuffle, 0x159b91}, {L"resin", Glyph::Resin, 0x397cca},
     {L"stamina", Glyph::Stamina, 0x7756bd}, {L"charge", Glyph::Charge, 0xbf8c17},
-    {L"gallery", Glyph::Photo, 0x477dac}
+    {L"gallery", Glyph::Photo, 0x477dac}, {L"prayer", Glyph::Prayer, 0x16876b}
 };
 inline const Topic* FindTopic(std::wstring key) {
     const std::wstring source = L"AipSource_", action = L"AipAction_";
@@ -37,7 +37,7 @@ inline const Topic* FindTopic(std::wstring key) {
     for (auto& ch : key) if (ch >= L'A' && ch <= L'Z') ch += L'a' - L'A';
     if (sourceId) {
         bool known = false;
-        for (const auto* item : {L"smtc", L"rss", L"genshin", L"hsr", L"zzz", L"discord"}) known = known || key == item;
+        for (const auto* item : {L"smtc", L"rss", L"genshin", L"hsr", L"zzz", L"discord", L"prayer"}) known = known || key == item;
         if (!known) return nullptr;
     }
     if (actionId) {
@@ -54,7 +54,7 @@ struct Asset { std::wstring relative; unsigned width, height; bool transparent; 
 enum class FontStyle { Vector, Mdl2, Fluent };
 inline bool IsMonochromeTopic(const Topic& topic) {
     return topic.glyph != Glyph::Music && topic.glyph != Glyph::Feed && topic.glyph != Glyph::Genshin &&
-        topic.glyph != Glyph::StarRail && topic.glyph != Glyph::Zenless && topic.glyph != Glyph::Chat;
+        topic.glyph != Glyph::StarRail && topic.glyph != Glyph::Zenless && topic.glyph != Glyph::Chat && topic.glyph != Glyph::Prayer;
 }
 struct NativeGlyph { wchar_t primary = 0, secondary = 0; bool slash = false; };
 // Microsoft Segoe Fluent/MDL2 tables use the same values for these glyphs.
@@ -82,6 +82,7 @@ inline NativeGlyph NativeGlyphFor(Glyph glyph) {
     case Glyph::Stamina: return {0xe83f, 0, false};
     case Glyph::Charge: return {0xe83e, 0, false};
     case Glyph::Photo: return {0xe91b, 0, false};
+    case Glyph::Prayer: return {0xe708, 0, false}; // Crescent moon; verified font availability gates native rendering.
     default: return {};
     }
 }

@@ -23,15 +23,15 @@ void TestMapping() {
     Profile profile;
     SecondaryTileConfiguration tiles;
     std::wstring error;
-    Check(ReadSecondaryTileConfiguration(profile, 1, tiles, error) && !tiles.enabled && tiles.tiles.size() == 6,
+    Check(ReadSecondaryTileConfiguration(profile, 1, tiles, error) && !tiles.enabled && tiles.tiles.size() == SecondaryTileCount,
         "existing one-content profiles keep secondary tiles disabled without range errors");
     std::set<std::wstring> ids;
     for (std::size_t index = 0; index < SecondaryTileCount; ++index) {
         const auto& descriptor = SecondaryTiles[index];
         const auto& tile = tiles.tiles[index];
         Check(ids.insert(descriptor.id).second && FindSecondaryTileDescriptor(descriptor.id) == &descriptor &&
-            tile.id == descriptor.id && tile.name == descriptor.name && tile.content == static_cast<int>(index + 2) && tile.enabled,
-            "six catalog mappings have unique stable IDs and numbered content defaults");
+            tile.id == descriptor.id && tile.name == descriptor.name && tile.content == static_cast<int>(index + 2) && tile.enabled == descriptor.defaultEnabled,
+            "catalog mappings have unique stable IDs and compatible numbered content defaults");
         Check(FindSourceDescriptor(descriptor.source) && BackgroundIdFor(descriptor.background) == BackgroundId::Transparent,
             "mapping defaults reuse the source/background catalog");
     }
@@ -39,7 +39,9 @@ void TestMapping() {
         "catalog lookup normalizes known IDs and rejects invented targets");
     profile.Set(L"Tiles", L"Enabled", L"yes");
     Check(ReadSecondaryTileConfiguration(profile, 7, tiles, error) && tiles.enabled && error.empty(),
-        "enabling six source tiles reads canonical typed booleans");
+        "old seven-content profiles stay valid with the new unconfigured Prayer mapping inactive");
+    Check(tiles.tiles.back().id == L"prayer" && tiles.tiles.back().content == 8 && !tiles.tiles.back().enabled,
+        "Prayer Times is appended without changing the six existing mappings or activating an absent Content8");
     const auto unchanged = tiles.tiles;
     profile.Set(L"Tile.smtc", L"Content", L"8");
     Check(!ReadSecondaryTileConfiguration(profile, 7, tiles, error) && error.find(L"Tile.smtc.Content") != std::wstring::npos &&

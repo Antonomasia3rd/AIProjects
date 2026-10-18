@@ -65,6 +65,7 @@ struct SecondaryTileDescriptor {
     const wchar_t* source;
     const wchar_t* background;
     int notesResource;
+    bool defaultEnabled = true;
 };
 inline constexpr SecondaryTileDescriptor SecondaryTiles[] = {
     {L"smtc", L"Now playing", 2, L"SMTC", L"Transparent", 0},
@@ -73,6 +74,7 @@ inline constexpr SecondaryTileDescriptor SecondaryTiles[] = {
     {L"hsr", L"Honkai: Star Rail", 5, L"Notes", L"Transparent", 1},
     {L"zzz", L"Zenless Zone Zero", 6, L"Notes", L"Transparent", 2},
     {L"discord", L"Discord", 7, L"DiscordRPC", L"Transparent", 0},
+    {L"prayer", L"Prayer times", 8, L"PrayerTimes", L"Transparent", 0, false},
 };
 inline constexpr std::size_t SecondaryTileCount = sizeof(SecondaryTiles) / sizeof(SecondaryTiles[0]);
 struct SecondaryTile {
@@ -136,7 +138,7 @@ inline bool ValidateSecondaryTileConfiguration(const SecondaryTileConfiguration&
     for (const auto& tile : cfg.tiles) {
         const auto* descriptor = FindSecondaryTileDescriptor(tile.id);
         if (!descriptor || tile.id != descriptor->id || !ids.insert(tile.id).second) {
-            error = L"Secondary tiles require unique IDs from the six-source tile catalog."; return false;
+            error = L"Secondary tiles require unique IDs from the source tile catalog."; return false;
         }
         if (tile.content < 1 || tile.content > MaxEntries ||
             (cfg.enabled && tile.enabled && static_cast<std::size_t>(tile.content) > contentCount)) {
@@ -152,7 +154,7 @@ inline bool ValidateSecondaryTileConfiguration(const SecondaryTileConfiguration&
             error = SecondaryTileSection(tile.id) + L": " + error; return false;
         }
     }
-    if (cfg.tiles.size() != SecondaryTileCount) { error = L"Secondary tile configuration requires the six catalog mappings."; return false; }
+    if (cfg.tiles.size() != SecondaryTileCount) { error = L"Secondary tile configuration requires all catalog mappings."; return false; }
     error.clear(); return true;
 }
 template<class Reader> bool ReadSecondaryTileConfiguration(Reader read, std::size_t contentCount,
@@ -173,7 +175,7 @@ template<class Reader> bool ReadSecondaryTileConfiguration(Reader read, std::siz
         SecondaryTile tile;
         tile.id = descriptor.id;
         const auto section = SecondaryTileSection(tile.id);
-        tile.enabled = get(section, L"Enabled", L"1") == L"1";
+        tile.enabled = get(section, L"Enabled", descriptor.defaultEnabled ? L"1" : L"0") == L"1";
         const auto defaultContent = std::to_wstring(descriptor.content);
         ParseInt(get(section, L"Content", defaultContent.c_str()), 1, MaxEntries, tile.content);
         tile.name = get(section, L"Name", descriptor.name);

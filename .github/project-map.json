@@ -199,6 +199,7 @@
       "dependencies/tile_visual_assets.inc",
       "dependencies/media_tile_layout.h",
       "dependencies/rss_tile_layout.h",
+      "dependencies/prayer_tile_layout.h",
       "dependencies/content_queue.h",
       "dependencies/gallery_engine.h",
       "dependencies/gallery_transaction.h",

@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $contentBuildDirectory = if ($env:CONTENT_OPTIMIZE -ceq '1') { 'build/content-integration-optimized' } else { 'build/content-integration' }
 $contentBuild = Join-Path $ReviewRoot $contentBuildDirectory
 $targets = @('HardwareProfileImportTests','NowPlayingProfileImportTests',
-    'NotesSourceTests','SmtcSourceTests','DiscordServiceTests','WinrtFactoryLifetimeTests','TransparentBackgroundTests','AdaptiveTileTextLayoutTests','AdaptiveTileTextRenderTests',
+    'NotesSourceTests','PrayerTimesModelTests','PrayerTimesSourceTests','SmtcSourceTests','DiscordServiceTests','WinrtFactoryLifetimeTests','TransparentBackgroundTests','AdaptiveTileTextLayoutTests','AdaptiveTileTextRenderTests',
     'PngCrc32Tests','CaptureAttemptTests','ContentPresetTests','ContentQueueTests','SecondaryTileTests',
     'TileVisualAssetsTests','TileVisualAssetsRenderTests','NotesTileRowsTests','MediaTileLayoutTests','GalleryEngineTests','GalleryInventoryTests','GalleryInventoryNativeTests','GalleryRuntimeTests','CapsBlinkEngineTests','TileNotificationPayloadTests','BoundedCaptureProcessTests','DiscordProfileEditTests',
     'ContentRuntimeTests','ContentRevisionHostTests','ContentRuntimeNoHardwareTests','GalleryTransactionTests')

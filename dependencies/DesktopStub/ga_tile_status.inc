@@ -2,6 +2,7 @@
 // accounts, image files, or Windows' private choice of visible queue item.
 #include "../media_tile_layout.h"
 #include "../rss_tile_layout.h"
+#include "../prayer_tile_layout.h"
 #include <set>
 #include <map>
 struct TileStatusLabels {
@@ -24,7 +25,12 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
 {
     std::wstring output;
     if (frame.textMode == aip::content::TextMode::Off) { AppendTileStatusLine(output, labels.textHidden); return output; }
-    if (frame.textMode == aip::content::TextMode::Auto && !frame.smtcSource && !frame.detailRows.empty()) {
+    if (frame.textMode == aip::content::TextMode::Auto && frame.prayerSource) {
+        AppendTileStatusLine(output, frame.text.primary); AppendTileStatusLine(output, frame.text.secondary); AppendTileStatusLine(output, frame.text.badge);
+        if (aip::content::PrayerTileShowsSchedule(height, frame.detailRows)) for (const auto& row : frame.detailRows) {
+            AppendTileStatusLine(output, row.primary + L" " + row.secondary);
+        }
+    } else if (frame.textMode == aip::content::TextMode::Auto && !frame.smtcSource && !frame.detailRows.empty()) {
         for (std::size_t i = 0; i < (std::min)(frame.detailRows.size(), aip::content::DetailTileRows(height)); ++i) {
             AppendTileStatusLine(output, frame.detailRows[i].primary);
             AppendTileStatusLine(output, frame.detailRows[i].secondary);

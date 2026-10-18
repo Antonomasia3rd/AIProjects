@@ -62,7 +62,8 @@ static bool ReadSecondaryTileMenuText(const std::wstring& text,
 
 // Pure staging: add absent fields, grow Count only as required by saved mappings,
 // and publish no partial text. Explicit activation fixes the primary at Content.1.
-static bool StageSecondaryTileDefaultLayout(std::wstring& text, bool activate, std::wstring& error)
+static constexpr const wchar_t* PrayerMappingRequired = L"Choose an existing content for Prayer Times; all 32 content slots are occupied.";
+static bool StageSecondaryTileDefaultLayout(std::wstring& text, bool activate, std::wstring& error, int prayerMapping = 0)
 {
     auto candidate = text;
     auto document = aip::ParseIniDocument(candidate);
@@ -89,8 +90,24 @@ static bool StageSecondaryTileDefaultLayout(std::wstring& text, bool activate, s
     }
     for (const auto& descriptor : aip::content::SecondaryTiles) {
         const auto section = aip::content::SecondaryTileSection(descriptor.id);
-        if (!missing(section, L"Enabled", L"1") || !missing(section, L"Name", descriptor.name) ||
-            !missing(section, L"Content", std::to_wstring(descriptor.content)) ||
+        int defaultMapping = descriptor.content;
+        bool appendPrayer = false;
+        std::wstring existingMapping;
+        if (std::wstring(descriptor.id) == L"prayer" && !aip::ReadIniValueFromDoc(document, section.c_str(), L"Content", existingMapping)) {
+            defaultMapping = 0;
+            for (int slot = 2; slot <= aip::content::MaxEntries; ++slot) {
+                if (slot <= count) continue;
+                const auto entryName = L"Content." + std::to_wstring(slot);
+                const bool occupied = std::any_of(document.begin(), document.end(), [&](const auto& entry) { return IEquals(entry.name, entryName); });
+                if (!occupied) { defaultMapping = slot; break; }
+            }
+            if (!defaultMapping) {
+                if (prayerMapping < 1 || prayerMapping > count) { error = PrayerMappingRequired; return false; }
+                defaultMapping = prayerMapping; appendPrayer = true;
+            }
+        }
+        if (!missing(section, L"Enabled", descriptor.defaultEnabled ? L"1" : L"0") || !missing(section, L"Name", descriptor.name) ||
+            !missing(section, L"Content", std::to_wstring(defaultMapping)) ||
             !missing(section, L"Background", L"Transparent") || !missing(section, L"Branding", L"Name") ||
             !missing(section, L"BackgroundColor", L"Auto")) {
             error = L"Could not stage a source tile mapping."; return false;
@@ -111,6 +128,16 @@ static bool StageSecondaryTileDefaultLayout(std::wstring& text, bool activate, s
             !missing(entry, L"NotesDetail", L"Summary") || (activate && !put(entry, L"Enabled", L"1"))) {
             error = L"Could not stage a source tile's content defaults."; return false;
         }
+        if (appendPrayer) {
+            std::wstring sources; aip::ReadIniValueFromDoc(document, entry.c_str(), L"TextSources", sources);
+            std::vector<std::wstring> parsed;
+            if (!aip::content::ParseSources(sources, parsed)) { error = L"The chosen content has an invalid source list."; return false; }
+            if (std::find(parsed.begin(), parsed.end(), L"PrayerTimes") == parsed.end()) {
+                if (!sources.empty()) sources += L",";
+                sources += L"PrayerTimes";
+                if (!put(entry, L"TextSources", sources)) return false;
+            }
+        }
     }
     if (!put(L"Content", L"Count", std::to_wstring(count)) || (activate &&
         (!put(L"Content", L"Enabled", L"1") || !put(L"Tiles", L"Enabled", L"1") || !put(L"Content", L"CycleEnabled", L"0")))) {
@@ -122,13 +149,33 @@ static bool StageSecondaryTileDefaultLayout(std::wstring& text, bool activate, s
     text = std::move(candidate); error.clear(); return true;
 }
 
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+static int (*g_testPrayerMappingChoice)(HWND) = nullptr;
+#endif
+static int ChoosePrayerContentMapping(HWND owner)
+{
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    return g_testPrayerMappingChoice ? g_testPrayerMappingChoice(owner) : 0;
+#else
+    HMENU menu = CreatePopupMenu(); if (!menu) return 0;
+    aip::AppendTrayMenuItem(menu, 0, SecondaryTileUiString(L"PrayerMappingPrompt", L"Choose a content; PrayerTimes is added to its existing text sources."), false, false);
+    const int count = IniReadClampedI(L"Content", L"Count", 1, 1, aip::content::MaxEntries);
+    for (int slot = 1; slot <= count; ++slot) aip::AppendTrayMenuItem(menu, static_cast<UINT>(slot),
+        std::to_wstring(slot) + L". " + ContentMenuValue(IniReadS((L"Content." + std::to_wstring(slot)).c_str(), L"Name", L"Content")), false, true);
+    POINT point{}; GetCursorPos(&point); if (owner) SetForegroundWindow(owner);
+    const auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, 0, owner, nullptr);
+    DestroyMenu(menu); if (owner) AfterTrayPopupClosed(owner);
+    return selected >= 1 && selected <= static_cast<UINT>(count) ? static_cast<int>(selected) : 0;
+#endif
+}
+
 static bool SaveSecondaryTileMenuSettings(HWND owner, const std::vector<aip::IniSetting>& settings,
     bool initialize = false, bool activate = false)
 {
     std::wstring error;
-    const bool saved = MutateDesktopStubIniWithWait([&](std::wstring& text) {
+    const auto commit = [&](int prayerMapping) { return MutateDesktopStubIniWithWait([&](std::wstring& text) {
         auto candidate = text;
-        if (initialize && !StageSecondaryTileDefaultLayout(candidate, activate, error)) return false;
+        if (initialize && !StageSecondaryTileDefaultLayout(candidate, activate, error, prayerMapping)) return false;
         for (auto setting : settings) {
             if (!NormalizeDesktopStubTypedSetting(setting.section, setting.key, setting.value, error) ||
                 !WriteContentProfileSetting(candidate, setting)) {
@@ -141,7 +188,13 @@ static bool SaveSecondaryTileMenuSettings(HWND owner, const std::vector<aip::Ini
         aip::content::SecondaryTileConfiguration tiles;
         if (!ReadSecondaryTileMenuText(candidate, content, tiles, error)) return false;
         text = std::move(candidate); return true;
-    }, CurrentIniWriteLockWaitMs());
+    }, CurrentIniWriteLockWaitMs()); };
+    bool saved = commit(0);
+    if (!saved && initialize && error == PrayerMappingRequired) {
+        const auto mapping = ChoosePrayerContentMapping(owner);
+        if (!mapping) return false;
+        error.clear(); saved = commit(mapping);
+    }
     if (!saved) {
         if (error.empty()) error = L"The tile configuration could not be saved; no partial change was applied.";
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Tiles", MB_OK | MB_ICONWARNING); return false;
@@ -279,6 +332,8 @@ static bool OpenSecondaryTileSetup(HWND owner, const std::wstring& key)
         for (UINT option = 0; option < options.size(); ++option)
             aip::AppendTrayMenuItem(advanced, ID_DISCORD_PROFILE_OPTION + option, options[option].label, false, true);
         aip::EndTrayNestedMenu(menu, advanced, L"Advanced profile options");
+    } else if (std::wstring(descriptor->id) == L"prayer") {
+        AppendPrayerSettingsMenu(menu);
     } else {
         aip::AppendTrayMenuItem(menu, 0, L"Now playing uses Windows' current media session", false, false);
         AppendSmtcDisplaySettingsMenu(menu);
@@ -297,7 +352,7 @@ static bool OpenSecondaryTileSetup(HWND owner, const std::wstring& key)
 static bool DispatchSecondaryTilesCommand(HWND owner, UINT command)
 {
     if (command == ID_SECONDARY_TILES_INITIALIZE) {
-        if (DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, SecondaryTileUiString(L"SourceTilesSetupPrompt", L"Prepare the six source contents? Missing fields are added; existing layout fields and login details are kept. Pin a tile to update it; Windows Start controls whether its Live Tile is shown.").c_str(), L"Source tiles", MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) == IDYES)
+        if (DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, SecondaryTileUiString(L"SourceTilesSetupPrompt", L"Prepare the source contents? Missing fields are added; existing layout fields and login details are kept. Pin a tile to update it; Windows Start controls whether its Live Tile is shown.").c_str(), L"Source tiles", MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) == IDYES)
             SaveSecondaryTileMenuSettings(owner, {}, true, false);
         return true;
     }

@@ -55,7 +55,7 @@ static void TestExistingLogoRefresh() {
     Check(SamePublishedLogos(aliased.logos, LogoUris(sample)), "readback recognizes the observed 30px alias without repeated migrations");
     auto wrongSize = aliased.logos; wrongSize.medium = L"Desktop";
     Check(!SamePublishedLogos(wrongSize, LogoUris(sample)), "alias handling never hides a stale real tile size");
-    for (const auto* id : {L"AipSource_smtc", L"AipSource_rss", L"AipSource_genshin", L"AipSource_hsr", L"AipSource_zzz", L"AipSource_discord",
+    for (const auto* id : {L"AipSource_smtc", L"AipSource_rss", L"AipSource_genshin", L"AipSource_hsr", L"AipSource_zzz", L"AipSource_discord", L"AipSource_prayer",
             L"AipAction_toggle", L"AipAction_play", L"AipAction_pause", L"AipAction_previous", L"AipAction_next",
             L"AipAction_repeat", L"AipAction_shuffle", L"AipAction_volume_down", L"AipAction_volume_up"}) {
         Check(IsKnownSecondaryArtworkId(id), "only recognized existing source/action destinations are eligible");

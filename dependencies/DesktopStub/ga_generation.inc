@@ -619,6 +619,26 @@ static void DeleteDisabledAssetsForCurrentConfig(
     }
 }
 
+static bool TryReusePublishedSecondaryLiveTileAssets(
+    const std::wstring& exeDir,
+    const ManifestDisplayInfo& manifestInfo,
+    const std::vector<int>& scales,
+    bool liveTileUpdateMode,
+    const std::wstring& stateKey,
+    std::vector<LiveTileUpdateAsset>& liveTileUpdateAssets)
+{
+    liveTileUpdateAssets.clear();
+    if (!GeneratedAssetCacheEnabled() || !SecondaryLiveAssetsOnly(liveTileUpdateMode) || stateKey.size() != 16 || !IsHexToken(stateKey)) return false;
+    std::vector<LiveTileUpdateAsset> candidate;
+    const auto files = BuildGeneratedAssetCacheFileList(exeDir, manifestInfo, scales, true, stateKey, candidate);
+    if (files.size() != std::size(g_liveTileAssets) || candidate.size() != std::size(g_liveTileAssets)) return false;
+    for (const auto& file : files)
+        if (!IsValidGeneratedPngWithDimensions(file.activePath, file.expectedWidth, file.expectedHeight)) return false;
+    liveTileUpdateAssets = std::move(candidate);
+    Log(L"[i] Reusing published secondary image assets: %ls", stateKey.c_str());
+    return true;
+}
+
 static bool TryRestoreGeneratedAssetCache(
     const std::wstring& exeDir,
     const ManifestDisplayInfo& manifestInfo,
@@ -667,6 +687,16 @@ static bool TryRestoreGeneratedAssetCache(
 
     Log(g_ui.generatedAssetCacheHit.c_str(), stateKey.c_str());
     return true;
+}
+
+// The same decision point supports bounded fake rendering/writing in fixtures.
+// Native publication and its freshness fences remain outside this helper.
+template<class Reuse, class Restore, class Render>
+static bool PrepareGeneratedImageAssets(Reuse reuse, Restore restore, Render render, bool& reusedAssets)
+{
+    reusedAssets = reuse();
+    if (!reusedAssets) reusedAssets = restore();
+    return reusedAssets || render();
 }
 
 static void SaveGeneratedAssetCache(
@@ -1280,6 +1310,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
         if (bakedText) for (const auto& headline : g_renderContent->rssHeadlines)
             state += L"rss=" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
         if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off) {
+            state += L"prayerSource=" + std::to_wstring(g_renderContent->prayerSource) + L";";
             state += L"wrapSourceText=" + std::to_wstring(g_renderContent->wrapSourceText) + L";";
             state += L"detailTopic=" + g_renderContent->detailTopic + L";";
             for (const auto& row : g_renderContent->detailRows)
@@ -2242,15 +2273,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     };
 
     std::wstring generationStateKey = BuildGenerationStateKey(wp);
-    restoredFromGeneratedAssetCache = TryRestoreGeneratedAssetCache(
-        exeDir,
-        manifestInfo,
-        scales,
-        liveTileUpdateMode,
-        generationStateKey,
-        liveTileUpdateAssets);
-
-    if (!restoredFromGeneratedAssetCache)
+    const auto renderAssets = [&]() -> bool
     {
         ScopedGdiPlus gdi;
         if (!gdi.ok())
@@ -2452,7 +2475,12 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
                 }
             }
         }
-    }
+        return true;
+    };
+    if (!PrepareGeneratedImageAssets(
+        [&] { return TryReusePublishedSecondaryLiveTileAssets(exeDir, manifestInfo, scales, liveTileUpdateMode, generationStateKey, liveTileUpdateAssets); },
+        [&] { return TryRestoreGeneratedAssetCache(exeDir, manifestInfo, scales, liveTileUpdateMode, generationStateKey, liveTileUpdateAssets); },
+        renderAssets, restoredFromGeneratedAssetCache)) return false;
 
     auto assetsDone = steady_clock::now();
     Log(g_ui.timingLog.c_str(), g_ui.timingAssetGeneration.c_str(), ElapsedMs(generationStart, assetsDone));

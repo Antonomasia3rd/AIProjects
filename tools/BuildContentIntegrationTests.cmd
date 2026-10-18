@@ -43,6 +43,8 @@ if /i "%~1"=="GalleryInventoryTests" goto GalleryInventory
 if /i "%~1"=="GalleryInventoryNativeTests" goto GalleryInventoryNative
 if /i "%~1"=="GalleryRuntimeTests" goto GalleryRuntime
 if /i "%~1"=="GalleryTransactionTests" goto GalleryTransaction
+if /i "%~1"=="PrayerTimesModelTests" goto PrayerModel
+if /i "%~1"=="PrayerTimesSourceTests" goto PrayerSource
 if /i "%~1"=="CapsBlinkEngineTests" goto CapsEngine
 if /i "%~1"=="TileNotificationPayloadTests" goto TilePayload
 if /i "%~1"=="BoundedCaptureProcessTests" goto BoundedCapture
@@ -130,6 +132,12 @@ cl %CONTENT_FLAGS% /WX tools\GalleryRuntimeTests.cpp /Fe:%CONTENT_OUT%\GalleryRu
 goto Result
 :GalleryTransaction
 cl %CONTENT_FLAGS% /WX tools\GalleryTransactionTests.cpp /Fe:%CONTENT_OUT%\GalleryTransactionTests.exe /Fo:%CONTENT_OUT%\GalleryTransactionTests.obj
+goto Result
+:PrayerModel
+cl %CONTENT_FLAGS% /WX tools\PrayerTimesModelTests.cpp /Fe:%CONTENT_OUT%\PrayerTimesModelTests.exe /Fo:%CONTENT_OUT%\PrayerTimesModelTests.obj
+goto Result
+:PrayerSource
+cl %CONTENT_FLAGS% /WX tools\PrayerTimesSourceTests.cpp /Fe:%CONTENT_OUT%\PrayerTimesSourceTests.exe /Fo:%CONTENT_OUT%\PrayerTimesSourceTests.obj /link winhttp.lib advapi32.lib
 goto Result
 :TileVisualRender
 cl %CONTENT_FLAGS% tools\TileVisualAssetsRenderTests.cpp /Fe:%CONTENT_OUT%\TileVisualAssetsRenderTests.exe /Fo:%CONTENT_OUT%\TileVisualAssetsRenderTests.obj /link gdiplus.lib gdi32.lib user32.lib shell32.lib shlwapi.lib advapi32.lib

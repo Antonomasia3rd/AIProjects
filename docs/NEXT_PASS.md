@@ -8,6 +8,28 @@ Read CURRENT_STATUS and the referenced records
 before changing source; old chronological audit entries are not a current bug
 list. Private bounded fixtures remain the default for failure injection.
 
+## Latest completed pass
+
+The user authorized fixing confirmed findings directly and requested Islamic
+Prayer Times. Published-secondary-PNG reuse passed its 40-image/32-entry
+eviction fixture and is installed. Prayer Times is installed as a shared source
+and seventh optional fixed tile. Existing Content8 and old seven-content
+profiles are preserved. The user's location preference
+is explicitly **unset**; no location or calculation method should be applied to
+the real profile automatically.
+
+The source uses AlAdhan daily schedules cached for the current/next day, manual
+city/country and selectable methods/Asr/timezone/adjustments. Public London
+schema probes exposed an ISO-versus-city-clock discrepancy; paired ISO/plain
+responses must correlate UTC instants with the city's civil clocks. This is a
+required regression, alongside date/DST rollover, offline/stale data, cancellation,
+old-profile compatibility, command-ID collision and retained-image reuse.
+Private schedule persistence is `<profile>.prayer-cache`, ignored by Git.
+The 194 model, 21 injected source, 440 extended host, 15,609 core host,
+5,630 exact renderer, 3 no-hardware and source/smoke gates passed. The installed
+resident passed guarded startup. Native source/pin/Startup/device acceptance
+remains ordinary local use; do not manufacture failures against user data.
+
 ## October 18 fixes installed; acceptance remains
 
 1. Gallery redistribution recovery: a journal bridges the separate ledger and
@@ -30,13 +52,11 @@ list. Private bounded fixtures remain the default for failure injection.
 
 ## Engineering and closure work
 
-- Fix the confirmed 06:45 scheduled gallery refresh burst: 74 jobs and zero
-  cache hits against a 32-entry cache, with 67 render keys repeated from startup.
-  Prefer validating/reusing retained deterministic secondary PNGs before
-  decode/resize/encode, preserving receipt/freshness and delivery timing. Test
-  more than 32 private images plus missing/corrupt/wrong-size output fallback.
-  See [the diagnosis](gallery-refresh-burst-2026-10-18.md). Smoothing native
-  submissions or suppressing identical queues is separate policy work.
+- Check the next ordinary gallery refresh after installed retained-PNG reuse.
+  The private eviction fixture proves zero repeated rendering for unchanged
+  valid outputs beyond 32 cache entries, with integrity/dimension fallback.
+  Real native-submission peak cost remains to be measured. See
+  [the diagnosis and repair](gallery-refresh-burst-2026-10-18.md).
 - Review owner-aware thumbnail/versioned-asset retirement and useful storage
   reporting. Historical gallery thumbnails/reservations currently accumulate;
   do not delete caches or ledger history based on guesses about Windows' queue.
@@ -55,6 +75,9 @@ list. Private bounded fixtures remain the default for failure injection.
   lower-priority reviews. Windhawk requires matching local binaries/symbols.
 - Existing security is opt-in; new hardening and the deferred Microsoft case
   remain below functional work, under the user's existing instructions.
+- Optional later source ideas: a local countdown/event tile and an agenda tile;
+  a Hijri/Ramadan view could reuse Prayer Times' existing calendar metadata.
+  These are ideas, not completed features or permission gates.
 
 ## Useful local acceptance by the user
 

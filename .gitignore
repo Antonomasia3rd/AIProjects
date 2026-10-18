@@ -22,6 +22,7 @@
 
 # Local inventories and private runtime configuration
 LOCAL_TOOL_INVENTORY.md
+*.prayer-cache*
 
 # Project-specific local/runtime files outside build/
 legacy/TaskSchedulerMigration/TaskSchedulerMigrationBackup/

@@ -389,11 +389,21 @@ static void AssertUiStringWired(const std::string& key, const std::string& defau
     };
     AssertCheck(defaultCheck);
 
+    std::string loadPattern = "g_ui\\." + property;
+    if (key.compare(0, 6, "Prayer") == 0) {
+        // Prayer settings are read on demand through explicit shared readers,
+        // rather than duplicating every value in the legacy g_ui structure.
+        loadPattern += "|(?:PrayerUiString|SecondaryTileUiString)\\(L\"" + key + "\"";
+        loadPattern += "|add\\([0-9]+,\\s*L\"" + key + "\"";
+        loadPattern += "|IniReadS\\(L\"Strings\",\\s*L\"" + key + "\"";
+        if (key.compare(0, 11, "PrayerLabel") == 0)
+            loadPattern += R"rx(|IniReadS\(L"Strings", \(L"PrayerLabel" \+ std::wstring\(aip::prayer::PrayerName\(row.id\)\)\))rx";
+    }
     Check loadCheck{
         "UI string is loaded: " + key,
         "UI/string sources",
         uiSources,
-        "g_ui\\." + property,
+        loadPattern,
         "UI field load missing for " + key,
         false
     };
@@ -510,6 +520,9 @@ int main(int argc, char** argv)
             "..\\dependencies\\DesktopStub\\ga_logging_core.inc",
             "..\\dependencies\\DesktopStub\\ga_manifest.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_strings.inc",
+            "..\\dependencies\\DesktopStub\\ga_prayer_settings_tray.inc",
+            "..\\dependencies\\DesktopStub\\ga_secondary_tile_tray.inc",
+            "..\\dependencies\\DesktopStub\\ga_content_runtime.inc",
             "..\\dependencies\\DesktopStub\\ga_runtime_helpers.inc"
         });
 
@@ -638,7 +651,7 @@ int main(int argc, char** argv)
         checks.push_back({"Desktop icon placeholder assets use full tile canvases", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(LoadEmbeddedDesktopIcon\(\).*RenderDesktopIconAsset\(icon\.get\(\),\s*t\.w,\s*t\.h,\s*t\.w,\s*t\.h\).*ScalePixels\(t\.w,\s*scale\).*ScalePixels\(t\.h,\s*scale\).*RenderDesktopIconAsset\(icon\.get\(\),\s*scaledW,\s*scaledH,\s*t\.w,\s*t\.h\))rx", "disabled/static Desktop icon placeholders must be rendered to target tile dimensions instead of saving the raw icon directly", false});
         checks.push_back({"Desktop icon placeholder renderer uses Windows 8 tile placement", "..\\dependencies\\DesktopStub\\ga_image.inc", image, R"rx(DesktopIconVisibleWidthForAsset.*MulDiv\(logicalShortSide,\s*74,\s*150\).*MulDiv\(logicalVisibleW,\s*assetShortSide,\s*logicalShortSide\).*DesktopIconCenterYForAsset.*MulDiv\(logicalShortSide,\s*119,\s*300\).*MulDiv\(logicalCenterY,\s*assetHeight,\s*logicalHeight\).*static Bitmap\* RenderDesktopIconAsset.*DrawImage\(icon,\s*Rect\(dx,\s*dy,\s*targetVisibleW,\s*targetVisibleH\))rx", "Desktop icon placeholder renderer must use Windows 8-style logical tile sizing and placement without stretching the icon or shrinking high-DPI variants", false});
         checks.push_back({"Desktop icon placeholder uses embedded high-resolution source", "..\\dependencies\\DesktopStub\\ga_desktop_icon_png.inc", desktopIcon, R"rx(Embedded 864x640 RGBA PNG generated from the Windows 8\.1 Desktop tile logo proportions.*0x00,\s*0x00,\s*0x03,\s*0x60,\s*0x00,\s*0x00,\s*0x02,\s*0x80)rx", "Desktop icon placeholder must use an embedded high-resolution PNG source so the app stays portable and avoids low-resolution upscaling", false});
-        checks.push_back({"Generated asset cache restores before loading wallpaper", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(BuildGenerationStateKey\(wp\).*TryRestoreGeneratedAssetCache\(.*if \(!restoredFromGeneratedAssetCache\).*LoadWallpaperBitmapForRender)rx", "generated asset cache hits must bypass wallpaper loading and PNG rendering", false});
+        checks.push_back({"Generated asset cache restores before loading wallpaper", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(PrepareGeneratedImageAssets\(Reuse reuse, Restore restore, Render render, bool& reusedAssets\).*reusedAssets = reuse\(\);.*if \(!reusedAssets\) reusedAssets = restore\(\);.*return reusedAssets \|\| render\(\);.*BuildGenerationStateKey\(wp\).*const auto renderAssets = .*LoadWallpaperBitmapForRender.*PrepareGeneratedImageAssets\(.*TryReusePublishedSecondaryLiveTileAssets\(.*TryRestoreGeneratedAssetCache\(.*renderAssets, restoredFromGeneratedAssetCache)rx", "generated asset cache or retained-output hits must bypass the deferred wallpaper loader and PNG renderer", false});
         checks.push_back({"Generated asset cache is populated after successful generation", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(GeneratedAssetCache.*AddGeneratedAssetCacheFile.*if \(ok\).*SaveGeneratedAssetCache\(exeDir,\s*BuildGenerationStateKey\(wp\),\s*generatedAssetCacheFiles\))rx", "successful generation must save generated PNGs into the bounded asset cache for repeat slideshow wallpapers", false});
         checks.push_back({"Generated asset cache mirrors the active Assets layout", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(ManifestGeneratedAssetCacheName.*return L"Assets\\\\.*LiveGeneratedAssetCacheName.*return L"Assets\\\\)rx", "generated asset cache entries should mirror the active Assets directory layout instead of using confusing Manifest or Live cache roots", false});
         checks.push_back({"Generated asset cache key includes asset, text, and Live Tile presentation settings", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(BuildGenerationStateKey.*LiveTileTemplateStyleIniValue\(ConfiguredLiveTileTemplateStyle\(\)\).*LiveTileBrandingIniValue\(ConfiguredLiveTileBranding\(\)\).*for \(const auto& t : g_tiles\).*IniReadI\(L"Assets",\s*t\.name,\s*0\).*IniReadS\(L"TileText",\s*L"Text",\s*L""\).*EffectiveManifestBackgroundColor\(\).*IniReadI\(L"TileText",\s*L"ApplyToMediumTile",\s*1\).*IniReadI\(L"TileText",\s*L"ApplyToWideTile",\s*1\).*IniReadI\(L"TileText",\s*L"ApplyToLargeTile",\s*1\))rx", "generated asset cache keys must include render-affecting template, branding, asset, text, background, and tile-target settings", false});

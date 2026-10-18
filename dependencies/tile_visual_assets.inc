@@ -87,6 +87,15 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
         graphics.FillPolygon(&brush, points, 3);
     };
     switch (topic->glyph) {
+    case Glyph::Prayer: {
+        GraphicsPath crescent;
+        crescent.AddBezier(73, 15, 32, -1, 4, 29, 15, 65);
+        crescent.AddBezier(15, 65, 25, 94, 66, 99, 87, 64);
+        crescent.AddBezier(87, 64, 40, 82, 26, 32, 73, 15);
+        crescent.CloseFigure();
+        graphics.FillPath(&brush, &crescent);
+        graphics.FillEllipse(&brush, 68.0f, 22.0f, 9.0f, 9.0f); break;
+    }
     case Glyph::Photo: {
         graphics.DrawRectangle(&pen, 16.0f, 20.0f, 68.0f, 60.0f);
         graphics.FillEllipse(&brush, 57.0f, 30.0f, 12.0f, 12.0f);

@@ -76,8 +76,8 @@ void TestSourceCatalog() {
         }
     }
     constexpr std::size_t sourceCount = sizeof(Sources) / sizeof(Sources[0]);
-    Require(sourceCount == 8, "the built-in source catalog has the expected migration set");
-    Require(SupportedSourceNames() == L"CustomText, RssFeed, CapsLock, SMTC, Notes, DiscordRPC, CapsBlink, AsusBlink",
+    Require(sourceCount == 9, "the built-in source catalog includes shared Prayer Times");
+    Require(SupportedSourceNames() == L"CustomText, RssFeed, CapsLock, SMTC, Notes, DiscordRPC, CapsBlink, AsusBlink, PrayerTimes",
         "the source catalog supplies the stable display and validation order");
     Require(SourceIdFor(L" smtc ") == SourceId::Smtc &&
             SourceIdFor(L"DiscordRPC") == SourceId::DiscordRpc &&
@@ -86,6 +86,7 @@ void TestSourceCatalog() {
     Require(SourceRefreshesWhileInactive(SourceId::RssFeed) &&
             SourceRefreshesWhileInactive(SourceId::Smtc) &&
             SourceRefreshesWhileInactive(SourceId::Notes) &&
+            SourceRefreshesWhileInactive(SourceId::PrayerTimes) &&
             !SourceRefreshesWhileInactive(SourceId::DiscordRpc) &&
             !SourceRefreshesWhileInactive(SourceId::CapsBlink) &&
             !SourceRefreshesWhileInactive(SourceId::AsusBlink) &&

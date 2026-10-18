@@ -115,6 +115,23 @@ static const IniDefault g_defaults[] = {
     {L"Content", L"CycleDriver", L"DesktopStub"},
     {L"Content", L"RefreshSeconds", L"2"},
     {L"Content", L"TextMode", L"Auto"},
+    {L"PrayerTimes", L"City", L""},
+    {L"PrayerTimes", L"Country", L""},
+    {L"PrayerTimes", L"State", L""},
+    {L"PrayerTimes", L"TimeZone", L""},
+    {L"PrayerTimes", L"Method", L"Auto"},
+    {L"PrayerTimes", L"School", L"0"},
+    {L"PrayerTimes", L"LatitudeAdjustmentMethod", L"3"},
+    {L"PrayerTimes", L"FajrAdjustmentMinutes", L"0"},
+    {L"PrayerTimes", L"DhuhrAdjustmentMinutes", L"0"},
+    {L"PrayerTimes", L"AsrAdjustmentMinutes", L"0"},
+    {L"PrayerTimes", L"MaghribAdjustmentMinutes", L"0"},
+    {L"PrayerTimes", L"IshaAdjustmentMinutes", L"0"},
+    {L"PrayerTimes", L"RefreshSeconds", L"43200"},
+    {L"PrayerTimes", L"TimeoutSeconds", L"10"},
+    {L"PrayerTimes", L"MaximumBytes", L"262144"},
+    {L"PrayerTimes", L"ShowSunrise", L"1"},
+    {L"PrayerTimes", L"TwentyFourHour", L"1"},
     {L"SMTC", L"Indicator", L"Status"},
     {L"SMTC", L"ShowRepeatShuffle", L"0"},
     {L"Content.1", L"Enabled", L"1"},
@@ -414,6 +431,36 @@ struct StringDefault {
 };
 
 static const StringDefault g_stringDefaults[] = {
+    {L"PrayerCity", L"City"},
+    {L"PrayerState", L"State / region (optional)"},
+    {L"PrayerTimeZone", L"Time zone override (blank uses schedule)"},
+    {L"PrayerRefreshSeconds", L"Schedule refresh (seconds)"},
+    {L"PrayerTimeoutSeconds", L"HTTP timeout (seconds)"},
+    {L"PrayerMaximumBytes", L"Response limit (bytes)"},
+    {L"PrayerRefreshNow", L"Refresh prayer schedule now"},
+    {L"PrayerMethodAuto", L"Auto (regional calculation method)"},
+    {L"PrayerMethodKemenag", L"20 - KEMENAG (Indonesia)"},
+    {L"PrayerMethod", L"Calculation method"},
+    {L"PrayerSchoolStandard", L"Standard (Shafi / Maliki / Hanbali)"},
+    {L"PrayerSchoolHanafi", L"Hanafi"},
+    {L"PrayerSchool", L"Asr calculation"},
+    {L"PrayerAdjustments", L"Local minute adjustments"},
+    {L"PrayerShowSunrise", L"Show sunrise in the header"},
+    {L"Prayer24Hour", L"Use 24-hour times"},
+    {L"PrayerLocation", L"Set city and country..."},
+    {L"PrayerCityPrompt", L"Enter the city manually. Leave blank to keep prayer times unconfigured."},
+    {L"PrayerCountry", L"Country"},
+    {L"PrayerCountryPrompt", L"Enter the country for this city. No location detection is used."},
+    {L"PrayerSettingsTitle", L"Prayer times settings"},
+    {L"PrayerSettingPrompt", L"Edit PrayerTimes setting:"},
+    {L"PrayerMappingPrompt", L"Choose a content; PrayerTimes is added to its existing text sources."},
+    {L"PrayerLoading", L"Loading prayer schedule..."},
+    {L"PrayerLabelFajr", L"Fajr"},
+    {L"PrayerLabelDhuhr", L"Dhuhr"},
+    {L"PrayerLabelAsr", L"Asr"},
+    {L"PrayerLabelMaghrib", L"Maghrib"},
+    {L"PrayerLabelIsha", L"Isha"},
+
     {L"EnabledText", L"enabled"},
     {L"DisabledText", L"disabled"},
     {L"OnText", L"on"},
@@ -1117,7 +1164,7 @@ static std::wstring BuildInitialIniTemplate()
         if (IEquals(d.section, L"RssFeed"))
             lines.push_back(FormatIniAssignment(d.key, d.value));
     }
-    for (const wchar_t* section : {L"Content", L"Content.1", L"SMTC", L"Notes", L"Notes.Resin", L"Notes.Stamina", L"Notes.Charge", L"Discord", L"CapsBlink", L"AsusBlink"})
+    for (const wchar_t* section : {L"Content", L"Content.1", L"SMTC", L"Notes", L"Notes.Resin", L"Notes.Stamina", L"Notes.Charge", L"Discord", L"CapsBlink", L"AsusBlink", L"PrayerTimes"})
     {
         lines.push_back(L"");
         lines.push_back(L"[" + std::wstring(section) + L"]");

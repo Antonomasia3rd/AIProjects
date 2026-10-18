@@ -11,6 +11,15 @@ static constexpr UINT ID_CONTENT_BUILTIN_PRESET = 19030;
 static constexpr UINT ID_CONTENT_CYCLE_DRIVER = 19040;
 static constexpr UINT ID_CONTENT_ENTRY_OPTIONS = 20000;
 static constexpr UINT CONTENT_ENTRY_COMMANDS = 64;
+static void AppendPrayerSettingsMenu(HMENU menu);
+static bool DispatchPrayerSettingsCommand(HWND owner, UINT command);
+static constexpr UINT ContentSourceChoiceOffset(UINT choice) { return choice < 8 ? 24 + choice : 34 + choice - 8; }
+static const aip::content::SourceDescriptor* ContentSourceChoiceForOffset(UINT field) {
+    static_assert(_countof(aip::content::Sources) <= 14, "Source menu choices exhausted their reserved command offsets.");
+    for (UINT choice = 0; choice < _countof(aip::content::Sources); ++choice)
+        if (ContentSourceChoiceOffset(choice) == field) return &aip::content::Sources[choice];
+    return nullptr;
+}
 static constexpr UINT ID_NOTES_SETTINGS = 24000;
 static constexpr UINT ID_DISCORD_SETTINGS = 25000;
 static constexpr UINT ID_DISCORD_PROFILE_OPTION = 25500;
@@ -146,6 +155,9 @@ static void AppendContentEngineMenu(HMENU menu, ContentMenuPart part = ContentMe
     }
     const int count = IniReadClampedI(L"Content", L"Count", 1, 1, aip::content::MaxEntries);
     if (part == ContentMenuPart::Sources) {
+    HMENU prayer = aip::BeginTrayNestedMenu(menu);
+    AppendPrayerSettingsMenu(prayer);
+    aip::EndTrayNestedMenu(menu, prayer, IniReadS(L"Strings", L"PrayerSettingsTitle", L"Prayer times settings"));
     HMENU notes = CreatePopupMenu();
     if (notes) {
         for (UINT i = 0; i < 3; ++i)
@@ -289,7 +301,7 @@ static void AppendContentEngineMenu(HMENU menu, ContentMenuPart part = ContentMe
                     std::vector<std::wstring> sources;
                     aip::content::ParseSources(IniReadS(section.c_str(), L"TextSources", L""), sources);
                     for (UINT choice = 0; choice < _countof(aip::content::Sources); ++choice)
-                        aip::AppendTrayMenuItem(choices, base + 24 + choice, aip::content::Sources[choice].label,
+                        aip::AppendTrayMenuItem(choices, base + ContentSourceChoiceOffset(choice), aip::content::Sources[choice].label,
                             std::find(sources.begin(), sources.end(), aip::content::Sources[choice].value) != sources.end(), true);
                     aip::AppendTrayMenuItem(choices, base + 4, L"Edit source order...", false, true);
                 } else if (i == 10) {
@@ -542,6 +554,7 @@ static bool SaveContentAsusEventSetting(HWND owner, const std::wstring& key, con
 
 static bool DispatchContentEngineCommand(HWND owner, UINT command)
 {
+    if (DispatchPrayerSettingsCommand(owner, command)) return true;
     if (command >= ID_CONTENT_CYCLE_DRIVER && command < ID_CONTENT_CYCLE_DRIVER + _countof(aip::content::CycleDrivers)) {
         SaveContentMenuSettings(owner, {{L"Content", L"CycleDriver", aip::content::CycleDrivers[command - ID_CONTENT_CYCLE_DRIVER].value}}); return true;
     }
@@ -731,10 +744,10 @@ static bool DispatchContentEngineCommand(HWND owner, UINT command)
             else SaveContentMenuSettings(owner, {{section, L"Background", background}});
             return true;
         }
-        if (field >= 24 && field < 24 + _countof(aip::content::Sources)) {
+        if (const auto* selectedSource = ContentSourceChoiceForOffset(field)) {
             std::vector<std::wstring> sources;
             aip::content::ParseSources(IniReadS(section.c_str(), L"TextSources", L""), sources);
-            const auto source = aip::content::Sources[field - 24].value;
+            const auto source = selectedSource->value;
             auto found = std::find(sources.begin(), sources.end(), source);
             if (found == sources.end()) sources.push_back(source); else sources.erase(found);
             std::wstring value;
@@ -773,3 +786,4 @@ static bool DispatchContentEngineCommand(HWND owner, UINT command)
     SaveContentMenuSettings(owner, {{section, option->key, value}});
     return true;
 }
+#include "ga_prayer_settings_tray.inc"

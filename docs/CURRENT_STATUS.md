@@ -11,6 +11,13 @@ is enabled and its focused native recheck passed.
 
 ## Saved and installed
 
+- The later October 18 build adds the optional Prayer Times source/tile and
+  reuses retained secondary PNGs after generated-cache eviction. It passed the
+  full focused/core/render/source/smoke gates and guarded installation, with
+  existing settings/history preserved. Prayer location remains blank, no new
+  tile was pinned, and no prayer cache was created for the real profile.
+  See [Prayer Times and validation](prayer-times-2026-10-18.md) and
+  [gallery refresh repair](gallery-refresh-burst-2026-10-18.md).
 - The 2026-10-18 CPU repairs are installed: optimized native builds,
   one cleanup per generation batch, Live Tile-only secondary assets, exact
   gallery-frame validation and a shared idle memory-maintenance cooldown.
@@ -98,7 +105,7 @@ See the [model](gallery-engine-2026-10-15.md),
 | Gallery acceptance | The real folder chooser/pin confirmations, Windows animation, actual image sets and nonresponsive native-codec shutdown need local acceptance. Exact copies deduplicate; different encodings of visually identical pictures do not. Pools and cached published images are retained. |
 | Gallery storage and native acceptance | Recovery and stale-dialog guards are installed and pass private failure injection. Real interactive recovery, Windows queue behavior and owner-aware retirement/storage reporting remain acceptance or engineering work. Do not force failures against the user's actual ledger. |
 | Historical renderer variation | The unexplained four-pixel opaque preset difference remains open. Exact assertions have not been relaxed; current passing renders do not establish its cause. |
-| CPU attribution and idle work | Idle CPU repairs are installed, with short mean samples falling from 0.454% to about 0.15–0.18%. The later 06:45:10 peak is correlated with the scheduled 900-second gallery refresh: 74 renders across 16 destinations, zero cache hits against a 32-entry cache, including 67 keys already rendered at startup. Reuse validated retained output PNGs before rerendering; see [the refresh-burst diagnosis](gallery-refresh-burst-2026-10-18.md). Residual idle-thread cost, Win+L causality and the older NPSMSvc episode remain separate work. |
+| CPU attribution and idle work | Idle samples remain about 0.15–0.18% versus 0.454% before repairs. The scheduled gallery refresh peak was traced to repeated rendering beyond a 32-entry cache; retained-PNG reuse is now installed and passes the 40-image eviction fixture. Measure the next ordinary refresh before claiming a real peak reduction. Residual idle-thread cost, Win+L causality and the older NPSMSvc episode remain separate work. |
 | Real integrations | Actual Startup-folder/StartupTask, sleep/wake keyboards, player icons/actions, and HoYoLAB browser/discovery/session behavior still need local acceptance beyond injected fixtures. Preserve existing accounts while testing. |
 | Source tile names | Explicit persisted Rename now has name-only native propagation and private injected tests. Confirm a real renamed pin keeps placement and appearance in normal use. Feed changes and artwork migration continue to preserve user-chosen names. |
 | Older delivery paths | Unpackaged/older-Windows helper queue correlation remains conservative; those paths keep app-managed rotation where individual delivery cannot be acknowledged safely. |

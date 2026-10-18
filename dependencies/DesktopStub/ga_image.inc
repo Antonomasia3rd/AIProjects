@@ -2,6 +2,7 @@
 // Lazy GDI+ lifetime
 // -----------------------------------------------------------------------------
 #include "../media_tile_layout.h"
+#include "../prayer_tile_layout.h"
 static std::mutex g_gdiPlusMutex;
 static ULONG_PTR g_gdiPlusToken = 0;
 static unsigned int g_gdiPlusUseCount = 0;
@@ -713,6 +714,30 @@ static bool RenderDetailRowsSimulation(Graphics& graphics, const aip::content::S
     return graphics.GetLastStatus() == Ok;
 }
 
+static bool RenderPrayerTileSimulation(Graphics& graphics, const aip::content::Snapshot& snapshot,
+    int width, int height, double scale)
+{
+    Font font(L"Segoe UI", static_cast<REAL>(12 * scale), FontStyleRegular, UnitPixel);
+    if (font.GetLastStatus() != Ok) return false;
+    const REAL margin = static_cast<REAL>(10 * scale), textWidth = static_cast<REAL>((width - 20) * scale);
+    const REAL bottom = static_cast<REAL>((height - 20) * scale);
+    REAL y = margin;
+    if (!DrawTopSourceField(graphics, snapshot.text.primary, font, margin, y, textWidth, bottom, 2, 255, static_cast<REAL>(2 * scale)) ||
+        !DrawTopSourceField(graphics, snapshot.text.secondary, font, margin, y, textWidth, bottom, 1, 180, static_cast<REAL>(2 * scale)) ||
+        !DrawTopSourceField(graphics, snapshot.text.badge, font, margin, y, textWidth, bottom, 2, 180, static_cast<REAL>(3 * scale))) return false;
+    if (aip::content::PrayerTileShowsSchedule(height, snapshot.detailRows)) {
+        // Reserve equal space for all five obligatory prayers; Sunrise is in
+        // the header, never a sixth row that can push Isha out of the tile.
+        const REAL rowHeight = (bottom - y) / 5;
+        for (const auto& row : snapshot.detailRows) {
+            REAL rowY = y, valueY = y;
+            if (!DrawTopSourceField(graphics, row.primary, font, margin, rowY, textWidth * .6f, y + rowHeight, 1, 255, 0) ||
+                !DrawTopSourceField(graphics, row.secondary, font, margin + textWidth * .6f, valueY, textWidth * .4f, y + rowHeight, 1, 255, 0)) return false;
+            y += rowHeight;
+        }
+    }
+    return graphics.GetLastStatus() == Ok;
+}
 static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int logicalWidth, int logicalHeight)
 {
     if (!bitmap || !TileTextOverlayEnabled() || !TileTextAppliesToTileName(tileName))
@@ -746,6 +771,7 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
     if (!ConfigureTileTextGraphics(graphics))
         return false;
     if (g_renderContent && logicalWidth >= 150 && logicalHeight >= 150) {
+        if (g_renderContent->prayerSource) return RenderPrayerTileSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
         if (g_renderContent->smtcSource) return RenderMediaTileSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
         if (!g_renderContent->detailRows.empty()) return RenderDetailRowsSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
         if (g_renderContent->wrapSourceText) {
