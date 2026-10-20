@@ -426,7 +426,7 @@ static void AppendGalleryTilesMenu(HMENU parent) {
     HMENU order=aip::BeginTrayNestedMenu(options);aip::AppendTrayMenuItem(order,ID_GALLERY_ORDER,L"Shuffle",cfg.order==aip::gallery::Order::Shuffle,configured);aip::AppendTrayMenuItem(order,ID_GALLERY_ORDER+1,L"Sequential",cfg.order==aip::gallery::Order::Sequential,configured);aip::EndTrayNestedMenu(options,order,L"Photo order");
     HMENU fit=aip::BeginTrayNestedMenu(options);aip::AppendTrayMenuItem(fit,ID_GALLERY_FIT,L"Fill tile (crop edges)",cfg.fit==aip::gallery::Fit::Fill,configured);aip::AppendTrayMenuItem(fit,ID_GALLERY_FIT+1,L"Fit whole photo",cfg.fit==aip::gallery::Fit::Fit,configured);aip::EndTrayNestedMenu(options,fit,L"Photo layout");
     aip::EndTrayNestedMenu(menu,options,L"Gallery settings");
-    const auto groups=GalleryGroups(cfg);const auto states=GalleryTileMenuStates();
+    const auto groups=GalleryGroups(cfg);
     for(std::size_t groupIndex=0;valid&&groupIndex<groups.size();++groupIndex) {
         const auto& group=groups[groupIndex];HMENU groupMenu=aip::BeginTrayNestedMenu(menu);const auto groupBase=ID_GALLERY_GROUP+static_cast<UINT>(groupIndex)*4;
         aip::AppendTrayMenuItem(groupMenu,groupBase,L"Pin all tiles in this gallery...",false,configured&&SecondaryTilePinUiAvailable());
@@ -439,8 +439,8 @@ static void AppendGalleryTilesMenu(HMENU parent) {
                 const auto i=group.indices[p];const auto& tile=cfg.tiles[i];const auto base=ID_GALLERY_TILE+static_cast<UINT>(i)*GALLERY_TILE_COMMAND_STRIDE;
                 HMENU item=aip::BeginTrayNestedMenu(page);
                 aip::AppendTrayMenuItem(item,base+1,L"Rename...",false,configured);
-                aip::AppendTrayMenuItem(item,base+2,L"Pin/update on Start...",false,configured&&SecondaryTilePinUiAvailable());
-                aip::AppendTrayMenuItem(item,base+3,L"Unpin from Start...",false,configured&&SecondaryTilePinUiAvailable());
+                AppendSecondaryTilePinCommands(item,aip::gallery::NativeTileId(cfg.groupId,tile.id),base+2,base+3,base+4,configured);
+                aip::AppendTrayMenuItem(item,base+5,SecondaryTileUiString(L"SelectedTileContents",L"Tile contents..."),false,true);
                 AppendTileAppearanceMenu(item,L"Gallery.Tile."+std::to_wstring(i+1),base+10);
                 aip::EndTrayNestedMenu(page,item,tile.name);
             }
@@ -481,6 +481,8 @@ static bool DispatchGalleryTilesCommand(HWND owner,UINT command) {
         if(action>=10&&action<=18){const auto a=action-10;if(a<2)SaveGalleryMenuSettings(owner,{{section,L"Background",a?L"Color":L"Transparent"}},&edit);else if(a<7)SaveGalleryMenuSettings(owner,{{section,L"Branding",aip::content::TileBrandingChoices[a-2]}},&edit);else if(a==7){auto color=tile.appearance.backgroundColor;if(ShowTextInputDialog(owner,L"Gallery background",L"Color as #RRGGBB, or Auto",color,true)==IDOK)SaveGalleryMenuSettings(owner,{{section,L"Background",L"Color"},{section,L"BackgroundColor",color}},&edit);}else SaveGalleryMenuSettings(owner,{{section,L"BackgroundColor",L"Auto"}},&edit);}
         else if(action==1){auto name=tile.name;if(ShowTextInputDialog(owner,L"Gallery tile",L"Tile name",name,true)==IDOK)SaveGalleryMenuSettings(owner,{{section,L"Name",name}},&edit);}
         else if(action==2)RequestPinSecondaryTile(owner,id,tile.name);else if(action==3)RequestUnpinSecondaryTile(owner,id);
+        else if(action==4)RequestSecondaryTileList(owner);
+        else if(action==5)ShowSelectedTileStatus(owner,id,tile.name);
     }
     return true;
 }

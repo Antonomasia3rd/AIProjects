@@ -190,8 +190,9 @@ static void TestGallerySetupHost()
             std::any_of(fields.begin(),fields.end(),[](const auto& value){return value.key==L"Folder"&&value.value==L"C:\\synthetic\\second";}),
             "multiple gallery folders survive the shared typed configuration batch");
     }
-    Check((commands.at(ID_GALLERY_TILE + 2).state & (MFS_DISABLED | MFS_GRAYED)) != 0,
-        "default inert menus cannot request native pinning even with valid gallery configuration");
+    Check(!commands.count(ID_GALLERY_TILE + 2) && !commands.count(ID_GALLERY_TILE + 3) &&
+        !commands.count(ID_GALLERY_TILE + 4) && commands.count(ID_GALLERY_TILE + 1),
+        "unavailable native pin inventory omits pin, unpin and retry actions while retaining the configured gallery row");
     DestroyMenu(menu);
     Check(!RequestGalleryPinHistory(nullptr), "default inert fixture cannot enumerate real package tiles");
     const auto* photo = aip::tile_visual::FindTopic(L"gallery");

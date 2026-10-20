@@ -746,14 +746,84 @@ static bool RenderDetailRowsSimulation(Graphics& graphics, const aip::content::S
     return graphics.GetLastStatus() == Ok;
 }
 
+static bool DrawPrayerClockField(Graphics& graphics, const aip::content::Snapshot& snapshot,
+    const std::wstring& text, const wchar_t* defaultStyle, unsigned& role,
+    REAL x, REAL& y, REAL width, REAL bottom, int maxLines, double scale, bool right = false)
+{
+    if (text.empty()) return true;
+    std::wstring style = defaultStyle;
+    const auto& presentation = snapshot.presentation;
+    if (presentation.Active()) {
+        style = role == 0 ? presentation.primaryStyle : role == 1 ? presentation.secondaryStyle : presentation.badgeStyle;
+        maxLines = presentation.wrap ? (role == 0 ? presentation.primaryLines : role == 1 ? presentation.secondaryLines : presentation.badgeLines) : 1;
+        if (role) y += static_cast<REAL>(presentation.gapLines * 12 * scale);
+    }
+    ++role;
+    if (width <= 0 || y >= bottom) return true;
+    Font font(L"Segoe UI", static_cast<REAL>(aip::content::TextStylePixels(style) * scale),
+        style.compare(0,4,L"base") == 0 ? FontStyleBold : FontStyleRegular, UnitPixel);
+    const REAL lineHeight = font.GetHeight(&graphics);
+    if (font.GetLastStatus() != Ok || lineHeight <= 0) return false;
+    const REAL available = (std::min)(bottom - y, lineHeight * maxLines + .01f);
+    RectF bounds(x,y,width,available), measured;
+    StringFormat format;
+    format.SetAlignment(right ? StringAlignmentFar : StringAlignmentNear);
+    format.SetTrimming(StringTrimmingEllipsisWord); format.SetFormatFlags(StringFormatFlagsLineLimit);
+    if (presentation.Active()) {
+        format.SetAlignment(presentation.align == L"center" ? StringAlignmentCenter : presentation.align == L"right" ? StringAlignmentFar : StringAlignmentNear);
+        if (!presentation.wrap) format.SetFormatFlags(StringFormatFlagsLineLimit | StringFormatFlagsNoWrap);
+    }
+    if (graphics.MeasureString(text.c_str(),static_cast<INT>(text.size()),&font,bounds,&format,&measured) != Ok) return false;
+    SolidBrush brush(Color(style.find(L"Subtle") == std::wstring::npos ? 255 : 153,255,255,255));
+    const auto saved = graphics.Save(); graphics.SetClip(bounds,CombineModeIntersect);
+    const auto result = graphics.DrawString(text.c_str(),static_cast<INT>(text.size()),&font,bounds,&format,&brush);
+    graphics.Restore(saved);
+    y += (std::min)(available,(std::max)(lineHeight,measured.Height)) + static_cast<REAL>(2 * scale);
+    return result == Ok;
+}
 static bool RenderPrayerTileSimulation(Graphics& graphics, const aip::content::Snapshot& snapshot,
     int width, int height, double scale)
 {
+    if (snapshot.prayerClock.Available()) {
+        const auto& clock = snapshot.prayerClock;
+        const auto layout = aip::content::ComputePrayerClockGeometry(width,height,clock,snapshot.detailRows);
+        const REAL margin = static_cast<REAL>(layout.margin * scale), bottom = static_cast<REAL>(layout.bottom * scale);
+        const REAL mainWidth = static_cast<REAL>(layout.mainWidth * scale), headerBottom = static_cast<REAL>(layout.clockBottom * scale);
+        REAL y = margin, countY = margin; unsigned role = 0;
+        if (!DrawPrayerClockField(graphics,snapshot,clock.time,aip::content::PrayerTimeStyle(layout.countdownColumn),role,
+                margin,y,mainWidth,headerBottom,1,scale) ||
+            !DrawPrayerClockField(graphics,snapshot,clock.prayer,L"body",role,margin,y,mainWidth,headerBottom,1,scale) ||
+            !DrawPrayerClockField(graphics,snapshot,aip::content::PrayerLocationText(clock),L"captionSubtle",role,
+                margin,y,mainWidth,headerBottom,2,scale)) return false;
+        if (layout.countdownColumn) {
+            role = 0; // Adaptive subgroup text roles restart in each column.
+            const REAL countX = static_cast<REAL>(layout.countdownX * scale), countWidth = static_cast<REAL>(layout.countdownWidth * scale);
+            if (!DrawPrayerClockField(graphics,snapshot,L"minutes",L"captionSubtle",role,countX,countY,countWidth,headerBottom,1,scale,true) ||
+                !DrawPrayerClockField(graphics,snapshot,clock.minutes,aip::content::PrayerCountdownStyle(clock),role,countX,countY,countWidth,headerBottom,1,scale,true)) return false;
+            role = 2;
+            y = (std::max)(y,countY);
+        } else if (!DrawPrayerClockField(graphics,snapshot,clock.countdown,L"caption",role,margin,y,mainWidth,headerBottom,1,scale)) return false;
+        const REAL fullWidth = static_cast<REAL>((width - 2 * layout.margin) * scale);
+        if (!DrawPrayerClockField(graphics,snapshot,clock.details,L"captionSubtle",role,margin,y,fullWidth,headerBottom,2,scale)) return false;
+        if (layout.schedule) {
+            y = (std::min)(y,headerBottom);
+            const REAL rowHeight = (bottom - y) / 5;
+            for (const auto& row : snapshot.detailRows) {
+                REAL labelY = y, valueY = y;
+                role = 0;
+                if (!DrawPrayerClockField(graphics,snapshot,row.primary,L"caption",role,margin,labelY,fullWidth * .6f,y + rowHeight,1,scale)) return false;
+                role = 0;
+                if (!DrawPrayerClockField(graphics,snapshot,row.secondary,L"caption",role,margin + fullWidth * .6f,valueY,fullWidth * .4f,y + rowHeight,1,scale,true)) return false;
+                y += rowHeight;
+            }
+        }
+        return graphics.GetLastStatus() == Ok;
+    }
     Font font(L"Segoe UI", static_cast<REAL>(12 * scale), FontStyleRegular, UnitPixel);
     if (font.GetLastStatus() != Ok) return false;
     const REAL margin = static_cast<REAL>(10 * scale), textWidth = static_cast<REAL>((width - 20) * scale);
     const REAL bottom = static_cast<REAL>((height - 20) * scale);
-    const bool full = aip::content::PrayerTileShowsSchedule(height, snapshot.detailRows);
+    const bool full = aip::content::PrayerTileShowsSchedule(height, snapshot.detailRows, snapshot.prayerClock);
     const REAL headerBottom = snapshot.presentation.Active() && full ? bottom - (bottom - margin) * .65f : bottom;
     REAL y = margin;
     if (!DrawTopSourceField(graphics, snapshot.text.primary, font, margin, y, textWidth, headerBottom, 2, 255, static_cast<REAL>(2 * scale)) ||

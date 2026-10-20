@@ -115,6 +115,50 @@ static void QueueCommandLineGenerationRequest()
     DESKTOPSTUB_CONTENT_QUEUE_GENERATE(wp, g_ui.commandLineGenerationRequestReason);
 }
 
+static constexpr ULONG_PTR TILE_INSTANCE_COPY_DATA = 0x41495054;
+static constexpr UINT WM_APP_TILE_INSTANCE_ACTIVATE = WM_APP + 126;
+static std::deque<std::pair<std::wstring, bool>> g_tileInstanceActivations;
+static bool ReadTileInstanceSourceActivation(const std::wstring& arguments, std::wstring& url)
+{
+    int count = 0;
+    auto args = CommandLineToArgvW(arguments.c_str(), &count);
+    std::wstring profile, candidate, issue;
+    { std::lock_guard<std::mutex> lock(g_pathMutex); profile = g_iniPath; }
+    const bool valid = args && count == 4 && IEquals(args[0], L"--ini") && IEquals(args[2], L"--open-url") &&
+        IEquals(aip::MakeAbsolutePath(args[1]), aip::MakeAbsolutePath(profile)) &&
+        ValidateRssFeedUrlSetting(args[3], false, candidate, issue);
+    if (args) LocalFree(args);
+    if (valid) url = std::move(candidate);
+    return valid;
+}
+static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn)
+{
+    aip::content::TileInstanceConfiguration cfg; std::wstring error;
+    if (!ReadCurrentTileInstances(cfg, error)) return false;
+    for (const auto& tile : cfg.tiles) if (tile.id == id) {
+        const auto resource = aip::content::DescribeTileInstanceType(tile.type).notesResource;
+        if (resource >= 0) {
+            const auto& account = tile.configuration.notes.accounts[resource];
+            const bool missing = account.uid.empty() || (account.token.empty() && account.tokenProtected.empty()) ||
+                (account.userId.empty() && account.userIdProtected.empty());
+            if (signIn || (tile.clickAction == L"setup" && missing && tile.error.empty()))
+                return OpenEmbeddedNotesSignInForTile(owner, resource, tile.id);
+        }
+        if (const auto* action = aip::content::FindTileAction(tile.clickAction)) {
+            int step = IniReadClampedI(aip::content::TileInstanceSection(id).c_str(), L"VolumeStepPercent", 5, 1, 100);
+            QueueMediaTileAction(owner, action->id, step); return true;
+        }
+        if (tile.clickAction == L"source") for (const auto& frame : CurrentSecondarySnapshots())
+            if (frame.secondaryTileId == aip::content::TileInstanceNativeId(tile)) {
+                std::wstring url;
+                if (ReadTileInstanceSourceActivation(frame.activationArguments, url)) {
+                    ShellExecuteW(owner, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL); return true;
+                }
+            }
+        return OpenTileInstanceSetup(owner, id);
+    }
+    return false;
+}
 static void HandleSingleInstanceRequest(WPARAM request)
 {
     const auto action = request & SINGLE_INSTANCE_REQUEST_MASK;
@@ -125,6 +169,7 @@ static void HandleSingleInstanceRequest(WPARAM request)
     if (action >= SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE &&
         action < SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE + aip::content::SecondaryTileCount) {
         const auto& tile = aip::content::SecondaryTiles[action - SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE];
+        if (TileInstanceModeRequested()) { ActivateTileInstance(g_hwnd, tile.id, (request & SINGLE_INSTANCE_FLAG_TILE_SIGN_IN) != 0); return; }
         if ((request & SINGLE_INSTANCE_FLAG_TILE_SIGN_IN) && std::wstring(tile.source) == L"Notes")
             OpenEmbeddedNotesSignIn(g_hwnd, tile.notesResource);
         else {
@@ -434,6 +479,26 @@ static void ExecutePendingRelaunchAfterExit()
 
 LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
 {
+    if (m == WM_COPYDATA) {
+        const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(l);
+        if (!data || data->dwData != TILE_INSTANCE_COPY_DATA || !data->lpData || data->cbData < 4 * sizeof(wchar_t) ||
+            data->cbData > 58 * sizeof(wchar_t) || data->cbData % sizeof(wchar_t)) return FALSE;
+        const auto* raw = static_cast<const wchar_t*>(data->lpData);
+        const auto count = data->cbData / sizeof(wchar_t);
+        if (raw[count - 1] != L'\0' || (raw[0] != L'0' && raw[0] != L'1') || raw[1] != L':' || g_tileInstanceActivations.size() >= 64) return FALSE;
+        const std::wstring id(raw + 2, count - 3);
+        if (!aip::content::ValidTileInstanceId(id) || g_shutdownState.IsRequested()) return FALSE;
+        g_tileInstanceActivations.emplace_back(id, raw[0] == L'1');
+        if (!PostMessageW(h, WM_APP_TILE_INSTANCE_ACTIVATE, 0, 0)) { g_tileInstanceActivations.pop_back(); return FALSE; }
+        return TRUE; // COM/browser work must run after SendMessage unwinds.
+    }
+    if (m == WM_APP_TILE_INSTANCE_ACTIVATE) {
+        if (!g_tileInstanceActivations.empty()) {
+            const auto request = std::move(g_tileInstanceActivations.front()); g_tileInstanceActivations.pop_front();
+            if (!g_shutdownState.IsRequested()) ActivateTileInstance(h, request.first, request.second);
+        }
+        return 0;
+    }
     if (SecondaryTileHandleMessage(h, m, w, l)) return 0;
     if (MediaTileActionHandleMessage(h, m)) return 0;
     if (m == WM_POWERBROADCAST && (w == PBT_APMRESUMEAUTOMATIC || w == PBT_APMRESUMESUSPEND)) {
@@ -585,6 +650,17 @@ static bool SignalExistingInstance(WPARAM request = SINGLE_INSTANCE_REQUEST_SHOW
         retries,
         delayMs,
         10000);
+}
+static bool SignalTileInstanceActivation(const std::wstring& id, bool signIn)
+{
+    if (!aip::content::ValidTileInstanceId(id)) return false;
+    const auto payload = (signIn ? L"1:" : L"0:") + id;
+    COPYDATASTRUCT data{TILE_INSTANCE_COPY_DATA, static_cast<DWORD>((payload.size() + 1) * sizeof(wchar_t)), const_cast<wchar_t*>(payload.c_str())};
+    // The target is this profile's resident window; no path/token is transmitted.
+    const auto target = FindWindowW(WINDOW_CLASS_NAME, g_instanceWindowTitle.empty() ? nullptr : g_instanceWindowTitle.c_str());
+    DWORD_PTR accepted = 0;
+    return target && SendMessageTimeoutW(target, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&data),
+        SMTO_ABORTIFHUNG | SMTO_BLOCK, 3000, &accepted) && accepted == TRUE;
 }
 
 static bool TryGetAlreadyRunningRequest(WPARAM& request)
@@ -1654,6 +1730,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         }
         else if (!g_commandLine.tileSetupKey.empty())
         {
+            if (TileInstanceModeRequested()) {
+                const bool delivered = SignalTileInstanceActivation(g_commandLine.tileSetupKey, g_commandLine.tileSignIn);
+                CloseHandle(g_singleInstanceMutex); g_singleInstanceMutex = nullptr;
+                if (!delivered) ShowCommandLineMessage(L"Could not deliver the tile activation to this profile's resident.", true);
+                return delivered ? 0 : 2;
+            }
             for (std::size_t index = 0; index < aip::content::SecondaryTileCount; ++index)
                 if (g_commandLine.tileSetupKey == aip::content::SecondaryTiles[index].id)
                     singleInstanceRequest = SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE + index;
@@ -1789,6 +1871,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     NormalizeSeparatorStrings();
     auto iniDone = steady_clock::now();
     LoadRuntimeSettingsFromIni(true);
+    std::wstring tileMigrationError;
+    if (!EnsureTileInstanceProfile(tileMigrationError)) {
+        QueueStartupWarning(L"Tile configuration conversion was not applied: " + tileMigrationError);
+    }
 
     // GDI+ is intentionally started lazily only when bitmap work is needed.
     auto gdiDone = iniDone;
@@ -1998,6 +2084,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
                 PostMessageW(g_hwnd, g_singleInstanceMessage, SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE + index, 0);
     }
     if (!g_commandLine.tileSetupKey.empty()) {
+        if (TileInstanceModeRequested()) {
+            g_tileInstanceActivations.emplace_back(g_commandLine.tileSetupKey, g_commandLine.tileSignIn);
+            PostMessageW(g_hwnd, WM_APP_TILE_INSTANCE_ACTIVATE, 0, 0);
+        } else
         for (std::size_t index = 0; index < aip::content::SecondaryTileCount; ++index)
             if (g_commandLine.tileSetupKey == aip::content::SecondaryTiles[index].id)
                 PostMessageW(g_hwnd, g_singleInstanceMessage, SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE + index |

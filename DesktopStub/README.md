@@ -4,19 +4,28 @@ See the [current topology](../docs/DESKTOPSTUB_TOPOLOGY.md) for what is compiled
 into the host, which helper executables are separate, and the status of source
 plugins versus shared source code.
 
-`DesktopStub.exe` generates Windows Start tile content and registers a loose Appx manifest for a desktop tile entry. Wallpaper remains the default. **Tile contents** combines backgrounds and source text; **Sources and accounts** configures the providers; **Tile display** chooses native or bitmap text; **Updates and cycling** controls timing. See the [settings guide](../docs/desktopstub-settings.md) and [content engine guide](../docs/content-engine.md).
+`DesktopStub.exe` generates Windows Start tile content and registers a loose Appx manifest for a desktop tile entry. **Tiles > Add tile...** creates independent tiles by type. Each tile owns its source, appearance, text layout, click action and update interval; five RSS tiles can use five feeds and five schedules in one resident process. **Plugins** contains independent CapsBlink and ASUS indicator utilities. See the [independent tile guide](../docs/tile-instances-2026-10-20.md) for the current schema, setup and command-line examples.
 
 The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale settings, then regenerate assets and re-register the manifest automatically. Most behavior is configurable through the tray menu and generated INI file. The same generation and delivery pipeline now handles composed content.
 
-**Tiles** manages the primary wallpaper and seven optional source tiles from one resident.
+**Tiles** manages an ordered list of independently configured instances from one resident.
+The list has no fixed seven/eight-source or 32-content-slot limit; large lists
+use **Previous tiles...** and **Next tiles...** menu pages. Existing profiles are
+converted with a pre-conversion backup while retaining source pin identities,
+accounts and gallery history. The old global content/source/display/cycling
+menus remain relevant to legacy profiles, rather than the normal tile workflow.
+Shared delivery mode, native template and shutdown-clearing controls are under
+**Application > Windows tile delivery**; source and refresh settings belong to
+each tile.
 Existing pins receive their own static topic logos automatically after an upgrade.
 **Quick Actions** offers direct per-action pinning without an enable switch.
 Source tiles and Quick Actions default to transparent fallback icons and
 name-only branding, hiding the small corner logo while live content is shown.
 Use **Tiles > your source > Appearance** or **Quick Actions > Appearance** to
 choose a solid background, a custom color, or different name/logo branding.
-Each source saves these choices under its `Tile.<source>` INI section; Quick
-Actions share `MediaActions`. The same settings accept `--set`, for example
+Each instance saves these choices under its `Tile.<id>` INI section; existing
+Quick Actions share `MediaActions`, while newly added QuickAction instances
+have their own settings. The same settings accept `--set`, for example
 `--set Tile.smtc.Branding=None`. See the
 [appearance settings](../docs/tile-appearance-2026-10-15.md) for all values.
 Now playing appearance can use current playback status, the player icon, or no
@@ -24,8 +33,9 @@ icon, with optional repeat/shuffle indicators. Game tiles stack the available
 resource/activity fields. For sign-in, open the game-specific embedded window,
 sign in, choose **Find game accounts**, then save the selected UID/server.
 Fresh private browser sessions are the default; remembering a session is optional
-for each game. Clearing local browser data keeps imported Notes credentials and
-does not call HoYoLAB Logout. See [current tile setup](../docs/multiple-tiles-2026-10-14.md)
+for each saved account in instance mode. Clearing local browser data keeps imported Notes credentials and
+does not call HoYoLAB Logout. Each game tile chooses an explicit saved account
+and can retain its own game UID/server. See the [current tile guide](../docs/tile-instances-2026-10-20.md)
 and [sign-in details](../docs/notes-signin-ux-2026-10-15.md).
 
 **Tiles > Photo galleries > Set up gallery...** creates a named set of 1–1,024 photo
@@ -123,6 +133,8 @@ DesktopStub\build\DesktopStub.exe
 
 On first launch the app creates `DesktopStub.ini` next to the executable. The tray menu exposes:
 
+- tile creation and each tile's type-specific source/display/click settings;
+- independent indicator plugins;
 - general settings;
 - notifications and logging;
 - wallpaper fitting and detection methods;
@@ -176,7 +188,7 @@ Supported options:
 - `--help`, `-h`, `/?`: show command-line help.
 - `--version`, `-v`: show the embedded release tag and AppX/Win32 package version.
 - `--ini <path>`: use an alternate INI file; alternate INI instances have separate single-instance scope. DesktopStub also keeps the runtime product/exe base in the mutex/message/window identity, so copied or renamed baseline projects do not accidentally signal each other even if they are pointed at the same explicit INI.
-- `--set Section.Key=Value`: set and save an INI value used by the app. Manifest fields are controlled through `[Settings] Manifest*` keys; changing them by command line regenerates `AppxManifest.xml`.
+- `--set Section.Key=Value`: set and save an INI value used by the app. Instance keys keep their source prefix: `--set "Tile.releases.RssFeed.FeedUrl=https://mods.windhawk.net/releases.atom"` writes `RssFeed.FeedUrl` within `[Tile.releases]`. Manifest fields are controlled through `[Settings] Manifest*` keys; changing them by command line regenerates `AppxManifest.xml`.
 - `--exit` / `--quit`: ask the running instance to exit gracefully.
 - `--once`: generate once and exit.
 - `--render-only`: render local tile assets and exit before package registration, activation, native tile updates, Startup handling or resident signaling. Supply `--wallpaper`, or use an enabled Image/None content entry containing only CustomText. With `--regenerate-manifest` and no image, it only writes the local manifest/configuration. External providers are rejected.
@@ -242,7 +254,7 @@ Generated Windows10 manifests declare the packaged task initially disabled. Exis
 - Supports quoted INI values and inline comments.
 - Keeps detailed logs and exposes registration output from the tray.
 - Records forced-shutdown cleanup state and warns on the next startup.
-- Can compose RSS/Atom headlines over wallpaper or a custom image, alongside custom text, SMTC and Caps Lock status. Separate configured copies can still provide independent Start tiles. See "RSS Feed Content Source" below.
+- Provides independent RSS/Atom, Now Playing, Prayer Times, game, Discord and wallpaper tiles in one resident, with their own settings. Legacy content composition remains documented for older profiles; indicator plugins run independently from tile text.
 
 ## Source Layout
 
@@ -338,34 +350,36 @@ The displayed name comes from `ManifestDisplayName` (`Desktop` by default). Bran
 
 ## RSS Feed Content Source
 
-The old `Settings.ContentSource=RssFeed` preset now maps to ordered headline entries in the content engine, with wallpaper behind them. It no longer selects an exclusive notification-publishing worker. The tray labels this as **Legacy preset: RSS / Atom over wallpaper** and asks before it turns off layered content; numbered entries remain saved. The tray exposes both source choices and all RSS values, as well as the new numbered content configuration. See [content composition, examples and timing](../docs/content-engine.md).
+Use **Tiles > Add tile... > RSS**, then the tile's **Source settings > RSS or Atom feed URL**. Each instance stores its own `RssFeed.FeedUrl` and `RssFeed.UpdateIntervalSeconds`. The new tile schema uses `[Tiles] Instances=...` and `[Tile.<id>] Type=RSS`, without numbered content entries. See the [five-feed example](../docs/tile-instances-2026-10-20.md#five-independent-rss-tiles).
 
-Use `--content-source Wallpaper|RssFeed` and `--rss-feed-url <http(s)://...>` for legacy profiles, or enable `RssFeed` in an entry's TextSources. Known content/RSS settings use one typed validation contract across INI, CLI and tray. Invalid profiles fail explicitly instead of being silently clamped; resident errors are logged and shown as source status. A command can set the URL and source together:
+For an existing instance named `releases`, change the feed through the same typed CLI/INI contract:
 
 ```cmd
-DesktopStub.exe --content-source rss --rss-feed-url https://example.com/feed.xml --rss-update-interval 900
+DesktopStub.exe --configure-only --set "Tile.releases.RssFeed.FeedUrl=https://mods.windhawk.net/releases.atom" --set "Tile.releases.RssFeed.UpdateIntervalSeconds=900"
 ```
 
-| `[RssFeed]` key | Default | Meaning |
+The following provider keys live under the tile section with a `RssFeed.` prefix:
+
+| RSS key | Default | Meaning |
 |---|---|---|
 | `FeedUrl` | empty | Required when RSS is enabled; HTTP or HTTPS. |
 | `UserAgent` | DesktopStub RSS user agent | Header sent with the request. |
 | `UpdateIntervalSeconds` | `900` | Fetch interval, 60–86400 seconds; independent of content cycling. |
-| `MaxItems` | `5` | Maximum parsed entries, 1–20. The legacy preset cycles these through the content host. |
+| `MaxItems` | `5` | Maximum parsed entries, 1–20. |
 | `HttpTimeoutSeconds` | `20` | Total HTTP request budget, 5–120 seconds. |
 | `MaxFeedBytes` | `2097152` | Response limit, 64 KiB–16 MiB. |
 
-RSS is data-only: it uses the same image generation, package registration, delivery mode and Windows compatibility targets as other content. Windows 10 live notifications retain activation of the selected headline's HTTP(S) link. Static registration tiles and older compatibility targets use the normal app activation.
+RSS is data-only: it uses the common rendering and delivery pipeline. `ClickAction=source` opens the featured article when a valid link is available; `setup` opens its own settings. Choose **Text size, wrapping and layout > Layout > Headlines with summaries** for a larger wrapped headline and summaries. Legacy `--content-source`, `--rss-*`, and numbered content composition apply to older profiles; use instance-prefixed settings after conversion.
 
-## Tile Text Overlay
+## Legacy Tile Text Overlay
 
-`[TileText]` controls optional content for generated tiles. It is disabled by default. In Windows 10 Live Tile mode, DesktopStub adds the configured content to either adaptive XML or native Windows 8.1 preset bindings and leaves its presentation to Windows. Registration/static-image mode and Windows 8/8.1 compatibility Live Tile targets bake the content into generated PNG assets using fixed Windows 8/8.1 template layouts:
+The following global overlay settings describe older profiles. Independent tiles use their own **Text size, wrapping and layout** menu and `[Tile.<id>]` fields instead. In Windows 10 Live Tile mode, DesktopStub sends adaptive XML or native Windows 8.1 preset bindings for Windows to render. Registration/static-image mode and Windows 8/8.1 compatibility targets bake text into generated PNG assets using the corresponding template layouts:
 
 - Medium tiles use a `TileSquareText02`-style heading/body layout, or a `TileSquareBlock`-style layout (badge number over a single caption line) when badge text is present.
 - Wide tiles use a `TileWideImageAndText02`-style image with a bottom text band, or `TileWideBlockAndText02` when badge text is present.
 - Large tiles use an `ImageAndTextOverlay02`-style darkened image with top heading and bottom body text.
 
-Small tiles and logo assets do not support text, matching the native tile templates. Typography, colors, alignment, margins, and line limits are intentionally not configurable because Windows does not apply those settings to native Live Tiles -- and for the same reason, there is no authoritative pixel-level specification to match exactly; Microsoft's tile template catalog documents line-wrap counts and image dimensions, not exact text placement, which was always internal to the OS's tile renderer. What DesktopStub's baked layouts are checked against is the catalog's *documented structure* (line counts, which fields exist, wrapping behavior), not pixel coordinates. Presentation keys written by older DesktopStub versions are ignored.
+Small tiles and logo assets do not support text, matching the native tile templates. Adaptive text supports named Windows sizes/weights, wrapping, alignment and line limits through the presentation controls below. Arbitrary font-family/pixel-size selection is not exposed. Legacy preset templates retain their documented field structure and native geometry; native Start placement still requires Windows visual acceptance testing.
 
 **Wide badge mapping**: `TileWideBlockAndText02` has three text slots: a wrapped left text field, the numeric block value, and a short caption beneath it. DesktopStub maps `Text`, `BadgeText`, and `SecondaryText` to those slots respectively, both in native Windows 10 preset XML and in the baked static overlay. No fourth field is needed for this template. [Microsoft's tile-template reference](https://learn.microsoft.com/en-us/uwp/api/windows.ui.notifications.tiletemplatetype?view=winrt-26100) documents the same field structure.
 
@@ -401,15 +415,14 @@ Prebuilt binaries are published through the repository's Windows build workflow 
 
 ## Tile text size, wrapping and layout
 
-Use **Tile display > Text size, wrapping and layout** for global controls, or a
-source tile's **Text size, wrapping and layout** menu for an override. Choosing a style activates
-Custom presentation. Default preserves the existing appearance; source tiles
-can Inherit global choices. RssHeadlines is a separate readable preset with one
+Use **Tiles > your tile > Text size, wrapping and layout**. Choosing a style activates
+Custom presentation. Default uses that type's ordinary appearance. Each instance
+owns its values. Headlines with summaries (`RssHeadlines`) is a readable RSS layout with one
 rich item on Medium/Wide and three on Large. Named Windows styles control size
 and weight; larger text leaves less room for content. Wrapping, line limits,
 alignment, stacking and blank-line gaps are also configurable.
 
-The same keys work in `[TileText]` and `[Tile.rss]`, `[Tile.prayer]`, etc. For
+The keys live in `[Tile.rss]`, `[Tile.prayer]`, or another configured instance section. For
 example, `--configure-only --set Tile.rss.TextPreset=RssHeadlines` or
 `--set Tile.prayer.TextPreset=Custom --set Tile.prayer.TextStyle=subtitle`.
 Additional keys are TextSecondaryStyle, TextBadgeStyle, TextWrap, TextMaxLines,
@@ -417,15 +430,16 @@ TextSecondaryMaxLines, TextBadgeMaxLines, TextAlign, TextStacking and TextGapLin
 
 ## Prayer Times
 
-Prayer Times is an optional built-in source and separate tile, sharing the same
-resident process. Use **Tiles > Prayer times > Source and sign-in settings** or
-**Sources and accounts > Prayer times settings** to enter a city/country and
+Prayer Times is an optional tile type sharing the same resident process. Use
+**Tiles > your prayer tile > Source settings** to enter a city/country and
 choose a named calculation method, Asr convention and optional minute
 adjustments. Location starts blank; there is no automatic location lookup.
 Select the convention and adjustments used by your local prayer timetable.
 
-Medium/Wide tiles show the next prayer and a minute countdown. Large tiles
-also show all five obligatory prayers; sunrise is an optional header item.
+Tiles show the next prayer time in large text, followed by its name and location.
+Wide/Large tiles have a separate right-hand minutes/countdown column; compact
+tiles put the countdown below the main text. Large tiles can also show all five
+obligatory prayers with `PrayerTimes.ShowTimetable=1`; sunrise information is optional.
 Both Windows text and image-overlay delivery are supported. The source uses
 [AlAdhan's calculated schedules](https://aladhan.com/prayer-times-api), rather
 than a mosque's Iqamah timetable. Network retrieval runs in the background and
@@ -433,18 +447,18 @@ cached today/tomorrow schedules supply ordinary countdown updates. The selected
 city/country and calculation options are sent to AlAdhan when fetching; no
 account or API key is required.
 
-The same settings are available under `[PrayerTimes]` and through commands such
-as `--configure-only --set PrayerTimes.City="Your city" --set PrayerTimes.Country="Your country"`.
-`Method=Auto`, `School=0`, `ShowSunrise=1` and `TwentyFourHour=1` are the defaults.
+Settings use a `PrayerTimes.` prefix in the instance section. For a tile named
+`prayers`, use `--configure-only --set "Tile.prayers.PrayerTimes.City=Your city" --set "Tile.prayers.PrayerTimes.Country=Your country"`.
+`Method=Auto`, `School=0`, `ShowSunrise=1`, `ShowTimetable=1` and `TwentyFourHour=1` are the defaults.
+Set that tile's `PrayerTimes.TwentyFourHour=0` for AM/PM formatting.
 The private `<profile>.prayer-cache` sidecar is bound to the requested location
 and calculation settings. A valid cached schedule remains visible during a
 network failure with a stale/error indication. User data and caches should
-stay private; the cache is ignored by Git. Prayer setup allocates an unused
-content slot, preserving existing contents, or asks which slot to extend when
-all 32 are occupied.
+stay private; the cache is ignored by Git. Additional PrayerTimes instances have
+their own locations, calculation options and update deadlines.
 
 ## Additional Behavior Notes
 
-- **Clear Live Tile on shutdown**: enabled by default. Packaged instances clear the live tile during graceful shutdown. Win8/8.1 broker mode can request a package-side clear through the broker.
+- **Clear Live Tile on shutdown**: enabled by default. Graceful shutdown clears the primary notification and owned secondary queues, including Gallery content, while preserving pins, images and ownership history. Win8/8.1 broker mode can request a package-side clear through the broker. Forced process termination cannot guarantee cleanup.
 - The wallpaper poller updates its internal baseline after a failed poll-triggered generation attempt. This prevents repeated regeneration of the same wallpaper when the tile/app registration stage fails after assets were generated successfully.
 - DesktopStub intentionally keeps the default log beside the executable even when `--ini` points at another directory. This preserves the pre-shared-baseline portable behavior; an explicit `[Settings] LogPath` still overrides it.

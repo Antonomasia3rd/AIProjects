@@ -476,6 +476,10 @@ int main(int argc, char** argv)
         const std::string desktopStub = ReadSource("DesktopStub.cpp");
         const std::string buildScript = ReadSource("BuildDesktopStub.cmd");
         const std::string readme = ReadSource("README.md");
+        const std::string tileInstanceGuide = ReadSource("..\\docs\\tile-instances-2026-10-20.md");
+        const std::string tileInstances = ReadSource("..\\dependencies\\tile_instances.h");
+        const std::string tileInstanceTray = ReadSource("..\\dependencies\\DesktopStub\\ga_tile_instance_tray.inc");
+        const std::string tileInstanceTrayTests = ReadSource("tools\\TileInstanceTrayHostTests.inc");
         const std::string tileTextSpec = ReadSource("..\\dependencies\\DesktopStub\\tile_text_layout_spec.inc");
         const std::string image = ReadSource("..\\dependencies\\DesktopStub\\ga_image.inc") + "\n" + ReadSource("..\\dependencies\\DesktopStub\\tile_text_render.inc");
         const std::string desktopIcon = ReadSource("..\\dependencies\\DesktopStub\\ga_desktop_icon_png.inc");
@@ -677,7 +681,7 @@ int main(int argc, char** argv)
         checks.push_back({"Tray desired state survives a transient shell add failure", "app source", app, R"rx(g_tray = desiredTray;.*if \(!EnsureTrayIcon\(&err\)\).*LogWin32Failure.*return;)rx", "TaskbarCreated must retry a desired tray icon after a transient Explorer failure", false});
         checks.push_back({"Relative log paths resolve beside the executable", "manifest source", manifest, R"rx(EffectiveConfiguredLogPath.*PathIsRelativeW\(configured\.c_str\(\)\).*aip::PathJoin\(GetExeDir\(\), configured\))rx", "an explicit relative LogPath must not depend on the caller's working directory", false});
         checks.push_back({"Opening the tray reloads strings and refreshes its tooltip", "tray menu", tray, R"rx(Menu\(HWND h\).*LoadUiStrings\(\).*UpdateTrayIconTooltip)rx", "external INI edits to Strings.TrayTip must take effect without restarting", false});
-        checks.push_back({"TileText presentation customization stays removed", "TileText sources", defaults + "\n" + commandLine + "\n" + tray + "\n" + image + "\n" + readme, R"rx(--tile-text-font|--tile-text-align|ID_TILE_TEXT_FONT|PromptTileTextStringSetting|CreateTileTextFontFamily|L"TileText",\s*L"Font"|ApplyToSmallTile|ApplyToLogos)rx", "native Live Tiles do not honor arbitrary presentation settings, and baked simulation must remain tied to Windows template layouts", true});
+        checks.push_back({"Arbitrary TileText fonts and unsupported small/logo text stay excluded", "TileText sources", defaults + "\n" + commandLine + "\n" + tray + "\n" + image + "\n" + readme, R"rx(--tile-text-font|--tile-text-align|ID_TILE_TEXT_FONT|PromptTileTextStringSetting|CreateTileTextFontFamily|L"TileText",\s*L"Font"|ApplyToSmallTile|ApplyToLogos)rx", "named adaptive text styles use the shared presentation model; arbitrary font families and unsupported small/logo text must remain excluded", true});
         checks.push_back({"Wide badge text mapping matches the documented three-slot template", "TileText docs/layout/XML", readme + "\n" + tileTextSpec + "\n" + liveTileTemplates, R"rx(TileWideBlockAndText02.*three text slots.*Text.*BadgeText.*SecondaryText.*TILE_TEXT_REGION\(Wide, 7, Body, 1, 210, 103.*AppendPresetLiveTileText\(xml, 1, primaryText\).*AppendPresetLiveTileText\(xml, 2, badgeText\).*AppendPresetLiveTileText\(xml, 3, secondaryText\))rx", "the static overlay and native preset XML must map primary, badge, and secondary to the same documented left/block/caption slots; the README must not revive a nonexistent fourth-field limitation", false});
         checks.push_back({"Live Tile mode writes dedicated notification assets", "..\\dependencies\\DesktopStub\\ga_generation.inc", generation, R"rx(g_liveTileAssets.*Assets\\\\LiveMediumTile\.png.*Assets\\\\LiveWideTile\.png.*Assets\\\\LiveLargeTile\.png.*NewLiveTileAssetToken.*VersionedLiveTileAssetPath.*if \(liveTileUpdateMode\).*VersionedLiveTileAssetPath\(t,\s*liveTileToken\).*liveTileUpdateAssets\.push_back)rx", "Live Tile mode must write dedicated versioned Live*.png notification assets instead of relying on manifest logo assets or overwriting the displayed tile image in place", false});
         checks.push_back({"Manifest target can generate Windows 10, 8.1, and 8 manifests", "manifest/command-line sources", manifest + "\n" + commandLine + "\n" + tray, R"rx(appx/2010/manifest.*xmlns:m2=.*2013/manifest.*AppxManifestTarget.*--manifest-target.*ID_MANIFEST_TARGET_WINDOWS10.*ID_MANIFEST_TARGET_WINDOWS81.*ID_MANIFEST_TARGET_WINDOWS8)rx", "manifest target selection must cover Windows 10, Windows 8.1, and Windows 8 from command line and tray", false});
@@ -1031,17 +1035,41 @@ int main(int argc, char** argv)
             },
             "post-start external INI edits must fail explicitly instead of being silently clamped on the next RSS poll");
         AssertContainsAll(
-            "DesktopStub RSS parity is documented",
-            "DesktopStub README",
-            readme,
+            "Independent DesktopStub RSS configuration parity is documented",
+            "DesktopStub README and instance guide",
+            readme + "\n" + tileInstanceGuide,
             {
-                "--content-source Wallpaper|RssFeed",
-                "--rss-feed-url <http(s)://...>",
-                "The tray exposes both source choices and all RSS values",
-                "one typed validation contract",
-                "fail explicitly instead of being silently clamped"
+                "Tiles > Add tile...",
+                "Source settings",
+                "Tile.releases.RssFeed.FeedUrl",
+                "RssFeed.UpdateIntervalSeconds",
+                "typed CLI/INI contract",
+                "same validation",
+                "complete new document",
+                "before-tile-instances.bak"
             },
-            "maintainer documentation must describe defaults, all three configuration surfaces, validation, and restart semantics");
+            "current documentation must describe independent RSS defaults, tray/INI/CLI parity, atomic validation and backed-up conversion");
+        AssertContainsAll(
+            "Independent tile configuration preserves explicit identities and source validation",
+            "tile instance model",
+            tileInstances,
+            {"ReadTileInstanceConfiguration", "ParseTileInstanceIds", "TileInstanceRead", "ReadConfiguration(",
+                "PlanLegacyTileInstanceMigration", "StageLegacyTileInstances", "tile.settings", "AipSource_"},
+            "instance composition must reuse provider validation, capture immutable source settings and preserve stable pin identities during staged conversion");
+        AssertContainsAll(
+            "Independent tile menus retain atomic validation and bounded navigation",
+            "tile instance tray",
+            tileInstanceTray,
+            {"MutateDesktopStubIniWithWait", "ValidateTileInstanceHostConfiguration", "TileInstanceMenuPageSize", "TileInstanceMenuVerb::Page",
+                "TileInstanceMenuVerb::Status", "TileInstanceMenuVerb::Overview", "ReadTileInstanceMenuConfiguration"},
+            "per-tile edits must validate whole staged documents, preserve repair routes and page menu commands instead of imposing a fixed tile-count limit");
+        AssertContainsAll(
+            "Independent tile behavior regressions stay wired",
+            "private host instance fixture",
+            contentRuntimeTests + "\n" + tileInstanceTrayTests,
+            {"TileInstanceTrayHostTests.inc", "TestTileInstanceTrayHost();", "layoutCommand", "RssHeadlines", "cfg.tiles.size() == 40",
+                "CaptureGalleryConfigurationView", "CurrentSecondaryAppearanceFingerprint", "invalid unused legacy gate"},
+            "private behavioral tests must cover independent RSS settings, actual tray dispatch, repair, pagination and gallery demand/appearance in instance mode");
         AssertNotContainsAny(
             "DesktopStub does not use unbounded startup INI mutation locks",
             "DesktopStub source",

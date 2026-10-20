@@ -159,6 +159,7 @@ struct Snapshot {
     std::vector<Text> rssHeadlines;
     std::vector<Text> detailRows;
     bool prayerSource = false;
+    aip::prayer::ClockText prayerClock;
     std::wstring detailTopic;
     bool smtcSource = false, smtcShowRepeatShuffle = false, wrapSourceText = false;
     MediaPlaybackState smtcState = MediaPlaybackState::Unknown;

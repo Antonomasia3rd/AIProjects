@@ -19,14 +19,14 @@ struct Configuration {
     int method = -1, school = 0, latitudeAdjustmentMethod = 3;
     std::array<int, 5> adjustmentsMinutes{};
     int refreshSeconds = 43200, timeoutSeconds = 10, maximumBytes = 262144;
-    bool showSunrise = true, twentyFourHour = true;
+    bool showSunrise = true, twentyFourHour = true, showTimetable = true;
 };
 inline constexpr const wchar_t* SettingKeys[] = {L"City", L"Country", L"State", L"TimeZone", L"Method", L"School",
     L"LatitudeAdjustmentMethod", L"FajrAdjustmentMinutes", L"DhuhrAdjustmentMinutes", L"AsrAdjustmentMinutes",
     L"MaghribAdjustmentMinutes", L"IshaAdjustmentMinutes", L"RefreshSeconds", L"TimeoutSeconds", L"MaximumBytes",
-    L"ShowSunrise", L"TwentyFourHour"};
+    L"ShowSunrise", L"TwentyFourHour", L"ShowTimetable"};
 inline constexpr const wchar_t* SettingDefaults[] = {L"",L"",L"",L"",L"Auto",L"0",L"3",L"0",L"0",L"0",L"0",L"0",
-    L"43200",L"10",L"262144",L"1",L"1"};
+    L"43200",L"10",L"262144",L"1",L"1",L"1"};
 inline std::wstring Trim(std::wstring value) {
     const auto first = value.find_first_not_of(L" \t\r\n");
     return first == std::wstring::npos ? L"" : value.substr(first, value.find_last_not_of(L" \t\r\n") - first + 1);
@@ -104,6 +104,7 @@ template<class Reader> inline bool ReadConfiguration(Reader get, Configuration& 
         case 12: result.refreshSeconds = number; break; case 13: result.timeoutSeconds = number; break;
         case 14: result.maximumBytes = number; break; case 15: result.showSunrise = value == L"1"; break;
         case 16: result.twentyFourHour = value == L"1"; break;
+        case 17: result.showTimetable = value == L"1"; break;
         default: result.adjustmentsMinutes[i - 7] = number; break;
         }
     }
@@ -124,6 +125,7 @@ inline bool Validate(Configuration& cfg, std::wstring& error, bool requireLocati
         if (std::wstring(key) == L"MaximumBytes") return std::to_wstring(input.maximumBytes);
         if (std::wstring(key) == L"ShowSunrise") return input.showSunrise ? L"1" : L"0";
         if (std::wstring(key) == L"TwentyFourHour") return input.twentyFourHour ? L"1" : L"0";
+        if (std::wstring(key) == L"ShowTimetable") return input.showTimetable ? L"1" : L"0";
         for (size_t i = 0; i < 5; ++i) if (std::wstring(key) == SettingKeys[i + 7]) return std::to_wstring(input.adjustmentsMinutes[i]);
         return L"";
     }, cfg, error);
@@ -208,8 +210,16 @@ struct Day {
 struct Schedule { std::vector<Day> days; };
 struct Data { std::wstring configKey; Schedule schedule; bool stale = false; std::wstring error; UTC nextRefreshUtc = 0, lastSuccessUtc = 0; };
 struct DetailRow { PrayerId id = PrayerId::Fajr; std::wstring label, value; bool next = false; };
+// Semantic display fields travel with the immutable snapshot. Renderers never
+// recover a prayer or countdown by parsing a translated summary sentence.
+struct ClockText {
+    std::wstring time, prayer, location, minutes, countdown, details;
+    bool showTimetable = true;
+    bool Available() const { return !time.empty() && !prayer.empty(); }
+};
 struct View {
     std::wstring title, secondary, badge, timeZone, hijriDate, error;
+    ClockText clock;
     std::vector<DetailRow> detailRows; bool available = false, stale = false; UTC nextUTCDeadline = 0;
 };
 inline bool ValidDay(const Day& day) {
@@ -261,6 +271,11 @@ inline View Compose(const Configuration& input, const Data& data, UTC now) {
         view.detailRows.push_back({prayer.id,PrayerName(prayer.id),TimeText(Adjusted(prayer,cfg),prayer.offsetMinutes,cfg.twentyFourHour),next == &prayer});
     if (next) {
         const UTC minutes = (nextUtc - now + 59) / 60;
+        view.clock.time = TimeText(nextUtc,next->offsetMinutes,cfg.twentyFourHour);
+        view.clock.prayer = PrayerName(next->id); view.clock.location = cfg.city;
+        view.clock.minutes = std::to_wstring(minutes);
+        view.clock.countdown = L"in " + view.clock.minutes + (minutes == 1 ? L" minute" : L" minutes");
+        view.clock.showTimetable = cfg.showTimetable;
         view.secondary = std::wstring(L"Next: ") + PrayerName(next->id) + L" " + TimeText(nextUtc,next->offsetMinutes,cfg.twentyFourHour) + L" - " + std::to_wstring(minutes) + L" min";
         view.nextUTCDeadline = minutes ? nextUtc - (minutes - 1) * 60 : now + 1;
     } else view.secondary = L"Next prayer schedule unavailable";
@@ -268,6 +283,9 @@ inline View Compose(const Configuration& input, const Data& data, UTC now) {
     if (cfg.showSunrise && day->hasSunrise) view.badge += L" | Sunrise " + TimeText(day->sunrise.utcSeconds,day->sunrise.offsetMinutes,cfg.twentyFourHour);
     if (view.stale) view.secondary += L" | Stale";
     if (!view.error.empty()) view.secondary += L" | " + view.error;
+    if (cfg.showSunrise && day->hasSunrise) view.clock.details = L"Sunrise " + TimeText(day->sunrise.utcSeconds,day->sunrise.offsetMinutes,cfg.twentyFourHour);
+    if (view.stale) view.clock.details += (view.clock.details.empty() ? L"" : L" | ") + std::wstring(L"Stale");
+    if (!view.error.empty()) view.clock.details += (view.clock.details.empty() ? L"" : L" | ") + view.error;
     const UTC midnight = (CivilDay(day->date) + 1) * 86400 - day->offsetMinutes * 60;
     if (midnight > now) view.nextUTCDeadline = (std::min)(view.nextUTCDeadline,midnight);
     if (data.nextRefreshUtc > now) view.nextUTCDeadline = (std::min)(view.nextUTCDeadline,data.nextRefreshUtc);

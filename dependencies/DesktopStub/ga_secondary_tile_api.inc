@@ -3,6 +3,7 @@
 // all WinRT state/results and owning windows are released on the UI thread.
 #include "../secondary_tiles.h"
 #include "../secondary_tile_rename.h"
+#include "../tile_instance_metadata.h"
 #include "../tile_actions.h"
 #include "../tile_visual_assets.inc"
 #include "../winrt_activation.h"
@@ -45,24 +46,25 @@ struct GalleryPinHistory {
 static GalleryPinHistory g_galleryPinHistory;
 static bool StageExplicitSourceTileNameIntents(std::wstring& text, const std::vector<aip::IniSetting>& settings, std::wstring& error)
 {
-    aip::content::SourceTileNames edits;
-    for (const auto& setting : settings) {
-        const auto section = aip::content::Lower(aip::content::Trim(setting.section));
-        if (aip::content::Lower(aip::content::Trim(setting.key)) != L"name" || section.compare(0, 5, L"tile.") != 0) continue;
-        if (const auto* descriptor = aip::content::FindSecondaryTileDescriptor(section.substr(5))) edits[descriptor->id] = L"";
-    }
-    if (edits.empty()) return true;
     const auto document = aip::ParseIniDocument(text);
     const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
     };
+    aip::content::SourceTileNames configured;
+    if (!aip::content::ReadSourceTileNames(read, configured, error)) return false;
+    aip::content::SourceTileNames edits;
+    for (const auto& setting : settings) {
+        const auto section = aip::content::Lower(aip::content::Trim(setting.section));
+        if (aip::content::Lower(aip::content::Trim(setting.key)) != L"name" || section.compare(0, 5, L"tile.") != 0) continue;
+        const auto found = configured.find(L"AipSource_" + section.substr(5));
+        if (found != configured.end()) edits[section.substr(5)] = found->second;
+    }
+    if (edits.empty()) return true;
     aip::content::SourceTileNameIntents existing; std::uint64_t sequence = 0;
     if (!aip::content::ReadSourceTileNameIntents(read, existing, sequence, error)) return false;
     auto candidate = text;
     for (auto& edit : edits) {
-        const auto* descriptor = aip::content::FindSecondaryTileDescriptor(edit.first);
-        edit.second = read(aip::content::SecondaryTileSection(edit.first).c_str(), L"Name", descriptor->name);
-        if (!aip::content::NormalizeSecondaryTileSetting(aip::content::SecondaryTileSection(edit.first), L"Name", edit.second, error) ||
+        if (!aip::content::NormalizeTileInstanceSetting(aip::content::TileInstanceSection(edit.first), L"Name", edit.second, error) ||
             sequence == (std::numeric_limits<std::uint64_t>::max)()) {
             if (error.empty()) error = L"Source tile name intent sequence cannot advance.";
             return false;
@@ -88,12 +90,14 @@ static bool PersistSourceTileNameRequests(const aip::content::SourceTileNames& n
         };
         aip::content::SourceTileNameIntents existing; std::uint64_t sequence = 0;
         if (!aip::content::ReadSourceTileNameIntents(read, existing, sequence, error)) return false;
+        aip::content::SourceTileNames configured;
+        if (!aip::content::ReadSourceTileNames(read, configured, error)) return false;
         std::vector<aip::IniSetting> edits;
         for (const auto& name : names) {
-            const auto* descriptor = name.first.compare(0, 10, L"AipSource_") == 0 ? aip::content::FindSecondaryTileDescriptor(name.first.substr(10)) : nullptr;
-            if (!descriptor || read(aip::content::SecondaryTileSection(descriptor->id).c_str(), L"Name", descriptor->name) != name.second) continue;
+            const auto configuredName = configured.find(name.first);
+            if (configuredName == configured.end() || configuredName->second != name.second) continue;
             const auto found = existing.find(name.first);
-            if (found == existing.end() || found->second.name != name.second) edits.push_back({aip::content::SecondaryTileSection(descriptor->id), L"Name", name.second});
+            if (found == existing.end() || found->second.name != name.second) edits.push_back({aip::content::TileInstanceSection(name.first.substr(10)), L"Name", name.second});
             else accepted[name.first] = found->second;
         }
         if (!StageExplicitSourceTileNameIntents(text, edits, error)) return false;
@@ -108,7 +112,7 @@ static bool PersistSourceTileNameRequests(const aip::content::SourceTileNames& n
 }
 static bool ClearSourceTileNameIntent(const std::wstring& id, std::uint64_t revision, const std::wstring& name)
 {
-    if (id.compare(0, 10, L"AipSource_") != 0 || !aip::content::FindSecondaryTileDescriptor(id.substr(10))) return false;
+    if (id.compare(0, 10, L"AipSource_") != 0 || !aip::content::ValidTileInstanceId(id.substr(10))) return false;
     return MutateDesktopStubIniWithWait([&](std::wstring& text) {
         const auto document = aip::ParseIniDocument(text);
         std::wstring wire;
@@ -189,7 +193,14 @@ static bool CurrentSecondaryAppearanceFingerprint(std::wstring& result, aip::con
     };
     std::wstring error;
     std::wstring candidate;
-    const bool appearanceValid = aip::content::ReadSecondaryAppearanceFingerprint(read, candidate, error);
+    aip::content::TileInstanceConfiguration instances;
+    bool appearanceValid = aip::content::ReadTileInstanceConfiguration(read, instances, error);
+    if (appearanceValid && instances.configured) {
+        candidate = L"Instances;";
+        for (const auto& tile : instances.tiles) if (!tile.primary)
+            candidate += aip::content::TileInstanceNativeId(tile) + L":" + aip::content::TileInstanceArtworkTopic(tile) + L":" +
+                tile.appearance.background + L":" + tile.appearance.branding + L":" + tile.appearance.backgroundColor + L";";
+    } else if (appearanceValid) appearanceValid = aip::content::ReadSecondaryAppearanceFingerprint(read, candidate, error);
     aip::content::SourceTileNames capturedNames;
     captured->namesValid = aip::content::ReadSourceTileNames(read, capturedNames, error);
     aip::content::SourceTileNameIntents capturedIntents; std::uint64_t sequence = 0;
@@ -200,7 +211,8 @@ static bool CurrentSecondaryAppearanceFingerprint(std::wstring& result, aip::con
         if (configured == capturedNames.end() || configured->second != item->second.name) item = capturedIntents.erase(item); else ++item;
     }
     aip::gallery::Configuration gallery;
-    captured->valid = aip::gallery::ReadConfiguration(read, gallery, error) && appearanceValid;
+    const bool configuredGallery = !aip::content::Trim(read(L"Gallery",L"GroupId",L"")).empty();
+    captured->valid = appearanceValid && ((instances.configured && !configuredGallery) || aip::gallery::ReadConfiguration(read, gallery, error));
     if (captured->valid && !gallery.groupId.empty()) {
         // Identity selects the existing native destinations. Account fields,
         // folders, photo order/cadence, and ordinary text never trigger COM.
@@ -238,9 +250,7 @@ static void ObserveExplicitSourceTileNameSettings(const std::vector<aip::IniSett
     for (const auto& setting : settings) {
         const auto section = aip::content::Lower(aip::content::Trim(setting.section));
         if (aip::content::Lower(aip::content::Trim(setting.key)) != L"name" || section.compare(0, 5, L"tile.") != 0) continue;
-        const auto* descriptor = aip::content::FindSecondaryTileDescriptor(section.substr(5));
-        if (!descriptor) continue;
-        const auto found = all.find(L"AipSource_" + std::wstring(descriptor->id));
+        const auto found = all.find(L"AipSource_" + section.substr(5));
         if (found != all.end()) intents.emplace(*found);
     }
     if (!intents.empty()) {
@@ -280,6 +290,15 @@ static void PollSecondaryTileAppearance()
 #endif
 }
 
+static bool FindConfiguredSecondaryTileInstance(const std::wstring& supplied, aip::content::TileInstance& output)
+{
+    const auto key = supplied.compare(0, 10, L"AipSource_") == 0 ? supplied.substr(10) : supplied;
+    aip::content::TileInstanceConfiguration instances; std::wstring error;
+    if (!aip::content::ValidTileInstanceId(key) || !ReadCurrentTileInstances(instances, error) || !instances.configured) return false;
+    const auto found = std::find_if(instances.tiles.begin(), instances.tiles.end(), [&](const auto& tile) { return !tile.primary && tile.id == key; });
+    if (found == instances.tiles.end()) return false;
+    output = *found; return true;
+}
 [[maybe_unused]] static std::wstring CanonicalSecondaryTileRuntimeId(std::wstring id)
 {
     if (id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0) {
@@ -298,11 +317,18 @@ static void PollSecondaryTileAppearance()
         return runtime;
     }
     if (id.compare(0, prefix.size(), prefix) == 0) id.erase(0, prefix.size());
+    if (TileInstanceModeRequested()) {
+        aip::content::TileInstance tile;
+        return FindConfiguredSecondaryTileInstance(id, tile) ? aip::content::TileInstanceNativeId(tile) : std::wstring{};
+    }
     const auto* descriptor = aip::content::FindSecondaryTileDescriptor(id);
     return descriptor ? prefix + descriptor->id : std::wstring{};
 }
 static bool IsKnownSecondaryMetadataId(const std::wstring& id)
 {
+    if (TileInstanceModeRequested() && id.compare(0, 10, L"AipSource_") == 0) {
+        aip::content::TileInstance tile; return FindConfiguredSecondaryTileInstance(id, tile);
+    }
     if (aip::tile_visual::IsKnownSecondaryArtworkId(id)) return true;
     if (id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) != 0) return false;
     return !CanonicalSecondaryTileRuntimeId(id).empty();
@@ -434,6 +460,11 @@ static void ApplyLogos(NativeTile& tile, const aip::tile_visual::Assets& logos)
 }
 static aip::content::TileAppearance ConfiguredAppearance(const std::wstring& id)
 {
+    if (TileInstanceModeRequested() && id.compare(0, 10, L"AipSource_") == 0) {
+        aip::content::TileInstance tile;
+        if (!FindConfiguredSecondaryTileInstance(id, tile)) throw winrt::hresult_error(E_INVALIDARG, L"Unknown tile instance appearance.");
+        return tile.appearance;
+    }
     if (id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0) {
         aip::gallery::Configuration gallery; aip::gallery::TileConfiguration tile;
         if (!FindConfiguredGalleryTile(id, gallery, tile)) throw winrt::hresult_error(E_INVALIDARG, L"Unknown gallery tile appearance.");
@@ -465,9 +496,27 @@ static void ApplyAppearance(NativeTile& tile, const aip::content::PublishedTileA
 static bool PrepareAppearanceAssets(const std::wstring& id, aip::tile_visual::Assets& logos,
     aip::content::PublishedTileAppearance& published, std::wstring& error)
 {
+    aip::content::TileInstance instance;
+    if (FindConfiguredSecondaryTileInstance(id, instance) && instance.type == aip::content::TileInstanceType::QuickAction) {
+        // Type changes can leave the previous RSS/game notification covering a
+        // static action logo. Clear that owned queue when applying its new
+        // metadata, rather than publishing a blank Live Tile over the icon.
+        const auto tiles = aip::AcquireUncachedActivationFactory<NativeTile, winrt::Windows::UI::StartScreen::ISecondaryTileStatics>();
+        if (tiles.Exists(id)) {
+            const auto updates = aip::AcquireUncachedActivationFactory<winrt::Windows::UI::Notifications::TileUpdateManager,
+                winrt::Windows::UI::Notifications::ITileUpdateManagerStatics>();
+            updates.CreateTileUpdaterForSecondaryTile(id).Clear();
+            ForgetSecondaryTileDelivery(id);
+        }
+    }
     const auto configured = ConfiguredAppearance(id);
     const bool gallery = id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0;
-    const auto topicKey = gallery ? std::wstring(L"gallery") : id;
+    auto topicKey = gallery ? std::wstring(L"gallery") : id;
+    if (TileInstanceModeRequested() && id.compare(0, 10, L"AipSource_") == 0) {
+        aip::content::TileInstance tile;
+        if (!FindConfiguredSecondaryTileInstance(id, tile)) { error = L"Unknown tile instance artwork."; return false; }
+        topicKey = aip::content::TileInstanceArtworkTopic(tile);
+    }
     const auto* topic = aip::tile_visual::FindTopic(topicKey);
     if (!topic) { error = L"Unknown tile artwork topic."; return false; }
     published = aip::content::PublishTileAppearance(configured, topic->rgb);
@@ -677,16 +726,16 @@ static void StartNextSourceTileRename()
         const auto request = ++nextId;
         try {
             state.id = std::wstring(state.tile.TileId());
-            const auto* descriptor = state.id.compare(0, 10, L"AipSource_") == 0 ?
-                aip::content::FindSecondaryTileDescriptor(state.id.substr(10)) : nullptr;
-            if (!descriptor || IniReadS(aip::content::SecondaryTileSection(descriptor->id).c_str(), L"Name", descriptor->name) != state.name) continue;
+            aip::content::SourceTileNames configured; std::wstring configurationError;
+            if (!aip::content::ReadSourceTileNames(IniReadS, configured, configurationError) || configured.find(state.id) == configured.end() ||
+                configured.at(state.id) != state.name) continue;
             aip::content::SourceTileNameIntents current;
             if (!ReadCurrentSourceTileNameIntents(current)) continue;
             const auto expected = current.find(state.id);
             if (expected == current.end() || expected->second.revision != state.nameRevision || expected->second.name != state.name) continue;
             // Mutate only the existing FindAllAsync object's display name.
             // Never replace its ID, arguments, logos, notification or position.
-            if (!aip::content::ApplyExplicitSourceTileName(state.tile, state.id, state.name)) {
+            if (!aip::content::ApplyExplicitSourceTileName(state.tile, state.id, state.name, &configured)) {
                 ClearSourceTileNameIntent(state.id, state.nameRevision, state.name); continue;
             }
             if (shuttingDown) return;

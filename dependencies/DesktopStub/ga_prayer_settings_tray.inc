@@ -59,11 +59,13 @@ static void AppendPrayerSettingsMenu(HMENU menu)
     for (UINT i = 0; i < 5; ++i) aip::AppendTrayMenuItem(adjustments, ID_PRAYER_SETTINGS + 20 + i,
         PrayerUiString((L"PrayerLabel" + std::wstring(prayers[i])).c_str(), prayers[i]) + L": " + IniReadS(L"PrayerTimes", g_prayerAdjustmentKeys[i], L"0"), false, true);
     aip::EndTrayNestedMenu(menu, adjustments, PrayerUiString(L"PrayerAdjustments", L"Local minute adjustments"));
-    bool sunrise = true, clock24 = true;
+    bool sunrise = true, clock24 = true, timetable = true;
     aip::content::ParseBool(IniReadS(L"PrayerTimes", L"ShowSunrise", L"1"), sunrise);
     aip::content::ParseBool(IniReadS(L"PrayerTimes", L"TwentyFourHour", L"1"), clock24);
+    aip::content::ParseBool(IniReadS(L"PrayerTimes", L"ShowTimetable", L"1"), timetable);
     aip::AppendTrayMenuItem(menu, ID_PRAYER_SETTINGS + 30, PrayerUiString(L"PrayerShowSunrise", L"Show sunrise in the header"), sunrise, true);
     aip::AppendTrayMenuItem(menu, ID_PRAYER_SETTINGS + 31, PrayerUiString(L"Prayer24Hour", L"Use 24-hour times"), clock24, true);
+    aip::AppendTrayMenuItem(menu, ID_PRAYER_SETTINGS + 32, PrayerUiString(L"PrayerShowTimetable", L"Show prayer timetable on Large tiles"), timetable, true);
     add(40, L"PrayerRefreshSeconds", L"Schedule refresh (seconds)", L"RefreshSeconds");
     add(41, L"PrayerTimeoutSeconds", L"HTTP timeout (seconds)", L"TimeoutSeconds");
     add(42, L"PrayerMaximumBytes", L"Response limit (bytes)", L"MaximumBytes");
@@ -94,8 +96,8 @@ static bool DispatchPrayerSettingsCommand(HWND owner, UINT command)
     if (offset == 10 || offset == 11 || offset == 13 || offset == 14) {
         SaveContentMenuSettings(owner, {{L"PrayerTimes", offset < 13 ? L"Method" : L"School", offset == 10 ? L"Auto" : offset == 11 ? L"20" : offset == 13 ? L"0" : L"1"}}); return true;
     }
-    if (offset == 30 || offset == 31) {
-        const auto* key = offset == 30 ? L"ShowSunrise" : L"TwentyFourHour"; bool enabled = true;
+    if (offset == 30 || offset == 31 || offset == 32) {
+        const auto* key = offset == 30 ? L"ShowSunrise" : offset == 31 ? L"TwentyFourHour" : L"ShowTimetable"; bool enabled = true;
         aip::content::ParseBool(IniReadS(L"PrayerTimes", key, L"1"), enabled);
         SaveContentMenuSettings(owner, {{L"PrayerTimes", key, enabled ? L"0" : L"1"}}); return true;
     }

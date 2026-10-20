@@ -1,27 +1,33 @@
 // Secondary tile management shares one INI and the resident content engine.
 // Construction reads configuration/status only; pin and setup require a click.
 #include "../secondary_tiles.h"
+#include "../tile_lifecycle.h"
 #include "ga_tile_status.inc"
 static bool OpenEmbeddedNotesSignIn(HWND owner, int resource);
 
 static std::vector<std::wstring> BuildTileStatusPagesIncludingGallery(const std::vector<aip::content::Snapshot>& prepared,
-    const std::vector<GalleryStatusSnapshots>& gallery, const TileStatusLabels& labels, const std::wstring& submittedQueue)
+    const std::vector<GalleryStatusSnapshots>& gallery, const TileStatusLabels& labels, const std::wstring& submittedQueue,
+    const std::wstring* destination = nullptr)
 {
     std::vector<aip::content::Snapshot> ordinary;
-    for (const auto& frame : prepared) if (frame.active && !frame.galleryFrame) ordinary.push_back(frame);
+    for (const auto& frame : prepared) if (frame.active && !frame.galleryFrame &&
+        (!destination || frame.secondaryTileId == *destination)) ordinary.push_back(frame);
     std::vector<std::wstring> pages;
     if (!ordinary.empty()) pages = BuildTileStatusPagesWithLabels(ordinary, labels);
     for (const auto& window : gallery) {
         if (std::none_of(window.frames.begin(), window.frames.end(), [](const auto& frame) { return frame.active; })) continue;
+        std::vector<aip::content::Snapshot> selected;
+        for (const auto& frame : window.frames) if (!destination || frame.secondaryTileId == *destination) selected.push_back(frame);
+        if (selected.empty()) continue;
         auto windowLabels = labels;
         if (window.submitted) windowLabels.queue = submittedQueue;
-        const auto group = BuildTileStatusPagesWithLabels(window.frames, windowLabels);
+        const auto group = BuildTileStatusPagesWithLabels(selected, windowLabels);
         pages.insert(pages.end(), group.begin(), group.end());
     }
     if (pages.empty()) pages.push_back(labels.noSnapshot);
     return pages;
 }
-static std::vector<std::wstring> BuildCurrentTileStatusPages()
+static std::vector<std::wstring> BuildCurrentTileStatusPages(const std::wstring* destination = nullptr)
 {
 #ifdef DESKTOPSTUB_TEST_GALLERY_STATUS_WINDOWS
     const auto gallery = DESKTOPSTUB_TEST_GALLERY_STATUS_WINDOWS();
@@ -29,7 +35,7 @@ static std::vector<std::wstring> BuildCurrentTileStatusPages()
     const auto gallery = CurrentGalleryStatusWindows();
 #endif
     return BuildTileStatusPagesIncludingGallery(CurrentSecondarySnapshots(), gallery, ReadTileStatusLabels(),
-        IniReadS(L"Strings", L"TileStatusSubmittedQueue", L"Last successfully submitted image queue (Windows chooses the visible image)"));
+        IniReadS(L"Strings", L"TileStatusSubmittedQueue", L"Last successfully submitted image queue (Windows chooses the visible image)"), destination);
 }
 
 static constexpr UINT ID_SECONDARY_TILES_ENABLED = 28000;
@@ -54,6 +60,13 @@ static bool ReadSecondaryTileMenuText(const std::wstring& text,
         std::wstring value;
         return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
     };
+    aip::content::TileInstanceConfiguration instances;
+    if (!ValidateTileInstanceHostConfiguration(read, instances, error)) return false;
+    if (instances.configured) {
+        content = {}; tiles = {};
+        for (const auto& tile : instances.tiles) if (tile.primary) { content = tile.configuration; break; }
+        return true;
+    }
     aip::content::TileAppearance actionAppearance;
     return aip::content::ReadConfiguration(read, content, error, ContentAsusEventsFromDocument(document)) &&
         aip::content::ReadSecondaryTileConfiguration(read, content.entries.size(), tiles, error) &&
@@ -248,11 +261,38 @@ static bool SecondaryTilePinUiAvailable()
 #endif
 }
 
+static void AppendTilePinCommandsForState(HMENU menu, aip::content::TilePinMenuState state, UINT pin, UINT unpin, UINT retry)
+{
+    if (state == aip::content::TilePinMenuState::Pinned)
+        aip::AppendTrayMenuItem(menu, unpin, SecondaryTileUiString(L"UnpinTile", L"Unpin from Start..."), false, true);
+    else if (state == aip::content::TilePinMenuState::Unpinned)
+        aip::AppendTrayMenuItem(menu, pin, SecondaryTileUiString(L"PinTile", L"Pin tile..."), false, true);
+    else if (state == aip::content::TilePinMenuState::Unknown)
+        aip::AppendTrayMenuItem(menu, retry, SecondaryTileUiString(L"CheckTilePinStatus", L"Check pin status..."), false, true);
+    else
+        aip::AppendTrayMenuItem(menu, 0, SecondaryTileUiString(L"TilePinStatusUnavailable", L"Pin status requires the registered app"), false, false);
+}
+static void AppendSecondaryTilePinCommands(HMENU menu, const std::wstring& id, UINT pin, UINT unpin, UINT retry, bool configured = true)
+{
+    AppendTilePinCommandsForState(menu, aip::content::TilePinState(SecondaryTilePinUiAvailable() && configured,
+        SecondaryTileInventoryReady(), SecondaryTileExists(id)), pin, unpin, retry);
+}
+
+static void ShowSelectedTileStatus(HWND owner, const std::wstring& destination, const std::wstring& name)
+{
+    const auto pages = BuildCurrentTileStatusPages(&destination);
+#ifdef DESKTOPSTUB_TEST_PAGED_TEXT_DIALOG
+    DESKTOPSTUB_TEST_PAGED_TEXT_DIALOG(owner, name.c_str(), pages);
+#else
+    ShowPagedTextDialog(owner, name.c_str(), pages);
+#endif
+}
+
 static void AppendSecondaryTilesMenu(HMENU menu)
 {
     const bool canPin = SecondaryTilePinUiAvailable();
     aip::AppendTrayMenuItem(menu, ID_SECONDARY_TILES_INITIALIZE, SecondaryTileUiString(L"SourceTilesSetup", L"Set up source contents..."), false, true);
-    aip::AppendTrayMenuItem(menu, ID_SECONDARY_TILES_STATUS, L"Tile status...", false, true);
+    aip::AppendTrayMenuItem(menu, ID_SECONDARY_TILES_STATUS, SecondaryTileUiString(L"AllTileContents", L"All tile contents..."), false, true);
     if (!canPin) aip::AppendTrayMenuItem(menu, 0, L"Pinning requires the registered app; setup remains available", false, false);
     aip::AppendMenuSeparator(menu);
     const int count = IniReadClampedI(L"Content", L"Count", 1, 1, aip::content::MaxEntries);
@@ -260,13 +300,10 @@ static void AppendSecondaryTilesMenu(HMENU menu)
         const auto& descriptor = aip::content::SecondaryTiles[index];
         const auto section = aip::content::SecondaryTileSection(descriptor.id);
         const auto name = IniReadS(section.c_str(), L"Name", descriptor.name);
-        const bool pinned = canPin && SecondaryTileExists(SecondaryTileApiId(descriptor.id));
         const UINT base = ID_SECONDARY_TILE_COMMANDS + index * SECONDARY_TILE_COMMAND_STRIDE;
         HMENU child = aip::BeginTrayNestedMenu(menu);
-        aip::AppendTrayMenuItem(child, 0, canPin ? (pinned ? L"Pinned to Start" : L"Not pinned to Start") : L"Pin status unavailable without app registration", false, false);
-        aip::AppendTrayMenuItem(child, base + 1, SecondaryTileUiString(L"PinTile", L"Pin tile..."), false, canPin);
-        aip::AppendTrayMenuItem(child, base + 2, L"Unpin from Start...", false, canPin && pinned);
-        aip::AppendTrayMenuItem(child, base + 3, L"Status...", false, true);
+        AppendSecondaryTilePinCommands(child, SecondaryTileApiId(descriptor.id), base + 1, base + 2, base);
+        aip::AppendTrayMenuItem(child, base + 3, SecondaryTileUiString(L"SelectedTileContents", L"Tile contents..."), false, true);
         aip::AppendTrayMenuItem(child, base + 4, L"Source and sign-in settings...", false, true);
         aip::AppendTrayMenuItem(child, base + 5, L"Rename...", false, true);
         AppendTileAppearanceMenu(child, section, base + 6);
@@ -346,6 +383,7 @@ static bool OpenSecondaryTileSetup(HWND owner, const std::wstring& key)
     if (command == ID_SECONDARY_SOURCE_SIGN_IN) {
         OpenEmbeddedNotesSignIn(owner, descriptor->notesResource);
     } else if (command == ID_SECONDARY_SOURCE_ACCOUNT) EditSecondaryNotesAccount(owner, descriptor->notesResource);
+    else if (command == ID_SECONDARY_TILES_STATUS) ShowSelectedTileStatus(owner, SecondaryTileApiId(descriptor->id), IniReadS(aip::content::SecondaryTileSection(descriptor->id).c_str(), L"Name", descriptor->name));
     else if (command) DispatchTrayCommand(owner, command);
     return true;
 }
@@ -373,14 +411,14 @@ static bool DispatchSecondaryTilesCommand(HWND owner, UINT command)
     const auto& descriptor = aip::content::SecondaryTiles[index];
     const auto section = aip::content::SecondaryTileSection(descriptor.id);
     if (DispatchTileAppearanceCommand(owner, command, ID_SECONDARY_TILE_COMMANDS + index * SECONDARY_TILE_COMMAND_STRIDE + 6, section)) return true;
-    if (action == 0) return true; // Retired checkbox command.
+    if (action == 0) { RequestSecondaryTileList(owner); return true; } // Explicit inventory retry; no pin mutation.
     if (action == 1) {
         if (SaveSecondaryTileMenuSettings(owner, {}, true, false))
             RequestPinSecondaryTile(owner, SecondaryTileApiId(descriptor.id), IniReadS(section.c_str(), L"Name", descriptor.name));
         return true;
     }
     if (action == 2) { RequestUnpinSecondaryTile(owner, SecondaryTileApiId(descriptor.id)); return true; }
-    if (action == 3) { return DispatchSecondaryTilesCommand(owner, ID_SECONDARY_TILES_STATUS); }
+    if (action == 3) { ShowSelectedTileStatus(owner, SecondaryTileApiId(descriptor.id), IniReadS(section.c_str(), L"Name", descriptor.name)); return true; }
     if (action == 4) return OpenSecondaryTileSetup(owner, descriptor.id);
     if (action == 5) {
         auto name = IniReadS(section.c_str(), L"Name", descriptor.name);

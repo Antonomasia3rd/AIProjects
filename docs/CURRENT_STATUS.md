@@ -11,6 +11,15 @@ is enabled and its focused native recheck passed.
 
 ## Saved and installed
 
+- October 20: independent tile instances, per-type settings, Plugins, Prayer
+  clock/countdown, scoped status, pin-state menus and owned gallery clearing
+  are installed. Native source publication and startup health passed after
+  repairing the old generation admission gate. See
+  [the guide](tile-instances-2026-10-20.md) and
+  [validation/remaining limits](tile-instance-validation-2026-10-20.md).
+  The user's configured Surabaya location is retained; older entries below
+  describing an unset location refer to the initial October 18 installation.
+
 - Text size/wrapping/layout controls and a readable RSS preset are installed,
   with Default preserving the existing appearance and source-tile inheritance.
   Non-gallery secondary updates no longer overwrite primary stable PNG paths.

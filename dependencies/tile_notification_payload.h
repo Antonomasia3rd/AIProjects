@@ -45,8 +45,8 @@ inline bool ValidOptions(const Options& options, std::wstring& error)
             return false;
         }
         for (wchar_t value : options.secondaryTileId) {
-            if (!alphanumeric(value) && value != L'.' && value != L'_') {
-                error = L"A secondary tile ID supports only ASCII letters, digits, periods and underscores.";
+            if (!alphanumeric(value) && value != L'.' && value != L'_' && value != L'-') {
+                error = L"A secondary tile ID supports only ASCII letters, digits, periods, underscores and hyphens.";
                 return false;
             }
         }

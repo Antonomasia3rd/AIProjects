@@ -140,8 +140,41 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
     const auto compactStatus = TileSnapshotVisibleText(frame, 150, TileStatusLabels{}), largeStatus = TileSnapshotVisibleText(frame, 310, TileStatusLabels{});
     Check(compactStatus.find(L"Isha") == std::wstring::npos && largeStatus.find(L"Isha 19:00") != std::wstring::npos,
         "Prayer tile status follows the same compact versus full timetable content");
+    frame.prayerClock = {L"11:14 AM",L"Dhuhr",L"Surabaya",L"44",L"in 44 minutes",L"Sunrise 05:06"};
+    std::wstring clockMedium,clockWide,clockLarge;
+    Check(AppendPrayerTileBinding(clockMedium,L"TileMedium",150,frame.text,frame.detailRows,L"",frame.prayerClock) &&
+        clockMedium.find(L"hint-style=\"title\"") != std::wstring::npos && clockMedium.find(L"in 44 minutes") != std::wstring::npos,
+        "clock Medium layout gives the next prayer time a larger style and keeps a readable countdown sentence");
+    Check(AppendPrayerTileBinding(clockWide,L"TileWide",150,frame.text,frame.detailRows,L"",frame.prayerClock) &&
+        clockWide.find(L"headerNumeral") != std::wstring::npos && clockWide.find(L">minutes<") != std::wstring::npos &&
+        clockWide.find(L"Isha") == std::wstring::npos,
+        "clock Wide layout separates the top-right countdown from the time and location");
+    Check(AppendPrayerTileBinding(clockLarge,L"TileLarge",310,frame.text,frame.detailRows,L"",frame.prayerClock) &&
+        clockLarge.find(L"Isha") != std::wstring::npos && clockLarge.find(L"at Surabaya") != std::wstring::npos,
+        "clock Large layout retains the complete prayer timetable under the prominent next-prayer header");
+    const auto clockStatus=TileSnapshotVisibleText(frame,150,TileStatusLabels{});
+    Check(clockStatus.find(L"11:14 AM\r\nDhuhr\r\nat Surabaya\r\nin 44 minutes\r\nSunrise 05:06") != std::wstring::npos &&
+        clockStatus.find(L"Next: Dhuhr") == std::wstring::npos,
+        "clock status uses the semantic clock fields with line breaks rather than the old summary sentence");
+    const auto clockKey=ContentSnapshotKey(frame);frame.prayerClock.minutes=L"43";
+    Check(ContentSnapshotKey(frame)!=clockKey,"a changed semantic countdown invalidates the snapshot cache even if summary text is unchanged");
+    frame.prayerClock.minutes=L"44";frame.prayerClock.showTimetable=false;
+    Check(TileSnapshotVisibleText(frame,310,TileStatusLabels{}).find(L"Isha")==std::wstring::npos && ContentSnapshotKey(frame)!=clockKey,
+        "timetable visibility updates both tile status and the presentation cache key");
+    frame.prayerClock.showTimetable=true;
     { ScopedGdiPlus gdi; Check(gdi.ok(), "Prayer renderer fixture starts only offscreen GDI+");
         if (gdi.ok()) { Gdiplus::Bitmap canvas(310, 310, PixelFormat32bppARGB); Gdiplus::Graphics graphics(&canvas);
-            graphics.Clear(Gdiplus::Color(0, 0, 0, 0)); Check(RenderPrayerTileSimulation(graphics, frame, 310, 310, 1), "bitmap fallback renders the five-prayer layout offscreen"); } }
+            graphics.Clear(Gdiplus::Color(0, 0, 0, 0)); Check(RenderPrayerTileSimulation(graphics, frame, 310, 310, 1), "bitmap fallback renders the clock and five-prayer layout offscreen");
+            auto hasInk=[&](int left,int top,int right,int bottom) {
+                for(int y=top;y<bottom;++y)for(int x=left;x<right;++x){Gdiplus::Color pixel;
+                    if(canvas.GetPixel(x,y,&pixel)==Gdiplus::Ok && pixel.GetA())return true;}
+                return false;
+            };
+            Check(hasInk(10,10,220,120)&&hasInk(230,10,300,110)&&hasInk(10,130,300,290),
+                "offscreen clock paints visible main text, a separate countdown column and lower prayer rows");
+            Gdiplus::Bitmap compact(150,150,PixelFormat32bppARGB);Gdiplus::Graphics compactGraphics(&compact);
+            compactGraphics.Clear(Gdiplus::Color(0,0,0,0));
+            Check(RenderPrayerTileSimulation(compactGraphics,frame,150,150,1),"compact bitmap clock uses the single-column fallback without a device or live tile");
+        } }
     Check(WriteContentFixture(original), "Prayer host fixture restores the prior private configuration");
 }

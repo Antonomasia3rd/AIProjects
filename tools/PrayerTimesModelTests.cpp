@@ -1,4 +1,5 @@
 #include "../dependencies/content_sources/prayer_times_model.h"
+#include "../dependencies/prayer_tile_layout.h"
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -42,6 +43,10 @@ int main() { try {
     data.lastSuccessUtc=data.schedule.days[0].fetchedAtUtc;data.nextRefreshUtc=data.lastSuccessUtc+43200;
     const UTC fajr=data.schedule.days[0].prayers[0].utcSeconds;
     auto view=Compose(cfg,data,fajr-61);
+    Check(view.clock.Available()&&view.clock.time==L"05:00"&&view.clock.prayer==L"Fajr"&&view.clock.location==cfg.city&&
+        view.clock.minutes==L"2"&&view.clock.countdown==L"in 2 minutes","clock layout carries independent semantic time, prayer, city and rounded countdown");
+    Check(Compose(cfg,data,fajr-60).clock.countdown==L"in 1 minute"&&Compose(cfg,data,fajr).clock.minutes==L"0",
+        "clock countdown handles singular and due-now boundaries without parsing summary text");
     Check(view.available&&view.detailRows.size()==5&&view.secondary.find(L"2 min")!=std::wstring::npos&&view.nextUTCDeadline==fajr-60,"countdown rounds up and schedules exact minute transition");
     Check(view.badge.find(L"Sunrise 06:00")!=std::wstring::npos&&view.timeZone==L"Asia/Jakarta"&&!view.hijriDate.empty(),"optional sunrise/timezone/Hijri metadata remains distinct from five required rows");
     Check(Compose(cfg,data,fajr).secondary.find(L"0 min")!=std::wstring::npos&&NextUTCDeadline(cfg,data,fajr)==fajr+1,"exact prayer instant is due now then advances");
@@ -51,9 +56,15 @@ int main() { try {
     const auto originalKey=ConfigurationKey(cfg);cfg.adjustmentsMinutes[0]=10;cfg.twentyFourHour=false;cfg.showSunrise=false;
     Check(ConfigurationKey(cfg)==originalKey,"presentation and local minute adjustments do not invalidate network cache");
     view=Compose(cfg,data,fajr);
+    Check(view.clock.time==L"5:10 AM"&&view.clock.details.empty(),"clock layout retains configured 12-hour time and respects hidden sunrise");
+    cfg.showTimetable=false;const auto noTable=Compose(cfg,data,fajr);
+    Check(!noTable.clock.showTimetable&&noTable.detailRows.size()==5&&ConfigurationKey(cfg)==originalKey,
+        "hiding the displayed timetable preserves cached schedule and next-prayer computation");
     Check(view.detailRows[0].value==L"5:10 AM"&&view.secondary.find(L"10 min")!=std::wstring::npos&&view.badge.find(L"Sunrise")==std::wstring::npos,"local tuning/display choices apply without changing cached UTC schedule");
     data.stale=true;data.error=L"Network unavailable";
     Check(Compose(cfg,data,fajr).available&&Compose(cfg,data,fajr).secondary.find(L"Stale")!=std::wstring::npos,"failed refresh retains usable daily data with explicit stale status");
+    Check(Compose(cfg,data,fajr).clock.details.find(L"Stale")!=std::wstring::npos&&
+        Compose(cfg,data,fajr).clock.details.find(L"Network unavailable")!=std::wstring::npos,"clock presentation exposes stale and error state alongside retained timings");
     const auto bytes=SerializeCache(data);Data loaded;
     Check(!bytes.empty()&&ParseCache(bytes,cfg,loaded,error)&&loaded.stale&&loaded.error==data.error&&loaded.schedule.days.size()==2,"private cache roundtrips typed daily data and stale/error state");
     auto other=cfg;other.city=L"Other City";
@@ -62,5 +73,43 @@ int main() { try {
     Check(!ParseCache(bytes+"junk",cfg,loaded,error)&&!ParseCache(std::string(65537,'x'),cfg,loaded,error),"trailing/oversized caches are rejected");
     Check(!Compose(other,data,fajr).available,"another request configuration never displays old city's data");
     Check(!Compose(cfg,data,CivilDay({2026,10,22})*86400).available,"past cached days are never presented as today's times");
+    Check(!Compose(other,data,fajr).clock.Available()&&!Compose(empty,data,fajr).clock.Available(),
+        "unconfigured or unrelated locations never receive a valid-looking clock");
+    {
+        using namespace aip::content;
+        ClockText clock;clock.time=L"11:14 AM";clock.prayer=L"Dhuhr";clock.location=L"Surabaya & <region>";
+        clock.minutes=L"44";clock.countdown=L"in 44 minutes";clock.details=L"Sunrise 05:06";
+        std::vector<Text> rows;for(const auto* label:{L"Fajr",L"Dhuhr",L"Asr",L"Maghrib",L"Isha"})rows.push_back({label,L"11:14 AM",L""});
+        const Text fallback{L"Legacy text",L"City",L"Status"};
+        for(const auto* name:{L"TileMedium",L"TileWide",L"TileLarge"}) {
+            const int width=std::wstring(name)==L"TileMedium"?150:310,height=std::wstring(name)==L"TileLarge"?310:150;
+            std::wstring xml;Check(AppendPrayerTileBinding(xml,name,height,fallback,rows,L"",clock),"clock binding is supported on Medium, Wide and Large");
+            Check(xml.find(L"11:14 AM")!=std::wstring::npos&&xml.find(L"Dhuhr")!=std::wstring::npos&&
+                xml.find(L"at Surabaya &amp; &lt;region&gt;")!=std::wstring::npos&&xml.find(L"Legacy text")==std::wstring::npos,
+                "clock fields are escaped and take precedence over legacy summary content");
+            const auto layout=ComputePrayerClockGeometry(width,height,clock,rows);
+            Check(layout.mainWidth>0&&layout.clockBottom<=layout.bottom&&layout.margin+layout.mainWidth<=width-layout.margin,
+                "bitmap clock text remains bounded by the actual tile dimensions");
+            if(width>200) {
+                Check(xml.find(L"headerNumeral")!=std::wstring::npos&&xml.find(L">minutes<")!=std::wstring::npos&&
+                    xml.find(L"in 44 minutes")==std::wstring::npos&&layout.countdownColumn,
+                    "wide layouts use independent top-right minutes and large numeric countdown");
+                Check(layout.margin+layout.mainWidth<layout.countdownX&&layout.countdownX+layout.countdownWidth<=width-layout.margin,
+                    "bitmap countdown and main clock occupy disjoint bounded columns");
+            } else Check(xml.find(L"in 44 minutes")!=std::wstring::npos&&!layout.countdownColumn,
+                "Medium uses the explicit compact countdown sentence instead of squeezing two columns");
+            Check((xml.find(L"Isha")!=std::wstring::npos)==(height>200)&&layout.schedule==(height>200),
+                "only Large displays the five-prayer timetable");
+        }
+        clock.showTimetable=false;std::wstring hidden;
+        AppendPrayerTileBinding(hidden,L"TileLarge",310,fallback,rows,L"",clock);
+        Check(hidden.find(L"Isha")==std::wstring::npos&&!ComputePrayerClockGeometry(310,310,clock,rows).schedule,
+            "native and bitmap timetable visibility follows the same display setting");
+        clock.minutes=L"1440";Check(std::wstring(PrayerCountdownStyle(clock))==L"titleNumeral"&&
+            ComputePrayerClockGeometry(310,150,clock,rows).countdownPixels==24,"four-digit countdowns use a smaller native style in both renderers");
+        clock={};std::wstring waiting;
+        Check(AppendPrayerTileBinding(waiting,L"TileMedium",150,fallback,{},L"",clock)&&waiting.find(L"Legacy text")!=std::wstring::npos&&
+            waiting.find(L"headerNumeral")==std::wstring::npos,"unavailable schedule retains the readable setup/error fallback");
+    }
     std::cout<<"PrayerTimes model: "<<checks<<" checks passed\n";return 0;
 }catch(const std::exception& ex){std::cerr<<"FAIL: "<<ex.what()<<'\n';return 1;} }

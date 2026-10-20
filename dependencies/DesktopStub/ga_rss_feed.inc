@@ -178,18 +178,18 @@ static bool RssDecodeFeedBytes(
     return aip::DecodeCodePageText(1252, bytes.data(), bytes.size(), text, 0);
 }
 
-static RssFeedSettings ReadRssFeedSettings()
+template<class Reader> static RssFeedSettings ReadRssFeedSettingsWith(Reader read)
 {
     RssFeedSettings settings;
-    std::wstring feedUrl = IniReadS(L"RssFeed", L"FeedUrl", L"");
-    std::wstring userAgent = IniReadS(
+    std::wstring feedUrl = read(L"RssFeed", L"FeedUrl", L"");
+    std::wstring userAgent = read(
         L"RssFeed",
         L"UserAgent",
         L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)");
-    std::wstring updateInterval = IniReadS(L"RssFeed", L"UpdateIntervalSeconds", L"900");
-    std::wstring maxItems = IniReadS(L"RssFeed", L"MaxItems", L"5");
-    std::wstring httpTimeout = IniReadS(L"RssFeed", L"HttpTimeoutSeconds", L"20");
-    std::wstring maxFeedBytes = IniReadS(L"RssFeed", L"MaxFeedBytes", L"2097152");
+    std::wstring updateInterval = read(L"RssFeed", L"UpdateIntervalSeconds", L"900");
+    std::wstring maxItems = read(L"RssFeed", L"MaxItems", L"5");
+    std::wstring httpTimeout = read(L"RssFeed", L"HttpTimeoutSeconds", L"20");
+    std::wstring maxFeedBytes = read(L"RssFeed", L"MaxFeedBytes", L"2097152");
     if (!ValidateDesktopStubContentProfileValues(
             L"RssFeed",
             feedUrl,
@@ -214,6 +214,7 @@ static RssFeedSettings ReadRssFeedSettings()
     settings.maxFeedBytes = static_cast<size_t>(parsedMaxFeedBytes);
     return settings;
 }
+static RssFeedSettings ReadRssFeedSettings() { return ReadRssFeedSettingsWith(IniReadS); }
 
 // ---------------------------------------------------------------------------
 // WinHTTP fetch

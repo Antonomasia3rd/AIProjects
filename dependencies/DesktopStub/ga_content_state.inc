@@ -217,8 +217,78 @@ static int CaptureContentLogicalCapsState()
     return g_contentLogicalCaps.load();
 }
 
+static bool TileInstanceModeRequested()
+{
+    return IniReadS(L"Tiles", L"Instances", L"\x1") != L"\x1";
+}
+static bool ReadCurrentTileInstances(aip::content::TileInstanceConfiguration& result, std::wstring& error)
+{
+    // A typed view belongs to a complete published INI revision. No per-tick
+    // reparsing and no provider callbacks while the INI cache is locked.
+    static std::mutex mutex;
+    static std::wstring lastProfile, lastError;
+    static unsigned long long lastRevision = ~0ull;
+    static aip::content::TileInstanceConfiguration cached;
+    static bool valid = false;
+    std::vector<IniEntry> refreshed; bool ready = false;
+    ReadIniSectionCached(L"Tiles", refreshed, &ready);
+    if (!ready) { error = L"The tile configuration is temporarily unavailable."; return false; }
+    std::lock_guard<std::mutex> viewLock(mutex);
+    std::vector<aip::IniSectionData> document;
+    std::wstring profile; unsigned long long revision = 0;
+    {
+        std::lock_guard<std::mutex> cacheLock(g_iniCacheMutex);
+        profile = g_iniCacheProfile; revision = g_iniCacheRevision;
+        if (lastProfile != profile || lastRevision != revision) document = g_iniCacheDoc;
+    }
+    if (lastProfile != profile || lastRevision != revision) {
+        const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+            std::wstring value;
+            return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+        };
+        aip::content::TileInstanceConfiguration next;
+        valid = ValidateTileInstanceHostConfiguration(read, next, lastError);
+        if (!valid && read(L"Tiles", L"Instances", L"\x1") != L"\x1") {
+            // A malformed source belongs to its tile. Keep other tiles alive
+            // and publish a clickable repair state for the affected instance.
+            std::vector<std::wstring> ids;
+            std::wstring version = read(L"Tiles", L"SchemaVersion", L"1"), issue;
+            if (aip::content::ParseTileInstanceIds(read(L"Tiles", L"Instances", L""), ids, issue) &&
+                aip::content::NormalizeTileInstanceSetting(L"Tiles", L"SchemaVersion", version, issue)) {
+                next = {}; next.configured = true; bool primarySeen = false;
+                for (const auto& id : ids) {
+                    aip::content::TileInstanceConfiguration one;
+                    const auto isolatedRead = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+                        if (IEquals(section, L"Tiles") && IEquals(key, L"Instances")) return id;
+                        return read(section, key, fallback);
+                    };
+                    aip::content::TileInstance tile;
+                    if (ValidateTileInstanceHostConfiguration(isolatedRead, one, issue) && !one.tiles.empty()) tile = std::move(one.tiles.front());
+                    else {
+                        tile.id = id; tile.name = read(aip::content::TileInstanceSection(id).c_str(), L"Name", id.c_str()); tile.error = issue;
+                        tile.accountReference = read(aip::content::TileInstanceSection(id).c_str(), L"Account", L"");
+                        const auto* descriptor = aip::content::FindTileInstanceType(read(aip::content::TileInstanceSection(id).c_str(), L"Type", L""));
+                        if (descriptor) tile.type = descriptor->type;
+                        aip::content::ParseBool(read(aip::content::TileInstanceSection(id).c_str(), L"Primary", L"0"), tile.primary);
+                        tile.primary = tile.primary && tile.type == aip::content::TileInstanceType::Wallpaper;
+                        aip::content::Entry entry; entry.background = L"Transparent"; tile.configuration.entries.push_back(std::move(entry));
+                    }
+                    if (tile.primary && primarySeen) { tile.error = L"Only one Wallpaper tile can use the primary Desktop identity."; tile.primary = false; }
+                    primarySeen = primarySeen || tile.primary;
+                    next.tiles.push_back(std::move(tile));
+                }
+                valid = true; lastError.clear();
+            }
+        }
+        cached = valid ? std::move(next) : aip::content::TileInstanceConfiguration{};
+        lastProfile = profile; lastRevision = revision;
+    }
+    if (!valid) { error = lastError; return false; }
+    result = cached; error.clear(); return true;
+}
 static bool CompositionRequested()
 {
+    if (TileInstanceModeRequested()) return true;
     for (const auto& id : CachedSecondaryTileIds())
         if (id.compare(0, 10, L"AipSource_") == 0 || id.compare(0, 11, L"AipGallery_") == 0) return true;
     bool enabled = false;

@@ -135,3 +135,47 @@ captured native font/brush/rectangle/FP arguments on unchanged copies of both
 historical executables. Both secondary-text pairs produced identical darker
 rasters; no lighter state was captured. The historical failure remains open,
 with original pixel comparisons and artifacts preserved.
+
+## Identical recurrence during tile-instance validation, 2026-10-20
+
+The copied normal review product (SHA-256
+`B056247F4DFD02B013343A4652914B36B8449507DD75B84BDC505991A543F60B`)
+reproduced the unchanged exact Medium unsupported-secondary failure during the
+full offline smoke. No tolerance or ignored-pixel rule was changed. The product
+was not installed as a result of this failed run.
+
+- Fixture: `C:/Users/Amiya/AppData/Local/Temp/DesktopStubSmoke-11f1131bc8a5439faaf31419457db75d`.
+- Log: `build/review-validation/tile-instances-oct20-offline-smoke.log`.
+- Baseline cache `FABF25F738382C94` is the exact historical LIGHT PNG,
+  SHA-256 `EC8F0259326C166E7239FFE90C18985B6A7F93FDAE6D8D1F344992F2958526D8`.
+- Secondary cache `A1A0355174B4DF54` is the exact historical DARK PNG,
+  SHA-256 `F5A76FCD16428B4AEC2819C07BF5A49FB221653EDE9C109062AA6F3C900DFBED`.
+- Exactly `(20,93)`, `(30,93)`, `(40,93)`, `(50,93)` differ, again from
+  opaque ARGB `FFAED4F2` to `FF9CCBEF` in the unchanged `AAAA` caption.
+  Base and scale-100 PNGs agree within each cache entry. Decoded PNG DPI is
+  95.9866 in both cases.
+
+Eight bounded copied-product render-only processes, with the generated-asset
+cache disabled and secondary text alternating `IIII`/`MMMM`, all generated the
+exact historical DARK PNG. These passing probes do not repair or invalidate
+the full-smoke failure. Their private images and process logs remain under
+`build/review-validation/opaque-product-repro-oct20` and
+`opaque-pixel-product-oct20-*`.
+
+The existing isolated renderer's DPI and floating-point rounding probes again
+produced only DARK. A private clone then varied all 25 combinations of the five
+supported pixel-offset modes and five compositing-quality modes. None produced
+the historical LIGHT state: half/high-quality offsets changed 713 pixels;
+gamma/high-quality compositing changed at least 519 pixels. Ordinary state was
+Display page units, scale 1, text contrast 4 and MXCSR `00001F80`. Contrast
+changes affect 220 antialiased pixels and likewise do not match the four-point
+variation. Probe sources, scanned executable and results remain in
+`build/review-validation/PixelStateProbe.*`, `opaque-state-probe-oct20-*`,
+`opaque-dpi-oct20.log`, `opaque-rounding-oct20.log`, and
+`opaque-contrast-oct20.log`.
+
+The matching complete historical PNG pair establishes recurrence of the same
+pre-existing defect. It does not establish its cause as an operating-system
+bug, prove a font-cache hypothesis, or support changing the font, hinting,
+geometry or exact comparison. Production renderer behavior remains unchanged;
+the missing evidence remains a LIGHT draw captured with its native arguments.

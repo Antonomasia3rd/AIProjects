@@ -4,6 +4,7 @@
 #include "../third_party/WebView2/WebView2.h"
 #include "../content_sources/notes_accounts.inc"
 #include "../content_sources/notes_signin_workers.h"
+#include "../content_sources/notes_tile_account_import.h"
 #include <wrl.h>
 #include <atomic>
 
@@ -31,7 +32,7 @@ struct State {
     HRESULT cleanupResult = E_PENDING;
     std::chrono::steady_clock::time_point cleanupDeadline{};
     UINT64 navigation = 0;
-    std::wstring profile, browserData;
+    std::wstring profile, browserData, tileId, accountReference, accountSection, accountFingerprint, tileFingerprint, browserProfile, preferenceSection;
     ComPtr<ICoreWebView2Environment> environment;
     ComPtr<ICoreWebView2Controller> controller;
     ComPtr<ICoreWebView2> view;
@@ -41,6 +42,52 @@ struct State {
     std::vector<aip::IniSetting> pending;
 };
 static std::map<HWND, std::shared_ptr<State>> windows;
+template<class Reader> static std::wstring AccountFingerprint(Reader read, const std::wstring& section, const std::wstring& prefix = L"") {
+    std::wstring result;
+    for (const auto* key : {L"UID", L"Server", L"LToken", L"LTUid", L"LTokenProtected", L"LTUidProtected", L"RefreshSeconds",
+        L"LTokenV2", L"LTUidV2", L"LToken_V2", L"LTUid_V2", L"LTokenV2Protected", L"LTUidV2Protected", L"RefreshIntervalSeconds"}) {
+        const auto value = read(section.c_str(), (prefix + key).c_str(), L""); result += std::to_wstring(value.size()) + L":" + value;
+    }
+    return result;
+}
+static bool SaveTargetAccount(HWND owner, const std::shared_ptr<State>& state) {
+    if (state->tileId.empty()) return SaveSecondaryTileMenuSettings(owner, state->pending);
+    std::wstring error;
+    const bool saved = MutateDesktopStubIniWithWait([&](std::wstring& text) {
+        if (!IEquals(aip::MakeAbsolutePath(g_iniPath), state->profile)) { error = L"The active profile changed."; return false; }
+        const auto document = aip::ParseIniDocument(text);
+        const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+            std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
+        };
+        aip::content::TileInstanceConfiguration cfg;
+        if (!ValidateTileInstanceHostConfiguration(read, cfg, error)) return false;
+        const auto found = std::find_if(cfg.tiles.begin(), cfg.tiles.end(), [&](const auto& tile) { return tile.id == state->tileId; });
+        if (found == cfg.tiles.end() || aip::content::DescribeTileInstanceType(found->type).notesResource != state->resource ||
+            found->accountReference != state->accountReference || AccountFingerprint(read, state->accountSection) != state->accountFingerprint ||
+            AccountFingerprint(read, aip::content::TileInstanceSection(state->tileId), L"Notes.") != state->tileFingerprint) {
+            error = L"The tile or saved account changed while sign-in was open. Reopen sign-in before saving."; return false;
+        }
+        aip::notes::TileNotesImportPlan plan;
+        if (!aip::notes::BuildTileNotesImportPlan(state->tileId, state->accountReference, state->pending, plan, error)) return false;
+        auto candidate = text;
+        for (const auto& setting : plan.removeKeys)
+            if (!aip::RemoveIniValueFromText(candidate, setting.section.c_str(), setting.key.c_str())) return false;
+        for (const auto& setting : plan.settings)
+            if (!aip::WriteIniValueToText(candidate, setting.section.c_str(), setting.key.c_str(), setting.value)) return false;
+        const auto staged = aip::ParseIniDocument(candidate);
+        if (!ValidateTileInstanceHostConfiguration([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+            std::wstring value; return aip::ReadIniValueFromDoc(staged, section, key, value) ? value : std::wstring(fallback);
+        }, cfg, error)) return false;
+        text = std::move(candidate); return true;
+    }, CurrentIniWriteLockWaitMs());
+    if (saved) {
+        state->accountReference = state->accountSection;
+        state->accountFingerprint = AccountFingerprint(IniReadS, state->accountSection);
+        state->tileFingerprint = AccountFingerprint(IniReadS, aip::content::TileInstanceSection(state->tileId), L"Notes.");
+        RefreshTileInstanceNow(state->tileId);
+    } else if (!error.empty()) SetWindowTextW(state->status, error.c_str());
+    return saved;
+}
 static aip::notes::SignInWorkers workers;
 static bool Live(const std::shared_ptr<State>& state) { return !state->closed && IsWindow(state->window); }
 static bool CurrentBrowser(const std::shared_ptr<State>& state, unsigned long long generation) {
@@ -96,7 +143,7 @@ static void StageAccount(const std::shared_ptr<State>& state, const std::wstring
     aip::JsonFieldString(json, first, "UID", uid); aip::JsonFieldString(json, first, "Server", server);
     aip::JsonFieldString(json, first, protect ? "LTokenProtected" : "LToken", protect ? aip::ProtectSecretForCurrentUser(token) : token);
     aip::JsonFieldString(json, first, protect ? "LTUidProtected" : "LTUid", protect ? aip::ProtectSecretForCurrentUser(user) : user);
-    const auto section = aip::notes::HostAccountSection(state->resource);
+    const auto section = state->accountSection;
     int refresh = 0;
     if (!aip::content::ParseInt(IniReadS(section.c_str(), L"RefreshSeconds", IniReadS(section.c_str(), L"RefreshIntervalSeconds", L"0").c_str()), 0, 86400, refresh)) throw std::runtime_error("refresh");
     aip::JsonFieldNumber(json, first, "RefreshSeconds", refresh); json += '}';
@@ -351,7 +398,7 @@ static void StartBrowser(const std::shared_ptr<State>& state) {
             ComPtr<ICoreWebView2Environment10> environment10; ComPtr<ICoreWebView2ControllerOptions> options;
             HRESULT prepared = environment->QueryInterface(IID_PPV_ARGS(&environment10));
             if (SUCCEEDED(prepared)) prepared = environment10->CreateCoreWebView2ControllerOptions(&options);
-            const auto profile = L"Notes_" + std::wstring(aip::notes::SignInGames[state->resource].profile);
+            const auto profile = state->browserProfile;
             if (SUCCEEDED(prepared)) prepared = options->put_ProfileName(profile.c_str());
             if (SUCCEEDED(prepared)) prepared = options->put_IsInPrivateModeEnabled(!state->retained);
             if (FAILED(prepared)) { Failure(state, L"Update WebView2 Runtime for isolated/private profiles", prepared); return S_OK; }
@@ -406,7 +453,7 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPA
                     SendMessageW(state->retain, BM_SETCHECK, state->retained ? BST_CHECKED : BST_UNCHECKED, 0);
                     SetSignInStatus(state, L"Finish browser cleanup, or reopen sign-in if the active profile changed. No preference was saved."); return 0;
                 }
-                if (!SaveSecondaryTileMenuSettings(window, {{aip::notes::SignInGames[state->resource].section, L"RetainSession", retained ? L"1" : L"0"}})) {
+                if (!SaveSecondaryTileMenuSettings(window, {{state->preferenceSection, L"RetainSession", retained ? L"1" : L"0"}})) {
                     SendMessageW(state->retain, BM_SETCHECK, state->retained ? BST_CHECKED : BST_UNCHECKED, 0); return 0;
                 }
                 state->retained = retained; CloseBrowser(state); StartBrowser(state); return 0;
@@ -415,7 +462,7 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPA
         if (message == WM_SAVE_ACCOUNT) {
             if (wParam != static_cast<WPARAM>(state->request)) return 0;
             if (!IEquals(aip::MakeAbsolutePath(g_iniPath), state->profile)) SetSignInStatus(state, L"The active profile changed. Reopen sign-in; no account was saved.");
-            else if (!state->pending.empty() && SaveSecondaryTileMenuSettings(window, state->pending)) {
+            else if (!state->pending.empty() && SaveTargetAccount(window, state)) {
                 RequestContentNotesRefresh(state->resource);
                 SetSignInStatus(state, std::wstring(aip::notes::SignInGames[state->resource].name) + L" account saved. Closing a fresh session discards local browser login; imported Notes credentials are kept.");
             } else SetSignInStatus(state, L"The account could not be saved. Existing configuration was kept.");
@@ -445,12 +492,12 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPA
 }
 }
 
-static bool OpenEmbeddedNotesSignIn(HWND owner, int resource) {
+static bool OpenEmbeddedNotesSignInTarget(HWND owner, int resource, const std::wstring& tileId) {
     if (resource < 0 || resource >= 3) return false;
     using namespace notes_signin;
     workers.ReapCompleted();
     const auto profile = aip::MakeAbsolutePath(g_iniPath);
-    for (const auto& item : windows) if (item.second->resource == resource && IEquals(item.second->profile, profile)) {
+    for (const auto& item : windows) if (item.second->resource == resource && item.second->tileId == tileId && IEquals(item.second->profile, profile)) {
         ShowWindow(item.first, SW_RESTORE); SetForegroundWindow(item.first); return true;
     }
     static thread_local struct Apartment {
@@ -469,12 +516,32 @@ static bool OpenEmbeddedNotesSignIn(HWND owner, int resource) {
     cls.lpszClassName = L"DesktopStubNotesEmbeddedSignIn"; cls.hCursor = LoadCursorW(nullptr, IDC_ARROW); cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     if (!RegisterClassW(&cls) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
     const auto state = std::make_shared<State>(); state->resource = resource; state->profile = profile;
-    std::wstring preference = IniReadS(aip::notes::SignInGames[resource].section, L"RetainSession", L"0"), error;
+    state->tileId = tileId;
+    if (!tileId.empty()) {
+        aip::content::TileInstanceConfiguration cfg;
+        std::wstring issue;
+        if (!ReadCurrentTileInstances(cfg, issue)) return false;
+        const auto found = std::find_if(cfg.tiles.begin(), cfg.tiles.end(), [&](const auto& tile) { return tile.id == tileId; });
+        if (found == cfg.tiles.end() || aip::content::DescribeTileInstanceType(found->type).notesResource != resource) return false;
+        state->accountReference = found->accountReference;
+    }
+    state->accountSection = tileId.empty() ? aip::notes::HostAccountSection(resource) :
+        state->accountReference.empty() ? L"Account." + tileId : state->accountReference;
+    state->accountFingerprint = AccountFingerprint(IniReadS, state->accountSection);
+    state->tileFingerprint = AccountFingerprint(IniReadS, aip::content::TileInstanceSection(tileId), L"Notes.");
+    state->browserProfile = L"Notes_" + std::wstring(aip::notes::SignInGames[resource].profile);
+    if (!tileId.empty()) {
+        std::wstring identityHash;
+        if (!aip::named_objects::StableIdentityHash(state->accountSection, identityHash)) return false;
+        state->browserProfile += L"_" + identityHash.substr(0, 16);
+    }
+    state->preferenceSection = tileId.empty() ? aip::notes::SignInGames[resource].section : state->accountSection;
+    std::wstring preference = IniReadS(state->preferenceSection.c_str(), L"RetainSession", L"0"), error;
     if (!aip::notes::NormalizeNotesSignInSetting(aip::notes::SignInGames[resource].section, L"RetainSession", preference, error)) {
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"HoYoLAB sign-in", MB_OK | MB_ICONWARNING); return false;
     }
     state->retained = preference == L"1";
-    const auto title = std::wstring(aip::notes::SignInGames[resource].name) + L" - HoYoLAB sign-in";
+    const auto title = std::wstring(aip::notes::SignInGames[resource].name) + L" - HoYoLAB sign-in" + (tileId.empty() ? L"" : L" - " + tileId);
     state->window = CreateWindowExW(WS_EX_APPWINDOW, cls.lpszClassName, title.c_str(), WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 1040, 820, owner, nullptr, cls.hInstance, nullptr);
     if (!state->window) return false;
@@ -489,7 +556,7 @@ static bool OpenEmbeddedNotesSignIn(HWND owner, int resource) {
     state->find = child(L"BUTTON", L"Find game accounts", BS_PUSHBUTTON | WS_TABSTOP, 12, 34, 170, 28, ID_FIND);
     state->accounts = child(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 192, 35, 800, 200, ID_ACCOUNTS);
     state->manual = child(L"BUTTON", L"Manual game UID", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 70, 156, 24, ID_MANUAL);
-    const auto section = aip::notes::HostAccountSection(resource);
+    const auto section = state->accountSection;
     state->uid = child(L"EDIT", IniReadS(section.c_str(), L"UID", L"").c_str(), ES_AUTOHSCROLL | WS_TABSTOP, 176, 68, 210, 26, 100);
     SendMessageW(state->uid, EM_SETLIMITTEXT, 32, 0);
     state->protect = child(L"BUTTON", L"Protect saved login fields with Windows DPAPI (optional)", BS_AUTOCHECKBOX | WS_TABSTOP, 402, 70, 580, 24, 101);
@@ -510,6 +577,8 @@ static bool OpenEmbeddedNotesSignIn(HWND owner, int resource) {
     if (!keyed || !EnsureDirectoryTreeExists(state->browserData)) { SetSignInStatus(state, L"Could not prepare this profile's writable embedded sign-in folder."); return false; }
     StartBrowser(state); return true;
 }
+static bool OpenEmbeddedNotesSignIn(HWND owner, int resource) { return OpenEmbeddedNotesSignInTarget(owner, resource, L""); }
+static bool OpenEmbeddedNotesSignInForTile(HWND owner, int resource, const std::wstring& tileId) { return OpenEmbeddedNotesSignInTarget(owner, resource, tileId); }
 static void CloseEmbeddedNotesSignIns() {
     // All worker cancellation is issued before joining. WinHTTP checks it every
     // pending wait; the lookup's one 15-second deadline remains the upper bound.
@@ -521,5 +590,6 @@ static void CloseEmbeddedNotesSignIns() {
 }
 #else
 static bool OpenEmbeddedNotesSignIn(HWND, int) { return false; }
+static bool OpenEmbeddedNotesSignInForTile(HWND, int, const std::wstring&) { return false; }
 static void CloseEmbeddedNotesSignIns() {}
 #endif

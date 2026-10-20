@@ -151,7 +151,8 @@ static void TestSecondaryTargets() {
     notification::Payload payload;
     for (const auto* target : {L"AipSource_smtc", L"AipSource_rss", L"AipSource_genshin", L"AipSource_hsr", L"AipSource_zzz", L"AipSource_discord",
         L"AipAction_toggle", L"AipAction_play", L"AipAction_pause", L"AipAction_previous", L"AipAction_next",
-        L"AipAction_repeat", L"AipAction_shuffle", L"AipAction_volume_down", L"AipAction_volume_up"}) {
+        L"AipAction_repeat", L"AipAction_shuffle", L"AipAction_volume_down", L"AipAction_volume_up",
+        L"AipSource_rss-0123456789abcdef", L"AipSource_prayertimes-second-city", L"AipSource_news-one"}) {
         Check(notification::Encode(xml, {false, {}, false, target}, transport, error) &&
             transport.find(notification::SecondaryMarker) == 0 && notification::Decode(transport, payload, error) &&
             payload.xml == xml && payload.options.secondaryTileId == target && !payload.options.queued,
@@ -177,7 +178,9 @@ static void TestSecondaryTargets() {
     for (const auto& bad : std::vector<std::wstring>{
         prefix + L"0\t0\t\r\n" + xml, prefix + L"0\t0\t\t\r\n" + xml,
         prefix + L"0\t0\t\t_bad\r\n" + xml, prefix + L"0\t0\t\tbad target\r\n" + xml,
-        prefix + L"0\t0\t\tAipAction_volume-down\r\n" + xml,
+        prefix + L"0\t0\t\tAipSource_rss/invalid\r\n" + xml,
+        prefix + L"0\t0\t\tAipSource_rss:invalid\r\n" + xml,
+        prefix + L"0\t0\t\tAipSource_rss\x1f" L"invalid\r\n" + xml,
         prefix + L"0\t0\t\tAipSource_smtc\textra\r\n" + xml,
         prefix + L"0\t0\t\t" + std::wstring(65, L'a') + L"\r\n" + xml }) {
         FakeState state;
@@ -186,6 +189,14 @@ static void TestSecondaryTargets() {
     Check(notification::Encode(xml, {false, {}, false, std::wstring(64, L'a')}, transport, error) &&
         notification::Decode(transport, payload, error) && payload.options.secondaryTileId.size() == 64,
         "maximum Windows secondary tile ID fits its bounded private header");
+    const auto maximumInstance = L"AipSource_" + std::wstring(53,L'r') + L"-";
+    Check(notification::Encode(xml, {false, {}, false, maximumInstance}, transport, error) &&
+        notification::Decode(transport,payload,error) && payload.options.secondaryTileId == maximumInstance,
+        "maximum-length independent tile ID preserves a supported hyphen through the actual payload encoder and decoder");
+    for (const auto& invalid : std::vector<std::wstring>{L"AipSource_rss?invalid",L"AipSource_rss/invalid",L"AipSource_rss\ninvalid",
+        L"-AipSource_rss",L"AipSource_" + std::wstring(55,L'r')})
+        Check(!notification::Encode(xml,{false,{},false,invalid},transport,error) && transport.empty() && !error.empty(),
+            "independent tile hyphen support retains target punctuation, control, first-character and length rejection");
 }
 int main() {
     try {

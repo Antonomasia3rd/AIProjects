@@ -3,6 +3,7 @@ static constexpr UINT ID_QUICK_ACTIONS_VOLUME = 29001;
 static constexpr UINT ID_QUICK_ACTIONS_CLICK = 29100;
 static constexpr UINT ID_QUICK_ACTIONS_SETUP = 29199;
 static constexpr UINT ID_QUICK_ACTIONS_PIN = 29200;
+static constexpr UINT QUICK_ACTIONS_PIN_STRIDE = 3;
 static constexpr UINT ID_QUICK_ACTIONS_APPEARANCE = 29300;
 static constexpr UINT ID_QUICK_ACTIONS_PIN_ALL = 29320;
 static void AppendQuickActionsMenu(HMENU parent)
@@ -11,21 +12,22 @@ static void AppendQuickActionsMenu(HMENU parent)
     aip::AppendTrayMenuItem(menu, ID_QUICK_ACTIONS_PIN_ALL, SecondaryTileUiString(L"QuickActionsPinAll", L"Pin all Quick Actions..."), false, SecondaryTilePinUiAvailable());
     AppendTileAppearanceMenu(menu, L"MediaActions", ID_QUICK_ACTIONS_APPEARANCE);
     aip::AppendTrayMenuItem(menu, ID_QUICK_ACTIONS_VOLUME, L"Volume step (%)...", false, true);
-    HMENU click = aip::BeginTrayNestedMenu(menu);
-    const auto current = IniReadS(L"Tile.smtc", L"ClickAction", L"toggle");
-    aip::AppendTrayMenuItem(click, ID_QUICK_ACTIONS_SETUP, L"Open source settings", current == L"setup", true);
-    for (std::size_t index = 0; index < aip::content::TileActionCount; ++index) {
-        const auto& action = aip::content::TileActions[index];
-        aip::AppendTrayMenuItem(click, ID_QUICK_ACTIONS_CLICK + static_cast<UINT>(index), action.label, current == action.id, true);
+    if (!TileInstanceModeRequested()) {
+        HMENU click = aip::BeginTrayNestedMenu(menu);
+        const auto current = IniReadS(L"Tile.smtc", L"ClickAction", L"toggle");
+        aip::AppendTrayMenuItem(click, ID_QUICK_ACTIONS_SETUP, L"Open source settings", current == L"setup", true);
+        for (std::size_t index = 0; index < aip::content::TileActionCount; ++index) {
+            const auto& action = aip::content::TileActions[index];
+            aip::AppendTrayMenuItem(click, ID_QUICK_ACTIONS_CLICK + static_cast<UINT>(index), action.label, current == action.id, true);
+        }
+        aip::EndTrayNestedMenu(menu, click, L"Now playing tile click");
     }
-    aip::EndTrayNestedMenu(menu, click, L"Now playing tile click");
     for (std::size_t index = 0; index < aip::content::TileActionCount; ++index) {
         const auto& action = aip::content::TileActions[index];
         HMENU tile = aip::BeginTrayNestedMenu(menu);
-        const bool available = SecondaryTilePinUiAvailable();
         const auto id = CanonicalSecondaryTileRuntimeId(L"AipAction_" + std::wstring(action.id));
-        aip::AppendTrayMenuItem(tile, ID_QUICK_ACTIONS_PIN + static_cast<UINT>(index) * 2, SecondaryTileUiString(L"PinTile", L"Pin tile..."), false, available);
-        aip::AppendTrayMenuItem(tile, ID_QUICK_ACTIONS_PIN + static_cast<UINT>(index) * 2 + 1, L"Unpin from Start...", false, available && SecondaryTileExists(id));
+        const auto base = ID_QUICK_ACTIONS_PIN + static_cast<UINT>(index) * QUICK_ACTIONS_PIN_STRIDE;
+        AppendSecondaryTilePinCommands(tile, id, base, base + 1, base + 2);
         aip::EndTrayNestedMenu(menu, tile, action.label);
     }
     aip::EndTrayNestedMenu(parent, menu, L"Quick Actions");
@@ -49,10 +51,12 @@ static bool DispatchQuickActionsCommand(HWND owner, UINT command)
         const auto value = command == ID_QUICK_ACTIONS_SETUP ? L"setup" : aip::content::TileActions[command - ID_QUICK_ACTIONS_CLICK].id;
         SaveSecondaryTileMenuSettings(owner, {{L"Tile.smtc", L"ClickAction", value}}); return true;
     }
-    if (command >= ID_QUICK_ACTIONS_PIN && command < ID_QUICK_ACTIONS_PIN + 2 * aip::content::TileActionCount) {
-        const auto& action = aip::content::TileActions[(command - ID_QUICK_ACTIONS_PIN) / 2];
+    if (command >= ID_QUICK_ACTIONS_PIN && command < ID_QUICK_ACTIONS_PIN + QUICK_ACTIONS_PIN_STRIDE * aip::content::TileActionCount) {
+        const auto& action = aip::content::TileActions[(command - ID_QUICK_ACTIONS_PIN) / QUICK_ACTIONS_PIN_STRIDE];
         const auto id = CanonicalSecondaryTileRuntimeId(L"AipAction_" + std::wstring(action.id));
-        if ((command - ID_QUICK_ACTIONS_PIN) % 2) RequestUnpinSecondaryTile(owner, id);
+        const auto operation = (command - ID_QUICK_ACTIONS_PIN) % QUICK_ACTIONS_PIN_STRIDE;
+        if (operation == 2) RequestSecondaryTileList(owner);
+        else if (operation == 1) RequestUnpinSecondaryTile(owner, id);
         else RequestPinSecondaryTile(owner, id, action.label);
         return true;
     }

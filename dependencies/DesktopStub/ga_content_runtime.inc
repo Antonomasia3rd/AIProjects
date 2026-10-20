@@ -289,23 +289,34 @@ struct ContentRssProvider
 {
     aip::content::AsyncSource<RssFeedSnapshot> source;
     bool waitExpired = false;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    std::function<RssFeedSnapshot(const RssFeedSettings&)> testReader;
+#endif
     static std::wstring Key(const RssFeedSettings& settings)
     {
         return settings.feedUrl + L"\n" + settings.userAgent + L"\n" +
             std::to_wstring(settings.maxItems) + L":" + std::to_wstring(settings.httpTimeoutSeconds) +
             L":" + std::to_wstring(settings.maxFeedBytes) + L":" + settings.validationError;
     }
-    void Refresh(const RssFeedSettings& settings, bool synchronous)
+    void Refresh(const RssFeedSettings& settings, bool synchronous, bool force = false)
     {
         waitExpired = false;
         const auto key = Key(settings);
         source.Request(key, milliseconds(static_cast<long long>(settings.updateIntervalSeconds) * 1000),
-            [settings](const aip::content::AsyncSource<RssFeedSnapshot>::Cancel& canceled) {
+            [settings
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+                , reader = testReader
+#endif
+            ](const aip::content::AsyncSource<RssFeedSnapshot>::Cancel& canceled) {
                 RssFeedSnapshot result;
                 if (!settings.valid) { result.status = settings.validationError; return result; }
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+                if (reader) return reader(settings);
+                result.status = L"RSS is unavailable in inert validation."; return result;
+#endif
                 try { return ReadRssFeedSnapshot(settings, canceled); }
                 catch (const winrt::hresult_error& ex) { result.status = ex.message().c_str(); return result; }
-            }, WakePollThread, synchronous);
+            }, WakePollThread, synchronous || force);
         if (synchronous && !source.Wait(key, milliseconds(static_cast<long long>(settings.httpTimeoutSeconds) * 1000 + 1000))) {
             waitExpired = true; source.CancelPending();
         }
@@ -416,7 +427,7 @@ struct ContentPrayerProvider {
         if (captured.data.configKey.empty()) captured.data.configKey = aip::prayer::ConfigurationKey(cfg);
         if (captured.data.schedule.days.empty() && captured.data.error.empty() && !cfg.city.empty() && !cfg.country.empty())
             captured.data.error = error.empty() ? IniReadS(L"Strings", L"PrayerLoading", L"Loading prayer schedule...") : aip::Utf8ToWide(error);
-        auto formatting = aip::prayer::ConfigurationKey(cfg) + L":" + std::to_wstring(cfg.showSunrise) + L":" + std::to_wstring(cfg.twentyFourHour);
+        auto formatting = aip::prayer::ConfigurationKey(cfg) + L":" + std::to_wstring(cfg.showSunrise) + L":" + std::to_wstring(cfg.twentyFourHour) + L":" + std::to_wstring(cfg.showTimetable);
         for (const auto adjustment : cfg.adjustmentsMinutes) formatting += L":" + std::to_wstring(adjustment);
         const auto now = Now(), minute = now / 60;
         if (!haveView || minute != viewedMinute || (view.nextUTCDeadline > 0 && now >= view.nextUTCDeadline) || viewedSerial != captured.serial || formatting != formatKey) {
@@ -450,6 +461,14 @@ static std::map<std::size_t, ContentSecondaryConfigurationView> g_contentSeconda
 static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstring& error,
         aip::content::SecondaryTileConfiguration* tiles)
 {
+    if (TileInstanceModeRequested()) {
+        aip::content::TileInstanceConfiguration instances;
+        if (!ReadCurrentTileInstances(instances, error)) return false;
+        cfg = {}; cfg.enabled = true;
+        if (tiles) *tiles = {};
+        for (const auto& tile : instances.tiles) if (tile.primary) { cfg = tile.configuration; break; }
+        return true;
+    }
     std::wstring profile;
     { std::lock_guard<std::mutex> lock(g_pathMutex); profile = aip::MakeAbsolutePath(g_iniPath); }
     std::unique_lock<std::mutex> viewLock(g_contentConfigurationViewMutex, std::defer_lock);
@@ -552,6 +571,9 @@ static bool ReadContentConfiguration(aip::content::Configuration& cfg, std::wstr
 
 static std::wstring ContentBackgroundPath(const aip::content::Entry& entry, const aip::content::SmtcMediaSnapshot* media = nullptr)
 {
+#ifdef DESKTOPSTUB_TEST_CONTENT_BACKGROUND_REQUEST
+    DESKTOPSTUB_TEST_CONTENT_BACKGROUND_REQUEST(entry);
+#endif
     const auto background = aip::content::BackgroundIdFor(entry.background);
     switch (background) {
     case aip::content::BackgroundId::Image: {
@@ -636,6 +658,12 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
     key += L":branding:" + snapshot.secondaryBranding;
     if (snapshot.textMode != aip::content::TextMode::Off && snapshot.presentation.Active()) key += L":presentation:" + aip::content::TextPresentationKey(snapshot.presentation);
     if (snapshot.textMode != aip::content::TextMode::Off) key += L":prayer:" + std::to_wstring(snapshot.prayerSource);
+    if (snapshot.textMode != aip::content::TextMode::Off && snapshot.prayerSource) {
+        for (const auto& field : {snapshot.prayerClock.time,snapshot.prayerClock.prayer,snapshot.prayerClock.location,
+            snapshot.prayerClock.minutes,snapshot.prayerClock.countdown,snapshot.prayerClock.details})
+            key += L":prayerClock:" + std::to_wstring(field.size()) + L":" + field;
+        key += L":prayerTimetable:" + std::to_wstring(snapshot.prayerClock.showTimetable);
+    }
     if (snapshot.textMode != aip::content::TextMode::Off) {
     for (const auto& headline : snapshot.rssHeadlines)
         key += L":" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
@@ -654,8 +682,10 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
     return key;
 }
 
+#include "ga_tile_instance_runtime.inc"
 static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 {
+    if (TileInstanceModeRequested()) return TileInstanceEngineTick(synchronous, queueGeneration);
     static aip::content::Cycle cycle;
     static std::wstring lastFrame, lastError, lastWarning, lastSecondaryBackgroundError;
     struct BackgroundCache { std::wstring path; ULONGLONG nextRead = 0; };
@@ -850,6 +880,10 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
                 aip::content::Text{prayer.title, prayer.secondary, prayer.badge};
             if (entry.sources.size() == 1) {
                 snapshot.prayerSource = true;
+                snapshot.prayerClock = prayer.clock;
+                if (prayer.clock.Available()) snapshot.text = {}; // The shared overlay below uses the clock fields.
+                if (prayer.clock.Available()) text = {prayer.clock.time, prayer.clock.prayer + L"\nat " + prayer.clock.location,
+                    prayer.clock.countdown + (prayer.clock.details.empty() ? L"" : L"\n" + prayer.clock.details)};
                 for (const auto& row : prayer.detailRows) snapshot.detailRows.push_back({
                     IniReadS(L"Strings", (L"PrayerLabel" + std::wstring(aip::prayer::PrayerName(row.id))).c_str(), row.label.c_str()), row.value, L""});
                 if (!prayer.available) {
@@ -1039,6 +1073,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 }
 
 static void StopContentProviders() {
+    StopTileInstanceProviders();
     StopGallerySource();
     // Request hardware cancellation before waiting on other sources.
     g_contentCaps.Cancel(); g_contentAsus.Cancel();

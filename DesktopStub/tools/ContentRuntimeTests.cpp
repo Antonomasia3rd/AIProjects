@@ -20,6 +20,14 @@ static unsigned contentBaseConfigurationParses = 0, contentSecondaryConfiguratio
 static std::wstring contentCacheSwitchProfileOnParse;
 static void ContentTestConfigurationParsed(bool secondary);
 #define DESKTOPSTUB_TEST_CONTENT_CONFIGURATION_PARSED(secondary) ContentTestConfigurationParsed(secondary)
+static unsigned contentWallpaperBackgroundRequests = 0;
+static unsigned contentBackgroundRequests = 0;
+static void ContentTestBackgroundRequested(const aip::content::Entry& entry) {
+    ++contentBackgroundRequests;
+    const auto id = aip::content::BackgroundIdFor(entry.background);
+    if (id == aip::content::BackgroundId::Wallpaper || id == aip::content::BackgroundId::LiveWallpaper) ++contentWallpaperBackgroundRequests;
+}
+#define DESKTOPSTUB_TEST_CONTENT_BACKGROUND_REQUEST(entry) ContentTestBackgroundRequested(entry)
 static std::vector<std::wstring> contentAssetCleanupDirectories;
 static void ContentTestVersionedAssetCleanup(const std::wstring& directory) { contentAssetCleanupDirectories.push_back(directory); }
 #define DESKTOPSTUB_TEST_VERSIONED_ASSET_CLEANUP(directory) ContentTestVersionedAssetCleanup(directory)
@@ -193,6 +201,11 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "PrayerCacheHostTests.inc"
 #include "PrayerTimesHostTests.inc"
 #include "TextPresentationHostTests.inc"
+#include "TileLifecycleHostTests.inc"
+#include "GenerationAdmissionHostTests.inc"
+#include "TileInstanceRuntimeHostTests.inc"
+#include "TileInstanceActivationHostTests.inc"
+#include "TileInstanceTrayHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
@@ -1153,6 +1166,11 @@ int wmain()
     TestPrayerCacheHost(directory);
     TestPrayerTimesHost(bitmapPath);
     TestTextPresentationHost();
+    TestTileLifecycleHost(bitmapPath);
+    TestTileInstanceRuntimeHost();
+    TestTileInstanceActivationHost();
+    TestTileInstanceTrayHost();
+    TestGenerationAdmissionHost(bitmapPath);
     StopContentProviders(); PublishContentSnapshot({});
     DeleteFileW(ini.c_str()); DeleteFileW(bitmapPath.c_str()); DeleteFileW(g_logPath.c_str());
     RemoveDirectoryW(directory.c_str());
@@ -1450,13 +1468,21 @@ int wmain()
     TestSecondaryTileHost(bitmapPath);
     fixtureGroup("gallery delivery, ledger and setup");
     TestGalleryHost(bitmapPath);
+    fixtureGroup("gallery submitted status retention");
     TestGalleryStatusRetentionHost(bitmapPath);
+    fixtureGroup("gallery native private ledger");
     TestGalleryLedgerHost(directory);
+    fixtureGroup("gallery setup staging");
     TestGallerySetupHost();
+    fixtureGroup("gallery pin batch policy");
     TestGalleryPinBatchHost();
+    fixtureGroup("tile status and icon lifetime");
     TestTileStatusHost();
+    fixtureGroup("primary asset retention");
     TestPrimaryAssetRetentionHost(directory);
+    fixtureGroup("hidden paged text dialog");
     TestPagedTextDialogHost();
+    fixtureGroup("content presets and confirmation policy");
     TestContentPresetsAndImportConfirmation();
     fixtureGroup("Discord advanced profile");
     TestDiscordAdvancedHost();

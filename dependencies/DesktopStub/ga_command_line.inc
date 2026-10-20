@@ -770,12 +770,24 @@ static bool RssFeedIntegerRange(
     return false;
 }
 
+#include "../tile_instances.h"
 static bool NormalizeDesktopStubTypedSetting(
     const std::wstring& section,
     const std::wstring& key,
     std::wstring& value,
     std::wstring& error)
 {
+    if (aip::content::IsTileInstanceSetting(section, key)) {
+        if (!aip::content::NormalizeTileInstanceSetting(section, key, value, error)) return false;
+        const auto dot = key.find(L'.');
+        if (dot != std::wstring::npos && IEquals(key.substr(0, dot), L"RssFeed")) {
+            std::wstring issue;
+            if (!NormalizeDesktopStubTypedSetting(L"RssFeed", key.substr(dot + 1), value, issue)) {
+                error = section + L"." + key + L": " + issue; return false;
+            }
+        }
+        return true;
+    }
     if (aip::gallery::KnownGallerySection(section))
         return aip::gallery::NormalizeSetting(section, key, value, error);
     if (aip::notes::KnownSignInSection(section))
@@ -857,6 +869,17 @@ static bool TryParseCommandLineOverrideSpec(
             ? L"Section and key cannot be empty: " + spec
             : L"Expected Section.Key=Value: " + spec;
         return false;
+    }
+
+    // Instance fields deliberately contain dots (RssFeed.FeedUrl, Notes.UID).
+    // The shared grammar retains its last-dot split for all other programs;
+    // DesktopStub knows that Tile.<stable-id> is the complete section name.
+    if (aip::content::Lower(setting.section).compare(0, 5, L"tile.") == 0) {
+        const auto afterId = setting.section.find(L'.', 5);
+        if (afterId != std::wstring::npos && aip::content::ValidTileInstanceId(aip::content::Lower(setting.section.substr(5, afterId - 5)))) {
+            setting.key = setting.section.substr(afterId + 1) + L"." + setting.key;
+            setting.section.resize(afterId);
+        }
     }
 
     section = std::move(setting.section);
@@ -1263,9 +1286,9 @@ static bool ParseCommandLineOptions()
         if (IEquals(arg, L"--tile-sign-in")) { g_commandLine.tileSignIn = true; continue; }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-setup", value, error, matched)) return fail(error);
         if (matched) {
-            const auto* tile = aip::content::FindSecondaryTileDescriptor(value);
-            if (!tile) return fail(L"--tile-setup expects smtc, rss, genshin, hsr, zzz or discord.");
-            g_commandLine.tileSetupKey = tile->id;
+            value = aip::content::Lower(aip::content::Trim(value));
+            if (!aip::content::ValidTileInstanceId(value)) return fail(L"--tile-setup expects a configured tile ID.");
+            g_commandLine.tileSetupKey = value;
             continue;
         }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--preset", value, error, matched)) return fail(error);
@@ -2062,7 +2085,7 @@ static bool ParseCommandLineOptions()
     if (g_commandLine.tileSetupKey.empty() && g_commandLine.mediaAction.empty()) {
         const auto& id = g_commandLine.windowsTileId;
         if (id.compare(0, 10, L"AipSource_") == 0) {
-            if (const auto* tile = aip::content::FindSecondaryTileDescriptor(id.substr(10))) g_commandLine.tileSetupKey = tile->id;
+            if (aip::content::ValidTileInstanceId(id.substr(10))) g_commandLine.tileSetupKey = id.substr(10);
         } else if (id.compare(0, 10, L"AipAction_") == 0) {
             auto key = id.substr(10); std::replace(key.begin(), key.end(), L'_', L'-');
             if (const auto* action = aip::content::FindTileAction(key)) g_commandLine.mediaAction = action->id;
@@ -2649,6 +2672,33 @@ static bool ValidateDesktopStubContentProfileValues(
     return true;
 }
 
+template<class Reader> static bool ValidateTileInstanceHostConfiguration(Reader read,
+    aip::content::TileInstanceConfiguration& cfg, std::wstring& error)
+{
+    aip::content::TileInstanceConfiguration candidate;
+    if (!aip::content::ReadTileInstanceConfiguration(read, candidate, error)) return false;
+    for (const auto& tile : candidate.tiles) if (tile.type == aip::content::TileInstanceType::Rss) {
+        const auto field = [&](const wchar_t* key, const wchar_t* fallback) {
+            return aip::content::TileInstanceRead(tile, read, L"RssFeed", key, fallback);
+        };
+        if (!ValidateDesktopStubContentProfileValues(L"Wallpaper", field(L"FeedUrl", L""),
+            field(L"UserAgent", L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)"),
+            field(L"UpdateIntervalSeconds", L"900"), field(L"MaxItems", L"5"),
+            field(L"HttpTimeoutSeconds", L"20"), field(L"MaxFeedBytes", L"2097152"), error)) {
+            error = aip::content::TileInstanceSection(tile.id) + L": " + error; return false;
+        }
+    }
+    cfg = std::move(candidate); error.clear(); return true;
+}
+template<class Reader> static bool ValidateTileInstanceProfileIfConfigured(Reader read, bool& configured, std::wstring& error)
+{
+    aip::content::TileInstanceConfiguration tiles;
+    if (!ValidateTileInstanceHostConfiguration(read, tiles, error)) return false;
+    configured = tiles.configured;
+    if (!configured) return true;
+    aip::gallery::Configuration gallery;
+    return aip::gallery::ReadConfiguration(read, gallery, error);
+}
 static bool ValidateDesktopStubProfileDocument(const std::wstring& text, std::wstring& error)
 {
     const auto document = aip::ParseIniDocument(text);
@@ -2660,6 +2710,9 @@ static bool ValidateDesktopStubProfileDocument(const std::wstring& text, std::ws
         if (!NormalizeDesktopStubDisplaySettingValue(setting, value, error)) return false;
     }
     if (!aip::notes::ValidateNotesSignInConfiguration(read, error)) return false;
+    bool instanceMode = false;
+    if (!ValidateTileInstanceProfileIfConfigured(read, instanceMode, error)) return false;
+    if (instanceMode) return true;
     aip::content::Configuration content;
     aip::content::SecondaryTileConfiguration tiles;
     aip::content::TileAppearance actions;
@@ -2683,6 +2736,9 @@ static bool ValidateCommandLinePresetDocument(const std::wstring& text, std::wst
     const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
     };
+    bool instanceMode = false;
+    if (!ValidateTileInstanceProfileIfConfigured(read, instanceMode, error)) return false;
+    if (instanceMode) return true;
     // This callback also validates an ordinary CLI mutation under the INI
     // lock. Preserve action-appearance parity even without a preset request.
     aip::content::TileAppearance actionAppearance;
@@ -2734,9 +2790,22 @@ static bool ValidateDesktopStubContentProfile(
     bool includeCommandLineOverrides,
     std::wstring& error)
 {
+    if (includeCommandLineOverrides && (!g_commandLine.presetName.empty() || !g_commandLine.nowPlayingImports.empty())) {
+        const wchar_t* absent = L"\x1f AIP instance list absent during composition preflight \x1f";
+        if (DesktopStubContentProfileValue(L"Tiles", L"Instances", absent, true) != absent) {
+            error = L"Legacy --preset and NowPlaying profile imports change global numbered contents and cannot configure independent tiles. "
+                L"Use Tiles > Add tile to add a tile of the desired type, or configure an existing Tile.<id> with --set.";
+            return false;
+        }
+    }
     if (includeCommandLineOverrides) PrepareCommandLineNotesServerChanges();
     if (includeCommandLineOverrides && !PrepareCommandLinePresetPreview(error)) return false;
     if (!ValidateDesktopStubDisplayProfile(includeCommandLineOverrides, error)) return false;
+    bool instanceMode = false;
+    if (!ValidateTileInstanceProfileIfConfigured([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
+    }, instanceMode, error)) return false;
+    if (instanceMode) return true;
     if (!aip::notes::ValidateNotesSignInConfiguration([includeCommandLineOverrides](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         return DesktopStubContentProfileValue(section, key, fallback, includeCommandLineOverrides);
     }, error)) return false;

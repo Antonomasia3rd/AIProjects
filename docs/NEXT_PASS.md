@@ -1,5 +1,106 @@
 # Next pass: outstanding fixes and acceptance
 
+## October 20 completed instance pass
+
+The independent-instance build is installed and native publication is verified;
+see [the final validation record](tile-instance-validation-2026-10-20.md).
+The final 628 extended checks include actual generation admission, profile-aware
+activation, dynamic-ID transport and background recovery. All seven source
+destinations appeared in successful completed native batches; the final
+resident passed 75 seconds with no failed batches in the observed window.
+The original profile/ledger/pin identities and configured Prayer location were
+preserved. The exact historical four-pixel renderer variation remains open.
+The earlier checkpoint below is retained as investigation history, not current
+installation status.
+
+## October 20 earlier checkpoint (superseded)
+
+Independent tile instances and the requested lifecycle/menu/Prayer changes are
+implemented in the working tree. Read [the instance guide](tile-instances-2026-10-20.md)
+for actual schema and controls. `[Tiles] Instances` selects independent
+`[Tile.<id>]` type-specific settings. Existing fixed source IDs, gallery groups,
+accounts and ownership history are retained by backed-up conversion. New-mode
+menus replace global composition controls with Tiles and Plugins. No unused
+Wallpaper tile means no wallpaper background queries in the runtime fixture.
+
+Validation already passed: 55 pure instance checks (including 1,100 instances),
+584 settled extended host checks, 220 Prayer model/layout checks, 21 injected
+Prayer source checks, 1,827 fresh DesktopStub source checks and 277 shared source
+checks. Product host and broker compile and scan clean. Reviewed host hash:
+`B056247F4DFD02B013343A4652914B36B8449507DD75B84BDC505991A543F60B`;
+broker: `DCF5B3EC1BB42F39C1F833E3DC07E850C3E0F11C2B43C0F5F1351DA74EE84D77`.
+
+**Not installed yet.** The ordinary resident and actual user profile remain on
+the previous build while these verification failures are investigated:
+
+- The full optimized core fixture exits `0xc0000409` at offset `0x2b7405` after
+  Gallery contain-pixel diagnostics, including a serial run without compiler
+  contention. This is not a watchdog timeout. See private
+  `tile-instances-oct20-core-serial-run.log`; a separately named diagnostic
+  fixture is being prepared to localize the failing call.
+- The product offline smoke reproduced the historical four-pixel opaque text
+  variation in Medium's unchanged primary `AAAA` when only an unsupported
+  secondary field changed. Preserved smoke directory:
+  `DesktopStubSmoke-11f1131bc8a5439faaf31419457db75d` under the user's Temp folder.
+  Differences are caption antialiasing pixels around y=93; exact comparison and
+  tolerances remain unchanged. Investigate before installing.
+
+Renderer/no-hardware gates and guarded installation remain. All work so far is
+bounded/private; no account sign-in, native pin, hardware or Startup acceptance
+was manufactured. The user's configured Surabaya location must be preserved.
+
+## User-requested tile-type redesign: brainstorm checkpoint
+
+The user requested documentation/brainstorming only near the current usage
+limit; implement after reset. Compatibility is not a priority because this
+version has not shipped. Preserve the actual user's accounts, pins and settings
+through an explicit backed-up conversion rather than maintaining confusing UI.
+
+New reported findings (not yet reproduced):
+- Gallery notifications appear to remain populated after DesktopStub exits.
+  Check shutdown clearing for every owned tile, including gallery destinations;
+  retain pinned shortcuts and ownership history. Separate image-file retention
+  from notification clearing: Windows may still need retained files.
+- RssHeadlines appeared ineffective or its setup was unclear. Reproduce the
+  exact saved per-tile settings, inheritance, active preset and native/bitmap
+  paths before assuming user error. Replace hidden dependencies with a direct
+  RSS layout selector and useful preview/status.
+- Global Tile status and per-tile Status appear to show the same screen.
+  Use one collection overview; a tile's status should select only that tile,
+  or remove the redundant action if there is no distinct useful behavior.
+- Pin/Unpin should be mutually exclusive when inventory is known. Unknown
+  inventory needs an honest checking/retry state, not two conflicting actions.
+
+Proposed architecture: tiles are independent instances identified by stable
+IDs. Each owns a type (Wallpaper, Gallery, RSS, Now Playing, Prayer Times,
+Notes/game, Discord, etc.), source configuration/account reference, layout,
+click action and update policy. Support multiple instances of a type (e.g.
+five independent RSS URLs/intervals). Retire the user-facing fixed global
+source slots and numbered content plumbing. Keep implementations under shared
+dependencies and one resident process/tray. Share internal connections/caches
+where appropriate without coupling each tile's preferences. Activate listeners
+only for demanded tile types; no Wallpaper tile means no wallpaper listener
+unless another explicit feature requires it. Dynamic tiles must not be limited
+to the current fixed seven source descriptors.
+
+Proposed UI: Tiles > Add tile... / each configured tile's relevant settings;
+Plugins for independent Caps/ASUS indicator actions; Application for Startup,
+tray/logging and shared app controls. Appearance and update settings belong to
+each tile. Optional defaults/templates can help creation but must not create
+obscure live inheritance dependencies. Notes accounts may share one credential
+store, with each tile explicitly selecting an account.
+
+Prayer layout requested: large next-prayer clock, prayer name and location;
+preferred separate top-right countdown column ("minutes" above a large number).
+Fallback: large time, "Dhuhr at Surabaya", then "in 44 minutes". Respect 12/24h
+choice; make this the Prayer type's default. A numeric countdown column can be
+composed within tile content; do not promise a custom shell badge position.
+Large tiles may retain the timetable beneath the header when it fits.
+
+Next: verify reported exit/RSS/status/pin behavior, settle the design with the
+user if necessary, implement tile-instance storage/runtime/UI, then private
+multi-RSS isolation/lifecycle/shutdown/layout tests before guarded installation.
+
 ## Completed text/memory follow-up
 
 Text presentation and primary stable-copy isolation are installed; see

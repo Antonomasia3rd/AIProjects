@@ -72,12 +72,12 @@ static bool RunNativeMediaAction(const std::wstring& key, int volumeStep, std::w
     return false;
 #endif
 }
-static void QueueMediaTileAction(HWND owner, const std::wstring& action)
+static void QueueMediaTileAction(HWND owner, const std::wstring& action, int requestedStep = -1)
 {
     if (!aip::content::FindTileAction(action)) return;
     if (g_mediaActionBusy.exchange(true)) return; // Do not accumulate repeated clicks.
     if (g_mediaActionThread.joinable()) g_mediaActionThread.join();
-    const int step = IniReadClampedI(L"MediaActions", L"VolumeStepPercent", 5, 1, 100);
+    const int step = requestedStep > 0 ? std::clamp(requestedStep, 1, 100) : IniReadClampedI(L"MediaActions", L"VolumeStepPercent", 5, 1, 100);
     try {
         g_mediaActionThread = std::thread([owner, action, step] {
             std::wstring error;

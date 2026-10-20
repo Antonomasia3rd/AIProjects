@@ -1317,6 +1317,12 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
         if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off) {
             if (g_renderContent->presentation.Active()) state += L"textPresentation=" + aip::content::TextPresentationKey(g_renderContent->presentation) + L";";
             state += L"prayerSource=" + std::to_wstring(g_renderContent->prayerSource) + L";";
+            if (g_renderContent->prayerSource) {
+                for (const auto& field : {g_renderContent->prayerClock.time,g_renderContent->prayerClock.prayer,g_renderContent->prayerClock.location,
+                    g_renderContent->prayerClock.minutes,g_renderContent->prayerClock.countdown,g_renderContent->prayerClock.details})
+                    state += L"prayerClock=" + std::to_wstring(field.size()) + L":" + field;
+                state += L"prayerTimetable=" + std::to_wstring(g_renderContent->prayerClock.showTimetable) + L";";
+            }
             state += L"wrapSourceText=" + std::to_wstring(g_renderContent->wrapSourceText) + L";";
             state += L"detailTopic=" + g_renderContent->detailTopic + L";";
             for (const auto& row : g_renderContent->detailRows)
@@ -2152,6 +2158,50 @@ static std::wstring CleanGenerationReasonForSentence(const wchar_t* reason)
     return text.empty() ? g_ui.unspecifiedReason : text;
 }
 
+static bool IsPrimaryRetirementGenerationFrame(const aip::content::Snapshot& frame)
+{
+    return frame.active && frame.secondaryTileId.empty() && !frame.galleryFrame && !frame.nativeQueue &&
+        frame.backgroundId == aip::content::BackgroundId::Transparent && frame.textMode == aip::content::TextMode::Off &&
+        frame.text.primary.empty() && frame.text.secondary.empty() && frame.text.badge.empty() &&
+        frame.rssHeadlines.empty() && frame.detailRows.empty() && !frame.smtcSource && !frame.prayerSource;
+}
+static const aip::content::TileInstance* FindCurrentGenerationTileInstance(const aip::content::TileInstanceConfiguration& instances,
+    const aip::content::Snapshot& frame)
+{
+    const auto found = std::find_if(instances.tiles.begin(), instances.tiles.end(), [&](const auto& tile) {
+        return frame.secondaryTileId.empty() ? tile.primary : !tile.primary && aip::content::TileInstanceNativeId(tile) == frame.secondaryTileId;
+    });
+    return found == instances.tiles.end() ? nullptr : &*found;
+}
+static bool CurrentGenerationTargetAllows(const aip::content::Snapshot& frame,
+    const aip::content::TileInstanceConfiguration* instances, const aip::content::Configuration& composition,
+    const aip::content::SecondaryTileConfiguration& secondary)
+{
+    if (frame.galleryFrame) return true; // Receipt/epoch checks remain at the gallery boundary.
+    if (instances) {
+        if (!instances->configured) return false;
+        const auto* tile = FindCurrentGenerationTileInstance(*instances, frame);
+        if (frame.secondaryTileId.empty()) return tile || IsPrimaryRetirementGenerationFrame(frame);
+        if (!tile) return false;
+#ifdef DESKTOPSTUB_TEST_SECONDARY_EXISTS
+        return DESKTOPSTUB_TEST_SECONDARY_EXISTS(frame.secondaryTileId);
+#else
+        return SecondaryTileExists(frame.secondaryTileId); // Cached inventory only; no metadata COM.
+#endif
+    }
+    if (frame.secondaryTileId.empty()) return true;
+    if (!secondary.enabled) return false;
+    return std::any_of(secondary.tiles.begin(), secondary.tiles.end(), [&](const auto& tile) {
+        return tile.enabled && L"AipSource_" + tile.id == frame.secondaryTileId && tile.content >= 1 &&
+            static_cast<std::size_t>(tile.content) <= composition.entries.size() &&
+            composition.entries[static_cast<std::size_t>(tile.content - 1)].enabled;
+    });
+}
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+// The real Generate admission path can be exercised without progressing into
+// image writes, registration, notification transport, or other integrations.
+static bool (*g_testGenerateAfterAdmission)(const aip::content::Snapshot&) = nullptr;
+#endif
 bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnly = false,
     const aip::content::Snapshot* suppliedContent = nullptr)
 {
@@ -2180,13 +2230,25 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         return false;
     }
     const bool composedContent = CompositionRequested();
+    const bool instanceMode = TileInstanceModeRequested();
+    ContentRenderScope contentScope(suppliedContent);
+    aip::content::TileInstanceConfiguration currentInstances;
     aip::content::Configuration currentContentConfiguration;
     aip::content::SecondaryTileConfiguration currentSecondaryConfiguration;
     if (composedContent)
     {
         // A live INI edit can arrive before the poller clears its old frame.
         // Validate one current document before accepting that published frame.
-        if (!ReadContentConfiguration(currentContentConfiguration, configurationError, &currentSecondaryConfiguration) || !currentContentConfiguration.enabled)
+        bool current = false;
+        if (instanceMode) {
+            current = ReadCurrentTileInstances(currentInstances, configurationError);
+            currentContentConfiguration.enabled = true;
+            if (current) {
+                const auto* tile = FindCurrentGenerationTileInstance(currentInstances, contentScope.snapshot);
+                if (tile && tile->error.empty()) currentContentConfiguration = tile->configuration;
+            }
+        } else current = ReadContentConfiguration(currentContentConfiguration, configurationError, &currentSecondaryConfiguration) && currentContentConfiguration.enabled;
+        if (!current)
         {
             Log(L"[!] Tile update skipped: %s", configurationError.empty()
                 ? L"the content configuration changed before this frame was ready." : configurationError.c_str());
@@ -2197,15 +2259,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     if (suppliedContent && suppliedContent->nativeQueue && !suppliedContent->galleryFrame &&
         (!ContentNativeQueueAvailable(currentContentConfiguration) ||
             suppliedContent->nativeQueueLayout != ContentNativeQueueLayout(currentContentConfiguration))) return false;
-    if (suppliedContent && !suppliedContent->secondaryTileId.empty() && !suppliedContent->galleryFrame) {
-        if (!currentSecondaryConfiguration.enabled) return false;
-        const auto target = std::find_if(currentSecondaryConfiguration.tiles.begin(), currentSecondaryConfiguration.tiles.end(), [&](const auto& tile) {
-            return tile.enabled && L"AipSource_" + tile.id == suppliedContent->secondaryTileId &&
-                currentContentConfiguration.entries[static_cast<std::size_t>(tile.content - 1)].enabled;
-        });
-        if (target == currentSecondaryConfiguration.tiles.end()) return false;
-    }
-    ContentRenderScope contentScope(suppliedContent);
+    if ((instanceMode || suppliedContent) && !CurrentGenerationTargetAllows(contentScope.snapshot,
+        instanceMode ? &currentInstances : nullptr, currentContentConfiguration, currentSecondaryConfiguration)) return false;
     if (composedContent && !contentScope.snapshot.active)
     {
         Log(L"[!] Tile update skipped: no current content frame is available. Check the tile contents configuration.");
@@ -2245,6 +2300,9 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         contentScope.snapshot.nativeQueueTag.clear();
         contentScope.snapshot.nativeQueueReset = false;
     }
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    if (g_testGenerateAfterAdmission) return g_testGenerateAfterAdmission(contentScope.snapshot);
+#endif
     bool assetsOk = true;
     bool restoredFromGeneratedAssetCache = false;
     std::vector<LiveTileUpdateAsset> liveTileUpdateAssets;

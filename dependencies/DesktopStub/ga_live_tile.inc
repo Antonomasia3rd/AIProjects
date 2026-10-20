@@ -257,7 +257,8 @@ static std::wstring NotesTileIconUri(const std::wstring& topic, const std::wstri
 }
 static const wchar_t* ContentLiveTileBrandingXmlValue()
 {
-    if (!g_renderContent || g_renderContent->secondaryTileId.empty()) return LiveTileBrandingXmlValue();
+    if (!g_renderContent || (g_renderContent->secondaryTileId.empty() && g_renderContent->secondaryBranding.empty()))
+        return LiveTileBrandingXmlValue();
     const auto value = ParseLiveTileBrandingValue(g_renderContent->secondaryBranding, LiveTileBranding::Name);
     switch (value) {
     case LiveTileBranding::None: return L"none";
@@ -321,7 +322,7 @@ static std::wstring BuildLiveTileXml(
         if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->prayerSource &&
             g_renderContent->textMode == aip::content::TextMode::Auto &&
             aip::content::AppendPrayerTileBinding(xml, templateName, asset.h, g_renderContent->text, g_renderContent->detailRows,
-                ContentHasTransparentBackground() ? L"" : uri)) { hasUsableBinding = true; continue; }
+                ContentHasTransparentBackground() ? L"" : uri, g_renderContent->prayerClock)) { hasUsableBinding = true; continue; }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->smtcSource &&
             g_renderContent->textMode == aip::content::TextMode::Auto) {
             std::wstring icon;
@@ -467,6 +468,33 @@ static bool Appx_Update_LiveTileXmlBare(const std::wstring& tileXml, std::wstrin
     }
 }
 
+// Only explicit owners from this profile are candidates. Gallery history is
+// retained when rows are removed/disabled, so include its still-pinned owners
+// without resetting reservations, advancing cursors, or deleting image assets.
+#include "../tile_lifecycle.h"
+static std::set<std::wstring> OwnedSecondaryTileIdsForClear()
+{
+    std::set<std::wstring> owned;
+    aip::content::TileInstanceConfiguration instances; std::wstring instanceError;
+    if (TileInstanceModeRequested()) {
+        if (ReadCurrentTileInstances(instances, instanceError)) for (const auto& tile : instances.tiles)
+            if (!tile.primary) owned.insert(aip::content::TileInstanceNativeId(tile));
+    } else for (const auto& tile : aip::content::SecondaryTiles) owned.insert(L"AipSource_" + std::wstring(tile.id));
+    aip::gallery::Configuration gallery; std::wstring error;
+    if (ReadGalleryConfiguration(gallery, error)) for (const auto& tile : gallery.tiles) {
+        const auto id = aip::gallery::NativeTileId(gallery.groupId, tile.id);
+        if (!id.empty()) owned.insert(id);
+    }
+    std::wstring profile; { std::lock_guard<std::mutex> lock(g_pathMutex); profile = aip::MakeAbsolutePath(g_iniPath); }
+    aip::gallery::Ledger ledger;
+    if (!profile.empty() && ReadGalleryLedgerNative(aip::gallery::runtime::LedgerPath(profile), ledger, error) == aip::gallery::runtime::ReadResult::Ok &&
+        aip::gallery::ValidateLedger(ledger, error)) for (const auto& tile : ledger.tiles) {
+        const auto id = aip::gallery::NativeTileId(ledger.groupId, tile.first);
+        if (!id.empty()) owned.insert(id);
+    }
+    return owned;
+}
+
 static bool Appx_Clear_LiveTileBare(std::wstring& failureMessage)
 {
     failureMessage.clear();
@@ -485,16 +513,22 @@ static bool Appx_Clear_LiveTileBare(std::wstring& failureMessage)
 
         using namespace winrt::Windows::UI::Notifications;
 
-        TileUpdater updater = TileUpdateManager::CreateTileUpdaterForApplication();
+        const auto updates = aip::AcquireUncachedActivationFactory<TileUpdateManager,
+            winrt::Windows::UI::Notifications::ITileUpdateManagerStatics>();
+        const auto nativeTiles = aip::AcquireUncachedActivationFactory<winrt::Windows::UI::StartScreen::SecondaryTile,
+            winrt::Windows::UI::StartScreen::ISecondaryTileStatics>();
+        const auto owned = OwnedSecondaryTileIdsForClear();
+        TileUpdater updater = updates.CreateTileUpdaterForApplication();
         updater.Clear();
-        // Clean shutdown returns source tiles to their own topic artwork.
-        // A primary clear must not leave secondary live text stuck indefinitely.
-        for (const auto& tile : aip::content::SecondaryTiles) {
-            const auto id = L"AipSource_" + std::wstring(tile.id);
-            if (!SecondaryTileExists(id)) continue;
-            try { TileUpdateManager::CreateTileUpdaterForSecondaryTile(id).Clear(); }
-            catch (...) { Log(L"[!] Could not clear source tile on shutdown: %ls", id.c_str()); }
-        }
+        // The cached pin inventory may be unavailable in a one-shot packaged
+        // clear helper. Query existence at this explicit cleanup boundary.
+        const auto failures = aip::content::ClearOwnedSecondaryTileNotifications(owned,
+            [&](const std::wstring& id) { return nativeTiles.Exists(id); },
+            [&](const std::wstring& id) { updates.CreateTileUpdaterForSecondaryTile(id).Clear(); });
+        for (const auto& id : failures) Log(L"[!] Could not clear owned tile notification on shutdown: %ls", id.c_str());
+        // Return the primary result, as before: startup must restore the primary
+        // once it was cleared even if a secondary failed. Each secondary failure
+        // remains explicit in the log; all other owned targets were attempted.
         return true;
     }
     catch (const winrt::hresult_error& e)

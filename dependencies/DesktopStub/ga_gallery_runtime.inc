@@ -654,9 +654,11 @@ static std::shared_ptr<const GalleryConfigurationView> CaptureGalleryConfigurati
             std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
         };
         auto candidate = std::make_shared<GalleryConfigurationView>(); candidate->profile = profile; candidate->revision = revision;
-        if (!aip::gallery::ReadConfiguration(read, candidate->configuration, error) ||
-            !aip::content::ParseBool(read(L"Content", L"Enabled", L"0"), candidate->contentEnabled) ||
-            !aip::content::ParseBool(read(L"Tiles", L"Enabled", L"0"), candidate->tilesEnabled)) {
+        const bool instances = aip::IniHasKeyInDoc(document,L"Tiles",L"Instances");
+        if (instances) candidate->contentEnabled = candidate->tilesEnabled = true;
+        if (!aip::gallery::ReadConfiguration(read, candidate->configuration, error) || (!instances &&
+            (!aip::content::ParseBool(read(L"Content", L"Enabled", L"0"), candidate->contentEnabled) ||
+            !aip::content::ParseBool(read(L"Tiles", L"Enabled", L"0"), candidate->tilesEnabled)))) {
             if (error.empty()) error = L"Gallery Content/Tiles enabled flags are invalid."; return {};
         }
         const auto absoluteFolder = [&](std::wstring& folder) {

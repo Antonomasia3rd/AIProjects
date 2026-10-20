@@ -61,6 +61,16 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
         LogWin32Failure(L"AppendBaselineTrayMenuHeader");
     }
 
+    if (TileInstanceModeRequested()) {
+        HMENU tilesMenu = beginSection(SecondaryTileUiString(L"TileInstancesTitle", L"Tiles"));
+        AppendTileInstancesMenu(tilesMenu);
+        AppendQuickActionsMenu(tilesMenu);
+        AppendGalleryTilesMenu(tilesMenu);
+        endSection(tilesMenu, SecondaryTileUiString(L"TileInstancesTitle", L"Tiles"));
+        HMENU pluginsMenu = beginSection(SecondaryTileUiString(L"TilePluginsTitle", L"Plugins"));
+        AppendTileInstancePluginsMenu(pluginsMenu);
+        endSection(pluginsMenu, SecondaryTileUiString(L"TilePluginsTitle", L"Plugins"));
+    } else {
     const auto& contentsTitle = g_ui.trayContentsTitle;
     const auto& sourcesTitle = g_ui.traySourcesTitle;
     const auto& updatesTitle = g_ui.trayUpdatesTitle;
@@ -381,8 +391,10 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     addTo(updatesMenu, ID_GENERATE_STARTUP, g_ui.generateOnStartup.c_str(), g_generateOnStartup);
     addTo(updatesMenu, ID_GENERATE_STARTUP_CHANGED_ONLY, g_ui.generateOnStartupOnlyWhenChanged.c_str(), g_generateOnStartupOnlyWhenChanged, g_generateOnStartup);
     endSection(updatesMenu, updatesTitle);
+    }
 
     HMENU generalMenu = beginSection(g_ui.generalTitle);
+    if (TileInstanceModeRequested()) AppendTileInstanceDeliveryMenu(generalMenu);
     AppendMenuWordingSettings(generalMenu);
     HMENU startupMenu = beginNestedMenu(generalMenu, L"CreatePopupMenu(Sign-in)");
     addTo(startupMenu, ID_RUN_AT_STARTUP, g_ui.runAtStartup.c_str(), startupInstalled);

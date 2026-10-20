@@ -26,8 +26,14 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
     std::wstring output;
     if (frame.textMode == aip::content::TextMode::Off) { AppendTileStatusLine(output, labels.textHidden); return output; }
     if (frame.textMode == aip::content::TextMode::Auto && frame.prayerSource) {
-        AppendTileStatusLine(output, frame.text.primary); AppendTileStatusLine(output, frame.text.secondary); AppendTileStatusLine(output, frame.text.badge);
-        if (aip::content::PrayerTileShowsSchedule(height, frame.detailRows)) for (const auto& row : frame.detailRows) {
+        if (frame.prayerClock.Available()) {
+            AppendTileStatusLine(output,frame.prayerClock.time); AppendTileStatusLine(output,frame.prayerClock.prayer);
+            AppendTileStatusLine(output,aip::content::PrayerLocationText(frame.prayerClock));
+            AppendTileStatusLine(output,frame.prayerClock.countdown); AppendTileStatusLine(output,frame.prayerClock.details);
+        } else {
+            AppendTileStatusLine(output, frame.text.primary); AppendTileStatusLine(output, frame.text.secondary); AppendTileStatusLine(output, frame.text.badge);
+        }
+        if (aip::content::PrayerTileShowsSchedule(height, frame.detailRows, frame.prayerClock)) for (const auto& row : frame.detailRows) {
             AppendTileStatusLine(output, row.primary + L" " + row.secondary);
         }
     } else if (frame.textMode == aip::content::TextMode::Auto && !frame.smtcSource && !frame.detailRows.empty()) {

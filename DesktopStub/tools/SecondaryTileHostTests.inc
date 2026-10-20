@@ -152,7 +152,8 @@ static void TestSecondaryTileHost(const std::wstring& bitmapPath)
         branded.secondaryBranding = L"NameAndLogo";
         Check(ContentSnapshotKey(branded) != nameKey, "a branding-only edit resends XML without requiring media text to change");
         render.snapshot.secondaryTileId.clear();
-        Check(std::wstring(ContentLiveTileBrandingXmlValue()) == LiveTileBrandingXmlValue(), "primary Desktop branding keeps its independent existing setting");
+        render.snapshot.secondaryBranding.clear();
+        Check(std::wstring(ContentLiveTileBrandingXmlValue()) == LiveTileBrandingXmlValue(), "legacy primary snapshots without an instance branding override retain the global setting");
     }
     secondaryTestPinned = false;
     Check(PrepareSecondaryBatch({frame}).empty(), "unpinned destinations cannot consume an update acknowledgement");

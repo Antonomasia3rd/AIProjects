@@ -40,9 +40,24 @@ static int RunRenderOnlyCommand()
     if (!ValidateCommandLineWallpaperPath() || !ValidateDesktopStubContentProfile(true, error))
         return fail(error.empty() ? g_commandLine.applyError : error);
     aip::content::Configuration composition;
-    if (!aip::content::ReadConfiguration([](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+    aip::content::TileInstance offlineInstance;
+    bool instanceMode = false;
+    const auto readOfflineConfiguration = [&](auto read, const auto& events) {
+        aip::content::TileInstanceConfiguration instances;
+        if (!ValidateTileInstanceHostConfiguration(read, instances, error)) return false;
+        instanceMode = instances.configured;
+        if (!instanceMode) return aip::content::ReadConfiguration(read, composition, error, events);
+        if (g_commandLine.configureOnly || manifestOnly) { composition = {}; return true; }
+        if (instances.tiles.empty()) { error = L"no tile instance is configured for offline rendering."; return false; }
+        auto selected = std::find_if(instances.tiles.begin(), instances.tiles.end(), [](const auto& tile) { return tile.primary; });
+        if (selected == instances.tiles.end()) selected = std::find_if(instances.tiles.begin(), instances.tiles.end(),
+            [](const auto& tile) { return tile.type == aip::content::TileInstanceType::Wallpaper; });
+        if (selected == instances.tiles.end()) { error = L"offline rendering needs a Wallpaper tile with explicit local input; external providers are not started."; return false; }
+        offlineInstance = *selected; composition = selected->configuration; return true;
+    };
+    if (!readOfflineConfiguration([](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
             return DesktopStubContentProfileValue(section, key, fallback, true);
-        }, composition, error, ReadContentAsusEvents(true))) return fail(error);
+        }, ReadContentAsusEvents(true))) return fail(error);
 
     aip::content::Snapshot snapshot;
     aip::content::Entry selectedEntry;
@@ -66,7 +81,12 @@ static int RunRenderOnlyCommand()
         snapshot.active = true;
         snapshot.name = selected->name;
         snapshot.textMode = composition.textMode;
+        snapshot.presentation = composition.presentation;
         snapshot.backgroundId = background;
+        if (instanceMode) {
+            snapshot.secondaryTileId = aip::content::TileInstanceNativeId(offlineInstance);
+            snapshot.secondaryBranding = offlineInstance.appearance.branding;
+        }
         selectedEntry = *selected;
         if (aip::content::EntryUsesSource(*selected, aip::content::SourceId::CustomText))
             snapshot.text = selected->custom;
@@ -103,9 +123,12 @@ static int RunRenderOnlyCommand()
                     IEquals(setting.section, L"AsusBlink") || IEquals(setting.section, L"CapsBlink"); })) {
                 const auto document = aip::ParseIniDocument(text);
                 aip::content::Configuration prospective; std::wstring issue;
-                if (!aip::content::ReadConfiguration([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+                const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
                     std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
-                }, prospective, issue, ContentAsusEventsFromDocument(document))) return false;
+                };
+                aip::content::TileInstanceConfiguration instances;
+                if (!ValidateTileInstanceHostConfiguration(read, instances, issue) || (!instances.configured &&
+                    !aip::content::ReadConfiguration(read, prospective, issue, ContentAsusEventsFromDocument(document)))) return false;
             }
             if (!ValidateCommandLinePresetDocument(text, g_commandLine.applyError)) return false;
             if (!g_commandLine.presetName.empty()) {
@@ -119,9 +142,9 @@ static int RunRenderOnlyCommand()
     // not its earlier preview, for this offline rendering request.
     if (!g_commandLine.presetName.empty() && !g_commandLine.configureOnly && !manifestOnly) {
         const auto document = aip::ParseIniDocument(g_commandLine.presetPreviewDocument);
-        if (!aip::content::ReadConfiguration([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
+        if (!readOfflineConfiguration([&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
             std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
-        }, composition, error, ContentAsusEventsFromDocument(document)) || !selectOfflineInput()) return fail(error);
+        }, ContentAsusEventsFromDocument(document)) || !selectOfflineInput()) return fail(error);
     }
     if (g_commandLine.configureOnly)
     {
