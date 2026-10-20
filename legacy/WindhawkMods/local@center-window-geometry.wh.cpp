@@ -2,7 +2,7 @@
 // @id              center-window-geometry
 // @name            Center Windows + Geometry
 // @description     Centers newly opened windows and shows X/Y/width/height while moving or resizing.
-// @version         0.1
+// @version         0.2
 // @author          Local
 // @include         windhawk.exe
 // @compilerOptions -ldwmapi -lgdi32 -lshell32
@@ -62,6 +62,62 @@ they have been shown, which can override automatic centering.
 #include <atomic>
 #include <unordered_set>
 
+// The stop event exists before the worker starts and remains valid until after
+// it exits. Window publication and message-queue creation cannot lose an unload
+// request. Windhawk serializes the owning init/uninit callbacks.
+class CenterGeometryWorkerLifecycle {
+    HANDLE m_stop = nullptr;
+    HANDLE m_thread = nullptr;
+
+public:
+    CenterGeometryWorkerLifecycle() = default;
+    CenterGeometryWorkerLifecycle(const CenterGeometryWorkerLifecycle&) = delete;
+    CenterGeometryWorkerLifecycle& operator=(const CenterGeometryWorkerLifecycle&) = delete;
+
+    bool Start(LPTHREAD_START_ROUTINE routine, void* argument = nullptr) {
+        if (!routine || m_thread || m_stop) return false;
+        m_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!m_stop) return false;
+        m_thread = CreateThread(nullptr, 0, routine, argument, 0, nullptr);
+        if (!m_thread) {
+            CloseHandle(m_stop);
+            m_stop = nullptr;
+            return false;
+        }
+        return true;
+    }
+
+    void RequestStop() {
+        if (m_stop) SetEvent(m_stop);
+    }
+
+    bool StopRequested() const {
+        return m_stop && WaitForSingleObject(m_stop, 0) == WAIT_OBJECT_0;
+    }
+
+    DWORD WaitForMessages() const {
+        if (!m_stop) return WAIT_FAILED;
+        return MsgWaitForMultipleObjectsEx(1, &m_stop, INFINITE,
+                                          QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    }
+
+    void Stop() {
+        RequestStop();
+        if (m_thread) {
+            // Never unload code which its worker can still execute.
+            WaitForSingleObject(m_thread, INFINITE);
+            CloseHandle(m_thread);
+            m_thread = nullptr;
+        }
+        if (m_stop) {
+            CloseHandle(m_stop);
+            m_stop = nullptr;
+        }
+    }
+};
+
+#ifndef CENTER_GEOMETRY_LIFECYCLE_TEST
+
 struct Settings {
     bool centerNewWindows;
     bool showGeometry;
@@ -71,7 +127,7 @@ struct Settings {
 
 Settings g_settings{};
 
-HANDLE g_workerThread = nullptr;
+CenterGeometryWorkerLifecycle g_worker;
 std::atomic<HWND> g_overlayWindow{nullptr};
 
 HWINEVENTHOOK g_objectHook = nullptr;
@@ -728,6 +784,7 @@ BOOL CALLBACK EnumExistingWindowsProc(
 // -----------------------------------------------------------------------------
 
 DWORD WINAPI WorkerThreadProc(LPVOID) {
+    if (g_worker.StopRequested()) return 0;
     LoadSettings();
 
     HINSTANCE instance =
@@ -773,6 +830,12 @@ DWORD WINAPI WorkerThreadProc(LPVOID) {
     }
 
     g_overlayWindow.store(overlay);
+
+    if (g_worker.StopRequested()) {
+        DestroyWindow(overlay);
+        UnregisterClassW(kOverlayClass, instance);
+        return 0;
+    }
 
     SetLayeredWindowAttributes(
         overlay,
@@ -828,16 +891,20 @@ DWORD WINAPI WorkerThreadProc(LPVOID) {
         DestroyWindow(overlay);
     }
 
-    MSG msg;
-
-    while (GetMessageW(
-               &msg,
-               nullptr,
-               0,
-               0) > 0) {
-
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+    bool quit = false;
+    while (!quit && !g_worker.StopRequested()) {
+        const DWORD wait = g_worker.WaitForMessages();
+        if (wait != WAIT_OBJECT_0 + 1) break;
+        MSG msg;
+        while (!g_worker.StopRequested() &&
+               PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                quit = true;
+                break;
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
     }
 
     if (IsWindow(overlay)) {
@@ -860,16 +927,7 @@ DWORD WINAPI WorkerThreadProc(LPVOID) {
 // -----------------------------------------------------------------------------
 
 BOOL WhTool_ModInit() {
-    g_workerThread =
-        CreateThread(
-            nullptr,
-            0,
-            WorkerThreadProc,
-            nullptr,
-            0,
-            nullptr);
-
-    return g_workerThread != nullptr;
+    return g_worker.Start(WorkerThreadProc);
 }
 
 
@@ -888,27 +946,7 @@ void WhTool_ModSettingsChanged() {
 
 
 void WhTool_ModUninit() {
-    HWND overlay =
-        g_overlayWindow.load();
-
-    if (overlay) {
-        PostMessageW(
-            overlay,
-            WM_CLOSE,
-            0,
-            0);
-    }
-
-    if (g_workerThread) {
-        WaitForSingleObject(
-            g_workerThread,
-            INFINITE);
-
-        CloseHandle(
-            g_workerThread);
-
-        g_workerThread = nullptr;
-    }
+    g_worker.Stop();
 }
 
 
@@ -1175,3 +1213,5 @@ void Wh_ModUninit() {
 
     ExitProcess(0);
 }
+
+#endif  // CENTER_GEOMETRY_LIFECYCLE_TEST
