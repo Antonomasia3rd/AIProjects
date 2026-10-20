@@ -315,8 +315,9 @@ static std::wstring BuildLiveTileXml(
 
         const wchar_t* templateName = LiveTileTemplateForTarget(asset.binding);
         if (LiveTileUsesAdaptiveXml() && g_renderContent && !g_renderContent->rssHeadlines.empty() &&
-            g_renderContent->textMode == aip::content::TextMode::Auto && g_renderContent->presentation.preset == L"RssHeadlines" &&
-            aip::content::AppendRssRichTileBinding(xml, templateName, asset.h, g_renderContent->rssHeadlines, ContentHasTransparentBackground() ? L"" : uri)) {
+            g_renderContent->textMode == aip::content::TextMode::Auto && aip::content::RssUsesRichLayout(g_renderContent->presentation) &&
+            aip::content::AppendRssRichTileBinding(xml, templateName, asset.h, g_renderContent->rssHeadlines,
+                ContentHasTransparentBackground() ? L"" : uri, g_renderContent->presentation)) {
             hasUsableBinding = true; continue;
         }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->prayerSource &&
@@ -380,7 +381,9 @@ static std::wstring BuildLiveTileXml(
 
     xml += L"  </visual>\r\n";
     xml += L"</tile>";
-    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active())
+    const bool richRssPresentation = g_renderContent && !g_renderContent->rssHeadlines.empty() &&
+        g_renderContent->textMode == aip::content::TextMode::Auto && aip::content::RssUsesRichLayout(g_renderContent->presentation);
+    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !richRssPresentation)
         xml = aip::content::ApplyTextPresentationXml(xml, g_renderContent->presentation);
     aip::tile_notification::Options options;
     if (g_renderContent) {
@@ -472,30 +475,49 @@ static bool Appx_Update_LiveTileXmlBare(const std::wstring& tileXml, std::wstrin
 // retained when rows are removed/disabled, so include its still-pinned owners
 // without resetting reservations, advancing cursors, or deleting image assets.
 #include "../tile_lifecycle.h"
-static std::set<std::wstring> OwnedSecondaryTileIdsForClear()
+static bool TileInstancePrimaryClearsOnShutdown()
+{
+    if(!TileInstanceModeRequested())return g_clearLiveTileOnShutdown.load();
+    aip::content::TileInstanceConfiguration instances;std::wstring error;
+    if(!ReadCurrentTileInstances(instances,error))return false;
+    return std::any_of(instances.tiles.begin(),instances.tiles.end(),[](const auto& tile){return tile.primary&&aip::content::TileInstanceClearsOnShutdown(tile);});
+}
+static bool AnyTileInstanceClearsOnShutdown()
+{
+    if(!TileInstanceModeRequested())return g_clearLiveTileOnShutdown.load();
+    if(g_clearLiveTileOnShutdown.load())return true; // Gallery keeps its existing global exit policy.
+    aip::content::TileInstanceConfiguration instances;std::wstring error;
+    if(ReadCurrentTileInstances(instances,error)&&std::any_of(instances.tiles.begin(),instances.tiles.end(),[](const auto& tile){return aip::content::TileInstanceClearsOnShutdown(tile);}))return true;
+    aip::gallery::Configuration gallery;
+    return ReadGalleryConfiguration(gallery,error)&&!gallery.groupId.empty()&&std::any_of(gallery.tiles.begin(),gallery.tiles.end(),[](const auto& tile){return tile.delivery.Read(L"Settings",L"ClearLiveTileOnShutdown",L"1")==L"1";});
+}
+static std::set<std::wstring> OwnedSecondaryTileIdsForClear(bool shutdownPolicy=false)
 {
     std::set<std::wstring> owned;
     aip::content::TileInstanceConfiguration instances; std::wstring instanceError;
     if (TileInstanceModeRequested()) {
         if (ReadCurrentTileInstances(instances, instanceError)) for (const auto& tile : instances.tiles)
-            if (!tile.primary) owned.insert(aip::content::TileInstanceNativeId(tile));
+            if (!tile.primary&&(!shutdownPolicy||aip::content::TileInstanceClearsOnShutdown(tile))) owned.insert(aip::content::TileInstanceNativeId(tile));
     } else for (const auto& tile : aip::content::SecondaryTiles) owned.insert(L"AipSource_" + std::wstring(tile.id));
     aip::gallery::Configuration gallery; std::wstring error;
+    std::map<std::wstring,bool> galleryExit;
     if (ReadGalleryConfiguration(gallery, error)) for (const auto& tile : gallery.tiles) {
         const auto id = aip::gallery::NativeTileId(gallery.groupId, tile.id);
-        if (!id.empty()) owned.insert(id);
+        const bool clear=tile.delivery.Read(L"Settings",L"ClearLiveTileOnShutdown",L"1")==L"1";
+        if (!id.empty()){galleryExit[id]=clear;if(!shutdownPolicy||clear)owned.insert(id);}
     }
     std::wstring profile; { std::lock_guard<std::mutex> lock(g_pathMutex); profile = aip::MakeAbsolutePath(g_iniPath); }
     aip::gallery::Ledger ledger;
     if (!profile.empty() && ReadGalleryLedgerNative(aip::gallery::runtime::LedgerPath(profile), ledger, error) == aip::gallery::runtime::ReadResult::Ok &&
         aip::gallery::ValidateLedger(ledger, error)) for (const auto& tile : ledger.tiles) {
         const auto id = aip::gallery::NativeTileId(ledger.groupId, tile.first);
-        if (!id.empty()) owned.insert(id);
+        const auto configured=galleryExit.find(id);const bool clear=configured==galleryExit.end()?g_clearLiveTileOnShutdown.load():configured->second;
+        if (!id.empty()&&(!shutdownPolicy||clear)) owned.insert(id);
     }
     return owned;
 }
 
-static bool Appx_Clear_LiveTileBare(std::wstring& failureMessage)
+static bool Appx_Clear_LiveTileBare(std::wstring& failureMessage,bool shutdownPolicy=false)
 {
     failureMessage.clear();
 
@@ -517,9 +539,10 @@ static bool Appx_Clear_LiveTileBare(std::wstring& failureMessage)
             winrt::Windows::UI::Notifications::ITileUpdateManagerStatics>();
         const auto nativeTiles = aip::AcquireUncachedActivationFactory<winrt::Windows::UI::StartScreen::SecondaryTile,
             winrt::Windows::UI::StartScreen::ISecondaryTileStatics>();
-        const auto owned = OwnedSecondaryTileIdsForClear();
-        TileUpdater updater = updates.CreateTileUpdaterForApplication();
-        updater.Clear();
+        const auto owned = OwnedSecondaryTileIdsForClear(shutdownPolicy);
+        if(!shutdownPolicy||TileInstancePrimaryClearsOnShutdown()){
+            TileUpdater updater = updates.CreateTileUpdaterForApplication();updater.Clear();
+        }
         // The cached pin inventory may be unavailable in a one-shot packaged
         // clear helper. Query existence at this explicit cleanup boundary.
         const auto failures = aip::content::ClearOwnedSecondaryTileNotifications(owned,
@@ -1776,12 +1799,12 @@ static bool Appx_Update_LiveTile(
     }
 }
 
-static bool Appx_Clear_Or_Request_LiveTile(std::wstring& failureMessage)
+static bool Appx_Clear_Or_Request_LiveTile(std::wstring& failureMessage,bool shutdownPolicy)
 {
     failureMessage.clear();
 
     if (CurrentProcessHasPackageIdentity())
-        return Appx_Clear_LiveTileBare(failureMessage);
+        return Appx_Clear_LiveTileBare(failureMessage,shutdownPolicy);
 
     ManifestCompatibilityTarget target = ConfiguredManifestCompatibilityTarget();
     if (target == ManifestCompatibilityTarget::Windows10 ||
@@ -1892,6 +1915,11 @@ static bool Appx_Clear_Or_Request_LiveTile(std::wstring& failureMessage)
 
     failureMessage = g_ui.liveTileUpdateRequiresIdentity;
     return false;
+}
+
+static bool Appx_Clear_Or_Request_LiveTile(std::wstring& failureMessage)
+{
+    return Appx_Clear_Or_Request_LiveTile(failureMessage,false);
 }
 
 static bool Appx_Update_Or_Request_LiveTile(

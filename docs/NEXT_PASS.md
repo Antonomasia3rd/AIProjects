@@ -1,5 +1,29 @@
 # Next pass: outstanding fixes and acceptance
 
+## October 20 delivery follow-up completed
+
+Per-tile delivery/cache/render policies and independent Registration identities
+are installed and verified. See [the follow-up validation record](tile-delivery-policies-2026-10-20.md).
+The 724 final host checks exercise actual PNG rendering with injected deployment;
+the full product smoke and SDK schema validation passed. Native installation
+passed its 75-second check with all seven source targets and a complete
+76-frame batch. Account values, prayer configuration and gallery ownership were
+preserved. Registration uses explicit setup and manual replacement pinning;
+existing native pins were not silently migrated.
+
+Remaining relevant acceptance/findings:
+- Observe actual Registration deployment/manual pinning and Windows' visible
+  image-cache refresh after choosing that mode; inert tests do not claim it.
+- Check native pin-flyout placement and RSS Default appearance during ordinary
+  use. Windows controls flyout size and its final position around the anchor.
+- A malformed hand-edited gallery row still pauses the shared gallery
+  configuration. Ordinary source tiles isolate invalid siblings; typed writes
+  reject invalid policy combinations.
+- Retain the historical exact four-pixel opaque caption variation as open.
+- The short installed CPU/RAM sample is recorded, but a controlled historical
+  wallpaper-only memory comparison and prolonged lock/resume stress are not
+  implied by it.
+
 ## October 20 completed instance pass
 
 The independent-instance build is installed and native publication is verified;

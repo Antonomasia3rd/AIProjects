@@ -3,6 +3,7 @@
 // -----------------------------------------------------------------------------
 #include "../live_capture_protocol.h"
 #include "../bounded_capture_process.inc"
+#include "../tile_policy_scope.h"
 
 enum class WallpaperDetectionMethod
 {
@@ -65,6 +66,15 @@ static WallpaperDetectionMethod CurrentWallpaperDetectionMethod()
 {
     return ParseWallpaperDetectionMethod(
         IniReadS(L"Settings", L"WallpaperDetectionMethod", L"TranscodedImageCache"));
+}
+
+static bool WallpaperDetectionFallbackEnabled()
+{
+    std::wstring value;
+    if (aip::content::TryReadTilePolicy(L"Settings", L"WallpaperDetectionFallbackOnInvalid", value)) {
+        return value == L"1";
+    }
+    return g_wallpaperDetectionFallbackOnInvalid.load();
 }
 
 static bool ShouldLogWallpaperDetectionEvent(const std::wstring& key)
@@ -1176,7 +1186,7 @@ std::wstring GetWallpaper(bool includeLiveWallpaper = true)
                 Log(g_ui.wallpaperDetectionMethodReturnedInvalid.c_str(), methodName, wallpaper.c_str());
         }
 
-        if (!g_wallpaperDetectionFallbackOnInvalid)
+        if (!WallpaperDetectionFallbackEnabled())
         {
             std::wstring disabledKey = L"wallpaper-fallback-disabled:";
             disabledKey += methodName;
@@ -1190,8 +1200,23 @@ std::wstring GetWallpaper(bool includeLiveWallpaper = true)
     }
 }
 
-FitMode GetWallpaperFit()
+static FitMode ReadUncapturedWallpaperFit()
 {
+    std::wstring scoped;
+    if (aip::content::TryReadTilePolicy(L"Settings", L"DisableFitting", scoped)) {
+        if (scoped == L"1") return FitMode::Fill;
+    }
+    if (aip::content::TryReadTilePolicy(L"Settings", L"TileWallpaperFit", scoped)) {
+        const auto fit = ToLowerCopy(TrimCopy(scoped));
+        if (fit == L"fill") return FitMode::Fill;
+        if (fit == L"fit") return FitMode::Fit;
+        if (fit == L"stretch") return FitMode::Stretch;
+        if (fit == L"center") return FitMode::Center;
+        if (fit == L"tile") return FitMode::Tile;
+        if (fit == L"span") return FitMode::Span;
+        // Auto follows the desktop; explicit modes above never query or
+        // modify desktop fitting and cannot alter another tile's settings.
+    }
     HKEY h;
     if (RegOpenKeyExW(HKEY_CURRENT_USER,
         L"Control Panel\\Desktop", 0, KEY_READ, &h))
@@ -1225,4 +1250,11 @@ FitMode GetWallpaperFit()
     case 22: return FitMode::Span;
     default: return FitMode::Center;
     }
+}
+
+FitMode GetWallpaperFit()
+{
+    FitMode captured;
+    if (TryContentWallpaperFit(captured)) return captured;
+    return ReadUncapturedWallpaperFit();
 }

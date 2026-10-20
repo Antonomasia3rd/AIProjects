@@ -3,6 +3,7 @@
 // starts a worker, accesses an account, or mutates the user's profile.
 #include "content_engine.h"
 #include "tile_actions.h"
+#include "tile_delivery_policy.h"
 #include <set>
 
 namespace aip { namespace content {
@@ -51,6 +52,7 @@ struct TileInstance {
     Configuration configuration;
     TileAppearance appearance;
     TextPresentation presentation;
+    TileDeliveryPolicy policy;
     std::wstring clickAction = L"setup", accountReference;
     std::wstring error; // Optional host diagnostic for a dormant invalid tile.
     // Additional provider fields not represented by content::Configuration.
@@ -63,6 +65,9 @@ struct TileInstanceConfiguration {
     std::vector<TileInstance> tiles;
 };
 inline std::wstring TileInstanceNativeId(const TileInstance& tile) { return tile.primary ? L"" : L"AipSource_" + tile.id; }
+inline bool TileInstanceClearsOnShutdown(const TileInstance& tile) {
+    return tile.policy.Read(L"Settings",L"ClearLiveTileOnShutdown",L"1")==L"1";
+}
 inline bool ParseTileInstanceIds(const std::wstring& text, std::vector<std::wstring>& output, std::wstring& error) {
     std::vector<std::wstring> ids; std::set<std::wstring> seen;
     if (!Trim(text).empty()) {
@@ -167,6 +172,7 @@ inline bool NormalizeTileInstanceSetting(const std::wstring& section, const std:
         return fail(L"unknown tile collection setting.");
     }
     if (s.compare(0, 5, L"tile.") != 0 || !ValidTileInstanceId(s.substr(5))) return fail(L"invalid tile instance section.");
+    if (FindTilePolicyField(key)) return NormalizeTilePolicySetting(key,value,error);
     if (k == L"type") {
         const auto* descriptor = FindTileInstanceType(value);
         if (!descriptor) return fail(L"unknown tile type.");
@@ -262,6 +268,7 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
         primarySeen = primarySeen || tile.primary;
         if (!tile.accountReference.empty() && descriptor->notesResource < 0) { error = section + L".Account is only applicable to game tiles."; return false; }
         if (!ReadTileAppearance(read, section, tile.appearance, error)) return false;
+        if (!ReadTileDeliveryPolicy(read,section,tile.id,tile.policy,error)) return false;
         if (!ReadConfiguration([&](const wchar_t* sourceSection, const wchar_t* key, const wchar_t* fallback) {
             return TileInstanceRead(tile, read, sourceSection, key, fallback);
         }, tile.configuration, error)) { error = section + L": " + error; return false; }
@@ -299,7 +306,14 @@ template<class Reader> bool PlanLegacyTileInstanceMigration(Reader read, TileIns
     if (read(L"Tiles", L"Instances", absent.c_str()) != absent) {
         TileInstanceConfiguration existing;
         if (!ReadTileInstanceConfiguration(read, existing, error)) return false;
-        output = std::move(plan); return true;
+        for(const auto& tile:existing.tiles)for(const auto& field:TilePolicyFields){
+            const auto section=TileInstanceSection(tile.id);
+            if(read(section.c_str(),field.key,absent.c_str())!=absent)continue;
+            auto value=read(field.section,field.setting,field.fallback);
+            if(!NormalizeTilePolicySetting(field.key,value,error)){error=section+L"."+error;return false;}
+            plan.settings.push_back({section,field.key,value});
+        }
+        plan.changed=!plan.settings.empty();output=std::move(plan);error.clear();return true;
     }
     auto add = [&](const std::wstring& section, const std::wstring& key, const std::wstring& value) { plan.settings.push_back({section,key,value}); };
     const auto copy = [&](const std::wstring& target, const std::wstring& sourceSection, const wchar_t* key, const std::wstring& targetKey) {
@@ -323,6 +337,13 @@ template<class Reader> bool PlanLegacyTileInstanceMigration(Reader read, TileIns
         for (const auto* key : {L"ImagePath",L"Text",L"SecondaryText",L"BadgeText",L"RssItem",L"NotesDetail"}) copy(section, oldContent, key, L"Content." + std::wstring(key));
         if (std::wstring(id) == L"desktop") copy(section, oldContent, L"Background", L"Content.Background");
         copy(section, L"Content", L"RefreshSeconds", L"RefreshSeconds"); copy(section, L"Content", L"TextMode", L"TextMode");
+        for(const auto& field:TilePolicyFields){
+            const auto local=read(section.c_str(),field.key,absent.c_str());
+            if(local!=absent)continue;
+            auto value=read(field.section,field.setting,field.fallback);
+            if(!NormalizeTilePolicySetting(field.key,value,error)){mappingsValid=false;continue;}
+            add(section,field.key,value);
+        }
         for (const auto* key : TextPresentationKeys) {
             const auto local = read(section.c_str(), key, absent.c_str());
             if (local == absent || (std::wstring(key) == L"TextPreset" && Lower(Trim(local)) == L"inherit")) {

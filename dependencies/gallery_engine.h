@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 #include "tile_appearance.h"
+#include "tile_delivery_policy.h"
 
 namespace aip { namespace gallery {
 inline constexpr std::size_t MaxTiles = 1024, MaxQueue = 5, MaxImages = 65536, MaxHistoricalTiles = 65536;
@@ -23,6 +24,8 @@ enum class Fit { Fill, Fit };
 struct TileConfiguration {
     std::wstring id, name; bool enabled = true; aip::content::TileAppearance appearance{};
     std::wstring folder, galleryName; // Empty folder inherits the legacy group folder.
+    aip::content::TileDeliveryPolicy delivery;
+    bool registration = false; // Effective transport, resolved by the host for Auto.
 };
 struct Configuration {
     bool enabled = false;
@@ -136,6 +139,22 @@ inline std::wstring NativeTileId(const std::wstring& groupId, const std::wstring
     // component contains underscores. Windows SecondaryTile IDs allow <=64.
     return std::wstring(NativeTilePrefix) + groupId + L"." + tileId;
 }
+inline std::wstring GalleryRegistrationId(const std::wstring& groupId, const std::wstring& tileId) {
+    if (NativeTileId(groupId,tileId).empty()) return {};
+    const auto hex = [](std::uint64_t value) {
+        std::wstring result(16,L'0');
+        for(int index=15;index>=0;--index){result[static_cast<std::size_t>(index)]=L"0123456789abcdef"[value&15];value>>=4;}
+        return result;
+    };
+    return L"gallery_" + hex(detail::Rank(groupId,0)) + L"_" + hex(detail::Rank(tileId,1));
+}
+inline bool UsesRegistration(const TileConfiguration& tile) { return tile.registration || (tile.delivery.included && tile.delivery.Mode() == L"Registration"); }
+inline unsigned EffectiveQueueSize(const Configuration& cfg, const TileConfiguration& tile) { return UsesRegistration(tile) ? 1u : cfg.queueSize; }
+inline Fit EffectiveFit(const Configuration& cfg, const TileConfiguration& tile) {
+    if (tile.delivery.Read(L"Settings",L"DisableFitting",L"0") == L"1") return Fit::Fill;
+    const auto fit = tile.delivery.Read(L"Settings",L"TileWallpaperFit",L"Auto");
+    return fit == L"Fit" ? Fit::Fit : fit == L"Fill" ? Fit::Fill : cfg.fit;
+}
 inline int TileSectionNumber(const std::wstring& section) {
     const auto text = detail::Lower(detail::Trim(section)); const std::wstring prefix = L"gallery.tile.";
     if (text.compare(0, prefix.size(), prefix) != 0) return 0;
@@ -148,6 +167,7 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
     error.clear(); const bool root = detail::Lower(detail::Trim(section)) == L"gallery";
     const int tile = TileSectionNumber(section); const auto name = detail::Lower(detail::Trim(key));
     if (!root && !tile) { error = L"Unknown gallery section."; return false; }
+    if (tile && aip::content::FindTilePolicyField(key)) return aip::content::NormalizeTilePolicySetting(key,value,error);
     auto normalized = detail::Trim(value); std::uint64_t number = 0; bool enabled = false;
     if (name == L"enabled") { if (!detail::Bool(normalized, enabled)) { error = L"Gallery Enabled must be Boolean."; return false; } normalized = enabled ? L"1" : L"0"; }
     else if ((root && name == L"groupid") || (tile && name == L"id")) {
@@ -196,6 +216,16 @@ inline bool ValidateConfiguration(const Configuration& cfg, std::wstring& error)
                 return false;
             }
         }
+        if (tile.delivery.included) {
+            for (const auto& field : aip::content::TilePolicyFields) {
+                std::wstring value;
+                if (!tile.delivery.Lookup(field.section,field.setting,value)) continue;
+                auto normalized = value;
+                if (!aip::content::NormalizeTilePolicySetting(field.key,normalized,error) || normalized != value) return false;
+            }
+            const auto fit = tile.delivery.Read(L"Settings",L"TileWallpaperFit",L"Auto");
+            if (fit != L"Auto" && fit != L"Fill" && fit != L"Fit") { error = L"Gallery image fitting supports Auto, Fill, or Fit."; return false; }
+        }
         if ((!tile.id.empty() && (!StableTileId(tile.id) || !ids.insert(detail::Lower(tile.id)).second)) ||
             (!cfg.groupId.empty() && !tile.id.empty() && NativeTileId(cfg.groupId, tile.id).empty()) ||
             (cfg.enabled && tile.id.empty()) || detail::Trim(tile.name).empty() || !detail::Text(tile.name, 256) ||
@@ -226,6 +256,7 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
         tile.folder = get(section, L"Folder", L""); tile.galleryName = get(section, L"GalleryName", L"");
         tile.enabled = get(section, L"Enabled", L"1") == L"1"; cfg.tiles.push_back(std::move(tile));
         if (!aip::content::ReadTileAppearance(read, section, cfg.tiles.back().appearance, error)) return false;
+        if (!aip::content::ReadTileDeliveryPolicy(read,section,GalleryRegistrationId(cfg.groupId,cfg.tiles.back().id),cfg.tiles.back().delivery,error)) return false;
     }
     if (!valid || !ValidateConfiguration(cfg, error)) return false;
     result = std::move(cfg); error.clear(); return true;
@@ -398,7 +429,7 @@ inline bool PrepareQueueBatch(const Configuration& cfg, const PoolSnapshot& pool
             if (candidate.ledger.nextTicket == (std::numeric_limits<std::uint64_t>::max)()) { error = L"Gallery delivery ticket space is exhausted."; return false; }
             auto& progress = candidate.ledger.tiles[tile.id];
             auto& pending = progress.pending; pending.ticket = candidate.ledger.nextTicket++;
-            const auto start = static_cast<std::size_t>(progress.cursor % pool->images.size()), count = (std::min)(static_cast<std::size_t>(cfg.queueSize), pool->images.size());
+            const auto start = static_cast<std::size_t>(progress.cursor % pool->images.size()), count = (std::min)(static_cast<std::size_t>(EffectiveQueueSize(cfg,tile)), pool->images.size());
             for (std::size_t i = 0; i < count; ++i) pending.images.push_back(pool->images[(start + i) % pool->images.size()]);
             pending.nextCursor = (start + count) % pool->images.size(); window.ticket = pending.ticket; window.images = pending.images; window.status = WindowStatus::Ready;
             candidate.requiresLedgerCommit = true;

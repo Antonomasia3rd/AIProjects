@@ -1,5 +1,8 @@
 // Private profiles, injected RSS readers and in-memory pin inventory only.
 // No real network, package pin, account, hardware or resident operation runs.
+static unsigned tileInstanceFitReads=0;
+static FitMode tileInstanceFitResult=FitMode::Fill;
+static FitMode ReadPrivateTileInstanceFit(){++tileInstanceFitReads;return tileInstanceFitResult;}
 static void TestTileInstanceRuntimeHost()
 {
     using namespace aip::content;
@@ -12,7 +15,7 @@ static void TestTileInstanceRuntimeHost()
     for(unsigned i=1;i<=40;++i){if(i>1)profile+=L",";profile+=L"feed"+std::to_wstring(i);}
     profile+=L"\r\n[Content]\r\nCount=invalid-unused-global\r\n[SMTC]\r\nIndicator=invalid-unused-global\r\n";
     for(unsigned i=1;i<=40;++i)profile+=L"[Tile.feed"+std::to_wstring(i)+L"]\r\nType=RSS\r\nName=Feed "+std::to_wstring(i)+
-        L"\r\nRssFeed.FeedUrl=https://rss-fixture.invalid/feed"+std::to_wstring(i)+L".atom\r\nRssFeed.UpdateIntervalSeconds="+
+        L"\r\nDelivery.Mode=LiveTile\r\nRssFeed.FeedUrl=https://rss-fixture.invalid/feed"+std::to_wstring(i)+L".atom\r\nRssFeed.UpdateIntervalSeconds="+
         std::to_wstring(i*60)+L"\r\nRssFeed.HttpTimeoutSeconds=5\r\nTextPreset=RssHeadlines\r\n";
     Check(WriteContentFixture(profile),"create forty independent RSS instances without changing a normal profile");
     TileInstanceConfiguration cfg;
@@ -159,6 +162,46 @@ static void TestTileInstanceRuntimeHost()
     StopTileInstanceProviders();
     Check(g_tileInstanceProviders.empty()&&readerLifetimes[1].expired()&&readerLifetimes[4].expired(),"instance shutdown releases all injected readers and owned workers");
     {
+        const auto savedFitReader=g_testTileInstanceFitReader;
+        g_testTileInstanceFitReader=ReadPrivateTileInstanceFit;tileInstanceFitReads=0;
+        TileInstance fitTile;fitTile.id=L"fit-test";fitTile.name=L"Private fit test";
+        fitTile.configuration.entries.emplace_back();fitTile.configuration.entries.front().background=L"Transparent";
+        fitTile.configuration.refreshSeconds=60;
+        fitTile.policy.included=true;fitTile.policy.owner=fitTile.id;
+        fitTile.policy.values[L"settings.listenfit"]=L"0";
+        TileInstanceProviderState fitState;tileInstanceFitResult=FitMode::Fit;
+        Check(ResolveTileInstanceFit(fitTile,fitState,BackgroundId::Wallpaper,false)==static_cast<int>(FitMode::Fit)&&tileInstanceFitReads==1,
+            "Auto wallpaper fitting captures its own initial fit through an inert injected reader");
+        tileInstanceFitResult=FitMode::Stretch;fitState.nextFitRead=0;
+        bool held=true;for(unsigned tick=0;tick<20;++tick)held=held&&ResolveTileInstanceFit(fitTile,fitState,BackgroundId::Wallpaper,false)==static_cast<int>(FitMode::Fit);
+        Check(held&&tileInstanceFitReads==1,"Wallpaper.ListenFit=0 holds the captured fit without background registry reads across overdue ticks");
+        fitState.forceRefresh=true;
+        Check(ResolveTileInstanceFit(fitTile,fitState,BackgroundId::Wallpaper,false)==static_cast<int>(FitMode::Stretch)&&tileInstanceFitReads==2,
+            "manual tile refresh updates a fit whose automatic observation is disabled");
+        fitState.forceRefresh=false;fitTile.policy.values[L"settings.listenfit"]=L"1";tileInstanceFitResult=FitMode::Center;
+        Check(ResolveTileInstanceFit(fitTile,fitState,BackgroundId::Wallpaper,false)==static_cast<int>(FitMode::Center)&&tileInstanceFitReads==3,
+            "enabling the tile's fit observation captures the current desktop fit once");
+        fitState.nextFitRead=0;tileInstanceFitResult=FitMode::Span;
+        Check(ResolveTileInstanceFit(fitTile,fitState,BackgroundId::Wallpaper,false)==static_cast<int>(FitMode::Span)&&tileInstanceFitReads==4,
+            "enabled fit observation rereads only after its own refresh deadline");
+        fitTile.policy.values[L"settings.tilewallpaperfit"]=L"Center";
+        const auto explicitFrame=ComposeTileInstance(fitTile,fitState,SmtcMediaSnapshot{},false);
+        Check(explicitFrame.capturedWallpaperFit==static_cast<int>(FitMode::Center)&&tileInstanceFitReads==4,
+            "explicit per-tile fit is captured without a desktop query even on a transparent frame");
+        fitTile.policy.values[L"settings.tilewallpaperfit"]=L"Auto";
+        auto automaticFrame=ComposeTileInstance(fitTile,fitState,SmtcMediaSnapshot{},false);
+        Check(automaticFrame.capturedWallpaperFit==static_cast<int>(FitMode::Fill)&&tileInstanceFitReads==4&&
+            ContentSnapshotKey(automaticFrame)!=ContentSnapshotKey(explicitFrame),
+            "Auto fitting for a non-wallpaper source resolves Fill and participates in the immutable snapshot key");
+        {ContentRenderScope captured(&explicitFrame);Check(GetWallpaperFit()==FitMode::Center,
+            "rendering reads the snapshot's captured fit rather than changed global or desktop fitting");}
+        automaticFrame.capturedWallpaperFit=static_cast<int>(FitMode::Tile);
+        {ContentRenderScope captured(&automaticFrame);Check(GetWallpaperFit()==FitMode::Tile,
+            "each immutable frame independently carries the fitting mode used by render and generation keys");}
+        Check(contentWallpaperBackgroundRequests==beforeWallpaper,"fit tests never request a real desktop background or write desktop settings");
+        g_testTileInstanceFitReader=savedFitReader;
+    }
+    {
         std::lock_guard<std::mutex> lock(g_tileInstanceRefreshMutex);g_tileInstanceRefreshRequests.clear();
     }
     const auto backup=g_iniPath+L".before-tile-instances.bak";
@@ -205,7 +248,7 @@ static void TestTileInstanceRuntimeHost()
         std::map<std::wstring,std::wstring> oldDelivered;
         {std::lock_guard<std::mutex> lock(g_secondaryDeliveryMutex);oldDelivered=g_secondaryDelivered;g_secondaryDelivered.clear();}
         const std::wstring primaryProfile=L"[Tiles]\r\nSchemaVersion=1\r\nInstances=primary-test\r\n[Tile.primary-test]\r\n"
-            L"Type=Wallpaper\r\nPrimary=1\r\nContent.Background=Transparent\r\nContent.Text=Primary caption\r\n";
+            L"Type=Wallpaper\r\nDelivery.Mode=LiveTile\r\nPrimary=1\r\nContent.Background=Transparent\r\nContent.Text=Primary caption\r\n";
         Check(WriteContentFixture(primaryProfile)&&TileInstanceEngineTick(true,false),
             "compose a primary Wallpaper identity with a deliberately inert transparent background");
         auto primaryFrames=CurrentSecondarySnapshots();

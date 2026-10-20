@@ -8,12 +8,18 @@ struct TileInstanceMenuCommand {
     TileInstanceMenuVerb verb;
     std::wstring id, key, value, prompt;
     bool secret = false;
+    std::wstring sectionOverride;
 };
+static std::wstring g_tilePolicyMenuSection;
 static std::map<UINT, TileInstanceMenuCommand> g_tileInstanceMenuCommands;
 static UINT g_nextTileInstanceMenuCommand = ID_TILE_INSTANCE_FIRST;
 static std::size_t g_tileInstanceMenuPage = 0;
 static bool DispatchTileInstanceCommand(HWND owner, UINT command);
 static bool OpenTileInstanceManager(HWND owner);
+static bool OfferTileDeliveryMigration(HWND owner,const std::wstring& tileId,const std::wstring& newMode);
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+static bool (*g_testTileDeliveryMigration)(HWND,const std::wstring&,const std::wstring&)=nullptr;
+#endif
 static std::wstring TileInstanceUi(const wchar_t* key, const wchar_t* fallback) { return IniReadS(L"Strings", key, fallback); }
 static void ResetTileInstanceMenuCommands()
 {
@@ -23,6 +29,7 @@ static UINT RegisterTileInstanceCommand(TileInstanceMenuCommand item)
 {
     if (g_nextTileInstanceMenuCommand > ID_TILE_INSTANCE_LAST) return 0;
     const auto id = g_nextTileInstanceMenuCommand++;
+    if(!g_tilePolicyMenuSection.empty())item.sectionOverride=g_tilePolicyMenuSection;
     g_tileInstanceMenuCommands.emplace(id, std::move(item)); return id;
 }
 static void AppendTileInstanceCommand(HMENU menu, const std::wstring& label, TileInstanceMenuCommand item,
@@ -62,8 +69,14 @@ static bool ReadTileInstanceMenuConfiguration(aip::content::TileInstanceConfigur
     }
     cfg = std::move(candidate); error = validationError; return true;
 }
-static bool SaveTileInstanceSettings(HWND owner, const std::vector<aip::IniSetting>& settings,
-    const std::wstring& expectedId = L"", const std::wstring& removedId = L"")
+static bool TileInstanceUsesRegistration(const aip::content::TileInstance& tile)
+{
+    if(tile.policy.Mode()==L"Registration")return true;
+    if(tile.policy.Mode()==L"LiveTile")return false;
+    aip::content::TilePolicyReadScope scope(tile.policy);return !UseExperimentalLiveTileUpdate();
+}
+static bool SaveTileInstanceSettingsWithRemovalConfirmation(HWND owner,const std::vector<aip::IniSetting>& settings,
+    const std::wstring& expectedId,const std::wstring& removedId,bool staticRemovalConfirmed)
 {
     std::wstring error;
     const bool saved = MutateDesktopStubIniWithWait([&](std::wstring& text) {
@@ -92,7 +105,12 @@ static bool SaveTileInstanceSettings(HWND owner, const std::vector<aip::IniSetti
             const auto tile = std::find_if(current.tiles.begin(), current.tiles.end(), [&](const auto& item) { return item.id == removedId; });
             if (tile == current.tiles.end()) { error = L"This tile no longer exists."; return false; }
             const auto nativeId = aip::content::TileInstanceNativeId(*tile);
-            if (!nativeId.empty() && (!SecondaryTileInventoryReady() || SecondaryTileExists(nativeId))) {
+            aip::content::TileDeliveryPolicy removalPolicy;
+            if(!aip::content::ReadTileDeliveryPolicy(readOriginal,aip::content::TileInstanceSection(tile->id),tile->id,removalPolicy,error))return false;
+            tile->policy=std::move(removalPolicy);
+            const bool registration=TileInstanceUsesRegistration(*tile);
+            if(registration&&!staticRemovalConfirmed){error=L"Unpin the Registration tile manually before removing its settings. Its registered identity is kept.";return false;}
+            if (!registration&&!nativeId.empty() && (!SecondaryTileInventoryReady() || SecondaryTileExists(nativeId))) {
                 error = L"Unpin this tile from Start before removing its settings. Check pin status if it is unknown."; return false;
             }
             std::wstring ids;
@@ -130,10 +148,19 @@ static bool SaveTileInstanceSettings(HWND owner, const std::vector<aip::IniSetti
     })) RequestRefreshExistingSecondaryTileLogos(g_hwnd, true);
     WakePollThread(); return true;
 }
+static bool SaveTileInstanceSettings(HWND owner,const std::vector<aip::IniSetting>& settings,
+    const std::wstring& expectedId=L"",const std::wstring& removedId=L"")
+{
+    return SaveTileInstanceSettingsWithRemovalConfirmation(owner,settings,expectedId,removedId,false);
+}
+static std::wstring TilePolicyMenuSection(const aip::content::TileInstance& tile)
+{
+    return g_tilePolicyMenuSection.empty()?aip::content::TileInstanceSection(tile.id):g_tilePolicyMenuSection;
+}
 static void AppendTileInstanceEditable(HMENU menu, const aip::content::TileInstance& tile,
     const wchar_t* key, const wchar_t* label, const wchar_t* fallback, bool toggle = false, bool secret = false)
 {
-    const auto section = aip::content::TileInstanceSection(tile.id);
+    const auto section = TilePolicyMenuSection(tile);
     const auto value = IniReadS(section.c_str(), key, fallback);
     bool checked = false; if (toggle) aip::content::ParseBool(value, checked);
     auto caption = TileInstanceUi((L"TileOption_" + std::wstring(key)).c_str(), label);
@@ -146,7 +173,8 @@ static void AppendTileInstanceChoices(HMENU parent, const aip::content::TileInst
     const wchar_t* key, const wchar_t* label, const std::vector<std::pair<std::wstring,std::wstring>>& choices, const wchar_t* fallback)
 {
     HMENU menu = aip::BeginTrayNestedMenu(parent);
-    const auto selected = IniReadS(aip::content::TileInstanceSection(tile.id).c_str(), key, fallback);
+    auto selected = IniReadS(TilePolicyMenuSection(tile).c_str(), key, fallback);
+    if(aip::content::FindTilePolicyField(key)){std::wstring ignored;aip::content::NormalizeTilePolicySetting(key,selected,ignored);}
     for (const auto& choice : choices) AppendTileInstanceCommand(menu, choice.second,
         {TileInstanceMenuVerb::Set,tile.id,key,choice.first,L""}, aip::content::Lower(selected) == aip::content::Lower(choice.first));
     aip::EndTrayNestedMenu(parent, menu, TileInstanceUi((L"TileOption_" + std::wstring(key)).c_str(),label));
@@ -164,7 +192,7 @@ static void AppendTileInstanceAppearance(HMENU parent, const aip::content::TileI
 static void AppendTileInstanceText(HMENU parent, const aip::content::TileInstance& tile)
 {
     HMENU menu = aip::BeginTrayNestedMenu(parent);
-    std::vector<std::pair<std::wstring,std::wstring>> presets{{L"Default",L"Type default"},{L"Custom",L"Custom text layout"}};
+    std::vector<std::pair<std::wstring,std::wstring>> presets{{L"Default",tile.type==aip::content::TileInstanceType::Rss?L"Readable headlines (recommended)":L"Type default"},{L"Custom",L"Custom text layout"}};
     if (tile.type == aip::content::TileInstanceType::Rss) presets.push_back({L"RssHeadlines",L"Headlines with summaries"});
     AppendTileInstanceChoices(menu,tile,L"TextPreset",L"Layout",presets,L"Default");
     const wchar_t* styleKeys[] = {L"TextStyle",L"TextSecondaryStyle",L"TextBadgeStyle"};
@@ -184,6 +212,42 @@ static void AppendTileInstanceText(HMENU parent, const aip::content::TileInstanc
     for (const auto& choice : aip::content::TextModes) delivery.emplace_back(choice.value,choice.label);
     AppendTileInstanceChoices(menu,tile,L"TextMode",L"Text delivery",delivery,L"Auto");
     aip::EndTrayNestedMenu(parent,menu,TileInstanceUi(L"TileInstanceTextLayout",L"Text size, wrapping and layout"));
+}
+static void AppendTileInstancePolicyMenu(HMENU parent,const aip::content::TileInstance& tile)
+{
+    using namespace aip::content;
+    const auto appendGroup=[&](const wchar_t* prefix,const wchar_t* title){
+        HMENU menu=aip::BeginTrayNestedMenu(parent),advanced=nullptr;
+        for(const auto& field:TilePolicyFields){
+            if(std::wstring(field.key).compare(0,wcslen(prefix),prefix)!=0)continue;
+            if(std::wstring(field.key)==L"Cache.Precache"||std::wstring(field.key)==L"Cache.PrecacheMaxFiles")continue;
+            if(tile.type==TileInstanceType::Gallery&&std::wstring(prefix)==L"Wallpaper."&&
+                std::wstring(field.key)!=L"Wallpaper.Fit"&&
+                std::wstring(field.key)!=L"Wallpaper.DecodeLowMemory"&&std::wstring(field.key)!=L"Wallpaper.DecodeMaxLongEdge")continue;
+            HMENU target=menu;
+            const auto key=std::wstring(field.key);
+            if(std::wstring(prefix)==L"Delivery."&&key!=L"Delivery.Mode"&&key!=L"Delivery.Template"&&key!=L"Delivery.ClearOnShutdown"&&key!=L"Delivery.ManifestTarget"){
+                if(!advanced)advanced=aip::BeginTrayNestedMenu(menu);target=advanced;
+            }
+            if(field.kind==TilePolicyValueKind::Choice){
+                std::vector<std::pair<std::wstring,std::wstring>> choices;
+                for(const auto& choice:TilePolicyChoices(field)){
+                    if(tile.type==TileInstanceType::Gallery&&std::wstring(field.key)==L"Wallpaper.Fit"&&choice!=L"Auto"&&choice!=L"Fill"&&choice!=L"Fit")continue;
+                    choices.emplace_back(choice,choice);
+                }
+                AppendTileInstanceChoices(target,tile,field.key,field.label,choices,field.fallback);
+            }else AppendTileInstanceEditable(target,tile,field.key,field.label,field.fallback,field.kind==TilePolicyValueKind::Boolean);
+        }
+        if(advanced)aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"TileInstanceRegistrationBackend",L"Registration backend"));
+        aip::EndTrayNestedMenu(parent,menu,TileInstanceUi((L"TileInstancePolicy_"+std::wstring(prefix)).c_str(),title));
+    };
+    appendGroup(L"Delivery.",L"Delivery and exit behavior");
+    appendGroup(L"Cache.",L"Image cache");
+    appendGroup(L"Assets.",L"Generated assets and scales");
+    appendGroup(L"Text.",L"Text on tile sizes");
+    if(tile.type==TileInstanceType::Wallpaper||(!tile.configuration.entries.empty()&&
+        BackgroundIdFor(tile.configuration.entries.front().background)!=BackgroundId::Transparent&&
+        BackgroundIdFor(tile.configuration.entries.front().background)!=BackgroundId::None))appendGroup(L"Wallpaper.",L"Image fitting, decode and capture");
 }
 static void AppendTileInstancePrayerSettings(HMENU menu,const aip::content::TileInstance& tile)
 {
@@ -269,12 +333,16 @@ static void AppendTileInstanceDetails(HMENU menu,const aip::content::TileInstanc
 {
     using namespace aip::content;
     const auto nativeId = TileInstanceNativeId(tile);
+    const bool registration=TileInstanceUsesRegistration(tile);
     if (!tile.primary) {
         const auto state = TilePinState(SecondaryTilePinUiAvailable(),SecondaryTileInventoryReady(),SecondaryTileExists(nativeId));
+        if(registration)AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceRegistrationPin",L"Registration setup and pin instructions..."),{TileInstanceMenuVerb::Pin,tile.id,L"",L"",L""});
+        else{
         if (state == TilePinMenuState::Pinned) AppendTileInstanceCommand(menu,TileInstanceUi(L"UnpinTile",L"Unpin from Start..."),{TileInstanceMenuVerb::Unpin,tile.id,L"",L"",L""});
         else if (state == TilePinMenuState::Unpinned) AppendTileInstanceCommand(menu,TileInstanceUi(L"PinTile",L"Pin tile..."),{TileInstanceMenuVerb::Pin,tile.id,L"",L"",L""});
         else if (state == TilePinMenuState::Unknown) AppendTileInstanceCommand(menu,TileInstanceUi(L"CheckTilePinStatus",L"Check pin status..."),{TileInstanceMenuVerb::Inventory,tile.id,L"",L"",L""});
         else aip::AppendTrayMenuItem(menu,0,TileInstanceUi(L"TilePinStatusUnavailable",L"Pin status requires the registered app"),false,false);
+        }
     }
     AppendTileInstanceCommand(menu,TileInstanceUi(L"SelectedTileContents",L"Tile contents..."),{TileInstanceMenuVerb::Status,tile.id,L"",L"",L""});
     AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceRefresh",L"Refresh this tile now"),{TileInstanceMenuVerb::Refresh,tile.id,L"",L"",L""});
@@ -287,14 +355,14 @@ static void AppendTileInstanceDetails(HMENU menu,const aip::content::TileInstanc
         for (const auto& descriptor : TileInstanceTypes) if (descriptor.type != TileInstanceType::Gallery) types.emplace_back(descriptor.value,descriptor.name);
         AppendTileInstanceChoices(menu,tile,L"Type",L"Repair tile type",types,DescribeTileInstanceType(tile.type).value);
     }
-    AppendTileInstanceAppearance(menu,tile); AppendTileInstanceText(menu,tile);
+    AppendTileInstanceAppearance(menu,tile); AppendTileInstanceText(menu,tile); AppendTileInstancePolicyMenu(menu,tile);
     if (tile.type != TileInstanceType::QuickAction) {
         std::vector<std::pair<std::wstring,std::wstring>> actions{{L"setup",L"Open this tile's settings"}};
         if (tile.type == TileInstanceType::Rss) actions.push_back({L"source",L"Open this tile's featured article"});
         for (const auto& action : TileActions) actions.emplace_back(action.id,action.label);
         AppendTileInstanceChoices(menu,tile,L"ClickAction",L"Click action",actions,tile.type == TileInstanceType::NowPlaying ? L"toggle" : tile.type == TileInstanceType::Rss ? L"source" : L"setup");
     }
-    const bool removable = tile.primary || (SecondaryTileInventoryReady() && !SecondaryTileExists(nativeId));
+    const bool removable = registration||tile.primary || (SecondaryTileInventoryReady() && !SecondaryTileExists(nativeId));
     AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceRemove",L"Remove tile settings (unpin first)"),{TileInstanceMenuVerb::Remove,tile.id,L"",L"",L""},false,removable);
 }
 static void AppendTileInstancesMenu(HMENU menu)
@@ -379,6 +447,11 @@ static bool AddIndependentTile(HWND owner,const std::wstring& type)
     if (!ids.empty()) ids += L","; ids += id;
     const bool primary = descriptor->type == TileInstanceType::Wallpaper && std::none_of(cfg.tiles.begin(),cfg.tiles.end(),[](const auto& tile) { return tile.primary; });
     std::vector<aip::IniSetting> settings{{section,L"Type",descriptor->value},{section,L"Name",name},{section,L"Primary",primary?L"1":L"0"},{L"Tiles",L"Instances",ids}};
+    for(const auto& field:TilePolicyFields){
+        auto value=IniReadS(field.section,field.setting,field.fallback);
+        if(!NormalizeTilePolicySetting(field.key,value,error))return false;
+        settings.push_back({section,field.key,value});
+    }
     if (!SaveTileInstanceSettings(owner,settings)) return false;
     // Configuration stays useful before pinning. Native pin confirmations are
     // always initiated explicitly by the user from the new tile's menu.
@@ -412,6 +485,51 @@ static bool OpenTileInstanceSetup(HWND owner,const std::wstring& id)
     DestroyMenu(menu); if (owner) AfterTrayPopupClosed(owner);
     if (command) DispatchTileInstanceCommand(owner,command); return true;
 }
+static void AppendGalleryTilePolicySettings(HMENU menu,const aip::gallery::Configuration& cfg,std::size_t index)
+{
+    if(index>=cfg.tiles.size())return;
+    const auto& row=cfg.tiles[index];
+    aip::content::TileInstance adapter;adapter.id=aip::gallery::NativeTileId(cfg.groupId,row.id);adapter.name=row.name;adapter.type=aip::content::TileInstanceType::Gallery;
+    adapter.configuration.entries.emplace_back();adapter.configuration.entries.front().background=L"Image";
+    const auto previous=g_tilePolicyMenuSection;g_tilePolicyMenuSection=L"Gallery.Tile."+std::to_wstring(index+1);
+    AppendTileInstancePolicyMenu(menu,adapter);g_tilePolicyMenuSection=previous;
+}
+static bool OpenGalleryTilePolicySetup(HWND owner,const std::wstring& nativeId)
+{
+    aip::gallery::Configuration cfg;std::wstring error;
+    if(!ReadGalleryConfiguration(cfg,error))return false;
+    const auto found=std::find_if(cfg.tiles.begin(),cfg.tiles.end(),[&](const auto& row){return aip::gallery::NativeTileId(cfg.groupId,row.id)==nativeId;});
+    if(found==cfg.tiles.end())return false;
+    const auto index=static_cast<std::size_t>(std::distance(cfg.tiles.begin(),found));
+    HMENU menu=CreatePopupMenu();if(!menu)return false;
+    ResetTileInstanceMenuCommands();
+    AppendGalleryTilePolicySettings(menu,cfg,index);
+    POINT point{};GetCursorPos(&point);if(owner)SetForegroundWindow(owner);
+    const auto command=static_cast<UINT>(TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,owner,nullptr));
+    DestroyMenu(menu);if(owner)AfterTrayPopupClosed(owner);
+    if(command)DispatchTileInstanceCommand(owner,command);return true;
+}
+static bool DispatchGalleryTilePolicyCommand(HWND owner,const TileInstanceMenuCommand& item)
+{
+    aip::gallery::Configuration cfg;std::wstring error;
+    if(!ReadGalleryConfiguration(cfg,error))return true;
+    const auto index=aip::gallery::TileSectionNumber(item.sectionOverride);
+    if(index<1||static_cast<std::size_t>(index)>cfg.tiles.size()||aip::gallery::NativeTileId(cfg.groupId,cfg.tiles[static_cast<std::size_t>(index-1)].id)!=item.id)return true;
+    const auto& row=cfg.tiles[static_cast<std::size_t>(index-1)];auto value=item.value;
+    if(item.verb==TileInstanceMenuVerb::Edit){
+        value=IniReadS(item.sectionOverride.c_str(),item.key.c_str(),item.value.c_str());
+        if(ShowTextInputDialog(owner,row.name,item.prompt,value,true)!=IDOK)return true;
+    }else if(item.verb==TileInstanceMenuVerb::Toggle){bool enabled=false;aip::content::ParseBool(IniReadS(item.sectionOverride.c_str(),item.key.c_str(),item.value.c_str()),enabled);value=enabled?L"0":L"1";}
+    if(aip::content::Lower(item.key)==L"delivery.mode"){
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+        if(g_testTileDeliveryMigration)g_testTileDeliveryMigration(owner,item.id,value);
+#else
+        OfferGalleryTileDeliveryMigration(owner,item.id,value);
+#endif
+        return true;
+    }
+    const auto edit=GalleryEdit(cfg);SaveGalleryMenuSettings(owner,{{item.sectionOverride,item.key,value}},&edit);return true;
+}
 static bool OpenTileInstanceManager(HWND owner)
 {
     for (;;) {
@@ -430,6 +548,7 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
 {
     const auto found = g_tileInstanceMenuCommands.find(command); if (found == g_tileInstanceMenuCommands.end()) return false;
     const auto item = found->second; // Popup construction may replace the registry.
+    if(!item.sectionOverride.empty())return DispatchGalleryTilePolicyCommand(owner,item);
     using namespace aip::content;
     if (item.verb == TileInstanceMenuVerb::Page) { g_tileInstanceMenuPage = static_cast<std::size_t>(_wtoi(item.value.c_str())); OpenTileInstanceManager(owner); return true; }
     if (item.verb == TileInstanceMenuVerb::Add) { AddIndependentTile(owner,item.value); OpenTileInstanceManager(owner); return true; }
@@ -446,7 +565,16 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
     if (selected == cfg.tiles.end()) return true;
     const auto tile = *selected;
     const auto section = TileInstanceSection(tile.id), nativeId = TileInstanceNativeId(tile);
-    if (item.verb == TileInstanceMenuVerb::Pin) { RequestPinSecondaryTile(owner,nativeId,tile.name); return true; }
+    if (item.verb == TileInstanceMenuVerb::Pin) {
+        if(TileInstanceUsesRegistration(tile)){
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+            if(g_testTileDeliveryMigration)g_testTileDeliveryMigration(owner,tile.id,L"Registration");
+#else
+            OfferTileDeliveryMigration(owner,tile.id,L"Registration");
+#endif
+        }else RequestPinSecondaryTile(owner,nativeId,tile.name);
+        return true;
+    }
     if (item.verb == TileInstanceMenuVerb::Unpin) { RequestUnpinSecondaryTile(owner,nativeId); return true; }
     if (item.verb == TileInstanceMenuVerb::Status) { ShowSelectedTileStatus(owner,nativeId,tile.name); return true; }
     if (item.verb == TileInstanceMenuVerb::Refresh) { RefreshTileInstanceNow(tile.id); return true; }
@@ -456,7 +584,11 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
         if (resource >= 0) OpenEmbeddedNotesSignInForTile(owner,resource,tile.id);
         return true;
     }
-    if (item.verb == TileInstanceMenuVerb::Remove) { SaveTileInstanceSettings(owner,{},tile.id,tile.id); return true; }
+    if (item.verb == TileInstanceMenuVerb::Remove) {
+        const bool registration=TileInstanceUsesRegistration(tile);
+        if(registration&&DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,L"Unpin this Registration tile from Start manually before removing its settings. The registered entry and files will be kept so existing pins remain recoverable. Remove these tile settings now?",tile.name.c_str(),MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION)!=IDYES)return true;
+        SaveTileInstanceSettingsWithRemovalConfirmation(owner,{},tile.id,tile.id,registration);return true;
+    }
     auto value = item.value;
     if (item.verb == TileInstanceMenuVerb::Edit) {
         value = IniReadS(section.c_str(),item.key.c_str(),item.value.c_str());
@@ -464,23 +596,41 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
     } else if (item.verb == TileInstanceMenuVerb::Toggle) {
         bool enabled = false; ParseBool(IniReadS(section.c_str(),item.key.c_str(),item.value.c_str()),enabled); value = enabled ? L"0" : L"1";
     }
+    if(Lower(item.key)==L"delivery.mode"){
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+        if(g_testTileDeliveryMigration)g_testTileDeliveryMigration(owner,tile.id,value);
+#else
+        OfferTileDeliveryMigration(owner,tile.id,value);return true;
+#endif
+        return true;
+    }
     std::vector<aip::IniSetting> settings{{section,item.key,value}};
+    if(Lower(item.key)==L"content.background"&&value==L"LiveWallpaper")settings.push_back({section,L"Wallpaper.Capture",L"1"});
     if (Lower(item.key) == L"textpreset" && value == L"RssHeadlines") {
         // Materialize the named layout so stale per-field custom settings from
         // the previous layout cannot make selecting it appear to do nothing.
         settings.push_back({section,L"TextMode",L"Auto"});
-        settings.push_back({section,L"TextStyle",L"subtitle"});
+        settings.push_back({section,L"TextStyle",L"base"});
         settings.push_back({section,L"TextSecondaryStyle",L"captionSubtle"});
         settings.push_back({section,L"TextBadgeStyle",L"captionSubtle"});
         settings.push_back({section,L"TextWrap",L"1"});
         settings.push_back({section,L"TextMaxLines",L"3"});
         settings.push_back({section,L"TextSecondaryMaxLines",L"2"});
         settings.push_back({section,L"TextBadgeMaxLines",L"1"});
-        settings.push_back({section,L"TextGapLines",L"1"});
+        settings.push_back({section,L"TextGapLines",L"0"});
         settings.push_back({section,L"TextAlign",L"left"});
         settings.push_back({section,L"TextStacking",L"top"});
     }
-    if (IsTextPresentationKey(item.key) && Lower(item.key) != L"textpreset")
-        settings.push_back({section,L"TextPreset",tile.presentation.preset == L"RssHeadlines" ? L"RssHeadlines" : L"Custom"});
+    if (IsTextPresentationKey(item.key) && Lower(item.key) != L"textpreset"){
+        const bool richRss=tile.type==TileInstanceType::Rss&&(tile.presentation.preset==L"Default"||tile.presentation.preset==L"RssHeadlines");
+        if(richRss&&tile.presentation.preset==L"Default"){
+            const std::pair<const wchar_t*,const wchar_t*> defaults[]={
+                {L"TextStyle",L"base"},{L"TextSecondaryStyle",L"captionSubtle"},{L"TextBadgeStyle",L"captionSubtle"},
+                {L"TextWrap",L"1"},{L"TextMaxLines",L"3"},{L"TextSecondaryMaxLines",L"2"},{L"TextBadgeMaxLines",L"1"},
+                {L"TextGapLines",L"0"},{L"TextAlign",L"left"},{L"TextStacking",L"top"}};
+            for(const auto& field:defaults)if(Lower(field.first)!=Lower(item.key))settings.push_back({section,field.first,field.second});
+        }
+        settings.push_back({section,L"TextPreset",richRss?L"RssHeadlines":L"Custom"});
+    }
     SaveTileInstanceSettings(owner,settings,tile.id); return true;
 }

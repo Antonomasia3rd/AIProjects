@@ -634,12 +634,14 @@ static bool ShouldUseAdaptiveStaticTextFallback()
 }
 
 static bool DrawTopSourceField(Graphics& graphics, const std::wstring& text, Font& font,
-    REAL x, REAL& y, REAL width, REAL bottom, int maxLines, BYTE alpha, REAL gap)
+    REAL x, REAL& y, REAL width, REAL bottom, int maxLines, BYTE alpha, REAL gap,
+    const aip::content::TextPresentation* overridePresentation = nullptr)
 {
     if (text.empty() || width <= 0 || y >= bottom) return true;
     std::unique_ptr<Font> presented;
     Font* selected = &font;
-    const auto* presentation = g_renderContent && g_renderContent->presentation.Active() ? &g_renderContent->presentation : nullptr;
+    const auto* presentation = overridePresentation ? overridePresentation :
+        g_renderContent && g_renderContent->presentation.Active() ? &g_renderContent->presentation : nullptr;
     if (presentation) {
         const bool badge = text == g_renderContent->text.badge && alpha < 255;
         const auto& style = alpha == 255 ? presentation->primaryStyle : badge ? presentation->badgeStyle : presentation->secondaryStyle;
@@ -899,9 +901,10 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
         }
     }
     if (g_renderContent && !g_renderContent->rssHeadlines.empty() && logicalHeight >= 150 && logicalWidth >= 150) {
-        if (g_renderContent->presentation.Active()) {
-            const bool rich = g_renderContent->presentation.preset == L"RssHeadlines";
-            const auto count = (std::min)(g_renderContent->rssHeadlines.size(), rich ? (logicalHeight > 200 ? std::size_t(3) : std::size_t(1)) : aip::content::RssTileRows(logicalHeight));
+        if (g_renderContent->presentation.Active() || aip::content::RssUsesRichLayout(g_renderContent->presentation)) {
+            const bool rich = aip::content::RssUsesRichLayout(g_renderContent->presentation);
+            const auto count = (std::min)(g_renderContent->rssHeadlines.size(), rich ? aip::content::RssRichTileRows(logicalWidth, logicalHeight) : aip::content::RssTileRows(logicalHeight));
+            const auto presentation = rich ? aip::content::RssRichPresentation(g_renderContent->presentation, logicalWidth, logicalHeight) : g_renderContent->presentation;
             Font font(L"Segoe UI", static_cast<REAL>(12 * scale), FontStyleRegular, UnitPixel);
             const REAL margin = static_cast<REAL>(10 * scale), width = static_cast<REAL>((logicalWidth - 20) * scale);
             const REAL rowHeight = static_cast<REAL>((logicalHeight - 30) * scale / count);
@@ -909,8 +912,9 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
                 REAL y = margin + static_cast<REAL>(row) * rowHeight;
                 const REAL bottom = y + rowHeight;
                 const auto& item = g_renderContent->rssHeadlines[row];
-                if (!DrawTopSourceField(graphics, std::to_wstring(row + 1) + L". " + item.primary, font, margin, y, width, bottom, 3, 255, 0) ||
-                    ((rich || logicalHeight > 200) && !DrawTopSourceField(graphics, item.secondary, font, margin, y, width, bottom, 2, 153, 0))) return false;
+                const auto title = rich ? item.primary : std::to_wstring(row + 1) + L". " + item.primary;
+                if (!DrawTopSourceField(graphics, title, font, margin, y, width, bottom, 3, 255, 0, &presentation) ||
+                    ((rich || logicalHeight > 200) && !DrawTopSourceField(graphics, item.secondary, font, margin, y, width, bottom, 2, 153, 0, &presentation))) return false;
             }
             return graphics.GetLastStatus() == Ok;
         }

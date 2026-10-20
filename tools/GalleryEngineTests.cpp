@@ -304,10 +304,45 @@ void TestManyTilesAndFolderEligibility() {
         "an image missing from its owner's folder stays reserved and cannot migrate to an overlapping folder's tile");
     Check(ValidateConfiguration(Config(static_cast<unsigned>(MaxTiles)), error), "the advertised1024configured-row ceiling is accepted");
 }
+void TestIndependentDeliveryPolicies() {
+    std::map<std::pair<std::wstring,std::wstring>,std::wstring> fields{
+        {{L"Gallery",L"Enabled"},L"1"},{{L"Gallery",L"GroupId"},L"group1"},
+        {{L"Gallery.Tile.1",L"Id"},L"tile1"},{{L"Gallery.Tile.2",L"Id"},L"tile2"},
+        {{L"Gallery.Tile.1",L"Delivery.Mode"},L"Registration"},{{L"Gallery.Tile.1",L"Cache.MaxEntries"},L"7"},
+        {{L"Gallery.Tile.2",L"Delivery.Mode"},L"LiveTile"},{{L"Gallery.Tile.2",L"Cache.MaxEntries"},L"19"},
+        {{L"Gallery.Tile.1",L"Wallpaper.Fit"},L"Fit"}};
+    const auto read = [&](const wchar_t* section,const wchar_t* key,const wchar_t* fallback) {
+        const auto found=fields.find({section,key});return found==fields.end()?std::wstring(fallback):found->second;
+    };
+    Configuration cfg; std::wstring error;
+    Check(ReadConfiguration(read,cfg,error) && UsesRegistration(cfg.tiles[0]) && !UsesRegistration(cfg.tiles[1]) &&
+        cfg.tiles[0].delivery.Read(L"Settings",L"GeneratedAssetCacheMaxEntries",L"") == L"7" &&
+        cfg.tiles[1].delivery.Read(L"Settings",L"GeneratedAssetCacheMaxEntries",L"") == L"19",
+        "gallery rows own independent delivery and image-cache settings");
+    Check(EffectiveQueueSize(cfg,cfg.tiles[0]) == 1 && EffectiveQueueSize(cfg,cfg.tiles[1]) == 5 &&
+        EffectiveFit(cfg,cfg.tiles[0]) == Fit::Fit && EffectiveFit(cfg,cfg.tiles[1]) == Fit::Fill,
+        "Registration uses one image while another gallery row keeps its native queue and fitting");
+    const auto id = GalleryRegistrationId(cfg.groupId,cfg.tiles[0].id);
+    Check(id.size() <= 54 && id != GalleryRegistrationId(cfg.groupId,cfg.tiles[1].id) && id != GalleryRegistrationId(L"another",cfg.tiles[0].id) &&
+        id == GalleryRegistrationId(cfg.groupId,cfg.tiles[0].id) &&
+        std::all_of(id.begin(),id.end(),[](wchar_t c){return (c>=L'a'&&c<=L'z')||(c>=L'0'&&c<=L'9')||c==L'_';}),
+        "gallery registration IDs are stable, bounded and scoped by both group and logical tile identity");
+    auto initial = NewLedger(); OwnershipPlan ownership;
+    Check(ReconcileOwnership(cfg,Images(20),initial,ownership,error),"mixed delivery gallery builds one shared ownership ledger");
+    QueueBatch batch;
+    Check(PrepareQueueBatch(cfg,ownership.pools,ownership.ledger,Due(cfg),batch,error) &&
+        Window(batch,L"tile1").images.size() == 1 && Window(batch,L"tile2").images.size() == 5,
+        "the durable planner independently limits Registration to one image without shrinking native queues");
+    auto value=std::wstring(L"yes");
+    Check(NormalizeSetting(L"Gallery.Tile.2",L"Cache.Enabled",value,error) && value==L"1",
+        "gallery per-row CLI and INI normalization uses the canonical shared policy fields");
+    fields[{L"Gallery.Tile.1",L"Wallpaper.Fit"}]=L"Stretch";
+    Check(!ReadConfiguration(read,cfg,error),"unsupported gallery fitting modes reject without silently rendering a different mode");
+}
 }
 int main() {
     try {
-        TestOwnershipAndMembership(); TestQueuePlanningAndFailures(); TestPersistenceAndReset(); TestTypedConfigurationAndDefenses(); TestManyTilesAndFolderEligibility();
+        TestOwnershipAndMembership(); TestQueuePlanningAndFailures(); TestPersistenceAndReset(); TestTypedConfigurationAndDefenses(); TestManyTilesAndFolderEligibility(); TestIndependentDeliveryPolicies();
         std::cout << checks << " gallery checks passed.\n"; return 0;
     } catch (const std::exception& error) { std::cerr << "FAIL after " << checks << " gallery checks: " << error.what() << '\n'; return 1; }
 }

@@ -66,14 +66,18 @@ static std::wstring SecondaryDeliveryKey(const aip::content::Snapshot& frame)
 {
     return frame.galleryFrame ? frame.secondaryTileId + L"|" + frame.nativeQueueTag : frame.secondaryTileId;
 }
+static bool TileSnapshotUsesRegistration(const aip::content::Snapshot& frame);
 static bool GalleryWindowComplete(const std::vector<aip::content::Snapshot>& frames, const aip::content::Snapshot& wanted)
 {
     if (!wanted.gallerySlotCount || wanted.gallerySlotCount > 5) return false;
+    const bool registration = TileSnapshotUsesRegistration(wanted);
+    if (registration && wanted.gallerySlotCount != 1) return false;
     std::set<unsigned> slots;
     for (const auto& frame : frames) if (frame.galleryFrame && frame.secondaryTileId == wanted.secondaryTileId &&
         frame.galleryEpoch == wanted.galleryEpoch && frame.galleryTicket == wanted.galleryTicket) {
         if (frame.gallerySlotCount != wanted.gallerySlotCount || frame.gallerySlot >= frame.gallerySlotCount ||
-            frame.nativeQueueTag != L"g" + std::to_wstring(frame.gallerySlot + 1) || !frame.nativeQueue ||
+            frame.nativeQueueTag != L"g" + std::to_wstring(frame.gallerySlot + 1) ||
+            frame.nativeQueue == registration || TileSnapshotUsesRegistration(frame) != registration ||
             !slots.insert(frame.gallerySlot).second || !IsUsableWallpaperPath(frame.backgroundPath) || !ContentGalleryFrameCurrent(frame)) return false;
     }
     return slots.size() == wanted.gallerySlotCount;
@@ -98,6 +102,8 @@ static std::vector<aip::content::Snapshot> CurrentSecondarySnapshots()
     std::lock_guard<std::mutex> lock(g_secondarySnapshotMutex);
     return g_secondarySnapshots;
 }
+static bool TileSnapshotUsesRegistration(const aip::content::Snapshot& frame);
+static bool TileRegistrationReadyForId(const std::wstring& id);
 static std::vector<aip::content::Snapshot> PrepareSecondaryBatch(const std::vector<aip::content::Snapshot>& frames, bool force = false)
 {
     std::vector<aip::content::Snapshot> changed;
@@ -110,14 +116,16 @@ static std::vector<aip::content::Snapshot> PrepareSecondaryBatch(const std::vect
             if (!force && found != g_secondaryDelivered.end() && found->second == frame.secondaryFrameKey) continue;
         }
         if (!IsUsableWallpaperPath(frame.backgroundPath)) { ContentFailGalleryFrame(frame); continue; }
-        if (!frame.secondaryTileId.empty() && pinned.find(frame.secondaryTileId) == pinned.end()) {
+        const bool registration = TileSnapshotUsesRegistration(frame);
+        if (registration && !TileRegistrationReadyForId(frame.policy.owner)) continue;
+        if (!registration && !frame.secondaryTileId.empty() && pinned.find(frame.secondaryTileId) == pinned.end()) {
 #ifdef DESKTOPSTUB_TEST_SECONDARY_EXISTS
             pinned[frame.secondaryTileId] = DESKTOPSTUB_TEST_SECONDARY_EXISTS(frame.secondaryTileId);
 #else
             pinned[frame.secondaryTileId] = SecondaryTileExists(frame.secondaryTileId);
 #endif
         }
-        if (!frame.secondaryTileId.empty() && !pinned[frame.secondaryTileId]) continue;
+        if (!registration && !frame.secondaryTileId.empty() && !pinned[frame.secondaryTileId]) continue;
         if (frame.galleryFrame) {
             const auto window = frame.secondaryTileId + L"|" + frame.galleryEpoch + L"|" + std::to_wstring(frame.galleryTicket);
             auto ready = completeWindows.find(window);
@@ -164,6 +172,24 @@ static bool ContentDirectLiveDeliveryAvailable()
     return UseExperimentalLiveTileUpdate() && !LiveTileModeReregistrationPending() && CurrentProcessHasPackageIdentity();
 #endif
 }
+static bool TilePolicyUsesRegistration(const aip::content::TileDeliveryPolicy& policy)
+{
+    if (!policy.included) return false;
+    if (policy.Mode()==L"Registration") return true;
+    if (policy.Mode()==L"LiveTile") return false;
+#ifdef DESKTOPSTUB_TEST_NATIVE_QUEUE_AVAILABLE
+    // The existing injected direct-transport capability stands in for package
+    // identity in inert host fixtures; never inspect the test runner's identity.
+    return !DESKTOPSTUB_TEST_NATIVE_QUEUE_AVAILABLE();
+#else
+    aip::content::TilePolicyReadScope scope(policy);
+    return !UseExperimentalLiveTileUpdate();
+#endif
+}
+static bool TileSnapshotUsesRegistration(const aip::content::Snapshot& frame)
+{
+    return TilePolicyUsesRegistration(frame.policy);
+}
 static bool ContentNativeQueueAvailable(const aip::content::Configuration& configuration)
 {
     return aip::content::NativeQueueEligible(configuration, ContentDirectLiveDeliveryAvailable());
@@ -190,6 +216,12 @@ static std::wstring ContentNativeQueueLayout(const aip::content::Configuration& 
         LiveTileTemplateStyleIniValue(ConfiguredLiveTileTemplateStyle());
 }
 static thread_local const aip::content::Snapshot* g_renderContent = nullptr;
+static bool TryContentWallpaperFit(FitMode& result)
+{
+    if(!g_renderContent||g_renderContent->capturedWallpaperFit<static_cast<int>(FitMode::Fill)||
+        g_renderContent->capturedWallpaperFit>static_cast<int>(FitMode::Span))return false;
+    result=static_cast<FitMode>(g_renderContent->capturedWallpaperFit);return true;
+}
 static bool ContentHasTransparentBackground()
 {
     return g_renderContent && g_renderContent->backgroundId == aip::content::BackgroundId::Transparent;
@@ -371,6 +403,7 @@ struct ContentRenderScope
 {
     aip::content::Snapshot snapshot;
     const aip::content::Snapshot* previous = g_renderContent;
+    std::unique_ptr<aip::content::TilePolicyReadScope> policyScope;
     explicit ContentRenderScope(const aip::content::Snapshot* supplied = nullptr)
     {
         if (supplied) snapshot = *supplied;
@@ -380,6 +413,7 @@ struct ContentRenderScope
             snapshot = g_contentSnapshot;
         }
         g_renderContent = snapshot.active ? &snapshot : nullptr;
+        policyScope = std::make_unique<aip::content::TilePolicyReadScope>(snapshot.policy);
     }
     ~ContentRenderScope() { g_renderContent = previous; }
     ContentRenderScope(const ContentRenderScope&) = delete;

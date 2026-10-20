@@ -67,6 +67,7 @@ struct Input {
     bool contentEnabled = false, tilesEnabled = false, directAvailable = false;
     bool pinnedKnown = false;
     std::set<std::wstring> pinnedIds; // Native IDs, copied once from the host cache.
+    std::set<std::wstring> registeredStaticIds; // Logical row IDs with ready Registration identities; never a claim that they are pinned.
 };
 struct Receipt {
     std::wstring groupId, tileId, epoch, frameKey;
@@ -77,11 +78,20 @@ struct Frame {
     Receipt receipt;
     std::wstring nativeId, path, name, activationArguments, layout, tag, branding;
     bool reset = false, contain = false;
+    bool registration = false;
+    aip::content::TileDeliveryPolicy policy;
+    aip::content::TileAppearance appearance;
 };
 struct StatusWindow {
     std::vector<Frame> frames;
     bool submitted = false; // Status only; never a source of delivery work.
 };
+inline bool StatusWindowHasDemand(const StatusWindow& window, const Input& input) {
+    if (window.frames.empty()) return false;
+    const auto& frame = window.frames.front();
+    return frame.registration ? input.registeredStaticIds.count(frame.receipt.tileId) != 0 :
+        input.directAvailable && input.pinnedKnown && input.pinnedIds.count(frame.nativeId) != 0;
+}
 struct MenuState {
     std::wstring id, nativeId, name, status;
     bool enabled = false, ledgerReady = false;
@@ -106,7 +116,8 @@ inline std::wstring ConfigKey(const Configuration& cfg) {
         std::to_wstring(cfg.refreshSeconds) + L":" + std::to_wstring(cfg.seed) + L":" +
         std::to_wstring(static_cast<int>(cfg.order)) + L":" + std::to_wstring(static_cast<int>(cfg.fit));
     for (const auto& tile : cfg.tiles) key += Pack(tile.id) + Pack(tile.name) + (tile.enabled ? L"1" : L"0") +
-        Pack(tile.appearance.background) + Pack(tile.appearance.branding) + Pack(tile.appearance.backgroundColor) + Pack(tile.folder) + Pack(tile.galleryName);
+        Pack(tile.appearance.background) + Pack(tile.appearance.branding) + Pack(tile.appearance.backgroundColor) + Pack(tile.folder) + Pack(tile.galleryName) +
+        Pack(aip::content::TileDeliveryPolicyKey(tile.delivery)) + (UsesRegistration(tile) ? L"Registration" : L"LiveTile");
     return key;
 }
 inline std::wstring InventoryFolderKey(std::wstring folder) {
@@ -153,6 +164,8 @@ class Coordinator {
     std::set<std::wstring> activeTiles_, activeFolders_;
     std::wstring lastScannedFolder_, selectionConfig_;
     std::set<std::wstring> selectionPins_;
+    std::set<std::wstring> selectionRegistered_;
+    bool selectionDirect_ = false;
     bool selectionKnown_ = false;
     EligibilityMap eligibility_;
     std::map<std::wstring, std::wstring> paths_;
@@ -245,13 +258,17 @@ class Coordinator {
         });
     }
     bool SelectFolders(const Input& input) {
-        if (selectionConfig_ == configKey_ && selectionKnown_ == input.pinnedKnown && selectionPins_ == input.pinnedIds) return false;
+        if (selectionConfig_ == configKey_ && selectionKnown_ == input.pinnedKnown && selectionPins_ == input.pinnedIds &&
+            selectionRegistered_ == input.registeredStaticIds && selectionDirect_ == input.directAvailable) return false;
         selectionConfig_ = configKey_; selectionKnown_ = input.pinnedKnown; selectionPins_ = input.pinnedIds;
+        selectionRegistered_ = input.registeredStaticIds; selectionDirect_ = input.directAvailable;
         std::set<std::wstring> desired; activeTiles_.clear(); activeFolders_.clear();
         for (const auto& tile : cfg_.tiles) {
             const auto& path = EffectiveFolder(cfg_, tile); if (path.empty()) continue;
             const auto key = InventoryFolderKey(path); desired.insert(key); folders_[key].path = path;
-            if (input.pinnedKnown && input.pinnedIds.find(NativeTileId(cfg_.groupId, tile.id)) != input.pinnedIds.end()) {
+            const bool ready = UsesRegistration(tile) ? input.registeredStaticIds.count(tile.id) != 0 :
+                input.directAvailable && input.pinnedKnown && input.pinnedIds.count(NativeTileId(cfg_.groupId,tile.id)) != 0;
+            if (ready) {
                 activeTiles_.insert(tile.id); activeFolders_.insert(key);
             }
         }
@@ -370,7 +387,10 @@ class Coordinator {
             if (!PrepareQueueBatch(cfg_, pools_, ledger_, due, batch, error)) { PublishStatus(error, true); return false; }
             if (batch.requiresLedgerCommit && !Save(batch.ledger, now, error)) return false;
             auto candidate = ledger_; bool unavailable = false;
-            for (const auto& window : batch.windows) if (window.status == WindowStatus::PendingImagesUnavailable || window.images.size() > cfg_.queueSize) {
+            for (const auto& window : batch.windows) {
+                const auto tile = std::find_if(cfg_.tiles.begin(),cfg_.tiles.end(),[&](const auto& value){return value.id == window.tileId;});
+                if (window.status != WindowStatus::PendingImagesUnavailable &&
+                    (tile == cfg_.tiles.end() || window.images.size() <= EffectiveQueueSize(cfg_,*tile))) continue;
                 Ledger next;
                 if (!AcknowledgeDelivery(candidate, window, false, next, error)) { PublishStatus(error, true); return false; }
                 candidate = std::move(next); unavailable = true;
@@ -398,13 +418,15 @@ class Coordinator {
                 for (std::size_t slot = 0; slot < window.images.size(); ++slot) {
                     const auto path = paths_.find(window.images[slot]); if (path == paths_.end()) continue;
                     Frame frame; frame.nativeId = NativeTileId(cfg_.groupId, window.tileId); frame.path = path->second; frame.name = tile->name; frame.branding = tile->appearance.branding;
+                    frame.registration = UsesRegistration(*tile); frame.policy = tile->delivery; frame.appearance = tile->appearance;
                     frame.activationArguments = L"--ini " + Quote(profile_) + L" --open-folder " + Quote(EffectiveFolder(cfg_, *tile));
-                    frame.contain = cfg_.fit == Fit::Fit; frame.reset = reset && slot == 0;
+                    frame.contain = EffectiveFit(cfg_,*tile) == Fit::Fit; frame.reset = reset && slot == 0;
                     frame.layout = L"Gallery:" + Pack(cfg_.groupId) + Pack(window.tileId) + Pack(window.epochId) + std::to_wstring(window.images.size()) + (frame.contain ? L":Fit" : L":Fill");
                     frame.tag = L"g" + std::to_wstring(slot + 1);
                     frame.receipt = {cfg_.groupId, window.tileId, window.epochId, L"", window.ticket, static_cast<unsigned>(slot), static_cast<unsigned>(window.images.size())};
                     frame.receipt.frameKey = Pack(profile_) + frame.layout + L":" + std::to_wstring(window.ticket) + L":" + std::to_wstring(flight.attempt) +
-                        L":" + std::to_wstring(slot) + Pack(window.images[slot]) + Pack(tile->name) + Pack(frame.activationArguments) + Pack(frame.branding);
+                        L":" + std::to_wstring(slot) + Pack(window.images[slot]) + Pack(tile->name) + Pack(frame.activationArguments) + Pack(frame.branding) +
+                        Pack(aip::content::TileDeliveryPolicyKey(frame.policy)) + (frame.registration ? L"Registration" : L"LiveTile");
                     frames.push_back(std::move(frame));
                 }
             }
@@ -468,10 +490,10 @@ public:
         }
         const bool selectionChanged = SelectFolders(input);
         if (selectionChanged) { InvalidateFlights(); force = true; }
-        if (!cfg_.enabled || !input.directAvailable) {
+        if (!cfg_.enabled || (!input.directAvailable && input.registeredStaticIds.empty())) {
             CancelWork(); ledgerReady_ = poolsReady_ = eligible_ = false; InvalidateFlights(true);
             PublishStatus(!cfg_.enabled ? L"Set up a gallery group to begin. Historical ownership is kept." :
-                L"Gallery queues need direct Live Tile delivery with package identity. No registration changes were requested.", true); return;
+                L"Gallery tiles need either a pinned Live Tile or an explicitly prepared Registration identity. No registration changes were requested.", true); return;
         }
         if (!eligible_) { force = true; nextScan_ = 0; eligible_ = true; }
         if (!services_.readLedger || !services_.saveLedger || !services_.scan || !services_.cacheDirectory) { PublishStatus(L"Gallery runtime services are unavailable.", true); return; }
@@ -489,7 +511,7 @@ public:
             ledger_ = std::move(fresh); ledgerReady_ = true; poolsReady_ = false;
         }
         if (!CommitAcknowledgements(now, error)) return;
-        if (!input.pinnedKnown || activeTiles_.empty()) {
+        if (activeTiles_.empty()) {
             CancelWork(); InvalidateFlights(); eligible_ = false;
             PublishStatus(input.pinnedKnown ? L"Pin a gallery tile to begin updates. Configured tile pools and historical ownership are kept." :
                 L"Waiting for Windows' pinned-tile inventory. No photo scan has started.", true); return;
@@ -534,7 +556,11 @@ public:
         return std::any_of(frames_.begin(), frames_.end(), [&](const auto& frame) {
             return Same(frame.receipt, expected.receipt) && frame.nativeId == expected.nativeId && frame.path == expected.path &&
                 frame.name == expected.name && frame.activationArguments == expected.activationArguments && frame.layout == expected.layout &&
-                frame.tag == expected.tag && frame.branding == expected.branding && frame.reset == expected.reset && frame.contain == expected.contain;
+                frame.tag == expected.tag && frame.branding == expected.branding && frame.reset == expected.reset && frame.contain == expected.contain &&
+                frame.registration == expected.registration &&
+                aip::content::TileDeliveryPolicyKey(frame.policy) == aip::content::TileDeliveryPolicyKey(expected.policy) &&
+                frame.appearance.background == expected.appearance.background && frame.appearance.backgroundColor == expected.appearance.backgroundColor &&
+                frame.appearance.branding == expected.appearance.branding;
         });
     }
     void Acknowledge(const Receipt& receipt) {
@@ -593,6 +619,7 @@ public:
 } } }
 
 #ifndef AIP_GALLERY_RUNTIME_NO_HOST
+static bool TileRegistrationReadyForId(const std::wstring& id);
 static bool GalleryTransactionPending(const std::wstring& profile)
 {
     const auto attributes = GetFileAttributesW(aip::gallery::transaction::Path(profile).c_str());
@@ -681,7 +708,17 @@ static bool CaptureGalleryConfiguration(aip::gallery::runtime::Input& input, std
     aip::gallery::runtime::Input candidate; candidate.profile = view->profile; candidate.configuration = view->configuration;
     candidate.contentEnabled = view->contentEnabled; candidate.tilesEnabled = view->tilesEnabled;
     candidate.pinnedKnown = SecondaryTileInventoryReady(); candidate.pinnedIds = CachedSecondaryTileIds();
-    candidate.directAvailable = ContentDirectLiveDeliveryAvailable();
+    candidate.directAvailable = false;
+    for (auto& tile : candidate.configuration.tiles) {
+        aip::content::TilePolicyReadScope scope(tile.delivery);
+        tile.registration = !UseExperimentalLiveTileUpdate();
+        if (tile.registration) {
+            if (TileRegistrationReadyForId(tile.delivery.owner)) candidate.registeredStaticIds.insert(tile.id);
+        } else candidate.directAvailable = ContentDirectLiveDeliveryAvailable() || candidate.directAvailable;
+    }
+    { std::lock_guard<std::mutex> lock(g_pathMutex);
+        if (!IEquals(candidate.profile,aip::MakeAbsolutePath(g_iniPath))) { error=L"The active gallery profile changed.";return false; }
+    }
     input = std::move(candidate); error.clear(); return true;
 }
 static bool ReadGalleryConfiguration(aip::gallery::Configuration& cfg, std::wstring& error)
@@ -771,7 +808,9 @@ static aip::content::Snapshot GallerySnapshotForFrame(const aip::gallery::runtim
 {
         aip::content::Snapshot frame; frame.active = true; frame.name = source.name; frame.backgroundPath = source.path;
         frame.backgroundId = aip::content::BackgroundId::Image; frame.textMode = aip::content::TextMode::Off;
-        frame.activationArguments = source.activationArguments; frame.nativeQueue = true; frame.nativeQueueReset = source.reset;
+        frame.activationArguments = source.activationArguments; frame.nativeQueue = !source.registration; frame.nativeQueueReset = source.reset;
+        frame.policy = source.policy; frame.registrationAppearance = source.appearance;
+        frame.artworkTopic = L"gallery";
         frame.nativeQueueTag = source.tag; frame.nativeQueueLayout = source.layout; frame.nativeQueueFrameKey = source.receipt.frameKey;
         frame.secondaryTileId = source.nativeId; frame.secondaryFrameKey = source.receipt.frameKey; frame.secondaryBranding = source.branding;
         frame.galleryFrame = true; frame.galleryContain = source.contain; frame.galleryGroupId = source.receipt.groupId;
@@ -793,11 +832,12 @@ static std::vector<GalleryStatusSnapshots> CurrentGalleryStatusWindows()
 {
     std::vector<GalleryStatusSnapshots> result;
     aip::gallery::runtime::Input input; std::wstring error;
-    if (!CaptureGalleryConfiguration(input, error) || !g_galleryRuntime.IsProfile(input.profile) || !input.pinnedKnown || !input.directAvailable) return result;
+    if (!CaptureGalleryConfiguration(input, error) || !g_galleryRuntime.IsProfile(input.profile) ||
+        (!input.directAvailable && input.registeredStaticIds.empty())) return result;
     auto effective = input.configuration; effective.enabled = !effective.groupId.empty();
     for (auto& tile : effective.tiles) tile.enabled = true;
     for (const auto& window : g_galleryRuntime.StatusWindows(aip::gallery::runtime::ConfigKey(effective))) {
-        if (window.frames.empty() || input.pinnedIds.find(window.frames.front().nativeId) == input.pinnedIds.end()) continue;
+        if (!aip::gallery::runtime::StatusWindowHasDemand(window,input)) continue;
         GalleryStatusSnapshots item; item.submitted = window.submitted;
         for (const auto& source : window.frames) {
             auto frame = GallerySnapshotForFrame(source);
@@ -811,21 +851,33 @@ static std::vector<GalleryStatusSnapshots> CurrentGalleryStatusWindows()
 }
 static bool ValidateGalleryFrame(const aip::content::Snapshot& frame)
 {
-    if (!frame.galleryFrame || !frame.nativeQueue) return false;
+    if (!frame.galleryFrame || (!frame.nativeQueue && frame.gallerySlotCount != 1)) return false;
     aip::gallery::runtime::Frame expected;
     expected.receipt = GalleryReceipt(frame); expected.nativeId = frame.secondaryTileId; expected.path = frame.backgroundPath;
     expected.name = frame.name; expected.activationArguments = frame.activationArguments; expected.layout = frame.nativeQueueLayout;
-    expected.tag = frame.nativeQueueTag; expected.branding = frame.secondaryBranding; expected.reset = frame.nativeQueueReset; expected.contain = frame.galleryContain;
+    expected.tag = frame.nativeQueueTag; expected.branding = frame.secondaryBranding;
+    expected.registration = !frame.nativeQueue; expected.reset = frame.nativeQueueReset; expected.contain = frame.galleryContain;
+    expected.policy = frame.policy; expected.appearance = frame.registrationAppearance;
     if (!g_galleryRuntime.ValidateFrame(expected)) return false;
     std::wstring error; const auto view = CaptureGalleryConfigurationView(error, true);
-    if (!view || !g_galleryRuntime.IsProfile(view->profile) || !ContentDirectLiveDeliveryAvailable() || !SecondaryTileInventoryReady() || !SecondaryTileExists(frame.secondaryTileId) ||
-        view->configuration.groupId != frame.galleryGroupId || (view->configuration.fit == aip::gallery::Fit::Fit) != frame.galleryContain ||
+    if (!view || !g_galleryRuntime.IsProfile(view->profile) ||
+        view->configuration.groupId != frame.galleryGroupId ||
         !frame.gallerySlotCount || frame.gallerySlotCount > view->configuration.queueSize || frame.gallerySlot >= frame.gallerySlotCount) return false;
     const auto tile = std::find_if(view->configuration.tiles.begin(), view->configuration.tiles.end(), [&](const auto& value) {
         return value.id == frame.galleryTileId && value.name == frame.name && value.appearance.branding == frame.secondaryBranding &&
             aip::gallery::NativeTileId(view->configuration.groupId, value.id) == frame.secondaryTileId;
     });
-    if (tile == view->configuration.tiles.end() || frame.activationArguments != L"--ini " + aip::QuoteCommandLineArg(view->profile) + L" --open-folder " + aip::QuoteCommandLineArg(aip::gallery::EffectiveFolder(view->configuration, *tile))) return false;
+    if (tile == view->configuration.tiles.end() || frame.activationArguments != L"--ini " + aip::QuoteCommandLineArg(view->profile) + L" --open-folder " + aip::QuoteCommandLineArg(aip::gallery::EffectiveFolder(view->configuration, *tile)) ||
+        aip::content::TileDeliveryPolicyKey(tile->delivery) != aip::content::TileDeliveryPolicyKey(frame.policy) ||
+        (aip::gallery::EffectiveFit(view->configuration,*tile) == aip::gallery::Fit::Fit) != frame.galleryContain) return false;
+    {
+        aip::content::TilePolicyReadScope scope(tile->delivery);
+        const bool registration = !UseExperimentalLiveTileUpdate();
+        if (registration != expected.registration) return false;
+        if (registration) {
+            if (frame.gallerySlotCount != 1 || !TileRegistrationReadyForId(tile->delivery.owner)) return false;
+        } else if (!ContentDirectLiveDeliveryAvailable() || !SecondaryTileInventoryReady() || !SecondaryTileExists(frame.secondaryTileId)) return false;
+    }
     return !GalleryTransactionPending(view->profile) && g_galleryRuntime.ValidateFrame(expected);
 }
 static void AcknowledgeGalleryFrame(const aip::content::Snapshot& frame) { if (frame.galleryFrame) g_galleryRuntime.Acknowledge(GalleryReceipt(frame)); }
@@ -876,6 +928,14 @@ static bool PrepareGalleryConfigurationSettings(const aip::gallery::Configuratio
         changes.push_back({section, L"Folder", tile.folder}); changes.push_back({section, L"GalleryName", tile.galleryName});
         changes.push_back({section, L"Background", tile.appearance.background}); changes.push_back({section, L"Branding", tile.appearance.branding});
         changes.push_back({section, L"BackgroundColor", tile.appearance.backgroundColor});
+        for (const auto& field : aip::content::TilePolicyFields) {
+            auto value = tile.delivery.included ? tile.delivery.Read(field.section,field.setting,field.fallback) : IniReadS(field.section,field.setting,field.fallback);
+            // Gallery fitting already has its own group default. A desktop's
+            // Stretch/Center/disabled-fit choice must not leak into a new row.
+            if (!tile.delivery.included && (std::wstring(field.key)==L"Wallpaper.Fit" || std::wstring(field.key)==L"Wallpaper.DisableFitting")) value=field.fallback;
+            if (!aip::content::NormalizeTilePolicySetting(field.key,value,error)) return false;
+            changes.push_back({section,field.key,std::move(value)});
+        }
     }
     output = std::move(changes); error.clear(); return true;
 }

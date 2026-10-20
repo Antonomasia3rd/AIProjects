@@ -9,6 +9,23 @@ static bool EnsureTileInstanceProfile(std::wstring& error)
         };
         aip::content::TileInstanceMigrationPlan plan;
         if (!aip::content::PlanLegacyTileInstanceMigration(read, plan, error)) return false;
+        if (!read(L"Gallery",L"GroupId",L"").empty()) {
+            aip::gallery::Configuration gallery;
+            if (!aip::gallery::ReadConfiguration(read,gallery,error)) return false;
+            for (std::size_t index=0;index<gallery.tiles.size();++index) {
+                const auto section=L"Gallery.Tile."+std::to_wstring(index+1);
+                for (const auto& field:aip::content::TilePolicyFields) {
+                    if (aip::IniHasKeyInDoc(document,section.c_str(),field.key)) continue;
+                    auto value=read(field.section,field.setting,field.fallback);
+                    // Galleries previously used their group's fitting mode,
+                    // independently of the desktop wallpaper's fitting switch.
+                    if (std::wstring(field.key)==L"Wallpaper.Fit") value=L"Auto";
+                    if (std::wstring(field.key)==L"Wallpaper.DisableFitting") value=L"0";
+                    if (!aip::content::NormalizeTilePolicySetting(field.key,value,error)) return false;
+                    plan.settings.push_back({section,field.key,std::move(value)});plan.changed=true;
+                }
+            }
+        }
         if (!plan.changed) return true;
         auto candidate = text;
         for (const auto& setting : plan.settings)
@@ -43,6 +60,9 @@ struct TileInstanceProviderState {
     std::unique_ptr<ContentDiscordProvider> discord;
     std::wstring backgroundKey, backgroundPath;
     ULONGLONG nextBackgroundRead = 0;
+    std::wstring fitKey;
+    int capturedFit = -1;
+    ULONGLONG nextFitRead = 0;
     void Stop() {
         if (rss) rss->Cancel(); if (prayer) prayer->Cancel(); if (notes) notes->Cancel();
         if (discord) discord->Cancel();
@@ -97,11 +117,52 @@ static std::wstring TileInstanceActivation(const aip::content::TileInstance& til
     // Preserve the profile identity there too, including paths with spaces.
     return TileInstanceProfileActivation(L"--tile-setup " + tile.id);
 }
+#if defined(DESKTOPSTUB_INERT_HARDWARE)
+static FitMode (*g_testTileInstanceFitReader)() = nullptr;
+#endif
+static FitMode ReadTileInstanceDesktopFit()
+{
+#if defined(DESKTOPSTUB_INERT_HARDWARE)
+    return g_testTileInstanceFitReader ? g_testTileInstanceFitReader() : FitMode::Fill;
+#else
+    return ReadUncapturedWallpaperFit();
+#endif
+}
+static int ResolveTileInstanceFit(const aip::content::TileInstance& tile,
+    TileInstanceProviderState& state,aip::content::BackgroundId background,bool synchronous)
+{
+    using namespace aip::content;
+    const auto requested=Lower(tile.policy.Read(L"Settings",L"TileWallpaperFit",L"Auto"));
+    const bool disabled=tile.policy.Read(L"Settings",L"DisableFitting",L"0")==L"1";
+    const bool listen=tile.policy.Read(L"Settings",L"ListenFit",L"1")==L"1";
+    const auto key=requested+L":"+std::to_wstring(static_cast<int>(background))+L":"+std::to_wstring(listen)+
+        L":"+std::to_wstring(disabled)+L":"+std::to_wstring(tile.configuration.refreshSeconds);
+    const auto capture=[&](FitMode fit){state.fitKey=key;state.capturedFit=static_cast<int>(fit);return state.capturedFit;};
+    if(disabled)return capture(FitMode::Fill);
+    for(const auto& explicitFit:{std::make_pair(L"fill",FitMode::Fill),std::make_pair(L"fit",FitMode::Fit),
+        std::make_pair(L"stretch",FitMode::Stretch),std::make_pair(L"center",FitMode::Center),
+        std::make_pair(L"tile",FitMode::Tile),std::make_pair(L"span",FitMode::Span)})
+        if(requested==explicitFit.first)return capture(explicitFit.second);
+    // Auto refers to desktop fitting only when this frame actually uses the
+    // desktop. Other sources never consult its registry on render/key paths.
+    if(background!=BackgroundId::Wallpaper&&background!=BackgroundId::LiveWallpaper)
+        return capture(FitMode::Fill);
+    const auto now=GetTickCount64();
+    if(state.capturedFit<0||state.fitKey!=key||synchronous||state.forceRefresh||(listen&&now>=state.nextFitRead)) {
+        state.capturedFit=static_cast<int>(ReadTileInstanceDesktopFit());state.fitKey=key;
+        state.nextFitRead=now+static_cast<ULONGLONG>(tile.configuration.refreshSeconds)*1000;
+    }
+    return state.capturedFit;
+}
 static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstance& tile,
     TileInstanceProviderState& state, const aip::content::SmtcMediaSnapshot& media, bool synchronous)
 {
     using namespace aip::content;
+    TilePolicyReadScope policyScope(tile.policy);
     Snapshot frame; frame.active = true; frame.name = tile.name;
+    frame.policy = tile.policy;
+    frame.registrationAppearance = tile.appearance;
+    frame.artworkTopic = TileInstanceArtworkTopic(tile);
     frame.secondaryTileId = TileInstanceNativeId(tile); frame.secondaryBranding = tile.appearance.branding;
     frame.presentation = tile.presentation; frame.textMode = tile.configuration.textMode;
     frame.activationArguments = TileInstanceActivation(tile);
@@ -110,6 +171,7 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         state.rss.reset(); state.prayer.reset(); state.notes.reset(); state.discord.reset();
         Entry background; background.background = L"Transparent";
         frame.backgroundId = BackgroundId::Transparent;
+        frame.capturedWallpaperFit = static_cast<int>(FitMode::Fill);
         if (state.backgroundKey != L"configuration-error" || !IsUsableWallpaperPath(state.backgroundPath)) {
             state.backgroundPath = ContentBackgroundPath(background); state.backgroundKey = L"configuration-error";
         }
@@ -119,11 +181,12 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
     }
     const auto& entry = tile.configuration.entries.front();
     frame.backgroundId = BackgroundIdFor(entry.background);
-    const auto backgroundKey = entry.background + L"\n" + entry.imagePath + L"\n" +
+    frame.capturedWallpaperFit = ResolveTileInstanceFit(tile,state,frame.backgroundId,synchronous);
+    const auto backgroundKey = TileDeliveryPolicyKey(tile.policy) + entry.background + L"\n" + entry.imagePath + L"\n" +
         (frame.backgroundId == BackgroundId::SmtcArtwork && media.artwork ? media.artwork->path : L"");
     const bool wallpaper = frame.backgroundId == BackgroundId::Wallpaper || frame.backgroundId == BackgroundId::LiveWallpaper;
     if (state.backgroundKey != backgroundKey || !IsUsableWallpaperPath(state.backgroundPath) || synchronous || state.forceRefresh ||
-        (wallpaper && GetTickCount64() >= state.nextBackgroundRead)) {
+        (wallpaper && IniReadI(L"Settings", L"ListenWallpaper", 1) && GetTickCount64() >= state.nextBackgroundRead)) {
         state.backgroundPath = ContentBackgroundPath(entry, &media); state.backgroundKey = backgroundKey;
         state.nextBackgroundRead = GetTickCount64() + static_cast<ULONGLONG>(tile.configuration.refreshSeconds) * 1000;
     }
@@ -218,23 +281,32 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     const auto pins = CachedSecondaryTileIds();
     std::set<std::wstring> refresh;
     { std::lock_guard<std::mutex> lock(g_tileInstanceRefreshMutex); refresh.swap(g_tileInstanceRefreshRequests); }
-    const auto demanded = [&](const TileInstance& tile) { return tile.primary || pins.count(TileInstanceNativeId(tile)) != 0; };
+    const auto demanded = [&](const TileInstance& tile) {
+        TilePolicyReadScope scope(tile.policy);
+        if (TilePolicyUsesRegistration(tile.policy)) return TileRegistrationReadyForId(tile.id);
+        return tile.primary || pins.count(TileInstanceNativeId(tile)) != 0;
+    };
     std::set<std::wstring> used;
-    bool smtcNeeded = false, artworkNeeded = false, appIconNeeded = false;
+    bool smtcNeeded = false, artworkNeeded = false, appIconNeeded = false, nativeMediaNeeded = false;
     int smtcSeconds = 86400;
     for (const auto& tile : cfg.tiles) if (demanded(tile)) {
-        if (tile.type == TileInstanceType::QuickAction && tile.error.empty()) continue;
+        if (tile.type == TileInstanceType::QuickAction && tile.error.empty()) {
+            TilePolicyReadScope scope(tile.policy);
+            if (!TilePolicyUsesRegistration(tile.policy)) continue;
+        }
         used.insert(tile.id);
         if (tile.error.empty() && (tile.type == TileInstanceType::NowPlaying || (!tile.configuration.entries.empty() &&
             BackgroundIdFor(tile.configuration.entries.front().background) == BackgroundId::SmtcArtwork))) {
             smtcNeeded = true; smtcSeconds = (std::min)(smtcSeconds, tile.configuration.refreshSeconds);
             artworkNeeded |= BackgroundIdFor(tile.configuration.entries.front().background) == BackgroundId::SmtcArtwork;
             appIconNeeded |= tile.configuration.smtc.indicatorMode == MediaIndicatorMode::AppIcon;
+            TilePolicyReadScope scope(tile.policy);
+            nativeMediaNeeded |= !TilePolicyUsesRegistration(tile.policy) && ContentDirectLiveDeliveryAvailable();
         }
     }
     for (auto it = g_tileInstanceProviders.begin(); it != g_tileInstanceProviders.end();)
         if (!used.count(it->first)) { it->second->Stop(); it = g_tileInstanceProviders.erase(it); } else ++it;
-    if (smtcNeeded) g_contentSmtc.Refresh(smtcSeconds, synchronous, artworkNeeded, ContentDirectLiveDeliveryAvailable(), appIconNeeded);
+    if (smtcNeeded) g_contentSmtc.Refresh(smtcSeconds, synchronous, artworkNeeded, nativeMediaNeeded, appIconNeeded);
     else g_contentSmtc.Cancel();
     const auto media = smtcNeeded ? g_contentSmtc.Read() : SmtcMediaSnapshot{};
     // Independent plugins intentionally don't contribute text to any tile.
@@ -247,7 +319,10 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     for (const auto& tile : cfg.tiles) if (demanded(tile)) {
         // Quick Actions are static native topic logos. They need metadata and
         // activation only; sending a transparent notification would hide them.
-        if (tile.type == TileInstanceType::QuickAction && tile.error.empty()) continue;
+        if (tile.type == TileInstanceType::QuickAction && tile.error.empty()) {
+            TilePolicyReadScope scope(tile.policy);
+            if (!TilePolicyUsesRegistration(tile.policy)) continue;
+        }
         auto& state = g_tileInstanceProviders[tile.id];
         if (state && state->type != tile.type) { state->Stop(); state.reset(); }
         if (!state) { state = std::make_unique<TileInstanceProviderState>(); state->type = tile.type; }
@@ -285,13 +360,13 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     if (synchronous || !queueGeneration) return !frames.empty();
     if (!GenerationWorkPending() && GetTickCount64() >= g_contentQueueRetryAfter.load()) {
         auto changed = PrepareSecondaryBatch(frames);
-        if (!changed.empty() && ContentDirectLiveDeliveryAvailable())
+        changed.erase(std::remove_if(changed.begin(), changed.end(), [](const auto& frame) {
+            if (TileSnapshotUsesRegistration(frame)) return false;
+            TilePolicyReadScope scope(frame.policy);
+            return !ContentDirectLiveDeliveryAvailable();
+        }), changed.end());
+        if (!changed.empty())
             DESKTOPSTUB_SECONDARY_BATCH_GENERATE(std::move(changed), L"Changed tile instances");
-        else if (primary.active && !ContentDirectLiveDeliveryAvailable()) {
-            static std::wstring last;
-            if (primary.secondaryFrameKey != last && DESKTOPSTUB_CONTENT_QUEUE_GENERATE(primary.backgroundPath, L"Primary wallpaper tile") != 0)
-                last = primary.secondaryFrameKey;
-        }
     }
     return !frames.empty();
 }

@@ -131,8 +131,28 @@ static bool ReadTileInstanceSourceActivation(const std::wstring& arguments, std:
     if (valid) url = std::move(candidate);
     return valid;
 }
+static bool OpenGalleryFolder(const std::wstring& directory);
+static bool ResolveGalleryRegistrationActivation(const std::wstring& id, std::wstring& folder)
+{
+    std::wstring error;
+    const auto view=CaptureGalleryConfigurationView(error,false);
+    if (!view) return false;
+    for (const auto& tile:view->configuration.tiles)
+        if (aip::gallery::GalleryRegistrationId(view->configuration.groupId,tile.id)==id && TileRegistrationReadyForId(id)) {
+            auto path=aip::gallery::EffectiveFolder(view->configuration,tile);
+            if (PathIsRelativeW(path.c_str())) path=ParentDirectoryOfPath(view->profile)+L"\\"+path;
+            path=aip::MakeAbsolutePath(path);
+            if (!path.empty() && GalleryDirectoryExists(path)) { folder=std::move(path);return true; }
+            return false;
+        }
+    return false;
+}
 static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn)
 {
+    if (!signIn && id.compare(0,8,L"gallery_")==0) {
+        std::wstring folder;
+        if (ResolveGalleryRegistrationActivation(id,folder)) return OpenGalleryFolder(folder);
+    }
     aip::content::TileInstanceConfiguration cfg; std::wstring error;
     if (!ReadCurrentTileInstances(cfg, error)) return false;
     for (const auto& tile : cfg.tiles) if (tile.id == id) {
@@ -227,7 +247,8 @@ static void HandleSingleInstanceRequest(WPARAM request)
 
 static void MaybeClearLiveTileOnShutdown()
 {
-    if (!g_clearLiveTileOnShutdown.load())
+    if (g_relaunchAfterExit.load() == 0) ClearOwnedRegistrationTilesOnShutdown();
+    if (!AnyTileInstanceClearsOnShutdown())
         return;
 
     // When switching from unpackaged/static mode to packaged Live Tile mode,
@@ -248,9 +269,9 @@ static void MaybeClearLiveTileOnShutdown()
 
     LogText(g_ui.liveTileClearOnShutdown);
     std::wstring failure;
-    if (Appx_Clear_Or_Request_LiveTile(failure))
+    if (Appx_Clear_Or_Request_LiveTile(failure,TileInstanceModeRequested()))
     {
-        SetLiveTileClearedOnShutdown(UseExperimentalLiveTileUpdate());
+        SetLiveTileClearedOnShutdown(UseExperimentalLiveTileUpdate()&&TileInstancePrimaryClearsOnShutdown());
         LogText(g_ui.liveTileClearOnShutdownSuccess);
     }
     else
@@ -277,6 +298,23 @@ static bool LiveTileRuntimeConditionMismatch(bool& shouldRunPackaged)
 {
     if (!g_liveTileRelaunchOnSwitch.load())
         return false;
+
+    if (TileInstanceModeRequested()) {
+        aip::content::TileInstanceConfiguration instances; std::wstring error;
+        if (!ReadCurrentTileInstances(instances,error)) return false;
+        bool liveRequired = std::any_of(instances.tiles.begin(), instances.tiles.end(), [](const auto& tile) {
+            return tile.policy.Mode() == L"LiveTile";
+        });
+        const auto gallery = CaptureGalleryConfigurationView(error,false);
+        if (gallery) liveRequired |= std::any_of(gallery->configuration.tiles.begin(), gallery->configuration.tiles.end(), [](const auto& tile) {
+            return tile.delivery.Mode() == L"LiveTile";
+        });
+        // The one host can update separate static packages while packaged.
+        // Auto preserves its current runtime; static tiles never force it out
+        // of the identity required by a sibling's Live Tile.
+        shouldRunPackaged = true;
+        return liveRequired && !CurrentProcessHasPackageIdentity();
+    }
 
     if (!LiveTileModeHasFixedRuntime(
             ConfiguredLiveTileUpdateMode(),
@@ -315,6 +353,19 @@ static bool QueueLiveTileRuntimeConditionRelaunch(HWND h)
 
     if (shouldRunPackaged)
     {
+        if (TileInstanceModeRequested()) {
+            const auto manifest = CurrentManifestDisplayInfo();
+            std::wstring family, full, error;
+            if (!IEquals(FileNameFromPath(manifest.executable),FileNameFromPath(g_exePath)) ||
+                !FindRegisteredPackageFamilyNameForManifest(manifest,family,full,error)) {
+                Log(L"[!] Live Tile migration needs DesktopStub's full-trust host package to be installed first. %ls",error.c_str());
+                return false;
+            }
+            g_relaunchAfterExit = 1;
+            LogText(g_ui.liveTileRelaunchToPackagedQueued);
+            RequestGracefulShutdown(h);
+            return true;
+        }
         // We are unpackaged while the fixed Live Tile mode requires package
         // identity. Re-register first so the package entry points at the latest
         // manifest/assets, then exit and relaunch through the registered package.
@@ -1364,7 +1415,7 @@ static int HandleAppxActivationAndExit()
         ValidateFormatStrings();
         NormalizeSeparatorStrings();
         std::wstring clearFailure;
-        if (Appx_Clear_LiveTileBare(clearFailure))
+        if (Appx_Clear_LiveTileBare(clearFailure,TileInstanceModeRequested()))
         {
             AppxActivationTrace(L"Live Tile cleared under package identity");
             return 0;
@@ -1403,7 +1454,7 @@ static int HandlePackagedLiveTileClearOnlyAndExit()
     LoadRuntimeSettingsFromIni(false);
 
     std::wstring failure;
-    if (Appx_Clear_LiveTileBare(failure))
+    if (Appx_Clear_LiveTileBare(failure,TileInstanceModeRequested()))
     {
         AppxActivationTrace(L"Live Tile cleared under package identity");
         return 0;

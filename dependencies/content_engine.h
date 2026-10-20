@@ -17,6 +17,7 @@
 #include "content_sources/notes_signin_model.h"
 #include "content_sources/prayer_times_model.h"
 #include "tile_text_presentation.h"
+#include "tile_delivery_policy.h"
 
 namespace aip { namespace content {
 constexpr int MaxEntries = 32;
@@ -142,8 +143,17 @@ struct Configuration {
     aip::prayer::Configuration prayer;
     TextPresentation presentation;
 };
+struct TileAppearance {
+    std::wstring background = L"Transparent";
+    std::wstring branding = L"Name";
+    std::wstring backgroundColor = L"Auto";
+};
 struct Snapshot {
     bool active = false;
+    int capturedWallpaperFit = -1; // Host FitMode ordinal; -1 keeps legacy desktop resolution.
+    TileDeliveryPolicy policy;
+    TileAppearance registrationAppearance;
+    std::wstring artworkTopic;
     std::wstring name, backgroundPath, activationArguments;
     Text text;
     TextMode textMode = TextMode::Auto;

@@ -203,6 +203,7 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "TextPresentationHostTests.inc"
 #include "TileLifecycleHostTests.inc"
 #include "GenerationAdmissionHostTests.inc"
+#include "TileRegistrationHostTests.inc"
 #include "TileInstanceRuntimeHostTests.inc"
 #include "TileInstanceActivationHostTests.inc"
 #include "TileInstanceTrayHostTests.inc"
@@ -1171,6 +1172,7 @@ int wmain()
     TestTileInstanceActivationHost();
     TestTileInstanceTrayHost();
     TestGenerationAdmissionHost(bitmapPath);
+    TestTileRegistrationHost(bitmapPath);
     StopContentProviders(); PublishContentSnapshot({});
     DeleteFileW(ini.c_str()); DeleteFileW(bitmapPath.c_str()); DeleteFileW(g_logPath.c_str());
     RemoveDirectoryW(directory.c_str());

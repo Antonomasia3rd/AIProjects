@@ -1,5 +1,9 @@
 # Independent tile implementation and validation, October 20
 
+This records the earlier 15:16 installation. The later per-tile delivery and
+Registration pass, final binary hashes, native publication and measured resource
+usage are in [the delivery follow-up](tile-delivery-policies-2026-10-20.md).
+
 The independent-instance build is installed. Current resident PID 45004 passed
 the guarded 75-second startup check **and native publication checks**. All seven
 existing source destinations appeared in successful completed batches; seven

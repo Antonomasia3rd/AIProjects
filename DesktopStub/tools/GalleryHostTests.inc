@@ -7,7 +7,12 @@ static std::vector<aip::content::Snapshot> GalleryTestFrames() { return galleryH
 static bool GalleryTestValidate(const aip::content::Snapshot& frame) {
     return galleryHostValid && std::any_of(galleryHostFrames.begin(), galleryHostFrames.end(), [&](const auto& current) {
         return current.secondaryTileId == frame.secondaryTileId && current.secondaryFrameKey == frame.secondaryFrameKey &&
-            current.gallerySlot == frame.gallerySlot && current.galleryTicket == frame.galleryTicket;
+            current.gallerySlot == frame.gallerySlot && current.galleryTicket == frame.galleryTicket &&
+            current.gallerySlotCount == frame.gallerySlotCount && current.galleryGroupId == frame.galleryGroupId &&
+            current.galleryTileId == frame.galleryTileId && current.galleryEpoch == frame.galleryEpoch &&
+            current.nativeQueueTag == frame.nativeQueueTag && current.nativeQueueReset == frame.nativeQueueReset &&
+            current.nativeQueueLayout == frame.nativeQueueLayout && current.backgroundPath == frame.backgroundPath &&
+            aip::content::TileDeliveryPolicyKey(current.policy) == aip::content::TileDeliveryPolicyKey(frame.policy);
     });
 }
 static void GalleryTestAck(const aip::content::Snapshot& frame) { galleryHostAcks.push_back(frame); }

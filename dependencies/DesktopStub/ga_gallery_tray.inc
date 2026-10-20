@@ -2,6 +2,9 @@
 // delivery. Building this menu never scans photographs or initializes history.
 static bool OpenGalleryFolder(const std::wstring& directory);
 static bool GalleryDirectoryExists(const std::wstring& directory);
+static bool OpenGalleryTilePolicySetup(HWND owner,const std::wstring& nativeId);
+static bool GalleryTileUsesRegistration(const aip::gallery::TileConfiguration& tile);
+static void PinGalleryGroup(HWND owner,const aip::gallery::Configuration& cfg,const std::vector<std::size_t>& indices);
 static constexpr UINT ID_GALLERY_SETUP = 30000, ID_GALLERY_ENABLED = 30001,
     ID_GALLERY_FOLDER = 30002, ID_GALLERY_OPEN_FOLDER = 30003, ID_GALLERY_REFRESH = 30004,
     ID_GALLERY_CADENCE = 30005, ID_GALLERY_SEED = 30006, ID_GALLERY_COUNT = 30010, ID_GALLERY_QUEUE = 30020,
@@ -40,11 +43,33 @@ static bool SameGalleryConfiguration(const aip::gallery::Configuration& a, const
         if (a.tiles[i].id != b.tiles[i].id || a.tiles[i].name != b.tiles[i].name || a.tiles[i].enabled != b.tiles[i].enabled ||
             a.tiles[i].folder != b.tiles[i].folder || a.tiles[i].galleryName != b.tiles[i].galleryName ||
             a.tiles[i].appearance.background != b.tiles[i].appearance.background || a.tiles[i].appearance.branding != b.tiles[i].appearance.branding ||
-            a.tiles[i].appearance.backgroundColor != b.tiles[i].appearance.backgroundColor) return false;
+            a.tiles[i].appearance.backgroundColor != b.tiles[i].appearance.backgroundColor||
+            aip::content::TileDeliveryPolicyKey(a.tiles[i].delivery)!=aip::content::TileDeliveryPolicyKey(b.tiles[i].delivery)) return false;
     return true;
 }
 struct GalleryEditContext { std::wstring profile; aip::gallery::Configuration before; };
-static GalleryEditContext GalleryEdit(const aip::gallery::Configuration& cfg) { return {GalleryProfilePath(), cfg}; }
+static GalleryEditContext GalleryEdit(const aip::gallery::Configuration& cfg)
+{
+    GalleryEditContext edit{GalleryProfilePath(),cfg};
+    // A newly constructed draft has not captured creation defaults yet. Use
+    // exactly the persistence serializer so its optimistic concurrency baseline
+    // matches the subsequently parsed document, including every local policy.
+    if(std::any_of(cfg.tiles.begin(),cfg.tiles.end(),[](const auto& tile){return !tile.delivery.included;})) {
+        std::vector<aip::IniSetting> fields;std::wstring error;
+        if(PrepareGalleryConfigurationSettings(cfg,fields,error)) {
+            std::map<std::pair<std::wstring,std::wstring>,std::wstring> canonical;
+            for(const auto& field:fields)canonical[{aip::content::TilePolicyLower(field.section),
+                aip::content::TilePolicyLower(field.key)}]=field.value;
+            aip::gallery::Configuration captured;
+            if(aip::gallery::ReadConfiguration([&](const wchar_t* section,const wchar_t* key,const wchar_t* fallback){
+                const auto found=canonical.find({aip::content::TilePolicyLower(section),aip::content::TilePolicyLower(key)});
+                return found==canonical.end()?std::wstring(fallback):found->second;
+            },captured,error))edit.before=std::move(captured);
+        }
+    }
+    ResolveGalleryConfigurationFolder(edit.before,edit.profile);
+    return edit;
+}
 static bool MatchGalleryEdit(const std::wstring& text, const GalleryEditContext& edit, std::wstring& error)
 {
     aip::gallery::Configuration current;
@@ -87,6 +112,10 @@ static bool StageGalleryInitialLayout(std::wstring& text, std::wstring& error)
 {
     auto candidate = text;
     auto document = aip::ParseIniDocument(candidate);
+    if(aip::IniHasKeyInDoc(document,L"Tiles",L"Instances")){
+        if(!ValidateDesktopStubProfileDocument(candidate,error))return false;
+        error.clear();return true; // Pin demand replaces the retired numbered-content gates.
+    }
     const auto missing = [&](const std::wstring& section, const wchar_t* key, const std::wstring& value) {
         std::wstring present;
         if (aip::ReadIniValueFromDoc(document, section.c_str(), key, present)) return true;
@@ -162,6 +191,43 @@ static bool SaveGalleryMenuSettings(HWND owner, const std::vector<aip::IniSettin
     });
     if (appearanceChanged) RequestRefreshExistingSecondaryTileLogos(g_hwnd, true);
     RequestGalleryRefresh(true); WakePollThread(); return true;
+}
+static bool OfferGalleryTileDeliveryMigration(HWND owner,const std::wstring& nativeId,const std::wstring& requestedMode)
+{
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    (void)owner;(void)nativeId;(void)requestedMode;return false;
+#else
+    auto mode=requestedMode;std::wstring error;
+    if(!aip::content::NormalizeTilePolicySetting(L"Delivery.Mode",mode,error))return false;
+    aip::gallery::Configuration cfg;if(!ReadGalleryConfiguration(cfg,error))return false;
+    const auto found=std::find_if(cfg.tiles.begin(),cfg.tiles.end(),[&](const auto& row){return aip::gallery::NativeTileId(cfg.groupId,row.id)==nativeId;});
+    if(found==cfg.tiles.end())return false;
+    const auto row=*found;const auto index=static_cast<std::size_t>(std::distance(cfg.tiles.begin(),found));
+    bool registration=mode==L"Registration";
+    if(mode==L"Auto"){
+        auto policy=row.delivery;policy.values[L"settings.experimentallivetileupdate"]=L"Auto";
+        aip::content::TilePolicyReadScope scope(policy);registration=!UseExperimentalLiveTileUpdate();
+    }
+    const auto prompt=registration?
+        L"Registration uses a separate app identity and one rendered photo per update. Your existing Gallery Live Tile pin and photo ownership history will be kept. After the first successful update, pin the new app from Start's All apps list and unpin the old tile manually. Prepare this separate Registration tile now?":
+        L"Live Tile delivery uses the existing Gallery tile identity and queued photos. The separate Registration app and its pin will be kept. Windows may ask you to pin the Live Tile separately. Change this gallery tile's delivery method now?";
+    if(DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,prompt,row.name.c_str(),MB_YESNO|MB_DEFBUTTON2|MB_ICONINFORMATION)!=IDYES)return false;
+    if(registration){
+        if(row.delivery.Read(L"Settings",L"AppxManifestTarget",L"Windows10")!=L"Windows10"){
+            DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,L"Separate Registration tile requires Windows10 manifest target. Set this gallery tile's Delivery.ManifestTarget to Windows10 before preparing it.",row.name.c_str(),MB_OK|MB_ICONWARNING);return false;
+        }
+        aip::tile_registration::Target target;
+        if(!BuildTileRegistrationTarget(aip::gallery::GalleryRegistrationId(cfg.groupId,row.id),row.name,row.appearance,target,error)||
+            !PrepareTileRegistrationPackage(target,true,error)){
+            DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,error.c_str(),L"Gallery Registration setup",MB_OK|MB_ICONWARNING);return false;
+        }
+    }
+    const auto edit=GalleryEdit(cfg);const auto section=L"Gallery.Tile."+std::to_wstring(index+1);
+    if(!SaveGalleryMenuSettings(owner,{{section,L"Delivery.Mode",mode}},&edit))return false;
+    ForgetSecondaryTileDelivery(nativeId);
+    if(!registration&&SecondaryTilePinUiAvailable()&&!SecondaryTileExists(nativeId))RequestPinSecondaryTile(owner,nativeId,row.name);
+    return true;
+#endif
 }
 // Only an entirely unused ledger from an interrupted first save can be reused.
 // Missing/corrupt/populated history is never inferred from the current pins.
@@ -300,9 +366,11 @@ static void CompleteGallerySetup(HWND owner)
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, error.c_str(), L"Photo gallery", MB_OK | MB_ICONWARNING); return;
     }
     RequestGalleryRefresh(true); WakePollThread();
-    std::vector<std::pair<std::wstring,std::wstring>> requests;
-    for(const auto& tile:draft.requested.tiles) requests.push_back({aip::gallery::NativeTileId(draft.requested.groupId,tile.id),tile.name});
-    RequestSecondaryTilePinBatch(owner,requests);
+    aip::gallery::Configuration savedConfiguration;
+    if(ReadGalleryConfiguration(savedConfiguration,error)){
+        std::vector<std::size_t> indices;for(std::size_t i=0;i<savedConfiguration.tiles.size();++i)indices.push_back(i);
+        PinGalleryGroup(owner,savedConfiguration,indices);
+    }
 }
 struct GalleryMenuGroup { std::wstring folder, name; std::vector<std::size_t> indices; };
 static std::vector<GalleryMenuGroup> GalleryGroups(const aip::gallery::Configuration& cfg) {
@@ -392,7 +460,11 @@ static bool AppendGalleryRows(aip::gallery::Configuration& cfg,const std::wstrin
 }
 static void PinGalleryGroup(HWND owner,const aip::gallery::Configuration& cfg,const std::vector<std::size_t>& indices) {
     std::vector<std::pair<std::wstring,std::wstring>> pins;
-    for(const auto i:indices) if(i<cfg.tiles.size()) pins.push_back({aip::gallery::NativeTileId(cfg.groupId,cfg.tiles[i].id),cfg.tiles[i].name});
+    for(const auto i:indices) if(i<cfg.tiles.size()){
+        const auto id=aip::gallery::NativeTileId(cfg.groupId,cfg.tiles[i].id);
+        if(TileInstanceModeRequested()&&GalleryTileUsesRegistration(cfg.tiles[i]))OfferGalleryTileDeliveryMigration(owner,id,L"Registration");
+        else pins.push_back({id,cfg.tiles[i].name});
+    }
     RequestSecondaryTilePinBatch(owner,pins);
 }
 static void AddGalleryFolder(HWND owner,aip::gallery::Configuration cfg) {
@@ -407,6 +479,13 @@ static void AddGalleryFolder(HWND owner,aip::gallery::Configuration cfg) {
     // A new folder normally brings new images. Explicit redistribution is also
     // available when that folder overlaps an existing pool.
     if(SaveGalleryConfiguration(owner,cfg,false,&edit)) {std::vector<std::size_t> added;for(std::size_t i=cfg.tiles.size()-static_cast<std::size_t>(count);i<cfg.tiles.size();++i)added.push_back(i);PinGalleryGroup(owner,cfg,added);}
+}
+static bool GalleryTileUsesRegistration(const aip::gallery::TileConfiguration& tile)
+{
+    if(!TileInstanceModeRequested())return false; // Preserve the legacy gallery pin workflow.
+    if(tile.delivery.Mode()==L"Registration")return true;
+    if(tile.delivery.Mode()==L"LiveTile")return false;
+    aip::content::TilePolicyReadScope scope(tile.delivery);return !UseExperimentalLiveTileUpdate();
 }
 static void AppendGalleryTilesMenu(HMENU parent) {
     HMENU menu=aip::BeginTrayNestedMenu(parent);aip::gallery::Configuration cfg;std::wstring error;
@@ -439,8 +518,10 @@ static void AppendGalleryTilesMenu(HMENU parent) {
                 const auto i=group.indices[p];const auto& tile=cfg.tiles[i];const auto base=ID_GALLERY_TILE+static_cast<UINT>(i)*GALLERY_TILE_COMMAND_STRIDE;
                 HMENU item=aip::BeginTrayNestedMenu(page);
                 aip::AppendTrayMenuItem(item,base+1,L"Rename...",false,configured);
-                AppendSecondaryTilePinCommands(item,aip::gallery::NativeTileId(cfg.groupId,tile.id),base+2,base+3,base+4,configured);
+                if(GalleryTileUsesRegistration(tile))aip::AppendTrayMenuItem(item,base+2,L"Registration setup and pin instructions...",false,configured);
+                else AppendSecondaryTilePinCommands(item,aip::gallery::NativeTileId(cfg.groupId,tile.id),base+2,base+3,base+4,configured);
                 aip::AppendTrayMenuItem(item,base+5,SecondaryTileUiString(L"SelectedTileContents",L"Tile contents..."),false,true);
+                aip::AppendTrayMenuItem(item,base+6,L"Rendering, cache and delivery...",false,configured);
                 AppendTileAppearanceMenu(item,L"Gallery.Tile."+std::to_wstring(i+1),base+10);
                 aip::EndTrayNestedMenu(page,item,tile.name);
             }
@@ -480,9 +561,11 @@ static bool DispatchGalleryTilesCommand(HWND owner,UINT command) {
         const auto index=(command-ID_GALLERY_TILE)/GALLERY_TILE_COMMAND_STRIDE,action=(command-ID_GALLERY_TILE)%GALLERY_TILE_COMMAND_STRIDE;if(index>=cfg.tiles.size())return true;const auto& tile=cfg.tiles[index];const auto section=L"Gallery.Tile."+std::to_wstring(index+1),id=aip::gallery::NativeTileId(cfg.groupId,tile.id);
         if(action>=10&&action<=18){const auto a=action-10;if(a<2)SaveGalleryMenuSettings(owner,{{section,L"Background",a?L"Color":L"Transparent"}},&edit);else if(a<7)SaveGalleryMenuSettings(owner,{{section,L"Branding",aip::content::TileBrandingChoices[a-2]}},&edit);else if(a==7){auto color=tile.appearance.backgroundColor;if(ShowTextInputDialog(owner,L"Gallery background",L"Color as #RRGGBB, or Auto",color,true)==IDOK)SaveGalleryMenuSettings(owner,{{section,L"Background",L"Color"},{section,L"BackgroundColor",color}},&edit);}else SaveGalleryMenuSettings(owner,{{section,L"BackgroundColor",L"Auto"}},&edit);}
         else if(action==1){auto name=tile.name;if(ShowTextInputDialog(owner,L"Gallery tile",L"Tile name",name,true)==IDOK)SaveGalleryMenuSettings(owner,{{section,L"Name",name}},&edit);}
-        else if(action==2)RequestPinSecondaryTile(owner,id,tile.name);else if(action==3)RequestUnpinSecondaryTile(owner,id);
+        else if(action==2){if(GalleryTileUsesRegistration(tile))OfferGalleryTileDeliveryMigration(owner,id,L"Registration");else RequestPinSecondaryTile(owner,id,tile.name);}
+        else if(action==3){if(!GalleryTileUsesRegistration(tile))RequestUnpinSecondaryTile(owner,id);}
         else if(action==4)RequestSecondaryTileList(owner);
         else if(action==5)ShowSelectedTileStatus(owner,id,tile.name);
+        else if(action==6)OpenGalleryTilePolicySetup(owner,id);
     }
     return true;
 }

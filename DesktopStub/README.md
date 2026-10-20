@@ -14,9 +14,11 @@ use **Previous tiles...** and **Next tiles...** menu pages. Existing profiles ar
 converted with a pre-conversion backup while retaining source pin identities,
 accounts and gallery history. The old global content/source/display/cycling
 menus remain relevant to legacy profiles, rather than the normal tile workflow.
-Shared delivery mode, native template and shutdown-clearing controls are under
-**Application > Windows tile delivery**; source and refresh settings belong to
-each tile.
+Delivery mode, native template, shutdown cleanup, generated assets/scales,
+image-cache budget and relevant image-fitting/decoder settings belong to each
+tile. Conversion captures existing global defaults once; later global edits do
+not alter saved tile policies. See the guide's [policy keys and delivery
+migration](../docs/tile-instances-2026-10-20.md#per-tile-rendering-cache-and-delivery).
 Existing pins receive their own static topic logos automatically after an upgrade.
 **Quick Actions** offers direct per-action pinning without an enable switch.
 Source tiles and Quick Actions default to transparent fallback icons and
@@ -415,10 +417,12 @@ Prebuilt binaries are published through the repository's Windows build workflow 
 
 ## Tile text size, wrapping and layout
 
-Use **Tiles > your tile > Text size, wrapping and layout**. Choosing a style activates
-Custom presentation. Default uses that type's ordinary appearance. Each instance
-owns its values. Headlines with summaries (`RssHeadlines`) is a readable RSS layout with one
-rich item on Medium/Wide and three on Large. Named Windows styles control size
+Use **Tiles > your tile > Text size, wrapping and layout**. Choosing a style normally
+activates Custom presentation; RSS retains its readable layout when editing its
+Default or Headlines with summaries settings. Each instance owns its values.
+Readable RSS (`Default` or `RssHeadlines`) uses a semibold 15-pixel headline and
+subtle summary, with one rich item on Medium, two on Wide and three on Large.
+Named Windows styles control size
 and weight; larger text leaves less room for content. Wrapping, line limits,
 alignment, stacking and blank-line gaps are also configurable.
 

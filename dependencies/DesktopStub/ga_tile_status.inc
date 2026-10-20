@@ -6,10 +6,11 @@
 #include <set>
 #include <map>
 struct TileStatusLabels {
-    std::wstring primary = L"Primary tile", mediumWide = L"Medium / Wide", large = L"Large";
+    std::wstring primary = L"Primary tile", mediumWide = L"Medium / Wide", medium = L"Medium", wide = L"Wide", large = L"Large";
     std::wstring noSnapshot = L"No prepared tile snapshot. Pin the tile and complete its source settings.";
     std::wstring textHidden = L"Text is hidden for this tile.", image = L"Image";
     std::wstring queue = L"Prepared image queue (Windows chooses the visible image)", slot = L"Slot";
+    std::wstring staticImage = L"Rendered image (Registration)";
 };
 static void AppendTileStatusLine(std::wstring& output, const std::wstring& line)
 {
@@ -21,9 +22,12 @@ static void AppendTileStatusLine(std::wstring& output, const std::wstring& line)
     }
     output += L"\r\n";
 }
-static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame, int height, const TileStatusLabels& labels)
+static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame, int height, const TileStatusLabels& labels, int width = 150)
 {
     std::wstring output;
+    aip::content::TilePolicyReadScope policyScope(frame.policy);
+    const auto* sizeSetting = height > 200 ? L"ApplyToLargeTile" : width > 200 ? L"ApplyToWideTile" : L"ApplyToMediumTile";
+    if (!IniReadI(L"TileText",sizeSetting,1)) { AppendTileStatusLine(output,labels.textHidden); return output; }
     if (frame.textMode == aip::content::TextMode::Off) { AppendTileStatusLine(output, labels.textHidden); return output; }
     if (frame.textMode == aip::content::TextMode::Auto && frame.prayerSource) {
         if (frame.prayerClock.Available()) {
@@ -42,10 +46,10 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
             AppendTileStatusLine(output, frame.detailRows[i].secondary);
         }
     } else if (frame.textMode == aip::content::TextMode::Auto && !frame.smtcSource && !frame.rssHeadlines.empty()) {
-        const bool rich = frame.presentation.preset == L"RssHeadlines";
-        const auto limit = rich ? (height > 200 ? std::size_t(3) : std::size_t(1)) : aip::content::RssTileRows(height);
+        const bool rich = aip::content::RssUsesRichLayout(frame.presentation);
+        const auto limit = rich ? aip::content::RssRichTileRows(width, height) : aip::content::RssTileRows(height);
         for (std::size_t i = 0; i < (std::min)(frame.rssHeadlines.size(), limit); ++i) {
-            AppendTileStatusLine(output, std::to_wstring(i + 1) + L". " + frame.rssHeadlines[i].primary);
+            AppendTileStatusLine(output, rich ? frame.rssHeadlines[i].primary : std::to_wstring(i + 1) + L". " + frame.rssHeadlines[i].primary);
             if (rich || height > 200) AppendTileStatusLine(output, frame.rssHeadlines[i].secondary);
         }
     } else {
@@ -68,15 +72,20 @@ static std::wstring BuildTileStatusTextWithLabels(const std::vector<aip::content
         if (!output.empty()) output += L"\r\n";
         AppendTileStatusLine(output, frame.name.empty() ? labels.primary : frame.name);
         if (frame.galleryFrame) {
-            AppendTileStatusLine(output, labels.queue);
+            AppendTileStatusLine(output, TileSnapshotUsesRegistration(frame) ? labels.staticImage : labels.queue);
             for (const auto& image : frames) if (image.galleryFrame && image.secondaryTileId == frame.secondaryTileId && image.galleryTicket == frame.galleryTicket) {
                 const auto leaf = image.backgroundPath.substr(image.backgroundPath.find_last_of(L"\\/") + 1);
                 AppendTileStatusLine(output, labels.slot + L" " + std::to_wstring(image.gallerySlot + 1) + L" [" + image.nativeQueueTag + L"] " + leaf);
             }
             continue;
         }
-        const auto medium = TileSnapshotVisibleText(frame, 150, labels), large = TileSnapshotVisibleText(frame, 310, labels);
-        if (medium != large) {
+        const auto medium = TileSnapshotVisibleText(frame, 150, labels), wide = TileSnapshotVisibleText(frame, 150, labels, 310),
+            large = TileSnapshotVisibleText(frame, 310, labels, 310);
+        if (medium != wide) {
+            AppendTileStatusLine(output, labels.medium + L":"); output += medium;
+            AppendTileStatusLine(output, labels.wide + L":"); output += wide;
+            AppendTileStatusLine(output, labels.large + L":"); output += large;
+        } else if (medium != large) {
             AppendTileStatusLine(output, labels.mediumWide + L":"); output += medium;
             AppendTileStatusLine(output, labels.large + L":"); output += large;
         } else output += large;
@@ -88,7 +97,10 @@ static TileStatusLabels ReadTileStatusLabels()
 {
     TileStatusLabels labels;
     labels.primary = IniReadS(L"Strings", L"TileStatusPrimary", labels.primary.c_str());
+    labels.staticImage = IniReadS(L"Strings", L"TileStatusRegistrationImage", labels.staticImage.c_str());
     labels.mediumWide = IniReadS(L"Strings", L"TileStatusMediumWide", labels.mediumWide.c_str());
+    labels.medium = IniReadS(L"Strings", L"TileStatusMedium", labels.medium.c_str());
+    labels.wide = IniReadS(L"Strings", L"TileStatusWide", labels.wide.c_str());
     labels.large = IniReadS(L"Strings", L"TileStatusLarge", labels.large.c_str());
     labels.noSnapshot = IniReadS(L"Strings", L"TileStatusNoSnapshot", labels.noSnapshot.c_str());
     labels.textHidden = IniReadS(L"Strings", L"TileStatusTextHidden", labels.textHidden.c_str());

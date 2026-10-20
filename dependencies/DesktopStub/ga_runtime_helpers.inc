@@ -5,6 +5,9 @@
 
 static LiveTileUpdateMode ConfiguredLiveTileUpdateMode()
 {
+    std::wstring scoped;
+    if (aip::content::TryReadTilePolicy(L"Settings", L"ExperimentalLiveTileUpdate", scoped))
+        return ParseLiveTileUpdateModeValue(scoped);
     LiveTileUpdateMode mode = static_cast<LiveTileUpdateMode>(g_liveTileUpdateMode.load());
     switch (mode)
     {
@@ -32,6 +35,9 @@ static ContentSource ConfiguredContentSource()
 
 static LiveTileTemplateStyle ConfiguredLiveTileTemplateStyle()
 {
+    std::wstring scoped;
+    if (aip::content::TryReadTilePolicy(L"Settings", L"LiveTileTemplateStyle", scoped))
+        return ParseLiveTileTemplateStyleValue(scoped);
     LiveTileTemplateStyle style = static_cast<LiveTileTemplateStyle>(g_liveTileTemplateStyle.load());
     switch (style)
     {
@@ -94,6 +100,9 @@ static std::wstring LiveTileBrandingSummaryText()
 
 static ManifestCompatibilityTarget ConfiguredManifestCompatibilityTarget()
 {
+    std::wstring scoped;
+    if (aip::content::TryReadTilePolicy(L"Settings", L"AppxManifestTarget", scoped))
+        return ParseManifestCompatibilityTargetValue(scoped);
     ManifestCompatibilityTarget target = static_cast<ManifestCompatibilityTarget>(g_manifestCompatibilityTarget.load());
     switch (target)
     {
@@ -358,18 +367,23 @@ static bool AddScale(std::vector<int>& scales, int scale)
 static std::vector<int> GetConfiguredScales()
 {
     std::vector<int> scales;
-    if (g_generateScaleAuto)
+    const auto enabled = [](const wchar_t* key, bool fallback) {
+        std::wstring value;
+        if (!aip::content::TryReadTilePolicy(L"Settings", key, value)) return fallback;
+        return value == L"1";
+    };
+    if (enabled(L"GenerateScaleAuto", g_generateScaleAuto.load()))
     {
         // Auto mode: use only the detected DPI scale; manual flags are ignored
         AddScale(scales, CurrentAssetScale());
     }
     else
     {
-        if (g_generateScale100) AddScale(scales, 100);
-        if (g_generateScale125) AddScale(scales, 125);
-        if (g_generateScale150) AddScale(scales, 150);
-        if (g_generateScale200) AddScale(scales, 200);
-        if (g_generateScale400) AddScale(scales, 400);
+        if (enabled(L"GenerateScale100", g_generateScale100.load())) AddScale(scales, 100);
+        if (enabled(L"GenerateScale125", g_generateScale125.load())) AddScale(scales, 125);
+        if (enabled(L"GenerateScale150", g_generateScale150.load())) AddScale(scales, 150);
+        if (enabled(L"GenerateScale200", g_generateScale200.load())) AddScale(scales, 200);
+        if (enabled(L"GenerateScale400", g_generateScale400.load())) AddScale(scales, 400);
     }
     if (scales.empty()) AddScale(scales, 100);
     std::sort(scales.begin(), scales.end());

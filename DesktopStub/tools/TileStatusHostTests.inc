@@ -53,17 +53,24 @@ static void TestTileStatusHost()
     TileStatusLabels labels;
     Snapshot rss; rss.active = true; rss.name = L"Feed tile"; rss.text.primary = L"Wrong raw source summary";
     for (int i = 1; i <= 6; ++i) rss.rssHeadlines.push_back({L"Headline " + std::to_wstring(i), L"Description " + std::to_wstring(i), L""});
-    const auto medium = TileSnapshotVisibleText(rss, 150, labels), large = TileSnapshotVisibleText(rss, 310, labels);
-    Check(medium.find(L"3. Headline 3") != std::wstring::npos && medium.find(L"Headline 4") == std::wstring::npos &&
-        medium.find(L"Description") == std::wstring::npos, "status Medium RSS text uses the same three numbered primary rows as native XML");
-    Check(large.find(L"5. Headline 5") != std::wstring::npos && large.find(L"Description 5") != std::wstring::npos &&
-        large.find(L"Headline 6") == std::wstring::npos, "status Large RSS text uses the same five rows and descriptions as native XML");
+    const auto medium = TileSnapshotVisibleText(rss, 150, labels), wide = TileSnapshotVisibleText(rss, 150, labels, 310),
+        large = TileSnapshotVisibleText(rss, 310, labels, 310);
+    Check(medium.find(L"Headline 1") != std::wstring::npos && medium.find(L"Headline 2") == std::wstring::npos &&
+        medium.find(L"Description 1") != std::wstring::npos, "status Medium RSS text uses the same single rich headline and summary as native XML");
+    Check(wide.find(L"Headline 2") != std::wstring::npos && wide.find(L"Description 2") != std::wstring::npos &&
+        wide.find(L"Headline 3") == std::wstring::npos, "status Wide RSS text uses the same two rich rows as native XML");
+    Check(large.find(L"Headline 3") != std::wstring::npos && large.find(L"Description 3") != std::wstring::npos &&
+        large.find(L"Headline 4") == std::wstring::npos, "status Large RSS text uses the same three rich rows and descriptions as native XML");
+    auto compact = rss; compact.presentation.preset = L"Custom";
+    Check(TileSnapshotVisibleText(compact,150,labels).find(L"3. Headline 3") != std::wstring::npos,
+        "explicit custom RSS list composition is preserved in status alongside readable defaults");
     Snapshot notes; notes.active = true; notes.name = L"Game tile"; notes.detailTopic = L"resin"; notes.text.primary = L"Wrong scalar resource";
     const wchar_t* topics[] = {L"notes-genshin-resin_not_full", L"notes-genshin-commission", L"notes-genshin-expedition", L"notes-genshin-realm", L"notes-genshin-weekly_boss"};
     for (int i = 0; i < 5; ++i) notes.detailRows.push_back({L"Activity " + std::to_wstring(i), L"Value " + std::to_wstring(i), L"", topics[i]});
     const auto status = BuildTileStatusTextWithLabels({rss, notes}, labels);
     Check(status.find(L"Wrong raw") == std::wstring::npos && status.find(L"Wrong scalar") == std::wstring::npos &&
         status.find(L"\r\n\r\nGame tile\r\n") != std::wstring::npos && status.find(L"Medium / Wide:") != std::wstring::npos &&
+        status.find(L"\r\nMedium:\r\n") != std::wstring::npos && status.find(L"\r\nWide:\r\n") != std::wstring::npos &&
         status.find(L"Large:") != std::wstring::npos && status.find(L"Activity 4") != std::wstring::npos,
         "status uses prepared headline/detail rows, labels size-specific limits and separates tile states by a blank line");
     auto hidden = notes; hidden.textMode = TextMode::Off;
@@ -83,7 +90,7 @@ static void TestTileStatusHost()
     Check(queue.find(L"Windows chooses the visible image") != std::wstring::npos && queue.find(L"Slot 2 [g2] two.png") != std::wstring::npos &&
         queue.find(L"private-cache") == std::wstring::npos && queue.find(L"Photos", queue.find(L"Photos") + 1) == std::wstring::npos,
         "gallery status groups cached queue slots without asserting the visible image or disclosing full cache paths");
-    labels.noSnapshot = L"Custom empty state"; labels.mediumWide = L"Custom compact size";
+    labels.noSnapshot = L"Custom empty state"; labels.medium = L"Custom compact size";
     Check(BuildTileStatusTextWithLabels({}, labels) == L"Custom empty state" &&
         BuildTileStatusTextWithLabels({rss}, labels).find(L"Custom compact size") != std::wstring::npos,
         "status wording can be supplied through the same configurable label model");

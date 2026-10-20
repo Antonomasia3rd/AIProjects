@@ -84,6 +84,9 @@ static int RunRenderOnlyCommand()
         snapshot.presentation = composition.presentation;
         snapshot.backgroundId = background;
         if (instanceMode) {
+            snapshot.policy = offlineInstance.policy;
+            snapshot.registrationAppearance = offlineInstance.appearance;
+            snapshot.artworkTopic = aip::content::TileInstanceArtworkTopic(offlineInstance);
             snapshot.secondaryTileId = aip::content::TileInstanceNativeId(offlineInstance);
             snapshot.secondaryBranding = offlineInstance.appearance.branding;
         }

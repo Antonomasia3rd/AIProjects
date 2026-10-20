@@ -68,6 +68,7 @@ enum class FitMode {
     Tile,
     Span
 };
+static bool TryContentWallpaperFit(FitMode& result);
 
 using namespace Gdiplus;
 using namespace std::chrono;
@@ -160,6 +161,8 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "..\dependencies\powershell_runner.inc"
 #include "../dependencies/appx_registration_script.h"
 #include "../dependencies/content_engine.h"
+#include "../dependencies/tile_policy_scope.h"
+#include "../dependencies/tile_registration.h"
 #include "../dependencies/DesktopStub/ga_core.inc"
 #if __has_include("DesktopStubVersionDefines.inc")
 #include "DesktopStubVersionDefines.inc"
@@ -179,6 +182,7 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "../dependencies/DesktopStub/ga_registration.inc"
 #include "../dependencies/DesktopStub/ga_generation.inc"
 #include "../dependencies/DesktopStub/ga_live_tile.inc"
+#include "../dependencies/DesktopStub/ga_tile_registration.inc"
 #include "../dependencies/DesktopStub/ga_rss_feed.inc"
 #include "../dependencies/DesktopStub/ga_content_runtime.inc"
 #include "../dependencies/DesktopStub/ga_discord_profile.inc"

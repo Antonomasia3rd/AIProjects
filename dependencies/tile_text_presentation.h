@@ -51,7 +51,7 @@ template<class Reader> bool ReadTextPresentation(Reader read, const std::wstring
     auto preset = read(section.c_str(), L"TextPreset", inherited ? L"Inherit" : L"Default");
     if (!NormalizeTextPresentationSetting(L"TextPreset", preset, error, inherited != nullptr)) return false;
     if (preset != L"Inherit") value.preset = preset;
-    if (preset == L"RssHeadlines") { value.primaryStyle = L"body"; value.primaryLines = 3; value.secondaryLines = 2; value.badgeLines = 1; value.wrap = true; value.gapLines = 1; }
+    if (preset == L"RssHeadlines") { value.primaryStyle = L"base"; value.primaryLines = 3; value.secondaryLines = 2; value.badgeLines = 1; value.wrap = true; value.gapLines = 0; }
     const auto get = [&](const wchar_t* key, const std::wstring& fallback, std::wstring& target) {
         auto candidate = read(section.c_str(), key, fallback.c_str());
         if (!NormalizeTextPresentationSetting(key, candidate, error, inherited != nullptr)) return false;

@@ -4,11 +4,6 @@
 #include <utility>
 #include <mutex>
 namespace aip { namespace content {
-struct TileAppearance {
-    std::wstring background = L"Transparent";
-    std::wstring branding = L"Name";
-    std::wstring backgroundColor = L"Auto";
-};
 inline constexpr const wchar_t* TileBrandingChoices[] = {L"Auto", L"None", L"Logo", L"Name", L"NameAndLogo"};
 inline bool NormalizeTileAppearanceSetting(const std::wstring& key, std::wstring& value, std::wstring& error) {
     const auto k = Lower(Trim(key)), v = Lower(Trim(value));

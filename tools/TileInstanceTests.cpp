@@ -1,6 +1,8 @@
 #include "../dependencies/tile_instances.h"
+#include "../dependencies/tile_policy_scope.h"
 #include <iostream>
 #include <map>
+#include <thread>
 
 namespace {
 using Values = std::map<std::pair<std::wstring, std::wstring>, std::wstring>;
@@ -45,6 +47,13 @@ int main() {
     Put(values, L"Tile.rss2", L"TextPreset", L"RssHeadlines");
     Put(values, L"Tile.action", L"Action", L"volume-down");
     Put(values, L"Tile.action", L"VolumeStepPercent", L"12");
+    Put(values,L"Tile.rss1",L"Delivery.Mode",L"LiveTile");
+    Put(values,L"Tile.rss1",L"Cache.Enabled",L"0");
+    Put(values,L"Tile.rss1",L"Cache.MaxEntries",L"2");
+    Put(values,L"Tile.rss1",L"Wallpaper.DecodeMaxLongEdge",L"1024");
+    Put(values,L"Tile.rss2",L"Delivery.Mode",L"Registration");
+    Put(values,L"Tile.rss2",L"Delivery.Template",L"Windows81Preset");
+    Put(values,L"Tile.rss2",L"Cache.MaxEntries",L"64");
     Check(ReadTileInstanceConfiguration(Reader(values), cfg, error), "independent multi-source document parses");
     Check(cfg.tiles.size() == 9 && cfg.tiles[0].primary && TileInstanceNativeId(cfg.tiles[0]).empty() && TileInstanceNativeId(cfg.tiles[1]) == L"AipSource_rss1", "ordered stable identities retain primary Desktop special case");
     Check(cfg.tiles[3].configuration.prayer.city == L"Surabaya" && cfg.tiles[4].configuration.prayer.city == L"Jakarta", "prayer locations are independent");
@@ -53,6 +62,25 @@ int main() {
     Check(cfg.tiles[1].presentation.preset == L"Default" && cfg.tiles[2].presentation.preset == L"RssHeadlines", "appearance templates do not leak across RSS instances");
     Check(cfg.tiles[8].clickAction == L"volume-down", "quick action is part of selected tile");
     Check(cfg.tiles[1].clickAction == L"source", "RSS defaults explicitly to opening its featured article");
+    Check(cfg.tiles[1].policy.included&&cfg.tiles[1].policy.Mode()==L"LiveTile"&&cfg.tiles[2].policy.Mode()==L"Registration"&&
+        cfg.tiles[2].policy.Template()==L"Windows81Preset","instances capture independent delivery/template policies");
+    Check(cfg.tiles[1].policy.Read(L"Settings",L"GeneratedAssetCache",L"1")==L"0"&&
+        cfg.tiles[1].policy.Read(L"Settings",L"GeneratedAssetCacheMaxEntries",L"0")==L"2"&&
+        cfg.tiles[2].policy.Read(L"Settings",L"GeneratedAssetCacheMaxEntries",L"0")==L"64", "cache budgets and enable flags are independent per tile");
+    Check(TileDeliveryPolicyKey(cfg.tiles[1].policy)!=TileDeliveryPolicyKey(cfg.tiles[2].policy)&&
+        TilePolicyCacheOwnerKey(L"profile-a",L"rss1")!=TilePolicyCacheOwnerKey(L"profile-a",L"rss2")&&
+        TilePolicyCacheOwnerKey(L"profile-a",L"rss1")!=TilePolicyCacheOwnerKey(L"profile-b",L"rss1"),"policy fingerprints and cache ownership separate tile and profile identities");
+    std::wstring scoped;
+    Check(!TryReadTilePolicy(L"Settings",L"GeneratedAssetCache",scoped),"no render policy override exists outside a snapshot scope");
+    {
+        TilePolicyReadScope scope(cfg.tiles[1].policy);
+        Check(TryReadTilePolicy(L"Settings",L"GeneratedAssetCache",scoped)&&scoped==L"0","snapshot scope exposes only the selected tile's captured policy");
+        try{TilePolicyReadScope nested(cfg.tiles[2].policy);Check(TryReadTilePolicy(L"Settings",L"GeneratedAssetCacheMaxEntries",scoped)&&scoped==L"64","nested scopes select their own immutable policy");throw 1;}catch(int){}
+        Check(TryReadTilePolicy(L"Settings",L"GeneratedAssetCacheMaxEntries",scoped)&&scoped==L"2","exception unwinding restores the previous policy scope");
+        bool childScoped=true;std::thread child([&]{std::wstring ignored;childScoped=TryReadTilePolicy(L"Settings",L"GeneratedAssetCache",ignored);});child.join();
+        Check(!childScoped,"another thread cannot inherit mutable global render policy state");
+    }
+    Check(!CurrentTileDeliveryPolicy(),"leaving render scope restores the legacy/global reader context");
     Check(TileInstanceRead(cfg.tiles[1], Reader(values), L"RssFeed", L"FeedUrl", L"") != TileInstanceRead(cfg.tiles[2], Reader(values), L"RssFeed", L"FeedUrl", L""), "per-tile RSS URLs are independent");
     Check(TileInstanceRead(cfg.tiles[1], Reader(values), L"RssFeed", L"UpdateIntervalSeconds", L"") == L"300" && TileInstanceRead(cfg.tiles[2], Reader(values), L"RssFeed", L"UpdateIntervalSeconds", L"") == L"900", "per-tile RSS intervals are independent");
     Put(values,L"Tile.rss1",L"RssFeed.FeedUrl",L"https://example.invalid/new-revision.atom");
@@ -132,6 +160,26 @@ int main() {
     for (const auto& setting : plan.settings) if (Lower(setting.key).find(L"ltoken") != std::wstring::npos || setting.value == L"111111111") copiedSecret = true;
     Check(!copiedSecret, "conversion preserves credential references instead of duplicating account fields");
     Check(PlanLegacyTileInstanceMigration(Reader(migrated), plan, error) && !plan.changed && plan.settings.empty(), "second conversion is an idempotent no-op");
+    Values schemaOne;Put(schemaOne,L"Tiles",L"Instances",L"own-feed");Tile(schemaOne,L"own-feed",L"RSS");
+    Put(schemaOne,L"Settings",L"GeneratedAssetCacheMaxEntries",L"93");
+    Put(schemaOne,L"Settings",L"ExperimentalLiveTileUpdate",L"0");
+    Check(PlanLegacyTileInstanceMigration(Reader(schemaOne),plan,error)&&plan.changed,"existing schema-one profiles receive missing policy values through a staged upgrade");
+    for(const auto& setting:plan.settings)Put(schemaOne,setting.section,setting.key,setting.value);
+    Put(schemaOne,L"Settings",L"GeneratedAssetCacheMaxEntries",L"3");Put(schemaOne,L"Settings",L"ExperimentalLiveTileUpdate",L"1");
+    TileInstanceConfiguration policyUpgraded;
+    Check(ReadTileInstanceConfiguration(Reader(schemaOne),policyUpgraded,error)&&policyUpgraded.tiles[0].policy.Mode()==L"Registration"&&
+        policyUpgraded.tiles[0].policy.Read(L"Settings",L"GeneratedAssetCacheMaxEntries",L"0")==L"93","materialized policies preserve the creation snapshot when application defaults later change");
+    Check(PlanLegacyTileInstanceMigration(Reader(schemaOne),plan,error)&&!plan.changed,"policy upgrade is idempotent and never rewrites independent preferences");
+    std::wstring invalidPolicy=L"4097";
+    Check(!NormalizeTilePolicySetting(L"Cache.MaxEntries",invalidPolicy,error),"cache bounds are validated instead of silently clamped");
+    bool allPolicyFields=true;
+    for(const auto& field:TilePolicyFields){
+        auto mixed=std::wstring(field.key);for(auto& ch:mixed)ch=static_cast<wchar_t>(std::towupper(ch));
+        mixed=L" \t"+mixed+L" \t";auto fallback=std::wstring(field.fallback);
+        allPolicyFields=allPolicyFields&&FindTilePolicyField(mixed)==&field&&NormalizeTilePolicySetting(mixed,fallback,error);
+    }
+    Check(allPolicyFields&&FindTilePolicyField(L" delivery.unknown ")==nullptr,
+        "cached policy lookup preserves every table field's identity, case/whitespace normalization and unknown-key rejection");
     auto invalidLegacy = legacy; Put(invalidLegacy,L"Tile.rss",L"Content",L"bad mapping");
     plan.changed = true; plan.settings = {{L"prior",L"key",L"value"}};
     Check(!PlanLegacyTileInstanceMigration(Reader(invalidLegacy),plan,error) && plan.changed && plan.settings.size() == 1 && plan.settings[0].section == L"prior",

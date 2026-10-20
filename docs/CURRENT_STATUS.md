@@ -11,6 +11,15 @@ is enabled and its focused native recheck passed.
 
 ## Saved and installed
 
+- October 20, 18:35: per-tile caching/delivery/render policies, separate
+  user/profile/tile Registration identities, explicit migration, readable RSS
+  Default and the centered hidden-owner pin anchor are installed. The final
+  724 host checks, 1,836 source checks, SDK manifest validation and copied-binary
+  smoke passed. All seven native sources and a complete 76-frame batch were
+  observed after installation, with no failed batches in the recorded window.
+  Read [the delivery follow-up](tile-delivery-policies-2026-10-20.md) for precise
+  scope, measured CPU/RAM, preserved data and remaining native acceptance.
+
 - October 20: independent tile instances, per-type settings, Plugins, Prayer
   clock/countdown, scoped status, pin-state menus and owned gallery clearing
   are installed. Native source publication and startup health passed after

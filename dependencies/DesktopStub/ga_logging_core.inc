@@ -256,7 +256,7 @@ static void FlushStartupWarnings()
 int IniReadI(const wchar_t* s, const wchar_t* k, int d)
 {
     std::wstring value;
-    if (!ReadIniValueCached(s, k, value))
+    if (!aip::content::TryReadTilePolicy(s ? s : L"", k ? k : L"", value) && !ReadIniValueCached(s, k, value))
         return d;
 
     if (s && k && IsDesktopStubDisplayBoolSetting(s, k))
@@ -376,6 +376,8 @@ static std::wstring TimeoutDisplayText(int timeoutMs)
 std::wstring IniReadS(const wchar_t* s, const wchar_t* k, const wchar_t* d)
 {
     std::wstring out;
+    if (aip::content::TryReadTilePolicy(s ? s : L"", k ? k : L"", out))
+        return out;
     if (ReadIniValueCached(s, k, out))
         return out;
     return d ? d : L"";

@@ -651,6 +651,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
 {
     ContentRenderScope scope(&snapshot);
     std::wstring key = FileFingerprint(snapshot.backgroundPath) + L":" + std::to_wstring(static_cast<int>(snapshot.textMode));
+    if(snapshot.capturedWallpaperFit>=0)key+=L":capturedFit:"+std::to_wstring(snapshot.capturedWallpaperFit);
     if (snapshot.textMode != aip::content::TextMode::Off)
         for (const auto& value : {snapshot.text.primary, snapshot.text.secondary, snapshot.text.badge})
             key += L":" + std::to_wstring(value.size()) + L":" + value;

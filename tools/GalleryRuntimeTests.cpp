@@ -385,9 +385,59 @@ void TestSubmittedStatusRetention() {
         "loading a new ownership epoch invalidates all old submitted status");
     coordinator.Suspend(); Check(coordinator.StatusWindows().empty(), "redistribution suspension clears and hides all status windows");
 }
+void TestRegistrationReceiptsAndMixedTransport() {
+    Harness host; auto input=Input();
+    auto& staticTile=input.configuration.tiles.front(); staticTile.registration=true;
+    std::wstring error;
+    Check(aip::content::ReadTileDeliveryPolicy([](const wchar_t*,const wchar_t* key,const wchar_t* fallback){
+        return std::wstring(key)==L"Delivery.Mode"?std::wstring(L"Registration"):std::wstring(fallback);
+    },L"Gallery.Tile.1",GalleryRegistrationId(input.configuration.groupId,staticTile.id),staticTile.delivery,error),
+        "static gallery fixture captures a complete independent policy");
+    input.registeredStaticIds.insert(staticTile.id); input.pinnedIds.erase(NativeTileId(input.configuration.groupId,staticTile.id));
+    host.Initialize(input); runtime::Coordinator coordinator(host.Services());
+    Pump(coordinator,input,[&]{return coordinator.CurrentFrames().size()==6;});
+    auto frames=coordinator.CurrentFrames(); const auto single=ForTile(frames,L"one"), native=ForTile(frames,L"two");
+    Check(single.size()==1 && single.front().registration && single.front().receipt.count==1 && native.size()==5 && !native.front().registration,
+        "one registered gallery and one pinned gallery prepare distinct one-image and five-image receipts");
+    runtime::StatusWindow staticStatus{single,false};
+    Check(runtime::StatusWindowHasDemand(staticStatus,input),"gallery status includes prepared Registration images without requiring a native secondary pin");
+    const auto initial=host.Load(); const auto staticCursor=initial.tiles.at(L"one").cursor;
+    Check(initial.tiles.at(L"one").pending.images.size()==1 && initial.tiles.at(L"two").pending.images.size()==5 &&
+        coordinator.ValidateFrame(single.front()),"every static image requires its exact durable pending window and policy before publication");
+    auto tampered=single.front();tampered.policy.values[L"settings.generatedassetcachemaxentries"]=L"9";
+    Check(!coordinator.ValidateFrame(tampered),"a static receipt cannot be reused under another captured cache or delivery policy");
+    coordinator.Fail(single.front().receipt);host.now=4999;coordinator.Refresh(input);
+    Check(ForTile(coordinator.CurrentFrames(),L"one").empty() && host.Load().tiles.at(L"one").cursor==staticCursor,
+        "failed static registration never advances photo ownership or cursor during retry backoff");
+    host.now=5000;coordinator.Refresh(input);const auto retry=ForTile(coordinator.CurrentFrames(),L"one");
+    Check(retry.size()==1 && retry.front().receipt.ticket==single.front().receipt.ticket && retry.front().receipt.frameKey!=single.front().receipt.frameKey,
+        "static retry preserves the durable image while rejecting stale attempt acknowledgements");
+    coordinator.Acknowledge(single.front().receipt);coordinator.Refresh(input);
+    Check(host.Load().tiles.at(L"one").pending.ticket!=0,"a stale static success cannot acknowledge the fresh retry");
+    coordinator.Acknowledge(retry.front().receipt);coordinator.Refresh(input);
+    Check(host.Load().tiles.at(L"one").pending.ticket==0 && host.Load().tiles.at(L"one").cursor==1,
+        "successful static registration acknowledges exactly one photo through the same durable commit path");
+    auto changed=input;changed.directAvailable=false;changed.pinnedKnown=false;changed.pinnedIds.clear();
+    Check(runtime::StatusWindowHasDemand(staticStatus,changed),"unknown Windows pin inventory does not hide an independently registered gallery status");
+    coordinator.RequestRefresh();coordinator.Refresh(changed);
+    Check(ForTile(coordinator.CurrentFrames(),L"two").empty() && ForTile(coordinator.CurrentFrames(),L"one").size()==1,
+        "registered gallery demand remains explicit and independent of unknown native pin inventory");
+    const auto owned=host.Load().images.size(); changed.registeredStaticIds.clear();coordinator.Refresh(changed);
+    Check(!runtime::StatusWindowHasDemand(staticStatus,changed),"a retired Registration identity stops appearing as an active gallery status");
+    Check(coordinator.CurrentFrames().empty() && host.Load().images.size()==owned,
+        "removing Registration readiness stops publication without discarding historical reservations");
+    Harness migrating;auto live=Input();migrating.Initialize(live);runtime::Coordinator migration(migrating.Services());
+    Pump(migration,live,[&]{return migration.CurrentFrames().size()==10;});
+    const auto oldFrame=ForTile(migration.CurrentFrames(),L"one").front();const auto before=migrating.Load();
+    auto moved=live;moved.configuration.tiles.front()=staticTile;moved.registeredStaticIds.insert(L"one");moved.pinnedIds.erase(NativeTileId(live.configuration.groupId,L"one"));
+    migration.Refresh(moved);const auto converted=ForTile(migration.CurrentFrames(),L"one");const auto after=migrating.Load();
+    Check(converted.size()==1 && converted.front().registration && !migration.Validate(oldFrame.receipt) &&
+        after.tiles.at(L"one").pending.images.size()==1 && after.tiles.at(L"one").cursor==before.tiles.at(L"one").cursor && after.images.size()==before.images.size(),
+        "mode migration replaces a five-slot pending window safely without advancing the cursor or releasing photo ownership");
+}
 }
 int main() {
-    try { TestExplicitInitializationAndCas(); TestPublicationAndSlotAcknowledgements(); TestRestartConflictAndUnavailableMode(); TestResumableInventoryAndShutdown(); TestManyTilesAndFolders(); TestUnavailableFolderIsolation(); TestSubmittedStatusRetention();
+    try { TestExplicitInitializationAndCas(); TestPublicationAndSlotAcknowledgements(); TestRestartConflictAndUnavailableMode(); TestResumableInventoryAndShutdown(); TestManyTilesAndFolders(); TestUnavailableFolderIsolation(); TestSubmittedStatusRetention(); TestRegistrationReceiptsAndMixedTransport();
         std::cout << checks << " gallery runtime checks passed.\n"; return 0;
     } catch (const std::exception& error) { std::cerr << "FAIL after " << checks << " runtime checks: " << error.what() << '\n'; return 1; }
 }

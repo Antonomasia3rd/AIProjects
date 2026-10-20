@@ -7,6 +7,7 @@ set "VCVARS="
 if not defined DESKTOPSTUB_PRODUCT_NAME set "DESKTOPSTUB_PRODUCT_NAME=DesktopStub"
 if not defined DESKTOPSTUB_HOST_EXE_NAME set "DESKTOPSTUB_HOST_EXE_NAME=%DESKTOPSTUB_PRODUCT_NAME%.exe"
 if not defined DESKTOPSTUB_BROKER_EXE_NAME set "DESKTOPSTUB_BROKER_EXE_NAME=%DESKTOPSTUB_PRODUCT_NAME%LiveTileBroker.exe"
+if not defined DESKTOPSTUB_LAUNCHER_EXE_NAME set "DESKTOPSTUB_LAUNCHER_EXE_NAME=DesktopStubTileLauncher.exe"
 if not defined DESKTOPSTUB_ENABLE_HARDWARE_SOURCES set "DESKTOPSTUB_ENABLE_HARDWARE_SOURCES=1"
 if not defined DESKTOPSTUB_OPTIMIZE set "DESKTOPSTUB_OPTIMIZE=1"
 if not defined DESKTOPSTUB_RELEASE_TAG_PREFIX set "DESKTOPSTUB_RELEASE_TAG_PRODUCT=!DESKTOPSTUB_PRODUCT_NAME: =!"
@@ -17,6 +18,8 @@ if errorlevel 1 exit /b 1
 call :ValidateBuildValue "DESKTOPSTUB_HOST_EXE_NAME"
 if errorlevel 1 exit /b 1
 call :ValidateBuildValue "DESKTOPSTUB_BROKER_EXE_NAME"
+if errorlevel 1 exit /b 1
+call :ValidateBuildValue "DESKTOPSTUB_LAUNCHER_EXE_NAME"
 if errorlevel 1 exit /b 1
 call :ValidateBuildValue "DESKTOPSTUB_ENABLE_HARDWARE_SOURCES"
 if errorlevel 1 exit /b 1
@@ -130,6 +133,7 @@ rem   The script now deliberately ignores every argument and always builds the
 rem   same stable target set:
 rem     - %DESKTOPSTUB_HOST_EXE_NAME%
 rem     - %DESKTOPSTUB_BROKER_EXE_NAME%
+rem     - DesktopStubTileLauncher.exe (transient per-tile Registration launcher)
 rem
 rem   The experimental background-task DLL remains in the source tree for
 rem   research, but it is not part of the normal one-command build.
@@ -170,6 +174,20 @@ if exist "%BROKER_EXE%.manifest" (
 )
 
 echo Building main DesktopStub host...
+cl /nologo %OPTIMIZATION_FLAGS% /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE TileLauncher.cpp /Fe"build\%DESKTOPSTUB_LAUNCHER_EXE_NAME%" /Fo"%OBJECT_DIR%\DesktopStubTileLauncher.obj" /link user32.lib shell32.lib ole32.lib uuid.lib /SUBSYSTEM:WINDOWS
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+if exist "build\%DESKTOPSTUB_LAUNCHER_EXE_NAME%.manifest" (
+    mt /nologo -manifest "build\%DESKTOPSTUB_LAUNCHER_EXE_NAME%.manifest" -outputresource:"build\%DESKTOPSTUB_LAUNCHER_EXE_NAME%;#1"
+    if errorlevel 1 (
+        set "STATUS=!ERRORLEVEL!"
+        popd
+        exit /b !STATUS!
+    )
+)
 rc /nologo %RC_VERSION_DEFINES% %RC_INCLUDE_DEFINES% /fo"%RES_FILE%" DesktopStub.rc
 if errorlevel 1 (
     set "STATUS=!ERRORLEVEL!"
@@ -231,7 +249,7 @@ exit /b !STATUS!
 :ValidateBuildValue
 setlocal DisableDelayedExpansion
 set "BUILD_VALUE_NAME=%~1"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$n=$env:BUILD_VALUE_NAME; $v=[Environment]::GetEnvironmentVariable($n, 'Process'); if ([string]::IsNullOrEmpty($v)) { Write-Host ('ERROR: {0} cannot be empty.' -f $n); [Environment]::Exit(1) }; $bad=$false; foreach ($c in @(0,10,13,33,34,37,38,40,41,60,62,94,124)) { if ($v.Contains([char]$c)) { $bad=$true } }; if ($bad) { Write-Host ('ERROR: {0} contains command-shell metacharacters, control characters, or quotes that are not supported: {1}' -f $n, $v); [Environment]::Exit(1) }; if ($n -eq 'DESKTOPSTUB_HOST_EXE_NAME' -or $n -eq 'DESKTOPSTUB_BROKER_EXE_NAME') { foreach ($c in @(42,47,58,63,92)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} must be a valid file name, not a path or wildcard: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($v.EndsWith(' ') -or $v.EndsWith('.') -or $v -eq '.' -or $v -eq '..') { Write-Host ('ERROR: {0} must not end in a space/dot or use a relative-directory name: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($n -eq 'DESKTOPSTUB_RELEASE_TAG_PREFIX') { foreach ($c in @(9,10,13,32,42,63,91,92,126)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} contains whitespace or characters that are invalid in a Git tag prefix: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($v.Contains('..') -or $v.Contains('@{') -or $v.EndsWith('.') -or $v.EndsWith('/')) { Write-Host ('ERROR: {0} is not a valid Git tag prefix: {1}' -f $n, $v); [Environment]::Exit(1) } }; [Environment]::Exit(0)"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$n=$env:BUILD_VALUE_NAME; $v=[Environment]::GetEnvironmentVariable($n, 'Process'); if ([string]::IsNullOrEmpty($v)) { Write-Host ('ERROR: {0} cannot be empty.' -f $n); [Environment]::Exit(1) }; $bad=$false; foreach ($c in @(0,10,13,33,34,37,38,40,41,60,62,94,124)) { if ($v.Contains([char]$c)) { $bad=$true } }; if ($bad) { Write-Host ('ERROR: {0} contains command-shell metacharacters, control characters, or quotes that are not supported: {1}' -f $n, $v); [Environment]::Exit(1) }; if ($n -eq 'DESKTOPSTUB_HOST_EXE_NAME' -or $n -eq 'DESKTOPSTUB_BROKER_EXE_NAME' -or $n -eq 'DESKTOPSTUB_LAUNCHER_EXE_NAME') { foreach ($c in @(42,47,58,63,92)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} must be a valid file name, not a path or wildcard: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($v.EndsWith(' ') -or $v.EndsWith('.') -or $v -eq '.' -or $v -eq '..') { Write-Host ('ERROR: {0} must not end in a space/dot or use a relative-directory name: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($n -eq 'DESKTOPSTUB_RELEASE_TAG_PREFIX') { foreach ($c in @(9,10,13,32,42,63,91,92,126)) { if ($v.Contains([char]$c)) { Write-Host ('ERROR: {0} contains whitespace or characters that are invalid in a Git tag prefix: {1}' -f $n, $v); [Environment]::Exit(1) } }; if ($v.Contains('..') -or $v.Contains('@{') -or $v.EndsWith('.') -or $v.EndsWith('/')) { Write-Host ('ERROR: {0} is not a valid Git tag prefix: {1}' -f $n, $v); [Environment]::Exit(1) } }; [Environment]::Exit(0)"
 set "STATUS=%ERRORLEVEL%"
 endlocal & exit /b %STATUS%
 

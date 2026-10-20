@@ -2,6 +2,7 @@
 // creates a window. Native completion delegates post plain mailbox records;
 // all WinRT state/results and owning windows are released on the UI thread.
 #include "../secondary_tiles.h"
+#include "../secondary_tile_anchor.h"
 #include "../secondary_tile_rename.h"
 #include "../tile_instance_metadata.h"
 #include "../tile_actions.h"
@@ -10,6 +11,7 @@
 #include <winrt/Windows.UI.StartScreen.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.UI.h>
+#include <winrt/Windows.UI.Popups.h>
 #include <shobjidl.h>
 #include <deque>
 #include <set>
@@ -637,6 +639,31 @@ static void StartNextLogoRefresh()
         ::RequestRefreshExistingSecondaryTileLogos(host, true);
     }
 }
+static winrt::Windows::Foundation::Rect CenteredPinSelection(HWND owner)
+{
+    POINT cursor{}; GetCursorPos(&cursor);
+    MONITORINFO monitor{sizeof(MONITORINFO)};
+    RECT work{};
+    if (GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &monitor)) work = monitor.rcWork;
+    else if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0))
+        work = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+    // The resident window is invisible and starts with a zero-sized client at
+    // (0,0). Give that owned HWND the selected monitor's coordinate space; never
+    // show/activate it or reposition Windows' confirmation dialog itself.
+    if (!IsWindowVisible(owner))
+        SetWindowPos(owner, nullptr, work.left, work.top, work.right - work.left, work.bottom - work.top,
+            SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+    POINT clientOrigin{}; ClientToScreen(owner, &clientOrigin);
+    UINT dpi = 96;
+    using GetDpi = UINT(WINAPI*)(HWND);
+#pragma warning(suppress: 4191)
+    const auto getDpi = reinterpret_cast<GetDpi>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow"));
+    if (getDpi) dpi = getDpi(owner);
+    const auto anchor = aip::content::CenteredSecondaryPinAnchor(
+        {static_cast<double>(work.left), static_cast<double>(work.top), static_cast<double>(work.right), static_cast<double>(work.bottom)},
+        clientOrigin.x, clientOrigin.y, dpi);
+    return {anchor.x, anchor.y, anchor.width, anchor.height};
+}
 static bool RequestMutation(HWND owner, const std::wstring& supplied, const std::wstring& name, bool pin)
 {
     const auto id = CanonicalSecondaryTileRuntimeId(supplied);
@@ -667,9 +694,8 @@ static bool RequestMutation(HWND owner, const std::wstring& supplied, const std:
         if (pin) {
             const auto statics = aip::AcquireUncachedActivationFactory<NativeTile, winrt::Windows::UI::StartScreen::ISecondaryTileStatics>();
             state.updateExisting = statics.Exists(id);
-            POINT anchor{}; GetCursorPos(&anchor);
             state.mutation = state.updateExisting ? state.tile.UpdateAsync() : state.tile.RequestCreateForSelectionAsync(
-                winrt::Windows::Foundation::Rect{static_cast<float>(anchor.x), static_cast<float>(anchor.y), 1.0f, 1.0f});
+                CenteredPinSelection(owner), winrt::Windows::UI::Popups::Placement::Below);
         } else state.mutation = state.tile.RequestDeleteAsync();
         auto inserted = pending.emplace(request, std::move(state));
         const std::weak_ptr<Mailbox> weak = mailbox; const auto destination = host;

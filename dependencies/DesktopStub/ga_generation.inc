@@ -2,6 +2,43 @@
 // Tile generation
 // -----------------------------------------------------------------------------
 #include "../png_crc32.h"
+// Defined by the isolated registration backend after the native Live Tile API.
+static bool BuildTileRegistrationTarget(const std::wstring&, const std::wstring&, const aip::content::TileAppearance&,
+    aip::tile_registration::Target&, std::wstring&);
+static bool PrepareTileRegistrationPackage(const aip::tile_registration::Target&, bool, std::wstring&);
+static bool WriteTileRegistrationManifest(aip::tile_registration::Target&, std::wstring&);
+static bool RegisterTileRegistrationPackage(const aip::tile_registration::Target&, bool, std::wstring&);
+static bool TileRegistrationReady(const aip::tile_registration::Target&, std::wstring&);
+
+static bool ScopedTileFlag(const wchar_t* setting, bool fallback)
+{
+    std::wstring value;
+    return aip::content::TryReadTilePolicy(L"Settings", setting, value) ? value == L"1" : fallback;
+}
+static bool RenderDisableFitting() { return ScopedTileFlag(L"DisableFitting", g_disableFitting); }
+static bool RenderIconForDisabled() { return ScopedTileFlag(L"GenerateDesktopIconForDisabledEntries", g_generateDesktopIconForDisabledEntries); }
+static bool RenderDeleteDisabled() { return ScopedTileFlag(L"DeleteDisabledAssets", g_deleteDisabledAssets); }
+static bool RenderScaleAuto() { return ScopedTileFlag(L"GenerateScaleAuto", g_generateScaleAuto); }
+static Bitmap* RenderDisabledTileAsset(int width, int height, int logicalWidth, int logicalHeight)
+{
+    if (g_renderContent && g_renderContent->policy.included && !g_renderContent->artworkTopic.empty()) {
+        auto result = std::make_unique<Bitmap>(width, height, PixelFormat32bppARGB);
+        Graphics graphics(result.get());
+        if (result->GetLastStatus() != Ok || graphics.GetLastStatus() != Ok) return nullptr;
+        graphics.Clear(Color(0, 0, 0, 0));
+        if (!RenderIconForDisabled()) return result.release();
+        const REAL side = static_cast<REAL>((std::min)(width, height)) * .64f;
+        const auto& appearance = g_renderContent->registrationAppearance;
+        const bool dark = appearance.background == L"Color" && aip::tile_visual::DarkArtworkInk({true,
+            aip::content::TileAppearanceRgb(appearance, 0x202020)});
+        const auto ink = dark ? Color(255,20,20,20) : Color(255,255,255,255);
+        if (!aip::tile_visual::DrawTileTopicGlyph(graphics, g_renderContent->artworkTopic,
+            RectF((width-side)/2, (height-side)/2, side, side), ink)) return nullptr;
+        return result.release();
+    }
+    std::unique_ptr<Bitmap> icon(LoadEmbeddedDesktopIcon());
+    return icon ? RenderDesktopIconAsset(icon.get(), width, height, logicalWidth, logicalHeight) : nullptr;
+}
 #ifndef DESKTOPSTUB_CONTENT_QUEUE_GENERATE
 #define DESKTOPSTUB_CONTENT_QUEUE_GENERATE QueueGenerate
 #endif
@@ -385,6 +422,14 @@ static int GeneratedAssetPrecacheMaxFiles()
 
 static std::wstring GeneratedAssetCacheRoot(const std::wstring& exeDir)
 {
+    const auto* policy = aip::content::CurrentTileDeliveryPolicy();
+    if (policy && policy->included) {
+        std::wstring profile;
+        { std::lock_guard<std::mutex> lock(g_pathMutex); profile = g_iniPath; }
+        const auto parent = IniReadS(L"Settings", L"GeneratedAssetCacheDirectory", L"");
+        return (parent.empty() ? GetExeDir() + L"\\AssetCache" : aip::MakeAbsolutePath(parent)) +
+            L"\\Tiles\\" + aip::content::TilePolicyCacheOwnerKey(aip::MakeAbsolutePath(profile), policy->owner);
+    }
     return exeDir + L"\\AssetCache";
 }
 
@@ -533,7 +578,8 @@ static std::vector<GeneratedAssetCacheFile> BuildGeneratedAssetCacheFileList(
         std::wstring outPath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
 
         bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
-        if (!staticWallpaperAssetEnabled && !g_generateDesktopIconForDisabledEntries)
+        if (!staticWallpaperAssetEnabled && !RenderIconForDisabled() &&
+            !(g_renderContent && TileSnapshotUsesRegistration(*g_renderContent)))
             continue;
 
         std::wstring cacheName = ManifestGeneratedAssetCacheName(t.name);
@@ -608,14 +654,15 @@ static void DeleteDisabledAssetsForCurrentConfig(
     const ManifestDisplayInfo& manifestInfo,
     bool liveTileUpdateMode)
 {
+    if (g_renderContent && TileSnapshotUsesRegistration(*g_renderContent)) return;
     if (SecondaryLiveAssetsOnly(liveTileUpdateMode)) return;
     for (const auto& t : g_tiles)
     {
         bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
-        if (staticWallpaperAssetEnabled || g_generateDesktopIconForDisabledEntries)
+        if (staticWallpaperAssetEnabled || RenderIconForDisabled())
             continue;
 
-        if (!g_deleteDisabledAssets && !liveTileUpdateMode)
+        if (!RenderDeleteDisabled() && !liveTileUpdateMode)
             continue;
 
         std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
@@ -1198,7 +1245,7 @@ static bool StartupGeneratedAssetsPresent(const std::wstring& exeDir)
             std::wstring manifestAssetPath = ManifestAssetPathForTile(manifestInfo, t);
             std::wstring basePath = ResolveManifestAssetPath(exeDir, manifestAssetPath);
 
-            if (!g_generateDesktopIconForDisabledEntries)
+            if (!RenderIconForDisabled())
             {
                 if (PathFileExistsW(basePath.c_str()))
                     return false;
@@ -1238,7 +1285,7 @@ static bool StartupGeneratedAssetsPresent(const std::wstring& exeDir)
 
         bool generatedByCurrentConfig =
             IniReadI(L"Assets", t.name, 0) != 0 ||
-            g_generateDesktopIconForDisabledEntries;
+            RenderIconForDisabled();
         if (!generatedByCurrentConfig)
             continue;
 
@@ -1303,15 +1350,21 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
 {
     std::wstring state;
     state += L"v=10;";
+    if (const auto* policy = aip::content::CurrentTileDeliveryPolicy())
+        state += aip::content::TileDeliveryPolicyKey(*policy);
     if (SecondaryLiveAssetsOnly(UseExperimentalLiveTileUpdate())) state += L"secondaryLiveOnly=1;";
     const bool bakedText = !UseExperimentalLiveTileUpdate() ||
         ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10 ||
         (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
     if (g_renderContent)
     {
+        state += L"topic=" + g_renderContent->artworkTopic + L";appearance=" + g_renderContent->registrationAppearance.background +
+            L":" + g_renderContent->registrationAppearance.backgroundColor + L":" + g_renderContent->registrationAppearance.branding + L";";
         state += L"contentMode=" + std::to_wstring(static_cast<int>(g_renderContent->textMode)) + L";";
         if (g_renderContent->galleryFrame) state += L"galleryFit=" + std::to_wstring(g_renderContent->galleryContain) + L";";
         state += L"contentBackground=" + std::to_wstring(static_cast<int>(g_renderContent->backgroundId)) + L";";
+        if (bakedText && !g_renderContent->rssHeadlines.empty())
+            state += L"rssLayout=ReadableV2;" + aip::content::TextPresentationKey(g_renderContent->presentation) + L";";
         if (bakedText) for (const auto& headline : g_renderContent->rssHeadlines)
             state += L"rss=" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
         if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off) {
@@ -1355,12 +1408,14 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     state += L"liveTileBranding=" + LiveTileBrandingIniValue(ConfiguredLiveTileBranding()) + L";";
     state += L"effectiveLiveTileUpdate=" + IntToWString(UseExperimentalLiveTileUpdate() ? 1 : 0) + L";";
     const bool galleryFit = g_renderContent && g_renderContent->galleryFrame;
-    state += L"disableFitting=" + IntToWString(!galleryFit && g_disableFitting ? 1 : 0) + L";";
+    if(g_renderContent&&g_renderContent->capturedWallpaperFit>=0)
+        state+=L"capturedFit="+IntToWString(g_renderContent->capturedWallpaperFit)+L";";
+    state += L"disableFitting=" + IntToWString(!galleryFit && RenderDisableFitting() ? 1 : 0) + L";";
     state += L"fit=" + IntToWString(static_cast<int>(galleryFit ? (g_renderContent->galleryContain ? FitMode::Fit : FitMode::Fill) :
-        g_disableFitting ? FitMode::Fill : GetWallpaperFit())) + L";";
-    state += L"desktopIconForDisabled=" + IntToWString(g_generateDesktopIconForDisabledEntries ? 1 : 0) + L";";
-    state += L"deleteDisabledAssets=" + IntToWString(g_deleteDisabledAssets ? 1 : 0) + L";";
-    state += L"scaleAuto=" + IntToWString(g_generateScaleAuto ? 1 : 0) + L";";
+        RenderDisableFitting() ? FitMode::Fill : GetWallpaperFit())) + L";";
+    state += L"desktopIconForDisabled=" + IntToWString(RenderIconForDisabled() ? 1 : 0) + L";";
+    state += L"deleteDisabledAssets=" + IntToWString(RenderDeleteDisabled() ? 1 : 0) + L";";
+    state += L"scaleAuto=" + IntToWString(RenderScaleAuto() ? 1 : 0) + L";";
 
     std::vector<int> scales = GetConfiguredScales();
     state += L"scales=";
@@ -1406,9 +1461,9 @@ static std::wstring BuildLiveTileModeReregistrationStateKey()
     state += L"appId=" + manifestInfo.applicationId + L";";
     state += L"exe=" + manifestInfo.executable + L";";
     state += L"displayName=" + manifestInfo.displayName + L";";
-    state += L"desktopIconForDisabled=" + IntToWString(g_generateDesktopIconForDisabledEntries ? 1 : 0) + L";";
+    state += L"desktopIconForDisabled=" + IntToWString(RenderIconForDisabled() ? 1 : 0) + L";";
     state += L"hideDisabled=" + IntToWString(g_hideDisabled ? 1 : 0) + L";";
-    state += L"deleteDisabled=" + IntToWString(g_deleteDisabledAssets ? 1 : 0) + L";";
+    state += L"deleteDisabled=" + IntToWString(RenderDeleteDisabled() ? 1 : 0) + L";";
 
     for (const auto& t : g_tiles)
         state += std::wstring(t.name) + L"=" + IntToWString(IniReadI(L"Assets", t.name, 0) ? 1 : 0) + L";";
@@ -1460,6 +1515,9 @@ static bool StartupLiveTileClearedStateNeedsGeneration()
 
 static bool FixedPackagedLiveTileModeNeedsUnpackagedReregistration()
 {
+    // Individual tiles no longer change the main package's static/live asset
+    // mode. A Registration tile owns a different package entirely.
+    if (TileInstanceModeRequested()) return false;
     bool shouldRunPackaged = false;
     if (!LiveTileModeHasFixedRuntime(
             ConfiguredLiveTileUpdateMode(),
@@ -1519,7 +1577,7 @@ static bool PrepareWallpaperRenderSource(
         return true;
     }
 
-    FitMode mode = g_disableFitting ? FitMode::Fill : GetWallpaperFit();
+    FitMode mode = RenderDisableFitting() ? FitMode::Fill : GetWallpaperFit();
     renderSource = src;
     renderMode = mode;
     preparedWallpaper.reset();
@@ -1631,7 +1689,7 @@ static int MaxWallpaperDecodeLongEdgeForGeneration(const std::vector<int>& scale
     // to the desktop-backed tile image, but it can cost hundreds of MB when GDI+
     // decodes it at native size. Use the monitor/virtual desktop as the automatic
     // decode ceiling, while still honoring unusually large generated assets.
-    if (!g_disableFitting && !(g_renderContent && g_renderContent->galleryFrame))
+    if (!RenderDisableFitting() && !(g_renderContent && g_renderContent->galleryFrame))
     {
         FitMode wallpaperFit = GetWallpaperFit();
         if ((wallpaperFit == FitMode::Center || wallpaperFit == FitMode::Tile) &&
@@ -1758,7 +1816,7 @@ static bool RenderWallpaperToGeneratedAssetCache(
         bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
         if (!staticWallpaperAssetEnabled)
         {
-            if (!g_generateDesktopIconForDisabledEntries)
+            if (!RenderIconForDisabled())
                 continue;
 
             if (!icon)
@@ -2175,14 +2233,18 @@ static const aip::content::TileInstance* FindCurrentGenerationTileInstance(const
 }
 static bool CurrentGenerationTargetAllows(const aip::content::Snapshot& frame,
     const aip::content::TileInstanceConfiguration* instances, const aip::content::Configuration& composition,
-    const aip::content::SecondaryTileConfiguration& secondary)
+    const aip::content::SecondaryTileConfiguration& secondary, bool renderOnly = false)
 {
     if (frame.galleryFrame) return true; // Receipt/epoch checks remain at the gallery boundary.
     if (instances) {
         if (!instances->configured) return false;
         const auto* tile = FindCurrentGenerationTileInstance(*instances, frame);
+        if (tile && frame.policy.included && aip::content::TileDeliveryPolicyKey(frame.policy) !=
+            aip::content::TileDeliveryPolicyKey(tile->policy)) return false;
+        if (tile && TileSnapshotUsesRegistration(frame)) return renderOnly || TileRegistrationReadyForId(tile->id);
         if (frame.secondaryTileId.empty()) return tile || IsPrimaryRetirementGenerationFrame(frame);
         if (!tile) return false;
+        if (renderOnly) return true;
 #ifdef DESKTOPSTUB_TEST_SECONDARY_EXISTS
         return DESKTOPSTUB_TEST_SECONDARY_EXISTS(frame.secondaryTileId);
 #else
@@ -2224,13 +2286,13 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     if (!renderOnly) ReloadRuntimeSettingsFromIni();
 
     std::wstring configurationError;
-    if (!ValidateDesktopStubDisplayProfile(false, configurationError))
+    const bool instanceMode = TileInstanceModeRequested();
+    if (!instanceMode && !ValidateDesktopStubDisplayProfile(false, configurationError))
     {
         Log(L"[!] Tile update skipped: %s", configurationError.c_str());
         return false;
     }
     const bool composedContent = CompositionRequested();
-    const bool instanceMode = TileInstanceModeRequested();
     ContentRenderScope contentScope(suppliedContent);
     aip::content::TileInstanceConfiguration currentInstances;
     aip::content::Configuration currentContentConfiguration;
@@ -2260,7 +2322,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         (!ContentNativeQueueAvailable(currentContentConfiguration) ||
             suppliedContent->nativeQueueLayout != ContentNativeQueueLayout(currentContentConfiguration))) return false;
     if ((instanceMode || suppliedContent) && !CurrentGenerationTargetAllows(contentScope.snapshot,
-        instanceMode ? &currentInstances : nullptr, currentContentConfiguration, currentSecondaryConfiguration)) return false;
+        instanceMode ? &currentInstances : nullptr, currentContentConfiguration, currentSecondaryConfiguration, renderOnly)) return false;
     if (composedContent && !contentScope.snapshot.active)
     {
         Log(L"[!] Tile update skipped: no current content frame is available. Check the tile contents configuration.");
@@ -2287,18 +2349,47 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
 
     std::wstring exeDir = GetExeDir();
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
+    const bool separateRegistration = TileSnapshotUsesRegistration(contentScope.snapshot);
+    aip::tile_registration::Target registrationTarget;
+    if (separateRegistration) {
+        if (ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10) {
+            Log(L"[!] Separate Registration tiles require the Windows 10 manifest target."); return false;
+        }
+        std::wstring registrationError;
+        if (!renderOnly && (!BuildTileRegistrationTarget(contentScope.snapshot.policy.owner, contentScope.snapshot.name,
+                contentScope.snapshot.registrationAppearance, registrationTarget, registrationError) ||
+            !PrepareTileRegistrationPackage(registrationTarget, false, registrationError))) {
+            Log(L"[!] Registration tile: %ls", registrationError.c_str()); return false;
+        }
+        // Static packages own their generated paths. They must never overwrite
+        // the main package's assets or another tile's images.
+        if (!renderOnly) exeDir = registrationTarget.root;
+        manifestInfo.propertiesLogo = L"Assets\\StoreLogo.png";
+        manifestInfo.square150x150Logo = L"Assets\\MediumTile.png";
+        manifestInfo.square44x44Logo = L"Assets\\Square44x44Logo.png";
+        manifestInfo.square30x30Logo = L"Assets\\Square30x30Logo.png";
+        manifestInfo.square71x71Logo = L"Assets\\SmallTile.png";
+        manifestInfo.wide310x150Logo = L"Assets\\WideTile.png";
+        manifestInfo.square310x310Logo = L"Assets\\LargeTile.png";
+        manifestInfo.splashScreenImage = L"Assets\\SplashScreen.png";
+    }
     bool liveTileUpdateMode = UseExperimentalLiveTileUpdate();
-    bool liveTileModeReregistrationPending = LiveTileModeReregistrationPending();
+    bool liveTileModeReregistrationPending = !separateRegistration && LiveTileModeReregistrationPending();
     bool useLiveTileUpdateForThisRun = liveTileUpdateMode && !liveTileModeReregistrationPending;
     // A frozen native batch cannot consume its reset-bearing first slot as a
     // registration-only frame, then send later slots into an uncleared queue.
     if (suppliedContent && suppliedContent->nativeQueue && !useLiveTileUpdateForThisRun) return false;
-    if (suppliedContent && !suppliedContent->secondaryTileId.empty() &&
+    if (!renderOnly && !separateRegistration && suppliedContent && !suppliedContent->secondaryTileId.empty() &&
         (!useLiveTileUpdateForThisRun || !ContentDirectLiveDeliveryAvailable())) return false;
     if (!useLiveTileUpdateForThisRun) {
         contentScope.snapshot.nativeQueue = false;
-        contentScope.snapshot.nativeQueueTag.clear();
-        contentScope.snapshot.nativeQueueReset = false;
+        // Gallery tags/reset flags are also immutable durable receipt fields.
+        // A static gallery writes no notification queue, but still needs that
+        // receipt unchanged for its final stale-frame check and acknowledgement.
+        if (!contentScope.snapshot.galleryFrame) {
+            contentScope.snapshot.nativeQueueTag.clear();
+            contentScope.snapshot.nativeQueueReset = false;
+        }
     }
 #ifdef DESKTOPSTUB_INERT_HARDWARE
     if (g_testGenerateAfterAdmission) return g_testGenerateAfterAdmission(contentScope.snapshot);
@@ -2378,12 +2469,15 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         logAssetDirIfNeeded(ParentDirectoryOfPath(outPath));
 
         bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
+        if (separateRegistration && contentScope.snapshot.textMode == aip::content::TextMode::Off &&
+            !contentScope.snapshot.artworkTopic.empty() && contentScope.snapshot.backgroundId == aip::content::BackgroundId::Transparent)
+            staticWallpaperAssetEnabled = false;
         if (!staticWallpaperAssetEnabled)
         {
-            if (!g_generateDesktopIconForDisabledEntries)
+            if (!RenderIconForDisabled() && !separateRegistration)
             {
                 Log((liveTileUpdateMode ? g_ui.skippingStaticAssetLiveTileMode : g_ui.skippingAssetDisabled).c_str(), t.name);
-                if ((g_deleteDisabledAssets || liveTileUpdateMode) && !DeleteDisabledAssetFiles(outPath))
+                if ((RenderDeleteDisabled() || liveTileUpdateMode) && !DeleteDisabledAssetFiles(outPath))
                     assetsOk = false;
                 continue;
             }
@@ -2391,15 +2485,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
             // Render the Desktop icon into full-size transparent asset
             // canvases using Windows 8-style tile logo sizing and placement.
             {
-                std::unique_ptr<Bitmap> icon(LoadEmbeddedDesktopIcon());
-                if (!icon)
-                {
-                    assetsOk = false;
-                    Log(g_ui.failedSaveAsset.c_str(), outPath.c_str());
-                    continue;
-                }
-
-                std::unique_ptr<Bitmap> desktopAsset(RenderDesktopIconAsset(icon.get(), t.w, t.h, t.w, t.h));
+                std::unique_ptr<Bitmap> desktopAsset(RenderDisabledTileAsset(t.w, t.h, t.w, t.h));
                 bool ok = desktopAsset && SavePNG(desktopAsset.get(), outPath.c_str());
                 if (ok)
                 {
@@ -2416,7 +2502,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
                     int scaledW = ScalePixels(t.w, scale);
                     int scaledH = ScalePixels(t.h, scale);
                     std::wstring scaledPath = ScaleAssetPath(outPath, scale);
-                    std::unique_ptr<Bitmap> scaledDesktopAsset(RenderDesktopIconAsset(icon.get(), scaledW, scaledH, t.w, t.h));
+                    std::unique_ptr<Bitmap> scaledDesktopAsset(RenderDisabledTileAsset(scaledW, scaledH, t.w, t.h));
                     bool scaledOk = scaledDesktopAsset && SavePNG(scaledDesktopAsset.get(), scaledPath.c_str());
                     if (scaledOk)
                     {
@@ -2586,7 +2672,10 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     std::wstring manifestPath;
     bool manifestCreated = false;
     DWORD manifestError = ERROR_SUCCESS;
-    bool manifestReady = EnsureAppxManifest(manifestPath, manifestCreated, manifestError);
+    std::wstring registrationError;
+    bool manifestReady = separateRegistration ? WriteTileRegistrationManifest(registrationTarget, registrationError) :
+        EnsureAppxManifest(manifestPath, manifestCreated, manifestError);
+    if (separateRegistration) manifestPath = registrationTarget.manifestPath;
     if (manifestCreated)
         Log(g_ui.appxManifestCreated.c_str(), manifestPath.c_str());
     if (!manifestReady)
@@ -2607,6 +2696,10 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     {
         appUpdateOk = false;
         appUpdateFailureMessage = FormatWide(g_ui.appxManifestCreateFailed.c_str(), manifestPath.c_str());
+    }
+    else if (separateRegistration)
+    {
+        appUpdateOk = RegisterTileRegistrationPackage(registrationTarget, false, appUpdateFailureMessage);
     }
     else if (liveTileModeReregistrationPending)
     {
@@ -2689,7 +2782,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         ElapsedMs(assetsDone, registrationDone));
     Log(g_ui.timingLog.c_str(), g_ui.timingGenerationTotal.c_str(), ElapsedMs(generationStart, registrationDone));
     std::wstring missingManifestAssets;
-    if (!appUpdateOk && !appUpdateFailureIsLiveTile)
+    if (!separateRegistration && !appUpdateOk && !appUpdateFailureIsLiveTile)
     {
         missingManifestAssets = FindMissingManifestAssets(exeDir);
         if (!missingManifestAssets.empty())
@@ -2706,7 +2799,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         }
         if (!restoredFromGeneratedAssetCache)
             SaveGeneratedAssetCache(exeDir, BuildGenerationStateKey(wp), generatedAssetCacheFiles);
-        if (contentScope.snapshot.secondaryTileId.empty()) StoreSuccessfulGenerationState(wp);
+        if (!separateRegistration && contentScope.snapshot.secondaryTileId.empty()) StoreSuccessfulGenerationState(wp);
         SetLiveTileClearedOnShutdown(false);
         if (contentScope.snapshot.galleryFrame) {
             ContentAcknowledgeGalleryFrame(contentScope.snapshot); galleryGuard.delivered = true;

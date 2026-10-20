@@ -394,7 +394,6 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     }
 
     HMENU generalMenu = beginSection(g_ui.generalTitle);
-    if (TileInstanceModeRequested()) AppendTileInstanceDeliveryMenu(generalMenu);
     AppendMenuWordingSettings(generalMenu);
     HMENU startupMenu = beginNestedMenu(generalMenu, L"CreatePopupMenu(Sign-in)");
     addTo(startupMenu, ID_RUN_AT_STARTUP, g_ui.runAtStartup.c_str(), startupInstalled);

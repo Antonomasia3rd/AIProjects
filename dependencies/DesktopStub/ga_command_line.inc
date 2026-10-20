@@ -779,6 +779,13 @@ static bool NormalizeDesktopStubTypedSetting(
 {
     if (aip::content::IsTileInstanceSetting(section, key)) {
         if (!aip::content::NormalizeTileInstanceSetting(section, key, value, error)) return false;
+        if(const auto* policy=aip::content::FindTilePolicyField(key)){
+            if(const auto* mapped=FindDesktopStubDisplaySetting(policy->section,policy->setting)){
+                std::wstring issue,mappedValue=value;
+                if(!NormalizeDesktopStubDisplaySettingValue(*mapped,mappedValue,issue)){error=section+L"."+key+L": "+issue;return false;}
+            }
+            return true; // Integer/path policies were validated by the portable table.
+        }
         const auto dot = key.find(L'.');
         if (dot != std::wstring::npos && IEquals(key.substr(0, dot), L"RssFeed")) {
             std::wstring issue;
@@ -879,6 +886,16 @@ static bool TryParseCommandLineOverrideSpec(
         if (afterId != std::wstring::npos && aip::content::ValidTileInstanceId(aip::content::Lower(setting.section.substr(5, afterId - 5)))) {
             setting.key = setting.section.substr(afterId + 1) + L"." + setting.key;
             setting.section.resize(afterId);
+        }
+    }
+    // Gallery rows use a numbered section and the same dotted local policies.
+    // Preserve their complete policy key while retaining the shared parser's
+    // established grammar for unrelated sections.
+    if(aip::content::Lower(setting.section).compare(0,13,L"gallery.tile.")==0) {
+        const auto afterIndex=setting.section.find(L'.',13);
+        if(afterIndex!=std::wstring::npos&&aip::gallery::TileSectionNumber(setting.section.substr(0,afterIndex))) {
+            setting.key=setting.section.substr(afterIndex+1)+L"."+setting.key;
+            setting.section.resize(afterIndex);
         }
     }
 

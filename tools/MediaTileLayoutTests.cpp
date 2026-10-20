@@ -2,6 +2,7 @@
 #include "../dependencies/media_tile_layout.h"
 #include "../dependencies/prayer_tile_layout.h"
 #include "../dependencies/rss_tile_layout.h"
+#include "../dependencies/secondary_tile_anchor.h"
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -142,8 +143,62 @@ void TestPresentation() {
     std::wstring rich;AppendRssRichTileBinding(rich,L"TileMedium",150,headlines,L"");
     Check(Count(rich,L"<group>")==1&&rich.find(L"\nsecond line")!=std::wstring::npos&&rich.find(L"Description")!=std::wstring::npos,"RSS rich preset explicitly selects one larger wrapped Medium headline with its description");
 }
+void TestRssReadableDefaults() {
+    std::vector<Text> headlines;
+    for (int i = 0; i < 6; ++i) headlines.push_back({L"Headline <&> " + std::to_wstring(i),L"Summary & details",L""});
+    const int widths[] = {150,310,310}, heights[] = {150,150,310};
+    const wchar_t* bindings[] = {L"TileMedium",L"TileWide",L"TileLarge"};
+    const std::size_t expected[] = {1,2,3};
+    TextPresentation defaults;
+    Check(RssUsesRichLayout(defaults),"RSS Default is readable without an extra preset switch or profile mutation");
+    for (std::size_t index = 0; index < 3; ++index) {
+        std::wstring xml;
+        Check(AppendRssRichTileBinding(xml,bindings[index],heights[index],headlines,L"image<&>.png",defaults) &&
+            Count(xml,L"<group>") == expected[index] && RssRichTileRows(widths[index],heights[index]) == expected[index],
+            "RSS native and bitmap policy show one Medium, two Wide and three Large rich entries");
+        const auto p = RssRichPresentation(defaults,widths[index],heights[index]);
+        Check(p.primaryStyle == L"base" && p.secondaryStyle == L"captionSubtle" && p.wrap && !p.gapLines &&
+            xml.find(L"hint-style=\"base\"") != std::wstring::npos && xml.find(L"hint-style=\"captionSubtle\"") != std::wstring::npos,
+            "readable RSS distinguishes semibold titles from subdued summaries without blank lines inside each entry");
+        Check(xml.find(L"Headline &lt;&amp;&gt;") != std::wstring::npos && xml.find(L"Summary &amp; details") != std::wstring::npos &&
+            xml.find(L"image&lt;&amp;&gt;.png") != std::wstring::npos && xml.find(L"1. Headline") == std::wstring::npos,
+            "RSS rich layout escapes every field and avoids list numbering noise");
+        Check(p.primaryLines <= 3 && p.secondaryLines <= 2 && (index != 1 || p.secondaryLines == 1),
+            "each tile size reserves bounded space for both the title and its summary");
+        auto larger = defaults; larger.preset = L"RssHeadlines"; larger.primaryStyle = L"subtitle";
+        const auto sized = RssRichPresentation(larger,widths[index],heights[index]);
+        Check(sized.primaryStyle == L"subtitle" && (index != 1 || sized.primaryLines == 1),
+            "explicit larger RSS titles are retained with size-aware line limits");
+    }
+    auto custom = defaults; custom.preset = L"Custom";
+    Check(!RssUsesRichLayout(custom),"intentional Custom list composition is not silently upgraded");
+    auto spaced = defaults; spaced.preset = L"RssHeadlines"; spaced.gapLines = 2;
+    const auto spacedWide = RssRichPresentation(spaced,310,150);
+    Check(spacedWide.gapLines == 2 && spacedWide.primaryLines == 1 && spacedWide.secondaryLines == 1,
+        "explicit RSS text spacing remains effective while wide row limits reserve summary space");
+    Profile profile; profile.values[{L"TileText",L"TextPreset"}] = L"RssHeadlines";
+    TextPresentation parsed; std::wstring error;
+    Check(ReadTextPresentation(profile,L"TileText",parsed,error) && parsed.primaryStyle == L"base" && parsed.gapLines == 0,
+        "named RSS preset shares the same readable title defaults as automatic RSS layout");
+    std::wstring invalid;
+    Check(!AppendRssRichTileBinding(invalid,nullptr,150,headlines,L"") && invalid.empty(),"invalid RSS binding preserves the output");
+}
+void TestCenteredPinAnchor() {
+    const auto primary = CenteredSecondaryPinAnchor({0,0,1920,1040},0,0,96);
+    Check(primary.x == 960 && primary.y == 520 && primary.width == 1 && primary.height == 1,
+        "pin selection uses the work-area center instead of the cursor position");
+    const auto secondary = CenteredSecondaryPinAnchor({-2560,-1440,0,0},-2560,-1440,144);
+    Check(secondary.x > 853.3f && secondary.x < 853.4f && secondary.y == 480,
+        "negative-origin monitor coordinates are first made owner-relative then converted to DIPs");
+    const auto visible = CenteredSecondaryPinAnchor({1920,0,5760,2080},2100,120,192);
+    Check(visible.x == 870 && visible.y == 460,
+        "an already positioned visible owner receives its own client-coordinate anchor at 200 percent DPI");
+    const auto fallback = CenteredSecondaryPinAnchor({0,40,1920,1080},0,40,0);
+    Check(fallback.x == 960 && fallback.y == 520,
+        "unknown DPI falls back to 96 without changing work-area taskbar offsets");
+}
 }
 int main() {
-    try { TestStatus(); TestLayouts(); TestSettings(); TestPresentation(); std::cout << checks << " media presentation checks passed\n"; return 0; }
+    try { TestStatus(); TestLayouts(); TestSettings(); TestPresentation(); TestRssReadableDefaults(); TestCenteredPinAnchor(); std::cout << checks << " media presentation checks passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << "After " << checks << " checks: " << error.what() << '\n'; return 1; }
 }

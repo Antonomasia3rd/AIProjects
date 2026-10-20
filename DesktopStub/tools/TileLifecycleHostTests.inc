@@ -154,10 +154,40 @@ static void TestTileLifecycleHost(const std::wstring& bitmapPath)
     const auto dynamicOwned = OwnedSecondaryTileIdsForClear();
     Check(dynamicOwned.count(L"AipSource_news-one") && dynamicOwned.count(L"AipSource_news-two") && !dynamicOwned.count(L"AipSource_desktop") &&
         !dynamicOwned.count(L"AipSource_rss"), "cleanup ownership follows configured independent instances and retains historical gallery owners");
+    const auto savedGlobalClear=g_clearLiveTileOnShutdown.load();
+    auto scopedExit=dynamic;
+    Check(WriteIniValueToText(scopedExit,L"Tile.desktop",L"Delivery.ClearOnShutdown",L"0")&&
+        WriteIniValueToText(scopedExit,L"Tile.news-one",L"Delivery.ClearOnShutdown",L"0")&&
+        WriteIniValueToText(scopedExit,L"Tile.news-two",L"Delivery.ClearOnShutdown",L"1")&&WriteContentFixture(scopedExit),
+        "exit policy fixture changes only local flags in its private profile");
+    g_clearLiveTileOnShutdown=false;
+    const auto selectedExit=OwnedSecondaryTileIdsForClear(true);
+    Check(!TileInstancePrimaryClearsOnShutdown()&&AnyTileInstanceClearsOnShutdown()&&selectedExit.count(L"AipSource_news-two")&&
+        !selectedExit.count(L"AipSource_news-one")&&!selectedExit.count(L"AipGallery_lifecycle.historical"),
+        "a local clear preference works independently of the application flag while another tile and gallery history remain untouched");
+    const auto manualClear=OwnedSecondaryTileIdsForClear(false);
+    Check(manualClear.count(L"AipSource_news-one")&&manualClear.count(L"AipSource_news-two"),
+        "an explicit manual clear retains its complete owned-target scope rather than inheriting exit-only preferences");
+    g_clearLiveTileOnShutdown=true;
+    const auto galleryExit=OwnedSecondaryTileIdsForClear(true);
+    Check(galleryExit.count(L"AipGallery_lifecycle.historical")&&!galleryExit.count(L"AipSource_news-one"),
+        "gallery's existing global shutdown behavior does not override an ordinary tile's local keep preference");
+    g_clearLiveTileOnShutdown=false;
+    scopedExit+=L"\r\n[Gallery]\r\nGroupId=lifecycle\r\nTileCount=2\r\n[Gallery.Tile.1]\r\nId=active\r\nName=Keep\r\nDelivery.ClearOnShutdown=0\r\n"
+        L"[Gallery.Tile.2]\r\nId=disabled\r\nName=Clear\r\nDelivery.ClearOnShutdown=1\r\n";
+    Check(WriteContentFixture(scopedExit),"gallery row exit preferences are staged in the private instance profile");
+    const auto perGalleryExit=OwnedSecondaryTileIdsForClear(true);
+    Check(perGalleryExit.count(L"AipGallery_lifecycle.disabled")&&!perGalleryExit.count(L"AipGallery_lifecycle.active")&&
+        !perGalleryExit.count(L"AipGallery_lifecycle.historical"),"configured gallery rows honor their own exit preferences while removed historical owners retain the global fallback");
+    g_clearLiveTileOnShutdown=savedGlobalClear;Check(WriteContentFixture(dynamic),"exit policy fixture restores its previous private document and application flag");
     const auto savedCommand = g_commandLine; const auto savedLine = contentTestCommandLine;
     std::wstring section, key, value;
     Check(TryParseCommandLineOverrideSpec(L"Tile.news-one.RssFeed.FeedUrl=https://example.invalid/feed.atom", section, key, value, error) &&
         section == L"Tile.news-one" && key == L"RssFeed.FeedUrl", "CLI preserves a dotted per-instance provider key under the stable tile section");
+    Check(TryParseCommandLineOverrideSpec(L"Gallery.Tile.12.Cache.MaxEntries=7",section,key,value,error)&&
+        section==L"Gallery.Tile.12"&&key==L"Cache.MaxEntries"&&value==L"7"&&
+        NormalizeDesktopStubTypedSetting(section,key,value,error),
+        "CLI preserves and validates a dotted gallery policy under its exact numbered tile section");
     value = L"0"; Check(!NormalizeDesktopStubTypedSetting(L"Tile.news-one", L"RssFeed.UpdateIntervalSeconds", value, error),
         "CLI validates prefixed RSS numbers before any settings transaction");
     const auto noLegacyDependency = dynamic + L"[Content]\r\nEnabled=invalid-old-flag\r\nCount=invalid-old-count\r\n";

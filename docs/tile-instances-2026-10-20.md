@@ -26,11 +26,12 @@ process. The tray icon and Startup entry belong to the application.
   unpinned. Removing its settings does not delete source photographs or accounts.
 - **Plugins** contains independent CapsBlink and ASUS indicator settings. These
   utilities do not add indicator text to the Desktop tile.
-- **Application > Windows tile delivery** contains the shared Live Tile,
-  static-registration and automatic delivery choices, the native template
-  choice, shutdown clearing and automatic relaunch when switching runtimes.
-  These application-level transport controls are separate from each tile's
-  source and refresh settings.
+- Each tile has **Delivery and exit behavior**, **Image cache**, **Generated
+  assets and scales** and **Text on tile sizes** settings. Image sources also
+  expose fitting and decode options; Wallpaper exposes desktop observation and
+  capture options. A gallery row opens these through **Rendering, cache and
+  delivery...**. Application Startup, tray, console and diagnostics remain
+  application settings.
 
 Adding an ordinary tile saves its configuration. Its pin command remains an
 explicit action, with Windows providing the confirmation. Gallery setup retains
@@ -178,10 +179,12 @@ a valid link is available. Choose `setup` to open the tile's settings instead.
 
 For a larger, wrapped headline, select **Text size, wrapping and layout >
 Layout > Headlines with summaries**. This writes a complete named layout:
-`TextPreset=RssHeadlines`, native `TextMode=Auto`, a `subtitle` headline,
+`TextPreset=RssHeadlines`, native `TextMode=Auto`, a semibold 15-pixel `base` headline,
 wrapping and bounded line/gap settings. It replaces stale individual text
 settings from the previous layout, so selecting it produces an observable
-change. Medium/Wide show one rich item and Large can show three.
+change. Medium shows one rich item, Wide two and Large three, with line limits
+adjusted to the available tile height. RSS also uses this readable layout when
+its preset is Default.
 
 The equivalent explicit layout is:
 
@@ -189,14 +192,14 @@ The equivalent explicit layout is:
 [Tile.releases]
 TextPreset=RssHeadlines
 TextMode=Auto
-TextStyle=subtitle
+TextStyle=base
 TextSecondaryStyle=captionSubtle
 TextBadgeStyle=captionSubtle
 TextWrap=1
 TextMaxLines=3
 TextSecondaryMaxLines=2
 TextBadgeMaxLines=1
-TextGapLines=1
+TextGapLines=0
 TextAlign=left
 TextStacking=top
 ```
@@ -225,6 +228,53 @@ the same validation and notifies the resident as usual.
 when editing it manually. The tray's Add workflow guards against stale menus
 dropping a tile that was added in another configuration change.
 
+## Per-tile rendering, cache and delivery
+
+These keys live alongside the source settings in `[Tile.<id>]`, or in
+`[Gallery.Tile.N]` for a gallery row. The tray, INI and dotted `--set` keys use
+the same validation. For example:
+
+```cmd
+DesktopStub.exe --configure-only --set "Tile.releases.Cache.MaxEntries=7" --set "Tile.releases.Delivery.Template=Adaptive" --set "Gallery.Tile.1.Cache.MaxEntries=12"
+```
+
+| Key family | Settings |
+| --- | --- |
+| `Delivery` | `Mode` (`Auto`, `LiveTile`, `Registration`), `Template` (`Adaptive`, `Windows81Preset`), `ClearOnShutdown`, and `ManifestTarget`. |
+| `Delivery` registration backend | `UsePowerShell`, `ComUseHelper`, `ComTimeoutMs`, `ComCancelWaitMs`, `PowerShellExe`, `PowerShellTimeoutMs`, `PowerShellPollMs`, `PowerShellTerminateWaitMs`, `PowerShellOutputLimitBytes`, `UnresolvedBlockMs`. |
+| `Cache` | `Enabled`, `MaxEntries` (0–4096), `Directory` (blank uses the application cache parent). Each tile has a separate cache partition and budget under that parent. |
+| `Assets` | `ScaleAuto`, `Scale100`, `Scale125`, `Scale150`, `Scale200`, `Scale400`, `StoreLogo`, `MediumTile`, `Square44x44Logo`, `Square30x30Logo`, `SmallTile`, `WideTile`, `LargeTile`, `SplashScreen`, `GenerateIconWhenDisabled`, `DeleteDisabled`. |
+| `Text` | `ApplyToMediumTile`, `ApplyToWideTile`, `ApplyToLargeTile`. |
+| `Wallpaper` fitting and decode | `Fit` (`Auto`, `Fill`, `Fit`, `Stretch`, `Center`, `Tile`, `Span`), `DisableFitting`, `DecodeLowMemory`, `DecodeMaxLongEdge` (0 means automatic). Gallery fitting supports `Auto`, `Fill` and `Fit`, with Auto using its gallery group's fit. |
+| `Wallpaper` desktop source | `Listen`, `ListenFit`, `DetectionMethod`, `DetectionFallbackOnInvalid`, `Capture`, `CaptureDelayMs`, `CaptureRefreshMs`, `CaptureStartupRefreshMs`, `CaptureStartupRefreshDurationMs`, `CaptureScreenFallback`. |
+
+Conversion captures missing values from the existing application settings once,
+including profiles already using SchemaVersion 1. Adding a tile captures its
+creation defaults once too. Subsequent application-level edits do not change
+existing tiles' saved policies. Missing hand-written keys use documented policy
+defaults rather than a live global override. Gallery creation retains its own
+group fitting through `Wallpaper.Fit=Auto` and `Wallpaper.DisableFitting=0`.
+
+`Wallpaper.Listen=0` retains the selected background until explicit refresh or a
+relevant configuration change. `Wallpaper.ListenFit=0` similarly retains the
+captured desktop fitting mode; explicit refresh updates it. When enabled, fit
+observation runs at that tile's `RefreshSeconds` cadence. Auto fit on an RSS,
+transparent or other non-desktop source resolves Fill without querying desktop
+fitting. Each frame carries the fitting mode used by its generation key and
+renderer. The old slideshow precache options remain accepted for legacy
+configuration, but are not exposed as active controls in instance mode.
+
+Native Live Tile delivery keeps the existing primary or `AipSource_...` pin.
+Registration delivery needs a separate app identity and rendered static tile
+images. Changing this through the tile menu offers preparation while retaining
+the old pin; after the first successful update, manually pin the new app from
+Start's All apps list and remove the old pin when satisfied. Windows cannot
+convert either identity's existing pin in place. Separate Registration packages
+currently require `Delivery.ManifestTarget=Windows10`. Auto follows the available
+runtime and requires Registration preparation when running unpackaged. Merely
+saving a Registration mode using `--configure-only` does not deploy a package or
+pin anything; finish preparation through that tile's setup command.
+
 ## Text customization
 
 `TextPreset=Default` uses the type's normal layout. `Custom` enables individual
@@ -241,8 +291,10 @@ content, and Windows remains responsible for native text rendering.
 The other fields are `TextSecondaryStyle`, `TextBadgeStyle`, `TextWrap`,
 `TextMaxLines`, `TextSecondaryMaxLines`, `TextBadgeMaxLines`, `TextAlign`,
 `TextStacking` and `TextGapLines`. Line limits are 1–8; blank-line gaps are 0–2.
-Changing an individual text property through the tray activates Custom layout
-unless the tile already uses Headlines with summaries.
+Changing an individual text property through the tray activates Custom layout,
+except that RSS Default and Headlines with summaries retain the readable RSS
+layout with the edited property. An explicitly selected Custom layout stays
+Custom.
 
 ## Prayer Times clock layout
 
@@ -306,9 +358,11 @@ refresh detection. Separate folder groups retain the gallery engine's existing
 queue/order/ownership rules; they are not ordinary `Tile.<id>` RSS-style runtime
 objects in this implementation.
 
-**Clear Live Tile on shutdown** clears owned secondary notification queues as
-well as the primary tile when enabled. It clears displayed/queued notification
-content, not Start pins, original images, configuration or ownership history.
+Each tile's `Delivery.ClearOnShutdown` controls cleanup of its owned native
+notification content on a graceful exit, including gallery rows. It does not
+unpin Start entries, delete source photographs, remove settings or erase
+ownership history. Historical gallery owners absent from current configuration
+retain the existing application's shutdown preference.
 Graceful shutdown and forced termination remain distinct: code cannot guarantee
 cleanup after the process is forcibly killed or the operating system stops it.
 
