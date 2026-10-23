@@ -537,6 +537,7 @@ static constexpr DesktopStubDisplaySetting g_displaySettings[] = {
     {L"Settings", L"NotificationApi", L"Auto", DesktopStubDisplaySettingType::NotificationApi},
     {L"Settings", L"NotificationProgressIntervalMs", L"750", DesktopStubDisplaySettingType::NotificationInterval},
     {L"Settings", L"NotifyOnOperations", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotificationConfirmations", L"1", DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"NotifyOnPinProgress", L"1", DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"NotifySourceErrors", L"1", DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"NotifyGalleryChanges", L"1", DesktopStubDisplaySettingType::Boolean},

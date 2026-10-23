@@ -196,6 +196,7 @@ static std::wstring BuildLegacyContentFixtureTemplate()
 #include "NativeQueueHostTests.inc"
 #include "SecondaryTileHostTests.inc"
 #include "GalleryHostTests.inc"
+#include "BatchIsolationHostTests.inc"
 #include "GalleryStatusRetentionHostTests.inc"
 #include "GalleryLedgerHostTests.inc"
 #include "GallerySetupHostTests.inc"
@@ -218,7 +219,10 @@ static std::wstring BuildLegacyContentFixtureTemplate()
 #include "TileInstanceRuntimeHostTests.inc"
 #include "TileInstanceActivationHostTests.inc"
 #include "TileInstanceTrayHostTests.inc"
+#include "TileDeliveryRegressionHostTests.inc"
 #include "SourceAlertHostTests.inc"
+#include "NotificationConfirmationHostTests.inc"
+#include "StalePinAndGalleryMenuHostTests.inc"
 #include "GalleryImageActivationHostTests.inc"
 #include "DateTimeTileHostTests.inc"
 #include "DesktopHostSetupHostTests.inc"
@@ -1176,6 +1180,10 @@ int wmain()
 #ifdef DESKTOPSTUB_NEW_SOURCE_HOST_ONLY
     fixtureGroup("source alerts and date/time/WuWa integration");
     TestSourceAlertHost();
+    TestNotificationConfirmationHost();
+    TestBatchIsolationHost();
+    TestStalePinAndGalleryMenuHost();
+    TestGalleryConfirmationContinuations();
     TestDateTimeTileHost(directory,bitmapPath);
     TestDesktopHostSetup(bitmapPath);
     TestFreshPresetPreview(directory);
@@ -1208,6 +1216,7 @@ int wmain()
     TestGenerationAdmissionHost(bitmapPath);
     fixtureGroup("owned Registration image publication and cleanup");
     TestTileRegistrationHost(bitmapPath);
+    TestTileDeliveryRegressionHost(bitmapPath);
 #endif
 #endif
     StopContentProviders(); PublishContentSnapshot({});

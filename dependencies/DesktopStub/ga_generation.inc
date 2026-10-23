@@ -3029,6 +3029,52 @@ static void ForceShutdownNow()
     ExitProcess(0);
 }
 
+struct FrozenGenerationBatchResult {
+    bool success=true;
+    std::size_t attempted=0,completed=0;
+};
+static std::wstring FrozenGenerationDestination(const aip::content::Snapshot& frame)
+{
+    // Native queue slots share one Windows destination. Static packages own a
+    // distinct destination even when their primary notification ID is empty.
+    const bool registration=TileSnapshotUsesRegistration(frame);
+    return (registration?L"registration|":L"native|")+std::to_wstring(frame.secondaryTileId.size())+L":"+frame.secondaryTileId+
+        (registration?L"|"+frame.policy.owner:L"");
+}
+static FrozenGenerationBatchResult RunFrozenGenerationBatch(const std::vector<aip::content::Snapshot>& snapshots,
+    const std::function<bool(const aip::content::Snapshot&)>& generate)
+{
+    FrozenGenerationBatchResult result;
+    std::set<std::wstring> failedDestinations;
+    GalleryBatchFailureGuard remainder{snapshots};
+    for(std::size_t index=0;index<snapshots.size();++index){
+        if(g_shutdownState.IsRequested()){result.success=false;break;}
+        const auto& snapshot=snapshots[index];
+        const auto destination=FrozenGenerationDestination(snapshot);
+        if(failedDestinations.count(destination)){
+            // A failed reset/slot cannot authorize later slots of that same
+            // queue. Retire their existing receipts without invoking delivery.
+            if(snapshot.galleryFrame)ContentFailGalleryFrame(snapshot);
+            remainder.next=index+1;continue;
+        }
+        // Generate owns the attempted frame's GalleryGenerationGuard; this
+        // remainder guard continues to own only frames not yet attempted.
+        remainder.next=index+1;++result.attempted;
+        bool completed=false;
+        try{completed=generate&&generate(snapshot);}
+        catch(const std::exception& ex){
+            const auto message=ExceptionTextToWide(ex);Log(g_ui.generationUnhandledException.c_str(),message.c_str());
+            if(g_notifyOnFailure)NotifyTrayBalloon(g_ui.notificationTitle,g_ui.notificationGenerationFailed,NIIF_ERROR);
+        }
+        catch(...){
+            const auto message=UnknownExceptionText();Log(g_ui.generationUnhandledException.c_str(),message.c_str());
+            if(g_notifyOnFailure)NotifyTrayBalloon(g_ui.notificationTitle,g_ui.notificationGenerationFailed,NIIF_ERROR);
+        }
+        if(completed)++result.completed;
+        else{result.success=false;failedDestinations.insert(destination);}
+    }
+    return result;
+}
 static void GenerationWorkerThread()
 {
     for (;;)
@@ -3062,17 +3108,10 @@ static void GenerationWorkerThread()
             if (snapshots.empty()) ok = Generate(wallpaper.c_str(), reason.c_str());
             else {
                 VersionedLiveTileAssetCleanupBatch cleanup(&cleanupPasses);
-                GalleryBatchFailureGuard remainder{snapshots};
-                ok = true;
-                for (std::size_t index = 0; index < snapshots.size(); ++index) {
-                    if (g_shutdownState.IsRequested()) { ok = false; break; }
-                    const auto& snapshot = snapshots[index]; remainder.next = index + 1;
-                    ++attemptedFrames;
-                    if (!Generate(snapshot.backgroundPath.c_str(), reason.c_str(), false, &snapshot)) {
-                        ok = false; break;
-                    }
-                    ++completedFrames;
-                }
+                const auto batch=RunFrozenGenerationBatch(snapshots,[&](const auto& snapshot){
+                    return Generate(snapshot.backgroundPath.c_str(),reason.c_str(),false,&snapshot);
+                });
+                ok=batch.success;attemptedFrames=batch.attempted;completedFrames=batch.completed;
             }
         }
         catch (const std::exception& ex)

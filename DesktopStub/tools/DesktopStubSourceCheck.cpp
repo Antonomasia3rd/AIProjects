@@ -546,6 +546,7 @@ int main(int argc, char** argv)
             "static bool Appx_Update_LiveTileXmlBare",
             "static bool Appx_Clear_LiveTileBare");
         const std::string uiSources = JoinSource({
+            "..\\dependencies\\DesktopStub\\ga_app.inc",
             "..\\dependencies\\DesktopStub\\ga_gallery_image_activation.inc",
             "..\\dependencies\\DesktopStub\\ga_desktop_host_setup.inc",
             "..\\dependencies\\DesktopStub\\ga_source_alert_runtime.inc",
@@ -556,6 +557,7 @@ int main(int argc, char** argv)
             "..\\dependencies\\DesktopStub\\ga_manifest.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_strings.inc",
             "..\\dependencies\\DesktopStub\\ga_notifications.inc",
+            "..\\dependencies\\DesktopStub\\ga_notification_confirmation.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_wording.inc",
             "..\\dependencies\\DesktopStub\\ga_tray_menu.inc",
             "..\\dependencies\\DesktopStub\\ga_gallery_tray.inc",
@@ -798,7 +800,7 @@ int main(int argc, char** argv)
             R"rx(PrepareTileRegistrationPackage.*if (!explicitSetup).*return false.*EnsureDirectoryTreeExists(target.root).*if (explicitSetup && !TileRegistrationWriteText(target.root.*registration.authorized.*TileRegistrationOwnerText(target)))rx",
             "new static package ownership and setup authorization must require the explicit per-tile setup choice", false});
         checks.push_back({"Registration deployment validates ownership and explicit authorization", "..\\dependencies\\DesktopStub\\ga_tile_registration.inc", tileRegistration,
-            R"rx(RegisterTileRegistrationPackage.*if (!TileRegistrationOwnedSetup(target,error)) return false;.*if (!explicitSetup && GetFileAttributesW(receipt.c_str()) == INVALID_FILE_ATTRIBUTES).*registration.authorized.*authorization != TileRegistrationOwnerText(target).*return false.*RegisterAppxManifest(target.manifestPath,error).*TileRegistrationWriteText(receipt,target.packageVersion))rx",
+            R"rx(RegisterTileRegistrationPackage.*if (!TileRegistrationOwnedSetup(target,error)) return false;.*if (!explicitSetup && GetFileAttributesW(receipt.c_str()) == INVALID_FILE_ATTRIBUTES).*registration.authorized.*authorization != TileRegistrationOwnerText(target).*return false.*if(!ResolveTileRegistrationDeploymentFile(target,deployment,error))return false;.*RegisterAppxManifest(deployment.path,error).*TileRegistrationWriteText(receipt,target.packageVersion))rx",
             "background package deployment must require matching ownership plus prior setup authorization or a successful published receipt", false});
 
         checks.push_back({"Legacy notification callers route through the selected backend", "notification adapter wiring", uiSources,

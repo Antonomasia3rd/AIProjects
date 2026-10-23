@@ -118,6 +118,43 @@ static void QueueCommandLineGenerationRequest()
 static constexpr ULONG_PTR TILE_INSTANCE_COPY_DATA = 0x41495054;
 static constexpr UINT WM_APP_TILE_INSTANCE_ACTIVATE = WM_APP + 126;
 static std::deque<std::pair<std::wstring, bool>> g_tileInstanceActivations;
+static constexpr ULONG_PTR TILE_ACTIVATION_NOTICE_COPY_DATA=0x4149504e;
+static constexpr UINT WM_APP_TILE_ACTIVATION_NOTICE=WM_APP+130;
+static std::deque<std::pair<std::wstring,bool>> g_tileActivationNotices;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+static bool (*g_testForwardTileActivationNotice)(const std::wstring&,bool)=nullptr;
+static void (*g_testTileActivationNotice)(const std::wstring&,const std::wstring&,bool)=nullptr;
+#endif
+static bool TileActivationNoticeId(const std::wstring& id)
+{
+    return !id.empty()&&id.size()<=128&&std::all_of(id.begin(),id.end(),[](wchar_t ch){return(ch>=L'A'&&ch<=L'Z')||(ch>=L'a'&&ch<=L'z')||(ch>=L'0'&&ch<=L'9')||ch==L'_'||ch==L'-'||ch==L'.';});
+}
+static bool ForwardTileActivationNotice(const std::wstring& id,bool missing)
+{
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    return g_testForwardTileActivationNotice&&g_testForwardTileActivationNotice(id,missing);
+#else
+    if(g_hwnd||!TileActivationNoticeId(id))return false;
+    const auto target=FindWindowW(WINDOW_CLASS_NAME,g_instanceWindowTitle.empty()?nullptr:g_instanceWindowTitle.c_str());if(!target)return false;
+    const auto text=(missing?L"0:":L"1:")+id;
+    COPYDATASTRUCT data{TILE_ACTIVATION_NOTICE_COPY_DATA,static_cast<DWORD>((text.size()+1)*sizeof(wchar_t)),const_cast<wchar_t*>(text.c_str())};DWORD_PTR accepted=0;
+    return SendMessageTimeoutW(target,WM_COPYDATA,0,reinterpret_cast<LPARAM>(&data),SMTO_ABORTIFHUNG|SMTO_BLOCK,3000,&accepted)&&accepted==TRUE;
+#endif
+}
+static void NotifyTileActivationProblem(const std::wstring& requestedId,const std::wstring& detail,bool missing)
+{
+    const auto id=TileActivationNoticeId(requestedId)?requestedId:L"tile";
+    if(!detail.empty())LogText(L"[!] Start tile activation: "+detail);
+    if(!NotificationAllowed(true)||!IniReadI(L"Settings",L"NotificationsEnabled",1))return;
+    if(ForwardTileActivationNotice(id,missing))return;
+    const auto message=missing?IniReadS(L"Strings",L"NotificationUnconfiguredPin",L"This Start pin is not in the current tile settings. Add a tile from the tray menu, restore the saved settings, or unpin the old entry."):
+        IniReadS(L"Strings",L"NotificationTileActivationFailed",L"This tile could not be opened. Check its settings and source availability, then try again. Saved settings and pins were kept.");
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    if(g_testTileActivationNotice){g_testTileActivationNotice(id,message,missing);return;}
+#endif
+    NotifyUserOperation((missing?L"unconfigured-pin-":L"tile-activation-failed-")+id,IniReadS(L"Strings",L"NotificationTitle",L"DesktopStub"),message,NIIF_WARNING,true);
+}
+static void NotifyUnconfiguredStartPin(const std::wstring& id){NotifyTileActivationProblem(id,L"The pin is absent from the current profile.",true);}
 static bool ReadTileInstanceSourceActivation(const std::wstring& arguments, std::wstring& url)
 {
     int count = 0;
@@ -151,16 +188,18 @@ static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn
 {
     if (!signIn && id.compare(0,8,L"gallery_")==0) {
         std::wstring issue;const auto gallery=CaptureGalleryConfigurationView(issue,true);
-        if(gallery)for(const auto& tile:gallery->configuration.tiles)if(aip::gallery::GalleryRegistrationId(gallery->configuration.groupId,tile.id)==id){
+        if(!gallery){NotifyTileActivationProblem(id,issue,false);return false;}
+        for(const auto& tile:gallery->configuration.tiles)if(aip::gallery::GalleryRegistrationId(gallery->configuration.groupId,tile.id)==id){
             const auto nativeId=aip::gallery::NativeTileId(gallery->configuration.groupId,tile.id);
             if(tile.clickAction==L"Setup")return OpenGalleryTilePolicySetup(owner,nativeId);
-            NotifyGalleryImageFallback();break;
+            std::wstring folder;
+            if(ResolveGalleryRegistrationActivation(id,folder)&&OpenGalleryFolder(folder)){NotifyGalleryImageFallback();return true;}
+            NotifyTileActivationProblem(id,L"The configured gallery folder or Registration identity is unavailable.",false);return false;
         }
-        std::wstring folder;
-        if (ResolveGalleryRegistrationActivation(id,folder)) return OpenGalleryFolder(folder);
+        NotifyUnconfiguredStartPin(id);return false;
     }
     aip::content::TileInstanceConfiguration cfg; std::wstring error;
-    if (!ReadCurrentTileInstances(cfg, error)) return false;
+    if (!ReadCurrentTileInstances(cfg, error)){NotifyTileActivationProblem(id,error,false);return false;}
     for (const auto& tile : cfg.tiles) if (tile.id == id) {
         const auto resource = aip::content::DescribeTileInstanceType(tile.type).notesResource;
         if (resource >= 0) {
@@ -183,8 +222,7 @@ static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn
             }
         return OpenTileInstanceSetup(owner, id);
     }
-    NotifyUserOperation(L"unconfigured-pin-"+id,IniReadS(L"Strings",L"NotificationTitle",L"DesktopStub"),
-        IniReadS(L"Strings",L"NotificationUnconfiguredPin",L"This Start pin is not in the current tile settings. Add a tile from the tray menu, restore the saved settings, or unpin the old entry."),NIIF_WARNING);
+    NotifyUnconfiguredStartPin(id);
     return false;
 }
 static void HandleSingleInstanceRequest(WPARAM request)
@@ -541,10 +579,25 @@ static void ExecutePendingRelaunchAfterExit()
 
 LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
 {
+    if(m==WM_APP_NOTIFICATION_CONFIRMATION){DrainUserConfirmations();return 0;}
+    if(m==WM_APP_TILE_ACTIVATION_NOTICE){
+        if(!g_tileActivationNotices.empty()){const auto notice=std::move(g_tileActivationNotices.front());g_tileActivationNotices.pop_front();
+            if(!g_shutdownState.IsRequested())NotifyTileActivationProblem(notice.first,L"",notice.second);}
+        return 0;
+    }
     if(m==WM_APP_REQUEST_DESKTOP_HOST_SETUP){if(!g_shutdownState.IsRequested())RequestDesktopHostSetup(h);return 0;}
     if(m==WM_APP_DESKTOP_HOST_SETUP_COMPLETE){CompleteDesktopHostSetup(h);return 0;}
     if (m == WM_COPYDATA) {
         const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(l);
+        if(data&&data->dwData==TILE_ACTIVATION_NOTICE_COPY_DATA){
+            if(!data->lpData||data->cbData<4*sizeof(wchar_t)||data->cbData>131*sizeof(wchar_t)||data->cbData%sizeof(wchar_t)||g_tileActivationNotices.size()>=64||g_shutdownState.IsRequested())return FALSE;
+            const auto* text=static_cast<const wchar_t*>(data->lpData);const auto count=data->cbData/sizeof(wchar_t);
+            if(text[count-1]!=L'\0'||(text[0]!=L'0'&&text[0]!=L'1')||text[1]!=L':')return FALSE;
+            const std::wstring id(text+2,count-3);if(!TileActivationNoticeId(id))return FALSE;
+            g_tileActivationNotices.emplace_back(id,text[0]==L'0');
+            if(!PostMessageW(h,WM_APP_TILE_ACTIVATION_NOTICE,0,0)){g_tileActivationNotices.pop_back();return FALSE;}
+            return TRUE;
+        }
         if (!data || data->dwData != TILE_INSTANCE_COPY_DATA || !data->lpData || data->cbData < 4 * sizeof(wchar_t) ||
             data->cbData > 58 * sizeof(wchar_t) || data->cbData % sizeof(wchar_t)) return FALSE;
         const auto* raw = static_cast<const wchar_t*>(data->lpData);
@@ -667,6 +720,7 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
         return 0;
     }
     else if (m==WM_DESTROY){
+        ClearUserConfirmations();g_tileActivationNotices.clear();
         CaptureContentLogicalCapsState();
         g_shutdownWindow = nullptr;
         TrayRemove();
@@ -1637,8 +1691,9 @@ static bool OpenGalleryFolder(const std::wstring& directory)
 #endif
 }
 
-static bool HandleGalleryImageActivation(CommandLineOptions& options,int& result)
+static bool HandleGalleryImageActivation(CommandLineOptions& options,int& result,bool* folderFallback=nullptr)
 {
+    if(folderFallback)*folderFallback=false;
     if(!options.galleryFolderActivation)return false;
     auto nativeId=options.windowsTileId;std::wstring token=options.galleryImageToken;
     GalleryShownActivation shown;
@@ -1647,8 +1702,13 @@ static bool HandleGalleryImageActivation(CommandLineOptions& options,int& result
         if(nativeId==shown.tileId)ReadGalleryClickPayload(shown.arguments,nativeId,token);
     }
     if(!token.empty()&&nativeId.empty()){aip::gallery::activation::Token decoded;if(aip::gallery::activation::Decode(token,decoded))nativeId=aip::gallery::NativeTileId(decoded.group,decoded.tile);}
-    aip::gallery::Configuration cfg;aip::gallery::TileConfiguration tile;
-    const bool configured=!nativeId.empty()&&FindConfiguredGalleryTile(nativeId,cfg,tile);
+    aip::gallery::Configuration cfg;aip::gallery::TileConfiguration tile;std::wstring issue;
+    if(!ReadGalleryConfiguration(cfg,issue)){
+        NotifyTileActivationProblem(nativeId,issue,false);result=2;return true;
+    }
+    const auto row=std::find_if(cfg.tiles.begin(),cfg.tiles.end(),[&](const auto& value){return !nativeId.empty()&&aip::gallery::NativeTileId(cfg.groupId,value.id)==nativeId;});
+    const bool configured=row!=cfg.tiles.end();if(configured)tile=*row;
+    if(!nativeId.empty()&&!configured){NotifyUnconfiguredStartPin(nativeId);result=2;return true;}
     if(configured&&tile.clickAction==L"Setup"){
         options.tileSetupKey=aip::gallery::GalleryRegistrationId(cfg.groupId,tile.id);options.galleryFolderActivation=false;
         options.openFolder.clear();options.galleryImageToken.clear();return false;
@@ -1656,9 +1716,10 @@ static bool HandleGalleryImageActivation(CommandLineOptions& options,int& result
     if(!token.empty()){
         std::wstring image,error;
         if(ResolveGalleryImageToken(token,nativeId,image,error)&&OpenResolvedGalleryImage(image)){result=0;return true;}
-        if(!configured){ShowCommandLineMessage(error.empty()?L"The clicked gallery photo is unavailable.":error,true);result=2;return true;}
+        if(!error.empty())LogText(L"[!] Gallery photo activation fallback: "+error);
+        if(!configured){NotifyTileActivationProblem(nativeId,error,false);result=2;return true;}
     }
-    if(configured){options.windowsTileId=nativeId;NotifyGalleryImageFallback();}
+    if(configured){options.windowsTileId=nativeId;if(folderFallback)*folderFallback=true;}
     return false; // Existing folder handler remains the honest no-metadata fallback.
 }
 static void ReadChaseableRssActivation(CommandLineOptions& options)
@@ -1737,14 +1798,15 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         return 0;
     }
 
-    int galleryClickResult=0;
-    if(HandleGalleryImageActivation(g_commandLine,galleryClickResult))return galleryClickResult;
+    int galleryClickResult=0;bool galleryFolderFallback=false;
+    if(HandleGalleryImageActivation(g_commandLine,galleryClickResult,&galleryFolderFallback))return galleryClickResult;
     if (g_commandLine.galleryFolderActivation) {
         std::wstring folder, error;
         if (!ResolveGalleryFolderActivation(g_commandLine, folder, error) || !OpenGalleryFolder(folder)) {
             if (error.empty()) error = L"Windows could not open the gallery directory.";
-            ShowCommandLineMessage(error, true); return 2;
+            NotifyTileActivationProblem(g_commandLine.windowsTileId,error,false);return 2;
         }
+        if(galleryFolderFallback)NotifyGalleryImageFallback();
         return 0; // No resident, INI creation, providers, registration or Startup.
     }
 

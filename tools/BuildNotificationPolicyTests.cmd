@@ -9,7 +9,7 @@ call "%NOTIFICATION_TEST_VS%\VC\Auxiliary\Build\vcvars64.bat" >nul
 if errorlevel 1 exit /b 3
 pushd "%NOTIFICATION_TEST_ROOT%" || exit /b 4
 if not exist "build\notification-tests" mkdir "build\notification-tests"
-cl /nologo /utf-8 /std:c++17 /EHsc /W4 /WX /O2 /DUNICODE /D_UNICODE tools\NotificationPolicyTests.cpp /Fe:build\notification-tests\NotificationPolicyTests.exe /Fo:build\notification-tests\NotificationPolicyTests.obj
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /WX /O2 /DUNICODE /D_UNICODE tools\NotificationPolicyTests.cpp /Fe:build\notification-tests\NotificationPolicyTests.exe /Fo:build\notification-tests\NotificationPolicyTests.obj /link ole32.lib user32.lib
 if errorlevel 1 goto Done
 cl /nologo /utf-8 /std:c++17 /EHsc /W4 /O2 /DUNICODE /D_UNICODE /c tools\NotificationNativeCompileTests.cpp /Fo:build\notification-tests\NotificationNativeCompileTests.obj
 :Done

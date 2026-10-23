@@ -203,3 +203,5 @@ static void NotifyOperationProgress(const std::wstring& key, const std::wstring&
     }
     NotificationBalloon(title, emitted.BalloonText(), failed ? NIIF_WARNING : NIIF_INFO, false);
 }
+
+#include "ga_notification_confirmation.inc"

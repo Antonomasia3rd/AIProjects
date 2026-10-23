@@ -2,9 +2,20 @@
 // No real package registration, pinning, Startup or program launch is invoked.
 static unsigned registrationHostDeployments = 0;
 static bool registrationHostDeploySucceeds = false;
+static std::wstring registrationHostDeploymentPath,registrationHostLogicalRoot,registrationHostPhysicalRoot;
+static bool registrationHostWrongPhysicalParent=false;
 static bool RegistrationHostAumid(std::wstring& value,std::wstring& error) { value=L"Canonical.Main_123456789abcd!App";error.clear();return true; }
-static bool RegistrationHostDeploy(const std::wstring&,std::wstring& error) {
+static bool RegistrationHostDeploy(const std::wstring& path,std::wstring& error) {
+    registrationHostDeploymentPath=path;
     ++registrationHostDeployments; if (!registrationHostDeploySucceeds) {error=L"Synthetic deployment failure";return false;}error.clear();return true;
+}
+static HANDLE RegistrationHostPhysicalOpen(const std::wstring& path,bool directory) {
+    auto physical=path;
+    if(IEquals(path,registrationHostLogicalRoot))physical=registrationHostPhysicalRoot;
+    else if(IEquals(path,registrationHostLogicalRoot+L"\\AppxManifest.xml"))physical=registrationHostPhysicalRoot+
+        (registrationHostWrongPhysicalParent?L"\\other\\AppxManifest.xml":L"\\AppxManifest.xml");
+    return CreateFileW(physical.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ,nullptr,OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT|(directory?FILE_FLAG_BACKUP_SEMANTICS:0),nullptr);
 }
 static bool RemoveRegistrationFixtureTree(const std::wstring& path,const std::wstring& ownedBase)
 {
@@ -25,6 +36,7 @@ static void TestTileRegistrationHost(const std::wstring& bitmapPath)
     const auto oldUser=g_testTileRegistrationUserScope,oldBase=g_testTileRegistrationBase,oldLauncher=g_testTileRegistrationLauncherSource;
     const auto oldResolver=g_testTileRegistrationHostAumid;
     const auto oldDeploy=g_testTileRegistrationRegister;
+    const auto oldDeploymentOpen=g_testTileRegistrationDeploymentOpen;
     const auto oldResponse=contentDialogResponse;
     const auto oldDirectories=gallerySetupTestDirectories;
     const auto oldGalleryFrames=galleryHostFrames,oldGalleryFailures=galleryHostFailures;
@@ -53,9 +65,9 @@ static void TestTileRegistrationHost(const std::wstring& bitmapPath)
         "declining migration keeps delivery, old pins, and the absent package cache unchanged");
     auto downlevel=profile;
     Check(aip::WriteIniValueToText(downlevel,L"Tile.reg-tile",L"Delivery.ManifestTarget",L"Windows81")&&WriteContentFixture(downlevel)&&
-        !OfferTileDeliveryMigration(nullptr,L"reg-tile",L"Registration")&&contentDialogText.find(L"Windows 10")!=std::wstring::npos&&
+        !OfferTileDeliveryMigration(nullptr,L"reg-tile",L"Registration")&&IniReadS(L"Tile.reg-tile",L"Delivery.Mode",L"Auto")==L"Auto"&&
         GetFileAttributesW(target.root.c_str())==INVALID_FILE_ATTRIBUTES,
-        "unsupported Registration manifest targets give repair guidance before staging any package files");
+        "unsupported Registration manifest targets preserve the selected mode and stage no package files");
     Check(WriteContentFixture(profile),"registration migration restores the supported private target before staging");
     Check(PrepareTileRegistrationPackage(target,true,error) && TileRegistrationReady(target,error) && TileRegistrationReadyForId(L"reg-tile"),
         "explicit staging authorizes the queued first registration and invalidates a cached negative demand immediately");
@@ -77,6 +89,24 @@ static void TestTileRegistrationHost(const std::wstring& bitmapPath)
     Check(RegisterTileRegistrationPackage(target,false,error) && registrationHostDeployments==2 &&
         GetFileAttributesW((target.root+L"\\registration.published").c_str())!=INVALID_FILE_ATTRIBUTES,
         "successful injected deployment writes a receipt only after the package operation succeeds");
+    Check(IEquals(registrationHostDeploymentPath,target.manifestPath),
+        "ordinary unpackaged Registration deployment resolves the existing owned manifest to its physical file");
+    const auto physicalRoot=directory+L"\\registration-physical-root";
+    Check(EnsureDirectoryTreeExists(physicalRoot)&&CopyFileW(target.manifestPath.c_str(),(physicalRoot+L"\\AppxManifest.xml").c_str(),TRUE),
+        "Registration redirection fixture copies only its private manifest into a physical shadow package directory");
+    registrationHostLogicalRoot=target.root;registrationHostPhysicalRoot=physicalRoot;registrationHostWrongPhysicalParent=false;
+    g_testTileRegistrationDeploymentOpen=RegistrationHostPhysicalOpen;
+    const auto beforePhysicalDeploy=registrationHostDeployments;
+    Check(RegisterTileRegistrationPackage(target,false,error)&&registrationHostDeployments==beforePhysicalDeploy+1&&
+        IEquals(registrationHostDeploymentPath,physicalRoot+L"\\AppxManifest.xml"),
+        "Registration deployment sends the opened physical manifest path instead of a process-private virtualized AppData name");
+    Check(EnsureDirectoryTreeExists(physicalRoot+L"\\other")&&CopyFileW(target.manifestPath.c_str(),(physicalRoot+L"\\other\\AppxManifest.xml").c_str(),TRUE),
+        "Registration redirection fixture prepares a mismatched physical-parent negative case");
+    registrationHostWrongPhysicalParent=true;
+    Check(!RegisterTileRegistrationPackage(target,false,error)&&registrationHostDeployments==beforePhysicalDeploy+1&&error.find(L"owned package")!=std::wstring::npos,
+        "a physically redirected manifest outside the resolved owned root is rejected before any deployment");
+    g_testTileRegistrationDeploymentOpen=oldDeploymentOpen;registrationHostWrongPhysicalParent=false;
+    Check(RemoveRegistrationFixtureTree(physicalRoot,physicalRoot),"Registration redirection fixture removes only its private physical shadow directory");
     const auto cache=directory+L"\\registration-cache",transparent=directory+L"\\registration-transparent.png";
     Check(GetFileAttributesW(cache.c_str())==INVALID_FILE_ATTRIBUTES,"registration rendering owns a new private image-cache root");
     {ScopedGdiPlus gdi;Check(gdi.ok(),"static registration rendering initializes offscreen GDI+ only");if(gdi.ok()){

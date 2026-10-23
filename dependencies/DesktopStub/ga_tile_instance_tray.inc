@@ -76,10 +76,12 @@ static bool TileInstanceUsesRegistration(const aip::content::TileInstance& tile)
     aip::content::TilePolicyReadScope scope(tile.policy);return !UseExperimentalLiveTileUpdate();
 }
 static bool SaveTileInstanceSettingsWithRemovalConfirmation(HWND owner,const std::vector<aip::IniSetting>& settings,
-    const std::wstring& expectedId,const std::wstring& removedId,bool staticRemovalConfirmed)
+    const std::wstring& expectedId,const std::wstring& removedId,bool staticRemovalConfirmed,
+    const std::function<bool(const std::wstring&,std::wstring&)>& confirmedGuard={})
 {
     std::wstring error;
     const bool saved = MutateDesktopStubIniWithWait([&](std::wstring& text) {
+        if(confirmedGuard&&!confirmedGuard(text,error))return false;
         auto candidate = text;
         const auto original = aip::ParseIniDocument(candidate);
         const auto readOriginal = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
@@ -147,6 +149,11 @@ static bool SaveTileInstanceSettingsWithRemovalConfirmation(HWND owner,const std
         return key == L"name" || key == L"type" || key == L"background" || key == L"branding" || key == L"backgroundcolor";
     })) RequestRefreshExistingSecondaryTileLogos(g_hwnd, true);
     WakePollThread(); return true;
+}
+static bool SaveConfirmedTileInstanceSettings(HWND owner,const std::vector<aip::IniSetting>& settings,const std::wstring& expectedId,
+    const std::function<bool(const std::wstring&,std::wstring&)>& confirmedGuard)
+{
+    return SaveTileInstanceSettingsWithRemovalConfirmation(owner,settings,expectedId,L"",false,confirmedGuard);
 }
 static bool SaveTileInstanceSettings(HWND owner,const std::vector<aip::IniSetting>& settings,
     const std::wstring& expectedId=L"",const std::wstring& removedId=L"")

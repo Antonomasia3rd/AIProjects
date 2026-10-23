@@ -1,5 +1,17 @@
 # Next pass: outstanding fixes and acceptance
 
+## October 23 delivery/confirmation repair installed
+
+The second fresh reset was explicitly requested after the user removed the old
+Start pins. Registration physical-path repair, sibling batch failure isolation,
+Gallery placeholder cleanup and Yes/No notification continuations are installed;
+see [the follow-up](tile-delivery-followup-2026-10-23.md). The active profile is
+Desktop-only again. Windows package activation/native wallpaper submission and
+75-second health passed. Native separate Registration deployment and interactive
+notification buttons still need fresh ordinary-use acceptance; injected tests
+cover their paths and one-shot/stale/cancellation behavior. Do not automatically
+repin the user's cleared tiles. The historical raster issue remains open.
+
 ## October 23 priority update installed
 
 The source/notification/performance/defaults slice and requested backed-up

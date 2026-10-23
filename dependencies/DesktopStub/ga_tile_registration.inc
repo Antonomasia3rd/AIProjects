@@ -10,6 +10,7 @@
 static std::wstring g_testTileRegistrationUserScope, g_testTileRegistrationBase, g_testTileRegistrationLauncherSource;
 static bool (*g_testTileRegistrationHostAumid)(std::wstring&,std::wstring&) = nullptr;
 static bool (*g_testTileRegistrationRegister)(const std::wstring&,std::wstring&) = nullptr;
+static HANDLE (*g_testTileRegistrationDeploymentOpen)(const std::wstring&,bool) = nullptr;
 #endif
 struct TileRegistrationReadyCacheEntry { ULONGLONG checked = 0; bool ready = false; };
 static std::mutex g_tileRegistrationReadyMutex;
@@ -193,6 +194,54 @@ static bool WriteTileRegistrationManifest(aip::tile_registration::Target& target
         !TileRegistrationWriteText(target.manifestPath,manifest)) { error = L"Could not write this registration tile's manifest or version record."; return false; }
     error.clear(); return true;
 }
+struct TileRegistrationDeploymentFile {
+    HANDLE file = INVALID_HANDLE_VALUE;
+    std::wstring path;
+    ~TileRegistrationDeploymentFile() { if(file!=INVALID_HANDLE_VALUE)CloseHandle(file); }
+    TileRegistrationDeploymentFile() = default;
+    TileRegistrationDeploymentFile(const TileRegistrationDeploymentFile&) = delete;
+    TileRegistrationDeploymentFile& operator=(const TileRegistrationDeploymentFile&) = delete;
+};
+static HANDLE OpenTileRegistrationDeploymentPath(const std::wstring& path,bool directory)
+{
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    if(g_testTileRegistrationDeploymentOpen)return g_testTileRegistrationDeploymentOpen(path,directory);
+#endif
+    return CreateFileW(path.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ,nullptr,OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT|(directory?FILE_FLAG_BACKUP_SEMANTICS:0),nullptr);
+}
+static bool TileRegistrationFinalPath(HANDLE file,bool directory,std::wstring& path)
+{
+    BY_HANDLE_FILE_INFORMATION info{};
+    if(file==INVALID_HANDLE_VALUE||GetFileType(file)!=FILE_TYPE_DISK||!GetFileInformationByHandle(file,&info)||
+        (info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)||((info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=0)!=directory)return false;
+    std::vector<wchar_t> buffer(32768);
+    const auto length=GetFinalPathNameByHandleW(file,buffer.data(),static_cast<DWORD>(buffer.size()),FILE_NAME_NORMALIZED|VOLUME_NAME_DOS);
+    if(!length||length>=buffer.size())return false;
+    path.assign(buffer.data(),length);
+    if(path.compare(0,8,L"\\\\?\\UNC\\")==0)path=L"\\\\"+path.substr(8);
+    else if(path.compare(0,4,L"\\\\?\\")==0)path.erase(0,4);
+    return !path.empty();
+}
+static bool ResolveTileRegistrationDeploymentFile(const aip::tile_registration::Target& target,
+    TileRegistrationDeploymentFile& deployment,std::wstring& error)
+{
+    // A packaged desktop process can successfully create logical AppData files
+    // which the package deployment service cannot see. Resolve the actual file
+    // handle rather than sending that process-private logical path to Windows.
+    // Keep the manifest open without write/delete sharing until deployment ends.
+    const auto directory=OpenTileRegistrationDeploymentPath(target.root,true);
+    std::wstring physicalRoot;
+    const bool rootValid=TileRegistrationFinalPath(directory,true,physicalRoot);
+    if(directory!=INVALID_HANDLE_VALUE)CloseHandle(directory);
+    if(!rootValid){error=L"The Registration tile's physical package directory could not be resolved. Retry its setup; existing pins were kept.";return false;}
+    deployment.file=OpenTileRegistrationDeploymentPath(target.manifestPath,false);
+    if(!TileRegistrationFinalPath(deployment.file,false,deployment.path)||
+        !IEquals(ParentDirectoryOfPath(deployment.path),physicalRoot)||!IEquals(FileNameFromPath(deployment.path),L"AppxManifest.xml")){
+        error=L"The Registration manifest could not be resolved inside its owned package directory. Retry its setup; existing pins were kept.";return false;
+    }
+    error.clear();return true;
+}
 static bool RegisterTileRegistrationPackage(const aip::tile_registration::Target& target,bool explicitSetup,std::wstring& error)
 {
     if (!TileRegistrationOwnedSetup(target,error)) return false;
@@ -203,11 +252,13 @@ static bool RegisterTileRegistrationPackage(const aip::tile_registration::Target
             error = L"Finish this tile's explicit Registration setup before background registration updates are allowed."; return false;
         }
     }
+    TileRegistrationDeploymentFile deployment;
+    if(!ResolveTileRegistrationDeploymentFile(target,deployment,error))return false;
 #ifdef DESKTOPSTUB_INERT_HARDWARE
     if (!g_testTileRegistrationRegister) { error = L"Native package registration is disabled in inert validation."; return false; }
-    if (!g_testTileRegistrationRegister(target.manifestPath,error)) return false;
+    if (!g_testTileRegistrationRegister(deployment.path,error)) return false;
 #else
-    if (!RegisterAppxManifest(target.manifestPath,error)) return false;
+    if (!RegisterAppxManifest(deployment.path,error)) return false;
 #endif
     if (!TileRegistrationWriteText(receipt,target.packageVersion)) { error = L"Windows registered the tile, but its local update receipt could not be saved."; return false; }
     error.clear(); return true;
@@ -261,45 +312,100 @@ static bool BackgroundTileRegistrationReady(const std::wstring& id) { return Til
 static std::wstring TileRegistrationSetupStatus(const std::wstring& id)
 {
     return BackgroundTileRegistrationReady(id) ?
-        L"Registration setup is ready. Pin the separate app from Windows Start after its first successful update." :
+        L"Registration setup is authorized. After Windows successfully publishes its first update, pin the separate app from Start's All apps list. Check the update status if that app is not available yet." :
         L"Registration setup is required. Select Registration in this tile's delivery settings to prepare its separate app.";
 }
 static bool SaveTileInstanceSettings(HWND,const std::vector<aip::IniSetting>&,const std::wstring&,const std::wstring&);
+static bool SaveConfirmedTileInstanceSettings(HWND,const std::vector<aip::IniSetting>&,const std::wstring&,
+    const std::function<bool(const std::wstring&,std::wstring&)>&);
 static bool SecondaryTilePinUiAvailable();
-static bool OfferTileDeliveryMigration(HWND owner,const std::wstring& tileId,const std::wstring& requestedMode)
+static void RefreshTileInstanceNow(const std::wstring& id);
+struct TileDeliveryMigrationSelection {
+    aip::content::TileInstance tile;
+    std::wstring profile,fingerprint;
+};
+static std::wstring TileDeliveryMigrationFingerprint(const std::vector<aip::IniSectionData>& document,
+    const std::wstring& tileId,const aip::content::TileDeliveryPolicy& policy)
 {
-    auto mode = requestedMode; std::wstring error;
-    if (!aip::content::NormalizeTilePolicySetting(L"Delivery.Mode",mode,error)) return false;
+    std::wstring result;
+    for(const auto& section:document)if(IEquals(section.name,aip::content::TileInstanceSection(tileId)))
+        for(const auto& entry:section.entries){
+            const auto key=aip::content::Lower(entry.key);
+            result+=std::to_wstring(key.size())+L":"+key+std::to_wstring(entry.value.size())+L":"+entry.value;
+        }
+    return result+aip::content::TileDeliveryPolicyKey(policy);
+}
+static bool ReadTileDeliveryMigrationSelection(const std::wstring& tileId,TileDeliveryMigrationSelection& selection,std::wstring& error)
+{
     aip::content::TileInstanceConfiguration cfg;
     if (!ReadCurrentTileInstances(cfg,error)) return false;
     const auto found = std::find_if(cfg.tiles.begin(),cfg.tiles.end(),[&](const auto& tile) { return tile.id == tileId; });
-    if (found == cfg.tiles.end()) return false;
-    const auto tile = *found;
-    const bool registration = mode == L"Registration" || (mode == L"Auto" && !CurrentProcessHasPackageIdentity());
-    if (mode == tile.policy.Mode() && !registration) return true;
-    if (registration && tile.policy.Read(L"Settings",L"AppxManifestTarget",L"Windows10") != L"Windows10") {
-        const auto message = IniReadS(L"Strings",L"TileRegistrationRequiresWindows10",L"Separate Registration tiles require the Windows 10 manifest target. Select Windows 10 in this tile's delivery settings, then choose Registration again. No files or pins were changed.");
-        DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,message.c_str(),tile.name.c_str(),MB_OK|MB_ICONINFORMATION); return false;
+    if (found == cfg.tiles.end()) {error=L"This tile no longer exists. Reopen Tiles and choose its delivery method again.";return false;}
+    TileDeliveryMigrationSelection current;current.tile=*found;
+    {std::lock_guard<std::mutex> lock(g_pathMutex);current.profile=aip::MakeAbsolutePath(g_iniPath);}
+    // Notification answers can arrive after another settings edit. Capture all
+    // selected-tile fields, including duplicates, rather than a menu's old copy.
+    {std::lock_guard<std::mutex> lock(g_iniCacheMutex);current.fingerprint=TileDeliveryMigrationFingerprint(g_iniCacheDoc,tileId,current.tile.policy);}
+    selection=std::move(current);error.clear();return true;
+}
+static bool TileDeliveryMigrationUsesRegistration(const aip::content::TileDeliveryPolicy& original,const std::wstring& mode)
+{
+    auto policy=original;policy.values[L"settings.experimentallivetileupdate"]=mode;
+    aip::content::TilePolicyReadScope scope(policy);return !UseExperimentalLiveTileUpdate();
+}
+static void NotifyTileDeliveryMigrationFailure(const std::wstring& id,const std::wstring& message)
+{
+    NotifyUserOperation(L"delivery-failed-"+id,IniReadS(L"Strings",L"NotificationDeliveryFailed",L"Tile delivery needs attention"),message,NIIF_WARNING);
+}
+static bool ApplyTileDeliveryMigration(HWND owner,const TileDeliveryMigrationSelection& expected,const std::wstring& mode)
+{
+    TileDeliveryMigrationSelection current;std::wstring error;
+    if(!ReadTileDeliveryMigrationSelection(expected.tile.id,current,error)||!IEquals(expected.profile,current.profile)||
+        expected.fingerprint!=current.fingerprint){
+        NotifyTileDeliveryMigrationFailure(expected.tile.id,error.empty()?L"This tile's settings changed while the confirmation was open. Reopen its delivery settings and try again. No delivery setting was changed.":error);return false;
     }
-    const auto prompt = registration ?
-        IniReadS(L"Strings",L"TileRegistrationMigrationPrompt",L"Registration uses a separate app identity and rendered tile images. Your existing Live Tile pin will be kept. After the first successful update, pin the new app from Start's All apps list; Windows cannot convert the existing pin in place. Prepare this separate Registration tile now?") :
-        IniReadS(L"Strings",L"TileLiveMigrationPrompt",L"Live Tile delivery uses DesktopStub's native tile identity. Your separate Registration app and its pin will be kept. Windows may ask you to pin the Live Tile separately. Change this tile's delivery method now?");
-    if (DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,prompt.c_str(),tile.name.c_str(),MB_YESNO|MB_DEFBUTTON2|MB_ICONINFORMATION) != IDYES) return false;
+    const auto tile=current.tile;
+    const bool registration=TileDeliveryMigrationUsesRegistration(tile.policy,mode);
     aip::tile_registration::Target target;
     if (registration && (!BuildTileRegistrationTarget(tile.id,tile.name,tile.appearance,target,error) ||
         !PrepareTileRegistrationPackage(target,true,error))) {
-        DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,error.c_str(),L"Registration tile setup",MB_OK|MB_ICONWARNING); return false;
+        NotifyTileDeliveryMigrationFailure(tile.id,error); return false;
     }
-    if (!SaveTileInstanceSettings(owner,{{aip::content::TileInstanceSection(tile.id),L"Delivery.Mode",mode}},tile.id,L"")) return false;
+    if (!SaveConfirmedTileInstanceSettings(owner,{{aip::content::TileInstanceSection(tile.id),L"Delivery.Mode",mode}},tile.id,
+        [expected](const std::wstring& text,std::wstring& guardError){
+            const auto document=aip::ParseIniDocument(text);
+            const auto read=[&](const wchar_t* section,const wchar_t* key,const wchar_t* fallback){std::wstring value;return aip::ReadIniValueFromDoc(document,section,key,value)?value:std::wstring(fallback);};
+            aip::content::TileDeliveryPolicy policy;
+            if(!aip::content::ReadTileDeliveryPolicy(read,aip::content::TileInstanceSection(expected.tile.id),expected.tile.id,policy,guardError))return false;
+            if(TileDeliveryMigrationFingerprint(document,expected.tile.id,policy)!=expected.fingerprint){guardError=L"This tile's settings changed before its delivery method could be saved. Reopen its delivery settings and try again.";return false;}
+            return true;
+        })) return false;
     NotifyUserOperation(L"delivery-"+tile.id,IniReadS(L"Strings",L"NotificationDeliveryChanged",L"Tile delivery changed"),
         NotificationSubjectText(registration?L"NotificationRegistrationPreparedMessage":L"NotificationLiveDeliveryChangedMessage",
             registration?L"%s is prepared for Registration. After its first successful update, pin its separate app from Start. Existing pins were kept.":
                 L"%s now uses Live Tile delivery. Existing Registration pins were kept.",tile.name));
     ForgetSecondaryTileDelivery(aip::content::TileInstanceNativeId(tile));
+    RefreshTileInstanceNow(tile.id);
     if (g_hwnd) PostMessageW(g_hwnd,WM_APP_CONTENT_FRAME_READY,0,0);
     if (!registration && !tile.primary && SecondaryTilePinUiAvailable() && !SecondaryTileExists(aip::content::TileInstanceNativeId(tile)))
         RequestPinSecondaryTile(owner,aip::content::TileInstanceNativeId(tile),tile.name);
     return true;
+}
+static bool OfferTileDeliveryMigration(HWND owner,const std::wstring& tileId,const std::wstring& requestedMode)
+{
+    auto mode=requestedMode;std::wstring error;TileDeliveryMigrationSelection selected;
+    if(!aip::content::NormalizeTilePolicySetting(L"Delivery.Mode",mode,error)||!ReadTileDeliveryMigrationSelection(tileId,selected,error)){
+        NotifyTileDeliveryMigrationFailure(tileId,error);return false;
+    }
+    const bool registration=TileDeliveryMigrationUsesRegistration(selected.tile.policy,mode);
+    if(mode==selected.tile.policy.Mode()&&!registration)return true;
+    if(registration&&selected.tile.policy.Read(L"Settings",L"AppxManifestTarget",L"Windows10")!=L"Windows10"){
+        NotifyTileDeliveryMigrationFailure(tileId,IniReadS(L"Strings",L"TileRegistrationRequiresWindows10",L"Separate Registration tiles require the Windows 10 manifest target. Select Windows 10 in this tile's delivery settings, then choose Registration again. No files or pins were changed."));return false;
+    }
+    const auto prompt=registration?
+        IniReadS(L"Strings",L"TileRegistrationMigrationPrompt",L"Registration uses a separate app identity and rendered tile images. Your existing Live Tile pin will be kept. After the first successful update, pin the new app from Start's All apps list; Windows cannot convert the existing pin in place. Prepare this separate Registration tile now?"):
+        IniReadS(L"Strings",L"TileLiveMigrationPrompt",L"Live Tile delivery uses DesktopStub's native tile identity. Your separate Registration app and its pin will be kept. Windows may ask you to pin the Live Tile separately. Change this tile's delivery method now?");
+    return ConfirmUserOperation(owner,L"delivery-"+tileId,selected.tile.name,prompt,[owner,selected,mode]{ApplyTileDeliveryMigration(owner,selected,mode);});
 }
 static bool ClearTileRegistrationImages(aip::tile_registration::Target& target,std::wstring& error)
 {

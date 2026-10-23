@@ -8,14 +8,21 @@
 #include <mutex>
 #include <stdexcept>
 #include <vector>
+#include <optional>
+#include <functional>
+#include <deque>
 #include "../dependencies/notification_policy.h"
 #include "../dependencies/tile_source_alerts.h"
+#include "../dependencies/notification_confirmation.h"
 
 namespace {
 using aip::notifications::Progress;
 int checks = 0;
 void Check(bool result, const char* name) { ++checks; if (!result) throw std::runtime_error(name); }
 std::atomic<bool> g_notificationsEnabled{true};
+std::atomic<bool> g_running{true};
+static int TestConfirmationDialog(HWND,const wchar_t*,const wchar_t*,UINT){return IDNO;}
+#define DESKTOPSTUB_CONTENT_MESSAGEBOX TestConfirmationDialog
 struct { bool renderOnly = false, configureOnly = false; } g_commandLine;
 std::mutex g_pathMutex;
 std::wstring g_iniPath = L"C:\\Profiles\\one.ini";
@@ -139,6 +146,11 @@ void TestAdapter() {
     NotifyScheduledUserEvent(L"prayer",L"Prayer",L"Dhuhr",aip::notifications::EventType::Alarm,aip::notifications::EventSound::Alarm);
     Check(balloonCalls==6,"master off suppresses source alarms and their sound");
     g_notificationsEnabled=true;
+    unsigned approved=0;
+    ClearUserConfirmations();
+    Check(!ConfirmUserOperation(nullptr,L"cancel",L"Confirm",L"Question",[&]{++approved;}),"a declined legacy confirmation is not treated as approval");
+    QueueUserConfirmationAction(L"review");DrainUserConfirmations();
+    Check(approved==0&&g_confirmations.Entries().empty(),"notification body activation does not approve an operation");
 }
 }
 int main() {

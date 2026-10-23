@@ -16,6 +16,8 @@
 #include <map>
 namespace aip { bool ShowTrayBalloon(const NOTIFYICONDATAW&, const std::wstring&, const std::wstring&, DWORD, UINT, DWORD*); }
 static std::atomic<bool> g_notificationsEnabled{true}, g_tray{true};
+static std::atomic<bool> g_running{true};
+static HWND g_hwnd=nullptr;
 static std::atomic<int> g_notificationTimeoutMs{4000};
 static struct { bool renderOnly = false, configureOnly = false; } g_commandLine;
 static std::mutex g_pathMutex, g_trayMutex;
@@ -32,4 +34,6 @@ void NotificationCompileWitness() {
     NotifyUserOperation(L"compile", L"compile", L"compile");
     NotifyOperationProgress(L"compile", L"compile", L"compile", 1, 2);
     NotifyScheduledUserEvent(L"compile",L"compile",L"compile",aip::notifications::EventType::Alarm,aip::notifications::EventSound::Silent);
+    ConfirmUserOperation(nullptr,L"compile",L"compile",L"compile",[]{});
+    DrainUserConfirmations();ClearUserConfirmations();
 }

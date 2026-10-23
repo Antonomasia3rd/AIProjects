@@ -11,6 +11,16 @@ is enabled and its focused native recheck passed.
 
 ## Saved and installed
 
+- October 23 follow-up: Registration now deploys the verified physical manifest
+  path from Windows' virtualized AppData cache; a failed destination no longer
+  aborts sibling Live Tile updates. Empty Gallery placeholders no longer produce
+  duplicate submenus, stale-pin errors share one notification route, and delivery
+  and Gallery confirmations use safe Yes/No notification continuations. The user
+  explicitly requested another reset after clearing pins; the fresh Desktop-only
+  configuration and 75-second native health passed without repinning. See
+  [the follow-up record](tile-delivery-followup-2026-10-23.md) for backup, hashes,
+  tests and remaining real Registration/notification acceptance.
+
 - October 23: source alerts/progress/backend selection, Prayer AM/PM and Sunrise,
   independent Clock/Calendar/WuWa, original Desktop artwork, explicit fresh
   setup, confirmed Discord defaults, exact Gallery activation metadata and

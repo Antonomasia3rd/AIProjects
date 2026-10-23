@@ -922,6 +922,8 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
         break;
     case ID_NOTIFY_OPERATIONS:
         ToggleSettingBool(L"NotifyOnOperations",1); break;
+    case ID_NOTIFICATION_CONFIRMATIONS:
+        ToggleSettingBool(L"NotificationConfirmations",1); break;
     case ID_NOTIFY_PIN_PROGRESS:
         ToggleSettingBool(L"NotifyOnPinProgress",1); break;
     case ID_NOTIFY_SOURCE_ERRORS:

@@ -421,6 +421,7 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     addTo(notificationApiMenu,ID_NOTIF_API_TOAST,IniReadS(L"Strings",L"NotificationApiToast",L"Windows notification (progress bar when available)").c_str(),IEquals(notificationApi,L"Toast"),g_notificationsEnabled);
     endNestedMenu(notificationsMenu,notificationApiMenu,IniReadS(L"Strings",L"NotificationApiTitle",L"Notification style"));
     addTo(notificationsMenu,ID_NOTIFY_OPERATIONS,IniReadS(L"Strings",L"NotifyOnOperations",L"Notify about operations and tile source changes").c_str(),IniReadI(L"Settings",L"NotifyOnOperations",1)!=0,g_notificationsEnabled);
+    addTo(notificationsMenu,ID_NOTIFICATION_CONFIRMATIONS,IniReadS(L"Strings",L"NotificationConfirmations",L"Use Yes/No notifications for confirmations when available").c_str(),IniReadI(L"Settings",L"NotificationConfirmations",1)!=0,true);
     addTo(notificationsMenu,ID_NOTIFY_PIN_PROGRESS,IniReadS(L"Strings",L"NotifyOnPinProgress",L"Show progress while pinning multiple tiles").c_str(),IniReadI(L"Settings",L"NotifyOnPinProgress",1)!=0,g_notificationsEnabled);
     addTo(notificationsMenu,ID_NOTIFY_SOURCE_ERRORS,IniReadS(L"Strings",L"NotifySourceErrors",L"Notify once when a tile source fails or recovers").c_str(),IniReadI(L"Settings",L"NotifySourceErrors",1)!=0,g_notificationsEnabled);
     addTo(notificationsMenu,ID_NOTIFY_GALLERY_CHANGES,IniReadS(L"Strings",L"NotifyGalleryChanges",L"Notify when gallery tiles are added or removed").c_str(),IniReadI(L"Settings",L"NotifyGalleryChanges",1)!=0,g_notificationsEnabled);
