@@ -74,6 +74,32 @@ static std::string NormalizeSource(const std::string& text)
     return normalized;
 }
 
+static std::string CompilerCommandForSource(const std::string& script,const std::string& source)
+{
+    // Inspect the actual invocation, not a flag on another target, a comment,
+    // or an unrelated fixture compiler. Both normal product targets need it.
+    std::string result,logical;std::size_t position=0;unsigned matches=0;
+    while(position<script.size()) {
+        const auto end=script.find('\n',position);auto line=script.substr(position,end==std::string::npos?end:end-position);
+        if(!line.empty()&&line.back()=='\r')line.pop_back();
+        const auto last=line.find_last_not_of(" \t");const bool continued=last!=std::string::npos&&line[last]=='^';
+        if(continued)line.erase(last);logical+=line;
+        if(!continued) {
+            auto command=NormalizeSource(logical);const auto first=command.find_first_not_of(' ');if(first!=std::string::npos)command.erase(0,first);
+            if((command.compare(0,3,"cl ")==0||command.compare(0,7,"cl.exe ")==0)&&
+                (command.find(" "+source+" ")!=std::string::npos||command.find(" \""+source+"\" ")!=std::string::npos)) {
+                // /link switches the parser to linker arguments. A compiler
+                // charset flag after it would not fix source decoding.
+                const auto linker=command.find(" /link");
+                result=linker==std::string::npos?command:command.substr(0,linker);++matches;
+            }
+            logical.clear();
+        }else logical+=' ';
+        if(end==std::string::npos)break;position=end+1;
+    }
+    return matches==1?result:std::string();
+}
+
 static std::string StripDotAllFlag(std::string pattern)
 {
     const std::string flag = "(?s)";
@@ -379,7 +405,7 @@ static bool DefaultStringNeedsFormatValidation(const std::string& defaults, cons
 static bool UiStringUsesSubjectSubstitution(const std::string& key)
 {
     // These strings use literal named tokens, never printf formatting.
-    if(key=="NotificationPrayerBefore"||key=="NotificationPrayerNow"||key=="NotificationRssNewItems")return true;
+    if(key=="NotificationRssNewItems")return true;
     return key == "NotificationSourceFailedMessage" || key == "NotificationSourceRecoveredMessage" ||
         key == "NotificationAccountSavedMessage" || key == "NotificationTileAddedMessage" ||
         key == "NotificationRegistrationPreparedMessage" || key == "NotificationLiveDeliveryChangedMessage";
@@ -403,10 +429,11 @@ static void AssertUiStringWired(const std::string& key, const std::string& defau
     // without retaining a duplicate field in the legacy g_ui structure.
     loadPattern += "|IniReadS\\(L\"Strings\",\\s*L\"" + key + "\"";
     loadPattern += "|(?:TileInstanceUi|SecondaryTileUiString)\\(L\"" + key + "\"";
+    if(key.compare(0,14,"GoogleCalendar")==0||key.compare(0,4,"Kuro")==0)
+        loadPattern += "|Text\\(L\"" + key + "\""; // Both setup helpers read [Strings] through Text(key,fallback).
     if (UiStringUsesSubjectSubstitution(key))
         loadPattern += "|NotificationSubjectText.*L\"" + key + "\"";
     if (key == "NotificationSourceFailed" || key == "NotificationSourceRecovered" ||
-        key == "NotificationPrayerBefore" || key == "NotificationPrayerNow" ||
         key == "PinTilesProgressTitle" || key == "UnpinTilesProgressTitle")
         loadPattern += "|L\"" + key + "\""; // Conditional key; its reader is checked below.
     if (key.compare(0, 6, "Prayer") == 0) {
@@ -566,6 +593,8 @@ int main(int argc, char** argv)
             "..\\dependencies\\DesktopStub\\ga_tile_instance_tray.inc",
             "..\\dependencies\\DesktopStub\\ga_tile_registration.inc",
             "..\\dependencies\\DesktopStub\\ga_notes_signin.inc",
+            "..\\dependencies\\DesktopStub\\ga_kuro_signin.inc",
+            "..\\dependencies\\DesktopStub\\ga_google_calendar_setup.inc",
             "..\\dependencies\\DesktopStub\\ga_prayer_settings_tray.inc",
             "..\\dependencies\\DesktopStub\\ga_secondary_tile_tray.inc",
             "..\\dependencies\\DesktopStub\\ga_content_runtime.inc",
@@ -608,6 +637,12 @@ int main(int argc, char** argv)
         checks.push_back({"DesktopStub imports standard min/max before the SDK 19041 GDI+ headers", "DesktopStub.cpp", desktopStub, R"rx(#include <windows\.h>\s*#include <algorithm>\s*namespace Gdiplus\s*\{\s*using std::max;\s*using std::min;\s*\}\s*#include <gdiplus\.h>)rx", "NOMINMAX removes the Windows macros, so SDK 19041 GDI+ must see std::min and std::max in its namespace before gdiplus.h is parsed", false});
         checks.push_back({"Build script ignores legacy target arguments", "BuildDesktopStub.cmd", buildScript, R"rx(Build policy:.*ignores every argument.*%DESKTOPSTUB_BROKER_EXE_NAME%.*if not "%~1"=="".*One or more arguments were supplied and ignored)rx", "BuildDesktopStub.cmd must accept but ignore old target arguments so every invocation builds the same outputs", false});
         checks.push_back({"Build script always builds host and broker", "BuildDesktopStub.cmd", buildScript, R"rx(echo Building packaged Live Tile broker\.\.\..*LiveTileBroker\.cpp.*echo Building main DesktopStub host\.\.\..*DesktopStub\.cpp)rx", "BuildDesktopStub.cmd must always build both DesktopStub.exe and DesktopStubLiveTileBroker.exe", false});
+        checks.push_back({"Normal host compiler decodes source as UTF-8", "BuildDesktopStub.cmd host compiler", CompilerCommandForSource(buildScript,"DesktopStub.cpp"),
+            R"rx(/utf-8 /std:c++17.*DesktopStub.cpp)rx",
+            "the normal DesktopStub.cpp compiler invocation must specify /utf-8 before /link so Unicode UI literals match the fixtures", false});
+        checks.push_back({"Normal broker compiler decodes source as UTF-8", "BuildDesktopStub.cmd broker compiler", CompilerCommandForSource(buildScript,"LiveTileBroker.cpp"),
+            R"rx(/utf-8 /std:c++17.*LiveTileBroker.cpp)rx",
+            "the normal LiveTileBroker.cpp compiler invocation must specify /utf-8 before /link independently of the host and fixture flags", false});
         checks.push_back({"Local tag refresh is explicit and non-destructive", "BuildDesktopStub.cmd", buildScript, R"rx(DESKTOPSTUB_REFRESH_TAGS.*call :RefreshDesktopStubTags.*:RefreshDesktopStubTags.*git remote get-url origin.*git fetch --quiet --tags origin.*continuing with local tags.*:ResolveDesktopStubVersion)rx", "normal local builds must stay offline and must not force-update or prune local tags; explicit refresh remains available", false});
         checks.push_back({"Local tag refresh never force-updates or prunes tags", "BuildDesktopStub.cmd", buildScript, R"rx(git fetch[^\r\n]*(--force|--prune-tags)|DESKTOPSTUB_SKIP_TAG_REFRESH)rx", "tag refresh must be opt-in and non-destructive", true});
         checks.push_back({"Build script derives DesktopStub version from configurable CI release tags", "BuildDesktopStub.cmd", buildScript, R"rx(ResolveDesktopStubVersion.*DESKTOPSTUB_VERSION.*DESKTOPSTUB_RELEASE_TAG_PREFIX.*git tag --points-at HEAD --list "%DESKTOPSTUB_RELEASE_TAG_PREFIX%\*".*git tag --list "%DESKTOPSTUB_RELEASE_TAG_PREFIX%\*".*%DESKTOPSTUB_RELEASE_TAG_PREFIX%%NEXT_DESKTOPSTUB_TAG_NUMBER%)rx", "BuildDesktopStub.cmd must derive the default DesktopStub version from a configurable vN release tag family while allowing explicit overrides", false});
@@ -816,7 +851,7 @@ int main(int argc, char** argv)
             R"rx(ConfiguredNotificationApi().*ParseApi(IniReadS(L"Settings", L"NotificationApi", L"Auto")).*NotificationExistingIdentity().*DispatchUserNotification.*NotificationToast.*NotificationBalloon.*EffectiveApi(Api requested, bool existingIdentity).*requested != Api::Balloon && existingIdentity ? Api::Toast : Api::Balloon)rx",
             "Auto/Toast must use an existing packaged identity and preserve explicit classic balloons without creating package state", false});
         checks.push_back({"Toast progress updates one operation with sequence and terminal replacement", "notification adapter", notifications,
-            R"rx(const auto tag = aip::notifications::StableId(key);.*const auto group = NotificationGroup();.*data.SequenceNumber(progress->sequence);.*data.Values().Insert(L"progressValue".*if (!progress->first && !progress->finished && toastStarted).*notifier.Update(data, tag, group).*NotificationNotFound.*ProgressXml(title).*MessageXml(title, message).*toast.Tag(tag); toast.Group(group);.*notifier.Show(toast))rx",
+            R"rx(const auto tag = aip::notifications::StableId(key);.*const auto group = options&&!options->group.empty()?options->group:NotificationGroup();.*data.SequenceNumber(progress->sequence);.*data.Values().Insert(L"progressValue".*if (!progress->first && !progress->finished && toastStarted).*notifier.Update(data, tag, group).*NotificationNotFound.*ProgressXml(title).*MessageXml(title, message).*toast.Tag(tag); toast.Group(group);.*notifier.Show(toast))rx",
             "bulk pin progress must update the same toast identity and finish with a replacement message rather than creating a popup per tile", false});
         checks.push_back({"Notification category switches and rate limits stay at the adapter boundary", "notification adapter", notifications,
             R"rx(NotifyUserOperation.*NotificationAllowed(force).*NotifyOnOperations.*NotifyOperationProgress.*NotificationAllowed(false).*NotifyOnPinProgress.*NotificationProgressIntervalMs.*g_notificationProgress.Next.*3000)rx",
@@ -831,8 +866,17 @@ int main(int argc, char** argv)
             R"rx(NotificationSubjectText.*IniReadS(L"Strings",key,fallback).*result.find(L"%s",offset).*result.replace(offset,2,subject))rx",
             "new message templates must substitute subjects as data instead of interpreting configurable printf directives", false});
         checks.push_back({"Source reminder tokens use literal substitution", "source alert adapter", ReadSource("..\\dependencies\\DesktopStub\\ga_source_alert_runtime.inc"),
-            R"rx(SourceAlertReplace.*text.find(token,at).*text.replace(at,token.size(),value).*ObserveRssTileAlerts.*SourceAlertReplace(message,L"%count%".*ObservePrayerTileAlerts.*SourceAlertReplace(message,L"%event%".*SourceAlertReplace(message,L"%time%")rx",
+            R"rx(SourceAlertReplace.*text.find(token,at).*text.replace(at,token.size(),value).*ObserveRssTileAlerts.*SourceAlertReplace(text,L"%count%".*SourceAlertReplace(text,L"%tile%".*format(title),format(message).*PrayerNotificationText.*%event%.*%minutes%.*%time%.*%city%.*%country%.*%tile%.*SourceAlertReplace(text,entry.first,entry.second))rx",
             "source reminders must replace named fields as data without interpreting configurable strings as printf formats", false});
+        checks.push_back({"All three Prayer phases use the same safe formatter", "source alert adapter", ReadSource("..\\dependencies\\DesktopStub\\ga_source_alert_runtime.inc"),
+            R"rx(ObservePrayerTileAlerts.*PrayerNotificationText(upcoming?settings.upcomingTitle:settings.atTimeTitle.*PrayerNotificationText(upcoming?settings.upcomingBody:settings.atTimeBody.*PrayerNotificationText(settings.currentTitle.*PrayerNotificationText(settings.currentBody)rx",
+            "upcoming, at-time and current-status text must pass their per-tile templates through literal token substitution", false});
+        checks.push_back({"Google setup strings use the configurable shared reader", "Google setup UI", ReadSource("..\\dependencies\\DesktopStub\\ga_google_calendar_setup.inc"),
+            R"rx(namespace google_calendar_setup.*Text(const wchar_t* key,const wchar_t* fallback).*IniReadS(L"Strings",key,fallback))rx",
+            "Google setup Text(key,fallback) must stay backed by the Strings INI section", false});
+        checks.push_back({"Kuro setup strings use the configurable shared reader", "Kuro setup UI", ReadSource("..\\dependencies\\DesktopStub\\ga_kuro_signin.inc"),
+            R"rx(namespace kuro_signin.*Text(const wchar_t* key,const wchar_t* fallback).*IniReadS(L"Strings",key,fallback))rx",
+            "Kuro setup Text(key,fallback) must stay backed by the Strings INI section", false});
         checks.push_back({"Notification transport tests replace both operating system APIs", "notification behavioral fixture", ReadSource("..\\tools\\NotificationPolicyTests.cpp"),
             R"rx(DESKTOPSTUB_TEST_NOTIFICATION_IDENTITY.*DESKTOPSTUB_TEST_NOTIFICATION_BALLOON.*DESKTOPSTUB_TEST_NOTIFICATION_TOAST.*ga_notifications.inc)rx",
             "notification behavior regressions must run the real adapter with injected transports instead of displaying notifications", false});

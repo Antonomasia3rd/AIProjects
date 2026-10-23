@@ -701,6 +701,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
 }
 
 #include "ga_clock_calendar.inc"
+#include "ga_google_calendar_provider.inc"
 #include "ga_kuro_provider.inc"
 #include "ga_source_alert_runtime.inc"
 #include "ga_tile_instance_runtime.inc"
@@ -1095,7 +1096,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 }
 
 static void StopContentProviders() {
-    StopTileInstanceProviders();
+    StopTileInstanceProviders(true);
     StopGallerySource();
     // Request hardware cancellation before waiting on other sources.
     g_contentCaps.Cancel(); g_contentAsus.Cancel();

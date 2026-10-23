@@ -17,6 +17,7 @@ static std::size_t g_tileInstanceMenuPage = 0;
 static bool DispatchTileInstanceCommand(HWND owner, UINT command);
 static bool OpenTileInstanceManager(HWND owner);
 static bool OfferTileDeliveryMigration(HWND owner,const std::wstring& tileId,const std::wstring& newMode);
+static bool OpenGoogleCalendarSetup(HWND owner,const std::wstring& tileId);
 #ifdef DESKTOPSTUB_INERT_HARDWARE
 static bool (*g_testTileDeliveryMigration)(HWND,const std::wstring&,const std::wstring&)=nullptr;
 #endif
@@ -278,9 +279,11 @@ static void AppendTileInstancePrayerSettings(HMENU menu,const aip::content::Tile
     AppendTileInstanceEditable(menu,tile,L"PrayerTimes.ShowSunrise",L"Show sunrise in details and timetable",L"1",true);
     AppendTileInstanceEditable(menu,tile,L"PrayerTimes.NextIncludesSunrise",L"Include sunrise in next event countdown",L"0",true);
     AppendTileInstanceEditable(menu,tile,L"PrayerTimes.ShowTimetable",L"Show timetable on large tiles",L"1",true);
-    AppendTileInstanceEditable(menu,tile,L"PrayerTimes.RefreshSeconds",L"Schedule refresh interval (seconds)",L"43200");
-    AppendTileInstanceEditable(menu,tile,L"PrayerTimes.TimeoutSeconds",L"HTTP timeout (seconds)",L"10");
-    AppendTileInstanceEditable(menu,tile,L"PrayerTimes.MaximumBytes",L"Response limit (bytes)",L"262144");
+    HMENU advanced=aip::BeginTrayNestedMenu(menu);
+    AppendTileInstanceEditable(advanced,tile,L"PrayerTimes.RefreshSeconds",L"Schedule refresh interval (seconds)",L"43200");
+    AppendTileInstanceEditable(advanced,tile,L"PrayerTimes.TimeoutSeconds",L"HTTP timeout (seconds)",L"10");
+    AppendTileInstanceEditable(advanced,tile,L"PrayerTimes.MaximumBytes",L"Response limit (bytes)",L"262144");
+    aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"TileInstanceAdvanced",L"Advanced"));
 }
 static void AppendTileInstanceAlerts(HMENU parent,const aip::content::TileInstance& tile)
 {
@@ -289,11 +292,30 @@ static void AppendTileInstanceAlerts(HMENU parent,const aip::content::TileInstan
     AppendTileInstanceChoices(menu,tile,L"Alerts.Type",L"Notification type",{{L"General",L"General"},{L"Reminder",L"Reminder"},{L"Alarm",L"Alarm"}},L"General");
     AppendTileInstanceChoices(menu,tile,L"Alerts.Sound",L"Notification sound",{{L"Silent",L"Silent"},{L"Default",L"Default"},{L"Alarm",L"Alarm sound"}},L"Silent");
     if(tile.type==aip::content::TileInstanceType::PrayerTimes){
-        AppendTileInstanceEditable(menu,tile,L"Alerts.LeadMinutes",L"Notify before prayer (minutes, 0 = at time)",L"20");
+        HMENU upcoming=aip::BeginTrayNestedMenu(menu);
+        AppendTileInstanceEditable(upcoming,tile,L"Alerts.UpcomingEnabled",L"Notify before prayer",L"1",true);
+        AppendTileInstanceEditable(upcoming,tile,L"Alerts.LeadMinutes",L"Minutes before prayer",L"20");
+        AppendTileInstanceEditable(upcoming,tile,L"Alerts.UpcomingTitle",L"Title (%event%, %minutes%, %time%, %city%, %tile%)",L"%event% in %minutes% minutes");
+        AppendTileInstanceEditable(upcoming,tile,L"Alerts.UpcomingBody",L"Message (%time%, %event%, %city%, %tile%)",L"%time%");
+        aip::EndTrayNestedMenu(menu,upcoming,TileInstanceUi(L"PrayerUpcomingNotification",L"Before prayer"));
+        HMENU atTime=aip::BeginTrayNestedMenu(menu);
+        AppendTileInstanceEditable(atTime,tile,L"Alerts.AtTimeEnabled",L"Notify at prayer time",L"1",true);
+        AppendTileInstanceEditable(atTime,tile,L"Alerts.AtTimeTitle",L"Title (%event%, %time%, %city%, %tile%)",L"It's time for %event%");
+        AppendTileInstanceEditable(atTime,tile,L"Alerts.AtTimeBody",L"Message (%time%, %event%, %city%, %tile%)",L"%time%");
+        aip::EndTrayNestedMenu(menu,atTime,TileInstanceUi(L"PrayerAtTimeNotification",L"At prayer time"));
+        HMENU current=aip::BeginTrayNestedMenu(menu);
+        AppendTileInstanceEditable(current,tile,L"Alerts.CurrentEnabled",L"Show silently in Notification Center (Toast API)",L"0",true);
+        AppendTileInstanceEditable(current,tile,L"Alerts.CurrentTitle",L"Title (%event%, %time%, %city%, %tile%)",L"%event%, %time%");
+        AppendTileInstanceEditable(current,tile,L"Alerts.CurrentBody",L"Message (%time%, %event%, %city%, %tile%)",L"at %city%");
+        aip::AppendTrayMenuItem(current,0,TileInstanceUi(L"PrayerCurrentDismissible",L"Windows allows dismissal; expires at the next prayer"),false,false);
+        aip::EndTrayNestedMenu(menu,current,TileInstanceUi(L"PrayerCurrentNotification",L"Current prayer status"));
+        AppendTileInstanceChoices(menu,tile,L"Alerts.TimeFormat",L"Notification time format",{{L"Inherit",L"Same as tile"},{L"12Hour",L"12-hour (AM/PM)"},{L"24Hour",L"24-hour"},{L"System",L"Windows setting"}},L"Inherit");
         AppendTileInstanceEditable(menu,tile,L"Alerts.Events",L"Events (Fajr,Dhuhr,Asr,Maghrib,Isha,Sunrise)",L"Fajr,Dhuhr,Asr,Maghrib,Isha");
     }else{
         AppendTileInstanceEditable(menu,tile,L"Alerts.MinimumNewItems",L"New items required before notifying",L"1");
         AppendTileInstanceEditable(menu,tile,L"Alerts.CooldownSeconds",L"Minimum time between notifications (seconds)",L"60");
+        AppendTileInstanceEditable(menu,tile,L"Alerts.Title",L"Notification title (%count%, %tile%; blank uses default)",L"");
+        AppendTileInstanceEditable(menu,tile,L"Alerts.Body",L"Notification message (%count%, %tile%; blank uses default)",L"");
     }
     aip::EndTrayNestedMenu(parent,menu,TileInstanceUi(L"TileSourceNotifications",L"Notifications for this tile"));
 }
@@ -312,15 +334,18 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
         AppendTileInstanceEditable(menu,tile,L"Content.BadgeText",L"Other text (optional)",L"");
         break;
     }
-    case TileInstanceType::Rss:
+    case TileInstanceType::Rss: {
         AppendTileInstanceEditable(menu,tile,L"RssFeed.FeedUrl",L"RSS or Atom feed URL",L"");
         AppendTileInstanceEditable(menu,tile,L"RssFeed.UpdateIntervalSeconds",L"Fetch new headlines every (seconds, 60-86400)",L"900");
         AppendTileInstanceEditable(menu,tile,L"RssFeed.MaxItems",L"Headlines to keep (1-20)",L"5");
         AppendTileInstanceEditable(menu,tile,L"Content.RssItem",L"Featured headline number (1-20)",L"1");
-        AppendTileInstanceEditable(menu,tile,L"RssFeed.HttpTimeoutSeconds",L"HTTP timeout (seconds, 5-120)",L"20");
-        AppendTileInstanceEditable(menu,tile,L"RssFeed.MaxFeedBytes",L"Response limit (bytes)",L"2097152");
-        AppendTileInstanceEditable(menu,tile,L"RssFeed.UserAgent",L"HTTP user agent",L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)");
+        HMENU advanced=aip::BeginTrayNestedMenu(menu);
+        AppendTileInstanceEditable(advanced,tile,L"RssFeed.HttpTimeoutSeconds",L"HTTP timeout (seconds, 5-120)",L"20");
+        AppendTileInstanceEditable(advanced,tile,L"RssFeed.MaxFeedBytes",L"Response limit (bytes)",L"2097152");
+        AppendTileInstanceEditable(advanced,tile,L"RssFeed.UserAgent",L"HTTP user agent",L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)");
+        aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"TileInstanceAdvanced",L"Advanced"));
         break;
+    }
     case TileInstanceType::NowPlaying:
         aip::AppendTrayMenuItem(menu,0,TileInstanceUi(L"TileInstanceSmtcExplanation",L"Uses Windows' current media session"),false,false);
         AppendTileInstanceChoices(menu,tile,L"SMTC.Indicator",L"Playback indicator",{{L"Status",L"Playback status"},{L"AppIcon",L"Source app icon"},{L"None",L"Hidden"}},L"Status");
@@ -335,32 +360,46 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
             AppendTileInstanceEditable(menu,tile,L"Clock.Location",L"Location label (optional)",L"");
             AppendTileInstanceEditable(menu,tile,L"Clock.ShowDate",L"Show date",L"1",true);
         }else{
-            AppendTileInstanceEditable(menu,tile,L"Calendar.FilePath",L"Local calendar file (.ics, optional)",L"");
-            AppendTileInstanceEditable(menu,tile,L"Calendar.DaysAhead",L"Look ahead (days)",L"7");
+            AppendTileInstanceChoices(menu,tile,L"Calendar.Source",L"Calendar source",{{L"Local",L"Local calendar file"},{L"Google",L"Google Calendar"}},L"Local");
+            if(tile.calendar.source==L"Google") {
+                AppendTileInstanceCommand(menu,TileInstanceUi(L"GoogleCalendarSetup",L"Google account and calendars..."),{TileInstanceMenuVerb::SignIn,tile.id,L"",L"",L""});
+            }else AppendTileInstanceEditable(menu,tile,L"Calendar.FilePath",L"Local calendar file (.ics, optional)",L"");
+            AppendTileInstanceEditable(menu,tile,L"Calendar.DaysAhead",tile.calendar.source==L"Google"?L"Look ahead (1-31 days)":L"Look ahead (days)",L"7");
             AppendTileInstanceEditable(menu,tile,L"Calendar.MaxEvents",L"Upcoming events to keep (1-10)",L"3");
-            AppendTileInstanceEditable(menu,tile,L"Calendar.RefreshSeconds",L"Check calendar file every (seconds)",L"60");
             AppendTileInstanceEditable(menu,tile,L"Calendar.ShowLocation",L"Show event location",L"1",true);
+            HMENU advanced=aip::BeginTrayNestedMenu(menu);
+            if(tile.calendar.source==L"Google"){
+                AppendTileInstanceEditable(advanced,tile,L"GoogleCalendar.RefreshSeconds",L"Fetch events every (seconds)",L"300");
+                AppendTileInstanceEditable(advanced,tile,L"GoogleCalendar.TimeoutSeconds",L"HTTP timeout (seconds)",L"15");
+                AppendTileInstanceEditable(advanced,tile,L"GoogleCalendar.MaximumBytes",L"Response limit (bytes)",L"2097152");
+            }else AppendTileInstanceEditable(advanced,tile,L"Calendar.RefreshSeconds",L"Check calendar file every (seconds)",L"60");
+            aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"TileInstanceAdvanced",L"Advanced"));
         }break;
     }
-    case TileInstanceType::Wuwa:
-        aip::AppendTrayMenuItem(menu,0,TileInstanceUi(L"KuroTokenExplanation",L"Overseas WuWa game access token; not a HoYoLAB cookie"),false,false);
-        AppendTileInstanceEditable(menu,tile,L"Kuro.GameToken",L"Save game access token (protected with Windows DPAPI)",L"",false,true);
+    case TileInstanceType::Wuwa: {
+        AppendTileInstanceCommand(menu,TileInstanceUi(L"KuroSignIn",L"Sign in to Kuro and choose character..."),{TileInstanceMenuVerb::SignIn,tile.id,L"",L"",L""});
         AppendTileInstanceEditable(menu,tile,L"Kuro.PlayerId",L"WuWa player ID (blank discovers a single linked role)",L"");
         AppendTileInstanceEditable(menu,tile,L"Kuro.Region",L"WuWa region (blank discovers a single linked role)",L"");
-        AppendTileInstanceEditable(menu,tile,L"Kuro.DeviceId",L"Device ID (optional)",L"");
         AppendTileInstanceEditable(menu,tile,L"Kuro.RefreshSeconds",L"Fetch game notes every (seconds)",L"300");
-        AppendTileInstanceEditable(menu,tile,L"Kuro.TimeoutSeconds",L"HTTP timeout (seconds)",L"15");
-        AppendTileInstanceEditable(menu,tile,L"Kuro.MaximumBytes",L"Response limit (bytes)",L"1048576");
+        HMENU advanced=aip::BeginTrayNestedMenu(menu);
+        AppendTileInstanceEditable(advanced,tile,L"Kuro.GameToken",L"Import game access token (protected with Windows DPAPI)",L"",false,true);
+        AppendTileInstanceEditable(advanced,tile,L"Kuro.DeviceId",L"Device ID (optional)",L"");
+        AppendTileInstanceEditable(advanced,tile,L"Kuro.TimeoutSeconds",L"HTTP timeout (seconds)",L"15");
+        AppendTileInstanceEditable(advanced,tile,L"Kuro.MaximumBytes",L"Response limit (bytes)",L"1048576");
+        aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"TileInstanceAdvanced",L"Advanced"));
         break;
+    }
     case TileInstanceType::Genshin: case TileInstanceType::Hsr: case TileInstanceType::Zzz: {
         AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceSignIn",L"Sign in to HoYoLAB inside this app..."),{TileInstanceMenuVerb::SignIn,tile.id,L"",L"",L""});
         AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceChooseAccount",L"Choose saved account..."),{TileInstanceMenuVerb::ChooseAccount,tile.id,L"",L"",L""});
-        AppendTileInstanceEditable(menu,tile,L"Account",L"Account reference (Notes.<resource> or Account.<id>)",L"");
         AppendTileInstanceEditable(menu,tile,L"Notes.UID",L"Game UID override (blank uses saved account)",L"");
         AppendTileInstanceEditable(menu,tile,L"Notes.Server",L"Game server override (blank auto-detects)",L"");
         AppendTileInstanceEditable(menu,tile,L"Notes.RefreshSeconds",L"Fetch game notes every (seconds)",L"300");
-        AppendTileInstanceEditable(menu,tile,L"Notes.HttpTimeoutSeconds",L"HTTP timeout (seconds)",L"15");
-        AppendTileInstanceEditable(menu,tile,L"Notes.MaximumBytes",L"Response limit (bytes)",L"1048576");
+        HMENU advanced=aip::BeginTrayNestedMenu(menu);
+        AppendTileInstanceEditable(advanced,tile,L"Notes.HttpTimeoutSeconds",L"HTTP timeout (seconds)",L"15");
+        AppendTileInstanceEditable(advanced,tile,L"Notes.MaximumBytes",L"Response limit (bytes)",L"1048576");
+        AppendTileInstanceEditable(advanced,tile,L"Account",L"Account reference (Notes.<resource> or Account.<id>)",L"");
+        aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"TileInstanceAdvanced",L"Advanced"));
         std::vector<std::pair<std::wstring,std::wstring>> details;
         const auto resource = DescribeTileInstanceType(tile.type).notesResource;
         for (const auto& detail : aip::notes::Details) if (aip::notes::DetailAvailable(resource,detail.id)) details.emplace_back(detail.value,detail.label);
@@ -379,7 +418,6 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
     }
     case TileInstanceType::Gallery: break; // Existing ownership-aware gallery editor is used instead.
     }
-    if(tile.type==TileInstanceType::Rss||tile.type==TileInstanceType::PrayerTimes)AppendTileInstanceAlerts(menu,tile);
 }
 static void AppendTileInstanceDetails(HMENU menu,const aip::content::TileInstance& tile)
 {
@@ -398,6 +436,7 @@ static void AppendTileInstanceDetails(HMENU menu,const aip::content::TileInstanc
     }
     AppendTileInstanceCommand(menu,TileInstanceUi(L"SelectedTileContents",L"Tile contents..."),{TileInstanceMenuVerb::Status,tile.id,L"",L"",L""});
     AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceRefresh",L"Refresh this tile now"),{TileInstanceMenuVerb::Refresh,tile.id,L"",L"",L""});
+    if(tile.type==TileInstanceType::Rss||tile.type==TileInstanceType::PrayerTimes)AppendTileInstanceAlerts(menu,tile);
     AppendTileInstanceEditable(menu,tile,L"Name",L"Tile name",tile.name.c_str());
     HMENU source = aip::BeginTrayNestedMenu(menu); AppendTileInstanceSourceSettings(source,tile);
     aip::EndTrayNestedMenu(menu,source,TileInstanceUi(L"TileInstanceSourceSettings",L"Source settings"));
@@ -605,6 +644,7 @@ static bool OpenTileInstanceManager(HWND owner)
         DispatchTileInstanceCommand(owner,command); return true;
     }
 }
+static bool OpenKuroSignInForTile(HWND owner,const std::wstring& tileId);
 static bool DispatchTileInstanceCommand(HWND owner,UINT command)
 {
     const auto found = g_tileInstanceMenuCommands.find(command); if (found == g_tileInstanceMenuCommands.end()) return false;
@@ -641,6 +681,8 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
     if (item.verb == TileInstanceMenuVerb::Refresh) { RefreshTileInstanceNow(tile.id); return true; }
     if (item.verb == TileInstanceMenuVerb::ChooseAccount) { ChooseTileInstanceAccount(owner,tile); return true; }
     if (item.verb == TileInstanceMenuVerb::SignIn) {
+        if(tile.type==TileInstanceType::Calendar){OpenGoogleCalendarSetup(owner,tile.id);return true;}
+        if(tile.type==TileInstanceType::Wuwa){OpenKuroSignInForTile(owner,tile.id);return true;}
         const auto resource = DescribeTileInstanceType(tile.type).notesResource;
         if (resource >= 0) OpenEmbeddedNotesSignInForTile(owner,resource,tile.id);
         return true;

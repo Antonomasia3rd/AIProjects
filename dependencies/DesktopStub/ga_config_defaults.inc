@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Globals
 // -----------------------------------------------------------------------------
 static std::atomic<bool> g_running(true), g_console(false), g_logging(true), g_tray(true);
@@ -449,6 +449,57 @@ struct StringDefault {
 };
 
 static const StringDefault g_stringDefaults[] = {
+    {L"GoogleCalendarChangedAfterSave",L"Settings changed again after this save. Reopen setup to use the current account and calendar."},
+    {L"GoogleCalendarCancelButton", L"Cancel operation"},
+    {L"GoogleCalendarCanceled", L"The pending operation was canceled. You may close the Google browser tab. Saved account settings were kept."},
+    {L"GoogleCalendarChoose", L"Choose a calendar and click Use selected calendar. Each Calendar tile can select its own account and calendar."},
+    {L"GoogleCalendarClientConnected", L"Google account connected. Refresh the calendar list or choose a calendar."},
+    {L"GoogleCalendarClientMissing", L"No Desktop OAuth client imported."},
+    {L"GoogleCalendarClientReady", L"Desktop OAuth client ready. Choose Connect to Google."},
+    {L"GoogleCalendarCloseButton", L"Close"},
+    {L"GoogleCalendarConnectButton", L"Connect to Google..."},
+    {L"GoogleCalendarConnectedMessage", L"Read-only Calendar access was saved for this tile with Windows protection."},
+    {L"GoogleCalendarConnectedTitle", L"Google Calendar connected"},
+    {L"GoogleCalendarConnecting", L"Continue Google sign-in in your default browser. This window stays available; Cancel operation closes the local listener."},
+    {L"GoogleCalendarDisconnectButton", L"Disconnect on this device"},
+    {L"GoogleCalendarDisconnected", L"Disconnected on this device. The saved grant and memory token were removed. Google account permissions can be reviewed separately in your account."},
+    {L"GoogleCalendarDisconnectedMessage", L"This tile's saved Google grant was removed. No Google calendar or event was deleted."},
+    {L"GoogleCalendarDisconnectedTitle", L"Google Calendar disconnected"},
+    {L"GoogleCalendarExpired", L"Google Calendar setup expired. No pending account was saved. Start Connect again when ready."},
+    {L"GoogleCalendarImportButton", L"Import Desktop OAuth JSON..."},
+    {L"GoogleCalendarImportReadFailed", L"Could not read the selected Desktop OAuth JSON. The file must be available and at most 128 KiB."},
+    {L"GoogleCalendarImportTitle", L"Import your Google Cloud Desktop OAuth credentials"},
+    {L"GoogleCalendarImported", L"Desktop OAuth client imported. Choose Connect to Google, then approve read-only Calendar access in your browser."},
+    {L"GoogleCalendarListButton", L"Refresh calendar list"},
+    {L"GoogleCalendarListing", L"Reading the calendars you allowed this app to access..."},
+    {L"GoogleCalendarNoCalendars", L"No readable calendars were returned. Check this account's calendar sharing permissions."},
+    {L"GoogleCalendarPrimarySuffix", L" (primary)"},
+    {L"GoogleCalendarProfileChanged", L"The active profile changed. Reopen Google Calendar setup before continuing."},
+    {L"GoogleCalendarRequestFailed", L"Google Calendar could not complete this request. Previous saved settings were kept."},
+    {L"GoogleCalendarSaveFailed", L"Google Calendar settings could not be saved. Previous settings were kept."},
+    {L"GoogleCalendarSelectFirst", L"Select a calendar from the list first."},
+    {L"GoogleCalendarSelectedMessage", L"This Calendar tile will display the selected Google calendar's upcoming events."},
+    {L"GoogleCalendarSelectedSaved", L"Selected calendar saved. This tile will refresh automatically. You may close this window."},
+    {L"GoogleCalendarSelectedTitle", L"Calendar selected"},
+    {L"GoogleCalendarSetup", L"Google account and calendars..."},
+    {L"GoogleCalendarSetupFailed", L"Google Calendar setup could not complete. Previous saved settings were kept; reopen setup to retry."},
+    {L"GoogleCalendarSetupInitial", L"No browser or account request starts until you choose Connect or Refresh calendar list."},
+    {L"GoogleCalendarSetupInstructions", L"Import the credentials JSON for your Google Cloud Desktop app, then connect in your default browser. Only read-only Calendar access is requested; DesktopStub never asks for your Google password."},
+    {L"GoogleCalendarTileChanged", L"This tile or its Google settings changed. Reopen setup; no previous account was replaced."},
+    {L"GoogleCalendarTimerFailed", L"Windows could not start the setup completion timer. No browser or account request was started; try again."},
+    {L"GoogleCalendarUseButton", L"Use selected calendar"},
+    {L"GoogleCalendarWindowSuffix", L" — Google Calendar"},
+    {L"GoogleCalendarWorkerBusy", L"Previous requests are stopping. Try again in a moment."},
+    {L"GoogleCalendarWorkerFailed", L"The Google Calendar worker could not start. No account was changed."},
+    {L"GoogleCalendarWorkerFailure", L"Google Calendar setup could not complete. No new account was saved; try again when ready."},
+    {L"KuroAccountSavedMessage", L"The selected character is connected. Its tile will refresh automatically."},
+    {L"KuroAccountSavedTitle", L"Wuthering Waves account saved"},
+    {L"KuroSignIn", L"Sign in to Kuro and choose character..."},
+    {L"PrayerAtTimeNotification", L"At prayer time"},
+    {L"PrayerCurrentDismissible", L"Windows allows dismissal; expires at the next prayer"},
+    {L"PrayerCurrentNotification", L"Current prayer status"},
+    {L"PrayerUpcomingNotification", L"Before prayer"},
+    {L"TileInstanceAdvanced", L"Advanced"},
     {L"PrayerCity", L"City"},
     {L"PrayerState", L"State / region (optional)"},
     {L"PrayerTimeZone", L"Time zone override (blank uses schedule)"},
@@ -874,9 +925,6 @@ static const StringDefault g_stringDefaults[] = {
     {L"NotificationSourceRecoveredMessage", L"%s refreshed successfully. Its tile will update when Windows displays the new content."},
     {L"NotificationRssTitle", L"Feed updated"},
     {L"NotificationRssNewItems", L"%count% new items in %tile%."},
-    {L"NotificationPrayerTitle", L"Prayer times"},
-    {L"NotificationPrayerBefore", L"%event% in %minutes% minutes at %city% (%time%)."},
-    {L"NotificationPrayerNow", L"It is time for %event% at %city% (%time%)."},
     {L"GalleryClickAction",L"When clicked"},
     {L"GalleryClickImage",L"Open the displayed photo (when Windows identifies it)"},
     {L"GalleryClickSetup",L"Open this tile's settings"},
@@ -1526,5 +1574,6 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from built-in defaults", L"Regenerate AppxManifest.xml from config");
     UpgradeStringDefaultIfUnmodified(L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with WIC: %lu x %lu.", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu (max long edge=%d).");
     UpgradePowerShellExeDefault();
+    UpgradeStringDefaultIfUnmodified(L"GoogleCalendarWindowSuffix",L" \u00e2\u20ac\u201d Google Calendar",L" \u2014 Google Calendar");
 }
 

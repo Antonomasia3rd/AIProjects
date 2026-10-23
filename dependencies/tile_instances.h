@@ -5,6 +5,7 @@
 #include "tile_actions.h"
 #include "tile_delivery_policy.h"
 #include "content_sources/clock_calendar_model.h"
+#include "content_sources/google_calendar_model.h"
 #include "content_sources/kuro_notes_model.h"
 #include "tile_source_alerts.h"
 #include <set>
@@ -61,6 +62,7 @@ struct TileInstance {
     TileDeliveryPolicy policy;
     aip::datetime::ClockConfiguration clock;
     aip::datetime::CalendarConfiguration calendar;
+    aip::google_calendar::Configuration googleCalendar;
     aip::kuro::Configuration kuro;
     std::wstring clickAction = L"setup", accountReference;
     std::wstring error; // Optional host diagnostic for a dormant invalid tile.
@@ -120,7 +122,7 @@ inline bool TileInstanceSourceSection(const TileInstance& tile, const std::wstri
     if (tile.type == TileInstanceType::NowPlaying) return s == L"smtc";
     if (tile.type == TileInstanceType::PrayerTimes) return s == L"prayertimes";
     if (tile.type == TileInstanceType::Clock) return s == L"clock";
-    if (tile.type == TileInstanceType::Calendar) return s == L"calendar";
+    if (tile.type == TileInstanceType::Calendar) return s == L"calendar" || s == L"googlecalendar";
     if (tile.type == TileInstanceType::Discord) return s == L"discord";
     const auto resource = DescribeTileInstanceType(tile.type).notesResource;
     return resource >= 0 && (s == L"notes" || s == L"notes." + Lower(NotesResources[resource].value));
@@ -219,6 +221,7 @@ inline bool NormalizeTileInstanceSetting(const std::wstring& section, const std:
         const auto source = Lower(sourceSection);
         if (source == L"alerts") return aip::notifications::NormalizeAlertSetting(sourceKey, value, error);
         if (source == L"kuro") return aip::kuro::NormalizeSetting(sourceKey, value, error);
+        if (source == L"googlecalendar") return aip::google_calendar::NormalizeSetting(sourceKey, value, error);
         if (source == L"clock" || source == L"calendar") return aip::datetime::NormalizeSetting(sourceSection, sourceKey, value, error);
         if (source == L"content") return NormalizeSetting(L"Content.1", sourceKey, value, error);
         if (source == L"notes") {
@@ -301,12 +304,21 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
         if (tile.type == TileInstanceType::Calendar && !aip::datetime::ReadCalendar([&](const wchar_t* key,const wchar_t* fallback) {
             return TileInstanceRead(tile,read,L"Calendar",key,fallback);
         },tile.calendar,error)) { error=section+L": "+error;return false; }
+        if (tile.type == TileInstanceType::Calendar) {
+            if (!aip::google_calendar::ReadConfiguration([&](const wchar_t* key,const wchar_t* fallback) {
+                return TileInstanceRead(tile,read,L"GoogleCalendar",key,fallback);
+            },tile.googleCalendar,error)) { error=section+L": "+error;return false; }
+            if (tile.calendar.source==L"Google" && tile.calendar.daysAhead>31) {
+                error=section+L": Google Calendar look-ahead supports 1 to 31 days.";return false;
+            }
+        }
         const auto capture = [&](const wchar_t* sourceSection,const wchar_t* key,const wchar_t* fallback) {
             const auto value = TileInstanceRead(tile,read,sourceSection,key,fallback);
             tile.settings[Lower(sourceSection)+L"."+Lower(key)] = value;
         };
         if (tile.type == TileInstanceType::Rss || tile.type == TileInstanceType::PrayerTimes) {
             for (const auto& field : aip::notifications::AlertFields) {
+                if(tile.type==TileInstanceType::Rss&&aip::notifications::IsPrayerAlertField(field.key))continue;
                 auto value=TileInstanceRead(tile,read,L"Alerts",field.key,field.fallback);
                 if(!aip::notifications::NormalizeAlertSetting(field.key,value,error)) { error=section+L": "+error;return false; }
                 tile.settings[L"alerts."+Lower(field.key)]=std::move(value);

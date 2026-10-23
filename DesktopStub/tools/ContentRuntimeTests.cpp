@@ -221,6 +221,9 @@ static std::wstring BuildLegacyContentFixtureTemplate()
 #include "TileInstanceTrayHostTests.inc"
 #include "TileDeliveryRegressionHostTests.inc"
 #include "SourceAlertHostTests.inc"
+#include "PrayerNotificationRuntimeHostTests.inc"
+#include "GoogleCalendarHostTests.inc"
+#include "TileSourceMenuHostTests.inc"
 #include "NotificationConfirmationHostTests.inc"
 #include "StalePinAndGalleryMenuHostTests.inc"
 #include "GalleryImageActivationHostTests.inc"
@@ -1181,6 +1184,10 @@ int wmain()
 #ifdef DESKTOPSTUB_NEW_SOURCE_HOST_ONLY
     fixtureGroup("source alerts and date/time/WuWa integration");
     TestSourceAlertHost();
+    TestPrayerNotificationRuntimeHost();
+    TestGoogleCalendarHost();
+    TestUnpinnedAlertDemandHost();
+    TestTileSourceMenuHost();
     TestNotificationConfirmationHost();
     TestBatchIsolationHost();
     TestStalePinAndGalleryMenuHost();

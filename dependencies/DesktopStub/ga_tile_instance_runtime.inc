@@ -61,6 +61,7 @@ struct TileInstanceProviderState {
     std::unique_ptr<ContentNotesProvider> notes;
     std::unique_ptr<ContentDiscordProvider> discord;
     std::unique_ptr<ContentDateTimeProvider> datetime;
+    std::unique_ptr<ContentGoogleCalendarProvider> googleCalendar;
     std::unique_ptr<ContentKuroProvider> kuro;
     std::wstring backgroundKey, backgroundPath;
     ULONGLONG nextBackgroundRead = 0;
@@ -72,9 +73,11 @@ struct TileInstanceProviderState {
         if (discord) discord->Cancel();
         if (kuro) kuro->Cancel();
         if (datetime) datetime->Cancel();
+        if (googleCalendar) googleCalendar->Cancel();
         if (rss) rss->Stop(); if (prayer) prayer->Stop(); if (notes) notes->Stop(); if (discord) discord->Stop();
         if (kuro) kuro->Stop();
         if (datetime) datetime->Stop();
+        if (googleCalendar) googleCalendar->Stop();
     }
 };
 static void NotifyTileSourceTransition(const aip::content::TileInstance& tile,TileInstanceProviderState& state,
@@ -94,10 +97,14 @@ static void NotifyTileSourceTransition(const aip::content::TileInstance& tile,Ti
 static std::map<std::wstring, std::unique_ptr<TileInstanceProviderState>> g_tileInstanceProviders;
 static std::mutex g_tileInstanceRefreshMutex;
 static std::set<std::wstring> g_tileInstanceRefreshRequests;
-static void StopTileInstanceProviders()
+static void StopTileInstanceProviders(bool preserveCurrentStatuses=false)
 {
     for (auto& item : g_tileInstanceProviders) item.second->Stop();
     g_tileInstanceProviders.clear();
+    // Ordinary process exit leaves the quiet entry to its native expiration.
+    // Its persisted delivery ID intentionally prevents resurrecting a dismissed
+    // card on restart. Configuration failure/provider reset retires it now.
+    if(!preserveCurrentStatuses&&!g_shutdownState.IsRequested()&&g_running.load())ClearPrayerCurrentStatuses();
     g_tileSourceAlerts.clear();
 }
 static bool ReadTileInstancePlugins(aip::content::Configuration& result)
@@ -178,7 +185,7 @@ static int ResolveTileInstanceFit(const aip::content::TileInstance& tile,
     return state.capturedFit;
 }
 static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstance& tile,
-    TileInstanceProviderState& state, const aip::content::SmtcMediaSnapshot& media, bool synchronous)
+    TileInstanceProviderState& state, const aip::content::SmtcMediaSnapshot& media, bool synchronous,bool publishTile=true)
 {
     using namespace aip::content;
     TilePolicyReadScope policyScope(tile.policy);
@@ -190,31 +197,32 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
     frame.presentation = tile.presentation; frame.textMode = tile.configuration.textMode;
     frame.activationArguments = TileInstanceActivation(tile);
     if (!tile.error.empty()) {
+        RemovePrayerCurrentStatus(tile.id);
         NotifyTileSourceTransition(tile,state,aip::notifications::SourceState::Failed);
         state.Stop();
-        state.rss.reset(); state.prayer.reset(); state.notes.reset(); state.discord.reset(); state.kuro.reset();state.datetime.reset();
+        state.rss.reset(); state.prayer.reset(); state.notes.reset(); state.discord.reset(); state.kuro.reset();state.datetime.reset();state.googleCalendar.reset();
         Entry background; background.background = L"Transparent";
         frame.backgroundId = BackgroundId::Transparent;
         frame.capturedWallpaperFit = static_cast<int>(FitMode::Fill);
-        if (state.backgroundKey != L"configuration-error" || !IsUsableWallpaperPath(state.backgroundPath)) {
+        if (publishTile&&(state.backgroundKey != L"configuration-error" || !IsUsableWallpaperPath(state.backgroundPath))) {
             state.backgroundPath = ContentBackgroundPath(background); state.backgroundKey = L"configuration-error";
         }
-        frame.backgroundPath = state.backgroundPath;
+        if(publishTile)frame.backgroundPath = state.backgroundPath;
         frame.text = {L"Check tile settings", tile.error, L"Click this tile to repair its settings."};
         frame.wrapSourceText = true; frame.secondaryFrameKey = ContentSnapshotKey(frame); return frame;
     }
     const auto& entry = tile.configuration.entries.front();
     frame.backgroundId = BackgroundIdFor(entry.background);
-    frame.capturedWallpaperFit = ResolveTileInstanceFit(tile,state,frame.backgroundId,synchronous);
+    if(publishTile)frame.capturedWallpaperFit = ResolveTileInstanceFit(tile,state,frame.backgroundId,synchronous);
     const auto backgroundKey = TileDeliveryPolicyKey(tile.policy) + entry.background + L"\n" + entry.imagePath + L"\n" +
         (frame.backgroundId == BackgroundId::SmtcArtwork && media.artwork ? media.artwork->path : L"");
     const bool wallpaper = frame.backgroundId == BackgroundId::Wallpaper || frame.backgroundId == BackgroundId::LiveWallpaper;
-    if (state.backgroundKey != backgroundKey || !IsUsableWallpaperPath(state.backgroundPath) || synchronous || state.forceRefresh ||
-        (wallpaper && IniReadI(L"Settings", L"ListenWallpaper", 1) && GetTickCount64() >= state.nextBackgroundRead)) {
+    if (publishTile&&(state.backgroundKey != backgroundKey || !IsUsableWallpaperPath(state.backgroundPath) || synchronous || state.forceRefresh ||
+        (wallpaper && IniReadI(L"Settings", L"ListenWallpaper", 1) && GetTickCount64() >= state.nextBackgroundRead))) {
         state.backgroundPath = ContentBackgroundPath(entry, &media); state.backgroundKey = backgroundKey;
         state.nextBackgroundRead = GetTickCount64() + static_cast<ULONGLONG>(tile.configuration.refreshSeconds) * 1000;
     }
-    frame.backgroundPath = state.backgroundPath;
+    if(publishTile)frame.backgroundPath = state.backgroundPath;
     if (frame.backgroundId == BackgroundId::SmtcArtwork) frame.backgroundLease = media.artwork;
     switch (tile.type) {
     case TileInstanceType::Wallpaper:
@@ -265,6 +273,7 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         bool completed=false;
         const auto view = state.prayer->Read(tile.configuration.prayer,&completed);
         if(completed&&view.available)ObservePrayerTileAlerts(tile,state.prayer->ReadSchedule(),state.prayer->Now());
+        else if(completed)RemovePrayerCurrentStatus(tile.id);
         NotifyTileSourceTransition(tile,state,tile.configuration.prayer.city.empty()||tile.configuration.prayer.country.empty()?
             aip::notifications::SourceState::Unconfigured:!completed?aip::notifications::SourceState::Pending:
             !view.error.empty()?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Healthy);
@@ -277,9 +286,21 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
     case TileInstanceType::Clock: case TileInstanceType::Calendar: {
         if(!state.datetime)state.datetime=std::make_unique<ContentDateTimeProvider>(WakePollThread);
         SYSTEMTIME now{};GetSystemTime(&now);const auto utc=aip::datetime::Seconds(DateTimeCivil(now));
-        const auto view=tile.type==TileInstanceType::Clock?state.datetime->Clock(tile.clock,utc,now.wMilliseconds):
-            state.datetime->Calendar(tile.calendar,utc,now.wMilliseconds,state.forceRefresh,synchronous);
-        NotifyTileSourceTransition(tile,state,view.pending?aip::notifications::SourceState::Pending:
+        ContentDateTimeView view;
+        if(tile.type==TileInstanceType::Clock){
+            if(state.googleCalendar){state.googleCalendar->Stop();state.googleCalendar.reset();}
+            view=state.datetime->Clock(tile.clock,utc,now.wMilliseconds);
+        }else if(tile.calendar.source==L"Google"){
+            state.datetime->Cancel();
+            if(!state.googleCalendar)state.googleCalendar=std::make_unique<ContentGoogleCalendarProvider>();
+            view=state.googleCalendar->Calendar(tile.calendar,GoogleCalendarConfigurationForTile(tile),utc,now.wMilliseconds,state.forceRefresh,synchronous);
+        }else{
+            if(state.googleCalendar){state.googleCalendar->Stop();state.googleCalendar.reset();}
+            view=state.datetime->Calendar(tile.calendar,utc,now.wMilliseconds,state.forceRefresh,synchronous);
+        }
+        const bool googleUnconfigured=tile.type==TileInstanceType::Calendar&&tile.calendar.source==L"Google"&&
+            (tile.googleCalendar.clientId.empty()||tile.googleCalendar.refreshTokenProtected.empty());
+        NotifyTileSourceTransition(tile,state,googleUnconfigured?aip::notifications::SourceState::Unconfigured:view.pending?aip::notifications::SourceState::Pending:
             view.ok?aip::notifications::SourceState::Healthy:aip::notifications::SourceState::Failed);
         if(!view.ok){frame.text={L"Check tile settings",view.status,L""};frame.wrapSourceText=true;break;}
         frame.clockSource=tile.type==TileInstanceType::Clock;frame.calendarSource=!frame.clockSource;
@@ -362,16 +383,20 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
         if (TilePolicyUsesRegistration(tile.policy)) return TileRegistrationReadyForId(tile.id);
         return tile.primary || pins.count(TileInstanceNativeId(tile)) != 0;
     };
+    const auto alertsDemanded=[&](const TileInstance& tile){
+        aip::notifications::AlertSettings settings;
+        return (tile.type==TileInstanceType::PrayerTimes||tile.type==TileInstanceType::Rss)&&ReadTileSourceAlerts(tile,settings);
+    };
     std::set<std::wstring> used;
     bool smtcNeeded = false, artworkNeeded = false, appIconNeeded = false, nativeMediaNeeded = false;
     int smtcSeconds = 86400;
-    for (const auto& tile : cfg.tiles) if (demanded(tile)) {
+    for (const auto& tile : cfg.tiles) if (demanded(tile)||alertsDemanded(tile)) {
         if (tile.type == TileInstanceType::QuickAction && tile.error.empty()) {
             TilePolicyReadScope scope(tile.policy);
             if (!TilePolicyUsesRegistration(tile.policy)) continue;
         }
         used.insert(tile.id);
-        if (tile.error.empty() && (tile.type == TileInstanceType::NowPlaying || (!tile.configuration.entries.empty() &&
+        if (demanded(tile)&&tile.error.empty() && (tile.type == TileInstanceType::NowPlaying || (!tile.configuration.entries.empty() &&
             BackgroundIdFor(tile.configuration.entries.front().background) == BackgroundId::SmtcArtwork))) {
             smtcNeeded = true; smtcSeconds = (std::min)(smtcSeconds, tile.configuration.refreshSeconds);
             artworkNeeded |= BackgroundIdFor(tile.configuration.entries.front().background) == BackgroundId::SmtcArtwork;
@@ -382,6 +407,9 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     }
     for (auto it = g_tileInstanceProviders.begin(); it != g_tileInstanceProviders.end();)
         if (!used.count(it->first)) { it->second->Stop(); it = g_tileInstanceProviders.erase(it); } else ++it;
+    std::set<std::wstring> activePrayerStatuses;
+    for(const auto& tile:cfg.tiles)if(tile.type==TileInstanceType::PrayerTimes&&used.count(tile.id)&&alertsDemanded(tile))activePrayerStatuses.insert(tile.id);
+    PrunePrayerCurrentStatuses(activePrayerStatuses);
     for(auto it=g_tileSourceAlerts.begin();it!=g_tileSourceAlerts.end();)
         if(!used.count(it->first))it=g_tileSourceAlerts.erase(it);else ++it;
     if (smtcNeeded) g_contentSmtc.Refresh(smtcSeconds, synchronous, artworkNeeded, nativeMediaNeeded, appIconNeeded);
@@ -394,7 +422,7 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
         if (plugins.asus.hardwareEnabled) g_contentAsus.Refresh(plugins.asus); else g_contentAsus.Cancel();
     } else { g_contentCaps.Cancel(); g_contentAsus.Cancel(); }
     std::vector<Snapshot> frames; Snapshot primary;
-    for (const auto& tile : cfg.tiles) if (demanded(tile)) {
+    for (const auto& tile : cfg.tiles) if (demanded(tile)||alertsDemanded(tile)) {
         // Quick Actions are static native topic logos. They need metadata and
         // activation only; sending a transparent notification would hide them.
         if (tile.type == TileInstanceType::QuickAction && tile.error.empty()) {
@@ -406,7 +434,9 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
         if (!state) { state = std::make_unique<TileInstanceProviderState>(); state->type = tile.type; }
         state->forceRefresh = refresh.count(tile.id) != 0;
         if (state->forceRefresh) ForgetSecondaryTileDelivery(TileInstanceNativeId(tile));
-        auto frame = ComposeTileInstance(tile, *state, media, synchronous);
+        const bool publishTile=demanded(tile);
+        auto frame = ComposeTileInstance(tile, *state, media, synchronous,publishTile);
+        if(!publishTile)continue;
         if (tile.primary) primary = frame;
         if (IsUsableWallpaperPath(frame.backgroundPath)) frames.push_back(std::move(frame));
     }

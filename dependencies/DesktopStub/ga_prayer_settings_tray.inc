@@ -69,9 +69,11 @@ static void AppendPrayerSettingsMenu(HMENU menu)
     bool nextSunrise=false;
     aip::content::ParseBool(IniReadS(L"PrayerTimes",L"NextIncludesSunrise",L"0"),nextSunrise);
     aip::AppendTrayMenuItem(menu,ID_PRAYER_SETTINGS+33,PrayerUiString(L"PrayerNextSunrise",L"Include Sunrise / Shuruq in next-event countdown"),nextSunrise,true);
-    add(40, L"PrayerRefreshSeconds", L"Schedule refresh (seconds)", L"RefreshSeconds");
-    add(41, L"PrayerTimeoutSeconds", L"HTTP timeout (seconds)", L"TimeoutSeconds");
-    add(42, L"PrayerMaximumBytes", L"Response limit (bytes)", L"MaximumBytes");
+    HMENU advanced=aip::BeginTrayNestedMenu(menu);
+    aip::AppendTrayMenuItem(advanced,ID_PRAYER_SETTINGS+40,PrayerUiString(L"PrayerRefreshSeconds",L"Schedule refresh (seconds)")+L": "+ContentMenuValue(IniReadS(L"PrayerTimes",L"RefreshSeconds",L"")),false,true);
+    aip::AppendTrayMenuItem(advanced,ID_PRAYER_SETTINGS+41,PrayerUiString(L"PrayerTimeoutSeconds",L"HTTP timeout (seconds)")+L": "+ContentMenuValue(IniReadS(L"PrayerTimes",L"TimeoutSeconds",L"")),false,true);
+    aip::AppendTrayMenuItem(advanced,ID_PRAYER_SETTINGS+42,PrayerUiString(L"PrayerMaximumBytes",L"Response limit (bytes)")+L": "+ContentMenuValue(IniReadS(L"PrayerTimes",L"MaximumBytes",L"")),false,true);
+    aip::EndTrayNestedMenu(menu,advanced,PrayerUiString(L"TileInstanceAdvanced",L"Advanced"));
     add(60, L"PrayerRefreshNow", L"Refresh prayer schedule now");
 }
 static bool DispatchPrayerSettingsCommand(HWND owner, UINT command)

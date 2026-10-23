@@ -1,5 +1,16 @@
 # Next pass: outstanding fixes and acceptance
 
+## October 24 Google/Kuro account flows and notification discovery
+
+Google Calendar browser authorization/calendar selection, guided overseas Kuro
+sign-in, Prayer upcoming/at-time/current phases and clearer Notifications versus
+Advanced menus are implemented. The user's Google Desktop client was imported
+and the requested Prayer phases configured. Actual Google consent/calendar
+refresh and Kuro credentials/human verification still need user acceptance;
+injected account fixtures cannot establish those accounts. See the
+[delivery and setup record](calendar-accounts-prayer-notifications-2026-10-24.md).
+Keep the broader lower-priority queue and exact legacy raster finding open.
+
 ## October 24 Calendar/Clock native layout correction installed
 
 Calendar Small/date-only Medium and the Clock text/branding contract were traced

@@ -7,6 +7,13 @@
 
 namespace aip::notifications {
 enum class Api { Auto, Balloon, Toast };
+// Optional properties of a native notification. Quiet history entries use
+// the same transport without inventing a background worker or balloon analog.
+struct NativeNoticeOptions {
+    bool suppressPopup=false;
+    std::int64_t expirationUtc=0;
+    std::wstring group;
+};
 inline Api ParseApi(std::wstring value) {
     std::transform(value.begin(), value.end(), value.begin(), [](wchar_t ch) { return static_cast<wchar_t>(towlower(ch)); });
     return value == L"balloon" ? Api::Balloon : value == L"toast" ? Api::Toast : Api::Auto;

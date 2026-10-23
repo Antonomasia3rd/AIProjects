@@ -27,13 +27,14 @@ inline bool Number(const std::wstring& v,int& n){if(v.empty()||v.size()>8)return
 inline bool SafeText(const std::wstring& v,std::size_t max){return v.size()<=max&&v.find_first_of(std::wstring(L"\r\n\0",3))==std::wstring::npos;}
 struct Setting {const wchar_t* key;const wchar_t* fallback;};
 inline constexpr Setting ClockSettings[]={{L"TimeZone",L"Local"},{L"TimeFormat",L"System"},{L"Location",L""},{L"ShowDate",L"1"}};
-inline constexpr Setting CalendarSettings[]={{L"TimeZone",L"Local"},{L"FilePath",L""},{L"DaysAhead",L"7"},{L"MaxEvents",L"3"},{L"RefreshSeconds",L"60"},{L"ShowLocation",L"1"},{L"TimeFormat",L"12Hour"}};
+inline constexpr Setting CalendarSettings[]={{L"TimeZone",L"Local"},{L"FilePath",L""},{L"DaysAhead",L"7"},{L"MaxEvents",L"3"},{L"RefreshSeconds",L"60"},{L"ShowLocation",L"1"},{L"TimeFormat",L"12Hour"},{L"Source",L"Local"}};
 inline bool NormalizeSetting(const std::wstring& section,std::wstring& key,std::wstring& value,std::wstring& error){
     const bool clock=Lower(section)==L"clock";if(!clock&&Lower(section)!=L"calendar"){error=L"Unknown date/time source.";return false;}
     const Setting* field=nullptr;const auto k=Lower(key);if(clock){for(const auto& f:ClockSettings)if(Lower(f.key)==k)field=&f;}else for(const auto& f:CalendarSettings)if(Lower(f.key)==k)field=&f;
     if(!field){error=L"Unknown "+section+L" setting.";return false;}key=field->key;value=Trim(value);
     const auto fail=[&](const wchar_t* why){error=section+L"."+key+L": "+why;return false;};
-    if(k==L"timezone"){if(value.empty())value=L"Local";if(!SafeText(value,128))return fail(L"expected a Windows time-zone ID or Local.");}
+    if(k==L"source"){const auto low=Lower(value);if(low==L"local")value=L"Local";else if(low==L"google")value=L"Google";else return fail(L"expected Local or Google.");}
+    else if(k==L"timezone"){if(value.empty())value=L"Local";if(!SafeText(value,128))return fail(L"expected a Windows time-zone ID or Local.");}
     else if(k==L"timeformat"){const auto low=Lower(value);if(low==L"12hour")value=L"12Hour";else if(low==L"24hour")value=L"24Hour";else if(low==L"system")value=L"System";else return fail(L"expected 12Hour, 24Hour or System.");}
     else if(k==L"showdate"||k==L"showlocation"){const auto low=Lower(value);if(low==L"1"||low==L"true"||low==L"on"||low==L"yes")value=L"1";else if(low==L"0"||low==L"false"||low==L"off"||low==L"no")value=L"0";else return fail(L"expected a boolean.");}
     else if(k==L"filepath"){if(!SafeText(value,32760))return fail(L"expected a local .ics file path.");if(!value.empty()&&(value.size()<7||value[1]!=L':'||(value[2]!=L'\\'&&value[2]!=L'/')||Lower(value.substr(value.size()-4))!=L".ics"))return fail(L"choose an absolute local drive path ending in .ics; URLs and network paths are not read.");}
@@ -42,9 +43,9 @@ inline bool NormalizeSetting(const std::wstring& section,std::wstring& key,std::
     error.clear();return true;
 }
 struct ClockConfiguration {std::wstring timeZone=L"Local",timeFormat=L"System",location;bool showDate=true;};
-struct CalendarConfiguration {std::wstring timeZone=L"Local",filePath,timeFormat=L"12Hour";int daysAhead=7,maxEvents=3,refreshSeconds=60;bool showLocation=true;};
+struct CalendarConfiguration {std::wstring timeZone=L"Local",filePath,timeFormat=L"12Hour";int daysAhead=7,maxEvents=3,refreshSeconds=60;bool showLocation=true;std::wstring source=L"Local";};
 template<class Reader> bool ReadClock(Reader get,ClockConfiguration& output,std::wstring& error){ClockConfiguration c;for(const auto& f:ClockSettings){std::wstring k=f.key,v=get(f.key,f.fallback);if(!NormalizeSetting(L"Clock",k,v,error))return false;if(k==L"TimeZone")c.timeZone=v;else if(k==L"TimeFormat")c.timeFormat=v;else if(k==L"Location")c.location=v;else c.showDate=v==L"1";}output=std::move(c);return true;}
-template<class Reader> bool ReadCalendar(Reader get,CalendarConfiguration& output,std::wstring& error){CalendarConfiguration c;for(const auto& f:CalendarSettings){std::wstring k=f.key,v=get(f.key,f.fallback);if(!NormalizeSetting(L"Calendar",k,v,error))return false;if(k==L"TimeZone")c.timeZone=v;else if(k==L"FilePath")c.filePath=v;else if(k==L"TimeFormat")c.timeFormat=v;else if(k==L"ShowLocation")c.showLocation=v==L"1";else {int n=0;Number(v,n);if(k==L"DaysAhead")c.daysAhead=n;else if(k==L"MaxEvents")c.maxEvents=n;else c.refreshSeconds=n;}}output=std::move(c);return true;}
+template<class Reader> bool ReadCalendar(Reader get,CalendarConfiguration& output,std::wstring& error){CalendarConfiguration c;for(const auto& f:CalendarSettings){std::wstring k=f.key,v=get(f.key,f.fallback);if(!NormalizeSetting(L"Calendar",k,v,error))return false;if(k==L"Source")c.source=v;else if(k==L"TimeZone")c.timeZone=v;else if(k==L"FilePath")c.filePath=v;else if(k==L"TimeFormat")c.timeFormat=v;else if(k==L"ShowLocation")c.showLocation=v==L"1";else {int n=0;Number(v,n);if(k==L"DaysAhead")c.daysAhead=n;else if(k==L"MaxEvents")c.maxEvents=n;else c.refreshSeconds=n;}}output=std::move(c);return true;}
 inline std::wstring Time(const Civil& d,const std::wstring& format){const auto two=[](int n){return (n<10?L"0":L"")+std::to_wstring(n);};return format==L"24Hour"?two(d.hour)+L":"+two(d.minute):std::to_wstring(d.hour%12?d.hour%12:12)+L":"+two(d.minute)+(d.hour<12?L" AM":L" PM");}
 inline std::uint64_t MillisecondsToNextMinute(UTC seconds,int milliseconds=0){return static_cast<std::uint64_t>(60-(seconds%60+60)%60)*1000-static_cast<unsigned>(milliseconds>=0&&milliseconds<1000?milliseconds:0);}
 struct Timestamp {Civil civil;std::wstring zone;bool dateOnly=false,utc=false;};

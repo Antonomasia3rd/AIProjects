@@ -13,10 +13,10 @@ static bool SourceAlertTestSave(const std::wstring& path,const std::wstring& tex
 {
     ++sourceAlertSaves;sourceAlertFiles[path]=text;return true;
 }
-static void SourceAlertTestNotify(const std::wstring&,const std::wstring&,const std::wstring& message,
+static void SourceAlertTestNotify(const std::wstring&,const std::wstring& title,const std::wstring& message,
     aip::notifications::EventType type,aip::notifications::EventSound)
 {
-    ++sourceAlertNotices;sourceAlertLastMessage=message;sourceAlertLastType=type;
+    ++sourceAlertNotices;sourceAlertLastMessage=title+L"\n"+message;sourceAlertLastType=type;
 }
 static void TestSourceAlertHost()
 {

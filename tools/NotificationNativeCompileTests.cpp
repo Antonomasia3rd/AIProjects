@@ -34,6 +34,8 @@ void NotificationCompileWitness() {
     NotifyUserOperation(L"compile", L"compile", L"compile");
     NotifyOperationProgress(L"compile", L"compile", L"compile", 1, 2);
     NotifyScheduledUserEvent(L"compile",L"compile",L"compile",aip::notifications::EventType::Alarm,aip::notifications::EventSound::Silent);
+    NotifyQuietUserStatus(L"compile",L"compile",L"compile",253402300799LL,L"compile-group");
+    RemoveQuietUserStatus(L"compile",L"compile-group");
     ConfirmUserOperation(nullptr,L"compile",L"compile",L"compile",[]{});
     DrainUserConfirmations();ClearUserConfirmations();
 }

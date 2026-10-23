@@ -6,8 +6,35 @@ struct TileSourceAlertRuntime {
     std::wstring owner,path,lastSaved;
     bool persistenceWarning=false;
     ULONGLONG nextSaveAttempt=0;
+    std::wstring currentTagKey,currentGroup,currentDeliveryKey;
+    ULONGLONG nextCurrentAttempt=0;
 };
 static std::map<std::wstring,TileSourceAlertRuntime> g_tileSourceAlerts;
+static bool SaveTileSourceAlertState(TileSourceAlertRuntime& runtime);
+static void RemovePrayerCurrentStatus(const std::wstring& tileId)
+{
+    const auto found=g_tileSourceAlerts.find(tileId);if(found==g_tileSourceAlerts.end())return;
+    auto& runtime=found->second;
+    if(!runtime.currentTagKey.empty())RemoveQuietUserStatus(runtime.currentTagKey,runtime.currentGroup);
+    // This is an explicit application removal (disable, source change or
+    // invalid configuration), rather than a user dismissal in Action Center.
+    // Allow one fresh quiet entry if that setting/source becomes active again.
+    bool changed=false;
+    if(!runtime.currentDeliveryKey.empty()) {
+        const auto delivered=std::find(runtime.state.delivered.begin(),runtime.state.delivered.end(),runtime.currentDeliveryKey);
+        if(delivered!=runtime.state.delivered.end()){runtime.state.delivered.erase(delivered);changed=true;}
+    }
+    runtime.currentTagKey.clear();runtime.currentGroup.clear();runtime.currentDeliveryKey.clear();runtime.nextCurrentAttempt=0;
+    if(changed)SaveTileSourceAlertState(runtime);
+}
+static void ClearPrayerCurrentStatuses()
+{
+    for(const auto& entry:g_tileSourceAlerts)RemovePrayerCurrentStatus(entry.first);
+}
+static void PrunePrayerCurrentStatuses(const std::set<std::wstring>& used)
+{
+    for(const auto& entry:g_tileSourceAlerts)if(!used.count(entry.first))RemovePrayerCurrentStatus(entry.first);
+}
 #ifdef DESKTOPSTUB_INERT_HARDWARE
 static bool (*g_testLoadSourceAlerts)(const std::wstring&,const std::wstring&,aip::notifications::AlertState&)=nullptr;
 static bool (*g_testSaveSourceAlerts)(const std::wstring&,const std::wstring&)=nullptr;
@@ -79,13 +106,14 @@ static std::wstring SourceAlertReplace(std::wstring text,const std::wstring& tok
 static TileSourceAlertRuntime* TileSourceAlertState(const aip::content::TileInstance& tile,const std::wstring& source)
 {
     std::wstring profile;{std::lock_guard<std::mutex> lock(g_pathMutex);profile=aip::MakeAbsolutePath(g_iniPath);}
-    const auto user=CurrentTileRegistrationUserScope();if(user.empty()||profile.empty())return nullptr;
+    const auto user=CurrentTileRegistrationUserScope();if(user.empty()||profile.empty()){RemovePrayerCurrentStatus(tile.id);return nullptr;}
     const auto profilePath=profile;
     profile=ToLowerCopy(profile);
     const auto owner=aip::notifications::StableId(user+L"|"+profile+L"|"+tile.id);
     const auto scope=aip::notifications::StableId(owner+L"|"+source);
     auto& runtime=g_tileSourceAlerts[tile.id];
     if(runtime.owner!=owner||runtime.state.scope!=scope) {
+        RemovePrayerCurrentStatus(tile.id);
         runtime={};runtime.owner=owner;runtime.path=profilePath+L".alerts."+owner;
         aip::notifications::SetAlertScope(runtime.state,scope);
         LoadTileSourceAlertState(runtime.path,scope,runtime.state);
@@ -95,6 +123,7 @@ static TileSourceAlertRuntime* TileSourceAlertState(const aip::content::TileInst
 }
 static void ObserveRssTileAlerts(const aip::content::TileInstance& tile,const RssFeedSnapshot& feed)
 {
+    RemovePrayerCurrentStatus(tile.id); // A reused tile ID must not retain its former prayer card.
     aip::notifications::AlertSettings settings;
     if(!feed.ok||feed.items.empty()||!ReadTileSourceAlerts(tile,settings))return;
     const auto source=aip::content::TileInstanceRead(tile,IniReadS,L"RssFeed",L"FeedUrl",L"");
@@ -106,27 +135,70 @@ static void ObserveRssTileAlerts(const aip::content::TileInstance& tile,const Rs
     const auto count=aip::notifications::ObserveRss(runtime->state,identities,now,settings,NotificationAllowed(false));
     SaveTileSourceAlertState(*runtime);
     if(!count)return;
-    auto message=IniReadS(L"Strings",L"NotificationRssNewItems",L"%count% new items in %tile%.");
-    message=SourceAlertReplace(message,L"%count%",std::to_wstring(count));message=SourceAlertReplace(message,L"%tile%",tile.name);
-    EmitTileSourceAlert(L"rss-new-"+runtime->owner,IniReadS(L"Strings",L"NotificationRssTitle",L"Feed updated"),message,settings.type,settings.sound);
+    auto title=settings.title.empty()?IniReadS(L"Strings",L"NotificationRssTitle",L"Feed updated"):settings.title;
+    auto message=settings.body.empty()?IniReadS(L"Strings",L"NotificationRssNewItems",L"%count% new items in %tile%."):settings.body;
+    const auto format=[&](std::wstring text){text=SourceAlertReplace(text,L"%count%",std::to_wstring(count));return SourceAlertReplace(text,L"%tile%",tile.name);};
+    EmitTileSourceAlert(L"rss-new-"+runtime->owner,format(title),format(message),settings.type,settings.sound);
+}
+static std::wstring PrayerNotificationTime(aip::prayer::UTC utc,int offset,const aip::prayer::Configuration& cfg,
+    const aip::notifications::AlertSettings& settings)
+{
+    if(settings.timeFormat==L"System") {
+        const auto local=aip::prayer::DateAtUTC(utc,offset);
+        const auto seconds=utc+static_cast<aip::prayer::UTC>(offset)*60;
+        const auto within=seconds-aip::prayer::FloorDay(seconds)*86400;
+        SYSTEMTIME system{};system.wYear=static_cast<WORD>(local.year);system.wMonth=static_cast<WORD>(local.month);system.wDay=static_cast<WORD>(local.day);
+        system.wHour=static_cast<WORD>(within/3600);system.wMinute=static_cast<WORD>(within%3600/60);
+        wchar_t text[128]{};if(GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT,TIME_NOSECONDS,&system,nullptr,text,static_cast<int>(std::size(text))))return text;
+    }
+    const bool twentyFour=settings.timeFormat==L"24Hour"||(settings.timeFormat==L"Inherit"&&cfg.twentyFourHour);
+    return aip::prayer::TimeText(utc,offset,twentyFour);
+}
+static std::wstring PrayerNotificationText(std::wstring text,const aip::content::TileInstance& tile,
+    aip::prayer::PrayerId event,aip::prayer::UTC utc,int offset,aip::prayer::UTC now,const aip::notifications::AlertSettings& settings)
+{
+    const auto& cfg=tile.configuration.prayer;
+    const auto minutes=(std::max)(aip::prayer::UTC(0),(utc-now+59)/60);
+    for(const auto& entry:std::vector<std::pair<std::wstring,std::wstring>>{{L"%event%",aip::prayer::PrayerName(event)},
+        {L"%minutes%",std::to_wstring(minutes)},{L"%time%",PrayerNotificationTime(utc,offset,cfg,settings)},
+        {L"%city%",cfg.city},{L"%country%",cfg.country},{L"%tile%",tile.name}})text=SourceAlertReplace(text,entry.first,entry.second);
+    return text;
 }
 static void ObservePrayerTileAlerts(const aip::content::TileInstance& tile,const aip::prayer::Data& data,aip::prayer::UTC now)
 {
-    aip::notifications::AlertSettings settings;if(!ReadTileSourceAlerts(tile,settings)||!NotificationAllowed(false))return;
+    aip::notifications::AlertSettings settings;
+    if(!ReadTileSourceAlerts(tile,settings)||!NotificationAllowed(false)){RemovePrayerCurrentStatus(tile.id);return;}
     const auto& cfg=tile.configuration.prayer;
-    if(cfg.city.empty()||cfg.country.empty()||data.configKey!=aip::prayer::ConfigurationKey(cfg))return;
+    if(cfg.city.empty()||cfg.country.empty()||data.configKey!=aip::prayer::ConfigurationKey(cfg)){RemovePrayerCurrentStatus(tile.id);return;}
     auto* runtime=TileSourceAlertState(tile,L"prayer|"+aip::prayer::ConfigurationKey(cfg));if(!runtime)return;
     const auto events=aip::notifications::DuePrayers(cfg,data,now,settings,runtime->state);
-    if(events.empty())return;
     SaveTileSourceAlertState(*runtime);
     for(const auto& event:events) {
-        const auto minutes=(std::max)(aip::prayer::UTC(0),(event.eventUtc-now+59)/60);
-        auto message=IniReadS(L"Strings",minutes?L"NotificationPrayerBefore":L"NotificationPrayerNow",
-            minutes?L"%event% in %minutes% minutes at %city% (%time%).":L"It is time for %event% at %city% (%time%).");
-        message=SourceAlertReplace(message,L"%event%",aip::prayer::PrayerName(event.event));
-        message=SourceAlertReplace(message,L"%minutes%",std::to_wstring(minutes));message=SourceAlertReplace(message,L"%city%",cfg.city);
-        message=SourceAlertReplace(message,L"%time%",aip::prayer::TimeText(event.eventUtc,event.offsetMinutes,cfg.twentyFourHour));
+        const bool upcoming=event.phase==aip::notifications::PrayerAlertPhase::Upcoming;
         EmitTileSourceAlert(L"prayer-"+runtime->owner+L"-"+event.key,
-            IniReadS(L"Strings",L"NotificationPrayerTitle",L"Prayer times"),message,settings.type,settings.sound);
+            PrayerNotificationText(upcoming?settings.upcomingTitle:settings.atTimeTitle,tile,event.event,event.eventUtc,event.offsetMinutes,now,settings),
+            PrayerNotificationText(upcoming?settings.upcomingBody:settings.atTimeBody,tile,event.event,event.eventUtc,event.offsetMinutes,now,settings),settings.type,settings.sound);
     }
+    const auto current=aip::notifications::CurrentPrayer(cfg,data,now,settings);
+    if(aip::notifications::ParseApi(IniReadS(L"Settings",L"NotificationApi",L"Auto"))==aip::notifications::Api::Balloon){
+        RemovePrayerCurrentStatus(tile.id);SaveTileSourceAlertState(*runtime);return;
+    }
+    if(!current.available){RemovePrayerCurrentStatus(tile.id);SaveTileSourceAlertState(*runtime);return;}
+    const auto title=PrayerNotificationText(settings.currentTitle,tile,current.event,current.eventUtc,current.offsetMinutes,now,settings);
+    const auto body=PrayerNotificationText(settings.currentBody,tile,current.event,current.eventUtc,current.offsetMinutes,now,settings);
+    const auto delivery=aip::notifications::StableId(current.key+L"|"+std::to_wstring(current.endUtc)+L"|"+title+L"|"+body);
+    if(runtime->currentDeliveryKey!=delivery) {
+        runtime->currentTagKey=L"prayer-current-"+runtime->owner;
+        runtime->currentGroup=NotificationGroup();runtime->currentDeliveryKey=delivery;runtime->nextCurrentAttempt=0;
+    }
+    // A dismissed history entry stays dismissed, including across a restart.
+    // Its native expiration removes it at the next actual prayer even if the
+    // resident exits. Content changes or the next prayer get a new delivery ID.
+    if(std::find(runtime->state.delivered.begin(),runtime->state.delivered.end(),delivery)==runtime->state.delivered.end()&&
+        GetTickCount64()>=runtime->nextCurrentAttempt) {
+        if(NotifyQuietUserStatus(runtime->currentTagKey,title,body,current.endUtc,runtime->currentGroup))
+            aip::notifications::Remember(runtime->state.delivered,delivery,128);
+        else runtime->nextCurrentAttempt=GetTickCount64()+30000;
+    }
+    SaveTileSourceAlertState(*runtime);
 }

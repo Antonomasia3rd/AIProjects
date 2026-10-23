@@ -3,6 +3,8 @@
 #define NOMINMAX
 #include <windows.h>
 #include <atomic>
+#include <chrono>
+#include <ctime>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -15,6 +17,14 @@
 #include "../dependencies/tile_source_alerts.h"
 #include "../dependencies/notification_confirmation.h"
 
+// Capture the actual source payload requested by the adapter without changing
+// either operating-system transport or the production hook signature.
+namespace notification_policy_fixture { static std::wstring sourceXml; }
+namespace aip::notifications {
+inline std::wstring NotificationPolicySourceEventXml(const std::wstring& title,const std::wstring& message,EventType type,EventSound sound) {
+    auto xml=SourceEventXml(title,message,type,sound);notification_policy_fixture::sourceXml=xml;return xml;
+}
+}
 namespace {
 using aip::notifications::Progress;
 int checks = 0;
@@ -40,6 +50,11 @@ DWORD lastBalloonIcon=0;
 std::wstring lastTitle, lastMessage, lastKey;
 bool hadProgress = false;
 Progress lastProgress;
+unsigned quietCalls=0,removeCalls=0;
+bool quietSucceeds=true,removeSucceeds=true;
+aip::notifications::NativeNoticeOptions lastQuietOptions;
+std::wstring lastRemovedKey,lastRemovedGroup;
+std::map<std::pair<std::wstring,std::wstring>,std::wstring> quietHistory;
 bool TestIdentity() { return identity; }
 bool TestBalloon(const std::wstring& title, const std::wstring& message, DWORD icon, bool) {
     lastBalloonIcon=icon;
@@ -49,10 +64,22 @@ bool TestToast(const std::wstring& key, const std::wstring& title, const std::ws
     ++toastCalls; lastKey = key; lastTitle = title; lastMessage = message;
     hadProgress = progress != nullptr; if (progress) lastProgress = *progress; return toastSucceeds;
 }
+bool TestQuietToast(const std::wstring& key,const std::wstring& title,const std::wstring& message,const aip::notifications::NativeNoticeOptions& options) {
+    ++quietCalls;lastKey=key;lastTitle=title;lastMessage=message;lastQuietOptions=options;
+    if(quietSucceeds)quietHistory[{options.group,aip::notifications::StableId(key)}]=message;
+    return quietSucceeds;
+}
+bool TestRemoveToast(const std::wstring& key,const std::wstring& group) {
+    ++removeCalls;lastRemovedKey=key;lastRemovedGroup=group;
+    if(removeSucceeds)quietHistory.erase({group,aip::notifications::StableId(key)});
+    return removeSucceeds;
+}
 #define DESKTOPSTUB_TEST_NOTIFICATION_IDENTITY TestIdentity
 #define DESKTOPSTUB_TEST_NOTIFICATION_BALLOON TestBalloon
 #define DESKTOPSTUB_TEST_NOTIFICATION_TOAST TestToast
+#define SourceEventXml NotificationPolicySourceEventXml
 #include "../dependencies/DesktopStub/ga_notifications.inc"
+#undef SourceEventXml
 
 void TestModel() {
     using namespace aip::notifications;
@@ -152,8 +179,69 @@ void TestAdapter() {
     QueueUserConfirmationAction(L"review");DrainUserConfirmations();
     Check(approved==0&&g_confirmations.Entries().empty(),"notification body activation does not approve an operation");
 }
+void TestQuietStatus() {
+    g_notificationsEnabled=true;g_commandLine.renderOnly=false;g_commandLine.configureOnly=false;
+    settings.clear();identity=true;toastSucceeds=true;quietSucceeds=removeSucceeds=true;
+    g_notificationToastRetryAfter=0;quietCalls=removeCalls=balloonCalls=toastCalls=0;quietHistory.clear();
+    g_testQuietNotificationToast=TestQuietToast;g_testRemoveNotificationToast=TestRemoveToast;
+    const auto now=std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto expires=now+3600;
+    const auto ownGroup=aip::notifications::StableId(L"private-profile/prayer-one");
+    const auto siblingGroup=aip::notifications::StableId(L"private-profile/prayer-two");
+    const auto ownTag=std::make_pair(ownGroup,aip::notifications::StableId(L"current-prayer"));
+    Check(NotifyQuietUserStatus(L"current-prayer",L"Dhuhr <fixture>",L"Until 3:00 PM & next prayer",expires,ownGroup)&&
+        quietCalls==1&&toastCalls==0&&balloonCalls==0,"quiet status uses only its injected native history transport");
+    Check(lastQuietOptions.suppressPopup&&lastQuietOptions.expirationUtc==expires&&lastQuietOptions.group==ownGroup,
+        "quiet status suppresses popups and preserves exact expiry and owned notification group");
+    const auto xml=notification_policy_fixture::sourceXml;
+    Check(xml.find(L"<audio silent=\"true\"/>")!=std::wstring::npos&&xml.find(L"scenario=")==std::wstring::npos&&
+        xml.find(L"loop=\"true\"")==std::wstring::npos&&xml.find(L"<actions>")==std::wstring::npos&&
+        xml.find(L"Dhuhr &lt;fixture&gt;")!=std::wstring::npos&&xml.find(L"&amp; next prayer")!=std::wstring::npos,
+        "actual quiet adapter payload is silent general history content with escaped text and no alarm actions");
+    Check(NotifyQuietUserStatus(L"current-prayer",L"Asr",L"Updated current prayer",expires+60,ownGroup)&&quietHistory.size()==1&&
+        quietHistory.at(ownTag)==L"Updated current prayer","same quiet key/group replaces its existing history entry instead of accumulating copies");
+    Check(NotifyQuietUserStatus(L"current-prayer",L"Sibling",L"Keep sibling",expires,siblingGroup)&&quietHistory.size()==2,
+        "identical quiet keys in separate owned groups remain independent");
+    Check(RemoveQuietUserStatus(L"current-prayer",ownGroup)&&removeCalls==1&&lastRemovedKey==L"current-prayer"&&lastRemovedGroup==ownGroup&&
+        quietHistory.count(ownTag)==0&&quietHistory.count({siblingGroup,aip::notifications::StableId(L"current-prayer")})==1,
+        "quiet cleanup targets the stable owned key/group while preserving sibling notification history");
+    const auto beforeRemove=removeCalls;
+    Check(RemoveQuietUserStatus(L"",ownGroup)&&RemoveQuietUserStatus(L"current-prayer",L"")&&removeCalls==beforeRemove,
+        "empty quiet removal identities cannot turn into a blanket history clear");
+    const auto quietBefore=quietCalls;
+    Check(!NotifyQuietUserStatus(L"expired",L"Expired",L"Do not show",now-1,ownGroup)&&
+        !NotifyQuietUserStatus(L"invalid-time",L"Invalid",L"Do not show",253402300800LL,ownGroup)&&quietCalls==quietBefore,
+        "expired and out-of-range quiet lifetimes reject before native transport");
+    settings[{L"Settings",L"NotificationApi"}]=L"Balloon";
+    Check(!NotifyQuietUserStatus(L"legacy",L"Legacy",L"Do not pop up",expires,ownGroup)&&quietCalls==quietBefore&&balloonCalls==0,
+        "forced legacy mode disables quiet history instead of inventing a balloon popup equivalent");
+    settings[{L"Settings",L"NotificationApi"}]=L"Toast";identity=false;
+    Check(!NotifyQuietUserStatus(L"unpackaged",L"No identity",L"No fallback",expires,ownGroup)&&quietCalls==quietBefore&&balloonCalls==0,
+        "quiet status without existing identity creates no package and has no balloon fallback");
+    identity=true;g_notificationsEnabled=false;
+    Check(!NotifyQuietUserStatus(L"muted",L"Muted",L"Do not show",expires,ownGroup)&&quietCalls==quietBefore&&balloonCalls==0,
+        "master-off suppresses quiet status as well as normal notification delivery");
+    Check(RemoveQuietUserStatus(L"current-prayer",siblingGroup)&&quietHistory.empty(),
+        "master-off still permits targeted removal of an already-owned quiet history entry");
+    g_notificationsEnabled=true;
+    for(bool* offline:{&g_commandLine.renderOnly,&g_commandLine.configureOnly}){
+        *offline=true;Check(!NotifyQuietUserStatus(L"offline",L"Offline",L"No native effect",expires,ownGroup)&&quietCalls==quietBefore,
+            "offline render/configure modes cannot create quiet history");*offline=false;
+    }
+    DispatchUserNotification(L"ordinary",L"Ordinary",L"Normal notification",NIIF_INFO,false);
+    Check(toastCalls==1&&quietCalls==quietBefore&&lastKey==L"ordinary"&&balloonCalls==0,
+        "quiet status options do not leak into ordinary native notification dispatch");
+    quietSucceeds=false;
+    Check(!NotifyQuietUserStatus(L"failed",L"Failed",L"No fallback",expires,ownGroup)&&quietCalls==quietBefore+1&&balloonCalls==0&&
+        g_notificationToastRetryAfter>GetTickCount64(),"quiet native failure is backoff-limited and never falls back to a popup balloon");
+    Check(!NotifyQuietUserStatus(L"backoff",L"Backoff",L"No retry",expires,ownGroup)&&quietCalls==quietBefore+1&&balloonCalls==0,
+        "quiet failure backoff prevents repeated native attempts");
+    removeSucceeds=false;Check(!RemoveQuietUserStatus(L"failed",ownGroup)&&balloonCalls==0,"quiet cleanup failure reports failure without creating a replacement notification");
+    g_testQuietNotificationToast=nullptr;g_testRemoveNotificationToast=nullptr;g_notificationToastRetryAfter=0;
+    settings.clear();quietHistory.clear();identity=toastSucceeds=true;
+}
 }
 int main() {
-    try { TestModel(); TestAdapter(); std::cout << checks << " notification policy/adapter checks; 0 failures\n"; return 0; }
+    try { TestModel(); TestAdapter(); TestQuietStatus(); std::cout << checks << " notification policy/adapter checks; 0 failures\n"; return 0; }
     catch (const std::exception& error) { std::cerr << "FAIL after " << checks << " checks: " << error.what() << '\n'; return 1; }
 }

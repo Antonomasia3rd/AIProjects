@@ -201,6 +201,8 @@ static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn
     aip::content::TileInstanceConfiguration cfg; std::wstring error;
     if (!ReadCurrentTileInstances(cfg, error)){NotifyTileActivationProblem(id,error,false);return false;}
     for (const auto& tile : cfg.tiles) if (tile.id == id) {
+        if(signIn&&tile.type==aip::content::TileInstanceType::Calendar)return OpenGoogleCalendarSetup(owner,tile.id);
+        if(signIn&&tile.type==aip::content::TileInstanceType::Wuwa)return OpenKuroSignInForTile(owner,tile.id);
         const auto resource = aip::content::DescribeTileInstanceType(tile.type).notesResource;
         if (resource >= 0) {
             const auto& account = tile.configuration.notes.accounts[resource];
@@ -2386,12 +2388,15 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             messageLoopExitCode = 1;
             break;
         }
+        if(IsGoogleCalendarSetupMessage(msg))continue;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
 
     ShutdownSecondaryTileUi();
     CloseEmbeddedNotesSignIns();
+    CloseKuroSignIns();
+    CloseGoogleCalendarSetups();
     ShutdownMediaTileActions();
     KillTimer(g_hwnd, APPX_ACTIVATION_REQUEST_TIMER_ID);
     g_running=false;

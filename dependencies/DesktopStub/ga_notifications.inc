@@ -2,6 +2,8 @@
 // persistent notification worker. Toasts use the identity DesktopStub already has.
 #include "../notification_policy.h"
 #include "../tile_source_alerts.h"
+#include <chrono>
+#include <ctime>
 #ifndef DESKTOPSTUB_TEST_NOTIFICATION_TOAST
 #include "../winrt_activation.h"
 #endif
@@ -11,6 +13,11 @@ static aip::notifications::ProgressTracker g_notificationProgress;
 static std::map<std::wstring, std::pair<std::wstring, ULONGLONG>> g_notificationRecent;
 static std::map<std::wstring, bool> g_notificationToastStarted;
 static std::atomic<ULONGLONG> g_notificationToastRetryAfter(0);
+#if defined(DESKTOPSTUB_INERT_HARDWARE) || defined(DESKTOPSTUB_TEST_NOTIFICATION_TOAST)
+static bool (*g_testQuietNotificationToast)(const std::wstring&,const std::wstring&,const std::wstring&,
+    const aip::notifications::NativeNoticeOptions&)=nullptr;
+static bool (*g_testRemoveNotificationToast)(const std::wstring&,const std::wstring&)=nullptr;
+#endif
 
 static bool NotificationExistingIdentity()
 {
@@ -61,13 +68,16 @@ static std::wstring NotificationGroup()
 }
 
 static bool NotificationToast(const std::wstring& key, const std::wstring& title, const std::wstring& message,
-    const aip::notifications::Progress* progress, const std::wstring& customXml = {})
+    const aip::notifications::Progress* progress, const std::wstring& customXml = {},
+    const aip::notifications::NativeNoticeOptions* options = nullptr)
 {
 #ifdef DESKTOPSTUB_TEST_NOTIFICATION_TOAST
     (void)customXml;
+    if(options&&options->suppressPopup)return g_testQuietNotificationToast&&g_testQuietNotificationToast(key,title,message,*options);
     return DESKTOPSTUB_TEST_NOTIFICATION_TOAST(key, title, message, progress);
 #elif defined(DESKTOPSTUB_INERT_HARDWARE)
-    (void)key; (void)title; (void)message; (void)progress; (void)customXml; return false;
+    (void)progress; (void)customXml;
+    return options&&options->suppressPopup&&g_testQuietNotificationToast&&g_testQuietNotificationToast(key,title,message,*options);
 #else
     const HRESULT initialized = RoInitialize(RO_INIT_MULTITHREADED);
     struct ApartmentCleanup { HRESULT result; ~ApartmentCleanup() { if (SUCCEEDED(result)) RoUninitialize(); } } cleanup{initialized};
@@ -86,7 +96,7 @@ static bool NotificationToast(const std::wstring& key, const std::wstring& title
             setting == NotificationSetting::DisabledByGroupPolicy) return true; // Respect Windows settings; do not escape through balloons.
         if (setting == NotificationSetting::DisabledByManifest) return false; // Capability unavailable, legacy API is still supported.
         const auto tag = aip::notifications::StableId(key);
-        const auto group = NotificationGroup();
+        const auto group = options&&!options->group.empty()?options->group:NotificationGroup();
         const auto operation = group + tag;
         bool toastStarted = false;
         {
@@ -117,6 +127,13 @@ static bool NotificationToast(const std::wstring& key, const std::wstring& title
         const auto toastFactory = aip::AcquireUncachedActivationFactory<ToastNotification, IToastNotificationFactory>();
         auto toast = toastFactory.CreateToastNotification(xml);
         toast.Tag(tag); toast.Group(group);
+        if(options) {
+            toast.SuppressPopup(options->suppressPopup);
+            if(options->expirationUtc>0){
+                const auto expires=winrt::clock::from_time_t(static_cast<time_t>(options->expirationUtc));
+                toast.ExpirationTime(winrt::box_value(expires).as<winrt::Windows::Foundation::IReference<winrt::Windows::Foundation::DateTime>>());
+            }
+        }
         if (progress && !progress->finished) toast.Data(data);
         notifier.Show(toast);
         if (progress)
@@ -132,11 +149,53 @@ static bool NotificationToast(const std::wstring& key, const std::wstring& title
     }
     catch (const winrt::hresult_error& error)
     {
-        LogText(L"[!] Notification toast failed; trying the tray balloon API (HRESULT " + std::to_wstring(static_cast<long>(error.code())) + L").");
+        LogText(std::wstring(options&&options->suppressPopup?L"[!] Quiet notification could not be updated (HRESULT ":
+            L"[!] Notification toast failed; trying the tray balloon API (HRESULT ") + std::to_wstring(static_cast<long>(error.code())) + L").");
         return false;
     }
     catch (...) { return false; }
 #endif
+}
+
+static bool RemoveQuietUserStatus(const std::wstring& key,const std::wstring& group)
+{
+    if(key.empty()||group.empty())return true;
+#if defined(DESKTOPSTUB_INERT_HARDWARE) || defined(DESKTOPSTUB_TEST_NOTIFICATION_TOAST)
+    return g_testRemoveNotificationToast&&g_testRemoveNotificationToast(key,group);
+#else
+    const HRESULT initialized=RoInitialize(RO_INIT_MULTITHREADED);
+    struct Cleanup{HRESULT result;~Cleanup(){if(SUCCEEDED(result))RoUninitialize();}}cleanup{initialized};
+    if(FAILED(initialized)&&initialized!=RPC_E_CHANGED_MODE)return false;
+    try{
+        using namespace winrt::Windows::UI::Notifications;
+        UINT32 size=0;
+        if(GetCurrentApplicationUserModelId(&size,nullptr)!=ERROR_INSUFFICIENT_BUFFER||size<2||size>1024)return false;
+        std::vector<wchar_t> id(size);if(GetCurrentApplicationUserModelId(&size,id.data())!=ERROR_SUCCESS)return false;
+        const auto manager=aip::AcquireUncachedActivationFactory<ToastNotificationManager,IToastNotificationManagerStatics2>();
+        manager.History().Remove(aip::notifications::StableId(key),group,id.data());
+        return true;
+    }catch(...){return false;}
+#endif
+}
+
+static bool NotifyQuietUserStatus(const std::wstring& key,const std::wstring& title,const std::wstring& message,
+    std::int64_t expirationUtc,const std::wstring& group)
+{
+    // A balloon is a popup and has no persistent history/expiry equivalent.
+    // Respect the selected API and OS notification policy without fallback.
+    bool existingIdentity=NotificationExistingIdentity();
+#if defined(DESKTOPSTUB_INERT_HARDWARE) && !defined(DESKTOPSTUB_TEST_NOTIFICATION_IDENTITY)
+    existingIdentity=g_testQuietNotificationToast!=nullptr; // Injected sink only; never native identity creation.
+#endif
+    if(!NotificationAllowed(false)||!existingIdentity||
+        aip::notifications::ParseApi(IniReadS(L"Settings",L"NotificationApi",L"Auto"))==aip::notifications::Api::Balloon||
+        GetTickCount64()<g_notificationToastRetryAfter.load())return false;
+    const auto now=std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    if(expirationUtc<=now||expirationUtc>253402300799LL)return false;
+    const aip::notifications::NativeNoticeOptions options{true,expirationUtc,group};
+    if(NotificationToast(key,title,message,nullptr,aip::notifications::SourceEventXml(title,message,
+        aip::notifications::EventType::General,aip::notifications::EventSound::Silent),&options))return true;
+    g_notificationToastRetryAfter=GetTickCount64()+30000;return false;
 }
 
 static aip::notifications::Api ConfiguredNotificationApi()

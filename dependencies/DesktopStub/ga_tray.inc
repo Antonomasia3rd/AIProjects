@@ -8,6 +8,8 @@ static bool RecoverInterruptedDesktopHostSetup();
 #include "ga_quick_actions.inc"
 #include "ga_gallery_tray.inc"
 #include "ga_tile_instance_tray.inc"
+#include "ga_kuro_signin.inc"
+#include "ga_google_calendar_setup.inc"
 #include "ga_desktop_host_setup.inc"
 #include "ga_menu_wording.inc"
 #include "ga_tray_menu.inc"

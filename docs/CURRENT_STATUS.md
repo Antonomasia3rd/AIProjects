@@ -11,6 +11,17 @@ is enabled and its focused native recheck passed.
 
 ## Saved and installed
 
+- October 24 accounts/notifications: Calendar now supports explicit Google
+  browser sign-in with a per-tile calendar picker and protected refresh grant.
+  Overseas WuWa has guided Kuro email/password sign-in, human verification and
+  character selection. Prayer has independent upcoming, at-time and quiet
+  current-status templates/time formats. Notifications are directly under each
+  Prayer/RSS tile; technical source fields are under Advanced. Explicit alert
+  demand works without Start pins or image publication. See the
+  [account/notification record](calendar-accounts-prayer-notifications-2026-10-24.md)
+  for tests, delivery and remaining real account acceptance. The supplied Google
+  Desktop client is imported locally; account consent remains a user action.
+
 - October 24: Calendar Small and date-only Medium layouts now follow the actual
   installed native builders, and Clock follows its traced XML/formatter contract
   across sizes. Locale-aware Small weekdays, native Clock branding/direction,
