@@ -26,7 +26,7 @@ inline std::wstring Trim(const std::wstring& v){const auto a=v.find_first_not_of
 inline bool Number(const std::wstring& v,int& n){if(v.empty()||v.size()>8)return false;n=0;for(auto c:v){if(c<L'0'||c>L'9')return false;n=n*10+c-L'0';}return true;}
 inline bool SafeText(const std::wstring& v,std::size_t max){return v.size()<=max&&v.find_first_of(std::wstring(L"\r\n\0",3))==std::wstring::npos;}
 struct Setting {const wchar_t* key;const wchar_t* fallback;};
-inline constexpr Setting ClockSettings[]={{L"TimeZone",L"Local"},{L"TimeFormat",L"12Hour"},{L"Location",L""},{L"ShowDate",L"1"}};
+inline constexpr Setting ClockSettings[]={{L"TimeZone",L"Local"},{L"TimeFormat",L"System"},{L"Location",L""},{L"ShowDate",L"1"}};
 inline constexpr Setting CalendarSettings[]={{L"TimeZone",L"Local"},{L"FilePath",L""},{L"DaysAhead",L"7"},{L"MaxEvents",L"3"},{L"RefreshSeconds",L"60"},{L"ShowLocation",L"1"},{L"TimeFormat",L"12Hour"}};
 inline bool NormalizeSetting(const std::wstring& section,std::wstring& key,std::wstring& value,std::wstring& error){
     const bool clock=Lower(section)==L"clock";if(!clock&&Lower(section)!=L"calendar"){error=L"Unknown date/time source.";return false;}
@@ -41,7 +41,7 @@ inline bool NormalizeSetting(const std::wstring& section,std::wstring& key,std::
     else {int n=0;if(!Number(value,n)||(k==L"daysahead"?(n<1||n>366):k==L"maxevents"?(n<1||n>10):(n<30||n>86400)))return fail(L"number is outside its supported range.");value=std::to_wstring(n);}
     error.clear();return true;
 }
-struct ClockConfiguration {std::wstring timeZone=L"Local",timeFormat=L"12Hour",location;bool showDate=true;};
+struct ClockConfiguration {std::wstring timeZone=L"Local",timeFormat=L"System",location;bool showDate=true;};
 struct CalendarConfiguration {std::wstring timeZone=L"Local",filePath,timeFormat=L"12Hour";int daysAhead=7,maxEvents=3,refreshSeconds=60;bool showLocation=true;};
 template<class Reader> bool ReadClock(Reader get,ClockConfiguration& output,std::wstring& error){ClockConfiguration c;for(const auto& f:ClockSettings){std::wstring k=f.key,v=get(f.key,f.fallback);if(!NormalizeSetting(L"Clock",k,v,error))return false;if(k==L"TimeZone")c.timeZone=v;else if(k==L"TimeFormat")c.timeFormat=v;else if(k==L"Location")c.location=v;else c.showDate=v==L"1";}output=std::move(c);return true;}
 template<class Reader> bool ReadCalendar(Reader get,CalendarConfiguration& output,std::wstring& error){CalendarConfiguration c;for(const auto& f:CalendarSettings){std::wstring k=f.key,v=get(f.key,f.fallback);if(!NormalizeSetting(L"Calendar",k,v,error))return false;if(k==L"TimeZone")c.timeZone=v;else if(k==L"FilePath")c.filePath=v;else if(k==L"TimeFormat")c.timeFormat=v;else if(k==L"ShowLocation")c.showLocation=v==L"1";else {int n=0;Number(v,n);if(k==L"DaysAhead")c.daysAhead=n;else if(k==L"MaxEvents")c.maxEvents=n;else c.refreshSeconds=n;}}output=std::move(c);return true;}

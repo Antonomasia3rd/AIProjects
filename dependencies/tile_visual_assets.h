@@ -7,7 +7,7 @@
 namespace aip { namespace tile_visual {
 enum class Glyph { Music, Feed, Genshin, StarRail, Zenless, Chat, Toggle, Play, Pause,
     Previous, Next, Repeat, Shuffle, VolumeDown, VolumeUp, Stop, Unknown,
-    RepeatOff, RepeatTrack, ShuffleOff, Resin, Stamina, Charge, Photo, Prayer, Clock, Calendar, Game, Desktop };
+    RepeatOff, RepeatTrack, ShuffleOff, Resin, Stamina, Charge, Photo, Prayer, Clock, Calendar, Game, Desktop, WorldClock };
 struct Topic { const wchar_t* key; Glyph glyph; std::uint32_t rgb; };
 inline constexpr Topic Topics[] = {
     {L"smtc", Glyph::Music, 0x159b91}, {L"rss", Glyph::Feed, 0xe77924},
@@ -25,7 +25,8 @@ inline constexpr Topic Topics[] = {
     {L"stamina", Glyph::Stamina, 0x7756bd}, {L"charge", Glyph::Charge, 0xbf8c17},
     {L"gallery", Glyph::Photo, 0x477dac}, {L"prayer", Glyph::Prayer, 0x16876b},
     {L"desktop", Glyph::Desktop, 0x477dac},
-    {L"clock",Glyph::Clock,0x477dac},{L"calendar",Glyph::Calendar,0x477dac},{L"wuwa",Glyph::Game,0x477dac}
+    {L"clock",Glyph::Clock,0x477dac},{L"worldclock",Glyph::WorldClock,0x477dac},
+    {L"calendar",Glyph::Calendar,0x477dac},{L"wuwa",Glyph::Game,0x477dac}
 };
 inline const Topic* FindTopic(std::wstring key) {
     const std::wstring source = L"AipSource_", action = L"AipAction_";
@@ -39,7 +40,7 @@ inline const Topic* FindTopic(std::wstring key) {
     for (auto& ch : key) if (ch >= L'A' && ch <= L'Z') ch += L'a' - L'A';
     if (sourceId) {
         bool known = false;
-        for (const auto* item : {L"smtc", L"rss", L"genshin", L"hsr", L"zzz", L"discord", L"prayer",L"clock",L"calendar",L"wuwa"}) known = known || key == item;
+        for (const auto* item : {L"smtc", L"rss", L"genshin", L"hsr", L"zzz", L"discord", L"prayer",L"clock",L"worldclock",L"calendar",L"wuwa"}) known = known || key == item;
         if (!known) return nullptr;
     }
     if (actionId) {
@@ -87,6 +88,10 @@ inline NativeGlyph NativeGlyphFor(Glyph glyph) {
     case Glyph::Desktop: return {0xe977,0,false}; // Microsoft PC1 glyph, distinct from Photo.
     case Glyph::Prayer: return {0xe708, 0, false}; // Crescent moon; verified font availability gates native rendering.
     case Glyph::Clock: return {0xe917,0,false};
+    // The installed Clock app uses a composite clock/globe image, not the
+    // generic Clock character. Draw our own geometry until a matching native
+    // font glyph is verified; never substitute an unverified PUA codepoint.
+    case Glyph::WorldClock: return {};
     case Glyph::Calendar: return {0xe787,0,false};
     case Glyph::Game: return {0xe7fc,0,false};
     default: return {};

@@ -8,6 +8,8 @@ struct ContentDateTimeView {
     std::wstring time,weekday,dayNumber,date,location,status;
     std::vector<ContentDateTimeEvent> events;
     std::uint64_t nextDelayMs=60000;
+    std::wstring shortWeekday;
+    bool rightToLeft=false;
 };
 static SYSTEMTIME DateTimeSystemTime(const aip::datetime::Civil& c) {
     SYSTEMTIME s{};s.wYear=static_cast<WORD>(c.year);s.wMonth=static_cast<WORD>(c.month);s.wDay=static_cast<WORD>(c.day);
@@ -54,13 +56,28 @@ static std::wstring ContentDateTimeFormat(const aip::datetime::Civil& civil,cons
     auto system=DateTimeSystemTime(civil);wchar_t text[128]{};
     return GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT,TIME_NOSECONDS,&system,nullptr,text,static_cast<int>(std::size(text)))?text:aip::datetime::Time(civil,L"12Hour");
 }
+static bool ContentDateTimeRightToLeft(const wchar_t* localeName) {
+    wchar_t readingLayout[8]{};
+    // LOCALE_IREADINGLAYOUT: 0 left-to-right, 1 right-to-left. Vertical
+    // layouts do not request the native Clock's right-to-left time mark.
+    return GetLocaleInfoEx(localeName,LOCALE_IREADINGLAYOUT,readingLayout,static_cast<int>(std::size(readingLayout)))&&readingLayout[0]==L'1';
+}
+static bool ContentDateTimeUserInterfaceRightToLeft() {
+    wchar_t localeName[LOCALE_NAME_MAX_LENGTH]{};
+    return LCIDToLocaleName(MAKELCID(GetUserDefaultUILanguage(),SORT_DEFAULT),localeName,static_cast<int>(std::size(localeName)),0)&&
+        ContentDateTimeRightToLeft(localeName);
+}
 static ContentDateTimeView ContentDateTimeHeader(aip::datetime::UTC now,int milliseconds,const std::wstring& zoneName,const std::wstring& format) {
     ContentDateTimeView view;DYNAMIC_TIME_ZONE_INFORMATION zone{};aip::datetime::Civil local;
     if(!ResolveContentTimeZone(zoneName,zone)||!ContentTimeZoneUtcToLocal(now,zone,local)){
         view.status=L"Choose a Windows time-zone ID such as SE Asia Standard Time, or Local.";return view;
     }
     view.ok=true;view.time=ContentDateTimeFormat(local,format);view.dayNumber=std::to_wstring(local.day);auto system=DateTimeSystemTime(local);wchar_t text[256]{};
+    // This header is cached per minute and configuration by the provider.
+    // Keep raw time untouched; only the native tile XML adds its LRM/RLM.
+    view.rightToLeft=ContentDateTimeUserInterfaceRightToLeft();
     if(GetDateFormatEx(LOCALE_NAME_USER_DEFAULT,0,&system,L"dddd",text,static_cast<int>(std::size(text)),nullptr))view.weekday=text;
+    if(GetDateFormatEx(LOCALE_NAME_USER_DEFAULT,0,&system,L"ddd",text,static_cast<int>(std::size(text)),nullptr))view.shortWeekday=text;
     if(GetDateFormatEx(LOCALE_NAME_USER_DEFAULT,DATE_LONGDATE,&system,nullptr,text,static_cast<int>(std::size(text)),nullptr))view.date=text;
     view.nextDelayMs=aip::datetime::MillisecondsToNextMinute(now,milliseconds);return view;
 }

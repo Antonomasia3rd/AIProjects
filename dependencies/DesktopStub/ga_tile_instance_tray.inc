@@ -330,7 +330,7 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
     case TileInstanceType::Clock: case TileInstanceType::Calendar: {
         const bool clock=tile.type==TileInstanceType::Clock;const auto section=clock?L"Clock.":L"Calendar.";
         AppendTileInstanceEditable(menu,tile,(std::wstring(section)+L"TimeZone").c_str(),L"Time zone (Local or Windows/IANA zone ID)",L"Local");
-        AppendTileInstanceChoices(menu,tile,(std::wstring(section)+L"TimeFormat").c_str(),L"Time format",{{L"12Hour",L"12-hour (AM/PM)"},{L"24Hour",L"24-hour"},{L"System",L"Windows setting"}},L"12Hour");
+        AppendTileInstanceChoices(menu,tile,(std::wstring(section)+L"TimeFormat").c_str(),L"Time format",{{L"12Hour",L"12-hour (AM/PM)"},{L"24Hour",L"24-hour"},{L"System",L"Windows setting"}},clock?L"System":L"12Hour");
         if(clock){
             AppendTileInstanceEditable(menu,tile,L"Clock.Location",L"Location label (optional)",L"");
             AppendTileInstanceEditable(menu,tile,L"Clock.ShowDate",L"Show date",L"1",true);

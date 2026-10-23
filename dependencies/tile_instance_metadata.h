@@ -8,7 +8,7 @@ inline std::wstring TileInstanceArtworkTopic(const TileInstance& tile) {
     case TileInstanceType::Rss: return L"rss";
     case TileInstanceType::NowPlaying: return L"smtc";
     case TileInstanceType::PrayerTimes: return L"prayer";
-    case TileInstanceType::Clock: return L"clock";
+    case TileInstanceType::Clock: return L"worldclock";
     case TileInstanceType::Calendar: return L"calendar";
     case TileInstanceType::Wuwa: return L"wuwa";
     case TileInstanceType::Genshin: return L"genshin";

@@ -2271,6 +2271,21 @@ static bool CurrentGenerationTargetAllows(const aip::content::Snapshot& frame,
 static bool (*g_testGenerateAfterAdmission)(const aip::content::Snapshot&) = nullptr;
 static void (*g_testGenerationBeforeQueueLock)() = nullptr;
 #endif
+static void ApplyDateTimeRegistrationVisuals(const aip::content::Snapshot& frame,aip::tile_registration::Target& target)
+{
+    if(frame.textMode==aip::content::TextMode::Off)return;
+    if(frame.clockSource&&!frame.dateTime.location.empty()){
+        // Static tiles have no binding displayName. Let Windows render the
+        // same location footer through the manifest, rather than dropping it
+        // or burning a second label into the clock image. Keep the existing
+        // manifest display-name bound and never split a UTF-16 surrogate pair.
+        auto label=frame.dateTime.location.substr(0,128);
+        if(!label.empty()&&label.back()>=0xd800&&label.back()<=0xdbff)label.pop_back();
+        target.displayName=std::move(label);
+    }
+    target.hideMediumName=aip::content::DateTimeNativeBranding(frame)&&
+        aip::content::CalendarDateOnlyCentered(frame,150,150);
+}
 bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnly = false,
     const aip::content::Snapshot* suppliedContent = nullptr)
 {
@@ -2371,6 +2386,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         // Static packages own their generated paths. They must never overwrite
         // the main package's assets or another tile's images.
         if (!renderOnly) exeDir = registrationTarget.root;
+        ApplyDateTimeRegistrationVisuals(contentScope.snapshot,registrationTarget);
         manifestInfo.propertiesLogo = L"Assets\\StoreLogo.png";
         manifestInfo.square150x150Logo = L"Assets\\MediumTile.png";
         manifestInfo.square44x44Logo = L"Assets\\Square44x44Logo.png";
@@ -2479,6 +2495,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         logAssetDirIfNeeded(ParentDirectoryOfPath(outPath));
 
         bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
+        if(!liveTileUpdateMode&&contentScope.snapshot.calendarSource&&IEquals(t.name,L"SmallTile")&&
+            contentScope.snapshot.textMode!=aip::content::TextMode::Off)staticWallpaperAssetEnabled=true;
         if (separateRegistration && contentScope.snapshot.textMode == aip::content::TextMode::Off &&
             !contentScope.snapshot.artworkTopic.empty() && contentScope.snapshot.backgroundId == aip::content::BackgroundId::Transparent)
             staticWallpaperAssetEnabled = false;

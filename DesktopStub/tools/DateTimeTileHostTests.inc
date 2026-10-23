@@ -141,7 +141,7 @@ static void TestDateTimeTileHost(const std::wstring& directory,const std::wstrin
         if(snapshot==&kuro)Check(xml.find(L"Waveplates")!=std::wstring::npos&&xml.find(L"Daily activity")!=std::wstring::npos,
             "native WuWa binding uses game detail rows rather than generic setup summary");
         const auto status=TileSnapshotVisibleText(frame,heights[size],TileStatusLabels{},widths[size]);
-        Check(frame.clockSource?status.find(L"11:14 AM\r\nSurabaya <fixture>")!=std::wstring::npos:
+        Check(frame.clockSource?(status.find(L"11:14 AM\r\nFriday\r\nSurabaya <fixture>")!=std::wstring::npos&&status.find(L"October 23, 2026")==std::wstring::npos):
             frame.calendarSource?(status.find(L"First meeting")!=std::wstring::npos&&(status.find(L"Third meeting")!=std::wstring::npos)==(size==2)):
             status.find(L"Waveplates\r\n120/240")!=std::wstring::npos,"visible status mirrors semantic source content and current tile size");
         if(gdi.ok()) {

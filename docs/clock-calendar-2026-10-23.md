@@ -3,9 +3,11 @@
 Clock and Calendar are independent tile types. They start no network, account
 reader, Microsoft Calendar store, hardware provider or notification worker.
 Create several Clock instances with different Windows timezone IDs for world
-clocks. The time uses an explicit 12-hour AM/PM default; `System` follows the
-Windows regional time format, and `24Hour` is available separately. Date and
-weekday text use the user's Windows regional settings.
+clocks. As of the October 24 parity correction, an absent/new Clock time format
+defaults to `System`, matching the installed Clock app's short-time formatter.
+Explicit `12Hour` (AM/PM), `24Hour` and `System` settings remain effective.
+Weekday text follows Windows regional settings. `Clock.ShowDate` controls the
+weekday line; the native layout does not contain a separate long-date block.
 
 Example instance configuration (add these IDs to `[Tiles] Instances`):
 
@@ -77,7 +79,7 @@ settings changes; the visible list filters already ended events on each read.
 Clock/date formatting is cached per minute, and the provider reports the exact
 next minute boundary without a per-second worker.
 
-Read-only reference inspection found the installed Windows Clock package
+The initial read-only reference inspection found the installed Windows Clock package
 `Microsoft.WindowsAlarms` 11.2607.6.0 and Mail/Calendar package
 `microsoft.windowscommunicationsapps` 16005.14326.22342.0. Their manifests declare
 small/medium/wide/large tile assets; Clock declares
@@ -85,7 +87,13 @@ small/medium/wide/large tile assets; Clock declares
 injected, disassembled or copied into the product. These manifests do not expose
 the generated live XML. Typography uses documented adaptive roles (`title` =
 24 effective pixels; `caption` = 12), and the user's screenshots guide layout.
-No claim of binary-exact reproduction follows from manifest inspection.
+No claim of binary-exact reproduction follows from that manifest inspection.
+The later [binary/code evidence](native-calendar-clock-evidence-2026-10-23.md)
+traces the actual Calendar Small/Medium builders and the complete Clock XML
+assembler and formatter callers. The [October 24 correction](calendar-clock-parity-2026-10-24.md)
+documents the implemented size-specific contracts, explicit settings, tests and
+remaining native visual acceptance. It supersedes the initial single-layout
+approximation above.
 
 Focused fixture: `tools/BuildClockCalendarTests.cmd`, then scan and run
 `build/content-integration/ClockCalendarTests.exe` through ReviewValidation.

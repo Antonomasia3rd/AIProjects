@@ -1,5 +1,17 @@
 # Next pass: outstanding fixes and acceptance
 
+## October 24 Calendar/Clock native layout correction installed
+
+Calendar Small/date-only Medium and the Clock text/branding contract were traced
+in the actual installed binaries and corrected. This update preserves the user
+configuration/pins established after the earlier reset. Native submission and
+75-second health passed; see [the result](calendar-clock-parity-2026-10-24.md).
+Native visual equivalence across DPI/themes and Calendar's event-filled layout
+remain separate acceptance/reverse-engineering work; the installed apps were
+not launched or their account stores read. Existing explicit typography/branding
+and 12/24-hour choices remain effective. The broad lower-priority feature queue
+and unrelated historical raster issue remain open.
+
 ## October 23 delivery/confirmation repair installed
 
 The second fresh reset was explicitly requested after the user removed the old

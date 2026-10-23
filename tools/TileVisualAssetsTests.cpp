@@ -42,6 +42,21 @@ static void TestFontFallback() {
     Check(FindTopic(L"desktop")&&NativeGlyphFor(FindTopic(L"desktop")->glyph).primary==0xe977&&
         FindTopic(L"desktop")->glyph!=FindTopic(L"gallery")->glyph,
         "Desktop fallback resolves the documented PC1 glyph instead of the gallery Photo glyph");
+    const auto* worldClock=FindTopic(L"worldclock");
+    Check(worldClock&&worldClock->glyph==Glyph::WorldClock&&FindTopic(L"clock")->glyph==Glyph::Clock&&
+        worldClock->glyph!=FindTopic(L"clock")->glyph&&IsMonochromeTopic(*worldClock),
+        "world-clock artwork is a distinct transparent composite and preserves generic Clock artwork");
+    Check(NativeGlyphFor(Glyph::WorldClock).primary==0&&
+        SelectFont(Glyph::WorldClock,[](FontStyle,wchar_t){return true;})==FontStyle::Vector,
+        "world-clock composite uses independent vector geometry rather than an unverified native codepoint");
+    Check(FindTopic(L"AipSource_worldclock")==worldClock&&FindTopic(L"WORLDCLOCK")==worldClock&&
+        !IsKnownSecondaryArtworkId(L"AipSource_worldclock"),
+        "world-clock topic resolves for rendering without becoming a new legacy pin destination");
+    aip::content::TileInstance clock;clock.type=aip::content::TileInstanceType::Clock;
+    Check(aip::content::TileInstanceArtworkTopic(clock)==L"worldclock"&&
+        AssetPlan(*worldClock)[3].relative.find(L"/worldclock/Small.png")!=std::wstring::npos&&
+        AssetPlan(*worldClock)[3].relative!=AssetPlan(*FindTopic(L"clock"))[3].relative,
+        "Clock tile instances select distinct world-clock assets so old generic-clock caches cannot survive");
     aip::content::TileInstance wallpaper,gallery;wallpaper.type=aip::content::TileInstanceType::Wallpaper;gallery.type=aip::content::TileInstanceType::Gallery;
     Check(aip::content::TileInstanceArtworkTopic(wallpaper)==L"desktop"&&aip::content::TileInstanceArtworkTopic(gallery)==L"gallery",
         "primary and independent Wallpaper instances never inherit photo-gallery artwork");

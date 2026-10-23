@@ -679,8 +679,10 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
     }
     if (snapshot.textMode != aip::content::TextMode::Off) {
     key+=L":datetime:"+std::to_wstring(snapshot.clockSource)+L":"+std::to_wstring(snapshot.calendarSource);
-    if(snapshot.clockSource||snapshot.calendarSource)for(const auto& field:{snapshot.dateTime.time,snapshot.dateTime.weekday,snapshot.dateTime.dayNumber,snapshot.dateTime.date,snapshot.dateTime.location})
+    if(snapshot.clockSource||snapshot.calendarSource)key+=L":DateTimeNativeLayout3";
+    if(snapshot.clockSource||snapshot.calendarSource)for(const auto& field:{snapshot.dateTime.time,snapshot.dateTime.weekday,snapshot.dateTime.dayNumber,snapshot.dateTime.date,snapshot.dateTime.location,snapshot.dateTime.shortWeekday})
         key+=L":"+std::to_wstring(field.size())+L":"+field;
+    if(snapshot.clockSource||snapshot.calendarSource)key+=L":rtl:"+std::to_wstring(snapshot.dateTime.rightToLeft);
     for (const auto& headline : snapshot.rssHeadlines)
         key += L":" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
     for (const auto& row : snapshot.detailRows)

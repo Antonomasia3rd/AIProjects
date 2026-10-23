@@ -283,7 +283,13 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
         }
         primarySeen = primarySeen || tile.primary;
         if (!tile.accountReference.empty() && descriptor->notesResource < 0) { error = section + L".Account is only applicable to game tiles."; return false; }
-        if (!ReadTileAppearance(read, section, tile.appearance, error)) return false;
+        // Date/time bindings have native size-specific branding defaults.
+        // An absent preference must remain distinguishable from explicit Name.
+        const auto appearanceRead=[&](const wchar_t* area,const wchar_t* key,const wchar_t* fallback){
+            const bool dateTime=tile.type==TileInstanceType::Clock||tile.type==TileInstanceType::Calendar;
+            return read(area,key,dateTime&&Lower(key)==L"branding"?L"Auto":fallback);
+        };
+        if (!ReadTileAppearance(appearanceRead, section, tile.appearance, error)) return false;
         if (!ReadTileDeliveryPolicy(read,section,tile.id,tile.policy,error)) return false;
         if (!ReadConfiguration([&](const wchar_t* sourceSection, const wchar_t* key, const wchar_t* fallback) {
             return TileInstanceRead(tile, read, sourceSection, key, fallback);

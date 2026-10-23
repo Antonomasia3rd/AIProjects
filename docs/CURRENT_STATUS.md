@@ -11,6 +11,16 @@ is enabled and its focused native recheck passed.
 
 ## Saved and installed
 
+- October 24: Calendar Small and date-only Medium layouts now follow the actual
+  installed native builders, and Clock follows its traced XML/formatter contract
+  across sizes. Locale-aware Small weekdays, native Clock branding/direction,
+  System time-format default, explicit appearance controls, static Registration
+  image/label handling and a world-clock fallback symbol are included. The
+  binary-only update preserved current settings/history/pins and passed native
+  publication plus 75-second health. See [the parity record](calendar-clock-parity-2026-10-24.md)
+  and [binary evidence](native-calendar-clock-evidence-2026-10-23.md). Cross-DPI
+  native pixels, Calendar event-filled parity and other UWP types are not claimed.
+
 - October 23 follow-up: Registration now deploys the verified physical manifest
   path from Windows' virtualized AppData cache; a failed destination no longer
   aborts sibling Live Tile updates. Empty Gallery placeholders no longer produce

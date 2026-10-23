@@ -142,6 +142,13 @@ static void AppendLiveTileImageBinding(
 
     xml += L"    <binding template=\"";
     xml += templateName;
+    if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->textMode==aip::content::TextMode::Overlay&&
+        (g_renderContent->clockSource||g_renderContent->calendarSource)){
+        const bool isMediumSize=std::wstring(templateName)==L"TileMedium";
+        const bool centered=isMediumSize&&aip::content::CalendarDateOnlyCentered(*g_renderContent,150,150);
+        xml+=L"\" branding=\""+aip::content::DateTimeBindingBranding(*g_renderContent,centered,isMediumSize);
+        if(g_renderContent->clockSource)xml+=L"\" displayName=\""+aip::XmlEscape(g_renderContent->dateTime.location);
+    }
     xml += L"\">\r\n";
     if (!omitBackgroundImage) {
         xml += L"      <image ";
@@ -304,6 +311,9 @@ static std::wstring BuildLiveTileXml(
             xml.insert(end, L" arguments=\"" + aip::XmlEscape(g_renderContent->activationArguments) + L"\"");
     }
 
+    if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->calendarSource&&
+        g_renderContent->textMode==aip::content::TextMode::Auto&&
+        aip::content::AppendDateTimeTileBinding(xml,L"TileSmall",71,*g_renderContent))hasUsableBinding=true;
     for (const auto& asset : liveTileAssets)
     {
         std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file, asset.w, asset.h);

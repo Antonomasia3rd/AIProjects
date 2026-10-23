@@ -173,7 +173,7 @@ struct Snapshot {
     bool prayerSource = false;
     aip::prayer::ClockText prayerClock;
     bool clockSource = false, calendarSource = false;
-    struct DateTimeText { std::wstring time,weekday,dayNumber,date,location; } dateTime;
+    struct DateTimeText { std::wstring time,weekday,dayNumber,date,location,shortWeekday; bool rightToLeft=false; } dateTime;
     std::wstring detailTopic;
     bool smtcSource = false, smtcShowRepeatShuffle = false, wrapSourceText = false;
     MediaPlaybackState smtcState = MediaPlaybackState::Unknown;

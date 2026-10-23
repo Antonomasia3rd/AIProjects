@@ -283,7 +283,7 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
             view.ok?aip::notifications::SourceState::Healthy:aip::notifications::SourceState::Failed);
         if(!view.ok){frame.text={L"Check tile settings",view.status,L""};frame.wrapSourceText=true;break;}
         frame.clockSource=tile.type==TileInstanceType::Clock;frame.calendarSource=!frame.clockSource;
-        frame.dateTime={frame.clockSource?view.time:L"",view.weekday,view.dayNumber,view.date,view.location};
+        frame.dateTime={frame.clockSource?view.time:L"",view.weekday,view.dayNumber,view.date,view.location,view.shortWeekday,view.rightToLeft};
         if(frame.calendarSource&&!view.events.empty())frame.sourceDiagnostic=view.status;
         frame.text={frame.clockSource?view.time:view.weekday+L" "+view.dayNumber,frame.clockSource?view.location:view.status,view.date};
         for(const auto& event:view.events)frame.detailRows.push_back({event.title,event.when+(event.location.empty()?L"":L"\n"+event.location),L""});

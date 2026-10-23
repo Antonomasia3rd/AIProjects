@@ -750,7 +750,7 @@ static bool RenderDetailRowsSimulation(Graphics& graphics, const aip::content::S
 
 static bool DrawPrayerClockField(Graphics& graphics, const aip::content::Snapshot& snapshot,
     const std::wstring& text, const wchar_t* defaultStyle, unsigned role,
-    REAL x, REAL& y, REAL width, REAL bottom, int maxLines, double scale, bool right = false)
+    REAL x, REAL& y, REAL width, REAL bottom, int maxLines, double scale, bool right = false,bool center=false)
 {
     if (text.empty()) return true;
     std::wstring style = defaultStyle;
@@ -762,14 +762,15 @@ static bool DrawPrayerClockField(Graphics& graphics, const aip::content::Snapsho
     }
     if (width <= 0 || y >= bottom) return true;
     const bool light = style.compare(0,5,L"title") == 0 || style.compare(0,9,L"subheader") == 0 || style.compare(0,6,L"header") == 0;
-    Font font(light ? L"Segoe UI Light" : L"Segoe UI", static_cast<REAL>(aip::content::TextStylePixels(style) * scale),
-        style.compare(0,4,L"base") == 0 ? FontStyleBold : FontStyleRegular, UnitPixel);
+    const bool clockBase=snapshot.clockSource&&style==L"base";
+    Font font(clockBase?L"Segoe UI Semibold":light ? L"Segoe UI Light" : L"Segoe UI", static_cast<REAL>(aip::content::TextStylePixels(style) * scale),
+        !clockBase&&style.compare(0,4,L"base") == 0 ? FontStyleBold : FontStyleRegular, UnitPixel);
     const REAL lineHeight = font.GetHeight(&graphics);
     if (font.GetLastStatus() != Ok || lineHeight <= 0) return false;
     const REAL available = (std::min)(bottom - y, lineHeight * maxLines + .01f);
     RectF bounds(x,y,width,available), measured;
     StringFormat format;
-    format.SetAlignment(right ? StringAlignmentFar : StringAlignmentNear);
+    format.SetAlignment(center?StringAlignmentCenter:right ? StringAlignmentFar : StringAlignmentNear);
     format.SetTrimming(StringTrimmingEllipsisWord); format.SetFormatFlags(StringFormatFlagsLineLimit);
     if (presentation.Active()) {
         if (!right) format.SetAlignment(presentation.align == L"center" ? StringAlignmentCenter : presentation.align == L"right" ? StringAlignmentFar : StringAlignmentNear);
@@ -845,13 +846,33 @@ static bool RenderPrayerTileSimulation(Graphics& graphics, const aip::content::S
     }
     return graphics.GetLastStatus() == Ok;
 }
+#include "../datetime_tile_layout.h"
 static bool RenderDateTimeTileSimulation(Graphics& graphics,const aip::content::Snapshot& frame,int width,int height,double scale)
 {
     const auto& date=frame.dateTime;const REAL margin=static_cast<REAL>(10*scale),bottom=static_cast<REAL>((height-20)*scale);
     const REAL fullWidth=static_cast<REAL>((width-20)*scale);REAL y=margin;
-    if(frame.clockSource)return DrawPrayerClockField(graphics,frame,date.time,L"title",0,margin,y,fullWidth,bottom,1,scale)&&
-        DrawPrayerClockField(graphics,frame,date.location,L"captionSubtle",1,margin,y,fullWidth,bottom,2,scale)&&
-        DrawPrayerClockField(graphics,frame,date.date,L"captionSubtle",1,margin,y,fullWidth,bottom,2,scale);
+    if(frame.clockSource){
+        const auto time=std::wstring(1,date.rightToLeft?L'\x200f':L'\x200e')+date.time;
+        return DrawPrayerClockField(graphics,frame,time,aip::content::ClockTimeStyle(width,height),0,margin,y,fullWidth,bottom,1,scale)&&
+            DrawPrayerClockField(graphics,frame,date.date.empty()?std::wstring():date.weekday,L"captionSubtle",1,margin,y,fullWidth,bottom,1,scale);
+    }
+    if(aip::content::CalendarDateOnlyCentered(frame,width,height)){
+        const bool isSmall=height<150;const auto& p=frame.presentation;
+        const auto& weekday=isSmall&&!date.shortWeekday.empty()?date.shortWeekday:date.weekday;
+        const auto dayStyle=isSmall?L"titleNumeral":L"headerNumeral";
+        const auto weekdayStyle=aip::content::PrayerFieldStyle(p,aip::content::PrayerFieldRole::Secondary,L"caption");
+        const auto numeralStyle=aip::content::PrayerFieldStyle(p,aip::content::PrayerFieldRole::Time,dayStyle);
+        Font weekdayFont(L"Segoe UI",static_cast<REAL>(aip::content::TextStylePixels(weekdayStyle)*scale),FontStyleRegular,UnitPixel);
+        Font dayFont(L"Segoe UI Light",static_cast<REAL>(aip::content::TextStylePixels(numeralStyle)*scale),FontStyleRegular,UnitPixel);
+        const REAL gap=p.Active()?static_cast<REAL>(p.gapLines*12*scale):0;
+        const REAL blockHeight=weekdayFont.GetHeight(&graphics)+dayFont.GetHeight(&graphics)+static_cast<REAL>(4*scale)+gap;
+        const REAL availableBottom=static_cast<REAL>((isSmall?height:height-10)*scale);
+        y=(std::max)(0.0f,(static_cast<REAL>(height*scale)-blockHeight)*.5f);
+        if(p.Active()&&p.stacking==L"top")y=isSmall?0:margin;
+        else if(p.Active()&&p.stacking==L"bottom")y=(std::max)(0.0f,availableBottom-blockHeight);
+        return DrawPrayerClockField(graphics,frame,weekday,L"caption",1,margin,y,fullWidth,availableBottom,1,scale,false,true)&&
+            DrawPrayerClockField(graphics,frame,date.dayNumber,dayStyle,0,margin,y,fullWidth,availableBottom,1,scale,false,true);
+    }
     if(!DrawPrayerClockField(graphics,frame,date.weekday,L"caption",1,margin,y,fullWidth,bottom,1,scale,true)||
         !DrawPrayerClockField(graphics,frame,date.dayNumber,L"headerNumeral",0,margin,y,fullWidth,bottom,1,scale,true)||
         !DrawPrayerClockField(graphics,frame,date.location,L"captionSubtle",1,margin,y,fullWidth,bottom,1,scale))return false;
@@ -863,7 +884,9 @@ static bool RenderDateTimeTileSimulation(Graphics& graphics,const aip::content::
 }
 static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int logicalWidth, int logicalHeight)
 {
-    if (!bitmap || !TileTextOverlayEnabled() || !TileTextAppliesToTileName(tileName))
+    const bool calendarSmall=g_renderContent&&g_renderContent->calendarSource&&IEquals(tileName?tileName:L"",L"SmallTile")&&
+        g_renderContent->textMode!=aip::content::TextMode::Off;
+    if (!bitmap || !TileTextOverlayEnabled() || (!calendarSmall&&!TileTextAppliesToTileName(tileName)))
         return true;
 
     int bitmapWidth = 0;
@@ -893,6 +916,7 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
 
     if (!ConfigureTileTextGraphics(graphics))
         return false;
+    if(calendarSmall)return RenderDateTimeTileSimulation(graphics,*g_renderContent,logicalWidth,logicalHeight,scale);
     if (g_renderContent && logicalWidth >= 150 && logicalHeight >= 150) {
         if (g_renderContent->presentation.Active() && !g_renderContent->smtcSource && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource &&
             g_renderContent->detailRows.empty() && g_renderContent->rssHeadlines.empty()) {

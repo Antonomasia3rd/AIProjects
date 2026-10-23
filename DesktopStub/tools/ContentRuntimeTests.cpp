@@ -225,6 +225,7 @@ static std::wstring BuildLegacyContentFixtureTemplate()
 #include "StalePinAndGalleryMenuHostTests.inc"
 #include "GalleryImageActivationHostTests.inc"
 #include "DateTimeTileHostTests.inc"
+#include "DateTimeParityHostTests.inc"
 #include "DesktopHostSetupHostTests.inc"
 #include "FreshPresetPreviewHostTests.inc"
 
@@ -1185,6 +1186,7 @@ int wmain()
     TestStalePinAndGalleryMenuHost();
     TestGalleryConfirmationContinuations();
     TestDateTimeTileHost(directory,bitmapPath);
+    TestDateTimeParityHost();
     TestDesktopHostSetup(bitmapPath);
     TestFreshPresetPreview(directory);
     TestGalleryImageActivationHost(bitmapPath);

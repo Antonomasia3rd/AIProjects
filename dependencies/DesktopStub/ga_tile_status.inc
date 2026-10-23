@@ -30,15 +30,21 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
     const auto* sizeSetting = height > 200 ? L"ApplyToLargeTile" : width > 200 ? L"ApplyToWideTile" : L"ApplyToMediumTile";
     if (!IniReadI(L"TileText",sizeSetting,1)) { AppendTileStatusLine(output,labels.textHidden); return output; }
     if (frame.textMode == aip::content::TextMode::Off) { AppendTileStatusLine(output, labels.textHidden); return output; }
-    if(frame.textMode==aip::content::TextMode::Auto&&(frame.clockSource||frame.calendarSource)){
+    if((frame.clockSource||frame.calendarSource)&&frame.textMode!=aip::content::TextMode::Off){
         const auto& date=frame.dateTime;
-        if(frame.clockSource){AppendTileStatusLine(output,date.time);AppendTileStatusLine(output,date.location);AppendTileStatusLine(output,date.date);}
+        if(frame.clockSource){
+            AppendTileStatusLine(output,date.time);if(!date.date.empty())AppendTileStatusLine(output,date.weekday);
+            const auto branding=aip::content::DateTimeBindingBranding(frame,false,width<=150);
+            if(branding==L"name"||branding==L"nameAndLogo")AppendTileStatusLine(output,date.location);
+        }
         else {
-            AppendTileStatusLine(output,date.weekday);AppendTileStatusLine(output,date.dayNumber);AppendTileStatusLine(output,date.location);
+            const bool centered=aip::content::CalendarDateOnlyCentered(frame,width,height);
+            AppendTileStatusLine(output,height<150&&!date.shortWeekday.empty()?date.shortWeekday:date.weekday);AppendTileStatusLine(output,date.dayNumber);
+            if(!centered)AppendTileStatusLine(output,date.location);
             for(size_t i=0;i<(std::min)(frame.detailRows.size(),aip::content::DateTimeEventCount(height));++i){
                 AppendTileStatusLine(output,frame.detailRows[i].primary);AppendTileStatusLine(output,frame.detailRows[i].secondary);
             }
-            if(frame.detailRows.empty())AppendTileStatusLine(output,frame.text.secondary);
+            if(!centered&&frame.detailRows.empty())AppendTileStatusLine(output,frame.text.secondary);
         }
     } else if (frame.textMode == aip::content::TextMode::Auto && frame.prayerSource) {
         if (frame.prayerClock.Available()) {

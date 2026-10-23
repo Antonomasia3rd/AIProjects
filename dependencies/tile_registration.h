@@ -13,6 +13,7 @@ struct Target {
     std::wstring identityName, applicationId = L"Tile", root, manifestPath, assetsDirectory, launcherPath;
     std::wstring hostAumid, hostArguments, hostPath, hostProduct = L"DesktopStub", displayName, publisher, publisherDisplayName;
     std::wstring packageVersion = L"1.0.0.1", backgroundColor = L"transparent", branding = L"Name";
+    bool hideMediumName=false;
 };
 inline bool ScopeKey(const std::wstring& key) {
     return key.size() == 16 && std::all_of(key.begin(),key.end(),[](wchar_t c) {
@@ -98,8 +99,11 @@ inline bool BuildManifest(const Target& target, std::wstring& output, std::wstri
     xml += L"<Applications><Application Id=\"Tile\" Executable=\""+std::wstring(LauncherFileName)+L"\" EntryPoint=\"Windows.FullTrustApplication\" uap10:Parameters=\""+Escape(LauncherArguments(target))+L"\">\r\n";
     xml += L"<uap:VisualElements DisplayName=\""+Escape(target.displayName)+L"\" Description=\""+Escape(target.displayName)+L"\" Square150x150Logo=\"Assets\\MediumTile.png\" Square44x44Logo=\"Assets\\Square44x44Logo.png\" BackgroundColor=\""+Escape(target.backgroundColor)+L"\">\r\n";
     xml += L"<uap:DefaultTile Square71x71Logo=\"Assets\\SmallTile.png\" Wide310x150Logo=\"Assets\\WideTile.png\" Square310x310Logo=\"Assets\\LargeTile.png\">";
-    if (branding == L"Name" || branding == L"NameAndLogo" || branding == L"Auto")
-        xml += L"<uap:ShowNameOnTiles><uap:ShowOn Tile=\"square150x150Logo\"/><uap:ShowOn Tile=\"wide310x150Logo\"/><uap:ShowOn Tile=\"square310x310Logo\"/></uap:ShowNameOnTiles>";
+    if (branding == L"Name" || branding == L"NameAndLogo" || branding == L"Auto"){
+        xml += L"<uap:ShowNameOnTiles>";
+        if(!target.hideMediumName)xml+=L"<uap:ShowOn Tile=\"square150x150Logo\"/>";
+        xml+=L"<uap:ShowOn Tile=\"wide310x150Logo\"/><uap:ShowOn Tile=\"square310x310Logo\"/></uap:ShowNameOnTiles>";
+    }
     xml += L"</uap:DefaultTile></uap:VisualElements></Application></Applications><Capabilities><rescap:Capability Name=\"runFullTrust\"/></Capabilities></Package>\r\n";
     output = std::move(xml); error.clear(); return true;
 }

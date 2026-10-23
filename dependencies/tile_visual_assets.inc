@@ -92,6 +92,24 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
         graphics.FillRectangle(&brush,21.0f,27.0f,27.0f,20.0f);line(58,53,76,53);break;
     case Glyph::Clock:
         graphics.DrawEllipse(&pen,15.0f,15.0f,70.0f,70.0f);line(50,50,50,28);line(50,50,67,59);break;
+    case Glyph::WorldClock: {
+        // Independent vector interpretation of the installed world's clock:
+        // a clock above/left of a globe, with a transparent separation between
+        // them. No Microsoft bitmap or font outline is copied into the app.
+        pen.SetWidth(5);
+        GraphicsPath globeSeparation;globeSeparation.AddEllipse(36.0f,36.0f,56.0f,56.0f);
+        const auto clockState=graphics.Save();
+        graphics.SetClip(&globeSeparation,CombineModeExclude);
+        graphics.DrawEllipse(&pen,10.0f,10.0f,46.0f,46.0f);
+        line(33,33,33,18);line(33,33,45,33);
+        graphics.Restore(clockState);
+        graphics.DrawEllipse(&pen,40.0f,40.0f,48.0f,48.0f);
+        graphics.DrawEllipse(&pen,54.0f,40.0f,20.0f,48.0f);
+        line(40,64,88,64);
+        graphics.DrawArc(&pen,40.0f,48.0f,48.0f,16.0f,0.0f,180.0f);
+        graphics.DrawArc(&pen,40.0f,64.0f,48.0f,16.0f,180.0f,180.0f);
+        break;
+    }
     case Glyph::Calendar:
         graphics.DrawRectangle(&pen,18.0f,25.0f,64.0f,58.0f);line(18,41,82,41);line(32,16,32,31);line(68,16,68,31);
         for(REAL x:{33.0f,50.0f,67.0f})for(REAL y:{55.0f,70.0f})graphics.FillRectangle(&brush,x-3.0f,y-3.0f,6.0f,6.0f);break;
