@@ -106,10 +106,14 @@ struct ContentDiscordProvider
             }
         }
     }
-    aip::content::Text Read()
+    aip::content::Text Read(bool* completed=nullptr,bool* failed=nullptr)
     {
-        if (!error.empty()) return {L"Discord source unavailable", L"Error: " + error, L""};
-        return aip::content::DiscordContent(service ? service->Read() : aip::discord::Snapshot{});
+        if(completed)*completed=false;if(failed)*failed=false;
+        if (!error.empty()) {if(completed)*completed=true;if(failed)*failed=true;return {L"Discord source unavailable", L"Error: " + error, L""};}
+        const auto snapshot=service ? service->Read() : aip::discord::Snapshot{};
+        if(completed)*completed=snapshot.phase==aip::discord::Phase::Preview||snapshot.phase==aip::discord::Phase::Active||snapshot.phase==aip::discord::Phase::Error;
+        if(failed)*failed=snapshot.phase==aip::discord::Phase::Error;
+        return aip::content::DiscordContent(snapshot);
     }
     void Cancel() { key.clear(); error.clear(); RequestStop(); }
     void Stop() { Cancel(); if (service && service->Stop(5000)) { service.reset(); stopping = false; } started = false; }
@@ -321,12 +325,15 @@ struct ContentRssProvider
             waitExpired = true; source.CancelPending();
         }
     }
-    RssFeedSnapshot Read(const RssFeedSettings& settings)
+    RssFeedSnapshot Read(const RssFeedSettings& settings,bool* completed=nullptr)
     {
         RssFeedSnapshot result;
-        if (waitExpired) { result.status = L"RSS refresh timed out before the one-shot deadline."; return result; }
+        if(completed)*completed=false;
+        if (waitExpired) { if(completed)*completed=true;result.status = L"RSS refresh timed out before the one-shot deadline."; return result; }
         std::string error;
-        if (!source.Read(Key(settings), result, error))
+        const bool ready=source.Read(Key(settings), result, error);
+        if(completed)*completed=ready||!error.empty();
+        if (!ready)
             result.status = error.empty() ? L"Loading RSS feed..." : aip::Utf8ToWide(error);
         return result;
     }
@@ -421,13 +428,14 @@ struct ContentPrayerProvider {
         }, WakePollThread, force);
         if (synchronous) source.Wait(key, milliseconds(static_cast<long long>(cfg.timeoutSeconds) * 2000 + 2000));
     }
-    aip::prayer::View Read(const aip::prayer::Configuration& cfg) {
+    aip::prayer::View Read(const aip::prayer::Configuration& cfg,bool* completed=nullptr) {
         ContentPrayerResult captured; std::string error;
         source.Read(key, captured, error);
+        if(completed)*completed=captured.serial!=0||!error.empty();
         if (captured.data.configKey.empty()) captured.data.configKey = aip::prayer::ConfigurationKey(cfg);
         if (captured.data.schedule.days.empty() && captured.data.error.empty() && !cfg.city.empty() && !cfg.country.empty())
             captured.data.error = error.empty() ? IniReadS(L"Strings", L"PrayerLoading", L"Loading prayer schedule...") : aip::Utf8ToWide(error);
-        auto formatting = aip::prayer::ConfigurationKey(cfg) + L":" + std::to_wstring(cfg.showSunrise) + L":" + std::to_wstring(cfg.twentyFourHour) + L":" + std::to_wstring(cfg.showTimetable);
+        auto formatting = aip::prayer::ConfigurationKey(cfg) + L":" + std::to_wstring(cfg.showSunrise) + L":" + std::to_wstring(cfg.twentyFourHour) + L":" + std::to_wstring(cfg.showTimetable) + L":" + std::to_wstring(cfg.nextIncludesSunrise);
         for (const auto adjustment : cfg.adjustmentsMinutes) formatting += L":" + std::to_wstring(adjustment);
         const auto now = Now(), minute = now / 60;
         if (!haveView || minute != viewedMinute || (view.nextUTCDeadline > 0 && now >= view.nextUTCDeadline) || viewedSerial != captured.serial || formatting != formatKey) {
@@ -435,6 +443,10 @@ struct ContentPrayerProvider {
             viewedMinute = minute; viewedSerial = captured.serial; formatKey = std::move(formatting);
         }
         return view;
+    }
+    aip::prayer::Data ReadSchedule() {
+        ContentPrayerResult captured; std::string ignored;
+        source.Read(key,captured,ignored); return captured.data;
     }
     void CancelPending() { source.CancelPending(); key.clear(); haveView = false; }
     void Cancel() { if (!key.empty() || source.HasPendingWork()) CancelPending(); }
@@ -666,6 +678,9 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
         key += L":prayerTimetable:" + std::to_wstring(snapshot.prayerClock.showTimetable);
     }
     if (snapshot.textMode != aip::content::TextMode::Off) {
+    key+=L":datetime:"+std::to_wstring(snapshot.clockSource)+L":"+std::to_wstring(snapshot.calendarSource);
+    if(snapshot.clockSource||snapshot.calendarSource)for(const auto& field:{snapshot.dateTime.time,snapshot.dateTime.weekday,snapshot.dateTime.dayNumber,snapshot.dateTime.date,snapshot.dateTime.location})
+        key+=L":"+std::to_wstring(field.size())+L":"+field;
     for (const auto& headline : snapshot.rssHeadlines)
         key += L":" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
     for (const auto& row : snapshot.detailRows)
@@ -683,9 +698,13 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
     return key;
 }
 
+#include "ga_clock_calendar.inc"
+#include "ga_kuro_provider.inc"
+#include "ga_source_alert_runtime.inc"
 #include "ga_tile_instance_runtime.inc"
 static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 {
+    if(g_desktopHostSetupPending.load())return false;
     if (TileInstanceModeRequested()) return TileInstanceEngineTick(synchronous, queueGeneration);
     static aip::content::Cycle cycle;
     static std::wstring lastFrame, lastError, lastWarning, lastSecondaryBackgroundError;

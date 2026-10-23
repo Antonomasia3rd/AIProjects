@@ -179,3 +179,15 @@ pre-existing defect. It does not establish its cause as an operating-system
 bug, prove a font-cache hypothesis, or support changing the font, hinting,
 geometry or exact comparison. Production renderer behavior remains unchanged;
 the missing evidence remains a LIGHT draw captured with its native arguments.
+
+## Identical recurrence during final feature validation, 2026-10-23
+
+The strict copied-product offline smoke again produced the exact historical
+LIGHT/DARK PNG pair and failed its unchanged four-pixel comparison. A bounded
+private probe swept seven geometry/font/transform inputs by plus/minus 128
+float ULPs, tested explicit page units/DPI, and primed native GDI fonts in 21
+fresh processes. It generated no LIGHT state and supports no production fix.
+The failing legacy profile does not enter the new typed source rendering
+branches. See [the preserved recurrence and probe evidence](render-determinism-recurrence-2026-10-23.md).
+The historical defect and failed gate remain open; unrelated passing feature
+gates must not be described as fixing or passing this comparison.

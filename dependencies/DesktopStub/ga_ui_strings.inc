@@ -48,29 +48,11 @@ std::wstring FormatWide(const wchar_t* fmt, ...)
     return result;
 }
 
+#include "ga_notifications.inc"
+
 void NotifyTrayBalloon(const std::wstring& title, const std::wstring& msg, DWORD icon = NIIF_INFO, bool force = false)
 {
-    NOTIFYICONDATAW nid{};
-    {
-        std::lock_guard<std::mutex> lk(g_trayMutex);
-        if ((!force && !g_tray) || (!force && !g_notificationsEnabled) || !g_nid.hWnd)
-            return;
-        nid = g_nid;
-    }
-    DWORD error = ERROR_SUCCESS;
-    if (!aip::ShowTrayBalloon(
-        nid,
-        title,
-        msg,
-        icon,
-        static_cast<UINT>(ClampInt(
-            g_notificationTimeoutMs.load(),
-            1000,
-            60000)),
-        &error))
-    {
-        LogWin32Failure(L"ShowTrayBalloon", error);
-    }
+    DispatchUserNotification(L"application", title, msg, icon, force);
 }
 
 static TextNormalizeResult NormalizeIniToUtf8BomIfNeeded()
@@ -316,7 +298,7 @@ void LoadUiStrings()
     g_ui.generatedAssetPrecacheMaxFilesLabel = IniReadS(L"Strings", L"GeneratedAssetPrecacheMaxFilesLabel", L"Pre-cache max files: %d");
     g_ui.showMenuAsDropdown = IniReadS(L"Strings", L"ShowMenuAsDropdown", L"Group settings into submenus");
     g_ui.notificationsTitle = IniReadS(L"Strings", L"NotificationsTitle", L"Notifications:");
-    g_ui.notificationsEnabled = IniReadS(L"Strings", L"NotificationsEnabled", L"Enable all tray notifications");
+    g_ui.notificationsEnabled = IniReadS(L"Strings", L"NotificationsEnabled", L"Enable notifications");
     g_ui.notifyOnStart = IniReadS(L"Strings", L"NotifyOnStart", L"Notify when generation starts");
     g_ui.notifyOnSuccess = IniReadS(L"Strings", L"NotifyOnSuccess", L"Notify when generation succeeds");
     g_ui.notifyOnFailure = IniReadS(L"Strings", L"NotifyOnFailure", L"Notify when generation, wallpaper, or registration fails");

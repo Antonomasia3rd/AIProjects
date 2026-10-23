@@ -150,6 +150,12 @@ static bool ResolveGalleryRegistrationActivation(const std::wstring& id, std::ws
 static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn)
 {
     if (!signIn && id.compare(0,8,L"gallery_")==0) {
+        std::wstring issue;const auto gallery=CaptureGalleryConfigurationView(issue,true);
+        if(gallery)for(const auto& tile:gallery->configuration.tiles)if(aip::gallery::GalleryRegistrationId(gallery->configuration.groupId,tile.id)==id){
+            const auto nativeId=aip::gallery::NativeTileId(gallery->configuration.groupId,tile.id);
+            if(tile.clickAction==L"Setup")return OpenGalleryTilePolicySetup(owner,nativeId);
+            NotifyGalleryImageFallback();break;
+        }
         std::wstring folder;
         if (ResolveGalleryRegistrationActivation(id,folder)) return OpenGalleryFolder(folder);
     }
@@ -177,6 +183,8 @@ static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn
             }
         return OpenTileInstanceSetup(owner, id);
     }
+    NotifyUserOperation(L"unconfigured-pin-"+id,IniReadS(L"Strings",L"NotificationTitle",L"DesktopStub"),
+        IniReadS(L"Strings",L"NotificationUnconfiguredPin",L"This Start pin is not in the current tile settings. Add a tile from the tray menu, restore the saved settings, or unpin the old entry."),NIIF_WARNING);
     return false;
 }
 static void HandleSingleInstanceRequest(WPARAM request)
@@ -208,6 +216,8 @@ static void HandleSingleInstanceRequest(WPARAM request)
 
     switch (request & SINGLE_INSTANCE_REQUEST_MASK)
     {
+    case SINGLE_INSTANCE_REQUEST_SETUP_DESKTOP:
+        PostMessageW(g_hwnd,WM_APP_REQUEST_DESKTOP_HOST_SETUP,0,0);return;
     case SINGLE_INSTANCE_REQUEST_EXIT:
         RequestGracefulShutdown(g_hwnd);
         return;
@@ -327,6 +337,7 @@ static bool LiveTileRuntimeConditionMismatch(bool& shouldRunPackaged)
 
 static bool QueueLiveTileRuntimeConditionRelaunch(HWND h)
 {
+    if(g_commandLine.setupDesktop||g_desktopHostSetupPending.load()||g_desktopHostSetupRecovered)return false;
     bool shouldRunPackaged = false;
     if (!LiveTileRuntimeConditionMismatch(shouldRunPackaged))
     {
@@ -530,6 +541,8 @@ static void ExecutePendingRelaunchAfterExit()
 
 LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
 {
+    if(m==WM_APP_REQUEST_DESKTOP_HOST_SETUP){if(!g_shutdownState.IsRequested())RequestDesktopHostSetup(h);return 0;}
+    if(m==WM_APP_DESKTOP_HOST_SETUP_COMPLETE){CompleteDesktopHostSetup(h);return 0;}
     if (m == WM_COPYDATA) {
         const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(l);
         if (!data || data->dwData != TILE_INSTANCE_COPY_DATA || !data->lpData || data->cbData < 4 * sizeof(wchar_t) ||
@@ -1624,6 +1637,42 @@ static bool OpenGalleryFolder(const std::wstring& directory)
 #endif
 }
 
+static bool HandleGalleryImageActivation(CommandLineOptions& options,int& result)
+{
+    if(!options.galleryFolderActivation)return false;
+    auto nativeId=options.windowsTileId;std::wstring token=options.galleryImageToken;
+    GalleryShownActivation shown;
+    if(token.empty()&&ReadGalleryShownActivation(shown)&&shown.tileId.compare(0,11,L"AipGallery_")==0){
+        if(nativeId.empty())nativeId=shown.tileId;
+        if(nativeId==shown.tileId)ReadGalleryClickPayload(shown.arguments,nativeId,token);
+    }
+    if(!token.empty()&&nativeId.empty()){aip::gallery::activation::Token decoded;if(aip::gallery::activation::Decode(token,decoded))nativeId=aip::gallery::NativeTileId(decoded.group,decoded.tile);}
+    aip::gallery::Configuration cfg;aip::gallery::TileConfiguration tile;
+    const bool configured=!nativeId.empty()&&FindConfiguredGalleryTile(nativeId,cfg,tile);
+    if(configured&&tile.clickAction==L"Setup"){
+        options.tileSetupKey=aip::gallery::GalleryRegistrationId(cfg.groupId,tile.id);options.galleryFolderActivation=false;
+        options.openFolder.clear();options.galleryImageToken.clear();return false;
+    }
+    if(!token.empty()){
+        std::wstring image,error;
+        if(ResolveGalleryImageToken(token,nativeId,image,error)&&OpenResolvedGalleryImage(image)){result=0;return true;}
+        if(!configured){ShowCommandLineMessage(error.empty()?L"The clicked gallery photo is unavailable.":error,true);result=2;return true;}
+    }
+    if(configured){options.windowsTileId=nativeId;NotifyGalleryImageFallback();}
+    return false; // Existing folder handler remains the honest no-metadata fallback.
+}
+static void ReadChaseableRssActivation(CommandLineOptions& options)
+{
+    if(options.tileSetupKey.empty()||options.tileSignIn||options.renderOnly||options.configureOnly||!options.settings.empty()||!options.openUrl.empty())return;
+    aip::content::TileInstanceConfiguration cfg;std::wstring error;if(!ReadCurrentTileInstances(cfg,error))return;
+    const auto tile=std::find_if(cfg.tiles.begin(),cfg.tiles.end(),[&](const auto& item){return item.id==options.tileSetupKey;});
+    if(tile==cfg.tiles.end()||tile->type!=aip::content::TileInstanceType::Rss||tile->clickAction!=L"source")return;
+    GalleryShownActivation shown;std::wstring url;
+    if(ReadGalleryShownActivation(shown)&&shown.tileId==aip::content::TileInstanceNativeId(*tile)&&ReadTileInstanceSourceActivation(shown.arguments,url)){
+        options.openUrl=std::move(url);options.tileSetupKey.clear();
+    }
+}
+
 int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 {
     // Capture children inherit only their private output/reply handles. Handle
@@ -1688,6 +1737,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         return 0;
     }
 
+    int galleryClickResult=0;
+    if(HandleGalleryImageActivation(g_commandLine,galleryClickResult))return galleryClickResult;
     if (g_commandLine.galleryFolderActivation) {
         std::wstring folder, error;
         if (!ResolveGalleryFolderActivation(g_commandLine, folder, error) || !OpenGalleryFolder(folder)) {
@@ -1696,6 +1747,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         }
         return 0; // No resident, INI creation, providers, registration or Startup.
     }
+
+    ReadChaseableRssActivation(g_commandLine);
 
     if (!g_commandLine.openUrl.empty()) {
         if (g_commandLine.renderOnly || g_commandLine.configureOnly || !g_commandLine.settings.empty()) return 2;
@@ -1773,7 +1826,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     {
         WPARAM singleInstanceRequest = SINGLE_INSTANCE_REQUEST_SHOW;
         bool explicitSingleInstanceRequest = false;
-        if (!g_commandLine.mediaAction.empty()) {
+        if(g_commandLine.setupDesktop){singleInstanceRequest=SINGLE_INSTANCE_REQUEST_SETUP_DESKTOP;explicitSingleInstanceRequest=true;}
+        else if (!g_commandLine.mediaAction.empty()) {
             for (std::size_t index = 0; index < aip::content::TileActionCount; ++index)
                 if (g_commandLine.mediaAction == aip::content::TileActions[index].id)
                     singleInstanceRequest = SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE + index;
@@ -1953,6 +2007,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     Log(g_ui.iniLabel.c_str(), g_iniPath.c_str());
     Log(g_ui.logFileLabel.c_str(), GetLogPathCopy().c_str());
     LogCommandLineSummary();
+    RecoverInterruptedDesktopHostSetup();
     FlushStartupWarnings();
 
     if (singleInstanceMutexFailure != ERROR_SUCCESS)
@@ -2128,7 +2183,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     // Existing pins need their own static logos after a program upgrade. This
     // refresh updates known destinations only and never opens a pin prompt.
     if (!g_shutdownState.IsRequested()) RequestRefreshExistingSecondaryTileLogos(g_hwnd);
-    bool queuedLiveTileRuntimeRelaunch = false;
+    bool queuedLiveTileRuntimeRelaunch = g_commandLine.setupDesktop;
+    if(g_commandLine.setupDesktop&&!g_shutdownState.IsRequested())RequestDesktopHostSetup(g_hwnd);
     if (!g_commandLine.mediaAction.empty()) {
         for (std::size_t index = 0; index < aip::content::TileActionCount; ++index)
             if (g_commandLine.mediaAction == aip::content::TileActions[index].id)
@@ -2147,9 +2203,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     // Publish an initial composed frame before mode reconciliation can request
     // registration/relaunch. This starts asynchronous providers but does not
     // wait for them or queue a premature tile update. The poller starts later.
-    if (!g_shutdownState.IsRequested() && CompositionRequested())
+    if (!g_commandLine.setupDesktop&&!g_shutdownState.IsRequested() && CompositionRequested())
         ContentEngineTick(false, false);
-    if (!g_shutdownState.IsRequested())
+    if (!g_commandLine.setupDesktop&&!g_shutdownState.IsRequested())
         queuedLiveTileRuntimeRelaunch = QueueLiveTileRuntimeConditionRelaunch(g_hwnd);
 
     if (!queuedLiveTileRuntimeRelaunch && CommandLineLiveTileModeChanged())
@@ -2182,7 +2238,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     }
 
     bool queuedPendingLiveTileModeReregistration = false;
-    if (!g_shutdownState.IsRequested() && !queuedLiveTileRuntimeRelaunch && LiveTileModeReregistrationPending())
+    if (!g_shutdownState.IsRequested() && !queuedLiveTileRuntimeRelaunch && !g_desktopHostSetupRecovered && LiveTileModeReregistrationPending())
         queuedPendingLiveTileModeReregistration = QueueLiveTileModeReregistration();
 
     ContentSource contentSource = ConfiguredContentSource();

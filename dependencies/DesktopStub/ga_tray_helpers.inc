@@ -3,6 +3,7 @@
 // -----------------------------------------------------------------------------
 enum {
     ID_EXIT=1001,
+    ID_SETUP_DESKTOP_HOST,
 
     // General
     ID_USE_PS,
@@ -52,6 +53,14 @@ enum {
     ID_DELETE_DISABLED_ASSETS,
     ID_SHOW_MENU_DROPDOWN,
     ID_NOTIF_ENABLED,
+    ID_NOTIF_API_AUTO,
+    ID_NOTIF_API_BALLOON,
+    ID_NOTIF_API_TOAST,
+    ID_NOTIFY_OPERATIONS,
+    ID_NOTIFY_PIN_PROGRESS,
+    ID_NOTIFY_SOURCE_ERRORS,
+    ID_NOTIFY_GALLERY_CHANGES,
+    ID_NOTIF_PROGRESS_INTERVAL,
     ID_NOTIFY_START,
     ID_NOTIFY_SUCCESS,
     ID_NOTIFY_FAILURE,

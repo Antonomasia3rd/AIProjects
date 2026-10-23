@@ -291,6 +291,10 @@ static bool OfferTileDeliveryMigration(HWND owner,const std::wstring& tileId,con
         DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,error.c_str(),L"Registration tile setup",MB_OK|MB_ICONWARNING); return false;
     }
     if (!SaveTileInstanceSettings(owner,{{aip::content::TileInstanceSection(tile.id),L"Delivery.Mode",mode}},tile.id,L"")) return false;
+    NotifyUserOperation(L"delivery-"+tile.id,IniReadS(L"Strings",L"NotificationDeliveryChanged",L"Tile delivery changed"),
+        NotificationSubjectText(registration?L"NotificationRegistrationPreparedMessage":L"NotificationLiveDeliveryChangedMessage",
+            registration?L"%s is prepared for Registration. After its first successful update, pin its separate app from Start. Existing pins were kept.":
+                L"%s now uses Live Tile delivery. Existing Registration pins were kept.",tile.name));
     ForgetSecondaryTileDelivery(aip::content::TileInstanceNativeId(tile));
     if (g_hwnd) PostMessageW(g_hwnd,WM_APP_CONTENT_FRAME_READY,0,0);
     if (!registration && !tile.primary && SecondaryTilePinUiAvailable() && !SecondaryTileExists(aip::content::TileInstanceNativeId(tile)))

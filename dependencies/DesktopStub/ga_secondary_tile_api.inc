@@ -3,6 +3,7 @@
 // all WinRT state/results and owning windows are released on the UI thread.
 #include "../secondary_tiles.h"
 #include "../secondary_tile_anchor.h"
+#include "../gallery_pin_changes.h"
 #include "../secondary_tile_rename.h"
 #include "../tile_instance_metadata.h"
 #include "../tile_actions.h"
@@ -30,6 +31,9 @@ static void StartNextSourceTileRename();
 static bool RequestRenameExistingSourceTiles(HWND owner, const aip::content::SourceTileNames& names);
 static aip::content::AppearanceRefreshNotice g_secondaryAppearanceNotice;
 static aip::content::SecondaryPinBatch g_secondaryPinBatch;
+static aip::content::SecondaryPinBatch g_secondaryUnpinBatch;
+struct RetiredGalleryPin { std::wstring profile, group; };
+static std::map<std::wstring, RetiredGalleryPin> g_retiredGalleryPins;
 static aip::content::SecondaryPinInventory g_secondaryPinInventory;
 static aip::content::SourceTileNameNotice g_sourceTileNameNotice;
 #ifdef DESKTOPSTUB_INERT_HARDWARE
@@ -40,6 +44,19 @@ static std::set<std::wstring> CachedSecondaryTileIds() { return g_secondaryPinIn
 static bool SecondaryTileInventoryReady() { return g_secondaryPinInventory.Known(); }
 static std::wstring SecondaryTileUiString(const wchar_t* key, const wchar_t* fallback) { return IniReadS(L"Strings", key, fallback); }
 static void CompleteGallerySetup(HWND owner);
+static bool RetiredGalleryPinStillRemoved(const std::wstring& id)
+{
+    const auto retired = g_retiredGalleryPins.find(id);
+    if (retired == g_retiredGalleryPins.end()) return false;
+    std::wstring profile;
+    { std::lock_guard<std::mutex> lock(g_pathMutex); profile = aip::MakeAbsolutePath(g_iniPath); }
+    if (profile != retired->second.profile) return false;
+    aip::gallery::Configuration current; std::wstring error;
+    if (!ReadGalleryConfiguration(current, error) || current.groupId != retired->second.group) return false;
+    return std::none_of(current.tiles.begin(), current.tiles.end(), [&](const auto& tile) {
+        return aip::gallery::NativeTileId(current.groupId, tile.id) == id;
+    });
+}
 struct GalleryPinHistory {
     bool ready = false, pending = false;
     std::set<std::wstring> ids;
@@ -664,9 +681,9 @@ static winrt::Windows::Foundation::Rect CenteredPinSelection(HWND owner)
         clientOrigin.x, clientOrigin.y, dpi);
     return {anchor.x, anchor.y, anchor.width, anchor.height};
 }
-static bool RequestMutation(HWND owner, const std::wstring& supplied, const std::wstring& name, bool pin)
+static bool RequestMutation(HWND owner, const std::wstring& supplied, const std::wstring& name, bool pin, bool retiredGallery = false)
 {
-    const auto id = CanonicalSecondaryTileRuntimeId(supplied);
+    const auto id = !pin && retiredGallery ? (RetiredGalleryPinStillRemoved(supplied) ? supplied : std::wstring{}) : CanonicalSecondaryTileRuntimeId(supplied);
     if (id.empty() || !EnsureUi(owner)) return false;
     if (pin && id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0 && !GalleryTilePinReady(id)) {
         Report(owner, L"Set up this gallery and its permanent ownership history before pinning.");
@@ -729,14 +746,42 @@ static bool SecondaryTileExists(const std::wstring& supplied)
     return g_secondaryPinInventory.Contains(supplied); // No synchronous COM or full-set copy on poll/menu paths.
 #endif
 }
+static void PublishSecondaryBatchProgress(bool pin)
+{
+    const auto& batch = pin ? g_secondaryPinBatch : g_secondaryUnpinBatch;
+    const auto& progress = batch.Status();
+    static std::uint64_t pinRevision = 0, unpinRevision = 0;
+    auto& lastRevision = pin ? pinRevision : unpinRevision;
+    if (!progress.total || progress.revision == lastRevision) return;
+    lastRevision = progress.revision;
+    const bool finished = !batch.Busy();
+    auto status = std::to_wstring(progress.Completed()) + L" / " + std::to_wstring(progress.total);
+    if (finished) status += L"; applied " + std::to_wstring(progress.applied) + L", skipped " + std::to_wstring(progress.skipped) +
+        L", cancelled " + std::to_wstring(progress.cancelled) + L", failed " + std::to_wstring(progress.failed);
+    else if (!batch.ActiveName().empty()) status += L" - " + batch.ActiveName();
+    if (!pin && finished && (progress.failed || progress.cancelled)) status += SecondaryTileUiString(L"UnpinRemainingManually", L". Unpin remaining tiles manually from Start.");
+    NotifyOperationProgress(pin ? L"pin-start-tiles" : L"unpin-gallery-tiles",
+        SecondaryTileUiString(pin ? L"PinTilesProgressTitle" : L"UnpinTilesProgressTitle", pin ? L"Pinning tiles to Start" : L"Removing old gallery pins"),
+        status, progress.Completed(), progress.total, finished, progress.failed != 0);
+}
 static void StartNextSecondaryPin()
 {
 #ifndef DESKTOPSTUB_INERT_HARDWARE
     if (secondary_ui::shuttingDown || secondary_ui::UserMutationPending() || secondary_ui::AppearanceRefreshPending() ||
         secondary_ui::NameOperationPending() || !secondary_ui::renameRequested.empty() || !secondary_ui::renameQueue.empty()) return;
-    g_secondaryPinBatch.Advance([](const auto& item) {
-        return secondary_ui::RequestMutation(secondary_ui::host, item.first, item.second, true);
+    using Batch = aip::content::SecondaryPinBatch;
+    g_secondaryUnpinBatch.AdvanceWithResult([](const auto& item) -> std::optional<Batch::Result> {
+        if (!RetiredGalleryPinStillRemoved(item.first) || (g_secondaryPinInventory.Known() && !g_secondaryPinInventory.Contains(item.first))) {
+            g_retiredGalleryPins.erase(item.first); return Batch::Result::Skipped;
+        }
+        if (secondary_ui::RequestMutation(secondary_ui::host, item.first, item.second, false, true)) return {};
+        g_retiredGalleryPins.erase(item.first);
+        return Batch::Result::Failed;
     });
+    PublishSecondaryBatchProgress(false);
+    if (g_secondaryUnpinBatch.Busy()) return;
+    g_secondaryPinBatch.Advance([](const auto& item) { return secondary_ui::RequestMutation(secondary_ui::host, item.first, item.second, true); });
+    PublishSecondaryBatchProgress(true);
 #endif
 }
 static void StartNextSourceTileRename()
@@ -836,6 +881,24 @@ static bool RequestSecondaryTilePinBatch(HWND owner, const std::vector<std::pair
         normalized.emplace_back(id, item.second.empty() ? id : item.second);
     }
     g_secondaryPinBatch.Enqueue(normalized); StartNextSecondaryPin(); return !normalized.empty();
+#endif
+}
+// Only called after a successful gallery configuration commit. The explicit
+// before/after snapshots authorize these exact retired native IDs; no arbitrary
+// unconfigured tile ID is accepted by RequestMutation.
+static bool RequestRetiredGalleryPinBatch(HWND owner, const aip::gallery::Configuration& before,
+    const aip::gallery::Configuration& after)
+{
+    const auto change = aip::gallery::PlanPinMembershipChange(before, after);
+    if (change.removedNative.empty()) return true;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    (void)owner; return false;
+#else
+    if (!secondary_ui::EnsureUi(owner)) return false;
+    std::wstring profile;
+    { std::lock_guard<std::mutex> lock(g_pathMutex); profile = aip::MakeAbsolutePath(g_iniPath); }
+    for (const auto& tile : change.removedNative) g_retiredGalleryPins[tile.first] = {profile, before.groupId};
+    g_secondaryUnpinBatch.Enqueue(change.removedNative); StartNextSecondaryPin(); return true;
 #endif
 }
 // Explicit redistribution only: the caller has confirmed, paused gallery work
@@ -1035,6 +1098,7 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
         // operation and apartment local before reading any completed result so
         // shutdown cannot invalidate a reference into the pending map.
         auto state = std::move(found->second); pending.erase(found);
+        auto batchResult = aip::content::SecondaryPinBatch::Result::Failed;
         try {
             if (completion.status != AsyncStatus::Completed && completion.status != AsyncStatus::Error && completion.status != AsyncStatus::Canceled)
                 throw winrt::hresult_error(E_UNEXPECTED, L"Windows returned an unknown secondary tile completion state.");
@@ -1092,6 +1156,8 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
                 LogText(L"Pinned source tile list refreshed.");
             } else {
                 const bool accepted = state.mutation.GetResults(); // Terminal only, no blocking wait/get.
+                batchResult = accepted ? aip::content::SecondaryPinBatch::Result::Applied :
+                    (state.updateExisting ? aip::content::SecondaryPinBatch::Result::Failed : aip::content::SecondaryPinBatch::Result::Cancelled);
                 if (accepted) {
                     if (state.kind == Kind::RefreshLogo) {
                         Log(L"Source tile %ls topic artwork metadata published: %ls", state.id.c_str(), state.expectedLogos.medium.c_str());
@@ -1112,6 +1178,7 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
             // nested modal loop which could dispatch shutdown before release.
             if (error.code() != HRESULT_FROM_WIN32(ERROR_CANCELLED)) Log(L"[!] Secondary tile: %ls", ErrorText(error).c_str());
             else LogText(L"Source tile request cancelled.");
+            if (error.code() == HRESULT_FROM_WIN32(ERROR_CANCELLED)) batchResult = aip::content::SecondaryPinBatch::Result::Cancelled;
             if (state.kind == Kind::GalleryHistory) g_galleryPinHistory.error = ErrorText(error);
             if (state.kind == Kind::List || state.kind == Kind::RefreshList || state.kind == Kind::VerifyLogos)
                 g_secondaryPinInventory.Complete(false, {}, GetTickCount64());
@@ -1121,7 +1188,8 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
                 g_secondaryPinInventory.Complete(false, {}, GetTickCount64());
         }
         state.mutation = nullptr; state.tile = nullptr; state.list = nullptr;
-        if (state.kind == Kind::Pin) g_secondaryPinBatch.Complete(state.id);
+        if (state.kind == Kind::Pin) g_secondaryPinBatch.Complete(state.id, batchResult);
+        if (state.kind == Kind::Unpin) { g_secondaryUnpinBatch.Complete(state.id, batchResult); g_retiredGalleryPins.erase(state.id); }
         if (state.kind == Kind::GalleryHistory) {
             KillTimer(window, GALLERY_HISTORY_TIMER);
             g_galleryPinHistory.pending = false;
@@ -1139,7 +1207,17 @@ static bool SecondaryTileHandleMessage(HWND window, UINT message, WPARAM wParam,
 }
 static void ShutdownSecondaryTileUi()
 {
+    for (const bool pin : {true,false}) {
+        const auto& batch=pin?g_secondaryPinBatch:g_secondaryUnpinBatch;
+        if (!batch.Busy()) continue;
+        const auto& progress=batch.Status();
+        NotifyOperationProgress(pin?L"pin-start-tiles":L"unpin-gallery-tiles",
+            SecondaryTileUiString(pin?L"PinTilesProgressTitle":L"UnpinTilesProgressTitle",pin?L"Pinning tiles to Start":L"Removing old gallery pins"),
+            SecondaryTileUiString(L"TileBatchStopped",L"Stopped before all requests finished. Unfinished requests were not counted as applied."),
+            progress.Completed(),progress.total,true,true);
+    }
     g_secondaryPinBatch.Clear();
+    g_secondaryUnpinBatch.Clear(); g_retiredGalleryPins.clear();
     g_sourceTileNameNotice.Clear();
     g_galleryPinHistory = {};
 #ifndef DESKTOPSTUB_INERT_HARDWARE

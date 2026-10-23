@@ -1,5 +1,23 @@
 # Next pass: outstanding fixes and acceptance
 
+## October 23 priority update installed
+
+The source/notification/performance/defaults slice and requested backed-up
+Desktop-only settings reset are complete. Read [the installation record](desktopstub-installed-2026-10-23.md)
+for final gates, hashes, backup and native health. Current private memory measured
+4.77–5.01 MiB in a short fresh-profile sample; this is not an old-build comparison.
+The full strict smoke still reproduces the identical historical four-pixel
+legacy caption discrepancy. Its renderer and assertions are unchanged; no fix
+or complete full-smoke pass is claimed.
+
+Remaining: native popup/scenario behavior, chaseable image clicks, live account
+acceptance, Registration/manual migration, lock/resume spike attribution and
+the renderer defect. Lower-priority font selection, lyrics, confirmed weekly
+Calendar timetable, supported fitness API feasibility and Battery are queued
+in [the suggestion list](tile-followups-2026-10-23.md). Earlier preservation
+notes describe their historical installs; the October 23 user-authorized reset
+archives that profile and deliberately leaves the active source list Desktop-only.
+
 ## October 20 delivery follow-up completed
 
 Per-tile delivery/cache/render policies and independent Registration identities

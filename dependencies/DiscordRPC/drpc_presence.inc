@@ -1,3 +1,4 @@
+#include "presence_defaults.h"
 static thread_local ULONGLONG g_lastIdleTime = 0;
 static thread_local ULONGLONG g_lastKernelTime = 0;
 static thread_local ULONGLONG g_lastUserTime = 0;
@@ -754,7 +755,7 @@ static PresencePayload BuildPresencePayload(const TemplateContext* suppliedConte
     std::string activity = "{";
     bool first = true;
 
-    std::wstring name = ApplyTemplate(IniReadS(L"general", L"activity_name", L"a game"), ctx);
+    std::wstring name = ApplyTemplate(IniReadS(L"general", L"activity_name", aip::discord::DefaultActivityName), ctx);
     if (name.empty())
     {
         name = L"a game";
@@ -770,7 +771,7 @@ static PresencePayload BuildPresencePayload(const TemplateContext* suppliedConte
 
     if (IniReadB(L"layout", L"details_field", true))
     {
-        std::wstring details = ApplyTemplate(IniReadS(L"general", L"details_template", L"{win_title}"), ctx);
+        std::wstring details = ApplyTemplate(IniReadS(L"general", L"details_template", aip::discord::DefaultDetailsTemplate), ctx);
         if (!details.empty())
         {
             JsonFieldString(activity, first, "details", LimitDiscordText(details, 128));
@@ -779,7 +780,7 @@ static PresencePayload BuildPresencePayload(const TemplateContext* suppliedConte
 
     if (IniReadB(L"layout", L"state_field", true))
     {
-        std::wstring state = ApplyTemplate(IniReadS(L"general", L"state_template", L"CPU: {cpu}, RAM: {ram_used}/{ram_total} ({ram_pct})"), ctx);
+        std::wstring state = ApplyTemplate(IniReadS(L"general", L"state_template", aip::discord::DefaultStateTemplate), ctx);
         if (!state.empty())
         {
             JsonFieldString(activity, first, "state", LimitDiscordText(state, 128));

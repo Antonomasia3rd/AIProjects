@@ -6,6 +6,32 @@ static FitMode ReadPrivateTileInstanceFit(){++tileInstanceFitReads;return tileIn
 static void TestTileInstanceRuntimeHost()
 {
     using namespace aip::content;
+    {
+        using namespace aip::notifications;
+        SourceTransitions source;
+        Check(source.Observe(SourceState::Unconfigured)==SourceNotice::None&&source.Observe(SourceState::Pending)==SourceNotice::None,
+            "unconfigured and pending tile sources do not emit failure notifications");
+        Check(source.Observe(SourceState::Healthy)==SourceNotice::None&&source.Observe(SourceState::Failed)==SourceNotice::Failed,
+            "a completed source failure produces one actionable notice");
+        bool quiet=true;for(unsigned tick=0;tick<1000;++tick)quiet=quiet&&source.Observe(SourceState::Failed)==SourceNotice::None;
+        Check(quiet&&source.Observe(SourceState::Pending)==SourceNotice::None&&source.Observe(SourceState::Failed)==SourceNotice::None,
+            "repeated failures and intervening pending work cannot create a notification storm");
+        Check(source.Observe(SourceState::Healthy)==SourceNotice::Recovered&&source.Observe(SourceState::Healthy)==SourceNotice::None,
+            "recovery is reported once after a failure and ordinary successful refreshes remain quiet");
+        Check(source.Observe(SourceState::Failed)==SourceNotice::Failed&&source.Observe(SourceState::Unconfigured)==SourceNotice::None&&
+            source.Observe(SourceState::Healthy)==SourceNotice::None,"returning a tile to setup clears its failure without a false recovery");
+        std::wstring value=L" balloon ",issue;
+        Check(NormalizeDesktopStubTypedSetting(L"Settings",L"NotificationApi",value,issue)&&value==L"Balloon",
+            "the classic notification API is selectable through the typed CLI");
+        value=L"Popup";Check(!NormalizeDesktopStubTypedSetting(L"Settings",L"NotificationApi",value,issue),
+            "unsupported notification APIs are rejected before changing configuration");
+        value=L"250";Check(NormalizeDesktopStubTypedSetting(L"Settings",L"NotificationProgressIntervalMs",value,issue),
+            "the notification progress interval accepts its lower bound");
+        for(const auto* invalid:{L"249",L"60001",L"true"}){value=invalid;Check(!NormalizeDesktopStubTypedSetting(L"Settings",L"NotificationProgressIntervalMs",value,issue),
+            "the progress interval rejects booleans and values outside its supported range");}
+        Check(NotificationSubjectText(L"SyntheticNotificationWording",L"%s %d %n",L"Tile %s")==L"Tile %s %d %n",
+            "notification subject formatting treats configurable text as data, including percent sequences");
+    }
     std::wstring original,error;Check(ReadIniFileForMutation(original),"instance runtime fixture captures its private profile");
     const auto savedPins=CachedSecondaryTileIds();const bool pinsKnown=SecondaryTileInventoryReady();
     const auto oldRefresh=g_iniCacheRefreshMs.load();g_iniCacheRefreshMs=0;

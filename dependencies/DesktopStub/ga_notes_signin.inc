@@ -85,6 +85,9 @@ static bool SaveTargetAccount(HWND owner, const std::shared_ptr<State>& state) {
         state->accountFingerprint = AccountFingerprint(IniReadS, state->accountSection);
         state->tileFingerprint = AccountFingerprint(IniReadS, aip::content::TileInstanceSection(state->tileId), L"Notes.");
         RefreshTileInstanceNow(state->tileId);
+        NotifyUserOperation(L"account-saved-"+state->tileId,IniReadS(L"Strings",L"NotificationAccountSaved",L"Game account saved"),
+            NotificationSubjectText(L"NotificationAccountSavedMessage",L"The account for %s was saved. Its resource information will refresh automatically.",
+                aip::notes::SignInGames[state->resource].name));
     } else if (!error.empty()) SetWindowTextW(state->status, error.c_str());
     return saved;
 }

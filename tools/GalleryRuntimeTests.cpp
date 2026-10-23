@@ -137,6 +137,8 @@ void TestPublicationAndSlotAcknowledgements() {
     Check(!coordinator.ValidateFrame(altered), "a copied receipt cannot change reset semantics");
     altered = frames.front(); altered.activationArguments += L" other";
     Check(!coordinator.ValidateFrame(altered), "exact frame validation rejects changed activation arguments");
+    altered = frames.front(); altered.clickAction=L"Setup";
+    Check(!coordinator.ValidateFrame(altered),"a copied receipt cannot replace its captured click action");
     const auto pendingPlans = host.plans.load();
     for (int tick = 0; tick < 10; ++tick) coordinator.Refresh(input);
     Check(host.plans == pendingPlans, "unchanged pending windows reuse their cached plan without validating/copying the whole ledger every poll");
@@ -435,9 +437,97 @@ void TestRegistrationReceiptsAndMixedTransport() {
         after.tiles.at(L"one").pending.images.size()==1 && after.tiles.at(L"one").cursor==before.tiles.at(L"one").cursor && after.images.size()==before.images.size(),
         "mode migration replaces a five-slot pending window safely without advancing the cursor or releasing photo ownership");
 }
+void TestIdenticalCompleteQueueSuppression() {
+    auto input=Input();input.configuration.tiles.resize(1);input.pinnedIds={NativeTileId(input.configuration.groupId,L"one")};
+    Harness host;std::atomic<unsigned> imageCount{3},pathVersion{0};
+    host.scanner=[&](const std::wstring&,const InventoryIndex& previous,const InventoryCancel&){InventoryResult result;result.index=previous;result.complete=true;result.images=Images(imageCount.load());for(auto& image:result.images)image.thumbnailPath+=L"-v"+std::to_wstring(pathVersion.load());return result;};
+    host.Initialize(input);runtime::Coordinator coordinator(host.Services());
+    Pump(coordinator,input,[&]{return coordinator.CurrentFrames().size()==3;});
+    auto frames=coordinator.CurrentFrames();coordinator.Acknowledge(frames.front().receipt);host.now=900001;coordinator.Refresh(input);
+    Check(coordinator.CurrentFrames().size()==3&&host.Load().tiles.at(L"one").pending.ticket==frames.front().receipt.ticket,
+        "a small pool cannot suppress its first partially acknowledged publication even after an interval");
+    const auto failedReceipt=frames.front().receipt;coordinator.Fail(frames[1].receipt);host.now=905001;coordinator.Refresh(input);frames=coordinator.CurrentFrames();
+    Check(frames.size()==3&&frames.front().receipt.frameKey!=failedReceipt.frameKey&&frames.front().receipt.ticket==failedReceipt.ticket&&!coordinator.Validate(failedReceipt),
+        "failed small-pool publication remains a real fresh-attempt retry");
+    for(const auto& frame:frames)coordinator.Acknowledge(frame.receipt);host.failSave=true;coordinator.Refresh(input);
+    Check(host.Load().tiles.at(L"one").pending.ticket!=0&&coordinator.CurrentFrames().empty(),
+        "all-slot transport success cannot establish repeat suppression before the ledger acknowledgement commits");
+    host.failSave=false;host.now=910001;coordinator.Refresh(input);
+    Check(host.Load().tiles.at(L"one").pending.ticket==0,"small-pool acknowledgement can retry and commit durably");
+    auto committed=Wire(host.Load());const auto saves=host.saves.load(),plans=host.plans.load();
+    for(int interval=0;interval<20;++interval){host.now+=900001;coordinator.Refresh(input);}
+    Check(coordinator.CurrentFrames().empty()&&host.saves==saves&&host.plans==plans&&Wire(host.Load())==committed,
+        "twenty due intervals preserve the identical complete small queue with no new ticket, ledger save or publication plan");
+    Check(coordinator.StatusWindows().size()==1&&coordinator.StatusWindows().front().submitted,
+        "suppression retains complete submitted status without reviving deliverable receipts");
+    const auto accept=[&](){const auto pending=coordinator.CurrentFrames();Check(!pending.empty(),"explicit invalidation produces actual frames");for(const auto& frame:pending)coordinator.Acknowledge(frame.receipt);coordinator.Refresh(input);Check(host.Load().tiles.at(L"one").pending.ticket==0,"invalidated replacement commits all-slot success");};
+    coordinator.RequestRefresh();coordinator.Refresh(input);Check(coordinator.CurrentFrames().size()==3,"manual refresh bypasses identical queue suppression");accept();
+    input.configuration.tiles.front().name=L"Changed gallery title";coordinator.Refresh(input);
+    Check(coordinator.CurrentFrames().size()==3&&coordinator.CurrentFrames().front().name==L"Changed gallery title","renaming invalidates the exact-publication proof");accept();
+    input.configuration.tiles.front().clickAction=L"Setup";coordinator.Refresh(input);
+    Check(coordinator.CurrentFrames().size()==3&&coordinator.CurrentFrames().front().clickAction==L"Setup","click-action changes invalidate proof and are captured on each immutable frame");accept();
+    input.configuration.tiles.front().clickAction=L"Image";coordinator.Refresh(input);accept();
+    input.pinnedIds.clear();coordinator.Refresh(input);input.pinnedIds.insert(NativeTileId(input.configuration.groupId,L"one"));coordinator.Refresh(input);
+    Check(coordinator.CurrentFrames().size()==3,"unpin and repin requires an actual complete publication");accept();
+    coordinator.Suspend();coordinator.Resume();coordinator.Refresh(input);Check(coordinator.CurrentFrames().size()==3,"suspend/resume clears suppression proof");accept();
+    Pump(coordinator,input,[&]{return coordinator.Status().find(L"refreshing the cached inventory")==std::wstring::npos;});
+    pathVersion=1;host.now+=900001;
+    Pump(coordinator,input,[&]{const auto current=coordinator.CurrentFrames();return current.size()==3&&current.front().path.find(L"-v1")!=std::wstring::npos;});
+    Check(coordinator.CurrentFrames().front().path.find(L"-v1")!=std::wstring::npos,"changed thumbnail paths cannot be suppressed, including an inventory completion after the due check");accept();
+    Pump(coordinator,input,[&]{return coordinator.Status().find(L"refreshing the cached inventory")==std::wstring::npos;});
+    imageCount=4;host.now+=900001;Pump(coordinator,input,[&]{return coordinator.CurrentFrames().size()==4;});
+    Check(host.Load().images.size()==4,"a newly discovered image expands its owner's queue rather than being suppressed");accept();
+    input.configuration.queueSize=2;coordinator.Refresh(input);const auto firstPair=coordinator.CurrentFrames();Check(firstPair.size()==2,"queue size changes publish a real resized queue");accept();
+    host.now+=900001;coordinator.Refresh(input);const auto secondPair=coordinator.CurrentFrames();
+    Check(secondPair.size()==2&&secondPair.front().path!=firstPair.front().path,"pools larger than the native queue keep advancing to a different sequence");accept();
+    input.configuration.queueSize=5;coordinator.Refresh(input);Check(coordinator.CurrentFrames().size()==4,"restoring queue capacity does not reuse the old shorter publication");accept();
+    std::wstring error;Check(aip::content::ReadTileDeliveryPolicy([](const wchar_t*,const wchar_t* key,const wchar_t* fallback){return std::wstring(key)==L"Cache.Enabled"?L"0":std::wstring(fallback);},L"Gallery.Tile.1",L"one",input.configuration.tiles.front().delivery,error),"capture changed per-tile cache policy");
+    coordinator.Refresh(input);Check(coordinator.CurrentFrames().size()==4,"per-tile delivery/cache policy changes invalidate identical image queues");accept();
+    input.renderingContext=L"AutoScale:125";coordinator.Refresh(input);Check(coordinator.CurrentFrames().size()==4,"initial render-environment identity establishes a new complete publication");accept();
+    input.renderingContext=L"AutoScale:150";coordinator.Refresh(input);Check(coordinator.CurrentFrames().size()==4,"Auto DPI scale changes republish assets even when policy and image paths are unchanged");accept();
+    coordinator.Stop();runtime::Coordinator restarted(host.Services());Pump(restarted,input,[&]{return restarted.CurrentFrames().size()==4;});
+    Check(restarted.CurrentFrames().size()==4,"startup never infers complete publication from an old committed ledger");
+    for(const auto& frame:restarted.CurrentFrames())restarted.Acknowledge(frame.receipt);restarted.Refresh(input);
+    const auto before=host.Load();Ledger reset;Check(ResetLedger(before,L"repeat_suppression_epoch2",true,reset,error),"explicitly retired epoch can be replaced in the fixture");
+    {std::lock_guard<std::mutex> lock(host.mutex);host.files[runtime::LedgerPath(input.profile)]=Wire(reset);}
+    restarted.RequestRefresh(true);Pump(restarted,input,[&]{return restarted.CurrentFrames().size()==4;});
+    Check(restarted.CurrentFrames().front().receipt.epoch==L"repeat_suppression_epoch2","new ownership epoch requires an actual new publication");
+}
+void TestFullPoolBoundaryTransports() {
+    for(const auto choice:{std::make_pair(1u,false),std::make_pair(5u,false),std::make_pair(1u,true)}){
+        auto input=Input();input.configuration.tiles.resize(1);input.pinnedIds={NativeTileId(input.configuration.groupId,L"one")};
+        if(choice.second){auto& tile=input.configuration.tiles.front();tile.registration=true;input.registeredStaticIds.insert(tile.id);input.pinnedIds.clear();std::wstring error;
+            Check(aip::content::ReadTileDeliveryPolicy([](const wchar_t*,const wchar_t* key,const wchar_t* fallback){return std::wstring(key)==L"Delivery.Mode"?L"Registration":std::wstring(fallback);},L"Gallery.Tile.1",L"one",tile.delivery,error),"capture explicit static delivery for repeat boundary test");}
+        Harness host;host.scanner=[&](const std::wstring&,const InventoryIndex& previous,const InventoryCancel&){InventoryResult result;result.index=previous;result.complete=true;result.images=Images(choice.first);return result;};
+        host.Initialize(input);runtime::Coordinator coordinator(host.Services());Pump(coordinator,input,[&]{return coordinator.CurrentFrames().size()==choice.first;});
+        const auto frames=coordinator.CurrentFrames();Check(frames.front().registration==choice.second,"initial boundary publication uses its requested transport");
+        for(const auto& frame:frames)coordinator.Acknowledge(frame.receipt);coordinator.Refresh(input);const auto saved=Wire(host.Load());const auto saves=host.saves.load(),plans=host.plans.load();
+        host.now=900001;coordinator.Refresh(input);
+        Check(coordinator.CurrentFrames().empty()&&Wire(host.Load())==saved&&host.saves==saves&&host.plans==plans,
+            "one-image static/native and full five-image native pools suppress only a complete durable identical repeat");
+        coordinator.RequestRefresh();coordinator.Refresh(input);Check(coordinator.CurrentFrames().size()==choice.first,"manual refresh still publishes each boundary transport");
+    }
+}
+void TestChangedPathLastAcknowledgementRace() {
+    auto input=Input();input.configuration.tiles.resize(1);input.pinnedIds={NativeTileId(input.configuration.groupId,L"one")};
+    Harness host;std::atomic<unsigned> version{0};host.scanner=[&](const std::wstring&,const InventoryIndex& previous,const InventoryCancel&){InventoryResult result;result.index=previous;result.complete=true;result.images=Images(3);for(auto& image:result.images)image.thumbnailPath+=L"-v"+std::to_wstring(version.load());return result;};
+    host.Initialize(input);auto services=host.Services();runtime::Coordinator* live=nullptr;bool inject=false,injected=false;runtime::Receipt oldLast;
+    services.planning=[&]{++host.plans;if(inject&&!injected){injected=true;live->Acknowledge(oldLast);}};
+    runtime::Coordinator coordinator(std::move(services));live=&coordinator;Pump(coordinator,input,[&]{return coordinator.CurrentFrames().size()==3;});
+    const auto old=coordinator.CurrentFrames();oldLast=old.back().receipt;coordinator.Acknowledge(old[0].receipt);coordinator.Acknowledge(old[1].receipt);
+    version=1;host.now=30001;inject=true;
+    Pump(coordinator,input,[&]{const auto current=coordinator.CurrentFrames();return injected&&current.size()==3&&current.front().path.find(L"-v1")!=std::wstring::npos;});
+    const auto replacement=coordinator.CurrentFrames();
+    Check(!coordinator.Validate(oldLast)&&replacement.front().receipt.ticket==old.front().receipt.ticket&&replacement.front().receipt.frameKey!=old.front().receipt.frameKey,
+        "old last-slot success racing after acknowledgement capture cannot authorize changed-path replacement frames");
+    coordinator.Refresh(input);Check(host.Load().tiles.at(L"one").pending.ticket==old.front().receipt.ticket&&host.Load().tiles.at(L"one").cursor==0,
+        "path-change attempt revokes ready-to-commit as well as old per-slot acknowledgement bits");
+    for(const auto& frame:replacement)coordinator.Acknowledge(frame.receipt);coordinator.Refresh(input);
+    Check(host.Load().tiles.at(L"one").pending.ticket==0,"all replacement slots can establish their own durable complete proof after the race");
+}
 }
 int main() {
-    try { TestExplicitInitializationAndCas(); TestPublicationAndSlotAcknowledgements(); TestRestartConflictAndUnavailableMode(); TestResumableInventoryAndShutdown(); TestManyTilesAndFolders(); TestUnavailableFolderIsolation(); TestSubmittedStatusRetention(); TestRegistrationReceiptsAndMixedTransport();
+    try { TestExplicitInitializationAndCas(); TestPublicationAndSlotAcknowledgements(); TestRestartConflictAndUnavailableMode(); TestResumableInventoryAndShutdown(); TestManyTilesAndFolders(); TestUnavailableFolderIsolation(); TestSubmittedStatusRetention(); TestRegistrationReceiptsAndMixedTransport(); TestIdenticalCompleteQueueSuppression(); TestFullPoolBoundaryTransports(); TestChangedPathLastAcknowledgementRace();
         std::cout << checks << " gallery runtime checks passed.\n"; return 0;
     } catch (const std::exception& error) { std::cerr << "FAIL after " << checks << " runtime checks: " << error.what() << '\n'; return 1; }
 }

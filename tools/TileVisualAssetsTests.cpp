@@ -1,4 +1,5 @@
 #include "../dependencies/tile_visual_assets.h"
+#include "../dependencies/tile_instance_metadata.h"
 #include <iostream>
 #include <set>
 #include <stdexcept>
@@ -38,6 +39,12 @@ static void TestFontFallback() {
         NativeGlyphFor(Glyph::RepeatTrack).primary == 0xe8ed, "status glyphs distinguish stopped/unknown/disabled/single-track states");
     Check(FindTopic(L"gallery") && NativeGlyphFor(FindTopic(L"gallery")->glyph).primary == 0xe91b,
         "gallery fallback maps to the documented Photo glyph");
+    Check(FindTopic(L"desktop")&&NativeGlyphFor(FindTopic(L"desktop")->glyph).primary==0xe977&&
+        FindTopic(L"desktop")->glyph!=FindTopic(L"gallery")->glyph,
+        "Desktop fallback resolves the documented PC1 glyph instead of the gallery Photo glyph");
+    aip::content::TileInstance wallpaper,gallery;wallpaper.type=aip::content::TileInstanceType::Wallpaper;gallery.type=aip::content::TileInstanceType::Gallery;
+    Check(aip::content::TileInstanceArtworkTopic(wallpaper)==L"desktop"&&aip::content::TileInstanceArtworkTopic(gallery)==L"gallery",
+        "primary and independent Wallpaper instances never inherit photo-gallery artwork");
     Check(!FindTopic(L"AipGallery_unknown.tile") && !IsKnownSecondaryArtworkId(L"AipGallery_unknown.tile"),
         "pure artwork does not classify arbitrary gallery IDs as pin destinations without host configuration");
 }

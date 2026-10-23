@@ -165,7 +165,10 @@ static void AppendTileInstanceEditable(HMENU menu, const aip::content::TileInsta
     bool checked = false; if (toggle) aip::content::ParseBool(value, checked);
     auto caption = TileInstanceUi((L"TileOption_" + std::wstring(key)).c_str(), label);
     if (!toggle && !secret) caption += L": " + ContentMenuValue(value);
-    if (secret) caption += value.empty() ? L": not configured" : L": configured";
+    if (secret) {
+        const bool protectedToken=aip::content::Lower(key)==L"kuro.gametoken"&&!IniReadS(section.c_str(),L"Kuro.GameTokenProtected",L"").empty();
+        caption += value.empty()&&!protectedToken ? L": not configured" : L": configured";
+    }
     AppendTileInstanceCommand(menu, caption, {toggle ? TileInstanceMenuVerb::Toggle : TileInstanceMenuVerb::Edit,
         tile.id,key,value,label,secret}, checked);
 }
@@ -264,12 +267,28 @@ static void AppendTileInstancePrayerSettings(HMENU menu,const aip::content::Tile
     HMENU adjustments = aip::BeginTrayNestedMenu(menu);
     for (const auto* key : g_prayerAdjustmentKeys) AppendTileInstanceEditable(adjustments,tile,(L"PrayerTimes."+std::wstring(key)).c_str(),key,L"0");
     aip::EndTrayNestedMenu(menu,adjustments,TileInstanceUi(L"PrayerAdjustments",L"Local minute adjustments"));
-    AppendTileInstanceEditable(menu,tile,L"PrayerTimes.TwentyFourHour",L"Use 24-hour times",L"1",true);
-    AppendTileInstanceEditable(menu,tile,L"PrayerTimes.ShowSunrise",L"Show sunrise information",L"1",true);
+    AppendTileInstanceEditable(menu,tile,L"PrayerTimes.TwentyFourHour",L"Use 24-hour times",L"0",true);
+    AppendTileInstanceEditable(menu,tile,L"PrayerTimes.ShowSunrise",L"Show sunrise in details and timetable",L"1",true);
+    AppendTileInstanceEditable(menu,tile,L"PrayerTimes.NextIncludesSunrise",L"Include sunrise in next event countdown",L"0",true);
     AppendTileInstanceEditable(menu,tile,L"PrayerTimes.ShowTimetable",L"Show timetable on large tiles",L"1",true);
     AppendTileInstanceEditable(menu,tile,L"PrayerTimes.RefreshSeconds",L"Schedule refresh interval (seconds)",L"43200");
     AppendTileInstanceEditable(menu,tile,L"PrayerTimes.TimeoutSeconds",L"HTTP timeout (seconds)",L"10");
     AppendTileInstanceEditable(menu,tile,L"PrayerTimes.MaximumBytes",L"Response limit (bytes)",L"262144");
+}
+static void AppendTileInstanceAlerts(HMENU parent,const aip::content::TileInstance& tile)
+{
+    HMENU menu=aip::BeginTrayNestedMenu(parent);
+    AppendTileInstanceEditable(menu,tile,L"Alerts.Enabled",L"Enable notifications for this tile",L"0",true);
+    AppendTileInstanceChoices(menu,tile,L"Alerts.Type",L"Notification type",{{L"General",L"General"},{L"Reminder",L"Reminder"},{L"Alarm",L"Alarm"}},L"General");
+    AppendTileInstanceChoices(menu,tile,L"Alerts.Sound",L"Notification sound",{{L"Silent",L"Silent"},{L"Default",L"Default"},{L"Alarm",L"Alarm sound"}},L"Silent");
+    if(tile.type==aip::content::TileInstanceType::PrayerTimes){
+        AppendTileInstanceEditable(menu,tile,L"Alerts.LeadMinutes",L"Notify before prayer (minutes, 0 = at time)",L"20");
+        AppendTileInstanceEditable(menu,tile,L"Alerts.Events",L"Events (Fajr,Dhuhr,Asr,Maghrib,Isha,Sunrise)",L"Fajr,Dhuhr,Asr,Maghrib,Isha");
+    }else{
+        AppendTileInstanceEditable(menu,tile,L"Alerts.MinimumNewItems",L"New items required before notifying",L"1");
+        AppendTileInstanceEditable(menu,tile,L"Alerts.CooldownSeconds",L"Minimum time between notifications (seconds)",L"60");
+    }
+    aip::EndTrayNestedMenu(parent,menu,TileInstanceUi(L"TileSourceNotifications",L"Notifications for this tile"));
 }
 static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::TileInstance& tile)
 {
@@ -301,6 +320,31 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
         AppendTileInstanceEditable(menu,tile,L"SMTC.ShowRepeatShuffle",L"Show repeat and shuffle status",L"0",true);
         break;
     case TileInstanceType::PrayerTimes: AppendTileInstancePrayerSettings(menu,tile); break;
+    case TileInstanceType::Clock: case TileInstanceType::Calendar: {
+        const bool clock=tile.type==TileInstanceType::Clock;const auto section=clock?L"Clock.":L"Calendar.";
+        AppendTileInstanceEditable(menu,tile,(std::wstring(section)+L"TimeZone").c_str(),L"Time zone (Local or Windows/IANA zone ID)",L"Local");
+        AppendTileInstanceChoices(menu,tile,(std::wstring(section)+L"TimeFormat").c_str(),L"Time format",{{L"12Hour",L"12-hour (AM/PM)"},{L"24Hour",L"24-hour"},{L"System",L"Windows setting"}},L"12Hour");
+        if(clock){
+            AppendTileInstanceEditable(menu,tile,L"Clock.Location",L"Location label (optional)",L"");
+            AppendTileInstanceEditable(menu,tile,L"Clock.ShowDate",L"Show date",L"1",true);
+        }else{
+            AppendTileInstanceEditable(menu,tile,L"Calendar.FilePath",L"Local calendar file (.ics, optional)",L"");
+            AppendTileInstanceEditable(menu,tile,L"Calendar.DaysAhead",L"Look ahead (days)",L"7");
+            AppendTileInstanceEditable(menu,tile,L"Calendar.MaxEvents",L"Upcoming events to keep (1-10)",L"3");
+            AppendTileInstanceEditable(menu,tile,L"Calendar.RefreshSeconds",L"Check calendar file every (seconds)",L"60");
+            AppendTileInstanceEditable(menu,tile,L"Calendar.ShowLocation",L"Show event location",L"1",true);
+        }break;
+    }
+    case TileInstanceType::Wuwa:
+        aip::AppendTrayMenuItem(menu,0,TileInstanceUi(L"KuroTokenExplanation",L"Overseas WuWa game access token; not a HoYoLAB cookie"),false,false);
+        AppendTileInstanceEditable(menu,tile,L"Kuro.GameToken",L"Save game access token (protected with Windows DPAPI)",L"",false,true);
+        AppendTileInstanceEditable(menu,tile,L"Kuro.PlayerId",L"WuWa player ID (blank discovers a single linked role)",L"");
+        AppendTileInstanceEditable(menu,tile,L"Kuro.Region",L"WuWa region (blank discovers a single linked role)",L"");
+        AppendTileInstanceEditable(menu,tile,L"Kuro.DeviceId",L"Device ID (optional)",L"");
+        AppendTileInstanceEditable(menu,tile,L"Kuro.RefreshSeconds",L"Fetch game notes every (seconds)",L"300");
+        AppendTileInstanceEditable(menu,tile,L"Kuro.TimeoutSeconds",L"HTTP timeout (seconds)",L"15");
+        AppendTileInstanceEditable(menu,tile,L"Kuro.MaximumBytes",L"Response limit (bytes)",L"1048576");
+        break;
     case TileInstanceType::Genshin: case TileInstanceType::Hsr: case TileInstanceType::Zzz: {
         AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceSignIn",L"Sign in to HoYoLAB inside this app..."),{TileInstanceMenuVerb::SignIn,tile.id,L"",L"",L""});
         AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceChooseAccount",L"Choose saved account..."),{TileInstanceMenuVerb::ChooseAccount,tile.id,L"",L"",L""});
@@ -328,6 +372,7 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
     }
     case TileInstanceType::Gallery: break; // Existing ownership-aware gallery editor is used instead.
     }
+    if(tile.type==TileInstanceType::Rss||tile.type==TileInstanceType::PrayerTimes)AppendTileInstanceAlerts(menu,tile);
 }
 static void AppendTileInstanceDetails(HMENU menu,const aip::content::TileInstance& tile)
 {
@@ -447,12 +492,21 @@ static bool AddIndependentTile(HWND owner,const std::wstring& type)
     if (!ids.empty()) ids += L","; ids += id;
     const bool primary = descriptor->type == TileInstanceType::Wallpaper && std::none_of(cfg.tiles.begin(),cfg.tiles.end(),[](const auto& tile) { return tile.primary; });
     std::vector<aip::IniSetting> settings{{section,L"Type",descriptor->value},{section,L"Name",name},{section,L"Primary",primary?L"1":L"0"},{L"Tiles",L"Instances",ids}};
+    if(descriptor->type==TileInstanceType::Discord){
+        // Freeze factory templates once for this new tile. Existing explicit
+        // inline fields and imported advanced profiles are never rewritten.
+        settings.push_back({section,L"Discord.Name",aip::discord::DefaultActivityName});
+        settings.push_back({section,L"Discord.Details",aip::discord::DefaultDetailsTemplate});
+        settings.push_back({section,L"Discord.State",aip::discord::DefaultStateTemplate});
+    }
     for(const auto& field:TilePolicyFields){
         auto value=IniReadS(field.section,field.setting,field.fallback);
         if(!NormalizeTilePolicySetting(field.key,value,error))return false;
         settings.push_back({section,field.key,value});
     }
     if (!SaveTileInstanceSettings(owner,settings)) return false;
+    NotifyUserOperation(L"tile-added-"+id,TileInstanceUi(L"NotificationTileAdded",L"Tile created"),
+        NotificationSubjectText(L"NotificationTileAddedMessage",L"%s was created. Open its settings to configure and pin it.",name));
     // Configuration stays useful before pinning. Native pin confirmations are
     // always initiated explicitly by the user from the new tile's menu.
     return true;
@@ -605,6 +659,15 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
         return true;
     }
     std::vector<aip::IniSetting> settings{{section,item.key,value}};
+    if(Lower(item.key)==L"kuro.gametoken"){
+        std::wstring tokenError; if(!aip::kuro::NormalizeSetting(L"GameToken",value,tokenError)){
+            DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,tokenError.c_str(),tile.name.c_str(),MB_OK|MB_ICONERROR);return true;
+        }
+        std::wstring protectedValue;
+        try {if(!value.empty())protectedValue=aip::ProtectSecretForCurrentUser(value);}
+        catch(...){DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,L"Windows could not protect this token. It has not been saved.",tile.name.c_str(),MB_OK|MB_ICONERROR);return true;}
+        settings={{section,L"Kuro.GameToken",L""},{section,L"Kuro.GameTokenProtected",protectedValue}};
+    }
     if(Lower(item.key)==L"content.background"&&value==L"LiveWallpaper")settings.push_back({section,L"Wallpaper.Capture",L"1"});
     if (Lower(item.key) == L"textpreset" && value == L"RssHeadlines") {
         // Materialize the named layout so stale per-field custom settings from
@@ -622,6 +685,15 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
         settings.push_back({section,L"TextStacking",L"top"});
     }
     if (IsTextPresentationKey(item.key) && Lower(item.key) != L"textpreset"){
+        if((tile.type==TileInstanceType::PrayerTimes||tile.type==TileInstanceType::Clock||tile.type==TileInstanceType::Calendar)&&!tile.presentation.Active()) {
+            const std::pair<const wchar_t*,const wchar_t*> defaults[]={{L"TextStyle",L"title"},{L"TextSecondaryStyle",L"captionSubtle"},
+                {L"TextBadgeStyle",L"headerNumeral"},{L"TextMaxLines",L"1"},{L"TextSecondaryMaxLines",L"2"},{L"TextBadgeMaxLines",L"1"}};
+            for(const auto& field:defaults)if(Lower(field.first)!=Lower(item.key))settings.push_back({section,field.first,field.second});
+            if(tile.type==TileInstanceType::Calendar){
+                if(Lower(item.key)!=L"textstyle")settings.push_back({section,L"TextStyle",L"headerNumeral"});
+                if(Lower(item.key)!=L"textbadgestyle")settings.push_back({section,L"TextBadgeStyle",L"base"});
+            }
+        }
         const bool richRss=tile.type==TileInstanceType::Rss&&(tile.presentation.preset==L"Default"||tile.presentation.preset==L"RssHeadlines");
         if(richRss&&tile.presentation.preset==L"Default"){
             const std::pair<const wchar_t*,const wchar_t*> defaults[]={

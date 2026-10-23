@@ -51,6 +51,8 @@ if /i "%~1"=="BoundedCaptureProcessTests" goto BoundedCapture
 if /i "%~1"=="DiscordProfileEditTests" goto Discord
 if /i "%~1"=="ContentRuntimeTests" goto Runtime
 if /i "%~1"=="ContentRevisionHostTests" goto Revisions
+if /i "%~1"=="ContentNewSourceHostTests" goto NewSources
+if /i "%~1"=="ContentGalleryLifecycleHostTests" goto GalleryLifecycle
 if /i "%~1"=="ContentRuntimeNoHardwareTests" goto Unavailable
 echo Unknown content fixture stage. This script compiles only.
 set "CONTENT_STATUS=2"
@@ -156,6 +158,12 @@ cl %CONTENT_FLAGS% DesktopStub\tools\ContentRuntimeTests.cpp %CONTENT_OUT%\Disco
 goto Result
 :Revisions
 cl %CONTENT_FLAGS% DesktopStub\tools\ContentRevisionHostTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj %CONTENT_OUT%\AsusService.obj /Fe:%CONTENT_OUT%\ContentRevisionHostTests.exe /Fo:%CONTENT_OUT%\ContentRevisionHostTests.obj /link %CONTENT_NATIVE_LIBS%
+goto Result
+:GalleryLifecycle
+cl %CONTENT_FLAGS% DesktopStub\tools\ContentGalleryLifecycleHostTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj %CONTENT_OUT%\AsusService.obj /Fe:%CONTENT_OUT%\ContentGalleryLifecycleHostTests.exe /Fo:%CONTENT_OUT%\ContentGalleryLifecycleHostTests.obj /link %CONTENT_NATIVE_LIBS%
+goto Result
+:NewSources
+cl %CONTENT_FLAGS% DesktopStub\tools\ContentNewSourceHostTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj %CONTENT_OUT%\AsusService.obj /Fe:%CONTENT_OUT%\ContentNewSourceHostTests.exe /Fo:%CONTENT_OUT%\ContentNewSourceHostTests.obj /link %CONTENT_NATIVE_LIBS%
 goto Result
 :Unavailable
 cl %CONTENT_FLAGS% DesktopStub\tools\ContentRuntimeNoHardwareTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj /Fe:%CONTENT_OUT%\ContentRuntimeNoHardwareTests.exe /Fo:%CONTENT_OUT%\ContentRuntimeNoHardwareTests.obj /link %CONTENT_NATIVE_LIBS%

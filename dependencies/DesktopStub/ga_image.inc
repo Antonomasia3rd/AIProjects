@@ -749,20 +749,20 @@ static bool RenderDetailRowsSimulation(Graphics& graphics, const aip::content::S
 }
 
 static bool DrawPrayerClockField(Graphics& graphics, const aip::content::Snapshot& snapshot,
-    const std::wstring& text, const wchar_t* defaultStyle, unsigned& role,
+    const std::wstring& text, const wchar_t* defaultStyle, unsigned role,
     REAL x, REAL& y, REAL width, REAL bottom, int maxLines, double scale, bool right = false)
 {
     if (text.empty()) return true;
     std::wstring style = defaultStyle;
     const auto& presentation = snapshot.presentation;
-    if (presentation.Active()) {
+    if (presentation.Active() && role < 3) {
         style = role == 0 ? presentation.primaryStyle : role == 1 ? presentation.secondaryStyle : presentation.badgeStyle;
         maxLines = presentation.wrap ? (role == 0 ? presentation.primaryLines : role == 1 ? presentation.secondaryLines : presentation.badgeLines) : 1;
         if (role) y += static_cast<REAL>(presentation.gapLines * 12 * scale);
     }
-    ++role;
     if (width <= 0 || y >= bottom) return true;
-    Font font(L"Segoe UI", static_cast<REAL>(aip::content::TextStylePixels(style) * scale),
+    const bool light = style.compare(0,5,L"title") == 0 || style.compare(0,9,L"subheader") == 0 || style.compare(0,6,L"header") == 0;
+    Font font(light ? L"Segoe UI Light" : L"Segoe UI", static_cast<REAL>(aip::content::TextStylePixels(style) * scale),
         style.compare(0,4,L"base") == 0 ? FontStyleBold : FontStyleRegular, UnitPixel);
     const REAL lineHeight = font.GetHeight(&graphics);
     if (font.GetLastStatus() != Ok || lineHeight <= 0) return false;
@@ -772,7 +772,7 @@ static bool DrawPrayerClockField(Graphics& graphics, const aip::content::Snapsho
     format.SetAlignment(right ? StringAlignmentFar : StringAlignmentNear);
     format.SetTrimming(StringTrimmingEllipsisWord); format.SetFormatFlags(StringFormatFlagsLineLimit);
     if (presentation.Active()) {
-        format.SetAlignment(presentation.align == L"center" ? StringAlignmentCenter : presentation.align == L"right" ? StringAlignmentFar : StringAlignmentNear);
+        if (!right) format.SetAlignment(presentation.align == L"center" ? StringAlignmentCenter : presentation.align == L"right" ? StringAlignmentFar : StringAlignmentNear);
         if (!presentation.wrap) format.SetFormatFlags(StringFormatFlagsLineLimit | StringFormatFlagsNoWrap);
     }
     if (graphics.MeasureString(text.c_str(),static_cast<INT>(text.size()),&font,bounds,&format,&measured) != Ok) return false;
@@ -794,27 +794,27 @@ static bool RenderPrayerTileSimulation(Graphics& graphics, const aip::content::S
         REAL y = margin, countY = margin; unsigned role = 0;
         if (!DrawPrayerClockField(graphics,snapshot,clock.time,aip::content::PrayerTimeStyle(layout.countdownColumn),role,
                 margin,y,mainWidth,headerBottom,1,scale) ||
-            !DrawPrayerClockField(graphics,snapshot,clock.prayer,L"body",role,margin,y,mainWidth,headerBottom,1,scale) ||
-            !DrawPrayerClockField(graphics,snapshot,aip::content::PrayerLocationText(clock),L"captionSubtle",role,
+            !DrawPrayerClockField(graphics,snapshot,clock.prayer,L"captionSubtle",1,margin,y,mainWidth,headerBottom,1,scale) ||
+            !DrawPrayerClockField(graphics,snapshot,aip::content::PrayerLocationText(clock),L"captionSubtle",1,
                 margin,y,mainWidth,headerBottom,2,scale)) return false;
         if (layout.countdownColumn) {
             role = 0; // Adaptive subgroup text roles restart in each column.
             const REAL countX = static_cast<REAL>(layout.countdownX * scale), countWidth = static_cast<REAL>(layout.countdownWidth * scale);
-            if (!DrawPrayerClockField(graphics,snapshot,L"minutes",L"captionSubtle",role,countX,countY,countWidth,headerBottom,1,scale,true) ||
-                !DrawPrayerClockField(graphics,snapshot,clock.minutes,aip::content::PrayerCountdownStyle(clock),role,countX,countY,countWidth,headerBottom,1,scale,true)) return false;
+            if (!DrawPrayerClockField(graphics,snapshot,L"minutes",L"captionSubtle",3,countX,countY,countWidth,headerBottom,1,scale,true) ||
+                !DrawPrayerClockField(graphics,snapshot,clock.minutes,aip::content::PrayerCountdownStyle(clock),2,countX,countY,countWidth,headerBottom,1,scale,true)) return false;
             role = 2;
             y = (std::max)(y,countY);
-        } else if (!DrawPrayerClockField(graphics,snapshot,clock.countdown,L"caption",role,margin,y,mainWidth,headerBottom,1,scale)) return false;
+        } else if (!DrawPrayerClockField(graphics,snapshot,clock.countdown,L"caption",2,margin,y,mainWidth,headerBottom,1,scale)) return false;
         const REAL fullWidth = static_cast<REAL>((width - 2 * layout.margin) * scale);
-        if (!DrawPrayerClockField(graphics,snapshot,clock.details,L"captionSubtle",role,margin,y,fullWidth,headerBottom,2,scale)) return false;
+        if (!DrawPrayerClockField(graphics,snapshot,clock.details,L"captionSubtle",1,margin,y,fullWidth,headerBottom,2,scale)) return false;
         if (layout.schedule) {
             y = (std::min)(y,headerBottom);
-            const REAL rowHeight = (bottom - y) / 5;
+            const REAL rowHeight = (bottom - y) / static_cast<REAL>(snapshot.detailRows.size());
             for (const auto& row : snapshot.detailRows) {
                 REAL labelY = y, valueY = y;
-                role = 0;
+                role = 1;
                 if (!DrawPrayerClockField(graphics,snapshot,row.primary,L"caption",role,margin,labelY,fullWidth * .6f,y + rowHeight,1,scale)) return false;
-                role = 0;
+                role = 1;
                 if (!DrawPrayerClockField(graphics,snapshot,row.secondary,L"caption",role,margin + fullWidth * .6f,valueY,fullWidth * .4f,y + rowHeight,1,scale,true)) return false;
                 y += rowHeight;
             }
@@ -835,7 +835,7 @@ static bool RenderPrayerTileSimulation(Graphics& graphics, const aip::content::S
         if (snapshot.presentation.Active()) y = (std::min)(y,headerBottom);
         // Reserve equal space for all five obligatory prayers; Sunrise is in
         // the header, never a sixth row that can push Isha out of the tile.
-        const REAL rowHeight = (bottom - y) / 5;
+        const REAL rowHeight = (bottom - y) / static_cast<REAL>(snapshot.detailRows.size());
         for (const auto& row : snapshot.detailRows) {
             REAL rowY = y, valueY = y;
             if (!DrawTopSourceField(graphics, row.primary, font, margin, rowY, textWidth * .6f, y + rowHeight, 1, 255, 0) ||
@@ -844,6 +844,22 @@ static bool RenderPrayerTileSimulation(Graphics& graphics, const aip::content::S
         }
     }
     return graphics.GetLastStatus() == Ok;
+}
+static bool RenderDateTimeTileSimulation(Graphics& graphics,const aip::content::Snapshot& frame,int width,int height,double scale)
+{
+    const auto& date=frame.dateTime;const REAL margin=static_cast<REAL>(10*scale),bottom=static_cast<REAL>((height-20)*scale);
+    const REAL fullWidth=static_cast<REAL>((width-20)*scale);REAL y=margin;
+    if(frame.clockSource)return DrawPrayerClockField(graphics,frame,date.time,L"title",0,margin,y,fullWidth,bottom,1,scale)&&
+        DrawPrayerClockField(graphics,frame,date.location,L"captionSubtle",1,margin,y,fullWidth,bottom,2,scale)&&
+        DrawPrayerClockField(graphics,frame,date.date,L"captionSubtle",1,margin,y,fullWidth,bottom,2,scale);
+    if(!DrawPrayerClockField(graphics,frame,date.weekday,L"caption",1,margin,y,fullWidth,bottom,1,scale,true)||
+        !DrawPrayerClockField(graphics,frame,date.dayNumber,L"headerNumeral",0,margin,y,fullWidth,bottom,1,scale,true)||
+        !DrawPrayerClockField(graphics,frame,date.location,L"captionSubtle",1,margin,y,fullWidth,bottom,1,scale))return false;
+    const auto count=(std::min)(frame.detailRows.size(),height>200?size_t(3):size_t(1));
+    for(size_t i=0;i<count;++i)if(!DrawPrayerClockField(graphics,frame,frame.detailRows[i].primary,L"base",2,margin,y,fullWidth,bottom,height>200?2:1,scale)||
+        !DrawPrayerClockField(graphics,frame,frame.detailRows[i].secondary,L"captionSubtle",1,margin,y,fullWidth,bottom,height>200?2:1,scale))return false;
+    if(frame.detailRows.empty()&&!DrawPrayerClockField(graphics,frame,frame.text.secondary,L"captionSubtle",1,margin,y,fullWidth,bottom,2,scale))return false;
+    return graphics.GetLastStatus()==Ok;
 }
 static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int logicalWidth, int logicalHeight)
 {
@@ -878,7 +894,7 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
     if (!ConfigureTileTextGraphics(graphics))
         return false;
     if (g_renderContent && logicalWidth >= 150 && logicalHeight >= 150) {
-        if (g_renderContent->presentation.Active() && !g_renderContent->smtcSource && !g_renderContent->prayerSource &&
+        if (g_renderContent->presentation.Active() && !g_renderContent->smtcSource && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource &&
             g_renderContent->detailRows.empty() && g_renderContent->rssHeadlines.empty()) {
             Font font(L"Segoe UI", static_cast<REAL>(12 * scale), FontStyleRegular, UnitPixel);
             REAL y = static_cast<REAL>(10 * scale) + PresentedTextOffset(*g_renderContent, logicalHeight, scale);
@@ -887,6 +903,7 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
                 DrawTopSourceField(graphics, secondaryText, font, margin, y, width, bottom, 2, 153, 0) &&
                 DrawTopSourceField(graphics, badgeText, font, margin, y, width, bottom, 2, 153, 0);
         }
+        if (g_renderContent->clockSource||g_renderContent->calendarSource) return RenderDateTimeTileSimulation(graphics,*g_renderContent,logicalWidth,logicalHeight,scale);
         if (g_renderContent->prayerSource) return RenderPrayerTileSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
         if (g_renderContent->smtcSource) return RenderMediaTileSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
         if (!g_renderContent->detailRows.empty()) return RenderDetailRowsSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);

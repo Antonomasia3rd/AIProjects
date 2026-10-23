@@ -18,6 +18,7 @@
 #include "content_sources/prayer_times_model.h"
 #include "tile_text_presentation.h"
 #include "tile_delivery_policy.h"
+#include "DiscordRPC/presence_defaults.h"
 
 namespace aip { namespace content {
 constexpr int MaxEntries = 32;
@@ -108,7 +109,8 @@ struct AsusConfiguration {
 struct DiscordConfiguration {
     bool send = false, clearOnStop = true;
     int refreshSeconds = 5, timeoutMs = 5000;
-    std::wstring profilePath, clientId, name = L"DesktopStub", details = L"{win_title}", state = L"CPU: {cpu}";
+    std::wstring profilePath, clientId, name = aip::discord::DefaultActivityName,
+        details = aip::discord::DefaultDetailsTemplate, state = aip::discord::DefaultStateTemplate;
 };
 inline constexpr Choice NotesResources[] = {{L"Resin", L"Genshin Impact resin"}, {L"Stamina", L"Star Rail stamina"}, {L"Charge", L"Zenless Zone Zero charge"}};
 struct NotesAccount {
@@ -153,7 +155,7 @@ struct Snapshot {
     int capturedWallpaperFit = -1; // Host FitMode ordinal; -1 keeps legacy desktop resolution.
     TileDeliveryPolicy policy;
     TileAppearance registrationAppearance;
-    std::wstring artworkTopic;
+    std::wstring artworkTopic, sourceDiagnostic;
     std::wstring name, backgroundPath, activationArguments;
     Text text;
     TextMode textMode = TextMode::Auto;
@@ -163,13 +165,15 @@ struct Snapshot {
     std::wstring secondaryTileId, secondaryFrameKey;
     std::wstring secondaryBranding;
     bool galleryFrame = false, galleryContain = false;
-    std::wstring galleryGroupId, galleryTileId, galleryEpoch;
+    std::wstring galleryGroupId, galleryTileId, galleryEpoch, galleryImageId;
     std::uint64_t galleryTicket = 0;
     unsigned gallerySlot = 0, gallerySlotCount = 0;
     std::vector<Text> rssHeadlines;
     std::vector<Text> detailRows;
     bool prayerSource = false;
     aip::prayer::ClockText prayerClock;
+    bool clockSource = false, calendarSource = false;
+    struct DateTimeText { std::wstring time,weekday,dayNumber,date,location; } dateTime;
     std::wstring detailTopic;
     bool smtcSource = false, smtcShowRepeatShuffle = false, wrapSourceText = false;
     MediaPlaybackState smtcState = MediaPlaybackState::Unknown;
@@ -550,9 +554,9 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
         return externalDiscordProfile ? read(L"Discord", key, fallback) : get(L"Discord", key, fallback);
     };
     cfg.discord.clientId = discordInline(L"ClientId", L"");
-    cfg.discord.name = discordInline(L"Name", L"DesktopStub");
-    cfg.discord.details = discordInline(L"Details", L"{win_title}");
-    cfg.discord.state = discordInline(L"State", L"CPU: {cpu}");
+    cfg.discord.name = discordInline(L"Name", aip::discord::DefaultActivityName);
+    cfg.discord.details = discordInline(L"Details", aip::discord::DefaultDetailsTemplate);
+    cfg.discord.state = discordInline(L"State", aip::discord::DefaultStateTemplate);
     cfg.discord.send = get(L"Discord", L"SendPresence", L"0") == L"1";
     cfg.discord.clearOnStop = get(L"Discord", L"ClearOnStop", L"1") == L"1";
     ParseInt(get(L"Discord", L"RefreshSeconds", L"5"), 1, 86400, cfg.discord.refreshSeconds);

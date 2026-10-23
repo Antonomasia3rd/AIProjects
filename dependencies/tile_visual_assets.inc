@@ -87,6 +87,14 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
         graphics.FillPolygon(&brush, points, 3);
     };
     switch (topic->glyph) {
+    case Glyph::Desktop:
+        graphics.DrawRectangle(&pen,12.0f,18.0f,76.0f,52.0f);line(50,70,50,83);line(32,83,68,83);
+        graphics.FillRectangle(&brush,21.0f,27.0f,27.0f,20.0f);line(58,53,76,53);break;
+    case Glyph::Clock:
+        graphics.DrawEllipse(&pen,15.0f,15.0f,70.0f,70.0f);line(50,50,50,28);line(50,50,67,59);break;
+    case Glyph::Calendar:
+        graphics.DrawRectangle(&pen,18.0f,25.0f,64.0f,58.0f);line(18,41,82,41);line(32,16,32,31);line(68,16,68,31);
+        for(REAL x:{33.0f,50.0f,67.0f})for(REAL y:{55.0f,70.0f})graphics.FillRectangle(&brush,x-3.0f,y-3.0f,6.0f,6.0f);break;
     case Glyph::Prayer: {
         GraphicsPath crescent;
         crescent.AddBezier(73, 15, 32, -1, 4, 29, 15, 65);
@@ -111,7 +119,7 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
         graphics.FillEllipse(&brush, 18.0f, 69.0f, 13.0f, 13.0f);
         graphics.DrawArc(&pen, -18.0f, 39.0f, 95.0f, 95.0f, 270, 90);
         graphics.DrawArc(&pen, -39.0f, 18.0f, 137.0f, 137.0f, 270, 90); break;
-    case Glyph::Genshin: case Glyph::StarRail: case Glyph::Zenless: {
+    case Glyph::Game: case Glyph::Genshin: case Glyph::StarRail: case Glyph::Zenless: {
         GraphicsPath controller;
         controller.AddBezier(24, 33, 12, 35, 9, 68, 15, 75);
         controller.AddBezier(15, 75, 22, 83, 31, 62, 38, 62);
@@ -124,7 +132,7 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
         pen.SetWidth(4);
         if (topic->glyph == Glyph::Genshin) { line(55, 20, 43, 20); line(43, 20, 43, 8); line(43, 8, 55, 8); line(55, 14, 49, 14); line(55, 14, 55, 20); }
         else if (topic->glyph == Glyph::StarRail) { line(43, 8, 43, 20); line(55, 8, 55, 20); line(43, 14, 55, 14); }
-        else { line(43, 8, 55, 8); line(55, 8, 43, 20); line(43, 20, 55, 20); }
+        else if(topic->glyph==Glyph::Zenless) { line(43, 8, 55, 8); line(55, 8, 43, 20); line(43, 20, 55, 20); }
         break;
     }
     case Glyph::Chat: {

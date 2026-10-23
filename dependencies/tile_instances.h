@@ -4,10 +4,13 @@
 #include "content_engine.h"
 #include "tile_actions.h"
 #include "tile_delivery_policy.h"
+#include "content_sources/clock_calendar_model.h"
+#include "content_sources/kuro_notes_model.h"
+#include "tile_source_alerts.h"
 #include <set>
 
 namespace aip { namespace content {
-enum class TileInstanceType { Wallpaper, Gallery, Rss, NowPlaying, PrayerTimes, Genshin, Hsr, Zzz, Discord, QuickAction };
+enum class TileInstanceType { Wallpaper, Gallery, Rss, NowPlaying, PrayerTimes, Genshin, Hsr, Zzz, Discord, QuickAction, Clock, Calendar, Wuwa };
 struct TileInstanceDescriptor {
     const wchar_t* value;
     const wchar_t* name;
@@ -27,6 +30,9 @@ inline constexpr TileInstanceDescriptor TileInstanceTypes[] = {
     {L"ZZZ", L"Zenless Zone Zero", TileInstanceType::Zzz, L"Notes", L"Transparent", 2},
     {L"Discord", L"Discord", TileInstanceType::Discord, L"DiscordRPC", L"Transparent", -1},
     {L"QuickAction", L"Quick action", TileInstanceType::QuickAction, L"", L"Transparent", -1},
+    {L"Clock", L"Clock / world clock", TileInstanceType::Clock, L"CustomText", L"Transparent", -1},
+    {L"Calendar", L"Calendar", TileInstanceType::Calendar, L"CustomText", L"Transparent", -1},
+    {L"WuWa", L"Wuthering Waves", TileInstanceType::Wuwa, L"CustomText", L"Transparent", -1},
 };
 inline const TileInstanceDescriptor* FindTileInstanceType(const std::wstring& value) {
     const auto canonical = Lower(Trim(value));
@@ -53,6 +59,9 @@ struct TileInstance {
     TileAppearance appearance;
     TextPresentation presentation;
     TileDeliveryPolicy policy;
+    aip::datetime::ClockConfiguration clock;
+    aip::datetime::CalendarConfiguration calendar;
+    aip::kuro::Configuration kuro;
     std::wstring clickAction = L"setup", accountReference;
     std::wstring error; // Optional host diagnostic for a dormant invalid tile.
     // Additional provider fields not represented by content::Configuration.
@@ -105,9 +114,13 @@ inline bool IsTileInstanceSetting(const std::wstring& section, const std::wstrin
 }
 inline bool TileInstanceSourceSection(const TileInstance& tile, const std::wstring& section) {
     const auto s = Lower(section);
+    if (s == L"alerts") return tile.type == TileInstanceType::Rss || tile.type == TileInstanceType::PrayerTimes;
+    if (tile.type == TileInstanceType::Wuwa) return s == L"kuro";
     if (tile.type == TileInstanceType::Rss) return s == L"rssfeed";
     if (tile.type == TileInstanceType::NowPlaying) return s == L"smtc";
     if (tile.type == TileInstanceType::PrayerTimes) return s == L"prayertimes";
+    if (tile.type == TileInstanceType::Clock) return s == L"clock";
+    if (tile.type == TileInstanceType::Calendar) return s == L"calendar";
     if (tile.type == TileInstanceType::Discord) return s == L"discord";
     const auto resource = DescribeTileInstanceType(tile.type).notesResource;
     return resource >= 0 && (s == L"notes" || s == L"notes." + Lower(NotesResources[resource].value));
@@ -204,6 +217,9 @@ inline bool NormalizeTileInstanceSetting(const std::wstring& section, const std:
         if (dot == std::wstring::npos) return fail(L"unknown tile instance setting.");
         auto sourceSection = key.substr(0, dot), sourceKey = key.substr(dot + 1);
         const auto source = Lower(sourceSection);
+        if (source == L"alerts") return aip::notifications::NormalizeAlertSetting(sourceKey, value, error);
+        if (source == L"kuro") return aip::kuro::NormalizeSetting(sourceKey, value, error);
+        if (source == L"clock" || source == L"calendar") return aip::datetime::NormalizeSetting(sourceSection, sourceKey, value, error);
         if (source == L"content") return NormalizeSetting(L"Content.1", sourceKey, value, error);
         if (source == L"notes") {
             const auto accountKey = Lower(sourceKey);
@@ -273,10 +289,39 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
             return TileInstanceRead(tile, read, sourceSection, key, fallback);
         }, tile.configuration, error)) { error = section + L": " + error; return false; }
         tile.presentation = tile.configuration.presentation;
+        if (tile.type == TileInstanceType::Clock && !aip::datetime::ReadClock([&](const wchar_t* key,const wchar_t* fallback) {
+            return TileInstanceRead(tile,read,L"Clock",key,fallback);
+        },tile.clock,error)) { error=section+L": "+error;return false; }
+        if (tile.type == TileInstanceType::Calendar && !aip::datetime::ReadCalendar([&](const wchar_t* key,const wchar_t* fallback) {
+            return TileInstanceRead(tile,read,L"Calendar",key,fallback);
+        },tile.calendar,error)) { error=section+L": "+error;return false; }
         const auto capture = [&](const wchar_t* sourceSection,const wchar_t* key,const wchar_t* fallback) {
             const auto value = TileInstanceRead(tile,read,sourceSection,key,fallback);
             tile.settings[Lower(sourceSection)+L"."+Lower(key)] = value;
         };
+        if (tile.type == TileInstanceType::Rss || tile.type == TileInstanceType::PrayerTimes) {
+            for (const auto& field : aip::notifications::AlertFields) {
+                auto value=TileInstanceRead(tile,read,L"Alerts",field.key,field.fallback);
+                if(!aip::notifications::NormalizeAlertSetting(field.key,value,error)) { error=section+L": "+error;return false; }
+                tile.settings[L"alerts."+Lower(field.key)]=std::move(value);
+            }
+        }
+        if(tile.type==TileInstanceType::Wuwa) {
+            const auto getKuro=[&](const wchar_t* key,const wchar_t* fallback,std::wstring& value) {
+                auto inherited=std::wstring(fallback);
+                if(std::wstring(key)==L"PlayerId")inherited=TileInstanceRead(tile,read,L"Kuro",L"UID",fallback);
+                if(std::wstring(key)==L"Region")inherited=TileInstanceRead(tile,read,L"Kuro",L"Server",fallback);
+                value=TileInstanceRead(tile,read,L"Kuro",key,inherited.c_str());
+                if(!aip::kuro::NormalizeSetting(key,value,error)){error=section+L": "+error;return false;}
+                tile.settings[L"kuro."+Lower(key)]=value;return true;
+            };
+            if(!getKuro(L"GameToken",L"",tile.kuro.gameToken)||!getKuro(L"GameTokenProtected",L"",tile.kuro.gameTokenProtected)||
+                !getKuro(L"PlayerId",L"",tile.kuro.playerId)||!getKuro(L"Region",L"",tile.kuro.region)||!getKuro(L"DeviceId",L"",tile.kuro.deviceId))return false;
+            for(const auto& field:{std::make_pair(L"RefreshSeconds",&tile.kuro.refreshSeconds),std::make_pair(L"TimeoutSeconds",&tile.kuro.timeoutSeconds),std::make_pair(L"MaximumBytes",&tile.kuro.maximumBytes)}){
+                std::wstring value;const auto fallback=std::to_wstring(*field.second);
+                if(!getKuro(field.first,fallback.c_str(),value)||!ParseInt(value,0,16777216,*field.second))return false;
+            }
+        }
         if (tile.type == TileInstanceType::Rss) {
             capture(L"RssFeed",L"FeedUrl",L"");
             capture(L"RssFeed",L"UserAgent",L"Mozilla/5.0 (Windows NT; DesktopStub RSS Live Tile)");

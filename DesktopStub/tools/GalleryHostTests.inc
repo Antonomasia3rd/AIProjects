@@ -80,7 +80,7 @@ static void TestGalleryHost(const std::wstring& bitmapPath)
     galleryHostValid = false;
     Check(!ContentGalleryFrameCurrent(galleryHostFrames.front()), "late target guard rejects a stale gallery receipt before transport");
     galleryHostValid = true;
-    auto text = BuildInitialIniTemplate();
+    auto text = BuildLegacyContentFixtureTemplate();
     const auto put = [&](const std::wstring& section, const wchar_t* key, const std::wstring& value) { return aip::WriteIniValueToText(text, section.c_str(), key, value); };
     put(L"Content", L"Enabled", L"1"); put(L"Content", L"Count", L"7"); put(L"Tiles", L"Enabled", L"1");
     for (unsigned slot = 1; slot <= 7; ++slot) {

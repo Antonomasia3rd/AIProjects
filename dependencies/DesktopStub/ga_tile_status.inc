@@ -3,6 +3,7 @@
 #include "../media_tile_layout.h"
 #include "../rss_tile_layout.h"
 #include "../prayer_tile_layout.h"
+#include "../datetime_tile_layout.h"
 #include <set>
 #include <map>
 struct TileStatusLabels {
@@ -29,7 +30,17 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
     const auto* sizeSetting = height > 200 ? L"ApplyToLargeTile" : width > 200 ? L"ApplyToWideTile" : L"ApplyToMediumTile";
     if (!IniReadI(L"TileText",sizeSetting,1)) { AppendTileStatusLine(output,labels.textHidden); return output; }
     if (frame.textMode == aip::content::TextMode::Off) { AppendTileStatusLine(output, labels.textHidden); return output; }
-    if (frame.textMode == aip::content::TextMode::Auto && frame.prayerSource) {
+    if(frame.textMode==aip::content::TextMode::Auto&&(frame.clockSource||frame.calendarSource)){
+        const auto& date=frame.dateTime;
+        if(frame.clockSource){AppendTileStatusLine(output,date.time);AppendTileStatusLine(output,date.location);AppendTileStatusLine(output,date.date);}
+        else {
+            AppendTileStatusLine(output,date.weekday);AppendTileStatusLine(output,date.dayNumber);AppendTileStatusLine(output,date.location);
+            for(size_t i=0;i<(std::min)(frame.detailRows.size(),aip::content::DateTimeEventCount(height));++i){
+                AppendTileStatusLine(output,frame.detailRows[i].primary);AppendTileStatusLine(output,frame.detailRows[i].secondary);
+            }
+            if(frame.detailRows.empty())AppendTileStatusLine(output,frame.text.secondary);
+        }
+    } else if (frame.textMode == aip::content::TextMode::Auto && frame.prayerSource) {
         if (frame.prayerClock.Available()) {
             AppendTileStatusLine(output,frame.prayerClock.time); AppendTileStatusLine(output,frame.prayerClock.prayer);
             AppendTileStatusLine(output,aip::content::PrayerLocationText(frame.prayerClock));
@@ -71,6 +82,7 @@ static std::wstring BuildTileStatusTextWithLabels(const std::vector<aip::content
         if (frame.galleryFrame && !galleryTargets.insert(frame.secondaryTileId).second) continue;
         if (!output.empty()) output += L"\r\n";
         AppendTileStatusLine(output, frame.name.empty() ? labels.primary : frame.name);
+        if(!frame.sourceDiagnostic.empty())AppendTileStatusLine(output,IniReadS(L"Strings",L"TileSourceDiagnostic",L"Source note")+L": "+frame.sourceDiagnostic);
         if (frame.galleryFrame) {
             AppendTileStatusLine(output, TileSnapshotUsesRegistration(frame) ? labels.staticImage : labels.queue);
             for (const auto& image : frames) if (image.galleryFrame && image.secondaryTileId == frame.secondaryTileId && image.galleryTicket == frame.galleryTicket) {

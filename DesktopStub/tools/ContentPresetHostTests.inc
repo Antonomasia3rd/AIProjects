@@ -88,9 +88,10 @@ static void TestContentPresetsAndImportConfirmation()
     g_iniPath = freshIniPath;
     { std::lock_guard<std::mutex> lock(g_iniCacheMutex); g_iniCacheLoaded = false; g_iniCacheDoc.clear(); }
     g_commandLine = {}; g_commandLine.configureOnly = true; g_commandLine.presetName = L"Wallpaper";
-    Check(GetFileAttributesW(freshIniPath.c_str()) == INVALID_FILE_ATTRIBUTES && RunRenderOnlyCommand() == 0 &&
-        IniReadI(L"Content", L"Enabled", 0) == 1 && IniReadI(L"Content", L"Count", 0) == 2,
-        "a preset can initialize a fresh missing INI using a read-only default preview");
+    Check(GetFileAttributesW(freshIniPath.c_str()) == INVALID_FILE_ATTRIBUTES && !ValidateDesktopStubContentProfile(true,error) &&
+        error.find(L"Add tile")!=std::wstring::npos && RunRenderOnlyCommand() == 2 &&
+        GetFileAttributesW(freshIniPath.c_str()) == INVALID_FILE_ATTRIBUTES,
+        "a legacy preset rejects a fresh independent factory before creating an INI");
     DeleteFileW(freshIniPath.c_str());
     g_iniPath = originalIniPath;
     g_commandLine = savedCommandLine;

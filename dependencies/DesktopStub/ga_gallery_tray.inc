@@ -1,15 +1,19 @@
 // Gallery setup/configuration is separate from image inventory and notification
 // delivery. Building this menu never scans photographs or initializes history.
+#include "../gallery_ini_batch.h"
 static bool OpenGalleryFolder(const std::wstring& directory);
 static bool GalleryDirectoryExists(const std::wstring& directory);
 static bool OpenGalleryTilePolicySetup(HWND owner,const std::wstring& nativeId);
 static bool GalleryTileUsesRegistration(const aip::gallery::TileConfiguration& tile);
 static void PinGalleryGroup(HWND owner,const aip::gallery::Configuration& cfg,const std::vector<std::size_t>& indices);
+static void CompleteGalleryMembershipChange(HWND owner, aip::gallery::Configuration before, aip::gallery::Configuration after);
 static constexpr UINT ID_GALLERY_SETUP = 30000, ID_GALLERY_ENABLED = 30001,
     ID_GALLERY_FOLDER = 30002, ID_GALLERY_OPEN_FOLDER = 30003, ID_GALLERY_REFRESH = 30004,
     ID_GALLERY_CADENCE = 30005, ID_GALLERY_SEED = 30006, ID_GALLERY_COUNT = 30010, ID_GALLERY_QUEUE = 30020,
     ID_GALLERY_ORDER = 30030, ID_GALLERY_FIT = 30040, ID_GALLERY_PIN_ALL = 30042, ID_GALLERY_ADD = 30043,
-    ID_GALLERY_REBALANCE = 30044, ID_GALLERY_RECOVER = 30045, ID_GALLERY_TILE = 30100, ID_GALLERY_GROUP = 52000;
+    ID_GALLERY_REBALANCE = 30044, ID_GALLERY_RECOVER = 30045,
+    ID_GALLERY_AUTO_UNPIN = 30046, ID_GALLERY_CONFIRM_UNPIN = 30047, ID_GALLERY_NOTIFY = 30048,
+    ID_GALLERY_TILE = 30100, ID_GALLERY_GROUP = 52000;
 static constexpr UINT GALLERY_TILE_COMMAND_STRIDE = 20;
 
 static std::wstring GalleryProfilePath()
@@ -85,7 +89,7 @@ static bool GalleryConfigurationRecoveryBytes(const aip::gallery::Configuration&
 {
     std::vector<aip::IniSetting> fields; std::wstring text;
     if (!PrepareGalleryConfigurationSettings(cfg, fields, error)) return false;
-    for (const auto& field : fields) if (!WriteContentProfileSetting(text, field)) { error = L"Gallery settings cannot be encoded for recovery."; return false; }
+    if (!aip::gallery::ApplySettingsToText(text, fields)) { error = L"Gallery settings cannot be encoded for recovery."; return false; }
     if (!aip::TryWideToUtf8(text, bytes) || bytes.size() > aip::gallery::transaction::MaxConfigurationBytes) {
         error = L"Gallery settings exceed the recovery record limit."; return false;
     }
@@ -94,12 +98,14 @@ static bool GalleryConfigurationRecoveryBytes(const aip::gallery::Configuration&
 static bool StageGalleryMenuSettings(std::wstring& text, const std::vector<aip::IniSetting>& settings, std::wstring& error)
 {
     auto candidate = text;
-    for (auto setting : settings) {
-        if (!NormalizeDesktopStubTypedSetting(setting.section, setting.key, setting.value, error) || !WriteContentProfileSetting(candidate, setting)) {
+    auto normalized = settings;
+    for (auto& setting : normalized) {
+        if (!NormalizeDesktopStubTypedSetting(setting.section, setting.key, setting.value, error)) {
             if (error.empty()) error = L"A gallery setting cannot be saved in the single-line INI format.";
             return false;
         }
     }
+    if (!aip::gallery::ApplySettingsToText(candidate,normalized)) { error=L"A gallery setting cannot be saved in the single-line INI format.";return false; }
     aip::gallery::Configuration checked;
     if (!ReadGalleryMenuText(candidate, checked, error) || !ValidateDesktopStubProfileDocument(candidate, error)) return false;
     text = std::move(candidate); error.clear(); return true;
@@ -478,7 +484,7 @@ static void AddGalleryFolder(HWND owner,aip::gallery::Configuration cfg) {
     std::uint64_t count=0;if(!aip::gallery::detail::UInt(aip::gallery::detail::Trim(countText),aip::gallery::MaxTiles,count)||!count||!AppendGalleryRows(cfg,folder,caption,static_cast<std::size_t>(count))){DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,L"The combined gallery count must be between 1 and 1024.",L"Photo gallery",MB_OK|MB_ICONWARNING);return;}
     // A new folder normally brings new images. Explicit redistribution is also
     // available when that folder overlaps an existing pool.
-    if(SaveGalleryConfiguration(owner,cfg,false,&edit)) {std::vector<std::size_t> added;for(std::size_t i=cfg.tiles.size()-static_cast<std::size_t>(count);i<cfg.tiles.size();++i)added.push_back(i);PinGalleryGroup(owner,cfg,added);}
+    if(SaveGalleryConfiguration(owner,cfg,false,&edit)) CompleteGalleryMembershipChange(owner,edit.before,cfg);
 }
 static bool GalleryTileUsesRegistration(const aip::gallery::TileConfiguration& tile)
 {
@@ -486,6 +492,43 @@ static bool GalleryTileUsesRegistration(const aip::gallery::TileConfiguration& t
     if(tile.delivery.Mode()==L"Registration")return true;
     if(tile.delivery.Mode()==L"LiveTile")return false;
     aip::content::TilePolicyReadScope scope(tile.delivery);return !UseExperimentalLiveTileUpdate();
+}
+static aip::gallery::PinMembershipChange GalleryMembershipChange(aip::gallery::Configuration before, aip::gallery::Configuration after)
+{
+    for (auto& tile : before.tiles) tile.registration = GalleryTileUsesRegistration(tile);
+    for (auto& tile : after.tiles) tile.registration = GalleryTileUsesRegistration(tile);
+    return aip::gallery::PlanPinMembershipChange(before, after);
+}
+static bool ConfirmRemovedGalleryPins(HWND owner, const aip::gallery::PinMembershipChange& change)
+{
+    if (change.removedNative.empty() || !IniReadI(L"Settings", L"AutoUnpinRemovedGalleryTiles", 1) ||
+        !IniReadI(L"Settings", L"ConfirmUnpinRemovedGalleryTiles", 0)) return true;
+    const auto prompt = IniReadS(L"Strings", L"ConfirmRemovedGalleryPins", L"Remove the old gallery tiles from Start after saving? Windows may also ask for confirmation. Photos and ownership history are kept.") +
+        L"\n\n" + std::to_wstring(change.removedNative.size()) + L" tile(s)";
+    return DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, prompt.c_str(), L"Photo gallery", MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION) == IDYES;
+}
+static void CompleteGalleryMembershipChange(HWND owner, aip::gallery::Configuration before, aip::gallery::Configuration after)
+{
+    for (auto& tile : before.tiles) tile.registration = GalleryTileUsesRegistration(tile);
+    for (auto& tile : after.tiles) tile.registration = GalleryTileUsesRegistration(tile);
+    const auto change = aip::gallery::PlanPinMembershipChange(before, after);
+    const bool automatic = IniReadI(L"Settings", L"AutoUnpinRemovedGalleryTiles", 1) != 0;
+    const bool queued = change.removedNative.empty() || !automatic || RequestRetiredGalleryPinBatch(owner, before, after);
+    if (IniReadI(L"Settings", L"NotifyGalleryChanges", 1) && (!change.removedNative.empty() || !change.removedRegistration.empty() || !change.addedNative.empty())) {
+        auto message = std::to_wstring(after.tiles.size()) + L" gallery tile(s) configured.";
+        if (!change.removedNative.empty()) message += automatic && queued ?
+            L" Removing " + std::to_wstring(change.removedNative.size()) + L" old Start pin(s); watch the unpin progress for results." :
+            L" " + std::to_wstring(change.removedNative.size()) + L" old Start pin(s) need manual removal.";
+        if (!change.removedRegistration.empty()) message += L" " + std::to_wstring(change.removedRegistration.size()) + L" Registration tile(s) must be unpinned manually in Start.";
+        NotifyUserOperation(L"gallery-membership", IniReadS(L"Strings", L"GalleryChangedTitle", L"Gallery updated"), message, queued ? NIIF_INFO : NIIF_WARNING);
+    }
+    // A shrink never re-pins every surviving row. New rows alone need pinning.
+    std::set<std::wstring> previous;
+    for (const auto& tile : before.tiles) previous.insert(aip::gallery::NativeTileId(before.groupId, tile.id));
+    std::vector<std::size_t> added;
+    for (std::size_t i = 0; i < after.tiles.size(); ++i)
+        if (!previous.count(aip::gallery::NativeTileId(after.groupId, after.tiles[i].id))) added.push_back(i);
+    if (!added.empty()) PinGalleryGroup(owner, after, added);
 }
 static void AppendGalleryTilesMenu(HMENU parent) {
     HMENU menu=aip::BeginTrayNestedMenu(parent);aip::gallery::Configuration cfg;std::wstring error;
@@ -498,6 +541,9 @@ static void AppendGalleryTilesMenu(HMENU parent) {
     aip::AppendTrayMenuItem(menu,ID_GALLERY_REBALANCE,L"Redistribute photos across tiles...",false,configured&&SecondaryTilePinUiAvailable());
     aip::AppendTrayMenuItem(menu,ID_GALLERY_REFRESH,L"Refresh gallery now",false,configured);
     HMENU options=aip::BeginTrayNestedMenu(menu);
+    aip::AppendTrayMenuItem(options,ID_GALLERY_AUTO_UNPIN,IniReadS(L"Strings",L"AutoUnpinRemovedGalleryTiles",L"Unpin removed gallery tiles automatically"),IniReadI(L"Settings",L"AutoUnpinRemovedGalleryTiles",1)!=0,true);
+    aip::AppendTrayMenuItem(options,ID_GALLERY_CONFIRM_UNPIN,IniReadS(L"Strings",L"ConfirmUnpinRemovedGalleryTiles",L"Ask before unpinning removed gallery tiles"),IniReadI(L"Settings",L"ConfirmUnpinRemovedGalleryTiles",0)!=0,true);
+    aip::AppendTrayMenuItem(options,ID_GALLERY_NOTIFY,IniReadS(L"Strings",L"NotifyGalleryChanges",L"Notify when gallery tiles are added or removed"),IniReadI(L"Settings",L"NotifyGalleryChanges",1)!=0,true);
     HMENU queue=aip::BeginTrayNestedMenu(options);for(UINT i=0;i<aip::gallery::MaxQueue;++i)aip::AppendTrayMenuItem(queue,ID_GALLERY_QUEUE+i,std::to_wstring(i+1),cfg.queueSize==i+1,configured);
     aip::EndTrayNestedMenu(options,queue,L"Photos queued per tile");
     aip::AppendTrayMenuItem(options,ID_GALLERY_CADENCE,L"Replace photo queues every (seconds): "+std::to_wstring(cfg.refreshSeconds)+L"...",false,configured);
@@ -522,6 +568,10 @@ static void AppendGalleryTilesMenu(HMENU parent) {
                 else AppendSecondaryTilePinCommands(item,aip::gallery::NativeTileId(cfg.groupId,tile.id),base+2,base+3,base+4,configured);
                 aip::AppendTrayMenuItem(item,base+5,SecondaryTileUiString(L"SelectedTileContents",L"Tile contents..."),false,true);
                 aip::AppendTrayMenuItem(item,base+6,L"Rendering, cache and delivery...",false,configured);
+                HMENU click=aip::BeginTrayNestedMenu(item);
+                aip::AppendTrayMenuItem(click,base+7,IniReadS(L"Strings",L"GalleryClickImage",L"Open the displayed photo (when Windows identifies it)"),tile.clickAction==L"Image",configured);
+                aip::AppendTrayMenuItem(click,base+8,IniReadS(L"Strings",L"GalleryClickSetup",L"Open this tile's settings"),tile.clickAction==L"Setup",configured);
+                aip::EndTrayNestedMenu(item,click,IniReadS(L"Strings",L"GalleryClickAction",L"When clicked"));
                 AppendTileAppearanceMenu(item,L"Gallery.Tile."+std::to_wstring(i+1),base+10);
                 aip::EndTrayNestedMenu(page,item,tile.name);
             }
@@ -532,13 +582,18 @@ static void AppendGalleryTilesMenu(HMENU parent) {
     aip::EndTrayNestedMenu(parent,menu,L"Photo galleries");
 }
 static bool DispatchGalleryTilesCommand(HWND owner,UINT command) {
-    const bool global=command>=ID_GALLERY_SETUP&&command<=ID_GALLERY_RECOVER;
+    const bool global=command>=ID_GALLERY_SETUP&&command<=ID_GALLERY_NOTIFY;
     const bool tileCommand=command>=ID_GALLERY_TILE&&command<ID_GALLERY_TILE+aip::gallery::MaxTiles*GALLERY_TILE_COMMAND_STRIDE;
     const bool groupCommand=command>=ID_GALLERY_GROUP&&command<ID_GALLERY_GROUP+aip::gallery::MaxTiles*4;
     if(!global&&!tileCommand&&!groupCommand)return false;
     if (command == ID_GALLERY_RECOVER) {
         std::wstring recoveryError;
         if (!RecoverPendingGalleryTransaction(recoveryError)) DESKTOPSTUB_CONTENT_MESSAGEBOX(owner, recoveryError.c_str(), L"Photo gallery recovery", MB_OK | MB_ICONWARNING);
+        return true;
+    }
+    if (command == ID_GALLERY_AUTO_UNPIN || command == ID_GALLERY_CONFIRM_UNPIN || command == ID_GALLERY_NOTIFY) {
+        const auto* key = command == ID_GALLERY_AUTO_UNPIN ? L"AutoUnpinRemovedGalleryTiles" : command == ID_GALLERY_CONFIRM_UNPIN ? L"ConfirmUnpinRemovedGalleryTiles" : L"NotifyGalleryChanges";
+        SaveGalleryMenuSettings(owner, {{L"Settings", key, IniReadI(L"Settings", key, command == ID_GALLERY_CONFIRM_UNPIN ? 0 : 1) ? L"0" : L"1"}});
         return true;
     }
     aip::gallery::Configuration cfg;std::wstring error;if(!ReadGalleryConfiguration(cfg,error)){DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,error.c_str(),L"Photo gallery",MB_OK|MB_ICONWARNING);return true;}
@@ -556,7 +611,27 @@ static bool DispatchGalleryTilesCommand(HWND owner,UINT command) {
         if(action==0)PinGalleryGroup(owner,cfg,group.indices);
         else if(action==3)OpenGalleryFolder(group.folder);
         else if(action==2){auto folder=group.folder;if(PickGalleryFolder(owner,folder)){for(const auto i:group.indices)cfg.tiles[i].folder=folder;SaveGalleryConfiguration(owner,cfg,false,&edit);}}
-        else {auto value=std::to_wstring(group.indices.size());if(ShowTextInputDialog(owner,L"Gallery size",L"Number of tiles for this folder (1-1024 total)",value,true)!=IDOK)return true;std::uint64_t count=0;if(!aip::gallery::detail::UInt(aip::gallery::detail::Trim(value),aip::gallery::MaxTiles,count)||!count||cfg.tiles.size()-group.indices.size()+count>aip::gallery::MaxTiles){DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,L"Enter a valid count within the 1024-tile total limit.",L"Photo gallery",MB_OK|MB_ICONWARNING);return true;}if(count>group.indices.size())AppendGalleryRows(cfg,group.folder,group.name,static_cast<std::size_t>(count)-group.indices.size());else if(count<group.indices.size()){std::set<std::size_t> removed(group.indices.begin()+static_cast<std::size_t>(count),group.indices.end());std::vector<aip::gallery::TileConfiguration> kept;for(std::size_t i=0;i<cfg.tiles.size();++i)if(!removed.count(i))kept.push_back(cfg.tiles[i]);cfg.tiles=std::move(kept);}if(SaveGalleryConfiguration(owner,cfg,true,&edit)){const auto updated=GalleryGroups(cfg);for(const auto& g:updated)if(IEquals(g.folder,group.folder)&&g.name==group.name){PinGalleryGroup(owner,cfg,g.indices);break;}}}
+        else {
+            auto value=std::to_wstring(group.indices.size());
+            if(ShowTextInputDialog(owner,L"Gallery size",L"Number of tiles for this folder (1-1024 total)",value,true)!=IDOK)return true;
+            std::uint64_t count=0;
+            if(!aip::gallery::detail::UInt(aip::gallery::detail::Trim(value),aip::gallery::MaxTiles,count)||!count||cfg.tiles.size()-group.indices.size()+count>aip::gallery::MaxTiles){DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,L"Enter a valid count within the 1024-tile total limit.",L"Photo gallery",MB_OK|MB_ICONWARNING);return true;}
+            if(count==group.indices.size()) return true;
+            const auto before=cfg;
+            if(count>group.indices.size())AppendGalleryRows(cfg,group.folder,group.name,static_cast<std::size_t>(count)-group.indices.size());
+            else {
+                std::set<std::size_t> removed(group.indices.begin()+static_cast<std::size_t>(count),group.indices.end());
+                std::vector<aip::gallery::TileConfiguration> kept;
+                for(std::size_t i=0;i<cfg.tiles.size();++i)if(!removed.count(i))kept.push_back(cfg.tiles[i]);
+                cfg.tiles=std::move(kept);
+            }
+            if(!ConfirmRemovedGalleryPins(owner,GalleryMembershipChange(before,cfg))) return true;
+            // A shrink only retires membership. Keep removed rows' image
+            // reservations so surviving tiles cannot duplicate an old queue
+            // while Windows is still asking whether to unpin it. Explicit
+            // redistribution remains available when those photos should move.
+            if(SaveGalleryConfiguration(owner,cfg,count>group.indices.size(),&edit)) CompleteGalleryMembershipChange(owner,before,cfg);
+        }
     } else if(tileCommand) {
         const auto index=(command-ID_GALLERY_TILE)/GALLERY_TILE_COMMAND_STRIDE,action=(command-ID_GALLERY_TILE)%GALLERY_TILE_COMMAND_STRIDE;if(index>=cfg.tiles.size())return true;const auto& tile=cfg.tiles[index];const auto section=L"Gallery.Tile."+std::to_wstring(index+1),id=aip::gallery::NativeTileId(cfg.groupId,tile.id);
         if(action>=10&&action<=18){const auto a=action-10;if(a<2)SaveGalleryMenuSettings(owner,{{section,L"Background",a?L"Color":L"Transparent"}},&edit);else if(a<7)SaveGalleryMenuSettings(owner,{{section,L"Branding",aip::content::TileBrandingChoices[a-2]}},&edit);else if(a==7){auto color=tile.appearance.backgroundColor;if(ShowTextInputDialog(owner,L"Gallery background",L"Color as #RRGGBB, or Auto",color,true)==IDOK)SaveGalleryMenuSettings(owner,{{section,L"Background",L"Color"},{section,L"BackgroundColor",color}},&edit);}else SaveGalleryMenuSettings(owner,{{section,L"BackgroundColor",L"Auto"}},&edit);}
@@ -566,6 +641,7 @@ static bool DispatchGalleryTilesCommand(HWND owner,UINT command) {
         else if(action==4)RequestSecondaryTileList(owner);
         else if(action==5)ShowSelectedTileStatus(owner,id,tile.name);
         else if(action==6)OpenGalleryTilePolicySetup(owner,id);
+        else if(action==7||action==8)SaveGalleryMenuSettings(owner,{{section,L"ClickAction",action==7?L"Image":L"Setup"}},&edit);
     }
     return true;
 }

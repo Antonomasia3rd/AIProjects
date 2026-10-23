@@ -22,6 +22,12 @@ static bool RenderScaleAuto() { return ScopedTileFlag(L"GenerateScaleAuto", g_ge
 static Bitmap* RenderDisabledTileAsset(int width, int height, int logicalWidth, int logicalHeight)
 {
     if (g_renderContent && g_renderContent->policy.included && !g_renderContent->artworkTopic.empty()) {
+        // Keep the original Desktop icon and its historical geometry on the
+        // main Desktop tile. Topic artwork is for distinct source/gallery pins.
+        if (aip::content::UsesOriginalPrimaryDesktopArtwork(*g_renderContent) && RenderIconForDisabled()) {
+            std::unique_ptr<Bitmap> icon(LoadEmbeddedDesktopIcon());
+            return icon ? RenderDesktopIconAsset(icon.get(),width,height,logicalWidth,logicalHeight) : nullptr;
+        }
         auto result = std::make_unique<Bitmap>(width, height, PixelFormat32bppARGB);
         Graphics graphics(result.get());
         if (result->GetLastStatus() != Ok || graphics.GetLastStatus() != Ok) return nullptr;
@@ -2263,6 +2269,7 @@ static bool CurrentGenerationTargetAllows(const aip::content::Snapshot& frame,
 // The real Generate admission path can be exercised without progressing into
 // image writes, registration, notification transport, or other integrations.
 static bool (*g_testGenerateAfterAdmission)(const aip::content::Snapshot&) = nullptr;
+static void (*g_testGenerationBeforeQueueLock)() = nullptr;
 #endif
 bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnly = false,
     const aip::content::Snapshot* suppliedContent = nullptr)
@@ -2375,6 +2382,9 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     }
     bool liveTileUpdateMode = UseExperimentalLiveTileUpdate();
     bool liveTileModeReregistrationPending = !separateRegistration && LiveTileModeReregistrationPending();
+    // A recovered explicit setup is a retry prompt, not permission for the
+    // ordinary poller to consume an older pending-registration marker.
+    if(!renderOnly&&liveTileModeReregistrationPending&&g_desktopHostSetupRecovered&&!g_desktopHostSetupPending.load())return false;
     bool useLiveTileUpdateForThisRun = liveTileUpdateMode && !liveTileModeReregistrationPending;
     // A frozen native batch cannot consume its reset-bearing first slot as a
     // registration-only frame, then send later slots into an uncleared queue.
@@ -2664,6 +2674,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     // Rendering/cache work can be expensive. Fence a stale gallery reset again
     // immediately before any target delivery or manifest/helper work.
     if (contentScope.snapshot.galleryFrame && !ContentGalleryFrameCurrent(contentScope.snapshot)) return false;
+    if(contentScope.snapshot.galleryFrame)PrepareGalleryImageActivation(contentScope.snapshot);
 
     LogText(liveTileModeReregistrationPending
         ? g_ui.reRegisteringManifestForLiveTileModeChange
@@ -2739,7 +2750,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
             if (liveTileUpdateMode)
             {
                 bool deferLiveTileUpdateUntilPackagedRelaunch =
-                    g_relaunchAfterExit.load() == 1 &&
+                    (g_relaunchAfterExit.load() == 1 || g_desktopHostSetupPending.load()) &&
                     !CurrentProcessHasPackageIdentity() &&
                     ConfiguredManifestCompatibilityTarget() == ManifestCompatibilityTarget::Windows10;
 
@@ -3082,6 +3093,7 @@ static void GenerationWorkerThread()
             snapshots.size(), attemptedFrames, completedFrames, cleanupPasses, ok ? 1 : 0,
             static_cast<long long>(ElapsedMs(batchStart, steady_clock::now())));
         RecordGenerationCompletion(requestId, ok);
+        if(g_desktopHostSetupPending.load()&&g_hwnd)PostMessageW(g_hwnd,WM_APP_DESKTOP_HOST_SETUP_COMPLETE,0,0);
         if (ok) g_contentQueueRetryAfter = 0;
         else if (!snapshots.empty() || ContentQueueHasAcknowledgedFrames())
             g_contentQueueRetryAfter = GetTickCount64() + 10000;
@@ -3097,6 +3109,7 @@ static void GenerationWorkerThread()
 static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring reason,
     std::vector<aip::content::Snapshot> snapshots = {})
 {
+    if(g_desktopHostSetupPending.load()&&!g_desktopHostSetupQueueAdmission)return 0;
     std::vector<aip::content::Snapshot> submission;
     for (const auto& snapshot : snapshots) if (snapshot.galleryFrame) submission.push_back(snapshot);
     GalleryBatchFailureGuard submissionGuard{submission};
@@ -3118,8 +3131,14 @@ static unsigned long long QueueGenerate(std::wstring wallpaper, std::wstring rea
 
     unsigned long long droppedRequestId = 0;
     std::vector<aip::content::Snapshot> droppedSnapshots;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    if(g_testGenerationBeforeQueueLock)g_testGenerationBeforeQueueLock();
+#endif
     {
         std::lock_guard<std::mutex> lk(g_generationQueueMutex);
+        // Repeat the fence under the same lock that replaces pending work. A
+        // poll call may have passed the fast check before explicit setup began.
+        if(g_desktopHostSetupPending.load()&&!g_desktopHostSetupQueueAdmission)return 0;
         if (g_generationWorkerStop || g_shutdownState.IsRequested())
             return 0;
 

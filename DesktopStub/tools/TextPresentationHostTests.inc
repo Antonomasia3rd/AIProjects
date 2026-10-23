@@ -2,7 +2,7 @@ static void TestTextPresentationHost()
 {
     using namespace aip::content;
     std::wstring original,error;ReadIniFileForMutation(original);
-    auto text=BuildInitialIniTemplate();aip::WriteIniValueToText(text,L"Content",L"Enabled",L"0");
+    auto text=BuildLegacyContentFixtureTemplate();aip::WriteIniValueToText(text,L"Content",L"Enabled",L"0");
     Check(WriteContentFixture(text),"presentation fixture owns only the private host profile");
     Configuration cfg;SecondaryTileConfiguration tiles;
     Check(ReadContentConfiguration(cfg,error,&tiles)&&!cfg.presentation.Active(),"new presentation defaults do not opt existing profiles into changed pixels");

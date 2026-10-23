@@ -1,5 +1,6 @@
 // Independent tile demand, provider state and immutable publication. A tile's
 // settings never replace another tile's provider key or refresh deadline.
+#include "../source_notification_state.h"
 static bool EnsureTileInstanceProfile(std::wstring& error)
 {
     return MutateDesktopStubIniWithWait([&](std::wstring& text) {
@@ -54,10 +55,13 @@ static bool EnsureTileInstanceProfile(std::wstring& error)
 struct TileInstanceProviderState {
     aip::content::TileInstanceType type = aip::content::TileInstanceType::Wallpaper;
     bool forceRefresh = false;
+    aip::notifications::SourceTransitions notificationTransitions;
     std::unique_ptr<ContentRssProvider> rss;
     std::unique_ptr<ContentPrayerProvider> prayer;
     std::unique_ptr<ContentNotesProvider> notes;
     std::unique_ptr<ContentDiscordProvider> discord;
+    std::unique_ptr<ContentDateTimeProvider> datetime;
+    std::unique_ptr<ContentKuroProvider> kuro;
     std::wstring backgroundKey, backgroundPath;
     ULONGLONG nextBackgroundRead = 0;
     std::wstring fitKey;
@@ -66,9 +70,27 @@ struct TileInstanceProviderState {
     void Stop() {
         if (rss) rss->Cancel(); if (prayer) prayer->Cancel(); if (notes) notes->Cancel();
         if (discord) discord->Cancel();
+        if (kuro) kuro->Cancel();
+        if (datetime) datetime->Cancel();
         if (rss) rss->Stop(); if (prayer) prayer->Stop(); if (notes) notes->Stop(); if (discord) discord->Stop();
+        if (kuro) kuro->Stop();
+        if (datetime) datetime->Stop();
     }
 };
+static void NotifyTileSourceTransition(const aip::content::TileInstance& tile,TileInstanceProviderState& state,
+    aip::notifications::SourceState current)
+{
+    using namespace aip::notifications;
+    const auto notice=state.notificationTransitions.Observe(current);
+    if(notice==SourceNotice::None||g_shutdownState.IsRequested()||!IniReadI(L"Settings",L"NotifySourceErrors",1))return;
+    const bool failed=notice==SourceNotice::Failed;
+    const auto title=IniReadS(L"Strings",failed?L"NotificationSourceFailed":L"NotificationSourceRecovered",
+        failed?L"A tile source needs attention":L"A tile source is available again");
+    const auto message=NotificationSubjectText(failed?L"NotificationSourceFailedMessage":L"NotificationSourceRecoveredMessage",
+        failed?L"%s could not refresh. Open this tile's settings or status for details. DesktopStub will retry automatically.":
+            L"%s refreshed successfully. Its tile will update when Windows displays the new content.",tile.name);
+    DispatchUserNotification(L"source-"+tile.id,title,message,failed?NIIF_WARNING:NIIF_INFO,false);
+}
 static std::map<std::wstring, std::unique_ptr<TileInstanceProviderState>> g_tileInstanceProviders;
 static std::mutex g_tileInstanceRefreshMutex;
 static std::set<std::wstring> g_tileInstanceRefreshRequests;
@@ -76,6 +98,7 @@ static void StopTileInstanceProviders()
 {
     for (auto& item : g_tileInstanceProviders) item.second->Stop();
     g_tileInstanceProviders.clear();
+    g_tileSourceAlerts.clear();
 }
 static bool ReadTileInstancePlugins(aip::content::Configuration& result)
 {
@@ -167,8 +190,9 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
     frame.presentation = tile.presentation; frame.textMode = tile.configuration.textMode;
     frame.activationArguments = TileInstanceActivation(tile);
     if (!tile.error.empty()) {
+        NotifyTileSourceTransition(tile,state,aip::notifications::SourceState::Failed);
         state.Stop();
-        state.rss.reset(); state.prayer.reset(); state.notes.reset(); state.discord.reset();
+        state.rss.reset(); state.prayer.reset(); state.notes.reset(); state.discord.reset(); state.kuro.reset();state.datetime.reset();
         Entry background; background.background = L"Transparent";
         frame.backgroundId = BackgroundId::Transparent;
         frame.capturedWallpaperFit = static_cast<int>(FitMode::Fill);
@@ -203,10 +227,17 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         });
         // An unconfigured feed is a local setup state, not a polling worker.
         RssFeedSnapshot feed;
+        bool completed=false;
         if (!settings.valid || settings.feedUrl.empty()) {
             state.rss->Cancel(); feed.status = settings.valid ? L"Choose a feed URL in this tile's settings." : settings.validationError;
-        } else { state.rss->Refresh(settings, synchronous, state.forceRefresh); feed = state.rss->Read(settings); }
+            NotifyTileSourceTransition(tile,state,settings.valid?aip::notifications::SourceState::Unconfigured:aip::notifications::SourceState::Failed);
+        } else {
+            state.rss->Refresh(settings, synchronous, state.forceRefresh); feed = state.rss->Read(settings,&completed);
+            NotifyTileSourceTransition(tile,state,!completed?aip::notifications::SourceState::Pending:
+                feed.ok&&!feed.items.empty()?aip::notifications::SourceState::Healthy:aip::notifications::SourceState::Failed);
+        }
         if (!feed.ok || feed.items.empty()) { frame.text = {L"Set up RSS", feed.status, L""}; break; }
+        if(completed)ObserveRssTileAlerts(tile,feed);
         for (std::size_t i = 0; i < (std::min)(feed.items.size(), std::size_t(5)); ++i)
             frame.rssHeadlines.push_back({feed.items[i].title, feed.items[i].summary, L""});
         const auto selected = (std::min)(static_cast<std::size_t>(entry.rssItem - 1), feed.items.size() - 1);
@@ -217,6 +248,8 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         break;
     }
     case TileInstanceType::NowPlaying:
+        NotifyTileSourceTransition(tile,state,media.text.primary==L"Media source unavailable"||media.text.primary==L"Media refresh timed out"?
+            aip::notifications::SourceState::Failed:media.hasSession?aip::notifications::SourceState::Healthy:aip::notifications::SourceState::Pending);
         frame.smtcSource = true; frame.smtcState = media.playbackState;
         frame.smtcIndicator = tile.configuration.smtc.indicatorMode;
         frame.smtcShowRepeatShuffle = tile.configuration.smtc.showRepeatShuffle;
@@ -229,11 +262,42 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         if (!state.prayer) state.prayer = std::make_unique<ContentPrayerProvider>();
         if (state.forceRefresh) state.prayer->forceRequested = true;
         state.prayer->Refresh(tile.configuration.prayer, synchronous);
-        const auto view = state.prayer->Read(tile.configuration.prayer);
+        bool completed=false;
+        const auto view = state.prayer->Read(tile.configuration.prayer,&completed);
+        if(completed&&view.available)ObservePrayerTileAlerts(tile,state.prayer->ReadSchedule(),state.prayer->Now());
+        NotifyTileSourceTransition(tile,state,tile.configuration.prayer.city.empty()||tile.configuration.prayer.country.empty()?
+            aip::notifications::SourceState::Unconfigured:!completed?aip::notifications::SourceState::Pending:
+            !view.error.empty()?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Healthy);
         frame.prayerSource = true; frame.prayerClock = view.clock;
         frame.text = view.clock.Available() ? Text{view.clock.time, view.clock.prayer + L"\nat " + view.clock.location,
             view.clock.countdown + (view.clock.details.empty() ? L"" : L"\n" + view.clock.details)} : Text{view.title, view.secondary, view.badge};
         for (const auto& row : view.detailRows) frame.detailRows.push_back({row.label, row.value, L""});
+        break;
+    }
+    case TileInstanceType::Clock: case TileInstanceType::Calendar: {
+        if(!state.datetime)state.datetime=std::make_unique<ContentDateTimeProvider>(WakePollThread);
+        SYSTEMTIME now{};GetSystemTime(&now);const auto utc=aip::datetime::Seconds(DateTimeCivil(now));
+        const auto view=tile.type==TileInstanceType::Clock?state.datetime->Clock(tile.clock,utc,now.wMilliseconds):
+            state.datetime->Calendar(tile.calendar,utc,now.wMilliseconds,state.forceRefresh,synchronous);
+        NotifyTileSourceTransition(tile,state,view.pending?aip::notifications::SourceState::Pending:
+            view.ok?aip::notifications::SourceState::Healthy:aip::notifications::SourceState::Failed);
+        if(!view.ok){frame.text={L"Check tile settings",view.status,L""};frame.wrapSourceText=true;break;}
+        frame.clockSource=tile.type==TileInstanceType::Clock;frame.calendarSource=!frame.clockSource;
+        frame.dateTime={frame.clockSource?view.time:L"",view.weekday,view.dayNumber,view.date,view.location};
+        if(frame.calendarSource&&!view.events.empty())frame.sourceDiagnostic=view.status;
+        frame.text={frame.clockSource?view.time:view.weekday+L" "+view.dayNumber,frame.clockSource?view.location:view.status,view.date};
+        for(const auto& event:view.events)frame.detailRows.push_back({event.title,event.when+(event.location.empty()?L"":L"\n"+event.location),L""});
+        break;
+    }
+    case TileInstanceType::Wuwa: {
+        if(!state.kuro)state.kuro=std::make_unique<ContentKuroProvider>();
+        state.kuro->Refresh(tile.kuro,synchronous,state.forceRefresh);bool completed=false;
+        const auto notes=state.kuro->Read(tile.kuro,&completed);
+        const bool configured=!tile.kuro.gameToken.empty()||!tile.kuro.gameTokenProtected.empty();
+        NotifyTileSourceTransition(tile,state,!configured?aip::notifications::SourceState::Unconfigured:!completed?aip::notifications::SourceState::Pending:
+            notes.state==aip::kuro::State::Error?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Healthy);
+        frame.text={notes.line1,notes.line2,L""};frame.wrapSourceText=true;
+        for(const auto& row:notes.rows)frame.detailRows.push_back({row.label,row.value,L""});
         break;
     }
     case TileInstanceType::Genshin: case TileInstanceType::Hsr: case TileInstanceType::Zzz: {
@@ -242,6 +306,8 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         if (state.forceRefresh) state.notes->refreshRequested.fetch_or(1u << resource);
         state.notes->Refresh(tile.configuration.notes, resource, synchronous);
         const auto notes = state.notes->ReadSnapshot(tile.configuration.notes, resource);
+        NotifyTileSourceTransition(tile,state,notes.state==aip::notes::StateKind::Loading?aip::notifications::SourceState::Pending:
+            notes.state==aip::notes::StateKind::Error?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Healthy);
         frame.text = ContentNotesProvider::FormatSnapshot(notes, entry.notesDetail);
         frame.detailRows = aip::notes::BuildNoteTileRows(notes, entry.notesDetail,
             [](const wchar_t* key, const wchar_t* fallback) { return IniReadS(L"Strings", key, fallback); });
@@ -249,11 +315,15 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         if (notes.state == aip::notes::StateKind::Error) frame.activationArguments += L" --tile-sign-in";
         break;
     }
-    case TileInstanceType::Discord:
+    case TileInstanceType::Discord: {
         if (!state.discord) state.discord = std::make_unique<ContentDiscordProvider>();
         if (state.forceRefresh) state.discord->Cancel();
-        state.discord->Refresh(tile.configuration.discord, synchronous); frame.text = state.discord->Read(); frame.wrapSourceText = true;
+        bool completed=false,failed=false;
+        state.discord->Refresh(tile.configuration.discord, synchronous); frame.text = state.discord->Read(&completed,&failed); frame.wrapSourceText = true;
+        NotifyTileSourceTransition(tile,state,!completed?aip::notifications::SourceState::Pending:
+            failed?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Healthy);
         break;
+    }
     case TileInstanceType::QuickAction:
         frame.textMode = TextMode::Off;
         break;
@@ -274,7 +344,13 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     if (!ReadCurrentTileInstances(cfg, error)) {
         StopTileInstanceProviders(); g_contentSmtc.Cancel(); g_contentCaps.Cancel(); g_contentAsus.Cancel();
         PublishSecondarySnapshots({}); PublishContentSnapshot({});
-        if (error != reportedError) { Log(L"Tile configuration: %ls", error.c_str()); reportedError = error; }
+        if (error != reportedError) {
+            Log(L"Tile configuration: %ls", error.c_str());
+            if(reportedError.empty()&&IniReadI(L"Settings",L"NotifySourceErrors",1))
+                NotifyUserOperation(L"tile-configuration",IniReadS(L"Strings",L"NotificationSourceFailed",L"A tile source needs attention"),
+                    IniReadS(L"Strings",L"NotificationTileConfigurationFailed",L"The tile configuration could not be read. Open Tiles to repair its settings; existing pins and saved accounts were kept."),NIIF_WARNING);
+            reportedError = error;
+        }
         return false;
     }
     reportedError.clear();
@@ -306,6 +382,8 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     }
     for (auto it = g_tileInstanceProviders.begin(); it != g_tileInstanceProviders.end();)
         if (!used.count(it->first)) { it->second->Stop(); it = g_tileInstanceProviders.erase(it); } else ++it;
+    for(auto it=g_tileSourceAlerts.begin();it!=g_tileSourceAlerts.end();)
+        if(!used.count(it->first))it=g_tileSourceAlerts.erase(it);else ++it;
     if (smtcNeeded) g_contentSmtc.Refresh(smtcSeconds, synchronous, artworkNeeded, nativeMediaNeeded, appIconNeeded);
     else g_contentSmtc.Cancel();
     const auto media = smtcNeeded ? g_contentSmtc.Read() : SmtcMediaSnapshot{};

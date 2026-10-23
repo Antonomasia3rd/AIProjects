@@ -94,6 +94,9 @@ static void TestDisplaySettingsParity()
         PopulateDesktopStubTrayMenu(menu, grouped, false);
         TrayMenuCommands commands;
         InspectTrayMenu(menu, commands);
+        for(UINT command:{ID_NOTIF_API_AUTO,ID_NOTIF_API_BALLOON,ID_NOTIF_API_TOAST,ID_NOTIFY_OPERATIONS,
+            ID_NOTIFY_PIN_PROGRESS,ID_NOTIFY_SOURCE_ERRORS,ID_NOTIFY_GALLERY_CHANGES,ID_NOTIF_PROGRESS_INTERVAL})
+            Check(commands.find(command)!=commands.end(),"both tray layouts expose notification API and category controls");
         for (UINT command : {ID_TILE_TEXT_APPLY_MEDIUM, ID_TILE_TEXT_APPLY_WIDE, ID_TILE_TEXT_APPLY_LARGE}) {
             const auto found = commands.find(command);
             Check(found != commands.end(), "both tray views keep each text-size command reachable exactly once");

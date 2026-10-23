@@ -26,6 +26,7 @@ struct TileConfiguration {
     std::wstring folder, galleryName; // Empty folder inherits the legacy group folder.
     aip::content::TileDeliveryPolicy delivery;
     bool registration = false; // Effective transport, resolved by the host for Auto.
+    std::wstring clickAction=L"Image";
 };
 struct Configuration {
     bool enabled = false;
@@ -170,6 +171,7 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
     if (tile && aip::content::FindTilePolicyField(key)) return aip::content::NormalizeTilePolicySetting(key,value,error);
     auto normalized = detail::Trim(value); std::uint64_t number = 0; bool enabled = false;
     if (name == L"enabled") { if (!detail::Bool(normalized, enabled)) { error = L"Gallery Enabled must be Boolean."; return false; } normalized = enabled ? L"1" : L"0"; }
+    else if(tile&&name==L"clickaction") {const auto action=detail::Lower(normalized);if(action!=L"image"&&action!=L"setup"){error=L"Gallery ClickAction must be Image or Setup.";return false;}normalized=action==L"image"?L"Image":L"Setup";}
     else if ((root && name == L"groupid") || (tile && name == L"id")) {
         if (!normalized.empty() && !StableTileId(normalized)) { error = L"Gallery IDs require 1-32 ASCII letters, digits, or underscores."; return false; }
     } else if (tile && (name == L"background" || name == L"branding" || name == L"backgroundcolor")) {
@@ -229,7 +231,7 @@ inline bool ValidateConfiguration(const Configuration& cfg, std::wstring& error)
         if ((!tile.id.empty() && (!StableTileId(tile.id) || !ids.insert(detail::Lower(tile.id)).second)) ||
             (!cfg.groupId.empty() && !tile.id.empty() && NativeTileId(cfg.groupId, tile.id).empty()) ||
             (cfg.enabled && tile.id.empty()) || detail::Trim(tile.name).empty() || !detail::Text(tile.name, 256) ||
-            !detail::Text(tile.folder, 32768) || !detail::Text(tile.galleryName, 256)) {
+            !detail::Text(tile.folder, 32768) || !detail::Text(tile.galleryName, 256) || (tile.clickAction!=L"Image"&&tile.clickAction!=L"Setup")) {
             error = L"Gallery tiles need unique stable IDs, a combined native ID of at most 64 characters, and nonempty names."; return false;
         }
     }
@@ -254,6 +256,7 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
         const auto section = L"Gallery.Tile." + std::to_wstring(i), name = L"Gallery " + std::to_wstring(i);
         TileConfiguration tile; tile.id = get(section, L"Id", L""); tile.name = get(section, L"Name", name.c_str());
         tile.folder = get(section, L"Folder", L""); tile.galleryName = get(section, L"GalleryName", L"");
+        tile.clickAction=get(section,L"ClickAction",L"Image");
         tile.enabled = get(section, L"Enabled", L"1") == L"1"; cfg.tiles.push_back(std::move(tile));
         if (!aip::content::ReadTileAppearance(read, section, cfg.tiles.back().appearance, error)) return false;
         if (!aip::content::ReadTileDeliveryPolicy(read,section,GalleryRegistrationId(cfg.groupId,cfg.tiles.back().id),cfg.tiles.back().delivery,error)) return false;

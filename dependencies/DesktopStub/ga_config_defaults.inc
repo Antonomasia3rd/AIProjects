@@ -15,6 +15,12 @@ static std::atomic<int> g_liveTileBranding(static_cast<int>(LiveTileBranding::Au
 static std::atomic<bool> g_liveTileRelaunchOnSwitch(true);
 static std::atomic<bool> g_clearLiveTileOnShutdown(true);
 static std::atomic<int> g_relaunchAfterExit(0);
+static std::atomic<bool> g_desktopHostSetupPending(false);
+static std::atomic<unsigned long long> g_desktopHostSetupRequestId(0);
+static bool g_desktopHostSetupPreviousPending=false,g_desktopHostSetupRecovered=false;
+static thread_local bool g_desktopHostSetupQueueAdmission=false;
+static constexpr UINT WM_APP_DESKTOP_HOST_SETUP_COMPLETE=WM_APP+129;
+static constexpr UINT WM_APP_REQUEST_DESKTOP_HOST_SETUP=WM_APP+128;
 static std::atomic<int> g_manifestCompatibilityTarget(static_cast<int>(ManifestCompatibilityTarget::Windows10));
 static std::atomic<bool> g_hideDisabled(false);
 static std::atomic<bool> g_showMenuAsDropdown(true);
@@ -132,8 +138,9 @@ static const IniDefault g_defaults[] = {
     {L"PrayerTimes", L"TimeoutSeconds", L"10"},
     {L"PrayerTimes", L"MaximumBytes", L"262144"},
     {L"PrayerTimes", L"ShowSunrise", L"1"},
-    {L"PrayerTimes", L"TwentyFourHour", L"1"},
+    {L"PrayerTimes", L"TwentyFourHour", L"0"},
     {L"PrayerTimes", L"ShowTimetable", L"1"},
+    {L"PrayerTimes", L"NextIncludesSunrise", L"0"},
     {L"SMTC", L"Indicator", L"Status"},
     {L"SMTC", L"ShowRepeatShuffle", L"0"},
     {L"Content.1", L"Enabled", L"1"},
@@ -161,9 +168,9 @@ static const IniDefault g_defaults[] = {
     {L"Discord", L"ProfilePath", L""},
     {L"Discord", L"SendPresence", L"0"},
     {L"Discord", L"ClientId", L""},
-    {L"Discord", L"Name", L"DesktopStub"},
-    {L"Discord", L"Details", L"{win_title}"},
-    {L"Discord", L"State", L"CPU: {cpu}"},
+    {L"Discord", L"Name", aip::discord::DefaultActivityName},
+    {L"Discord", L"Details", aip::discord::DefaultDetailsTemplate},
+    {L"Discord", L"State", aip::discord::DefaultStateTemplate},
     {L"Discord", L"RefreshSeconds", L"5"},
     {L"Discord", L"OperationTimeoutMs", L"5000"},
     {L"Discord", L"ClearOnStop", L"1"},
@@ -252,6 +259,14 @@ static const IniDefault g_defaults[] = {
     {L"Settings", L"GenerateScale400", L"0"},
     {L"Settings", L"ShowMenuAsDropdown", L"1"},
     {L"Settings", L"NotificationsEnabled", L"1"},
+    {L"Settings", L"NotificationApi", L"Auto"},
+    {L"Settings", L"NotifyOnOperations", L"1"},
+    {L"Settings", L"NotifyOnPinProgress", L"1"},
+    {L"Settings", L"NotificationProgressIntervalMs", L"750"},
+    {L"Settings", L"NotifySourceErrors", L"1"},
+    {L"Settings", L"NotifyGalleryChanges", L"1"},
+    {L"Settings", L"AutoUnpinRemovedGalleryTiles", L"1"},
+    {L"Settings", L"ConfirmUnpinRemovedGalleryTiles", L"0"},
     {L"Settings", L"NotifyOnStart", L"0"},
     {L"Settings", L"NotifyOnSuccess", L"0"},
     {L"Settings", L"NotifyOnFailure", L"1"},
@@ -448,7 +463,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"PrayerSchoolHanafi", L"Hanafi"},
     {L"PrayerSchool", L"Asr calculation"},
     {L"PrayerAdjustments", L"Local minute adjustments"},
-    {L"PrayerShowSunrise", L"Show sunrise in the header"},
+    {L"PrayerShowSunrise", L"Show Sunrise / Shuruq in header and timetable"},
+    {L"PrayerNextSunrise", L"Include Sunrise / Shuruq in next-event countdown"},
     {L"Prayer24Hour", L"Use 24-hour times"},
     {L"PrayerLocation", L"Set city and country..."},
     {L"PrayerCityPrompt", L"Enter the city manually. Leave blank to keep prayer times unconfigured."},
@@ -828,7 +844,45 @@ static const StringDefault g_stringDefaults[] = {
     {L"CurrentDpiScaleLabel", L"Current DPI: %d%% (asset scale: %d%%)"},
     {L"ShowMenuAsDropdown", L"Group settings into submenus"},
     {L"NotificationsTitle", L"Notifications:"},
-    {L"NotificationsEnabled", L"Enable all tray notifications"},
+    {L"NotificationsEnabled", L"Enable notifications"},
+    {L"NotificationApiTitle", L"Notification style"},
+    {L"NotificationApiAuto", L"Automatic (Windows notification, balloon fallback)"},
+    {L"NotificationApiBalloon", L"Classic tray balloon (Windows 7 / ExplorerPatcher)"},
+    {L"NotificationApiToast", L"Windows notification (progress bar when available)"},
+    {L"NotifyOnOperations", L"Notify about operations and tile source changes"},
+    {L"NotifyOnPinProgress", L"Show progress while pinning multiple tiles"},
+    {L"NotifySourceErrors", L"Notify once when a tile source fails or recovers"},
+    {L"NotifyGalleryChanges", L"Notify when gallery tiles are added or removed"},
+    {L"AutoUnpinRemovedGalleryTiles", L"Unpin removed gallery tiles automatically"},
+    {L"ConfirmUnpinRemovedGalleryTiles", L"Ask before unpinning removed gallery tiles"},
+    {L"PinTilesProgressTitle", L"Pinning tiles to Start"},
+    {L"UnpinTilesProgressTitle", L"Removing old gallery pins"},
+    {L"ConfirmRemovedGalleryPins", L"Remove the old gallery tiles from Start after saving? Windows may also ask for confirmation. Photos and ownership history are kept."},
+    {L"GalleryChangedTitle", L"Gallery updated"},
+    {L"TileBatchStopped", L"Stopped before all requests finished. Unfinished requests were not counted as applied."},
+    {L"UnpinRemainingManually", L". Unpin remaining tiles manually from Start."},
+    {L"NotificationProgressInterval", L"Progress update interval (milliseconds)"},
+    {L"NotificationSourceFailed", L"A tile source needs attention"},
+    {L"NotificationSourceFailedMessage", L"%s could not refresh. Open this tile's settings or status for details. DesktopStub will retry automatically."},
+    {L"NotificationSourceRecovered", L"A tile source is available again"},
+    {L"NotificationSourceRecoveredMessage", L"%s refreshed successfully. Its tile will update when Windows displays the new content."},
+    {L"NotificationRssTitle", L"Feed updated"},
+    {L"NotificationRssNewItems", L"%count% new items in %tile%."},
+    {L"NotificationPrayerTitle", L"Prayer times"},
+    {L"NotificationPrayerBefore", L"%event% in %minutes% minutes at %city% (%time%)."},
+    {L"NotificationPrayerNow", L"It is time for %event% at %city% (%time%)."},
+    {L"GalleryClickAction",L"When clicked"},
+    {L"GalleryClickImage",L"Open the displayed photo (when Windows identifies it)"},
+    {L"GalleryClickSetup",L"Open this tile's settings"},
+    {L"NotificationGalleryImageFallback",L"Windows did not provide an exact available photo for this click. Opening the gallery folder instead."},
+    {L"NotificationTileConfigurationFailed", L"The tile configuration could not be read. Open Tiles to repair its settings; existing pins and saved accounts were kept."},
+    {L"NotificationAccountSaved", L"Game account saved"},
+    {L"NotificationAccountSavedMessage", L"The account for %s was saved. Its resource information will refresh automatically."},
+    {L"NotificationTileAdded", L"Tile created"},
+    {L"NotificationTileAddedMessage", L"%s was created. Open its settings to configure and pin it."},
+    {L"NotificationDeliveryChanged", L"Tile delivery changed"},
+    {L"NotificationRegistrationPreparedMessage", L"%s is prepared for Registration. After its first successful update, pin its separate app from Start. Existing pins were kept."},
+    {L"NotificationLiveDeliveryChangedMessage", L"%s now uses Live Tile delivery. Existing Registration pins were kept."},
     {L"NotifyOnStart", L"Notify when generation starts"},
     {L"NotifyOnSuccess", L"Notify when generation succeeds"},
     {L"NotifyOnFailure", L"Notify when generation, wallpaper, or registration fails"},
@@ -1175,6 +1229,21 @@ static std::wstring BuildInitialIniTemplate()
         for (const auto& d : g_defaults)
             if (IEquals(d.section, section)) lines.push_back(FormatIniAssignment(d.key, d.value));
     }
+    // Fresh installations begin with the original Desktop wallpaper use case.
+    // Keep this out of g_defaults: filling missing defaults in an existing
+    // legacy profile must not silently replace its source list or saved layout.
+    lines.push_back(L"");
+    lines.push_back(L"[Tiles]");
+    lines.push_back(FormatIniAssignment(L"SchemaVersion",L"1"));
+    lines.push_back(FormatIniAssignment(L"Instances",L"desktop"));
+    lines.push_back(L"");
+    lines.push_back(L"[Tile.desktop]");
+    lines.push_back(FormatIniAssignment(L"Type",L"Wallpaper"));
+    lines.push_back(FormatIniAssignment(L"Name",L"Desktop"));
+    lines.push_back(FormatIniAssignment(L"Primary",L"1"));
+    lines.push_back(FormatIniAssignment(L"Content.Background",L"Wallpaper"));
+    lines.push_back(FormatIniAssignment(L"Delivery.Mode",L"LiveTile"));
+    lines.push_back(FormatIniAssignment(L"Branding",L"NameAndLogo"));
     lines.push_back(L"");
     lines.push_back(L"[PowerShellErrorMessages]");
     lines.push_back(L"; Optional HRESULT/error-code matches for PowerShell registration failures.");

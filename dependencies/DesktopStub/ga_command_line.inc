@@ -7,6 +7,7 @@ static bool StageExplicitSourceTileNameIntents(std::wstring& text, const std::ve
 #include "../content_presets.h"
 #include "../secondary_tiles.h"
 #include "../gallery_engine.h"
+#include "../gallery_image_activation.h"
 #include "../content_sources/notes_profile.inc"
 #include "../content_sources/notes_signin_model.h"
 #include "../hardware/hardware_profile_import.inc"
@@ -17,10 +18,12 @@ struct CommandLineHardwareImport { bool asus = false; std::wstring path; };
 struct CommandLineOptions
 {
     bool helpRequested = false;
+    bool setupDesktop = false;
     std::wstring tileSetupKey;
     std::wstring windowsTileId, mediaAction;
     bool tileSignIn = false;
     std::wstring openUrl, openFolder;
+    std::wstring galleryImageToken;
     bool galleryFolderActivation = false;
     bool versionRequested = false;
     bool parseFailed = false;
@@ -90,6 +93,7 @@ static constexpr WPARAM SINGLE_INSTANCE_REQUEST_REGENERATE_MANIFEST = 4;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_MESSAGEBOX = 5;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_CONSOLE = 6;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE = 7;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SETUP_DESKTOP = 11;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MASK = 0x00FF;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE = 32;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE = 64;
@@ -511,7 +515,7 @@ static bool TryParseCommandLineBoolValue(const std::wstring& rawValue, bool& val
     return aip::ParseBoolValue(rawValue, value);
 }
 
-enum class DesktopStubDisplaySettingType { Boolean, LiveTileMode, TemplateStyle, Branding, Target };
+enum class DesktopStubDisplaySettingType { Boolean, LiveTileMode, TemplateStyle, Branding, Target, NotificationApi, NotificationInterval };
 struct DesktopStubDisplaySetting {
     const wchar_t* section;
     const wchar_t* key;
@@ -530,6 +534,14 @@ static constexpr DesktopStubDisplaySetting g_displaySettings[] = {
     {L"Settings", L"GenerateOnStartupOnlyWhenChanged", L"1", DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"ShowMenuAsDropdown", L"1", DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"NotificationsEnabled", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotificationApi", L"Auto", DesktopStubDisplaySettingType::NotificationApi},
+    {L"Settings", L"NotificationProgressIntervalMs", L"750", DesktopStubDisplaySettingType::NotificationInterval},
+    {L"Settings", L"NotifyOnOperations", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotifyOnPinProgress", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotifySourceErrors", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"NotifyGalleryChanges", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"AutoUnpinRemovedGalleryTiles", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings", L"ConfirmUnpinRemovedGalleryTiles", L"0", DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"NotifyOnStart", L"0", DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"NotifyOnSuccess", L"0", DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"NotifyOnFailure", L"1", DesktopStubDisplaySettingType::Boolean},
@@ -581,6 +593,8 @@ static constexpr DesktopStubDisplaySetting g_displaySettings[] = {
     {L"Assets", L"LargeTile", L"1", DesktopStubDisplaySettingType::Boolean},
     {L"Assets", L"SplashScreen", L"0", DesktopStubDisplaySettingType::Boolean},
     {L"State", L"LiveTileModeReregistrationPending", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"State", L"DesktopHostSetupPending", L"0", DesktopStubDisplaySettingType::Boolean},
+    {L"State", L"DesktopHostSetupPreviousPending", L"0", DesktopStubDisplaySettingType::Boolean},
     {L"State", L"LiveTileClearedOnShutdown", L"0", DesktopStubDisplaySettingType::Boolean},
     {L"State", L"ForceShutdownPendingCleanup", L"0", DesktopStubDisplaySettingType::Boolean},
 };
@@ -603,6 +617,19 @@ static bool NormalizeDesktopStubDisplaySettingValue(const DesktopStubDisplaySett
         return false;
     };
     switch (setting.type) {
+    case DesktopStubDisplaySettingType::NotificationInterval: {
+        int parsed=0;
+        if(!aip::ParseIntValueInRange(value,250,60000,parsed))return fail(L"an integer from 250 to 60000");
+        value=std::to_wstring(parsed);break;
+    }
+    case DesktopStubDisplaySettingType::NotificationApi: {
+        value = TrimCopy(value);
+        if (IEquals(value,L"Auto")) value=L"Auto";
+        else if (IEquals(value,L"Balloon")) value=L"Balloon";
+        else if (IEquals(value,L"Toast")) value=L"Toast";
+        else return fail(L"Auto, Balloon, or Toast");
+        break;
+    }
     case DesktopStubDisplaySettingType::Boolean: {
         bool enabled = false;
         if (!TryParseCommandLineBoolValue(value, enabled)) return fail(L"a true/false value");
@@ -1154,9 +1181,13 @@ static bool ParseCommandLineOptions()
         return false;
     };
 
+    bool desktopSetupOtherOption=false;
     for (int i = 1; i < argc; ++i)
     {
         std::wstring arg = argv[i] ? argv[i] : L"";
+        if(!IEquals(arg,L"--setup-desktop")&&!IEquals(arg,L"--ini")&&!CommandLineStartsWithI(arg,L"--ini=")&&
+            !IEquals(arg,L"--help")&&!IEquals(arg,L"-h")&&!IEquals(arg,L"/?")&&!IEquals(arg,L"/help")&&
+            !IEquals(arg,L"--version")&&!IEquals(arg,L"-v")&&!IEquals(arg,L"/version"))desktopSetupOtherOption=true;
         std::wstring value;
         std::wstring error;
         bool matched = false;
@@ -1177,6 +1208,7 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
+        if(IEquals(arg,L"--setup-desktop")){g_commandLine.setupDesktop=true;continue;}
         if (TryParseAppxActivationArgument(arg, value))
         {
             g_commandLine.appxActivationServer = true;
@@ -1300,6 +1332,9 @@ static bool ParseCommandLineOptions()
             g_commandLine.galleryFolderActivation = true;
             continue;
         }
+        if(!CommandLineTryGetOptionValue(argc,argv,i,L"--gallery-image",value,error,matched))return fail(error);
+        if(matched){aip::gallery::activation::Token token;if(!aip::gallery::activation::Decode(value,token))return fail(L"--gallery-image expects an owned gallery photo token, never a file path.");
+            g_commandLine.galleryImageToken=value;g_commandLine.galleryFolderActivation=true;continue;}
         if (IEquals(arg, L"--tile-sign-in")) { g_commandLine.tileSignIn = true; continue; }
         if (!CommandLineTryGetOptionValue(argc, argv, i, L"--tile-setup", value, error, matched)) return fail(error);
         if (matched) {
@@ -2084,6 +2119,9 @@ static bool ParseCommandLineOptions()
     }
 
     std::wstring combinationError;
+    if(!g_commandLine.galleryImageToken.empty()&&!g_commandLine.openFolder.empty())return fail(L"--gallery-image and --open-folder cannot be combined.");
+    if(g_commandLine.setupDesktop&&!g_commandLine.helpRequested&&!g_commandLine.versionRequested&&desktopSetupOtherOption)
+        return fail(L"--setup-desktop is an explicit package setup action. Combine it only with --ini, --help or --version; run settings, imports, Startup and offline commands separately.");
     if (!ValidateCommandLinePresetCombination(combinationError)) return fail(combinationError);
     if (g_commandLine.windowsTileId.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0)
         g_commandLine.galleryFolderActivation = true;
@@ -2146,6 +2184,7 @@ static std::wstring CommandLineUsageText()
         COMMAND_LINE_HELP_TEMPLATE_KEY,
         g_commandLineHelpDefaults[0].value);
     return FormatCommandLineHelpTemplate(iniTemplate.c_str()) +
+        L"\nDesktop setup: --setup-desktop [--ini FILE] registers the main Desktop host, then restarts with Live Tile identity. Explicit action only.\n"
         L"\nNotes: --notes-import-profile INI; --notes-import-cookie GAME=JSON; --notes-clear GAME (configuration only).\n"
         L"       --notes-refresh GAME|All (existing resident only; no new process).\n"
         L"Hardware profiles: --caps-import-profile INI; --asus-import-profile INI (configuration only).\n"
@@ -2155,7 +2194,7 @@ static std::wstring CommandLineUsageText()
         L"Discord advanced profile: --discord-set Section.Key=Value; --discord-create-profile INI (configuration only).\n"
         L"  Credential replacements require masked tray input or explicit --discord-private-input; values are never echoed.\n"
         L"ASUS numbered fields: --set AsusBlink.Event001HddState=128,129 (hardware and disk flags stay explicit).\n"
-        L"Gallery: Gallery.Folder, TileCount (1-1024), QueueSize (1-5), RefreshSeconds (60-86400), Order, Fit, Seed; Gallery.Tile.N.Folder/GalleryName select separate folders. Pinned tiles update automatically.\n"
+        L"Gallery: Gallery.Folder, TileCount (1-1024), QueueSize (1-5), RefreshSeconds (60-86400), Order, Fit, Seed; Gallery.Tile.N.Folder/GalleryName select separate folders; ClickAction=Image|Setup. Pinned tiles update automatically.\n"
         L"  Use Tiles > Photo gallery > Set up gallery first to create permanent per-tile ownership history; pin each tile manually.\n"
         L"  --open-folder DIRECTORY opens an existing directory; relative paths are beside the selected INI.\n";
 }
@@ -2520,6 +2559,10 @@ static bool ApplyCommandLinePresetToDocument(std::wstring& text, std::wstring& e
     if (g_commandLine.presetName.empty()) return true;
     if (!ValidateCommandLinePresetCombination(error)) return false;
     const auto document = aip::ParseIniDocument(text);
+    std::wstring instanceList;
+    if(aip::ReadIniValueFromDoc(document,L"Tiles",L"Instances",instanceList)){
+        error=L"Legacy --preset does not change independent typed tiles. Use Tiles > Add tile and configure that tile's type instead.";return false;
+    }
     const auto read = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         std::wstring value; return aip::ReadIniValueFromDoc(document, section, key, value) ? value : std::wstring(fallback);
     };
@@ -2580,14 +2623,18 @@ static bool PrepareCommandLinePresetPreview(std::wstring& error)
     g_commandLine.presetPreviewDocument.clear();
     if (g_commandLine.presetName.empty()) return true;
     if (!ValidateCommandLinePresetCombination(error)) return false;
+    DesktopStubIniMutationGuard previewLock(CurrentIniWriteLockWaitMs());
+    if(!previewLock.IsLocked()){error=L"The preset target INI could not be locked for a read-only preview.";return false;}
     std::wstring text;
-    if (!ReadIniFileForMutation(text)) {
-        const auto attributes = GetFileAttributesW(g_iniPath.c_str());
-        if (attributes != INVALID_FILE_ATTRIBUTES || GetLastError() != ERROR_FILE_NOT_FOUND) {
-            error = L"The preset target INI could not be read."; return false;
-        }
-        text = BuildInitialIniTemplate();
-    }
+    WIN32_FILE_ATTRIBUTE_DATA attributes{};
+    const bool exists=GetFileAttributesExW(g_iniPath.c_str(),GetFileExInfoStandard,&attributes)!=FALSE;
+    if(!exists&&!IsMissingFileError(GetLastError())){error=L"The preset target INI could not be inspected.";return false;}
+    if(exists&&(attributes.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)){error=L"The preset target INI is a directory.";return false;}
+    // LoadIniText intentionally returns success with empty decoded text for a
+    // missing file. Mirror the actual factory's BYTE-empty test here, before
+    // any initialization write: a BOM-only existing file remains legacy.
+    if(!exists||(!attributes.nFileSizeHigh&&!attributes.nFileSizeLow))text=BuildInitialIniTemplate();
+    else if(!ReadIniFileForMutation(text)){error=L"The preset target INI could not be read.";return false;}
     if (!ApplyCommandLinePresetToDocument(text, error)) return false;
     g_commandLine.presetPreviewDocument = std::move(text);
     g_commandLine.presetPreviewLoaded = true;

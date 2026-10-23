@@ -1681,6 +1681,7 @@ static class RepoTools
                             throw new InvalidOperationException("DesktopStub informational command did not print its output: " + infoOption);
                         AssertFileDoesNotExist(helpIni, "DesktopStub informational commands must not create the INI");
                     }
+                    VerifyDesktopStubFreshFactory(exe, tempRoot);
                     if (!allowPackageIntegration) VerifyDesktopStubOfflineGuards(exe, tempRoot);
                     string customHelpText = "[CommandLineHelp]\r\n\"Template\" = \"CUSTOM_HELP_MARKER {exe}\"\r\n";
                     File.WriteAllText(customHelpIni, customHelpText, new UTF8Encoding(true));
@@ -1701,6 +1702,11 @@ static class RepoTools
                     AssertFileContains(legacyManifestIni, "[Manifest]", "DesktopStub must preserve an existing legacy Manifest section");
                     AssertFileContains(legacyManifestIni, "; Preserve user comments and unknown legacy values.", "DesktopStub must preserve comments in legacy configuration");
                     AssertFileContains(legacyManifestIni, "\"CustomLegacyValue\" = \"keep-me\"", "DesktopStub must preserve unknown legacy configuration values");
+                    // These comparisons intentionally exercise the legacy
+                    // numbered-content renderer and its exact pixel contract.
+                    // A fresh factory profile now selects typed Desktop-only
+                    // settings, so seed a genuine existing legacy document.
+                    SeedDesktopStubLegacySmokeProfile(ini);
                     SmokeProcess(exe, new[] { "--ini", ini, "--no-tray", "--console", "--logging", "--notifications", "--live-tile-mode", "Auto", "--live-tile-template", "Windows81Preset", "--live-tile-branding", "NameAndLogo", "--rss-feed-url", "https://example.com/feed.xml", "--rss-user-agent", "DesktopStub-Smoke/1.0", "--rss-update-interval", "300", "--rss-max-items", "10", "--rss-http-timeout", "30", "--rss-max-feed-bytes", "1048576", "--scales", "auto", "--asset", "MediumTile=1", "--set", "Strings.TrayTip=DesktopStub" + trailingSpaces, "--regenerate-manifest" }, new[] { 0 }, 30, "DesktopStub settings and manifest");
                     AssertFileContains(ini, "\"TrayTip\" = \"DesktopStub" + trailingSpaces + "\"", "DesktopStub --set must preserve trailing value spaces");
                     AssertFileContains(ini, "\"LiveTileTemplateStyle\" = \"Windows81Preset\"", "DesktopStub must persist the selected Windows 10 Live Tile template style");
@@ -2230,6 +2236,60 @@ static class RepoTools
             new[] { 0 }, 30, "DesktopStub leave adaptive composition");
     }
 
+    static void SeedDesktopStubLegacySmokeProfile(string ini)
+    {
+        const string text = "; Explicit legacy renderer fixture; modern fresh defaults are tested separately.\r\n[Content]\r\n\"Enabled\" = \"0\"\r\n";
+        // Create-only inside the runner's private directory. An unexpected
+        // existing file must never be replaced to make a smoke test pass.
+        using (FileStream file = new FileStream(ini, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+        using (StreamWriter writer = new StreamWriter(file, new UTF8Encoding(true)))
+            writer.Write(text);
+    }
+
+    static void AssertDesktopStubFactorySetting(string text, string section, string key, string value)
+    {
+        Match block = Regex.Match(text, @"(?ms)^[ \t]*\[" + Regex.Escape(section) + @"\][ \t]*\r?\n(?<body>.*?)(?=^[ \t]*\[|\z)");
+        string assignment = @"(?m)^[ \t]*""" + Regex.Escape(key) + @"""[ \t]*=[ \t]*""" + Regex.Escape(value) + @"""[ \t]*\r?$";
+        if (!block.Success || !Regex.IsMatch(block.Groups["body"].Value, assignment))
+            throw new InvalidOperationException("Fresh DesktopStub factory setting differs: [" + section + "] " + key + "=" + value);
+    }
+
+    static void VerifyDesktopStubFreshFactory(string exe, string tempRoot)
+    {
+        string fresh = Path.Combine(tempRoot, "FreshFactory.ini");
+        SmokeProcess(exe, new[] { "--ini", fresh, "--configure-only" }, new[] { 0 }, 10,
+            "DesktopStub fresh Desktop-only factory configuration");
+        string text = File.ReadAllText(fresh, Encoding.UTF8);
+        AssertDesktopStubFactorySetting(text, "Tiles", "SchemaVersion", "1");
+        AssertDesktopStubFactorySetting(text, "Tiles", "Instances", "desktop");
+        AssertDesktopStubFactorySetting(text, "Tile.desktop", "Type", "Wallpaper");
+        AssertDesktopStubFactorySetting(text, "Tile.desktop", "Name", "Desktop");
+        AssertDesktopStubFactorySetting(text, "Tile.desktop", "Primary", "1");
+        AssertDesktopStubFactorySetting(text, "Tile.desktop", "Content.Background", "Wallpaper");
+        AssertDesktopStubFactorySetting(text, "Tile.desktop", "Delivery.Mode", "LiveTile");
+        AssertDesktopStubFactorySetting(text, "Tile.desktop", "Branding", "NameAndLogo");
+        AssertDesktopStubFactorySetting(text, "Settings", "RunAtStartup", "0");
+        AssertDesktopStubFactorySetting(text, "Settings", "RunAtStartupPackaged", "0");
+        if (Regex.Matches(text, @"(?m)^[ \t]*\[Tile\.[^\]\r\n]+\][ \t]*\r?$").Count != 1)
+            throw new InvalidOperationException("Fresh DesktopStub factory unexpectedly added optional source tiles.");
+        AssertFileDoesNotExist(Path.Combine(tempRoot, "AppxManifest.xml"), "Fresh configure-only must not generate or register a manifest");
+        AssertFileDoesNotExist(Path.Combine(tempRoot, "DesktopStub.log"), "Fresh configure-only must not start resident logging");
+        AssertFileDoesNotExist(fresh + ".gallery-ledger", "Fresh configure-only must not initialize gallery ownership");
+        byte[] before = File.ReadAllBytes(fresh);
+        ProcessResult existing = SmokeProcess(exe, new[] { "--ini", fresh, "--configure-only", "--preset", "WallpaperRSS" }, new[] { 2 }, 10,
+            "DesktopStub typed factory rejects legacy preset atomically");
+        string existingMessage = existing.Output + existing.Error;
+        if (!existingMessage.Contains("independent") || !existingMessage.Contains("Tiles > Add tile") || !before.SequenceEqual(File.ReadAllBytes(fresh)))
+            throw new InvalidOperationException("Legacy preset must explain independent tiles and preserve the exact factory profile.");
+        string absent = Path.Combine(tempRoot, "FreshFactoryPresetRejected.ini");
+        ProcessResult missing = SmokeProcess(exe, new[] { "--ini", absent, "--configure-only", "--preset", "WallpaperRSS" }, new[] { 2 }, 10,
+            "DesktopStub new-profile legacy preset rejects before creation");
+        string missingMessage = missing.Output + missing.Error;
+        if (!missingMessage.Contains("independent") || !missingMessage.Contains("Tiles > Add tile"))
+            throw new InvalidOperationException("New-profile legacy preset rejection must explain the independent tile configuration.");
+        AssertFileDoesNotExist(absent, "Rejected new-profile legacy preset must not create a partial INI");
+    }
+
     static void VerifyDesktopStubOfflineGuards(string exe, string tempRoot)
     {
         int index = 0;
@@ -2240,10 +2300,13 @@ static class RepoTools
             AssertFileDoesNotExist(ini, "Offline startup rejection must precede INI creation");
         }
         string external = Path.Combine(tempRoot, "OfflineExternal.ini");
-        SmokeProcess(exe, new[] { "--ini", external, "--render-only", "--set", "Content.Enabled=1",
+        SeedDesktopStubLegacySmokeProfile(external);
+        byte[] externalBefore = File.ReadAllBytes(external);
+        ProcessResult externalResult = SmokeProcess(exe, new[] { "--ini", external, "--render-only", "--set", "Content.Enabled=1",
             "--set", "Content.1.Background=None", "--set", "Content.1.TextSources=SMTC" }, new[] { 2 }, 10,
             "DesktopStub offline external provider rejected");
-        AssertFileDoesNotExist(external, "Offline provider rejection must precede INI creation");
+        if (!(externalResult.Output + externalResult.Error).Contains("external providers") || !externalBefore.SequenceEqual(File.ReadAllBytes(external)))
+            throw new InvalidOperationException("Offline external provider rejection must identify the provider guard and preserve the exact legacy fixture without initialization.");
         string missingInput = Path.Combine(tempRoot, "OfflineNoInput.ini");
         SmokeProcess(exe, new[] { "--ini", missingInput, "--render-only" }, new[] { 2 }, 10,
             "DesktopStub offline requires an explicit image or None content");
@@ -2264,6 +2327,7 @@ static class RepoTools
             new[] { 0 }, 10, "DesktopStub explicit later setting restores layered content");
         AssertFileContains(preset, "\"Enabled\" = \"1\"", "Later explicit layered setting must take precedence");
         string blank = Path.Combine(tempRoot, "OfflineNone.ini");
+        SeedDesktopStubLegacySmokeProfile(blank);
         SmokeProcess(exe, new[] { "--ini", blank, "--render-only", "--no-live-tile", "--asset", "MediumTile=1",
             "--asset", "WideTile=1", "--asset", "LargeTile=1", "--set", "Content.Enabled=1",
             "--set", "Content.1.Background=None", "--set", "Content.1.TextSources=CustomText",

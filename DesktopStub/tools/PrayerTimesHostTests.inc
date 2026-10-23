@@ -93,7 +93,8 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
     Check(http == 0 && loads == 0 && !provider.source.HasPendingWork(), "unset location starts no HTTP, cache read or worker request");
     provider.Refresh(prayer, true);
     auto view = provider.Read(prayer);
-    Check(http == 4 && loads == 1 && saves == 1 && view.available && view.detailRows.size() == 5 && view.detailRows[1].value == L"12:00",
+    Check(http == 4 && loads == 1 && saves == 1 && view.available && view.detailRows.size() == 6 && view.detailRows[2].value == L"12:00 PM" &&
+        view.clock.time == L"5:00 AM" && !prayer.twentyFourHour,
         "one selected source retrieves cached today/tomorrow response pairs and uses the city's schedule times");
     for (int tick = 0; tick < 10; ++tick) provider.Refresh(prayer, false);
     Check(http == 4 && loads == 1, "unchanged selected polls do not repeat network or persistent cache reads");
@@ -105,7 +106,7 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
         "the view deadline advances to the following prayer on the next tick within the same minute without HTTP");
     auto adjusted = prayer; adjusted.adjustmentsMinutes[1] = 5; adjusted.twentyFourHour = false;
     const auto adjustedView = provider.Read(adjusted);
-    Check(adjustedView.detailRows.size() == 5 && adjustedView.detailRows[1].value == L"12:05 PM" && http == 4, "local adjustment/display edits reformat cached data without new HTTP");
+    Check(adjustedView.detailRows.size() == 6 && adjustedView.detailRows[2].value == L"12:05 PM" && http == 4, "local adjustment/display edits reformat cached data without new HTTP");
     provider.forceRequested = true; provider.Refresh(prayer, true);
     Check(http == 8 && loads == 1 && provider.Read(prayer).available, "explicit force refresh refetches unexpired daily schedules rather than only clearing the retry deadline");
     provider.Stop();
@@ -162,8 +163,60 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
     Check(TileSnapshotVisibleText(frame,310,TileStatusLabels{}).find(L"Isha")==std::wstring::npos && ContentSnapshotKey(frame)!=clockKey,
         "timetable visibility updates both tile status and the presentation cache key");
     frame.prayerClock.showTimetable=true;
+    {
+        const auto tagFor = [](const std::wstring& xml, const std::wstring& text) {
+            const auto content = xml.find(L">" + text + L"</text>");
+            if (content == std::wstring::npos) return std::wstring{};
+            const auto start = xml.rfind(L"<text ", content);
+            return start == std::wstring::npos ? std::wstring{} : xml.substr(start, content - start + 1);
+        };
+        const int oldTemplate = g_liveTileTemplateStyle.load(), oldTarget = g_manifestCompatibilityTarget.load();
+        g_liveTileTemplateStyle = static_cast<int>(LiveTileTemplateStyle::Adaptive);
+        g_manifestCompatibilityTarget = static_cast<int>(ManifestCompatibilityTarget::Windows10);
+        frame.backgroundId = BackgroundId::None;
+        const wchar_t* bindings[] = {L"TileMedium", L"TileWide", L"TileLarge"};
+        const int widths[] = {150,310,310}, heights[] = {150,150,310};
+        ManifestDisplayInfo manifest;
+        const auto native = [&](const Snapshot& snapshot, int size) {
+            const std::vector<LiveTileUpdateAsset> assets{{L"LivePrayerFixture",L"unused.png",bindings[size],L"absent-prayer-fixture.png",widths[size],heights[size]}};
+            ContentRenderScope scope(&snapshot);
+            return BuildLiveTileXml(ParentDirectoryOfPath(bitmapPath),manifest,assets);
+        };
+        for(int size=0;size<3;++size) {
+            const auto xml=native(frame,size);
+            const auto time=tagFor(xml,L"11:14 AM"), prayerName=tagFor(xml,L"Dhuhr"), location=tagFor(xml,L"at Surabaya");
+            Check(!xml.empty() && time.find(L"hint-style=\"title\"")!=std::wstring::npos && TextStylePixels(L"title")==24 &&
+                ComputePrayerClockGeometry(widths[size],heights[size],frame.prayerClock,frame.detailRows).timePixels==24,
+                "actual native notification keeps the default time at title24 on Medium Wide and Large");
+            Check(prayerName.find(L"hint-style=\"captionSubtle\"")!=std::wstring::npos && location.find(L"hint-style=\"captionSubtle\"")!=std::wstring::npos,
+                "default prayer name and location share the same subdued text style on every tile size");
+        }
+        Check(WriteContentFixture(L"[Tile.prayer]\r\nTextPreset=Custom\r\nTextStyle=title\r\nTextSecondaryStyle=subtitleSubtle\r\nTextBadgeStyle=header\r\nTextSecondaryMaxLines=3\r\nTextMaxLines=1\r\nTextWrap=1\r\n"),
+            "custom Prayer presentation regression uses only a private INI document");
+        Check(ReadTextPresentation(IniReadS,L"Tile.prayer",frame.presentation,error) && frame.presentation.Active(),
+            "custom Prayer roles and wrapping are read through the actual INI configuration reader");
+        for(int size=0;size<3;++size) {
+            const auto xml=native(frame,size);
+            const auto prayerName=tagFor(xml,L"Dhuhr"), location=tagFor(xml,L"at Surabaya");
+            Check(prayerName.find(L"hint-style=\"subtitleSubtle\"")!=std::wstring::npos && location.find(L"hint-style=\"subtitleSubtle\"")!=std::wstring::npos &&
+                prayerName.find(L"hint-maxLines=\"3\"")!=std::wstring::npos && location.find(L"hint-maxLines=\"3\"")!=std::wstring::npos &&
+                prayerName.find(L"hint-wrap=\"true\"")!=std::wstring::npos && location.find(L"hint-wrap=\"true\"")!=std::wstring::npos,
+                "actual native notification preserves identical custom Secondary styles and wrapping for prayer and city");
+            const auto badge=tagFor(xml,size==0?L"in 44 minutes":L"44");
+            Check(badge.find(L"hint-style=\"header\"")!=std::wstring::npos && tagFor(xml,L"11:14 AM").find(L"hint-style=\"title\"")!=std::wstring::npos,
+                "outer generic text presentation cannot reassign the location to Badge or the badge to Time");
+        }
+        frame.presentation.wrap=false;
+        const auto noWrap=native(frame,1);
+        Check(tagFor(noWrap,L"Dhuhr").find(L"hint-wrap=\"false\"")!=std::wstring::npos && tagFor(noWrap,L"at Surabaya").find(L"hint-maxLines=\"1\"")!=std::wstring::npos,
+            "turning off wrapping applies to both prayer name and location in the final notification");
+        frame.presentation.wrap=true;
+        g_liveTileTemplateStyle=oldTemplate;g_manifestCompatibilityTarget=oldTarget;
+    }
     { ScopedGdiPlus gdi; Check(gdi.ok(), "Prayer renderer fixture starts only offscreen GDI+");
-        if (gdi.ok()) { Gdiplus::Bitmap canvas(310, 310, PixelFormat32bppARGB); Gdiplus::Graphics graphics(&canvas);
+        if (gdi.ok()) {
+            const auto customFrame=frame; frame.presentation={};
+            Gdiplus::Bitmap canvas(310, 310, PixelFormat32bppARGB); Gdiplus::Graphics graphics(&canvas);
             graphics.Clear(Gdiplus::Color(0, 0, 0, 0)); Check(RenderPrayerTileSimulation(graphics, frame, 310, 310, 1), "bitmap fallback renders the clock and five-prayer layout offscreen");
             auto hasInk=[&](int left,int top,int right,int bottom) {
                 for(int y=top;y<bottom;++y)for(int x=left;x<right;++x){Gdiplus::Color pixel;
@@ -175,6 +228,34 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
             Gdiplus::Bitmap compact(150,150,PixelFormat32bppARGB);Gdiplus::Graphics compactGraphics(&compact);
             compactGraphics.Clear(Gdiplus::Color(0,0,0,0));
             Check(RenderPrayerTileSimulation(compactGraphics,frame,150,150,1),"compact bitmap clock uses the single-column fallback without a device or live tile");
+            Gdiplus::Bitmap prayerField(180,180,PixelFormat32bppARGB),cityField(180,180,PixelFormat32bppARGB),singleLine(180,180,PixelFormat32bppARGB);
+            Gdiplus::Graphics prayerGraphics(&prayerField),cityGraphics(&cityField),singleGraphics(&singleLine);
+            prayerGraphics.Clear(Gdiplus::Color(0,0,0,0));cityGraphics.Clear(Gdiplus::Color(0,0,0,0));singleGraphics.Clear(Gdiplus::Color(0,0,0,0));
+            Check(ConfigureTileTextGraphics(prayerGraphics)&&ConfigureTileTextGraphics(cityGraphics)&&ConfigureTileTextGraphics(singleGraphics),
+                "isolated Prayer fields use the same grayscale text rendering configuration as generated tile PNGs");
+            Gdiplus::REAL prayerY=10,cityY=10,singleY=10;
+            const auto longSecondary=L"Surabaya Indonesia Eastern District";
+            auto nowrapFrame=customFrame;nowrapFrame.presentation.wrap=false;
+            Check(DrawPrayerClockField(prayerGraphics,customFrame,longSecondary,L"caption",1,10,prayerY,100,170,1,1) &&
+                DrawPrayerClockField(cityGraphics,customFrame,longSecondary,L"header",1,10,cityY,100,170,2,1) &&
+                DrawPrayerClockField(singleGraphics,nowrapFrame,longSecondary,L"caption",1,10,singleY,100,170,2,1),
+                "offscreen Prayer and city fields render the actual INI-selected custom Secondary role");
+            prayerGraphics.Flush(Gdiplus::FlushIntentionSync);cityGraphics.Flush(Gdiplus::FlushIntentionSync);
+            Gdiplus::Rect fieldBounds(0,0,180,180);Gdiplus::BitmapData prayerPixels{},cityPixels{};
+            const bool prayerLocked=prayerField.LockBits(&fieldBounds,Gdiplus::ImageLockModeRead,PixelFormat32bppARGB,&prayerPixels)==Gdiplus::Ok;
+            const bool cityLocked=cityField.LockBits(&fieldBounds,Gdiplus::ImageLockModeRead,PixelFormat32bppARGB,&cityPixels)==Gdiplus::Ok;
+            bool samePixels=prayerLocked&&cityLocked,hasSecondaryInk=false;unsigned maxSecondaryAlpha=0;
+            if(samePixels)for(int y=0;y<180;++y){
+                const auto* first=reinterpret_cast<const std::uint32_t*>(static_cast<const BYTE*>(prayerPixels.Scan0)+static_cast<std::ptrdiff_t>(y)*prayerPixels.Stride);
+                const auto* second=reinterpret_cast<const std::uint32_t*>(static_cast<const BYTE*>(cityPixels.Scan0)+static_cast<std::ptrdiff_t>(y)*cityPixels.Stride);
+                for(int x=0;x<180;++x){const auto alpha=static_cast<unsigned>(first[x]>>24);
+                    samePixels=samePixels&&first[x]==second[x];hasSecondaryInk=hasSecondaryInk||alpha!=0;maxSecondaryAlpha=(std::max)(maxSecondaryAlpha,alpha);
+                }
+            }
+            if(prayerLocked)prayerField.UnlockBits(&prayerPixels);if(cityLocked)cityField.UnlockBits(&cityPixels);
+            Check(samePixels&&hasSecondaryInk&&prayerY==cityY&&maxSecondaryAlpha<=153,
+                "Prayer and location use identical subtitleSubtle font alpha and wrap bounds rather than mixing Secondary and Badge");
+            Check(prayerY>singleY+10,"bitmap TextWrap from the actual INI reader permits multiple Secondary lines and disables them when requested");
         } }
     Check(WriteContentFixture(original), "Prayer host fixture restores the prior private configuration");
 }

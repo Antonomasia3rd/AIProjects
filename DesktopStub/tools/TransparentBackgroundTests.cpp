@@ -114,6 +114,10 @@ int wmain(int argc, wchar_t** argv)
     g_logging = g_notificationsEnabled = g_console = false;
     g_keepGdiPlusLoaded = false;
     auto profile = BuildInitialIniTemplate();
+    // This fixture explicitly covers legacy numbered-content configuration;
+    // typed primary/fallback behavior is covered by the host defaults fixture.
+    aip::RemoveIniSectionFromText(profile,L"Tiles");
+    aip::RemoveIniSectionFromText(profile,L"Tile.desktop");
     for (const aip::IniSetting& setting : std::vector<aip::IniSetting>{
         {L"Content", L"Enabled", L"1"}, {L"Content", L"Count", L"1"},
         {L"Content.1", L"Background", L"Transparent"}, {L"Content.1", L"TextSources", L"CustomText"},

@@ -1,6 +1,8 @@
 #include "../dependencies/DiscordRPC/service.h"
+#include "../dependencies/DiscordRPC/profile_edit.h"
 #include "../dependencies/DiscordRPC/service_cancel.h"
 #include "../dependencies/content_sources/discord.h"
+#include "../dependencies/tile_instances.h"
 #include <atomic>
 #include <chrono>
 #include <iostream>
@@ -57,6 +59,41 @@ template<class Predicate> Snapshot Wait(Service& service, Predicate predicate) {
     std::cerr << "wait expired at phase " << static_cast<int>(snapshot.phase) << " revision " << snapshot.revision << "\n";
     std::wcerr << L"fixture details=" << snapshot.details << L" error=" << snapshot.error << L"\n";
     throw std::runtime_error("bounded wait for service snapshot expired");
+}
+void FactoryDefaults() {
+    using namespace aip::content;
+    TileInstanceConfiguration tiles;std::wstring error;
+    const auto reader=[](const wchar_t* section,const wchar_t* key,const wchar_t* fallback)->std::wstring {
+        if(std::wstring(section)==L"Tiles"&&std::wstring(key)==L"Instances")return L"discord-a,discord-b";
+        if(std::wstring(section).find(L"Tile.discord-")==0&&std::wstring(key)==L"Type")return L"Discord";
+        if(std::wstring(section)==L"Tile.discord-b"&&std::wstring(key)==L"Discord.State")return L"Explicit custom state";
+        return fallback;
+    };
+    Check(ReadTileInstanceConfiguration(reader,tiles,error)&&tiles.tiles.size()==2,"read independent Discord factory and custom instances");
+    Check(tiles.tiles[0].configuration.discord.name==DefaultActivityName&&tiles.tiles[0].configuration.discord.details==DefaultDetailsTemplate&&
+        tiles.tiles[0].configuration.discord.state==DefaultStateTemplate,"new tile defaults match shared standalone activity, foreground and CPU/RAM templates");
+    Check(tiles.tiles[1].configuration.discord.state==L"Explicit custom state","factory fallback preserves existing explicit per-tile template");
+    const auto optionsList=ProfileOptions();
+    const auto standaloneDefault=[&](const wchar_t* key){for(const auto& option:optionsList)if(option.section==L"general"&&option.key==key)return option.defaultValue;return std::wstring{};};
+    Check(standaloneDefault(L"activity_name")==DefaultActivityName&&standaloneDefault(L"details_template")==DefaultDetailsTemplate&&standaloneDefault(L"state_template")==DefaultStateTemplate,
+        "standalone editor and embedded tile share the exact same factory templates");
+    auto profile=std::make_shared<Profile>();
+    const auto& cfg=tiles.tiles[0].configuration.discord;
+    profile->values[{L"general",L"activity_name"}]=cfg.name;
+    profile->values[{L"general",L"details_template"}]=cfg.details;
+    profile->values[{L"general",L"state_template"}]=cfg.state;
+    Options options;options.profileOverride=profile;options.refreshMs=50;
+    auto context=std::make_shared<Context>();context->tokens[L"win_title"]=L"Foreground application";
+    context->tokens[L"cpu"]=L"5%";context->tokens[L"ram_used"]=L"0.8GB";context->tokens[L"ram_total"]=L"16GB";context->tokens[L"ram_pct"]=L"5%";
+    options.contextOverride=context;int transports=0;
+    options.transportFactory=[&]()->std::unique_ptr<Transport>{++transports;return {};};
+    Service service;Check(service.Start(options,error),"factory preview starts without a Discord client or token");
+    const auto snapshot=Wait(service,[](const aip::discord::Snapshot& state){return state.phase==Phase::Preview;});
+    Check(snapshot.details==L"Foreground application"&&snapshot.state==L"CPU: 5%, RAM: 0.8GB/16GB (5%)",
+        "real shared presence builder evaluates foreground and complete CPU/RAM template in preview");
+    Check(snapshot.details.find(L"Configure")==std::wstring::npos&&snapshot.name!=L"DesktopStub"&&transports==0,
+        "factory preview uses resolved data and does not construct transport or setup placeholders");
+    Check(service.Stop(2000),"factory preview stops within deadline");
 }
 void PreviewAndReload() {
     Service service; std::wstring error;
@@ -199,7 +236,7 @@ void CancellationRelayLifetime() {
 }
 }
 int main() {
-    try { PreviewAndReload(); SendingAndErrors(); CancellationAndLifetime(); SnapshotStress(); CancellationRelayLifetime();
+    try { FactoryDefaults(); PreviewAndReload(); SendingAndErrors(); CancellationAndLifetime(); SnapshotStress(); CancellationRelayLifetime();
         std::cout << "Discord service fixture tests passed (" << checks << " checks; 40000 snapshot reads; 80000 relay reads; no real network or token files).\n"; return 0;
     } catch (const std::exception& error) { std::cerr << "Discord service fixture failure after " << checks << " checks: " << error.what() << "\n"; return 1; }
 }

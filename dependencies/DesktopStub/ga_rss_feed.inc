@@ -9,6 +9,7 @@ struct RssFeedItem
     std::wstring summary;
     std::wstring link;
     std::wstring date;
+    std::wstring identity;
 };
 
 struct RssFeedSnapshot
@@ -374,6 +375,7 @@ static RssFeedSnapshot RssParseFeedXml(const std::wstring& xml, const RssFeedSet
             item.summary = RssLimitText(RssChildHtmlText(node, { L"description", L"summary", L"content" }), 240);
             item.date = RssLimitText(RssChildText(node, { L"pubdate", L"published", L"updated", L"date" }), 80);
             item.link = RssChildLink(node);
+            item.identity = RssLimitText(RssChildText(node, { L"guid", L"id" }), 2048);
 
             if (item.title.empty())
                 item.title = item.summary.empty() ? L"(untitled)" : RssLimitText(item.summary, 120);

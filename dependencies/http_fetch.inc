@@ -32,6 +32,11 @@ struct HttpFetchOptions {
     std::chrono::milliseconds timeout{20000};
     size_t maximumBytes = 2u * 1024u * 1024u;
     bool useSystemProxy = true;
+    // Defaults preserve the read-only GET callers. Credential-bearing API
+    // adapters explicitly opt into POST and disable automatic redirects.
+    std::wstring method = L"GET";
+    std::string body;
+    bool followRedirects = true;
     // Evaluated on the calling worker only, never from a WinHTTP callback.
     std::function<bool()> canceled;
 };
@@ -137,8 +142,13 @@ struct Handle {
 struct State {
 #ifdef AIP_HTTP_FETCH_TESTING
     State() { ++liveCallbackStates; }
-    ~State() { --liveCallbackStates; }
 #endif
+    ~State() {
+        if (!requestBody.empty()) SecureZeroMemory(requestBody.data(), requestBody.size());
+#ifdef AIP_HTTP_FETCH_TESTING
+        --liveCallbackStates;
+#endif
+    }
     std::mutex mutex;
     std::condition_variable changed;
     DWORD completion = 0, error = 0, bytesRead = 0;
@@ -146,6 +156,8 @@ struct State {
     // An asynchronous read buffer belongs to callback state, not caller stack
     // storage. It survives a timed-out fetch until HANDLE_CLOSING.
     std::array<BYTE, 16384> buffer{};
+    // WinHTTP can still access the POST bytes after a timed-out caller exits.
+    std::string requestBody;
 };
 struct CallbackLease { std::shared_ptr<State> state; };
 
@@ -256,7 +268,9 @@ inline bool FetchHttpBytes(const HttpFetchOptions& options, HttpFetchResponse& r
         using namespace http_detail;
         if (options.timeout.count() < 1 || options.timeout.count() > INT_MAX || options.maximumBytes == 0 ||
             options.userAgent.empty() || options.userAgent.find_first_of(L"\r\n\0", 0, 3) != std::wstring::npos ||
-            options.accept.find_first_of(L"\r\n\0", 0, 3) != std::wstring::npos)
+            options.accept.find_first_of(L"\r\n\0", 0, 3) != std::wstring::npos ||
+            (options.method != L"GET" && options.method != L"POST") ||
+            options.body.size() > 1048576 || (options.method == L"GET" && !options.body.empty()))
         {
             error = L"HTTP options require a positive finite timeout/byte limit and valid single-line headers.";
             return false;
@@ -268,6 +282,7 @@ inline bool FetchHttpBytes(const HttpFetchOptions& options, HttpFetchResponse& r
         Url url;
         if (!ParseUrl(options.url, url, error)) return false;
         auto state = std::make_shared<State>();
+        state->requestBody = options.body;
         Handle session, connection, request;
         session.value = WinHttpOpen(options.userAgent.c_str(), options.useSystemProxy
             ? WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY : WINHTTP_ACCESS_TYPE_NO_PROXY,
@@ -282,9 +297,14 @@ inline bool FetchHttpBytes(const HttpFetchOptions& options, HttpFetchResponse& r
         if (!WinHttpSetTimeouts(session.value, timeout, timeout, timeout, timeout)) return Started(FALSE, error);
         connection.value = WinHttpConnect(session.value, url.host.c_str(), url.port, 0);
         if (!connection.value) return Started(FALSE, error);
-        request.value = WinHttpOpenRequest(connection.value, L"GET", url.target.c_str(), nullptr,
+        request.value = WinHttpOpenRequest(connection.value, options.method.c_str(), url.target.c_str(), nullptr,
             WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, url.secure ? WINHTTP_FLAG_SECURE : 0);
         if (!request.value) return Started(FALSE, error);
+        if (!options.followRedirects) {
+            DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+            if (!WinHttpSetOption(request.value, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy)))
+                return Started(FALSE, error);
+        }
         const DWORD notifications = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE | WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE |
             WINHTTP_CALLBACK_FLAG_READ_COMPLETE | WINHTTP_CALLBACK_FLAG_REQUEST_ERROR | WINHTTP_CALLBACK_FLAG_HANDLES;
         if (WinHttpSetStatusCallback(request.value, Callback, notifications, 0) == WINHTTP_INVALID_STATUS_CALLBACK)
@@ -299,7 +319,8 @@ inline bool FetchHttpBytes(const HttpFetchOptions& options, HttpFetchResponse& r
         if (!Continue(options, deadline, error)) return false;
         Prepare(state);
         if (!Started(WinHttpSendRequest(request.value, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                WINHTTP_NO_REQUEST_DATA, 0, 0, context), error) ||
+                state->requestBody.empty() ? WINHTTP_NO_REQUEST_DATA : state->requestBody.data(),
+                static_cast<DWORD>(state->requestBody.size()), static_cast<DWORD>(state->requestBody.size()), context), error) ||
             !Wait(state, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, options, deadline, error)) return false;
         Prepare(state);
         if (!Started(WinHttpReceiveResponse(request.value, nullptr), error) ||

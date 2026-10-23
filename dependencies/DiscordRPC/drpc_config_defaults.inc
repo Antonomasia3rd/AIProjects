@@ -1,4 +1,5 @@
 // Shared functional source defaults; setup is explicit through profile_edit.
+#include "presence_defaults.h"
 static const aip::IniDefaultValue kDefaults[] =
 {
     { L"general", L"transport_mode", L"ipc" },
@@ -7,11 +8,11 @@ static const aip::IniDefaultValue kDefaults[] =
     { L"general", L"idle_message", L"Idle" },
     { L"general", L"window_title_detection_enabled", L"true" },
     { L"general", L"fallback_details", L"Foreground program detection is disabled." },
-    { L"general", L"activity_name", L"a game" },
+    { L"general", L"activity_name", aip::discord::DefaultActivityName },
     { L"general", L"activity_type", L"0" },
     { L"general", L"status", L"online" },
-    { L"general", L"details_template", L"{win_title}" },
-    { L"general", L"state_template", L"CPU: {cpu}, RAM: {ram_used}/{ram_total} ({ram_pct})" },
+    { L"general", L"details_template", aip::discord::DefaultDetailsTemplate },
+    { L"general", L"state_template", aip::discord::DefaultStateTemplate },
     { L"general", L"token_protected", L"" },
 
     { L"censor_map", L"rule_order", L"full_replace, word_replace, pattern_replace" },

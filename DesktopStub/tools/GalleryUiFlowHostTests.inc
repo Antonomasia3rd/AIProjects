@@ -1,6 +1,9 @@
 // Real atomic ledger/config writes use the host's private fixture directory;
 // every Windows clear/confirmation is injected. No photographs or native pins.
 static void TestGalleryUiFlowHost() {
+    const auto phaseStarted=GetTickCount64();
+    const auto phase=[&](const char* name){std::cerr<<"Gallery recovery phase: "<<name<<"; "<<GetTickCount64()-phaseStarted<<" ms; "<<checks<<" checks\n";};
+    phase("initial layout");
     std::wstring original,error;Check(ReadIniFileForMutation(original),"resize flow captures private fixture INI");
     const auto profile=GalleryProfilePath(),path=aip::gallery::runtime::LedgerPath(profile);
     if(GetFileAttributesW(path.c_str())!=INVALID_FILE_ATTRIBUTES){Check(false,"resize fixture refuses existing history");return;}
@@ -17,6 +20,7 @@ static void TestGalleryUiFlowHost() {
     Check(aip::gallery::ReconcileOwnership(before,images,initial,assigned,error)&&SaveGalleryLedgerNative(path,initial,assigned.ledger,error)==aip::gallery::runtime::SaveResult::Saved,"eight old pools own all synthetic images before expansion");
     auto expanded=before;Check(AppendGalleryRows(expanded,before.folder,L"Photos",20),"resize prepares twenty-eight tiles");
     const int oldDialogs=contentDialogs,oldResponse=contentDialogResponse;contentDialogResponse=IDYES;
+    phase("conflicting dialog edits");
     const auto savedEvent = g_galleryTransactionTestEvent;
     const auto edit = GalleryEdit(before);
     auto concurrent = before; concurrent.tiles.front().name = L"Concurrent renamed tile";
@@ -41,6 +45,7 @@ static void TestGalleryUiFlowHost() {
         IniReadS(L"Notes.Resin", L"UID", L"") == L"800000001", "expected-gallery guards allow and preserve unrelated account changes");
     Check(WriteContentFixture(text), "restore baseline private profile before transaction failure fixtures");
     galleryUiClearSucceeds = false;
+    phase("transaction failure and rollback");
     Check(!SaveGalleryConfiguration(nullptr,expanded,true),"failed logical queue clearing refuses redistribution");
     aip::gallery::Ledger preserved;std::wstring preservedIni;
     Check(ReadGalleryLedgerNative(path,preserved,error)==aip::gallery::runtime::ReadResult::Ok&&preserved.epochId==L"before_resize"&&preserved.images.size()==56&&ReadIniFileForMutation(preservedIni)&&preservedIni==text,"failed clear preserves every reservation and original configuration");
@@ -55,6 +60,7 @@ static void TestGalleryUiFlowHost() {
     Check(!SaveGalleryConfiguration(nullptr, expanded, true, &edit) && GalleryTransactionPending(profile), "interruption immediately after durable intent leaves a recoverable record");
     g_galleryTransactionTestEvent = {};
     Check(RecoverPendingGalleryTransaction(error) && !GalleryTransactionPending(profile), "restart recovery cancels an unstarted change while preserving original ownership");
+    phase("restart recovery");
     g_galleryTransactionTestEvent = [](const wchar_t* stage) { return std::wstring(stage) != L"after-reset"; };
     Check(!SaveGalleryConfiguration(nullptr, expanded, true, &edit) && GalleryTransactionPending(profile), "interruption after reset retains durable rollback data");
     aip::gallery::runtime::Input blocked;
@@ -81,6 +87,7 @@ static void TestGalleryUiFlowHost() {
         "recovery refuses ambiguous external gallery changes rather than guessing a replacement allocation");
     Check(WriteContentFixture(text) && RecoverPendingGalleryTransaction(error), "restoring the matching profile permits safe retry of the same recovery record");
     Check(SaveGalleryConfiguration(nullptr,expanded,true)&&galleryUiClearedIds.size()==8,"confirmed resize clears every historical destination before resetting");
+    phase("committed resize");
     aip::gallery::Ledger reset;aip::gallery::Configuration saved;
     Check(ReadGalleryLedgerNative(path,reset,error)==aip::gallery::runtime::ReadResult::Ok&&reset.epochId!=L"before_resize"&&reset.images.empty()&&ReadGalleryConfiguration(saved,error)&&saved.tiles.size()==28&&saved.tiles.front().id==before.tiles.front().id,"successful resize keeps native identities and atomically publishes fresh allocation history");
     const auto afterEdit = GalleryEdit(saved); auto next = saved; Check(AppendGalleryRows(next, saved.folder, L"Photos", 1), "post-commit fixture prepares one more tile");
@@ -97,4 +104,5 @@ static void TestGalleryUiFlowHost() {
     g_galleryTransactionTestEvent = savedEvent;
     contentDialogs=oldDialogs;contentDialogResponse=oldResponse;galleryUiClearSucceeds=false;galleryUiClearedIds.clear();
     Check(DeleteFileW(path.c_str())&&WriteContentFixture(original),"resize flow removes only its owned private ledger and restores private INI");
+    phase("complete");
 }

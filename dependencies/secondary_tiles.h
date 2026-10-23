@@ -6,32 +6,60 @@
 #include "tile_actions.h"
 #include <set>
 #include <deque>
+#include <optional>
 
 namespace aip { namespace content {
 // A batch has at most one native confirmation in flight. A declined/error
 // completion retires that item; it does not cancel the remaining user request.
 class SecondaryPinBatch {
     std::deque<std::pair<std::wstring, std::wstring>> waiting_;
-    std::wstring active_;
+    std::wstring active_, activeName_;
+public:
+    enum class Result { Applied, Cancelled, Failed, Skipped };
+    struct Progress {
+        std::size_t total = 0, applied = 0, cancelled = 0, failed = 0, skipped = 0;
+        std::uint64_t revision = 0;
+        std::size_t Completed() const { return applied + cancelled + failed + skipped; }
+    };
+private:
+    Progress progress_;
+    void Record(Result result) {
+        if (result == Result::Applied) ++progress_.applied;
+        else if (result == Result::Cancelled) ++progress_.cancelled;
+        else if (result == Result::Skipped) ++progress_.skipped;
+        else ++progress_.failed;
+        ++progress_.revision;
+    }
 public:
     void Enqueue(const std::vector<std::pair<std::wstring, std::wstring>>& requests) {
+        bool newBatch = !Busy();
         for (const auto& item : requests) {
             if (item.first.empty() || item.first == active_ || std::any_of(waiting_.begin(), waiting_.end(), [&](const auto& queued) { return queued.first == item.first; })) continue;
+            if (newBatch) { const auto revision = progress_.revision; progress_ = {}; progress_.revision = revision; newBatch = false; }
             waiting_.push_back(item);
+            ++progress_.total; ++progress_.revision;
         }
     }
     template<class Begin> void Advance(Begin begin) {
+        AdvanceWithResult([&](const auto& item) { return begin(item) ? std::optional<Result>{} : std::optional<Result>{Result::Failed}; });
+    }
+    // A missing result means an asynchronous request started. Terminal skips
+    // and preparation errors consume one item without stalling the batch.
+    template<class Begin> void AdvanceWithResult(Begin begin) {
         if (!active_.empty()) return;
         while (!waiting_.empty()) {
-            auto next = std::move(waiting_.front()); waiting_.pop_front(); active_ = next.first;
-            if (begin(next)) return;
-            active_.clear(); // A preparation failure also advances to the next item.
+            auto next = std::move(waiting_.front()); waiting_.pop_front(); active_ = next.first; activeName_ = next.second; ++progress_.revision;
+            const auto terminal = begin(next);
+            if (!terminal) return;
+            Complete(next.first, *terminal);
         }
     }
-    void Complete(const std::wstring& id) { if (active_ == id) active_.clear(); }
-    void Clear() { waiting_.clear(); active_.clear(); }
+    void Complete(const std::wstring& id, Result result = Result::Applied) { if (active_ == id) { Record(result); active_.clear(); activeName_.clear(); } }
+    void Clear() { waiting_.clear(); active_.clear(); activeName_.clear(); const auto revision = progress_.revision; progress_ = {}; progress_.revision = revision + 1; }
     bool Busy() const { return !active_.empty() || !waiting_.empty(); }
     std::size_t Waiting() const { return waiting_.size(); }
+    const Progress& Status() const { return progress_; }
+    const std::wstring& ActiveName() const { return activeName_; }
 };
 class SecondaryPinInventory {
     mutable std::mutex mutex_;

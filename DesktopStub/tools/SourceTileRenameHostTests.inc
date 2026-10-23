@@ -199,7 +199,7 @@ static void TestSourceTileRenameHost()
             "matching completion clears only its own intent and preserves other source changes");
     }
     const auto savedCommandLine = g_commandLine;
-    auto offline = BuildInitialIniTemplate();
+    auto offline = BuildLegacyContentFixtureTemplate();
     aip::WriteIniValueToText(offline, L"Content", L"Enabled", L"0");
     Check(WriteContentFixture(offline), "offline rename uses a complete private template without sparse-default work");
     g_commandLine = {}; g_commandLine.configureOnly = true;

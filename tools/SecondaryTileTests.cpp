@@ -1,6 +1,7 @@
 // Platform-neutral mapping tests. No Windows headers, pinning, tile delivery,
 // network/accounts, media playback, user files or hardware APIs are involved.
 #include "../dependencies/secondary_tiles.h"
+#include "../dependencies/gallery_pin_changes.h"
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -213,9 +214,47 @@ void TestPinnedSelectionAndBatches() {
     batch.Complete(L"two"); batch.Advance(begin);
     Check(requests == std::vector<std::wstring>({L"one", L"two", L"bad", L"three"}), "preparation failures skip only their own item");
     batch.Complete(L"three"); batch.Advance(begin); Check(!batch.Busy(), "completed pin batch releases all state");
+    Check(batch.Status().total == 4 && batch.Status().applied == 3 && batch.Status().failed == 1 && batch.Status().Completed() == 4,
+        "batch totals include unique requests and preparation failures exactly once");
+    batch.Enqueue({{L"four", L"Four"}, {L"five", L"Five"}}); batch.Advance(begin);
+    batch.Complete(L"unrelated", SecondaryPinBatch::Result::Cancelled);
+    Check(batch.Status().Completed() == 0 && batch.Status().total == 2, "unrelated completions cannot advance fresh batch progress");
+    batch.Enqueue({{L"four", L"duplicate active"}, {L"six", L"Six"}});
+    Check(batch.Status().total == 3 && batch.ActiveName() == L"Four", "appending work expands total without restarting current progress");
+    batch.Complete(L"four", SecondaryPinBatch::Result::Cancelled);
+    batch.AdvanceWithResult([](const auto& item) -> std::optional<SecondaryPinBatch::Result> {
+        return item.first == L"five" ? std::optional<SecondaryPinBatch::Result>{SecondaryPinBatch::Result::Skipped} : std::optional<SecondaryPinBatch::Result>{};
+    });
+    Check(batch.Status().cancelled == 1 && batch.Status().skipped == 1 && batch.ActiveName() == L"Six", "declines and already absent tiles keep distinct progress results and continue sequentially");
+    batch.Complete(L"six", SecondaryPinBatch::Result::Failed); batch.Advance(begin);
+    Check(!batch.Busy() && batch.Status().Completed() == 3 && batch.Status().applied == 0 && batch.Status().failed == 1,
+        "all declined skipped and failed operations produce a finite honest completion");
+    const auto revision = batch.Status().revision; batch.Enqueue({});
+    Check(batch.Status().revision == revision && batch.Status().Completed() == 3, "an empty appended request does not erase final progress");
+    batch.Clear(); Check(!batch.Busy() && batch.Status().total == 0, "shutdown clears queue and progress for a fresh lifecycle");
+}
+void TestGalleryPinMembership() {
+    aip::gallery::Configuration before; before.groupId = L"group";
+    for (unsigned i = 0; i < 16; ++i) { aip::gallery::TileConfiguration tile; tile.id = L"first" + std::to_wstring(i + 1); tile.name = L"Gallery " + std::to_wstring(i + 1); before.tiles.push_back(tile); }
+    aip::gallery::TileConfiguration other; other.id = L"other1"; other.name = L"Other gallery"; before.tiles.push_back(other);
+    auto after = before; after.tiles.erase(after.tiles.begin() + 14, after.tiles.begin() + 16);
+    const auto shrink = aip::gallery::PlanPinMembershipChange(before, after);
+    Check(shrink.removedNative == std::vector<std::pair<std::wstring, std::wstring>>{{L"AipGallery_group.first15", L"Gallery 15"}, {L"AipGallery_group.first16", L"Gallery 16"}},
+        "sixteen to fourteen retires exact original stable IDs rather than renumbered sections");
+    Check(shrink.addedNative.empty() && shrink.removedRegistration.empty(), "shrinking avoids redundant requests for fourteen survivors and another gallery");
+    before.tiles[15].registration = true;
+    const auto mixed = aip::gallery::PlanPinMembershipChange(before, after);
+    Check(mixed.removedNative.size() == 1 && mixed.removedRegistration == std::vector<std::wstring>{L"Gallery 16"},
+        "Registration removals remain manual and never enter native deletion queue");
+    auto grown = after; aip::gallery::TileConfiguration extra; extra.id = L"brandnew"; extra.name = L"New gallery tile"; grown.tiles.push_back(extra);
+    const auto grow = aip::gallery::PlanPinMembershipChange(after, grown);
+    Check(grow.removedNative.empty() && grow.addedNative == std::vector<std::pair<std::wstring, std::wstring>>{{L"AipGallery_group.brandnew", L"New gallery tile"}},
+        "growth requests only added stable IDs and leaves siblings untouched");
+    const auto same = aip::gallery::PlanPinMembershipChange(after, after);
+    Check(same.removedNative.empty() && same.addedNative.empty() && same.removedRegistration.empty(), "unchanged membership schedules no pin mutation");
 }
 }
 int main() {
-    try { TestMapping(); TestAppearance(); TestProviderSelection(); TestAppearanceNotices(); TestPinnedSelectionAndBatches(); std::cout << checks << " secondary tile checks passed\n"; return 0; }
+    try { TestMapping(); TestAppearance(); TestProviderSelection(); TestAppearanceNotices(); TestPinnedSelectionAndBatches(); TestGalleryPinMembership(); std::cout << checks << " secondary tile checks passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << "After " << checks << " checks: " << error.what() << '\n'; return 1; }
 }

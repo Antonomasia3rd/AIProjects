@@ -180,6 +180,28 @@ static void TestSecondaryTileHost(const std::wstring& bitmapPath)
         render.snapshot.smtcState = aip::content::MediaPlaybackState::Paused;
         Check(BuildGenerationStateKey(bitmapPath) != second, "explicit playback status invalidates the bitmap cache without parsing caption text");
     }
+    {
+        const auto retired = g_retiredGalleryPins;
+        const auto profile = GalleryProfilePath();
+        const auto id = aip::gallery::NativeTileId(L"owned", L"retired");
+        std::wstring gallery = L"[Gallery]\r\nEnabled=0\r\nGroupId=owned\r\nTileCount=1\r\n[Gallery.Tile.1]\r\nId=kept\r\nName=Kept\r\n";
+        Check(WriteContentFixture(gallery), "retired pin guard uses a private synthetic gallery profile");
+        g_retiredGalleryPins[id] = {profile, L"owned"};
+        Check(RetiredGalleryPinStillRemoved(id), "committed removed stable ID is authorized for its exact profile and group");
+        Check(CanonicalSecondaryTileRuntimeId(id).empty(), "ordinary pin mutation still rejects a removed gallery ID");
+        aip::WriteIniValueToText(gallery, L"Gallery", L"TileCount", L"2");
+        aip::WriteIniValueToText(gallery, L"Gallery.Tile.2", L"Id", L"retired");
+        aip::WriteIniValueToText(gallery, L"Gallery.Tile.2", L"Name", L"Restored");
+        Check(WriteContentFixture(gallery) && !RetiredGalleryPinStillRemoved(id), "restoring a row before queued deletion prevents unpinning that restored tile");
+        aip::WriteIniValueToText(gallery, L"Gallery", L"TileCount", L"1");
+        Check(WriteContentFixture(gallery), "retired pin profile guard restores the removed state");
+        g_retiredGalleryPins[id].profile += L".other";
+        Check(!RetiredGalleryPinStillRemoved(id), "retired pin authorization cannot cross configuration profiles");
+        g_retiredGalleryPins[id].profile = profile;
+        g_retiredGalleryPins[id].group = L"another";
+        Check(!RetiredGalleryPinStillRemoved(id), "retired pin authorization cannot cross ownership groups");
+        g_retiredGalleryPins = retired;
+    }
     Check(WriteContentFixture(original), "secondary fixture restores private configuration");
     PublishSecondarySnapshots({}); contentNativeQueueAvailable = direct;
     ContentEngineTick(false, false);

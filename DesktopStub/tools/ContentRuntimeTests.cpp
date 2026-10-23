@@ -179,6 +179,17 @@ static bool WriteContentFixture(const std::wstring& text)
     std::wstring loaded;
     return ReadIniFileForMutation(loaded) && loaded == text;
 }
+// Legacy compatibility fixtures intentionally exercise the numbered-content
+// model. Their complete defaults must not accidentally opt into the fresh
+// installation's independent Desktop-only schema.
+static std::wstring BuildLegacyContentFixtureTemplate()
+{
+    auto text=BuildInitialIniTemplate();
+    aip::RemoveIniSectionFromText(text,L"Tiles");
+    aip::RemoveIniSectionFromText(text,L"Tile.desktop");
+    return text;
+}
+#include "PrimaryDesktopDefaultsHostTests.inc"
 
 #include "DisplaySettingsTests.inc"
 #include "ContentPresetHostTests.inc"
@@ -207,12 +218,17 @@ static bool WriteContentFixture(const std::wstring& text)
 #include "TileInstanceRuntimeHostTests.inc"
 #include "TileInstanceActivationHostTests.inc"
 #include "TileInstanceTrayHostTests.inc"
+#include "SourceAlertHostTests.inc"
+#include "GalleryImageActivationHostTests.inc"
+#include "DateTimeTileHostTests.inc"
+#include "DesktopHostSetupHostTests.inc"
+#include "FreshPresetPreviewHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
 {
     std::wstring original;
     if (!ReadIniFileForMutation(original)) return false;
-    auto complete = BuildInitialIniTemplate();
+    auto complete = BuildLegacyContentFixtureTemplate();
     for (const auto& section : aip::ParseIniDocument(original))
         for (const auto& entry : section.entries)
             if (!aip::WriteIniValueToText(complete, section.name.c_str(), entry.key.c_str(), entry.value)) return false;
@@ -1157,22 +1173,43 @@ int wmain()
     Check(WriteContentFixture(config), "temporary INI fixture");
     LoadUiStrings();
 #ifdef DESKTOPSTUB_REVISION_HOST_ONLY
+#ifdef DESKTOPSTUB_NEW_SOURCE_HOST_ONLY
+    fixtureGroup("source alerts and date/time/WuWa integration");
+    TestSourceAlertHost();
+    TestDateTimeTileHost(directory,bitmapPath);
+    TestDesktopHostSetup(bitmapPath);
+    TestFreshPresetPreview(directory);
+    TestGalleryImageActivationHost(bitmapPath);
+#else
+#ifdef DESKTOPSTUB_GALLERY_LIFECYCLE_HOST_ONLY
     fixtureGroup("gallery recovery, CPU, idle maintenance and explicit names");
     TestGalleryUiFlowHost();
+    fixtureGroup("idle maintenance");
     TestIdleMaintenanceHost();
+    fixtureGroup("gallery CPU cache");
     TestGalleryCpuHost(directory, bitmapPath);
+    fixtureGroup("content CPU cache");
     TestContentCpuCacheHost(directory);
+    fixtureGroup("explicit source names");
     TestSourceTileRenameHost();
+    fixtureGroup("published secondary asset reuse");
     TestPublishedSecondaryAssetReuseHost(directory);
+#else
+    fixtureGroup("Prayer cache, clock and presentation");
     TestPrayerCacheHost(directory);
     TestPrayerTimesHost(bitmapPath);
     TestTextPresentationHost();
     TestTileLifecycleHost(bitmapPath);
+    fixtureGroup("independent instance providers and notifications");
     TestTileInstanceRuntimeHost();
     TestTileInstanceActivationHost();
+    fixtureGroup("independent instance tray and policy settings");
     TestTileInstanceTrayHost();
     TestGenerationAdmissionHost(bitmapPath);
+    fixtureGroup("owned Registration image publication and cleanup");
     TestTileRegistrationHost(bitmapPath);
+#endif
+#endif
     StopContentProviders(); PublishContentSnapshot({});
     DeleteFileW(ini.c_str()); DeleteFileW(bitmapPath.c_str()); DeleteFileW(g_logPath.c_str());
     RemoveDirectoryW(directory.c_str());
@@ -1180,6 +1217,7 @@ int wmain()
     std::cout << checks << " extended host checks; " << failures << " failures\n";
     return failures ? 1 : 0;
 #else
+    TestPrimaryDesktopFactoryDefaults();
     {
         const auto defaults = aip::ParseIniDocument(BuildInitialIniTemplate());
         std::wstring prompt;

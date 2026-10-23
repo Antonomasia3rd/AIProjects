@@ -1,5 +1,13 @@
 // Literal overrides complement the named Strings catalogue. They cover dialog
 // titles/prompts and app-owned message boxes without changing data/schema keys.
+static std::wstring NotificationSubjectText(const wchar_t* key,const wchar_t* fallback,const std::wstring& subject) {
+    auto result=IniReadS(L"Strings",key,fallback);
+    // Configurable wording is data, not a printf program. Leave every other
+    // percent sequence literal so a translation cannot change argument types.
+    std::size_t offset=0;
+    while((offset=result.find(L"%s",offset))!=std::wstring::npos){result.replace(offset,2,subject);offset+=subject.size();}
+    return result;
+}
 static std::mutex g_uiLiteralMutex;
 static std::map<std::wstring,std::wstring> g_uiLiteralDefaults;
 static std::wstring UiLiteralKey(const std::wstring& text) {

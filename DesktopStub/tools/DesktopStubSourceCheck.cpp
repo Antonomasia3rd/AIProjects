@@ -376,6 +376,15 @@ static bool DefaultStringNeedsFormatValidation(const std::string& defaults, cons
     return false;
 }
 
+static bool UiStringUsesSubjectSubstitution(const std::string& key)
+{
+    // These strings use literal named tokens, never printf formatting.
+    if(key=="NotificationPrayerBefore"||key=="NotificationPrayerNow"||key=="NotificationRssNewItems")return true;
+    return key == "NotificationSourceFailedMessage" || key == "NotificationSourceRecoveredMessage" ||
+        key == "NotificationAccountSavedMessage" || key == "NotificationTileAddedMessage" ||
+        key == "NotificationRegistrationPreparedMessage" || key == "NotificationLiveDeliveryChangedMessage";
+}
+
 static void AssertUiStringWired(const std::string& key, const std::string& defaults, const std::string& uiSources)
 {
     std::string property = UiPropertyName(key);
@@ -390,6 +399,16 @@ static void AssertUiStringWired(const std::string& key, const std::string& defau
     AssertCheck(defaultCheck);
 
     std::string loadPattern = "g_ui\\." + property;
+    // On-demand menu/provider strings use the same configurable INI reader
+    // without retaining a duplicate field in the legacy g_ui structure.
+    loadPattern += "|IniReadS\\(L\"Strings\",\\s*L\"" + key + "\"";
+    loadPattern += "|(?:TileInstanceUi|SecondaryTileUiString)\\(L\"" + key + "\"";
+    if (UiStringUsesSubjectSubstitution(key))
+        loadPattern += "|NotificationSubjectText.*L\"" + key + "\"";
+    if (key == "NotificationSourceFailed" || key == "NotificationSourceRecovered" ||
+        key == "NotificationPrayerBefore" || key == "NotificationPrayerNow" ||
+        key == "PinTilesProgressTitle" || key == "UnpinTilesProgressTitle")
+        loadPattern += "|L\"" + key + "\""; // Conditional key; its reader is checked below.
     if (key.compare(0, 6, "Prayer") == 0) {
         // Prayer settings are read on demand through explicit shared readers,
         // rather than duplicating every value in the legacy g_ui structure.
@@ -409,7 +428,7 @@ static void AssertUiStringWired(const std::string& key, const std::string& defau
     };
     AssertCheck(loadCheck);
 
-    if (DefaultStringNeedsFormatValidation(defaults, key))
+    if (DefaultStringNeedsFormatValidation(defaults, key) && !UiStringUsesSubjectSubstitution(key))
     {
         Check formatCheck{
             "UI format is validated: " + key,
@@ -467,6 +486,11 @@ int main(int argc, char** argv)
         const std::string core = ReadSource("..\\dependencies\\DesktopStub\\ga_core.inc");
         const std::string contentEngine = ReadSource("..\\dependencies\\content_engine.h");
         const std::string contentRuntime = ReadSource("..\\dependencies\\DesktopStub\\ga_content_runtime.inc");
+        const std::string notifications = ReadSource("..\\dependencies\\DesktopStub\\ga_notifications.inc");
+        const std::string notificationPolicy = ReadSource("..\\dependencies\\notification_policy.h");
+        const std::string sourceNotificationState = ReadSource("..\\dependencies\\source_notification_state.h");
+        const std::string tileInstanceRuntime = ReadSource("..\\dependencies\\DesktopStub\\ga_tile_instance_runtime.inc");
+        const std::string uiWording = ReadSource("..\\dependencies\\DesktopStub\\ga_ui_wording.inc");
         const std::string discordProfileHost = ReadSource("..\\dependencies\\DesktopStub\\ga_discord_profile.inc");
         const std::string contentHardware = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware.inc");
         const std::string contentHardwareUnavailable = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware_unavailable.inc");
@@ -522,11 +546,24 @@ int main(int argc, char** argv)
             "static bool Appx_Update_LiveTileXmlBare",
             "static bool Appx_Clear_LiveTileBare");
         const std::string uiSources = JoinSource({
+            "..\\dependencies\\DesktopStub\\ga_gallery_image_activation.inc",
+            "..\\dependencies\\DesktopStub\\ga_desktop_host_setup.inc",
+            "..\\dependencies\\DesktopStub\\ga_source_alert_runtime.inc",
+            "..\\dependencies\\DesktopStub\\ga_tile_status.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_logging.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_state.inc",
             "..\\dependencies\\DesktopStub\\ga_logging_core.inc",
             "..\\dependencies\\DesktopStub\\ga_manifest.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_strings.inc",
+            "..\\dependencies\\DesktopStub\\ga_notifications.inc",
+            "..\\dependencies\\DesktopStub\\ga_ui_wording.inc",
+            "..\\dependencies\\DesktopStub\\ga_tray_menu.inc",
+            "..\\dependencies\\DesktopStub\\ga_gallery_tray.inc",
+            "..\\dependencies\\DesktopStub\\ga_secondary_tile_api.inc",
+            "..\\dependencies\\DesktopStub\\ga_tile_instance_runtime.inc",
+            "..\\dependencies\\DesktopStub\\ga_tile_instance_tray.inc",
+            "..\\dependencies\\DesktopStub\\ga_tile_registration.inc",
+            "..\\dependencies\\DesktopStub\\ga_notes_signin.inc",
             "..\\dependencies\\DesktopStub\\ga_prayer_settings_tray.inc",
             "..\\dependencies\\DesktopStub\\ga_secondary_tile_tray.inc",
             "..\\dependencies\\DesktopStub\\ga_content_runtime.inc",
@@ -764,6 +801,40 @@ int main(int argc, char** argv)
             R"rx(RegisterTileRegistrationPackage.*if (!TileRegistrationOwnedSetup(target,error)) return false;.*if (!explicitSetup && GetFileAttributesW(receipt.c_str()) == INVALID_FILE_ATTRIBUTES).*registration.authorized.*authorization != TileRegistrationOwnerText(target).*return false.*RegisterAppxManifest(target.manifestPath,error).*TileRegistrationWriteText(receipt,target.packageVersion))rx",
             "background package deployment must require matching ownership plus prior setup authorization or a successful published receipt", false});
 
+        checks.push_back({"Legacy notification callers route through the selected backend", "notification adapter wiring", uiSources,
+            R"rx(#include "ga_notifications.inc".*void NotifyTrayBalloon.*DispatchUserNotification(L"application", title, msg, icon, force))rx",
+            "existing notification call sites must retain their gates while using the configurable shared transport", false});
+        checks.push_back({"Notification master and inert modes cannot be bypassed", "notification adapter", notifications,
+            R"rx(static bool NotificationAllowed(bool force).*if (g_commandLine.renderOnly || g_commandLine.configureOnly) return false;.*return g_notificationsEnabled.load();)rx",
+            "even forced notification calls must honor the master switch and remain inert during render/configuration-only validation", false});
+        checks.push_back({"Classic balloons snapshot tray identity before shell delivery", "notification adapter", notifications,
+            R"rx(static bool NotificationBalloon.*NOTIFYICONDATAW nid{};.*std::lock_guard<std::mutex> lock(g_trayMutex);.*if ((!force && !g_tray) || !g_nid.hWnd) return false;.*nid = g_nid;.*}.*aip::ShowTrayBalloon(nid, title, message, icon)rx",
+            "the Windows 7 balloon route must copy the current tray identity under its mutex and release the lock before shell delivery", false});
+        checks.push_back({"Notification API selection uses existing identity and configurable fallback", "notification adapter and policy", notifications + "\n" + notificationPolicy,
+            R"rx(ConfiguredNotificationApi().*ParseApi(IniReadS(L"Settings", L"NotificationApi", L"Auto")).*NotificationExistingIdentity().*DispatchUserNotification.*NotificationToast.*NotificationBalloon.*EffectiveApi(Api requested, bool existingIdentity).*requested != Api::Balloon && existingIdentity ? Api::Toast : Api::Balloon)rx",
+            "Auto/Toast must use an existing packaged identity and preserve explicit classic balloons without creating package state", false});
+        checks.push_back({"Toast progress updates one operation with sequence and terminal replacement", "notification adapter", notifications,
+            R"rx(const auto tag = aip::notifications::StableId(key);.*const auto group = NotificationGroup();.*data.SequenceNumber(progress->sequence);.*data.Values().Insert(L"progressValue".*if (!progress->first && !progress->finished && toastStarted).*notifier.Update(data, tag, group).*NotificationNotFound.*ProgressXml(title).*MessageXml(title, message).*toast.Tag(tag); toast.Group(group);.*notifier.Show(toast))rx",
+            "bulk pin progress must update the same toast identity and finish with a replacement message rather than creating a popup per tile", false});
+        checks.push_back({"Notification category switches and rate limits stay at the adapter boundary", "notification adapter", notifications,
+            R"rx(NotifyUserOperation.*NotificationAllowed(force).*NotifyOnOperations.*NotifyOperationProgress.*NotificationAllowed(false).*NotifyOnPinProgress.*NotificationProgressIntervalMs.*g_notificationProgress.Next.*3000)rx",
+            "operation/progress gates and the slower classic-balloon limit must apply before transport dispatch", false});
+        checks.push_back({"Source notices report transitions instead of each poll", "source notification state", sourceNotificationState,
+            R"rx(SourceNotice Observe(SourceState state).*SourceState::Pending.*SourceNotice::None.*SourceState::Unconfigured.*failed_ = false.*SourceState::Failed.*if (failed_) return SourceNotice::None;.*failed_ = true; return SourceNotice::Failed;.*if (!failed_) return SourceNotice::None;.*failed_ = false; return SourceNotice::Recovered;)rx",
+            "pending/setup states and repeated failures must remain quiet; one recovery may follow an actual failure", false});
+        checks.push_back({"Tile source notices use completed results and configurable safe wording", "independent provider host", tileInstanceRuntime,
+            R"rx(NotifyTileSourceTransition.*notificationTransitions.Observe(current).*NotifySourceErrors.*IniReadS(L"Strings",failed?L"NotificationSourceFailed":L"NotificationSourceRecovered".*NotificationSubjectText(failed?L"NotificationSourceFailedMessage":L"NotificationSourceRecoveredMessage".*DispatchUserNotification(L"source-".*state.rss->Read(settings,&completed).*state.prayer->Read(tile.configuration.prayer,&completed))rx",
+            "source failures must come from completed provider results and use safe subject-only notifications without raw account or URL diagnostics", false});
+        checks.push_back({"Configurable notification subjects use literal substitution", "UI wording helper", uiWording,
+            R"rx(NotificationSubjectText.*IniReadS(L"Strings",key,fallback).*result.find(L"%s",offset).*result.replace(offset,2,subject))rx",
+            "new message templates must substitute subjects as data instead of interpreting configurable printf directives", false});
+        checks.push_back({"Source reminder tokens use literal substitution", "source alert adapter", ReadSource("..\\dependencies\\DesktopStub\\ga_source_alert_runtime.inc"),
+            R"rx(SourceAlertReplace.*text.find(token,at).*text.replace(at,token.size(),value).*ObserveRssTileAlerts.*SourceAlertReplace(message,L"%count%".*ObservePrayerTileAlerts.*SourceAlertReplace(message,L"%event%".*SourceAlertReplace(message,L"%time%")rx",
+            "source reminders must replace named fields as data without interpreting configurable strings as printf formats", false});
+        checks.push_back({"Notification transport tests replace both operating system APIs", "notification behavioral fixture", ReadSource("..\\tools\\NotificationPolicyTests.cpp"),
+            R"rx(DESKTOPSTUB_TEST_NOTIFICATION_IDENTITY.*DESKTOPSTUB_TEST_NOTIFICATION_BALLOON.*DESKTOPSTUB_TEST_NOTIFICATION_TOAST.*ga_notifications.inc)rx",
+            "notification behavior regressions must run the real adapter with injected transports instead of displaying notifications", false});
+
         const std::vector<std::string> uiStringKeys = ExtractUiStringDefaultKeys(defaults);
 
         if (listChecks)
@@ -781,6 +852,21 @@ int main(int argc, char** argv)
 
         for (const auto& check : checks)
             AssertCheck(check);
+
+        AssertNotContainsAny(
+            "Forced notices cannot bypass the notification master switch",
+            "notification admission helper",
+            SliceSource(notifications,"static bool NotificationAllowed","static bool NotificationBalloon"),
+            {"force ||", "|| force", "if (force) return true", "if(force)return true"},
+            "force is a visibility/category override only; the master notification setting must always win");
+        AssertContainsAll(
+            "Notification and source transition behavioral regressions remain wired",
+            "private notification and provider fixtures",
+            ReadSource("..\\tools\\NotificationPolicyTests.cpp")+"\n"+ReadSource("tools\\TileInstanceRuntimeHostTests.inc"),
+            {"master off also suppresses forced warnings", "offline render/configure mode suppresses even forced notices",
+                "SourceTransitions source", "repeated failures and intervening pending work cannot create a notification storm",
+                "notification subject formatting treats configurable text as data"},
+            "source/backend regression coverage must retain master-off, inert-validation, non-spam and safe-wording assertions");
 
         AssertNotContainsAny(
             "DesktopStub tray dispatch checks direct INI writes",

@@ -4,9 +4,45 @@ See the [current topology](../docs/DESKTOPSTUB_TOPOLOGY.md) for what is compiled
 into the host, which helper executables are separate, and the status of source
 plugins versus shared source code.
 
-`DesktopStub.exe` generates Windows Start tile content and registers a loose Appx manifest for a desktop tile entry. **Tiles > Add tile...** creates independent tiles by type. Each tile owns its source, appearance, text layout, click action and update interval; five RSS tiles can use five feeds and five schedules in one resident process. **Plugins** contains independent CapsBlink and ASUS indicator utilities. See the [independent tile guide](../docs/tile-instances-2026-10-20.md) for the current schema, setup and command-line examples.
+`DesktopStub.exe` supplies Windows Start tile content. A fresh configuration starts with one **Desktop** wallpaper tile. **Tiles > Add tile...** creates additional independent tiles by type. Each tile owns its source, appearance, text layout, click action and update interval; five RSS tiles can use five feeds and five schedules in one resident process. **Plugins** contains independent CapsBlink and ASUS indicator utilities. See the [independent tile guide](../docs/tile-instances-2026-10-20.md) for the current schema, setup and command-line examples.
 
-The app can monitor wallpaper changes, wallpaper fit mode changes, and DPI scale settings, then regenerate assets and re-register the manifest automatically. Most behavior is configurable through the tray menu and generated INI file. The same generation and delivery pipeline now handles composed content.
+## Fresh VM quick start
+
+Live Tiles need **Windows 10's Start menu/screen**, or an already working legacy
+Start implementation on Windows 11 that supports Live Tiles. The standard
+Windows 11 Start menu [does not display them](https://learn.microsoft.com/en-us/windows/uwp/launch-resume/chaseable-tile-notifications). Selecting a Windows 8/8.1 manifest
+does not add Live Tile support to that menu.
+
+1. Keep the extracted release/build files together in a permanent, writable
+   folder. Open a terminal in the folder containing `DesktopStub.exe` and run:
+
+   ```powershell
+   .\DesktopStub.exe --setup-desktop
+   ```
+
+2. Wait for the setup result. It prepares the wallpaper assets, registers the
+   main app identity once, then restarts DesktopStub with that identity. If you
+   already opened the EXE normally, **Tiles > Set up Desktop tile...** performs
+   the same explicit setup. Check Windows Developer Mode/sideloading policy if
+   Windows refuses package registration; setup reports the error and can be
+   retried from that menu.
+3. Open Start's **All apps** list and pin **Desktop** to Start. This is the
+   default app display name, not `DesktopStub`; a customized manifest/display
+   name can change it. Select Medium, Wide or Large and leave its Live Tile
+   enabled. Keep DesktopStub running for wallpaper updates.
+
+Fresh defaults use **LiveTile** delivery and **NameAndLogo** branding, with no
+optional source tiles pinned or enabled automatically. Native updates avoid
+repeated static Registration updates; the one-time identity registration above
+is still required. **Launch at sign-in is off by default** for both startup
+methods. Enable one later under **Application > Launch at sign-in** if wanted.
+After setup, normal launches can use `DesktopStub.exe` without repeating setup.
+See the [fresh Desktop defaults and setup details](../docs/desktop-factory-defaults-2026-10-23.md).
+
+The app monitors configured wallpaper, fitting and DPI changes and publishes
+updates through the selected tile delivery method. Static Registration delivery
+is a separate option. Most behavior is configurable through the tray menu and
+generated INI file.
 
 **Tiles** manages an ordered list of independently configured instances from one resident.
 The list has no fixed seven/eight-source or 32-content-slot limit; large lists
@@ -58,8 +94,8 @@ whether Live Tile content is displayed. See the
 
 ## Requirements
 
-- Windows 10/11 for the running utility and normal Desktop Bridge registration. The manifest generator can also emit Windows 8 or Windows 8.1-style AppX XML for Start Screen/Live Tile simulator compatibility.
-- Visual Studio Build Tools with the C++ workload.
+- Windows 10/11 for the running utility and normal Desktop Bridge registration. Native Live Tiles need the compatible Start interface described above. The manifest generator can also emit Windows 8 or Windows 8.1-style AppX XML for Start Screen/Live Tile simulator compatibility.
+- Visual Studio Build Tools with the C++ workload when building from source; prebuilt releases do not require the compiler.
 - Developer Mode or sideloading support may be required for Appx registration, depending on Windows policy.
 
 ## Build
@@ -117,13 +153,19 @@ The default binary smoke copies its inputs into a temporary directory and uses o
 
 ## Run
 
-For first-time/default Windows 10 usage:
+For a first installation, use the [fresh VM quick start](#fresh-vm-quick-start)
+and perform explicit main Desktop setup:
 
 ```cmd
-DesktopStub\build\DesktopStub.exe
+DesktopStub\build\DesktopStub.exe --setup-desktop
 ```
 
-You do not need to run `--manifest-win8` or `--manifest-win81` unless you are deliberately switching this build into the Windows 8/8.1 compatibility experiment. The generated manifest target defaults to Windows 10.
+Once setup succeeds, launch `DesktopStub\build\DesktopStub.exe` normally, or
+open the registered **Desktop** app from Start. Starting an unpackaged EXE on a
+fresh VM by itself does not install the identity needed for native Live Tile
+updates. Neither setup nor a normal launch enables sign-in startup by default.
+
+You do not need to run `--manifest-win8` or `--manifest-win81` unless you are deliberately switching this build into the Windows 8/8.1 compatibility experiment. The generated manifest target defaults to Windows 10, which the Desktop setup action requires.
 
 For Windows 8/8.1 Start Screen simulator testing, switch the generated manifest target after the normal build. The broker is already produced by `BuildDesktopStub.cmd`; extra build arguments are ignored.
 
@@ -443,7 +485,9 @@ Select the convention and adjustments used by your local prayer timetable.
 Tiles show the next prayer time in large text, followed by its name and location.
 Wide/Large tiles have a separate right-hand minutes/countdown column; compact
 tiles put the countdown below the main text. Large tiles can also show all five
-obligatory prayers with `PrayerTimes.ShowTimetable=1`; sunrise information is optional.
+obligatory prayers with `PrayerTimes.ShowTimetable=1`; optional sunrise is a sixth
+chronological row between Fajr and Dhuhr. `PrayerTimes.NextIncludesSunrise=0`
+keeps the next-prayer countdown separate unless explicitly enabled.
 Both Windows text and image-overlay delivery are supported. The source uses
 [AlAdhan's calculated schedules](https://aladhan.com/prayer-times-api), rather
 than a mosque's Iqamah timetable. Network retrieval runs in the background and
@@ -453,13 +497,68 @@ account or API key is required.
 
 Settings use a `PrayerTimes.` prefix in the instance section. For a tile named
 `prayers`, use `--configure-only --set "Tile.prayers.PrayerTimes.City=Your city" --set "Tile.prayers.PrayerTimes.Country=Your country"`.
-`Method=Auto`, `School=0`, `ShowSunrise=1`, `ShowTimetable=1` and `TwentyFourHour=1` are the defaults.
+`Method=Auto`, `School=0`, `ShowSunrise=1`, `ShowTimetable=1` and `TwentyFourHour=0` (AM/PM) are the defaults.
 Set that tile's `PrayerTimes.TwentyFourHour=0` for AM/PM formatting.
 The private `<profile>.prayer-cache` sidecar is bound to the requested location
 and calculation settings. A valid cached schedule remains visible during a
 network failure with a stale/error indication. User data and caches should
 stay private; the cache is ignored by Git. Additional PrayerTimes instances have
 their own locations, calculation options and update deadlines.
+
+## Independent Clock, Calendar, WuWa and source alerts
+
+**Tiles > Add tile...** includes Clock/world clocks, a date-only or explicit local
+`.ics` Calendar preview, and overseas Wuthering Waves notes with an explicitly
+supplied SDK game access token. Prayer and RSS tiles have independent optional
+notifications, thresholds/lead times, types and sounds. Sunrise is a separate
+chronological timetable entry; next-event countdown and sunrise alerts are
+independent opt-ins. No new source or notification is enabled automatically.
+See [setup, settings and limits](../docs/tile-sources-alerts-2026-10-23.md).
+
+## Notifications and bulk pin progress
+
+Use **Application > Notifications > Notification style** to select `Auto`,
+`Balloon`, or `Toast`. Auto uses Windows notifications when DesktopStub already
+has a package identity and otherwise uses the classic tray balloon API. Balloon
+always uses the Windows 7-compatible tray API, including ExplorerPatcher's
+configured balloon presentation. Toast falls back to a balloon if the existing
+identity or notification API is unavailable; selecting a notification style does
+not create a package or shortcut.
+
+Bulk pin/unpin operations update one progress notification. Windows notifications
+can display a progress bar; classic balloons show numeric counts and are limited
+to at most one intermediate update every three seconds. Counts advance after
+Windows answers each request. Rejected/canceled requests are recorded separately
+from successfully applied changes. Windows still owns each pin/unpin confirmation.
+
+The **Enable notifications** master switch suppresses both APIs, including forced
+warnings. **Notify about operations and tile source changes** gates discrete
+operation/source notices. Pin progress, source failure/recovery, and gallery changes
+also have their own switches. Healthy refreshes, prayer countdown ticks, and photo
+rotations do not display notifications. A completed source failure is reported
+once until recovery, rather than on every polling attempt. Generation start/success
+notices remain disabled by default; generation failure notices remain enabled.
+
+All settings can also be set with `--configure-only --set`, for example:
+
+```powershell
+DesktopStub.exe --configure-only --set Settings.NotificationApi=Balloon
+DesktopStub.exe --configure-only --set Settings.NotifyOnPinProgress=1
+```
+
+The corresponding `[Settings]` keys are `NotificationApi=Auto`,
+`NotifyOnOperations=1`, `NotifyOnPinProgress=1`, `NotifySourceErrors=1`,
+`NotifyGalleryChanges=1`, and `NotificationProgressIntervalMs=750` (250–60000).
+Notification wording is configurable in `[Strings]`. The new operation/source
+message templates substitute `%s` literally with the tile/game name; other percent
+sequences are treated as text.
+
+**Photo galleries > Gallery settings** controls removal behavior:
+`AutoUnpinRemovedGalleryTiles=1` requests removal of obsolete owned native pins
+after a saved gallery resize. `ConfirmUnpinRemovedGalleryTiles=0` disables the
+additional DesktopStub confirmation by default; Windows may still ask. Gallery
+change notices are enabled by default. Photos and ownership history are retained;
+separate Registration pins must be removed manually from Start.
 
 ## Additional Behavior Notes
 

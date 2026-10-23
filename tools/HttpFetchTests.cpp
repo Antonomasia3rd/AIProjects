@@ -35,7 +35,7 @@ public:
     std::atomic<int> requests{0};
     unsigned short port = 0;
     using Handler = std::function<void(SOCKET, const std::string&, const std::atomic<bool>&)>;
-    explicit Server(Handler handler)
+    explicit Server(Handler handler, bool rawRequest = false)
     {
         listener_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         sockaddr_in address{};
@@ -46,7 +46,7 @@ public:
             getsockname(listener_, reinterpret_cast<sockaddr*>(&address), &size) || listen(listener_, SOMAXCONN))
             throw std::runtime_error("Could not bind a loopback HTTP fixture.");
         port = ntohs(address.sin_port);
-        thread_ = std::thread([this, handler] {
+        thread_ = std::thread([this, handler, rawRequest] {
             while (running_)
             {
                 fd_set readers;
@@ -61,8 +61,18 @@ public:
                 setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&socketTimeout), sizeof(socketTimeout));
                 std::string request;
                 char buffer[2048];
-                while (running_ && request.size() < 65536 && request.find("\r\n\r\n") == std::string::npos)
+                while (running_ && request.size() < 1114112)
                 {
+                    const auto headersEnd = request.find("\r\n\r\n");
+                    if (headersEnd != std::string::npos) {
+                        std::size_t bodyBytes = 0;
+                        const auto length = request.find("Content-Length:");
+                        if (length != std::string::npos) {
+                            const auto begin = request.find_first_of("0123456789", length + 15);
+                            if (begin != std::string::npos) bodyBytes = static_cast<std::size_t>(std::stoul(request.substr(begin)));
+                        }
+                        if (!rawRequest || request.size() >= headersEnd + 4 + bodyBytes) break;
+                    }
                     const int read = recv(client, buffer, sizeof(buffer), 0);
                     if (read <= 0) break;
                     request.append(buffer, read);
@@ -72,7 +82,7 @@ public:
                     ++requests;
                     const auto first = request.find(' ');
                     const auto last = request.find(' ', first + 1);
-                    handler(client, request.substr(first + 1, last - first - 1), running_);
+                    handler(client, rawRequest ? request : request.substr(first + 1, last - first - 1), running_);
                 }
                 shutdown(client, SD_BOTH);
                 closesocket(client);
@@ -228,12 +238,66 @@ void TestSlowHeaders()
         Clock::now() - started < std::chrono::seconds(1) && response.body.empty(),
         "a server that delays headers is bounded by the same total HTTP deadline");
 }
+void TestPostAndRedirectPolicy()
+{
+    Server server([](SOCKET socket, const std::string& request, const std::atomic<bool>&) {
+        const auto split = request.find("\r\n\r\n");
+        const auto body = split == std::string::npos ? std::string{} : request.substr(split + 4);
+        if (request.find("POST /redirect ") == 0) Send(socket,
+            "HTTP/1.1 307 Temporary Redirect\r\nLocation: /forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+        else if (request.find("POST /echo ") == 0) Reply(socket, body);
+        else Reply(socket, "unexpected verb/path", "400 Bad Request");
+    }, true);
+    auto options = Options(server, L"/echo");
+    options.method = L"POST"; options.body = std::string(131072, 'x') + "&synthetic=not-a-real-token";
+    options.followRedirects = false;
+    options.headers.push_back({L"Content-Type", L"application/x-www-form-urlencoded"});
+    aip::HttpFetchResponse response; std::wstring error;
+    Check(aip::FetchHttpBytes(options, response, error) &&
+        std::string(response.body.begin(), response.body.end()) == options.body,
+        "loopback POST preserves exact body bytes beyond the header/read buffer size");
+    options.url = server.Url(L"/redirect");
+    const int before = server.requests;
+    Check(!aip::FetchHttpBytes(options, response, error) && response.statusCode == 307 &&
+        server.requests == before + 1 && response.body.empty(),
+        "credential POST with redirects disabled never forwards its body to the redirect destination");
+    options.url = server.Url(L"/echo"); options.body.clear();
+    Check(aip::FetchHttpBytes(options, response, error) && response.body.empty(),
+        "empty POST body remains an explicit POST request");
+    options.method = L"GET"; options.body = "must-not-send";
+    const int unchanged = server.requests;
+    Check(!aip::FetchHttpBytes(options, response, error) && server.requests == unchanged,
+        "an accidental GET body is rejected without contacting loopback");
+}
+void TestPostCancellationLifetime()
+{
+    Server server([](SOCKET socket, const std::string&, const std::atomic<bool>& running) {
+        for (int i = 0; i < 20 && running; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (running) Reply(socket, "late");
+    });
+    bool bounded = true;
+    for (int i = 0; i < 8; ++i) {
+        auto options = Options(server);
+        options.method = L"POST"; options.body = std::string(1048576, 'p');
+        options.timeout = std::chrono::milliseconds(35);
+        aip::HttpFetchResponse response; std::wstring error; const auto started = Clock::now();
+        bounded = !aip::FetchHttpBytes(options, response, error) && Clock::now() - started < std::chrono::seconds(1) && bounded;
+        // Destroy caller-owned body immediately. The final WinHTTP callback
+        // retains its independent request-body allocation until HANDLE_CLOSING.
+        options.body.assign(1048576, 'z');
+    }
+    const auto deadline = Clock::now() + std::chrono::seconds(2);
+    while (aip::http_detail::liveCallbackStates != 0 && Clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    Check(bounded && aip::http_detail::liveCallbackStates == 0,
+        "canceled POST owns its send buffer until every late callback releases without leaking state");
+}
 }
 int main()
 {
     WSADATA winsock{};
     if (WSAStartup(MAKEWORD(2, 2), &winsock)) return 1;
-    try { TestUrls(); TestResponses(); TestTimeoutAndCancel(); TestSlowHeaders(); }
+    try { TestUrls(); TestResponses(); TestTimeoutAndCancel(); TestSlowHeaders(); TestPostAndRedirectPolicy(); TestPostCancellationLifetime(); }
     catch (const std::exception& exception) { std::cerr << exception.what() << '\n'; ++failures; }
     WSACleanup();
     std::cout << (failures ? "HTTP fetch tests failed.\n" : "HTTP fetch tests passed.\n");

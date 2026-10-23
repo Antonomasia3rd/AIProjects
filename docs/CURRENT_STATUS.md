@@ -11,6 +11,17 @@ is enabled and its focused native recheck passed.
 
 ## Saved and installed
 
+- October 23: source alerts/progress/backend selection, Prayer AM/PM and Sunrise,
+  independent Clock/Calendar/WuWa, original Desktop artwork, explicit fresh
+  setup, confirmed Discord defaults, exact Gallery activation metadata and
+  Gallery repeat/configuration CPU repairs are installed. The requested reset
+  archived old settings/accounts/history and left one Desktop wallpaper tile;
+  photos and Start pins were retained. Native publication and 75-second health
+  passed. Core/new-source and content smoke passed separately; the full smoke
+  reproduced the unchanged historical four-pixel legacy preset failure, which
+  remains open with strict comparisons. See [the installed record](desktopstub-installed-2026-10-23.md)
+  for backup, hashes, resource measurements and remaining acceptance.
+
 - October 20, 18:35: per-tile caching/delivery/render policies, separate
   user/profile/tile Registration identities, explicit migration, readable RSS
   Default and the centered hidden-owner pin anchor are installed. The final

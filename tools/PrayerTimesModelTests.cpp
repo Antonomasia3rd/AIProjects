@@ -6,7 +6,7 @@
 using namespace aip::prayer;
 static int checks=0;
 static void Check(bool value,const char* message) { ++checks; if (!value) throw std::runtime_error(message); }
-static Configuration Config() { Configuration cfg; cfg.city=L"Fixture City"; cfg.country=L"ID"; cfg.method=20; cfg.timeZone=L"Asia/Jakarta"; return cfg; }
+static Configuration Config() { Configuration cfg; cfg.city=L"Fixture City"; cfg.country=L"ID"; cfg.method=20; cfg.timeZone=L"Asia/Jakarta"; cfg.twentyFourHour=true; return cfg; }
 static Day Fixture(Date date,int offset=420) {
     Day day; day.date=date; day.timeZone=L"Asia/Jakarta"; day.hijriDate=L"07-05-1448"; day.offsetMinutes=offset;
     day.fetchedAtUtc=CivilDay(date)*86400-offset*60;
@@ -16,6 +16,8 @@ static Day Fixture(Date date,int offset=420) {
 }
 int main() { try {
     Configuration empty; std::wstring error;
+    Check(!empty.twentyFourHour&&TimeText(12*3600+34*60,0,empty.twentyFourHour)==L"12:34 PM"&&TimeText(34*60,0,empty.twentyFourHour)==L"12:34 AM",
+        "factory clock format includes AM/PM with correct noon and midnight labels");
     Check(empty.city.empty()&&empty.country.empty()&&Validate(empty,error)&&!Validate(empty,error,true),"location remains unset and requires explicit city/country before fetch");
     for(int method=-1;method<=24;++method) {
         std::wstring key=L"method",value=std::to_wstring(method);
@@ -47,10 +49,14 @@ int main() { try {
         view.clock.minutes==L"2"&&view.clock.countdown==L"in 2 minutes","clock layout carries independent semantic time, prayer, city and rounded countdown");
     Check(Compose(cfg,data,fajr-60).clock.countdown==L"in 1 minute"&&Compose(cfg,data,fajr).clock.minutes==L"0",
         "clock countdown handles singular and due-now boundaries without parsing summary text");
-    Check(view.available&&view.detailRows.size()==5&&view.secondary.find(L"2 min")!=std::wstring::npos&&view.nextUTCDeadline==fajr-60,"countdown rounds up and schedules exact minute transition");
+    Check(view.available&&view.detailRows.size()==6&&view.detailRows[1].id==PrayerId::Sunrise&&view.detailRows[2].id==PrayerId::Dhuhr&&view.secondary.find(L"2 min")!=std::wstring::npos&&view.nextUTCDeadline==fajr-60,"countdown schedules exact minute transition and chronological timetable includes distinct Sunrise/Shuruq");
     Check(view.badge.find(L"Sunrise 06:00")!=std::wstring::npos&&view.timeZone==L"Asia/Jakarta"&&!view.hijriDate.empty(),"optional sunrise/timezone/Hijri metadata remains distinct from five required rows");
     Check(Compose(cfg,data,fajr).secondary.find(L"0 min")!=std::wstring::npos&&NextUTCDeadline(cfg,data,fajr)==fajr+1,"exact prayer instant is due now then advances");
     Check(Compose(cfg,data,fajr+1).secondary.find(L"Dhuhr")!=std::wstring::npos,"after prayer instant next mandatory prayer is selected");
+    cfg.nextIncludesSunrise=true;
+    Check(Compose(cfg,data,fajr+1).clock.prayer==L"Sunrise"&&Compose(cfg,data,data.schedule.days[0].sunrise.utcSeconds+1).clock.prayer==L"Dhuhr",
+        "optional sunrise countdown selects sunrise independently from the five prayers");
+    cfg.nextIncludesSunrise=false;
     const UTC isha=data.schedule.days[0].prayers[4].utcSeconds;
     Check(Compose(cfg,data,isha+1).secondary.find(L"Fajr")!=std::wstring::npos,"after Isha tomorrow Fajr is next");
     const auto originalKey=ConfigurationKey(cfg);cfg.adjustmentsMinutes[0]=10;cfg.twentyFourHour=false;cfg.showSunrise=false;
@@ -88,6 +94,10 @@ int main() { try {
                 xml.find(L"at Surabaya &amp; &lt;region&gt;")!=std::wstring::npos&&xml.find(L"Legacy text")==std::wstring::npos,
                 "clock fields are escaped and take precedence over legacy summary content");
             const auto layout=ComputePrayerClockGeometry(width,height,clock,rows);
+            Check(layout.timePixels==24&&std::wstring(PrayerTimeStyle(layout.countdownColumn))==L"title"&&
+                xml.find(L"hint-style=\"subheader\"")==std::wstring::npos&&
+                xml.find(L"hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\"1\" hint-align=\"left\">Dhuhr")!=std::wstring::npos,
+                "Clock-sized time stays 24 pixels on all sizes and prayer name shares the subtle location style");
             Check(layout.mainWidth>0&&layout.clockBottom<=layout.bottom&&layout.margin+layout.mainWidth<=width-layout.margin,
                 "bitmap clock text remains bounded by the actual tile dimensions");
             if(width>200) {
@@ -102,6 +112,12 @@ int main() { try {
                 "only Large displays the five-prayer timetable");
         }
         clock.showTimetable=false;std::wstring hidden;
+        TextPresentation custom;custom.preset=L"Custom";custom.primaryStyle=L"title";custom.secondaryStyle=L"bodySubtle";custom.badgeStyle=L"headerNumeral";
+        std::wstring customized;AppendPrayerTileBinding(customized,L"TileWide",150,fallback,rows,L"",clock,custom);
+        Check(customized.find(L"hint-style=\"bodySubtle\" hint-wrap=\"true\" hint-maxLines=\"2\" hint-align=\"left\">Dhuhr")!=std::wstring::npos&&
+            customized.find(L"hint-style=\"bodySubtle\" hint-wrap=\"true\" hint-maxLines=\"2\" hint-align=\"left\">at Surabaya")!=std::wstring::npos&&
+            customized.find(L"hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\"1\" hint-align=\"right\">minutes")!=std::wstring::npos,
+            "prayer name and city follow the same custom Secondary settings without enlarging the minutes label");
         AppendPrayerTileBinding(hidden,L"TileLarge",310,fallback,rows,L"",clock);
         Check(hidden.find(L"Isha")==std::wstring::npos&&!ComputePrayerClockGeometry(310,310,clock,rows).schedule,
             "native and bitmap timetable visibility follows the same display setting");

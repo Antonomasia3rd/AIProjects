@@ -8,11 +8,11 @@ $targets = @('HardwareProfileImportTests','NowPlayingProfileImportTests',
     'NotesSourceTests','PrayerTimesModelTests','PrayerTimesSourceTests','SmtcSourceTests','DiscordServiceTests','WinrtFactoryLifetimeTests','TransparentBackgroundTests','AdaptiveTileTextLayoutTests','AdaptiveTileTextRenderTests',
     'PngCrc32Tests','CaptureAttemptTests','ContentPresetTests','ContentQueueTests','SecondaryTileTests',
     'TileVisualAssetsTests','TileVisualAssetsRenderTests','NotesTileRowsTests','MediaTileLayoutTests','GalleryEngineTests','GalleryInventoryTests','GalleryInventoryNativeTests','GalleryRuntimeTests','CapsBlinkEngineTests','TileNotificationPayloadTests','BoundedCaptureProcessTests','DiscordProfileEditTests',
-    'ContentRuntimeTests','ContentRevisionHostTests','ContentRuntimeNoHardwareTests','GalleryTransactionTests')
+    'ContentRuntimeTests','ContentRevisionHostTests','ContentGalleryLifecycleHostTests','ContentNewSourceHostTests','ContentRuntimeNoHardwareTests','GalleryTransactionTests')
 foreach ($target in (@('DiscordService','DiscordEditor','AsusService') + $targets)) {
     # Optimizing the full host translation unit can exceed a minute on slower
     # laptops. This compile budget does not change fixture watchdogs.
-    $compileSeconds = if ($target -in @('ContentRuntimeTests','ContentRevisionHostTests','ContentRuntimeNoHardwareTests','TransparentBackgroundTests','AdaptiveTileTextRenderTests')) { 240 } else { 60 }
+    $compileSeconds = if ($target -in @('ContentRuntimeTests','ContentRevisionHostTests','ContentGalleryLifecycleHostTests','ContentNewSourceHostTests','ContentRuntimeNoHardwareTests','TransparentBackgroundTests','AdaptiveTileTextRenderTests')) { 240 } else { 60 }
     $built = Invoke-ReviewProcess -File $env:ComSpec -Parameters @('/d','/c',
         (Join-Path $PSScriptRoot 'BuildContentIntegrationTests.cmd'), $target) -Label ($target + '-content-build') -Seconds $compileSeconds
     Write-Output $built.Output.Trim()

@@ -19,14 +19,14 @@ struct Configuration {
     int method = -1, school = 0, latitudeAdjustmentMethod = 3;
     std::array<int, 5> adjustmentsMinutes{};
     int refreshSeconds = 43200, timeoutSeconds = 10, maximumBytes = 262144;
-    bool showSunrise = true, twentyFourHour = true, showTimetable = true;
+    bool showSunrise = true, twentyFourHour = false, showTimetable = true, nextIncludesSunrise = false;
 };
 inline constexpr const wchar_t* SettingKeys[] = {L"City", L"Country", L"State", L"TimeZone", L"Method", L"School",
     L"LatitudeAdjustmentMethod", L"FajrAdjustmentMinutes", L"DhuhrAdjustmentMinutes", L"AsrAdjustmentMinutes",
     L"MaghribAdjustmentMinutes", L"IshaAdjustmentMinutes", L"RefreshSeconds", L"TimeoutSeconds", L"MaximumBytes",
-    L"ShowSunrise", L"TwentyFourHour", L"ShowTimetable"};
+    L"ShowSunrise", L"TwentyFourHour", L"ShowTimetable", L"NextIncludesSunrise"};
 inline constexpr const wchar_t* SettingDefaults[] = {L"",L"",L"",L"",L"Auto",L"0",L"3",L"0",L"0",L"0",L"0",L"0",
-    L"43200",L"10",L"262144",L"1",L"1",L"1"};
+    L"43200",L"10",L"262144",L"1",L"0",L"1",L"0"};
 inline std::wstring Trim(std::wstring value) {
     const auto first = value.find_first_not_of(L" \t\r\n");
     return first == std::wstring::npos ? L"" : value.substr(first, value.find_last_not_of(L" \t\r\n") - first + 1);
@@ -105,6 +105,7 @@ template<class Reader> inline bool ReadConfiguration(Reader get, Configuration& 
         case 14: result.maximumBytes = number; break; case 15: result.showSunrise = value == L"1"; break;
         case 16: result.twentyFourHour = value == L"1"; break;
         case 17: result.showTimetable = value == L"1"; break;
+        case 18: result.nextIncludesSunrise = value == L"1"; break;
         default: result.adjustmentsMinutes[i - 7] = number; break;
         }
     }
@@ -126,6 +127,7 @@ inline bool Validate(Configuration& cfg, std::wstring& error, bool requireLocati
         if (std::wstring(key) == L"ShowSunrise") return input.showSunrise ? L"1" : L"0";
         if (std::wstring(key) == L"TwentyFourHour") return input.twentyFourHour ? L"1" : L"0";
         if (std::wstring(key) == L"ShowTimetable") return input.showTimetable ? L"1" : L"0";
+        if (std::wstring(key) == L"NextIncludesSunrise") return input.nextIncludesSunrise ? L"1" : L"0";
         for (size_t i = 0; i < 5; ++i) if (std::wstring(key) == SettingKeys[i + 7]) return std::to_wstring(input.adjustmentsMinutes[i]);
         return L"";
     }, cfg, error);
@@ -266,9 +268,15 @@ inline View Compose(const Configuration& input, const Data& data, UTC now) {
     for (const auto& scheduleDay : data.schedule.days) {
         if (!ValidDay(scheduleDay)) continue;
         for (const auto& prayer : scheduleDay.prayers) { const auto time = Adjusted(prayer,cfg); if (time >= now && time < nextUtc) { nextUtc = time; next = &prayer; } }
+        if (cfg.nextIncludesSunrise && scheduleDay.hasSunrise && scheduleDay.sunrise.utcSeconds >= now && scheduleDay.sunrise.utcSeconds < nextUtc) {
+            nextUtc = scheduleDay.sunrise.utcSeconds; next = &scheduleDay.sunrise;
+        }
     }
-    for (const auto& prayer : day->prayers)
+    for (const auto& prayer : day->prayers) {
         view.detailRows.push_back({prayer.id,PrayerName(prayer.id),TimeText(Adjusted(prayer,cfg),prayer.offsetMinutes,cfg.twentyFourHour),next == &prayer});
+        if (prayer.id == PrayerId::Fajr && cfg.showSunrise && day->hasSunrise)
+            view.detailRows.push_back({PrayerId::Sunrise,L"Sunrise / Shuruq",TimeText(day->sunrise.utcSeconds,day->sunrise.offsetMinutes,cfg.twentyFourHour),next == &day->sunrise});
+    }
     if (next) {
         const UTC minutes = (nextUtc - now + 59) / 60;
         view.clock.time = TimeText(nextUtc,next->offsetMinutes,cfg.twentyFourHour);

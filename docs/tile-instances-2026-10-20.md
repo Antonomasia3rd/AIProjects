@@ -85,7 +85,7 @@ PrayerTimes.Country=
 
 Each `Tile.<id>` section requires `Type`. The canonical type values are
 `Wallpaper`, `RSS`, `NowPlaying`, `PrayerTimes`, `Genshin`, `HSR`, `ZZZ`,
-`Discord` and `QuickAction`. `Gallery` is reserved by the portable model; the
+`Discord`, `QuickAction`, `Clock`, `Calendar` and `WuWa`. `Gallery` is reserved by the portable model; the
 current user-facing gallery workflow uses its ownership-aware gallery engine,
 described below.
 
@@ -310,10 +310,11 @@ label and large countdown at the right; compact layouts put the countdown below
 the main text. This column is inside the notification's content, not an OS shell
 badge whose position the application controls.
 
-`PrayerTimes.TwentyFourHour=0` selects AM/PM times; its default is `1` for 24-hour
+`PrayerTimes.TwentyFourHour=0` selects AM/PM times; its default is `0`; select `1` for 24-hour
 times. `PrayerTimes.ShowTimetable=1` retains the five-prayer timetable on Large
 tiles; set it to `0` for the clock-focused layout without the timetable.
-`PrayerTimes.ShowSunrise=1` includes available sunrise information. These
+`PrayerTimes.ShowSunrise=1` includes available sunrise information and its chronological timetable row.
+`PrayerTimes.NextIncludesSunrise=0` keeps sunrise out of the next-prayer countdown unless enabled. These
 display changes use cached schedule data instead of fetching a schedule on
 every countdown update.
 

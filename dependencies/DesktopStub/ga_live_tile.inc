@@ -4,6 +4,7 @@
 #include "../tile_notification_winrt.inc"
 #include "../media_tile_layout.h"
 #include "../prayer_tile_layout.h"
+#include "../datetime_tile_layout.h"
 static bool CurrentProcessPackageFullName(std::wstring& packageFullName)
 {
     packageFullName.clear();
@@ -320,10 +321,14 @@ static std::wstring BuildLiveTileXml(
                 ContentHasTransparentBackground() ? L"" : uri, g_renderContent->presentation)) {
             hasUsableBinding = true; continue;
         }
+        if (LiveTileUsesAdaptiveXml() && g_renderContent && (g_renderContent->clockSource || g_renderContent->calendarSource) &&
+            g_renderContent->textMode == aip::content::TextMode::Auto &&
+            aip::content::AppendDateTimeTileBinding(xml,templateName,asset.h,*g_renderContent,
+                ContentHasTransparentBackground()?L"":uri)) { hasUsableBinding=true;continue; }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->prayerSource &&
             g_renderContent->textMode == aip::content::TextMode::Auto &&
             aip::content::AppendPrayerTileBinding(xml, templateName, asset.h, g_renderContent->text, g_renderContent->detailRows,
-                ContentHasTransparentBackground() ? L"" : uri, g_renderContent->prayerClock)) { hasUsableBinding = true; continue; }
+                ContentHasTransparentBackground() ? L"" : uri, g_renderContent->prayerClock, g_renderContent->presentation)) { hasUsableBinding = true; continue; }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->smtcSource &&
             g_renderContent->textMode == aip::content::TextMode::Auto) {
             std::wstring icon;
@@ -383,7 +388,7 @@ static std::wstring BuildLiveTileXml(
     xml += L"</tile>";
     const bool richRssPresentation = g_renderContent && !g_renderContent->rssHeadlines.empty() &&
         g_renderContent->textMode == aip::content::TextMode::Auto && aip::content::RssUsesRichLayout(g_renderContent->presentation);
-    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !richRssPresentation)
+    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !richRssPresentation && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource)
         xml = aip::content::ApplyTextPresentationXml(xml, g_renderContent->presentation);
     aip::tile_notification::Options options;
     if (g_renderContent) {

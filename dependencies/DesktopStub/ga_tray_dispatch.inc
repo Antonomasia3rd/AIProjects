@@ -16,6 +16,7 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
 
     switch(cmd)
     {
+    case ID_SETUP_DESKTOP_HOST: RequestDesktopHostSetup(h);return;
     case ID_USE_PS:
     {
         bool v = !UsePowerShell();
@@ -914,6 +915,22 @@ static void DispatchTrayCommand(HWND h, UINT cmd)
     }
     break;
 
+    case ID_NOTIF_API_AUTO:
+    case ID_NOTIF_API_BALLOON:
+    case ID_NOTIF_API_TOAST:
+        if(!IniWrite(L"Settings",L"NotificationApi",cmd==ID_NOTIF_API_BALLOON?L"Balloon":cmd==ID_NOTIF_API_TOAST?L"Toast":L"Auto"))return;
+        break;
+    case ID_NOTIFY_OPERATIONS:
+        ToggleSettingBool(L"NotifyOnOperations",1); break;
+    case ID_NOTIFY_PIN_PROGRESS:
+        ToggleSettingBool(L"NotifyOnPinProgress",1); break;
+    case ID_NOTIFY_SOURCE_ERRORS:
+        ToggleSettingBool(L"NotifySourceErrors",1); break;
+    case ID_NOTIFY_GALLERY_CHANGES:
+        ToggleSettingBool(L"NotifyGalleryChanges",1); break;
+    case ID_NOTIF_PROGRESS_INTERVAL:
+        CycleSettingIntPreset(L"NotificationProgressIntervalMs",750,250,60000,{250,500,750,1000,2000,5000,10000,30000,60000});
+        break;
     case ID_NOTIF_ENABLED:
     {
         g_notificationsEnabled = !g_notificationsEnabled;

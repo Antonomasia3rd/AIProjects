@@ -63,6 +63,8 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
 
     if (TileInstanceModeRequested()) {
         HMENU tilesMenu = beginSection(SecondaryTileUiString(L"TileInstancesTitle", L"Tiles"));
+        if(!CurrentProcessHasPackageIdentity())addTo(tilesMenu,ID_SETUP_DESKTOP_HOST,
+            IniReadS(L"Strings",L"DesktopHostSetup",L"Set up Desktop tile..."),false,!g_desktopHostSetupPending.load());
         AppendTileInstancesMenu(tilesMenu);
         AppendQuickActionsMenu(tilesMenu);
         AppendGalleryTilesMenu(tilesMenu);
@@ -75,6 +77,8 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     const auto& sourcesTitle = g_ui.traySourcesTitle;
     const auto& updatesTitle = g_ui.trayUpdatesTitle;
     HMENU secondaryTilesMenu = beginSection(L"Tiles");
+    if(!CurrentProcessHasPackageIdentity())addTo(secondaryTilesMenu,ID_SETUP_DESKTOP_HOST,
+        IniReadS(L"Strings",L"DesktopHostSetup",L"Set up Desktop tile..."),false,!g_desktopHostSetupPending.load());
     AppendSecondaryTilesMenu(secondaryTilesMenu);
     AppendQuickActionsMenu(secondaryTilesMenu);
     AppendGalleryTilesMenu(secondaryTilesMenu);
@@ -410,6 +414,18 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     endNestedMenu(generalMenu, interfaceMenu, g_ui.trayInterfaceTitle);
     HMENU notificationsMenu = beginNestedMenu(generalMenu, L"CreatePopupMenu(Notifications)");
     addTo(notificationsMenu, ID_NOTIF_ENABLED, g_ui.notificationsEnabled.c_str(), g_notificationsEnabled);
+    HMENU notificationApiMenu = beginNestedMenu(notificationsMenu,L"CreatePopupMenu(Notification style)");
+    const auto notificationApi = IniReadS(L"Settings",L"NotificationApi",L"Auto");
+    addTo(notificationApiMenu,ID_NOTIF_API_AUTO,IniReadS(L"Strings",L"NotificationApiAuto",L"Automatic (Windows notification, balloon fallback)").c_str(),IEquals(notificationApi,L"Auto"),g_notificationsEnabled);
+    addTo(notificationApiMenu,ID_NOTIF_API_BALLOON,IniReadS(L"Strings",L"NotificationApiBalloon",L"Classic tray balloon (Windows 7 / ExplorerPatcher)").c_str(),IEquals(notificationApi,L"Balloon"),g_notificationsEnabled);
+    addTo(notificationApiMenu,ID_NOTIF_API_TOAST,IniReadS(L"Strings",L"NotificationApiToast",L"Windows notification (progress bar when available)").c_str(),IEquals(notificationApi,L"Toast"),g_notificationsEnabled);
+    endNestedMenu(notificationsMenu,notificationApiMenu,IniReadS(L"Strings",L"NotificationApiTitle",L"Notification style"));
+    addTo(notificationsMenu,ID_NOTIFY_OPERATIONS,IniReadS(L"Strings",L"NotifyOnOperations",L"Notify about operations and tile source changes").c_str(),IniReadI(L"Settings",L"NotifyOnOperations",1)!=0,g_notificationsEnabled);
+    addTo(notificationsMenu,ID_NOTIFY_PIN_PROGRESS,IniReadS(L"Strings",L"NotifyOnPinProgress",L"Show progress while pinning multiple tiles").c_str(),IniReadI(L"Settings",L"NotifyOnPinProgress",1)!=0,g_notificationsEnabled);
+    addTo(notificationsMenu,ID_NOTIFY_SOURCE_ERRORS,IniReadS(L"Strings",L"NotifySourceErrors",L"Notify once when a tile source fails or recovers").c_str(),IniReadI(L"Settings",L"NotifySourceErrors",1)!=0,g_notificationsEnabled);
+    addTo(notificationsMenu,ID_NOTIFY_GALLERY_CHANGES,IniReadS(L"Strings",L"NotifyGalleryChanges",L"Notify when gallery tiles are added or removed").c_str(),IniReadI(L"Settings",L"NotifyGalleryChanges",1)!=0,g_notificationsEnabled);
+    const auto notificationProgressLabel = IniReadS(L"Strings",L"NotificationProgressInterval",L"Progress update interval (milliseconds)")+L": "+std::to_wstring(ReadSettingClamped(L"NotificationProgressIntervalMs",750,250,60000));
+    addTo(notificationsMenu,ID_NOTIF_PROGRESS_INTERVAL,notificationProgressLabel.c_str(),false,g_notificationsEnabled&&IniReadI(L"Settings",L"NotifyOnPinProgress",1)!=0);
     addTo(notificationsMenu, ID_NOTIFY_START, g_ui.notifyOnStart.c_str(), g_notifyOnStart, g_notificationsEnabled);
     addTo(notificationsMenu, ID_NOTIFY_SUCCESS, g_ui.notifyOnSuccess.c_str(), g_notifyOnSuccess, g_notificationsEnabled);
     addTo(notificationsMenu, ID_NOTIFY_FAILURE, g_ui.notifyOnFailure.c_str(), g_notifyOnFailure, g_notificationsEnabled);
