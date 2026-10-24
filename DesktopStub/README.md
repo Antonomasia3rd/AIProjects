@@ -6,6 +6,12 @@ plugins versus shared source code.
 
 `DesktopStub.exe` supplies Windows Start tile content. A fresh configuration starts with one **Desktop** wallpaper tile. **Tiles > Add tile...** creates additional independent tiles by type. Each tile owns its source, appearance, text layout, click action and update interval; five RSS tiles can use five feeds and five schedules in one resident process. **Plugins** contains independent CapsBlink and ASUS indicator utilities. See the [independent tile guide](../docs/tile-instances-2026-10-20.md) for the current schema, setup and command-line examples.
 
+Open **Settings...** in the tray menu, or run `DesktopStub.exe --settings`, for
+the native Properties window. It exposes the same tile, plugin and application
+settings while retaining the tray interface. **All tile contents...** provides
+one central paged view of content and source diagnostics. See the
+[settings and UX follow-up](../docs/desktopstub-settings-ux-2026-10-24.md).
+
 Calendar tiles support full Google sign-in through your own Google Cloud Desktop
 OAuth client as well as local ICS files. WuWa tiles provide guided Kuro
 email/password sign-in and character selection. Prayer/RSS desktop notifications

@@ -452,8 +452,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"GoogleCalendarChangedAfterSave",L"Settings changed again after this save. Reopen setup to use the current account and calendar."},
     {L"GoogleCalendarCancelButton", L"Cancel operation"},
     {L"GoogleCalendarCanceled", L"The pending operation was canceled. You may close the Google browser tab. Saved account settings were kept."},
-    {L"GoogleCalendarChoose", L"Choose a calendar and click Use selected calendar. Each Calendar tile can select its own account and calendar."},
-    {L"GoogleCalendarClientConnected", L"Google account connected. Refresh the calendar list or choose a calendar."},
+    {L"GoogleCalendarChoose", L"Choose All calendars to combine upcoming events from every readable calendar, or select one calendar. Click Use selected calendars to save this tile's choice."},
+    {L"GoogleCalendarClientConnected", L"Google account connected. Refresh the list, then choose All calendars or one calendar."},
     {L"GoogleCalendarClientMissing", L"No Desktop OAuth client imported."},
     {L"GoogleCalendarClientReady", L"Desktop OAuth client ready. Choose Connect to Google."},
     {L"GoogleCalendarCloseButton", L"Close"},
@@ -477,17 +477,35 @@ static const StringDefault g_stringDefaults[] = {
     {L"GoogleCalendarProfileChanged", L"The active profile changed. Reopen Google Calendar setup before continuing."},
     {L"GoogleCalendarRequestFailed", L"Google Calendar could not complete this request. Previous saved settings were kept."},
     {L"GoogleCalendarSaveFailed", L"Google Calendar settings could not be saved. Previous settings were kept."},
-    {L"GoogleCalendarSelectFirst", L"Select a calendar from the list first."},
+    {L"GoogleCalendarSelectFirst", L"Select All calendars or one calendar from the list first."},
     {L"GoogleCalendarSelectedMessage", L"This Calendar tile will display the selected Google calendar's upcoming events."},
     {L"GoogleCalendarSelectedSaved", L"Selected calendar saved. This tile will refresh automatically. You may close this window."},
-    {L"GoogleCalendarSelectedTitle", L"Calendar selected"},
+    {L"GoogleCalendarSelectedTitle", L"Calendars selected"},
     {L"GoogleCalendarSetup", L"Google account and calendars..."},
     {L"GoogleCalendarSetupFailed", L"Google Calendar setup could not complete. Previous saved settings were kept; reopen setup to retry."},
     {L"GoogleCalendarSetupInitial", L"No browser or account request starts until you choose Connect or Refresh calendar list."},
-    {L"GoogleCalendarSetupInstructions", L"Import the credentials JSON for your Google Cloud Desktop app, then connect in your default browser. Only read-only Calendar access is requested; DesktopStub never asks for your Google password."},
+    {L"GoogleCalendarSetupInstructions", L"Import your Google Cloud Desktop app credentials, then connect in your browser. Choose All calendars to combine upcoming events or select one calendar. Access is read-only; DesktopStub never asks for your Google password."},
     {L"GoogleCalendarTileChanged", L"This tile or its Google settings changed. Reopen setup; no previous account was replaced."},
     {L"GoogleCalendarTimerFailed", L"Windows could not start the setup completion timer. No browser or account request was started; try again."},
-    {L"GoogleCalendarUseButton", L"Use selected calendar"},
+    {L"GoogleCalendarUseButton", L"Use selected calendars"},
+    {L"GoogleCalendarAllCalendars", L"All calendars"},
+    {L"GoogleCalendarPickerFailed", L"The calendar picker could not be prepared. Saved account settings were kept; refresh the list to retry."},
+    {L"GoogleCalendarAllSelectedSaved", L"All readable calendars selected. Their upcoming events will be combined on this tile. You may close this window."},
+    {L"GoogleCalendarAllSelectedMessage", L"This Calendar tile will combine upcoming events from all readable calendars in this Google account."},
+    {L"SettingsWindowAdd", L"Add tile..."},
+    {L"SettingsWindowApplied", L"Settings refreshed. Any requested confirmation must finish before its change is applied."},
+    {L"SettingsWindowBack", L"\u2190 Back"},
+    {L"SettingsWindowHeading", L"Settings"},
+    {L"SettingsWindowNoTiles", L"No tiles configured"},
+    {L"SettingsWindowOpenIni", L"Open configuration file..."},
+    {L"SettingsWindowReference", L"ExplorerPatcher-style presentation, independently implemented for DesktopStub."},
+    {L"SettingsWindowReload", L"Reload settings (F5)"},
+    {L"SettingsWindowReloaded", L"Settings reloaded."},
+    {L"SettingsWindowStale", L"The profile or settings changed. Press F5 to reload before applying another change."},
+    {L"SettingsWindowTile", L"Tile"},
+    {L"SettingsWindowTiles", L"Tiles"},
+    {L"SettingsWindowTitle", L"DesktopStub Properties"},
+    {L"DesktopSettingsWindow", L"Settings..."},
     {L"GoogleCalendarWindowSuffix", L" — Google Calendar"},
     {L"GoogleCalendarWorkerBusy", L"Previous requests are stopping. Try again in a moment."},
     {L"GoogleCalendarWorkerFailed", L"The Google Calendar worker could not start. No account was changed."},
@@ -1573,6 +1591,12 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from built-in defaults if missing", L"generated from configured defaults if missing");
     UpgradeStringDefaultIfUnmodified(L"ManifestRegenerateNow", L"Regenerate AppxManifest.xml from built-in defaults", L"Regenerate AppxManifest.xml from config");
     UpgradeStringDefaultIfUnmodified(L"WallpaperImageLoadedWic", L"[i] Wallpaper image loaded with WIC: %lu x %lu.", L"[i] Wallpaper image loaded with low-memory WIC decode: %lu x %lu (max long edge=%d).");
+    UpgradeStringDefaultIfUnmodified(L"GoogleCalendarClientConnected",L"Google account connected. Refresh the calendar list or choose a calendar.",L"Google account connected. Refresh the list, then choose All calendars or one calendar.");
+    UpgradeStringDefaultIfUnmodified(L"GoogleCalendarChoose",L"Choose a calendar and click Use selected calendar. Each Calendar tile can select its own account and calendar.",L"Choose All calendars to combine upcoming events from every readable calendar, or select one calendar. Click Use selected calendars to save this tile's choice.");
+    UpgradeStringDefaultIfUnmodified(L"GoogleCalendarSelectFirst",L"Select a calendar from the list first.",L"Select All calendars or one calendar from the list first.");
+    UpgradeStringDefaultIfUnmodified(L"GoogleCalendarSelectedTitle",L"Calendar selected",L"Calendars selected");
+    UpgradeStringDefaultIfUnmodified(L"GoogleCalendarSetupInstructions",L"Import the credentials JSON for your Google Cloud Desktop app, then connect in your default browser. Only read-only Calendar access is requested; DesktopStub never asks for your Google password.",L"Import your Google Cloud Desktop app credentials, then connect in your browser. Choose All calendars to combine upcoming events or select one calendar. Access is read-only; DesktopStub never asks for your Google password.");
+    UpgradeStringDefaultIfUnmodified(L"GoogleCalendarUseButton",L"Use selected calendar",L"Use selected calendars");
     UpgradePowerShellExeDefault();
     UpgradeStringDefaultIfUnmodified(L"GoogleCalendarWindowSuffix",L" \u00e2\u20ac\u201d Google Calendar",L" \u2014 Google Calendar");
 }

@@ -19,6 +19,7 @@ struct CommandLineOptions
 {
     bool helpRequested = false;
     bool setupDesktop = false;
+    bool settingsWindow = false;
     std::wstring tileSetupKey;
     std::wstring windowsTileId, mediaAction;
     bool tileSignIn = false;
@@ -94,6 +95,7 @@ static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_MESSAGEBOX = 5;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_CONSOLE = 6;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE = 7;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SETUP_DESKTOP = 11;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SETTINGS_WINDOW = 12;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MASK = 0x00FF;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE = 32;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE = 64;
@@ -1210,6 +1212,7 @@ static bool ParseCommandLineOptions()
         }
 
         if(IEquals(arg,L"--setup-desktop")){g_commandLine.setupDesktop=true;continue;}
+        if(IEquals(arg,L"--settings")){g_commandLine.settingsWindow=true;continue;}
         if (TryParseAppxActivationArgument(arg, value))
         {
             g_commandLine.appxActivationServer = true;
@@ -2185,6 +2188,7 @@ static std::wstring CommandLineUsageText()
         COMMAND_LINE_HELP_TEMPLATE_KEY,
         g_commandLineHelpDefaults[0].value);
     return FormatCommandLineHelpTemplate(iniTemplate.c_str()) +
+        L"\nSettings window: --settings [--ini FILE] opens the native Properties window; the tray menu remains available.\n"
         L"\nDesktop setup: --setup-desktop [--ini FILE] registers the main Desktop host, then restarts with Live Tile identity. Explicit action only.\n"
         L"\nNotes: --notes-import-profile INI; --notes-import-cookie GAME=JSON; --notes-clear GAME (configuration only).\n"
         L"       --notes-refresh GAME|All (existing resident only; no new process).\n"

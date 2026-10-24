@@ -15,6 +15,12 @@ void ConfigurationTests(){
     std::wstring error;for(const auto& setting:Settings){auto key=std::wstring(setting.key),value=std::wstring(setting.fallback);Check(NormalizeSetting(key,value,error),"Google setting factory value validates");}
     for(const auto* value:{L"token-plaintext",L"http://other.example/",L"dpapi:old"}){std::wstring key=L"RefreshTokenProtected",text=value;Check(!NormalizeSetting(key,text,error),"plaintext/foreign/legacy serialized refresh tokens are not accepted");}
     auto cfg=Config();Check(RuntimeConfigValidate(cfg,error,true),"bounded owner-bound Google configuration validates");cfg.ownerKey.clear();Check(!RuntimeConfigValidate(cfg,error),"missing account owner is rejected");
+    auto single=Config(),all=single;all.allCalendars=true;
+    Check(!single.allCalendars&&ConfigurationKey(single)!=ConfigurationKey(all),"all-calendars defaults off and invalidates the private provider configuration key");
+    std::wstring allKey=L"AllCalendars",allValue=L"yes";Check(NormalizeSetting(allKey,allValue,error)&&allValue==L"1","all-calendars accepts normalized boolean settings");
+    allValue=L"sometimes";Check(!NormalizeSetting(allKey,allValue,error),"ambiguous all-calendars settings reject");
+    Configuration parsed;Check(ReadConfiguration([](const wchar_t* key,const wchar_t* fallback){return std::wstring(key)==L"AllCalendars"?L"1":std::wstring(fallback);},parsed,error)&&parsed.allCalendars,
+        "per-tile configuration reads persisted AllCalendars without a global account setting");
     cfg=Config();Check(ImportDesktopClientJson(R"({"installed":{"client_id":"123-import.apps.googleusercontent.com","client_secret":"DESKTOP_PUBLIC_SECRET","token_uri":"https://attacker.example/token"}})",cfg,error)&&
         cfg.clientId==L"123-import.apps.googleusercontent.com"&&cfg.refreshTokenProtected.empty(),"Desktop OAuth JSON imports only client credentials and clears stale grants");
     for(const auto* json:{R"({"web":{"client_id":"123-fixture.apps.googleusercontent.com"}})",R"({"type":"service_account","private_key":"PRIVATE"})",
@@ -84,5 +90,80 @@ void FetchTests(){
 void TimeZoneTests(){std::wstring windows;Check(ResolveIanaWindowsTimeZone(L"Asia/Jakarta",windows)&&windows==L"SE Asia Standard Time","OS ICU maps Indonesian calendar zone without small hardcoded alias list");
     Check(ResolveIanaWindowsTimeZone(L"Europe/Helsinki",windows)&&!windows.empty(),"OS ICU resolves another IANA timezone outside the previous aliases");
     Check(!ResolveIanaWindowsTimeZone(L"Unrecognized/NoSuchZone",windows)&&windows.empty(),"unrecognized IANA zone never guesses local timezone");}
+void AllCalendarTests(){
+    auto cfg=Config();cfg.allCalendars=true;auto hooks=BaseHooks();Session session;int tokenCalls=0,listCalls=0,eventCalls=0;
+    hooks.http=[&](const aip::HttpFetchOptions& options,aip::HttpFetchResponse& response,std::wstring&){
+        if(options.url==L"https://oauth2.googleapis.com/token"){++tokenCalls;Reply(response,tokens);return true;}
+        Check(options.method==L"GET"&&!options.followRedirects&&options.url.find(L"REFRESH_ONLY_FIXTURE")==std::wstring::npos,
+            "all-calendar requests remain bounded read-only calls without refresh credentials in URLs");
+        if(options.url.find(L"calendarList")!=std::wstring::npos){++listCalls;Check(options.url.find(L"showHidden=true")!=std::wstring::npos,
+            "all-calendars includes readable account calendars hidden from the web app list");Reply(response,R"({"items":[{"id":"jakarta@example.test","summary":"Jakarta","timeZone":"Asia/Jakarta","primary":true},{"id":"tokyo@example.test","summary":"Tokyo","timeZone":"Asia/Tokyo"}]})");return true;}
+        ++eventCalls;
+        if(options.url.find(L"jakarta%40example.test")!=std::wstring::npos)Reply(response,R"({"timeZone":"UTC","items":[{"id":"same-id","summary":"Jakarta all day","start":{"date":"2026-10-24"},"end":{"date":"2026-10-25"}},{"id":"timed","summary":"Between the all-day midnights","start":{"dateTime":"2026-10-23T16:00:00Z"},"end":{"dateTime":"2026-10-23T16:30:00Z"}}]})");
+        else Reply(response,R"({"timeZone":"UTC","items":[{"id":"same-id","summary":"Tokyo all day","start":{"date":"2026-10-24"},"end":{"date":"2026-10-25"}},{"id":"same-id","summary":"Repeated on a page","start":{"date":"2026-10-24"},"end":{"date":"2026-10-25"}}]})");return true;};
+    const auto start=aip::datetime::Seconds({2026,10,23});std::vector<Event> events;std::wstring error;
+    Check(FetchEvents(cfg,start,start+7*86400,events,error,{},hooks,&session)&&events.size()==3&&events[0].summary==L"Tokyo all day"&&
+        events[1].summary==L"Between the all-day midnights"&&events[2].summary==L"Jakarta all day",
+        "all calendars merge chronologically using each original all-day zone rather than UTC midnight");
+    Check(tokenCalls==1&&listCalls==1&&eventCalls==2,"multi-calendar fetch lists account calendars once and shares one bearer across every calendar and timezone lookup");
+    Check(events.size()==3&&events[0].id!=events[2].id&&events[0].calendarId==L"tokyo@example.test"&&events[2].calendarId==L"jakarta@example.test"&&
+        events[0].allDayUtcResolved&&events[2].allDayUtcResolved,"duplicates within a calendar collapse while equal IDs in different calendars keep independent origin identities");
+    aip::datetime::Occurrence occurrence;bool resolverUsed=false;
+    Check(ToOccurrence(events[0],[&](const auto&,const auto&,auto&){resolverUsed=true;return false;},occurrence)&&!resolverUsed&&occurrence.start==start+15*3600,
+        "resolved multi-calendar all-day instants reach the host without repeating timezone conversion");
+    bool canceled=false;eventCalls=0;session.Clear();
+    hooks.http=[&](const aip::HttpFetchOptions& options,aip::HttpFetchResponse& response,std::wstring&){
+        if(options.url==L"https://oauth2.googleapis.com/token")Reply(response,tokens);
+        else if(options.url.find(L"calendarList")!=std::wstring::npos)Reply(response,R"({"items":[{"id":"one","summary":"One","timeZone":"UTC"},{"id":"two","summary":"Two","timeZone":"UTC"}]})");
+        else {++eventCalls;if(eventCalls==2){response.statusCode=403;return true;}Reply(response,R"({"items":[{"id":"first","start":{"dateTime":"2026-10-24T01:00:00Z"},"end":{"dateTime":"2026-10-24T02:00:00Z"}}]})");}return true;};
+    Check(!FetchEvents(cfg,start,start+7*86400,events,error,{},hooks,&session)&&events.empty()&&eventCalls==2,
+        "a denied later calendar cannot return an apparently successful partial account aggregate");
+    eventCalls=0;
+    hooks.http=[&](const aip::HttpFetchOptions& options,aip::HttpFetchResponse& response,std::wstring&){
+        if(options.url==L"https://oauth2.googleapis.com/token")Reply(response,tokens);
+        else if(options.url.find(L"calendarList")!=std::wstring::npos)Reply(response,R"({"items":[{"id":"one","timeZone":"UTC"},{"id":"two","timeZone":"UTC"}]})");
+        else {++eventCalls;Reply(response,R"({"items":[]})");canceled=true;}return true;};
+    Check(!FetchEvents(cfg,start,start+7*86400,events,error,[&]{return canceled;},hooks)&&events.empty()&&eventCalls==1,
+        "cancellation during the first calendar prevents later account requests and discards the partial result");
+    canceled=false;listCalls=0;eventCalls=0;
+    hooks.http=[&](const aip::HttpFetchOptions& options,aip::HttpFetchResponse& response,std::wstring&){
+        if(options.url==L"https://oauth2.googleapis.com/token"){Reply(response,tokens);return true;}
+        if(options.url.find(L"calendarList")!=std::wstring::npos){++listCalls;std::string body="{\"items\":[";const auto count=listCalls==1?100:1;
+            for(int i=0;i<count;++i){if(i)body+=',';body+="{\"id\":\"cal-"+std::to_string((listCalls-1)*100+i)+"\",\"timeZone\":\"UTC\"}";}
+            body+=listCalls==1?"],\"nextPageToken\":\"second\"}":"]}";Reply(response,body);return true;}
+        ++eventCalls;Reply(response,R"({"items":[]})");return true;};
+    Check(!FetchEvents(cfg,start,start+7*86400,events,error,{},hooks)&&events.empty()&&listCalls==2&&eventCalls==0&&error.find(L"100")!=std::wstring::npos,
+        "more than 100 readable calendars fails before any calendar events are fetched");
+    listCalls=0;eventCalls=0;
+    hooks.http=[&](const aip::HttpFetchOptions& options,aip::HttpFetchResponse& response,std::wstring&){
+        if(options.url==L"https://oauth2.googleapis.com/token"){Reply(response,tokens);return true;}
+        if(options.url.find(L"calendarList")!=std::wstring::npos){++listCalls;Reply(response,R"({"items":[{"id":"one","timeZone":"UTC"},{"id":"two","timeZone":"UTC"}]})");return true;}
+        ++eventCalls;const bool first=options.url.find(L"/one/events")!=std::wstring::npos;int page=eventCalls-1;std::string body="{\"items\":[";
+        const int count=first?250:1;for(int i=0;i<count;++i){if(i)body+=',';body+="{\"id\":\"event-"+std::to_string(first?page*250+i:0)+"\",\"start\":{\"dateTime\":\"2026-10-24T01:00:00Z\"},\"end\":{\"dateTime\":\"2026-10-24T02:00:00Z\"}}";}
+        body+=(first&&page<7)?"],\"nextPageToken\":\"page-"+std::to_string(page+1)+"\"}":"]}";Reply(response,body);return true;};
+    Check(!FetchEvents(cfg,start,start+7*86400,events,error,{},hooks)&&events.empty()&&eventCalls==9&&error.find(L"2000")!=std::wstring::npos,
+        "the 2000-event cap applies across calendars and cannot publish a truncated aggregate");
+    ULONGLONG clock=1000;hooks.monotonicNow=[&]{return clock;};eventCalls=0;
+    hooks.http=[&](const aip::HttpFetchOptions& options,aip::HttpFetchResponse& response,std::wstring&){
+        if(options.url==L"https://oauth2.googleapis.com/token")Reply(response,tokens);
+        else if(options.url.find(L"calendarList")!=std::wstring::npos)Reply(response,R"({"items":[{"id":"one","timeZone":"UTC"},{"id":"two","timeZone":"UTC"}]})");
+        else {++eventCalls;clock=eventCalls==1?30000:47000;Reply(response,R"({"items":[]})");}return true;};
+    Check(!FetchEvents(cfg,start,start+7*86400,events,error,{},hooks)&&events.empty()&&eventCalls==2,
+        "one shared 45-second deadline covers all calendar requests instead of restarting the timeout for each calendar");
+    hooks.monotonicNow={};eventCalls=0;
+    hooks.http=[&](const aip::HttpFetchOptions& options,aip::HttpFetchResponse& response,std::wstring&){
+        if(options.url==L"https://oauth2.googleapis.com/token")Reply(response,tokens);
+        else if(options.url.find(L"calendarList")!=std::wstring::npos)Reply(response,R"({"items":[{"id":"one","timeZone":"Unrecognized/NoSuchZone"}]})");
+        else {++eventCalls;Reply(response,R"({"items":[{"id":"allday","start":{"date":"2026-10-24"},"end":{"date":"2026-10-25"}}]})");}return true;};
+    Check(!FetchEvents(cfg,start,start+7*86400,events,error,{},hooks)&&events.empty()&&error.find(L"time zone")!=std::wstring::npos,
+        "unknown original all-day timezone fails without inventing local time or returning a partial aggregate");
+    eventCalls=0;
+    hooks.http=[&](const aip::HttpFetchOptions& options,aip::HttpFetchResponse& response,std::wstring&){
+        if(options.url==L"https://oauth2.googleapis.com/token")Reply(response,tokens);
+        else if(options.url.find(L"calendarList")!=std::wstring::npos)Reply(response,R"({"items":[{"id":"one","timeZone":"UTC"},{"id":"two","timeZone":"UTC"}]})");
+        else {++eventCalls;Reply(response,R"({"items":[],"nextPageToken":"same"})");}return true;};
+    Check(!FetchEvents(cfg,start,start+7*86400,events,error,{},hooks)&&events.empty()&&eventCalls==2&&error.find(L"repeated")!=std::wstring::npos,
+        "repeated event page tokens stop the aggregate before later calendars and never publish success");
 }
-int main(){ConfigurationTests();CallbackTests();ConnectTests();FetchTests();TimeZoneTests();std::cout<<"Google Calendar: "<<checks<<" checks, "<<failures<<" failures; injected HTTP/browser/credentials only\n";return failures?1:0;}
+}
+int main(){ConfigurationTests();CallbackTests();ConnectTests();FetchTests();TimeZoneTests();AllCalendarTests();std::cout<<"Google Calendar: "<<checks<<" checks, "<<failures<<" failures; injected HTTP/browser/credentials only\n";return failures?1:0;}

@@ -1,4 +1,6 @@
 #include "ga_tray_helpers.inc"
+static constexpr UINT ID_DESKTOPSTUB_SETTINGS_WINDOW=64900;
+static bool OpenDesktopStubSettings(HWND owner);
 static bool RequestDesktopHostSetup(HWND owner);
 static void CompleteDesktopHostSetup(HWND owner);
 static bool RecoverInterruptedDesktopHostSetup();
@@ -14,3 +16,4 @@ static bool RecoverInterruptedDesktopHostSetup();
 #include "ga_menu_wording.inc"
 #include "ga_tray_menu.inc"
 #include "ga_tray_dispatch.inc"
+#include "ga_settings_window.inc"

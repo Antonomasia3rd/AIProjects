@@ -11,6 +11,7 @@
 namespace aip { namespace notifications {
 enum class ConfirmationChoice { Yes, No };
 struct ConfirmationAction { std::wstring token; ConfirmationChoice choice=ConfirmationChoice::No; };
+struct ConfirmationLaunch {std::wstring action,profile;bool review=false;};
 struct PendingConfirmation {
     std::wstring key,token,profile;
     std::uint64_t created=0,deadline=0;
@@ -33,6 +34,32 @@ inline bool ParseConfirmationAction(const std::wstring& arguments,ConfirmationAc
     else if(suffix==L"&choice=no")parsed.choice=ConfirmationChoice::No;
     else return false;
     output=std::move(parsed);return true;
+}
+// Foreground toast actions may launch another EXE. Reserve their arguments
+// before positional wallpaper parsing; stale actions must never become paths.
+inline bool ParseConfirmationLaunch(const std::vector<std::wstring>& args,ConfirmationLaunch& output,bool& recognized){
+    const bool legacyReview=(args.size()==2&&args[1]==L"review")||(args.size()==3&&args[1]==L"-ToastActivated"&&args[2]==L"review");
+    recognized=legacyReview;for(std::size_t i=1;i<args.size();++i){if(args[i]==L"--ini"&&i+1<args.size()){++i;continue;}
+        if(args[i].compare(0,8,L"confirm=")==0||args[i]==L"--notification-review")recognized=true;}
+    if(!recognized)return false;ConfirmationLaunch parsed;bool profileSeen=false,actionSeen=false;
+    for(std::size_t i=1;i<args.size();++i){const auto& arg=args[i];
+        if(arg==L"--ini"){
+            if(profileSeen||i+1>=args.size()||!ConfirmationIdentityText(args[i+1],32760))return false;
+            profileSeen=true;parsed.profile=args[++i];
+        }else if(arg.compare(0,8,L"confirm=")==0||arg==L"--notification-review"||(legacyReview&&arg==L"review")){
+            if(actionSeen)return false;actionSeen=true;parsed.action=arg;parsed.review=arg==L"review"||arg==L"--notification-review";
+            ConfirmationAction action;if(!parsed.review&&!ParseConfirmationAction(arg,action))return false;
+        }else if(arg!=L"-ToastActivated"&&arg!=L"--launched-from-appx-stub")return false;
+    }
+    if(!actionSeen)return false;output=std::move(parsed);return true;
+}
+inline std::wstring ConfirmationProfilePrefix(const std::wstring& profile){
+    if(profile.empty())return {};if(!ConfirmationIdentityText(profile,32760))return {};
+    std::wstring quoted=L"--ini \"";std::size_t slashes=0;
+    for(const auto ch:profile){if(ch==L'\\'){++slashes;continue;}
+        quoted.append(ch==L'\"'?slashes*2+1:slashes,L'\\');slashes=0;quoted+=ch;
+    }
+    quoted.append(slashes*2,L'\\');return quoted+L"\" ";
 }
 class ConfirmationRegistry {
     std::vector<PendingConfirmation> pending_;
@@ -102,13 +129,15 @@ inline std::wstring ConfirmationXmlText(const std::wstring& text,std::size_t max
     return escaped;
 }
 inline std::wstring XMLConfirmationXml(const std::wstring& title,const std::wstring& message,const std::wstring& token,
-    const std::wstring& yesLabel=L"Yes",const std::wstring& noLabel=L"No"){
+    const std::wstring& yesLabel=L"Yes",const std::wstring& noLabel=L"No",const std::wstring& profile={}){
     if(!ValidConfirmationToken(token))return {};
+    const auto prefix=ConfirmationProfilePrefix(profile);if(!profile.empty()&&prefix.empty())return {};
     const auto yes=ConfirmationXmlText(yesLabel,64),no=ConfirmationXmlText(noLabel,64);
-    return L"<toast launch=\"review\"><visual><binding template=\"ToastGeneric\"><text>"+ConfirmationXmlText(title,128)+
+    const auto argument=[&](const std::wstring& value){return ConfirmationXmlText(prefix+value,33000);};
+    return L"<toast launch=\""+argument(L"--notification-review")+L"\"><visual><binding template=\"ToastGeneric\"><text>"+ConfirmationXmlText(title,128)+
         L"</text><text>"+ConfirmationXmlText(message,1024)+L"</text></binding></visual><actions>"
-        L"<action content=\""+(yes.empty()?L"Yes":yes)+L"\" activationType=\"foreground\" arguments=\"confirm="+token+L"&amp;choice=yes\"/>"
-        L"<action content=\""+(no.empty()?L"No":no)+L"\" activationType=\"foreground\" arguments=\"confirm="+token+L"&amp;choice=no\"/>"
+        L"<action content=\""+(yes.empty()?L"Yes":yes)+L"\" activationType=\"foreground\" arguments=\""+argument(L"confirm="+token+L"&choice=yes")+L"\"/>"
+        L"<action content=\""+(no.empty()?L"No":no)+L"\" activationType=\"foreground\" arguments=\""+argument(L"confirm="+token+L"&choice=no")+L"\"/>"
         L"</actions><audio silent=\"true\"/></toast>";
 }
 } }

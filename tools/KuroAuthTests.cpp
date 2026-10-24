@@ -1,4 +1,5 @@
 #include "../dependencies/content_sources/kuro_auth.inc"
+#include "../dependencies/content_sources/kuro_signin_layout.h"
 #include <iostream>
 namespace {
 int checks=0,failures=0;
@@ -29,6 +30,17 @@ void ModelTests(){
     input.password=L"UNIQUE-PRIVATE-PASSWORD-NEVER-IN-BROWSER";
     Check(page.find(input.email)==std::wstring::npos&&page.find(input.password)==std::wstring::npos&&page.find(L"access_token")==std::wstring::npos,
         "verification document never embeds account email, password or game token");
+    CaptchaStage stage=CaptchaStage::Error;
+    Check(ParseCaptchaStageMessage(L"{\"nonce\":\""+nonce+L"\",\"stage\":\"ready\"}",nonce,stage)&&stage==CaptchaStage::Ready,
+        "challenge readiness requires the current native session nonce");
+    Check(ParseCaptchaStageMessage(L"{\"nonce\":\""+nonce+L"\",\"stage\":\"error\"}",nonce,stage)&&stage==CaptchaStage::Error,
+        "challenge script errors return through the same nonce-bound channel");
+    for(const auto& invalid:std::vector<std::wstring>{L"{\"stage\":\"ready\"}",L"{\"nonce\":\"wrong\",\"stage\":\"ready\"}",
+        L"{\"nonce\":\""+nonce+L"\",\"stage\":\"ready\",\"extra\":true}",L"{\"nonce\":\""+nonce+L"\",\"stage\":\"loaded\"}",proofJson})
+        Check(!ParseCaptchaStageMessage(invalid,nonce,stage),"foreign, extra, unknown and proof-only messages cannot masquerade as challenge readiness");
+    Check(page.find(L"onReady(function()")!=std::wstring::npos&&page.find(L"window.kuroNotice('ready')")!=std::wstring::npos&&
+        page.find(L"onerror='window.kuroFailure()'")!=std::wstring::npos&&page.find(L"c.onError(function(){window.kuroFailure();})")!=std::wstring::npos,
+        "actual challenge HTML reports GeeTest readiness and script/service failures rather than relying on blank document navigation");
 }
 void FlowTests(){
     Credentials input;Input(input);int calls=0;std::string firstBody;
@@ -71,5 +83,38 @@ void FlowTests(){
     Check(calls==2&&result.status==Status::Error&&result.token.empty(),"unsafe returned token is never accepted");
     Credentials empty;calls=0;result=Login(empty,{},[&](const auto&,auto&,auto&){++calls;return false;});Check(calls==0&&result.status==Status::Error,"empty manual inputs cannot launch network activity");
 }
+void RoleRetryTests(){
+    Result signedIn;signedIn.status=Status::Authenticated;signedIn.token=L"PRIVATE-REUSABLE-GAME-TOKEN";
+    std::vector<Role> roles;std::wstring error;int calls=0;
+    const auto unavailable=[&](const aip::HttpFetchOptions& options,auto& response,auto&){++calls;
+        Check(options.url.find(L"emailPwd.lg")==std::wstring::npos&&options.url.find(L"getToken.lg")==std::wstring::npos,
+            "character retry performs no password login or authorization-code exchange");
+        Reply(response,calls==1?R"({"codes":0,"oauthCode":"CODE"})":R"({"code":1005,"message":"PRIVATE-REUSABLE-GAME-TOKEN"})");return true;};
+    Check(!DiscoverSignedInRoles(signedIn,L"FIXTURE-DEVICE",roles,error,unavailable)&&calls==5&&roles.empty()&&
+        signedIn.status==Status::Authenticated&&signedIn.token==L"PRIVATE-REUSABLE-GAME-TOKEN"&&error.find(L"1005")!=std::wstring::npos&&
+        error.find(signedIn.token)==std::wstring::npos,"retryable role lookup failure preserves successful temporary sign-in and redacts remote messages");
+    calls=0;
+    Check(DiscoverSignedInRoles(signedIn,L"FIXTURE-DEVICE",roles,error,[&](const auto& options,auto& response,auto&){++calls;
+        Check(options.url.find(L"emailPwd.lg")==std::wstring::npos,"successful character retry still does not need the password");
+        Reply(response,calls==1?R"({"codes":0,"oauthCode":"NEW-CODE"})":R"({"code":0,"data":{"Asia":"{\"roleId\":12345,\"roleName\":\"Rover\",\"level\":60}"}})");return true;})&&
+        calls==2&&roles.size()==1&&roles.front().region==L"Asia"&&signedIn.token==L"PRIVATE-REUSABLE-GAME-TOKEN",
+        "a new lookup can discover the character using the same explicit temporary token");
+    Result absent;calls=0;Check(!DiscoverSignedInRoles(absent,L"FIXTURE",roles,error,[&](const auto&,auto&,auto&){++calls;return false;})&&calls==0,
+        "character retry cannot start without an authenticated temporary session");
 }
-int main(){ModelTests();FlowTests();std::cout<<checks<<" checks, "<<failures<<" failures\n";return failures?1:0;}
+void LayoutTests(){
+    using namespace aip::kuro::signin;
+    Check(CompactHeight==300&&ExpandedHeight>CompactHeight,"sign-in opens compact and expands only for a visible challenge");
+    for(int width:{624,744,1000})for(bool challenge:{false,true}){
+        const int height=challenge?640:260;const auto layout=Compute(width,height,challenge);
+        for(const auto& box:{layout.heading,layout.emailLabel,layout.email,layout.passwordLabel,layout.password,layout.login,layout.retry,layout.save,layout.close,layout.status})
+            Check(box.x>=0&&box.y>=0&&box.width>0&&box.height>0&&box.Right()<=width&&box.Bottom()<=height,
+                "resizable sign-in controls remain within the supported client bounds");
+        Check(layout.login.Right()<layout.retry.x&&layout.retry.Right()<layout.save.x&&layout.save.Right()<layout.close.x,
+            "sign-in/retry/save/close controls do not overlap at the minimum supported width");
+        Check(challenge?(layout.browser.y==BrowserTop&&layout.browser.height>0&&layout.browser.Bottom()<=height):
+            (layout.browser.width==0&&layout.browser.height==0),"the compact layout reserves no empty browser area");
+    }
+}
+}
+int main(){ModelTests();FlowTests();RoleRetryTests();LayoutTests();std::cout<<checks<<" checks, "<<failures<<" failures\n";return failures?1:0;}

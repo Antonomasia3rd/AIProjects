@@ -21,6 +21,7 @@ struct Hooks {
         std::wstring&,std::wstring&,std::wstring&,const Cancel&)> authorize;
     SecretTransform protect,unprotect;
     bool inert=false;
+    std::function<ULONGLONG()> monotonicNow; // Inert deadline fixtures only.
 };
 class Session {
 public:
@@ -34,8 +35,8 @@ public:
 };
 namespace detail {
 inline bool Canceled(const Cancel& cancel){return cancel&&cancel();}
-inline Cancel Deadline(const Cancel& cancel,unsigned milliseconds=45000) {
-    const auto deadline=GetTickCount64()+milliseconds;return [cancel,deadline]{return Canceled(cancel)||GetTickCount64()>=deadline;};
+inline Cancel Deadline(const Cancel& cancel,unsigned milliseconds=45000,const std::function<ULONGLONG()>& clock={}) {
+    const auto deadline=(clock?clock():GetTickCount64())+milliseconds;return [cancel,deadline,clock]{return Canceled(cancel)||(clock?clock():GetTickCount64())>=deadline;};
 }
 inline bool SafeToken(const std::wstring& token){return !token.empty()&&token.size()<=16384&&
     std::none_of(token.begin(),token.end(),[](wchar_t c){return c<=0x20||c==0x7f;});}
@@ -293,34 +294,40 @@ inline bool Connect(const Configuration& c,Credentials& credentials,std::wstring
         detail::Wipe(session->accessToken);session->key=ConfigurationKey(configured);session->accessToken=access.value;session->expires=GetTickCount64()+static_cast<ULONGLONG>((std::max)(0,expires-30))*1000;}
     return true;
 }
-inline bool ListCalendars(const Configuration& c,std::vector<CalendarChoice>& output,std::wstring& error,const Cancel& cancel={},const Hooks& hooks={},Session* session=nullptr) {
-    const auto bounded=detail::Deadline(cancel);output.clear();detail::Sensitive access;if(!detail::Access(c,hooks,bounded,access,error,session))return false;std::wstring next;std::set<std::wstring> pages,ids;
+namespace detail {
+inline bool ListReadableCalendars(const Configuration& c,const std::wstring& access,std::vector<CalendarChoice>& output,std::wstring& error,
+    const Cancel& bounded,const Hooks& hooks,std::size_t maximum) {
+    output.clear();std::vector<CalendarChoice> gathered;std::wstring next;std::set<std::wstring> pages,ids;
     for(unsigned pageIndex=0;pageIndex<8;++pageIndex){std::string json;auto url=L"https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=100&minAccessRole=reader&showDeleted=false";
         std::wstring request=url;if(!next.empty())request+=L"&pageToken="+detail::Query(next);
-        if(!detail::Request(c,hooks,bounded,request,access.value,json,error)){if(session)session->Clear();return false;}detail::Object page;std::vector<std::string> items;
+        if(c.allCalendars)request+=L"&showHidden=true";
+        if(!detail::Request(c,hooks,bounded,request,access,json,error))return false;detail::Object page;std::vector<std::string> items;
         if(!detail::Items(json,page,items,next,100)){error=L"Google returned an invalid calendar list.";return false;}
         for(const auto& item:items){detail::Object row;CalendarChoice calendar;
             if(!detail::ReadObject(item,row)||!detail::String(row,"id",calendar.id,2048)||calendar.id.empty()||
                 !detail::String(row,"summary",calendar.name,512,true)||!detail::String(row,"timeZone",calendar.timeZone,128,true)){error=L"Google returned an invalid calendar entry.";return false;}
             const auto primary=row.find("primary");calendar.primary=primary!=row.end()&&primary->second=="true";
-            if(calendar.name.empty())calendar.name=L"Calendar";if(ids.insert(calendar.id).second)output.push_back(std::move(calendar));
+            if(calendar.name.empty())calendar.name=L"Calendar";
+            if(ids.insert(calendar.id).second){if(gathered.size()>=maximum){error=maximum<=100?
+                L"All-calendars mode supports at most 100 readable calendars. Choose one calendar for this tile instead.":
+                L"Google calendar list exceeds the bounded 800-calendar picker. Choose a calendar ID explicitly.";return false;}
+                gathered.push_back(std::move(calendar));}
         }
-        if(next.empty())return !detail::Canceled(bounded);if(!pages.insert(next).second){error=L"Google returned a repeated calendar page.";return false;}
+        if(next.empty()){if(Canceled(bounded)){error=L"Google Calendar request canceled or timed out.";return false;}output=std::move(gathered);return true;}
+        if(!pages.insert(next).second){error=L"Google returned a repeated calendar page.";return false;}
     }
     error=L"Google calendar list exceeds the bounded 800-calendar picker. Choose a calendar ID explicitly.";return false;
 }
-inline bool FetchEvents(const Configuration& c,aip::datetime::UTC minimum,aip::datetime::UTC maximum,std::vector<Event>& output,
-    std::wstring& error,const Cancel& cancel={},const Hooks& hooks={},Session* session=nullptr) {
-    output.clear();if(minimum<aip::datetime::Seconds({1601,1,1})||maximum>aip::datetime::Seconds({9999,12,31,23,59,59})||
-        maximum<=minimum||maximum-minimum>32LL*86400){error=L"Google Calendar query must cover a supported positive window of at most 32 days.";return false;}
-    const auto bounded=detail::Deadline(cancel);detail::Sensitive access;if(!detail::Access(c,hooks,bounded,access,error,session))return false;std::wstring next;std::set<std::wstring> pages,ids;
+inline bool FetchCalendar(const Configuration& c,const std::wstring& calendarId,const std::wstring& timeZone,const std::wstring& access,
+    aip::datetime::UTC minimum,aip::datetime::UTC maximum,std::vector<Event>& gathered,std::size_t& scanned,std::wstring& error,const Cancel& bounded,const Hooks& hooks) {
+    std::wstring next;std::set<std::wstring> pages,ids;
     for(unsigned pageIndex=0;pageIndex<8;++pageIndex){
-        auto url=L"https://www.googleapis.com/calendar/v3/calendars/"+detail::Query(c.calendarId.empty()?L"primary":c.calendarId)+
+        auto url=L"https://www.googleapis.com/calendar/v3/calendars/"+detail::Query(calendarId)+
             L"/events?singleEvents=true&orderBy=startTime&showDeleted=false&maxResults=250&timeZone=UTC&timeMin="+detail::Query(Rfc3339(minimum))+L"&timeMax="+detail::Query(Rfc3339(maximum));
-        if(!next.empty())url+=L"&pageToken="+detail::Query(next);std::string json;if(!detail::Request(c,hooks,bounded,url,access.value,json,error)){if(session)session->Clear();return false;}
+        if(!next.empty())url+=L"&pageToken="+detail::Query(next);std::string json;if(!detail::Request(c,hooks,bounded,url,access,json,error))return false;
         detail::Object page;std::vector<std::string> items;if(!detail::Items(json,page,items,next,250)){error=L"Google returned an invalid event page.";return false;}
-        std::wstring calendarZone;if(!detail::String(page,"timeZone",calendarZone,128,true)){error=L"Google returned an invalid calendar time zone.";return false;}
         for(const auto& item:items){detail::Object row,start,end;Event event;std::wstring status;
+            if(++scanned>4000){error=L"Google Calendar window exceeds the bounded 4000-row scan. Reduce Days ahead or select one calendar.";return false;}
             if(!detail::ReadObject(item,row)||!detail::String(row,"status",status,32,true)){error=L"Google returned an invalid event.";return false;}
             if(status==L"cancelled")continue;
             const auto startField=row.find("start"),endField=row.find("end");
@@ -333,28 +340,79 @@ inline bool FetchEvents(const Configuration& c,aip::datetime::UTC minimum,aip::d
                 if(!detail::String(start,"date",first,10)||!detail::String(end,"date",last,10)||!ParseDate(first,event.startDate)||!ParseDate(last,event.endDate)||
                     aip::datetime::Days(event.endDate)<=aip::datetime::Days(event.startDate)||start.count("dateTime")||end.count("dateTime")){
                     error=L"Google returned invalid all-day event dates.";return false;}
-                // events.list timeZone=UTC controls response metadata, so do not
-                // use that field for all-day wall dates. Resolve using the
-                // selected calendar's original zone from calendarList below.
-                event.calendarTimeZone=calendarZone;
+                // UTC response metadata does not change all-day wall dates.
+                event.calendarTimeZone=timeZone;
             }else if(!detail::String(start,"dateTime",first,128)||!detail::String(end,"dateTime",last,128)||
                 !ParseRfc3339(first,event.start)||!ParseRfc3339(last,event.end)||event.end<event.start){error=L"Google returned invalid event timestamps.";return false;}
-            if(ids.insert(event.id).second)output.push_back(std::move(event));
-        }
-        if(next.empty()){
-            if(std::any_of(output.begin(),output.end(),[](const Event& e){return e.allDay;})){
-                // calendarList.readonly supplies the selected calendar's
-                // original timezone without expanding the requested scopes.
-                std::vector<CalendarChoice> calendars;if(!ListCalendars(c,calendars,error,bounded,hooks,session))return false;
-                std::wstring originalZone;for(const auto& calendar:calendars)if(calendar.id==c.calendarId||(c.calendarId==L"primary"&&calendar.primary)){originalZone=calendar.timeZone;break;}
-                if(originalZone.empty()){error=L"The selected Google calendar has no available original timezone for all-day events.";return false;}
-                for(auto& event:output)if(event.allDay)event.calendarTimeZone=originalZone;
+            event.calendarId=calendarId;
+            if(ids.insert(event.id).second){
+                if(gathered.size()>=2000){error=L"Google Calendar window exceeds the bounded 2000-event limit. Reduce Days ahead or select one calendar.";return false;}
+                if(c.allCalendars)event.id=std::to_wstring(calendarId.size())+L":"+calendarId+L":"+event.id;
+                gathered.push_back(std::move(event));
             }
-            return !detail::Canceled(bounded);
         }
+        if(next.empty())return !detail::Canceled(bounded);
         if(!pages.insert(next).second){error=L"Google returned a repeated event page.";return false;}
     }
-    error=L"Google event window exceeds the bounded 2000-event limit. Reduce Days ahead.";return false;
+    error=L"Google Calendar event window exceeds eight pages. Reduce Days ahead or select one calendar.";return false;
+}
+inline bool AllDayUtc(const aip::datetime::Civil& date,const std::wstring& iana,std::map<std::wstring,DYNAMIC_TIME_ZONE_INFORMATION>& zones,
+    aip::datetime::UTC& utc) {
+    if(!aip::datetime::Valid(date)||iana.empty())return false;auto zone=zones.find(iana);
+    if(zone==zones.end()){
+        std::wstring windows;if(!ResolveIanaWindowsTimeZone(iana,windows))return false;DYNAMIC_TIME_ZONE_INFORMATION found{};bool matched=false;
+        for(DWORD index=0;;++index){const auto status=EnumDynamicTimeZoneInformation(index,&found);if(status==ERROR_NO_MORE_ITEMS)break;
+            if(status!=ERROR_SUCCESS)return false;if(windows==found.TimeZoneKeyName){matched=true;break;}}
+        if(!matched)return false;zone=zones.emplace(iana,found).first;
+    }
+    TIME_ZONE_INFORMATION year{};if(!GetTimeZoneInformationForYear(static_cast<USHORT>(date.year),&zone->second,&year))return false;
+    std::set<aip::datetime::UTC> candidates;
+    for(const auto bias:{year.StandardBias,year.DaylightBias}){
+        if(zone->second.DynamicDaylightTimeDisabled&&bias!=year.StandardBias)continue;
+        const auto candidate=aip::datetime::Seconds(date)+static_cast<aip::datetime::UTC>(year.Bias+bias)*60;
+        const auto civil=aip::datetime::FromSeconds(candidate);SYSTEMTIME source{},local{};source.wYear=static_cast<WORD>(civil.year);
+        source.wMonth=static_cast<WORD>(civil.month);source.wDay=static_cast<WORD>(civil.day);source.wHour=static_cast<WORD>(civil.hour);
+        source.wMinute=static_cast<WORD>(civil.minute);source.wSecond=static_cast<WORD>(civil.second);
+        if(SystemTimeToTzSpecificLocalTimeEx(&zone->second,&source,&local)&&local.wYear==date.year&&local.wMonth==date.month&&local.wDay==date.day&&
+            local.wHour==date.hour&&local.wMinute==date.minute&&local.wSecond==date.second)candidates.insert(candidate);
+    }
+    if(candidates.size()!=1)return false;utc=*candidates.begin();return true;
+}
+} // detail
+inline bool ListCalendars(const Configuration& c,std::vector<CalendarChoice>& output,std::wstring& error,const Cancel& cancel={},const Hooks& hooks={},Session* session=nullptr) {
+    output.clear();const auto bounded=detail::Deadline(cancel,45000,hooks.inert?hooks.monotonicNow:std::function<ULONGLONG()>{});
+    detail::Sensitive access;if(!detail::Access(c,hooks,bounded,access,error,session))return false;
+    if(detail::ListReadableCalendars(c,access.value,output,error,bounded,hooks,800))return true;if(session)session->Clear();return false;
+}
+inline bool FetchEvents(const Configuration& c,aip::datetime::UTC minimum,aip::datetime::UTC maximum,std::vector<Event>& output,
+    std::wstring& error,const Cancel& cancel={},const Hooks& hooks={},Session* session=nullptr) {
+    output.clear();if(minimum<aip::datetime::Seconds({1601,1,1})||maximum>aip::datetime::Seconds({9999,12,31,23,59,59})||
+        maximum<=minimum||maximum-minimum>32LL*86400){error=L"Google Calendar query must cover a supported positive window of at most 32 days.";return false;}
+    const auto bounded=detail::Deadline(cancel,45000,hooks.inert?hooks.monotonicNow:std::function<ULONGLONG()>{});
+    detail::Sensitive access;if(!detail::Access(c,hooks,bounded,access,error,session))return false;
+    std::vector<CalendarChoice> calendars;std::vector<Event> gathered;std::size_t scanned=0;
+    const auto failed=[&]{if(session)session->Clear();if(error.empty())error=L"Google Calendar request canceled or timed out.";return false;};
+    if(c.allCalendars){
+        if(!detail::ListReadableCalendars(c,access.value,calendars,error,bounded,hooks,100))return failed();
+        for(const auto& calendar:calendars){if(detail::Canceled(bounded)||!detail::FetchCalendar(c,calendar.id,calendar.timeZone,access.value,minimum,maximum,
+            gathered,scanned,error,bounded,hooks))return failed();}
+        std::map<std::wstring,DYNAMIC_TIME_ZONE_INFORMATION> zones;
+        for(auto& event:gathered){if(detail::Canceled(bounded))return failed();if(event.allDay){
+            if(!detail::AllDayUtc(event.startDate,event.calendarTimeZone,zones,event.start)||!detail::AllDayUtc(event.endDate,event.calendarTimeZone,zones,event.end)){
+                error=L"An all-day Google Calendar event has an unavailable or ambiguous original time zone.";return failed();}
+            event.allDayUtcResolved=true;}}
+        std::stable_sort(gathered.begin(),gathered.end(),[](const Event& a,const Event& b){return a.start<b.start;});
+    }else{
+        const auto calendarId=c.calendarId.empty()?L"primary":c.calendarId;
+        if(!detail::FetchCalendar(c,calendarId,L"",access.value,minimum,maximum,gathered,scanned,error,bounded,hooks))return failed();
+        if(std::any_of(gathered.begin(),gathered.end(),[](const Event& e){return e.allDay;})){
+            if(!detail::ListReadableCalendars(c,access.value,calendars,error,bounded,hooks,800))return failed();
+            std::wstring originalZone;for(const auto& calendar:calendars)if(calendar.id==calendarId||(calendarId==L"primary"&&calendar.primary)){originalZone=calendar.timeZone;break;}
+            if(originalZone.empty()){error=L"The selected Google calendar has no available original timezone for all-day events.";return failed();}
+            for(auto& event:gathered)if(event.allDay)event.calendarTimeZone=originalZone;
+        }
+    }
+    if(detail::Canceled(bounded))return failed();output=std::move(gathered);return true;
 }
 // Disconnect in the UI should always remove its local protected token even if
 // this best-effort server revocation fails. Google revocation affects this

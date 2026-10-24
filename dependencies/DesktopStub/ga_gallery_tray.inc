@@ -586,7 +586,6 @@ static void AppendGalleryTilesMenu(HMENU parent) {
                 aip::AppendTrayMenuItem(item,base+1,L"Rename...",false,configured);
                 if(GalleryTileUsesRegistration(tile))aip::AppendTrayMenuItem(item,base+2,L"Registration setup and pin instructions...",false,configured);
                 else AppendSecondaryTilePinCommands(item,aip::gallery::NativeTileId(cfg.groupId,tile.id),base+2,base+3,base+4,configured);
-                aip::AppendTrayMenuItem(item,base+5,SecondaryTileUiString(L"SelectedTileContents",L"Tile contents..."),false,true);
                 aip::AppendTrayMenuItem(item,base+6,L"Rendering, cache and delivery...",false,configured);
                 HMENU click=aip::BeginTrayNestedMenu(item);
                 aip::AppendTrayMenuItem(click,base+7,IniReadS(L"Strings",L"GalleryClickImage",L"Open the displayed photo (when Windows identifies it)"),tile.clickAction==L"Image",configured);

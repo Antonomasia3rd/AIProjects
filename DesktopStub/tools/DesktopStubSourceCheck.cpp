@@ -429,8 +429,8 @@ static void AssertUiStringWired(const std::string& key, const std::string& defau
     // without retaining a duplicate field in the legacy g_ui structure.
     loadPattern += "|IniReadS\\(L\"Strings\",\\s*L\"" + key + "\"";
     loadPattern += "|(?:TileInstanceUi|SecondaryTileUiString)\\(L\"" + key + "\"";
-    if(key.compare(0,14,"GoogleCalendar")==0||key.compare(0,4,"Kuro")==0)
-        loadPattern += "|Text\\(L\"" + key + "\""; // Both setup helpers read [Strings] through Text(key,fallback).
+    if(key.compare(0,14,"GoogleCalendar")==0||key.compare(0,4,"Kuro")==0||key.compare(0,14,"SettingsWindow")==0)
+        loadPattern += "|Text\\(L\"" + key + "\""; // Scoped setup/settings readers are guarded separately below.
     if (UiStringUsesSubjectSubstitution(key))
         loadPattern += "|NotificationSubjectText.*L\"" + key + "\"";
     if (key == "NotificationSourceFailed" || key == "NotificationSourceRecovered" ||
@@ -515,9 +515,16 @@ int main(int argc, char** argv)
         const std::string contentRuntime = ReadSource("..\\dependencies\\DesktopStub\\ga_content_runtime.inc");
         const std::string notifications = ReadSource("..\\dependencies\\DesktopStub\\ga_notifications.inc");
         const std::string notificationPolicy = ReadSource("..\\dependencies\\notification_policy.h");
+        const std::string confirmationPolicy = ReadSource("..\\dependencies\\notification_confirmation.h");
+        const std::string confirmationAdapter = ReadSource("..\\dependencies\\DesktopStub\\ga_notification_confirmation.inc");
         const std::string sourceNotificationState = ReadSource("..\\dependencies\\source_notification_state.h");
         const std::string tileInstanceRuntime = ReadSource("..\\dependencies\\DesktopStub\\ga_tile_instance_runtime.inc");
         const std::string uiWording = ReadSource("..\\dependencies\\DesktopStub\\ga_ui_wording.inc");
+        const std::string settingsWindow = ReadSource("..\\dependencies\\DesktopStub\\ga_settings_window.inc");
+        const std::string textInputDialog = ReadSource("..\\dependencies\\DesktopStub\\ga_text_input_dialog.inc");
+        const std::string tileStatus = ReadSource("..\\dependencies\\DesktopStub\\ga_tile_status.inc");
+        const std::string googleCalendarModel = ReadSource("..\\dependencies\\content_sources\\google_calendar_model.h");
+        const std::string googleCalendarSetup = ReadSource("..\\dependencies\\DesktopStub\\ga_google_calendar_setup.inc");
         const std::string discordProfileHost = ReadSource("..\\dependencies\\DesktopStub\\ga_discord_profile.inc");
         const std::string contentHardware = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware.inc");
         const std::string contentHardwareUnavailable = ReadSource("..\\dependencies\\DesktopStub\\ga_content_hardware_unavailable.inc");
@@ -586,6 +593,8 @@ int main(int argc, char** argv)
             "..\\dependencies\\DesktopStub\\ga_notifications.inc",
             "..\\dependencies\\DesktopStub\\ga_notification_confirmation.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_wording.inc",
+            "..\\dependencies\\DesktopStub\\ga_settings_window.inc",
+            "..\\dependencies\\DesktopStub\\ga_text_input_dialog.inc",
             "..\\dependencies\\DesktopStub\\ga_tray_menu.inc",
             "..\\dependencies\\DesktopStub\\ga_gallery_tray.inc",
             "..\\dependencies\\DesktopStub\\ga_secondary_tile_api.inc",
@@ -877,6 +886,42 @@ int main(int argc, char** argv)
         checks.push_back({"Kuro setup strings use the configurable shared reader", "Kuro setup UI", ReadSource("..\\dependencies\\DesktopStub\\ga_kuro_signin.inc"),
             R"rx(namespace kuro_signin.*Text(const wchar_t* key,const wchar_t* fallback).*IniReadS(L"Strings",key,fallback))rx",
             "Kuro setup Text(key,fallback) must stay backed by the Strings INI section", false});
+        checks.push_back({"Settings window strings use the scoped configurable reader", "native settings UI", settingsWindow,
+            R"rx(namespace desktop_settings.*Text(const wchar_t* key,const wchar_t* fallback).*IniReadS(L"Strings",key,fallback))rx",
+            "SettingsWindow wording must use its scoped Text reader backed by the Strings INI section", false});
+        checks.push_back({"Native settings presenter is included after tray command dispatch", "tray composition", trayWrapper,
+            R"rx(#include "ga_tray_dispatch.inc".*#include "ga_settings_window.inc")rx",
+            "the settings presenter must reuse the established command dispatcher rather than inventing independent settings writes", false});
+        checks.push_back({"Shared input dialog preserves configurable titles and prompts", "runtime and text input dialog", runtime+"\n"+textInputDialog,
+            R"rx(#include "ga_text_input_dialog.inc".*INT_PTR ShowTextInputDialog.*UiLiteralText(title.empty()?g_ui.renameDialogTitle:title,true).*UiLiteralText(prompt.empty()?caption:prompt,true).*TextInputDialogTemplate(caption,question,password).*DialogBoxIndirectParamW)rx",
+            "the native input presenter must remain behind ShowTextInputDialog and preserve configurable wording and password mode", false});
+        checks.push_back({"Confirmation foreground payload carries a profile and dedicated inert body action", "confirmation payload", SliceSource(confirmationPolicy,"inline std::wstring XMLConfirmationXml", "} }"),
+            R"rx(ConfirmationProfilePrefix(profile).*argument(L"--notification-review").*activationType=\\\"foreground\\\".*argument(L"confirm="+token+L"&choice=yes").*activationType=\\\"foreground\\\".*argument(L"confirm="+token+L"&choice=no"))rx",
+            "confirmation buttons must retain profile-scoped random choices while a body click uses only the dedicated inert review marker", false});
+        checks.push_back({"Foreground confirmation dispatch precedes general command-line parsing", "application entry", SliceSource(app,"int WINAPI wWinMain", "g_iniPath = sidecarPaths.configPath;"),
+            R"rx(HandleNotificationConfirmationLaunch(captureArguments).*if(notificationResult>=0)return notificationResult;.*ParseCommandLineOptions())rx",
+            "toast choices must exit through their reserved endpoint before positional wallpaper, INI mutation or normal resident startup", false});
+        checks.push_back({"Cold confirmation initializes renamed executable scope before IPC", "confirmation launch endpoint", SliceSource(app,"static int HandleNotificationConfirmationLaunch", "static bool TryGetAlreadyRunningRequest"),
+            R"rx(ParseConfirmationLaunch(arguments,launch,recognized).*if(!recognized)return -1;if(!valid)return 2;if(launch.review)return 0;.*TryBuildSidecarPathsFromExecutable.*g_exePath=paths.exePath;.*ConfigureSingleInstanceIdentity.*FindWindowW.*NOTIFICATION_CONFIRMATION_COPY_DATA.*launch.action.size().*SendMessageTimeoutW.*return 0;)rx",
+            "the one-shot confirmation endpoint must scope the current executable/profile, send only the bounded action, and exit without starting a resident", false});
+        checks.push_back({"Native confirmation callback only queues action arguments", "native confirmation callback", SliceSource(confirmationAdapter,"record.activated=", "record.dismissed="),
+            R"rx(Activated.*noexcept.*ToastActivatedEventArgs.*QueueUserConfirmationAction)rx",
+            "native toast activation must marshal a decision to the resident UI queue, never execute a continuation on the notification thread", false});
+        checks.push_back({"Confirmation UI drain requires a live profile-bound resolution", "confirmation UI drain", SliceSource(confirmationAdapter,"static void DrainUserConfirmations()", "static bool ConfirmUserOperation"),
+            R"rx(UserConfirmationProfile().*ParseConfirmationAction(arguments,action).*g_confirmations.Resolve(action.token,action.choice,profile,GetTickCount64()).*if(resolved->approved)approved=std::move(callback->second);.*g_confirmationCallbacks.erase(callback).*if(approved&&g_running.load())approved();)rx",
+            "only a consumed live registry resolution may invoke a Yes continuation; replayed, expired, foreign-profile and No actions must not execute it", false});
+        checks.push_back({"Calendar setup notes remain separate from visible Calendar contents", "Calendar source composition", SliceSource(tileInstanceRuntime,"frame.clockSource=tile.type==TileInstanceType::Clock", "case TileInstanceType::Wuwa"),
+            R"rx(if(frame.calendarSource)frame.sourceDiagnostic=view.status;.*frame.text={frame.clockSource?view.time:view.weekday+L" "+view.dayNumber,frame.clockSource?view.location:L"",view.date};.*frame.detailRows.push_back)rx",
+            "setup/loading/empty-source notes belong in diagnostics; a normal Calendar snapshot must keep secondary text empty instead of rendering source status onto its date face", false});
+        checks.push_back({"Tile contents displays Calendar source diagnostics explicitly", "tile status dialog", SliceSource(tileStatus,"static std::wstring BuildTileStatusTextWithLabels", "static TileStatusLabels ReadTileStatusLabels"),
+            R"rx(if(!frame.sourceDiagnostic.empty()).*IniReadS(L"Strings",L"TileSourceDiagnostic",L"Source note").*frame.sourceDiagnostic)rx",
+            "source diagnostics must remain accessible in Tile contents with a configurable label rather than being silently lost", false});
+        checks.push_back({"All-calendars mode is validated persisted configuration and invalidates source cache", "Google Calendar model", googleCalendarModel,
+            R"rx({L"AllCalendars",L"0"}.*if(lower==L"allcalendars").*if(boolean==L"1".*value=L"1";.*else if(boolean==L"0".*value=L"0";.*ReadConfiguration.*else if(key==L"AllCalendars")c.allCalendars=value==L"1";.*ConfigurationKey.*std::to_wstring(c.allCalendars))rx",
+            "GoogleCalendar.AllCalendars must validate as a boolean, be read into the configuration, and change the source identity when toggled", false});
+        checks.push_back({"Google Calendar picker uses the tested All/individual selection contract", "Google setup picker", googleCalendarSetup,
+            R"rx(PopulateChoices.*GoogleCalendarAllCalendars.*PickerSelection(state->configuration.allCalendars,state->configuration.calendarId,state->choices).*SaveSelected.*PickerSettings.*Save(state,selection,error))rx",
+            "the modeless picker must use the shared row-offset/save contract so All does not overwrite CalendarId or select a shifted individual row", false});
         checks.push_back({"Notification transport tests replace both operating system APIs", "notification behavioral fixture", ReadSource("..\\tools\\NotificationPolicyTests.cpp"),
             R"rx(DESKTOPSTUB_TEST_NOTIFICATION_IDENTITY.*DESKTOPSTUB_TEST_NOTIFICATION_BALLOON.*DESKTOPSTUB_TEST_NOTIFICATION_TOAST.*ga_notifications.inc)rx",
             "notification behavior regressions must run the real adapter with injected transports instead of displaying notifications", false});
@@ -913,6 +958,64 @@ int main(int argc, char** argv)
                 "SourceTransitions source", "repeated failures and intervening pending work cannot create a notification storm",
                 "notification subject formatting treats configurable text as data"},
             "source/backend regression coverage must retain master-off, inert-validation, non-spam and safe-wording assertions");
+
+        const auto confirmationEndpoint=SliceSource(app,"static int HandleNotificationConfirmationLaunch", "static bool TryGetAlreadyRunningRequest");
+        AssertNotContainsAny(
+            "Cold confirmation endpoint cannot create files, settings or another resident",
+            "one-shot notification launch endpoint",confirmationEndpoint,
+            {"EnsureIni", "EnsureAppxManifest", "EnsureSingleInstance", "IniWrite(", "WriteIni", "MutateDesktopStubIni", "CreateWindow", "CreateProcess",
+                "ShellExecute", "RegisterAppxManifest", "QueueGenerate", "Generate(", "SetStartup", "SignalExistingInstance"},
+            "a valid, stale or malformed confirmation launch may only locate the existing profile resident and forward the strict decision; it must not enter normal startup, file creation or settings mutation");
+        AssertContainsAll(
+            "Confirmation launch parser reserves its marker without claiming ordinary profile values",
+            "reserved confirmation argument parser",SliceSource(confirmationPolicy,"inline bool ParseConfirmationLaunch", "inline std::wstring ConfirmationProfilePrefix"),
+            {"const bool legacyReview=", "args.size()==2", "args.size()==3", "L\"-ToastActivated\"", "L\"--notification-review\"",
+                "if(args[i]==L\"--ini\"&&i+1<args.size()){++i;continue;}", "ParseConfirmationAction(arg,action)", "if(actionSeen)return false;"},
+            "legacy bare review must be isolated, INI values must not become actions, and every button action must pass the exact nonce/choice parser");
+        AssertContainsAll(
+            "Native foreground callbacks strip only a matching profile before queueing",
+            "confirmation callback admission",SliceSource(confirmationAdapter,"static void QueueUserConfirmationAction", "struct NativeUserConfirmation"),
+            {"ParseConfirmationAction(action,parsed)", "arguments.size()>33000", "CommandLineToArgvW", "ParseConfirmationLaunch(values,launch,recognized)",
+                "launch.review", "profile!=UserConfirmationProfile()", "g_confirmationActions.size()>=64", "g_confirmationActions.push_back(action)"},
+            "wrapped foreground arguments must remain bounded, strictly parsed and profile-matched before joining the resident decision queue");
+        const auto confirmationIpc=SliceSource(app,"if(data&&data->dwData==NOTIFICATION_CONFIRMATION_COPY_DATA)", "if(data&&data->dwData==TILE_ACTIVATION_NOTICE_COPY_DATA)");
+        AssertContainsAll(
+            "Confirmation IPC accepts only a bounded terminated strict decision",
+            "resident confirmation COPYDATA handler",confirmationIpc,
+            {"data->cbData>53*sizeof(wchar_t)", "data->cbData%sizeof(wchar_t)", "text[count-1]!=L'\\0'", "ParseConfirmationAction(action,parsed)",
+                "QueueUserConfirmationAction(action);return TRUE;"},
+            "cross-process toast replies must carry only the bounded exact token/choice message and run continuations later on the UI queue");
+        AssertNotContainsAny(
+            "Confirmation IPC never approves while SendMessage is active",
+            "resident confirmation COPYDATA handler",confirmationIpc,
+            {"DrainUserConfirmations(", "approved(", "accepted(", "g_confirmations.Resolve", "Generate(", "RegisterAppxManifest"},
+            "synchronous COPYDATA delivery must queue only; approval, COM and configuration work belong after SendMessage has unwound");
+        AssertContainsAll(
+            "Native settings applies captured commands through existing guarded dispatchers",
+            "native settings apply boundary",SliceSource(settingsWindow,"static void Apply(", "static void Activate("),
+            {"RevisionMatches(s)", "IniWriteMutexGuard>(s->profile", "!lease->IsLocked()||!RevisionMatches(s)",
+                "RegistryScope registry", "RegisterTileInstanceCommand(command)", "DispatchTileInstanceCommand(g_hwnd,id)",
+                "DispatchTrayCommand(g_hwnd,node.global)"},
+            "the property window must retain revision checks and the shared typed/global command paths rather than create a parallel configuration engine");
+        AssertNotContainsAny(
+            "Calendar visible-text adapter does not expose source diagnostics",
+            "size-specific visible tile text",SliceSource(tileStatus,"static std::wstring TileSnapshotVisibleText", "static std::wstring BuildTileStatusTextWithLabels"),
+            {"sourceDiagnostic", "TileSourceDiagnostic", "Source note"},
+            "source notes are diagnostic information, not part of the size-specific visible Calendar text contract");
+        AssertNotContainsAny(
+            "Calendar source status is not assigned to its ordinary secondary text",
+            "successful Calendar snapshot",SliceSource(tileInstanceRuntime,"frame.clockSource=tile.type==TileInstanceType::Clock", "case TileInstanceType::Wuwa"),
+            {"frame.clockSource?view.location:view.status", "frame.text.secondary=view.status", "frame.text.secondary = view.status"},
+            "Calendar setup/loading/no-events status must remain in sourceDiagnostic instead of leaking onto a normal Calendar tile face");
+        const auto googleChoiceBinding=SliceSource(googleCalendarSetup,"static std::wstring AccountKey", "static void EmptyChoices");
+        AssertContainsAll(
+            "Loaded Google calendar choices are bound to the account grant",
+            "Google picker account binding",googleChoiceBinding,{"configuration.ownerKey", "configuration.clientId", "configuration.clientSecret", "configuration.refreshTokenProtected"},
+            "loaded picker rows must retain their Windows/profile/tile and OAuth grant binding");
+        AssertNotContainsAny(
+            "Switching All versus one Google calendar does not discard account choices",
+            "Google picker account binding",googleChoiceBinding,{"allCalendars", "calendarId"},
+            "the full configuration fingerprint may include selection state, but account-bound picker rows must survive a selection-only save");
 
         AssertNotContainsAny(
             "DesktopStub tray dispatch checks direct INI writes",

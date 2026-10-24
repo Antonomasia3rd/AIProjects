@@ -1,4 +1,4 @@
-﻿bool UsePowerShell()
+bool UsePowerShell()
 {
     return IniReadI(L"Settings", L"UsePowerShell", 0) != 0;
 }
@@ -456,95 +456,7 @@ static DLGITEMTEMPLATE* AlignDialogItem(WORD*& p)
     return item;
 }
 
-static constexpr int TEXT_INPUT_EDIT_ID = 1001;
-static constexpr int TEXT_INPUT_PROMPT_ID = 1002;
-
-INT_PTR ShowTextInputDialog(
-    HWND parent,
-    const std::wstring& title,
-    const std::wstring& prompt,
-    std::wstring& value,
-    bool allowEmpty,
-    bool password = false)
-{
-    std::wstring dialogTitle = UiLiteralText(title.empty() ? g_ui.renameDialogTitle : title,true);
-    std::wstring dialogPrompt = UiLiteralText(prompt.empty() ? dialogTitle : prompt,true);
-    size_t stringBytes =
-        (dialogTitle.size() + dialogPrompt.size() + g_ui.okText.size() + g_ui.cancelText.size() + 64) * sizeof(wchar_t);
-    std::vector<BYTE> tmpl(4096 + stringBytes);
-    DLGTEMPLATE* dlg = (DLGTEMPLATE*)tmpl.data();
-
-    dlg->style = WS_POPUP | WS_SYSMENU | DS_MODALFRAME | WS_CAPTION | DS_SETFONT | DS_CENTER;
-    dlg->cdit = 4;
-    dlg->x = 10; dlg->y = 10; dlg->cx = 205; dlg->cy = 65;
-
-    WORD* p = (WORD*)(dlg + 1);
-
-    *p++ = 0; // no menu
-    *p++ = 0; // default class
-
-    AppendDialogTemplateString(p, dialogTitle);
-    *p++ = 9; // font size
-    AppendDialogTemplateString(p, L"Segoe UI");
-
-    // ---- Prompt ----
-    DLGITEMTEMPLATE* item = AlignDialogItem(p);
-    item->x = 6; item->y = 5; item->cx = 137; item->cy = 39;
-    item->id = TEXT_INPUT_PROMPT_ID;
-    item->style = WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX;
-
-    p = (WORD*)(item + 1);
-    *p++ = 0xFFFF; *p++ = 0x0082; // STATIC class
-    AppendDialogTemplateString(p, dialogPrompt);
-    *p++ = 0; // no extra data
-
-    // ---- OK button ----
-    item = AlignDialogItem(p);
-    item->x = 156; item->y = 5; item->cx = 43; item->cy = 12;
-    item->id = IDOK;
-    item->style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON;
-
-    p = (WORD*)(item + 1);
-    *p++ = 0xFFFF; *p++ = 0x0080; // BUTTON
-    AppendDialogTemplateString(p, g_ui.okText);
-    *p++ = 0;
-
-    // ---- Cancel button ----
-    item = AlignDialogItem(p);
-    item->x = 156; item->y = 20; item->cx = 43; item->cy = 12;
-    item->id = IDCANCEL;
-    item->style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON;
-
-    p = (WORD*)(item + 1);
-    *p++ = 0xFFFF; *p++ = 0x0080;
-    AppendDialogTemplateString(p, g_ui.cancelText);
-    *p++ = 0;
-
-    // ---- Edit box ----
-    item = AlignDialogItem(p);
-    item->x = 6; item->y = 47; item->cx = 193; item->cy = 12;
-    item->id = TEXT_INPUT_EDIT_ID;
-    item->style = WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL | (password ? ES_PASSWORD : 0);
-
-    p = (WORD*)(item + 1);
-    *p++ = 0xFFFF; *p++ = 0x0081; // EDIT class
-    *p++ = 0; // no text
-    *p++ = 0; // no extra data
-
-    struct TextInputDialogState
-    {
-        std::wstring* value;
-        bool allowEmpty;
-    } state{ &value, allowEmpty };
-
-    return DialogBoxIndirectParamW(
-        GetModuleHandleW(nullptr),
-        (DLGTEMPLATE*)tmpl.data(),
-        parent,
-        RenameDlgProc,
-        (LPARAM)&state
-    );
-}
+#include "ga_text_input_dialog.inc"
 
 INT_PTR ShowRenameDialog(HWND parent, std::wstring& path)
 {

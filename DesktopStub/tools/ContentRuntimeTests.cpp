@@ -205,6 +205,7 @@ static std::wstring BuildLegacyContentFixtureTemplate()
 #include "GalleryUiFlowHostTests.inc"
 #include "PrimaryAssetRetentionHostTests.inc"
 #include "PagedTextDialogHostTests.inc"
+#include "TextInputDialogHostTests.inc"
 #include "IdleMaintenanceHostTests.inc"
 #include "GalleryCpuHostTests.inc"
 #include "ContentCpuCacheHostTests.inc"
@@ -1189,6 +1190,8 @@ int wmain()
     TestUnpinnedAlertDemandHost();
     TestTileSourceMenuHost();
     TestNotificationConfirmationHost();
+    TestPagedTextDialogHost();
+    TestTextInputDialogHost();
     TestBatchIsolationHost();
     TestStalePinAndGalleryMenuHost();
     TestGalleryConfirmationContinuations();

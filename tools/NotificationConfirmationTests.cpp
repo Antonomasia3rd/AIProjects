@@ -48,13 +48,36 @@ void ArgumentTests(){
         L"confirm="+token+L"&choice=yes ",L"choice=yes&confirm="+token,L"confirm="+std::wstring(32,L'A')+L"&choice=yes",L"confirm="+std::wstring(10000,L'a')+L"&choice=yes"}){
         action.token=L"sentinel";Check(!ParseConfirmationAction(arguments,action)&&action.token==L"sentinel","body/malformed/uppercase/extra/oversized callback cannot resolve approval");
     }
+    ConfirmationLaunch launch;bool recognized=false;const auto response=L"confirm="+token+L"&choice=no";
+    Check(ParseConfirmationLaunch({L"DesktopStub.exe",response},launch,recognized)&&recognized&&launch.action==response&&launch.profile.empty()&&!launch.review,
+        "Windows foreground confirmation is reserved instead of becoming a wallpaper path");
+    Check(ParseConfirmationLaunch({L"DesktopStub.exe",L"--ini",L"D:\\Profile with spaces\\tiles.ini",response},launch,recognized)&&launch.profile==L"D:\\Profile with spaces\\tiles.ini",
+        "foreground confirmation preserves its explicit profile scope");
+    Check(ParseConfirmationLaunch({L"DesktopStub.exe",L"-ToastActivated",L"review"},launch,recognized)&&launch.review,
+        "toast body activation is recognized without approving an operation");
+    for(const auto& args:std::vector<std::vector<std::wstring>>{
+        {L"DesktopStub.exe",L"confirm=bad&choice=no"},{L"DesktopStub.exe",response,L"--set",L"Settings.Tray=0"},
+        {L"DesktopStub.exe",response,L"--exit"},{L"DesktopStub.exe",response,response},{L"DesktopStub.exe",L"--ini",L"",response}}){
+        launch.action=L"sentinel";Check(!ParseConfirmationLaunch(args,launch,recognized)&&recognized&&launch.action==L"sentinel",
+            "malformed or mixed confirmation cannot reach positional files, settings or another operation");
+    }
+    Check(!ParseConfirmationLaunch({L"DesktopStub.exe",L"D:\\picture.png"},launch,recognized)&&!recognized,
+        "ordinary image arguments remain available to the ordinary CLI parser");
+    Check(!ParseConfirmationLaunch({L"DesktopStub.exe",L"--ini",L"review"},launch,recognized)&&!recognized&&
+        !ParseConfirmationLaunch({L"DesktopStub.exe",L"--wallpaper",L"review"},launch,recognized)&&!recognized,
+        "ordinary CLI values named review are not interpreted as toast actions");
+    Check(ConfirmationProfilePrefix(L"D:\\Profile with spaces\\tiles.ini")==L"--ini \"D:\\Profile with spaces\\tiles.ini\" ",
+        "profile launch prefix uses Windows argument quoting");
 }
 void XmlTests(){
     const auto token=Token(42);const auto xml=XMLConfirmationXml(L"Title <&>",L"Keep old pin?",token,L"Yes \"now\"",L"No & stay");
     Check(xml.find(L"Title &lt;&amp;&gt;")!=std::wstring::npos&&xml.find(L"Yes &quot;now&quot;")!=std::wstring::npos&&xml.find(L"No &amp; stay")!=std::wstring::npos,"text and action labels are XML escaped");
     Check(xml.find(L"confirm="+token+L"&amp;choice=yes")!=std::wstring::npos&&xml.find(L"confirm="+token+L"&amp;choice=no")!=std::wstring::npos&&xml.find(L"activationType=\"foreground\"")!=std::wstring::npos,"only explicit inline buttons carry decisions");
-    Check(xml.find(L"launch=\"review\"")!=std::wstring::npos&&xml.find(L"protocol")==std::wstring::npos&&xml.find(L"background")==std::wstring::npos,"body click is harmless and payload invents no protocol/background registration");
+    Check(xml.find(L"launch=\"--notification-review\"")!=std::wstring::npos&&xml.find(L"protocol")==std::wstring::npos&&xml.find(L"background")==std::wstring::npos,"body uses a dedicated inert marker and invents no protocol/background registration");
     Check(XMLConfirmationXml(L"t",L"m",L"invalid").empty(),"malformed token cannot produce a toast");
+    const auto scoped=XMLConfirmationXml(L"t",L"m",token,L"Yes",L"No",L"D:\\A & B\\tiles.ini");
+    Check(scoped.find(L"--ini &quot;D:\\A &amp; B\\tiles.ini&quot; confirm=")!=std::wstring::npos,
+        "foreground buttons carry the owning profile as escaped data");
     std::wstring unicode(127,L'a');unicode+=static_cast<wchar_t>(0xd83d);unicode+=static_cast<wchar_t>(0xde00);
     Check(ConfirmationXmlText(unicode,128)==std::wstring(127,L'a'),"truncation never cuts a UTF-16 surrogate pair");
     Check(ConfirmationXmlText(std::wstring{L'a',wchar_t(0),wchar_t(1),wchar_t(0xd800),L'b',wchar_t(0xdc00),wchar_t(0xffff)},128)==L"ab","invalid controls, noncharacters and lone surrogates cannot invalidate XML");

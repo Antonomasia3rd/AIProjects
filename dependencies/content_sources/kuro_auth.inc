@@ -79,18 +79,29 @@ inline bool ParseCaptchaMessage(const std::wstring& json,const std::wstring& exp
         proof.Available()&&SafeText(proof.lotNumber,256)&&SafeText(proof.passToken,4096)&&SafeText(proof.genTime,64)&&SafeText(proof.captchaOutput,8192);
     if(!valid)proof.Clear();return valid;
 }
+inline bool ParseCaptchaStageMessage(const std::wstring& json,const std::wstring& expectedNonce,CaptchaStage& stage) {
+    if(json.size()>256||expectedNonce.size()!=32)return false;
+    aip::kuro::detail::Members values;if(!aip::kuro::detail::Object(aip::WideToUtf8(json),values)||values.size()!=2)return false;
+    std::wstring nonce,value;
+    if(!aip::kuro::detail::Wide(values["nonce"],nonce)||nonce!=expectedNonce||!aip::kuro::detail::Wide(values["stage"],value))return false;
+    if(value==L"ready")stage=CaptchaStage::Ready;else if(value==L"error")stage=CaptchaStage::Error;else return false;
+    return true;
+}
 inline std::wstring CaptchaHtml(const std::wstring& nonce) {
     if(nonce.size()!=32||!std::all_of(nonce.begin(),nonce.end(),[](wchar_t c){return (c>=L'0'&&c<=L'9')||(c>=L'a'&&c<=L'f');}))return {};
     return L"<!doctype html><html><head><meta charset='utf-8'><meta name='referrer' content='no-referrer'></head>"
         L"<body><p>Complete Kuro's verification below. Your password is never sent to this page.</p>"
-        L"<button id='retry' disabled>Show verification</button><p id='status'>Loading verification...</p>"
-        L"<script src='https://static.geetest.com/v4/gt4.js'></script><script>"
-        L"if(typeof initGeetest4!=='function'){document.getElementById('status').textContent='Verification could not load. Close this window and retry sign-in.';}"
+        L"<button id='retry' disabled>Show verification</button><p id='status'>Loading verification...</p><script>"
+        L"window.kuroNotice=function(stage){try{if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage(JSON.stringify({nonce:'"+nonce+L"',stage:stage}));}catch(e){}};"
+        L"window.kuroFailure=function(){if(window.kuroFailed)return;window.kuroFailed=true;document.getElementById('status').textContent='Verification could not load. Return to DesktopStub and retry verification.';window.kuroNotice('error');};"
+        L"window.addEventListener('error',function(){window.kuroFailure();});</script>"
+        L"<script src='https://static.geetest.com/v4/gt4.js' onerror='window.kuroFailure()'></script><script>"
+        L"if(typeof initGeetest4!=='function'){window.kuroFailure();}"
         L"else initGeetest4({captchaId:'1f4565ff7acc97b1a2fc97b921743aa4',product:'bind',language:'en'},function(c){"
         L"c.onReady(function(){document.getElementById('retry').disabled=false;document.getElementById('retry').onclick=function(){c.showCaptcha();};"
-        L"document.getElementById('status').textContent='Complete the verification to continue sign-in.';c.showCaptcha();});"
+        L"document.getElementById('status').textContent='Complete the verification to continue sign-in.';window.kuroNotice('ready');c.showCaptcha();});"
         L"c.onSuccess(function(){var v=c.getValidate();if(!v)return;v.nonce='"+nonce+L"';window.chrome.webview.postMessage(JSON.stringify(v));});"
-        L"c.onError(function(){document.getElementById('status').textContent='Verification failed to load. Close and retry sign-in.';});});</script></body></html>";
+        L"c.onError(function(){window.kuroFailure();});});</script></body></html>";
 }
 inline Result Login(const Credentials& credentials,const CaptchaProof& proof={},const HttpTransport& transport=aip::FetchHttpBytes,const Cancel& canceled={}) {
     Result result;
@@ -125,5 +136,15 @@ inline Result Login(const Credentials& credentials,const CaptchaProof& proof={},
         Wipe(result.token);result.message=L"Kuro could not exchange sign-in for a game access token. Retry sign-in.";return result;}
     if(response.count("expires_in"))aip::kuro::detail::Number(response,"expires_in",result.expiresIn,0);
     result.status=Status::Authenticated;result.message=L"Signed in. Finding linked Wuthering Waves roles...";return result;
+}
+inline bool DiscoverSignedInRoles(const Result& signedIn,const std::wstring& deviceId,std::vector<Role>& roles,std::wstring& error,
+    const HttpTransport& transport=aip::FetchHttpBytes,const Cancel& canceled={}) {
+    roles.clear();
+    if(signedIn.status!=Status::Authenticated||signedIn.token.empty()){error=L"Sign in to Kuro before looking up Wuthering Waves characters.";return false;}
+    Configuration cfg;cfg.gameToken=signedIn.token;cfg.deviceId=deviceId;cfg.timeoutSeconds=15;
+    struct Clear{Configuration& cfg;~Clear(){Wipe(cfg.gameToken);}}clear{cfg};
+    if(!DiscoverRoles(cfg,roles,error,transport,{},canceled))return false;
+    if(roles.empty()){error=L"No overseas Wuthering Waves character was found for this Kuro account. Check the game account, then retry character lookup.";return false;}
+    return true;
 }
 }}}

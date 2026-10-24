@@ -11,6 +11,7 @@ struct Configuration {
     // Included inside the DPAPI envelope to reject cross-profile reuse.
     std::wstring ownerKey;
     int refreshSeconds=300,timeoutSeconds=15,maximumBytes=2097152;
+    bool allCalendars=false;
 };
 struct Credentials {std::wstring refreshTokenProtected;};
 struct CalendarChoice {std::wstring id,name,timeZone;bool primary=false;};
@@ -19,10 +20,12 @@ struct Event {
     aip::datetime::UTC start=0,end=0;
     bool allDay=false;
     aip::datetime::Civil startDate,endDate; // Calendar-local dates; end exclusive.
+    std::wstring calendarId; // Origin calendar; multi-calendar IDs are namespaced.
+    bool allDayUtcResolved=false;
 };
 using Cancel=std::function<bool()>;
 inline constexpr aip::datetime::Setting Settings[]={
-    {L"ClientId",L""},{L"ClientSecret",L""},{L"RefreshTokenProtected",L""},{L"CalendarId",L"primary"},
+    {L"ClientId",L""},{L"ClientSecret",L""},{L"RefreshTokenProtected",L""},{L"CalendarId",L"primary"},{L"AllCalendars",L"0"},
     {L"RefreshSeconds",L"300"},{L"TimeoutSeconds",L"15"},{L"MaximumBytes",L"2097152"}};
 inline bool NormalizeSetting(std::wstring& key,std::wstring& value,std::wstring& error) {
     const auto lower=aip::datetime::Lower(key);const aip::datetime::Setting* known=nullptr;
@@ -41,6 +44,12 @@ inline bool NormalizeSetting(std::wstring& key,std::wstring& value,std::wstring&
         error=L"Google refresh tokens must be saved through Connect as user-protected credentials; plaintext tokens are not accepted.";return false;
     }
     if(lower==L"calendarid"&&value.empty())value=L"primary";
+    if(lower==L"allcalendars"){
+        const auto boolean=aip::datetime::Lower(value);
+        if(boolean==L"1"||boolean==L"true"||boolean==L"yes"||boolean==L"on")value=L"1";
+        else if(boolean==L"0"||boolean==L"false"||boolean==L"no"||boolean==L"off")value=L"0";
+        else {error=L"Google Calendar AllCalendars must be a boolean.";return false;}
+    }
     if(lower==L"refreshseconds"||lower==L"timeoutseconds"||lower==L"maximumbytes"){
         int number=0;const auto minimum=lower==L"maximumbytes"?1024:lower==L"refreshseconds"?30:1;
         const auto maximum=lower==L"maximumbytes"?4194304:lower==L"refreshseconds"?86400:120;
@@ -54,6 +63,7 @@ template<class Reader> bool ReadConfiguration(Reader get,Configuration& output,s
     for(const auto& field:Settings){std::wstring key=field.key,value=get(field.key,field.fallback);if(!NormalizeSetting(key,value,error))return false;
         if(key==L"ClientId")c.clientId=value;else if(key==L"ClientSecret")c.clientSecret=value;
         else if(key==L"CalendarId")c.calendarId=value;else if(key==L"RefreshTokenProtected")c.refreshTokenProtected=value;
+        else if(key==L"AllCalendars")c.allCalendars=value==L"1";
         else {int number=0;aip::datetime::Number(value,number);if(key==L"RefreshSeconds")c.refreshSeconds=number;else if(key==L"TimeoutSeconds")c.timeoutSeconds=number;else c.maximumBytes=number;}}
     output=std::move(c);return true;
 }
@@ -61,7 +71,7 @@ inline bool NormalizeGoogleCalendarSetting(std::wstring& key,std::wstring& value
 inline std::wstring ConfigurationKey(const Configuration& c) {
     // Private revision key only. Never write to diagnostics or notifications.
     return c.ownerKey+L"\n"+c.clientId+L"\n"+c.clientSecret+L"\n"+c.refreshTokenProtected+L"\n"+c.calendarId+L"\n"+
-        std::to_wstring(c.refreshSeconds)+L":"+std::to_wstring(c.timeoutSeconds)+L":"+std::to_wstring(c.maximumBytes);
+        std::to_wstring(c.refreshSeconds)+L":"+std::to_wstring(c.timeoutSeconds)+L":"+std::to_wstring(c.maximumBytes)+L":"+std::to_wstring(c.allCalendars);
 }
 inline bool ParseDate(const std::wstring& text,aip::datetime::Civil& out) {
     if(text.size()!=10||text[4]!=L'-'||text[7]!=L'-')return false;
@@ -87,7 +97,7 @@ inline std::wstring Rfc3339(aip::datetime::UTC seconds) {
 }
 template<class Resolver> bool ToOccurrence(const Event& event,Resolver resolve,aip::datetime::Occurrence& result) {
     auto start=event.start,end=event.end;
-    if(event.allDay&&(!resolve(event.startDate,event.calendarTimeZone,start)||!resolve(event.endDate,event.calendarTimeZone,end)))return false;
+    if(event.allDay&&!event.allDayUtcResolved&&(!resolve(event.startDate,event.calendarTimeZone,start)||!resolve(event.endDate,event.calendarTimeZone,end)))return false;
     if(end<start)return false;result={start,end,event.allDay,event.summary,event.location,event.id};return true;
 }
 } }

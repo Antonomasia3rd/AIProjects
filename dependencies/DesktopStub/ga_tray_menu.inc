@@ -49,6 +49,7 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     };
 
     std::wstring versionLine = FormatWide(g_ui.versionLabel.c_str(), DesktopStubVersionDisplayText().c_str());
+    aip::AppendTrayMenuItem(m,ID_DESKTOPSTUB_SETTINGS_WINDOW,IniReadS(L"Strings",L"DesktopSettingsWindow",L"Settings..."),false,true);
     if (!aip::AppendBaselineTrayMenuHeader(
             m,
             ID_SHOW_MENU_DROPDOWN,

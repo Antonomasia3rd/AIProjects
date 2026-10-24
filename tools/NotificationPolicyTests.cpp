@@ -2,6 +2,7 @@
 // transports replaced. No tray icon, notification, app identity or package API.
 #define NOMINMAX
 #include <windows.h>
+#include <shellapi.h>
 #include <atomic>
 #include <chrono>
 #include <ctime>

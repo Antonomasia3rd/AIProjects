@@ -90,6 +90,139 @@ static const char* GoogleCalendarHostEvents=R"({"timeZone":"UTC","items":[
     {"id":"inside","summary":"Inside look-ahead","start":{"dateTime":"2026-10-25T00:29:00Z"},"end":{"dateTime":"2026-10-25T00:40:00Z"}},
     {"id":"boundary","summary":"Outside look-ahead","start":{"dateTime":"2026-10-25T00:30:00Z"},"end":{"dateTime":"2026-10-25T01:00:00Z"}}
 ]})";
+static bool GoogleCalendarStatusRaster(const aip::content::Snapshot& frame,const wchar_t* asset,int width,int height,
+    std::vector<Gdiplus::ARGB>& pixels,bool& hasInk)
+{
+    Gdiplus::Bitmap image(width,height,PixelFormat32bppARGB);
+    {Gdiplus::Graphics graphics(&image);if(graphics.Clear(Gdiplus::Color(0,0,0,0))!=Gdiplus::Ok)return false;}
+    ContentRenderScope scope(&frame);
+    if(!ApplyTileTextOverlay(&image,asset,width,height))return false;
+    pixels.clear();pixels.reserve(static_cast<size_t>(width)*height);hasInk=false;
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x){Gdiplus::Color pixel;
+        if(image.GetPixel(x,y,&pixel)!=Gdiplus::Ok)return false;
+        pixels.push_back(pixel.GetValue());hasInk|=pixel.GetA()!=0;
+    }
+    return true;
+}
+static void TestCalendarStatusPresentationHost()
+{
+    using namespace aip::content;
+    std::wstring original,error;Check(ReadIniFileForMutation(original),"Calendar status fixture captures its private INI");
+    const auto oldRefresh=g_iniCacheRefreshMs.load(),oldTemplate=g_liveTileTemplateStyle.load(),oldTarget=g_manifestCompatibilityTarget.load();
+    const auto oldNotifications=g_notificationsEnabled.load(),oldRunning=g_running.load();const auto oldUser=g_testTileRegistrationUserScope;
+    g_iniCacheRefreshMs=0;g_notificationsEnabled=false;g_running=true;g_testTileRegistrationUserScope=L"7777777777777777";
+    g_liveTileTemplateStyle=static_cast<int>(LiveTileTemplateStyle::Adaptive);g_manifestCompatibilityTarget=static_cast<int>(ManifestCompatibilityTarget::Windows10);
+    const auto restore=[&]{Check(WriteContentFixture(original),"Calendar status fixture restores its private INI");
+        g_iniCacheRefreshMs=oldRefresh;g_notificationsEnabled=oldNotifications;g_running=oldRunning;g_testTileRegistrationUserScope=oldUser;
+        g_liveTileTemplateStyle=oldTemplate;g_manifestCompatibilityTarget=oldTarget;};
+    const auto profile=std::wstring(L"[Tiles]\r\nInstances=unconnected,date,local-event,connected\r\n")+
+        L"[Tile.unconnected]\r\nType=Calendar\r\nName=Date fixture\r\nCalendar.Source=Google\r\nCalendar.TimeZone=UTC\r\nGoogleCalendar.ClientId=123-status.apps.googleusercontent.com\r\n"+
+        L"[Tile.date]\r\nType=Calendar\r\nName=Local date fixture\r\nCalendar.Source=Local\r\nCalendar.TimeZone=UTC\r\n"+
+        L"[Tile.local-event]\r\nType=Calendar\r\nName=Local agenda fixture\r\nCalendar.Source=Local\r\nCalendar.TimeZone=UTC\r\nCalendar.FilePath=C:\\inert-calendar-status.ics\r\n"+
+        L"[Tile.connected]\r\nType=Calendar\r\nName=Connected agenda fixture\r\nCalendar.Source=Google\r\nCalendar.TimeZone=UTC\r\nGoogleCalendar.ClientId=123-status.apps.googleusercontent.com\r\nGoogleCalendar.RefreshTokenProtected=dpapi:v1:utf8:STATUS_FIXTURE\r\n";
+    Check(WriteContentFixture(profile),"Calendar status composition uses only explicit private fixture sources");
+    TileInstanceConfiguration cfg;
+    if(!ReadCurrentTileInstances(cfg,error)||cfg.tiles.size()!=4){Check(false,"Calendar status typed fixture parses four independent calendars");restore();return;}
+    std::atomic<unsigned> httpCalls{0},decrypts{0},authorizations{0},browsers{0},localReads{0};
+    TileInstanceProviderState unconnectedState,dateState,localState,connectedState;
+    unconnectedState.type=dateState.type=localState.type=connectedState.type=TileInstanceType::Calendar;
+    unconnectedState.googleCalendar=std::make_unique<ContentGoogleCalendarProvider>();
+    unconnectedState.googleCalendar->testHooks.http=[&](const auto&,auto&,auto&){++httpCalls;return false;};
+    unconnectedState.googleCalendar->testHooks.unprotect=[&](const auto&,auto&){++decrypts;return false;};
+    unconnectedState.googleCalendar->testHooks.authorize=[&](const auto&,const auto&,const auto&,const auto&,auto&,auto&,auto&,const auto&){++authorizations;return false;};
+    unconnectedState.googleCalendar->testHooks.browser=[&](const auto&){++browsers;return false;};
+    const auto unconnected=ComposeTileInstance(cfg.tiles[0],unconnectedState,SmtcMediaSnapshot{},true);
+    Check(unconnected.calendarSource&&!unconnected.dateTime.weekday.empty()&&!unconnected.dateTime.dayNumber.empty()&&unconnected.text.secondary.empty()&&
+        unconnected.sourceDiagnostic.find(L"Connect Google Calendar")!=std::wstring::npos&&unconnected.detailRows.empty(),
+        "unconnected Google Calendar composes its date header and keeps setup instructions only as a source diagnostic");
+    const auto fullStatus=BuildTileStatusTextWithLabels({unconnected},TileStatusLabels{});
+    Check(fullStatus.find(L"Source note: Connect Google Calendar")!=std::wstring::npos,
+        "Tile contents retains the unconnected Calendar setup explanation in its separate Source note");
+    Check(httpCalls==0&&decrypts==0&&authorizations==0&&browsers==0,
+        "unconnected Calendar presentation cannot start HTTP, credential decoding, authorization or browser work");
+    ScopedGdiPlus gdi;Check(gdi.ok(),"Calendar status raster check initializes only offscreen GDI+");
+    for(const auto& size:std::vector<std::pair<const wchar_t*,int>>{{L"TileWide",150},{L"TileLarge",310}}){
+        const wchar_t* asset=size.second>200?L"LiveLargeTile":L"LiveWideTile";
+        std::wstring xml;const auto visible=TileSnapshotVisibleText(unconnected,size.second,TileStatusLabels{},310);
+        Check(AppendDateTimeTileBinding(xml,size.first,size.second,unconnected)&&xml.find(unconnected.dateTime.weekday)!=std::wstring::npos&&
+            xml.find(L">"+unconnected.dateTime.dayNumber+L"</text>")!=std::wstring::npos&&xml.find(L"Connect")==std::wstring::npos&&xml.find(L"Google")==std::wstring::npos,
+            "Calendar Wide and Large XML keep the native date header without setup instructions");
+        Check(visible.find(unconnected.dateTime.weekday)!=std::wstring::npos&&visible.find(unconnected.dateTime.dayNumber)!=std::wstring::npos&&
+            visible.find(L"Connect")==std::wstring::npos&&visible.find(L"Google")==std::wstring::npos,
+            "Calendar Wide and Large visible status mirrors date-only tile text without the separate diagnostic");
+        if(gdi.ok()){
+            auto expected=unconnected;expected.text.secondary.clear();expected.sourceDiagnostic.clear();
+            std::vector<Gdiplus::ARGB> actualPixels,expectedPixels;bool actualInk=false,expectedInk=false;
+            Check(GoogleCalendarStatusRaster(unconnected,asset,310,size.second,actualPixels,actualInk)&&
+                GoogleCalendarStatusRaster(expected,asset,310,size.second,expectedPixels,expectedInk)&&actualInk&&expectedInk&&actualPixels==expectedPixels,
+                "Calendar Wide and Large bitmap output matches the exact date-only reference with no setup-text pixels");
+        }
+    }
+    const auto dateOnly=ComposeTileInstance(cfg.tiles[1],dateState,SmtcMediaSnapshot{},true);
+    Check(dateOnly.calendarSource&&!dateOnly.dateTime.dayNumber.empty()&&dateOnly.detailRows.empty()&&dateOnly.text.secondary.empty(),
+        "ordinary local date-only Calendar keeps its clean native header");
+    SYSTEMTIME clock{};GetSystemTime(&clock);const auto now=aip::datetime::Seconds(DateTimeCivil(clock));
+    const auto start=aip::google_calendar::Rfc3339(now+3600),end=aip::google_calendar::Rfc3339(now+7200);
+    const auto stamp=[](std::wstring value){value.erase(std::remove(value.begin(),value.end(),L'-'),value.end());value.erase(std::remove(value.begin(),value.end(),L':'),value.end());return value;};
+    localState.datetime=std::make_unique<ContentDateTimeProvider>();
+    localState.datetime->testReader=[&](const std::wstring&,std::wstring& text,std::wstring&){++localReads;
+        text=L"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:"+stamp(start)+L"\r\nDTEND:"+stamp(end)+
+            L"\r\nSUMMARY:Local status meeting\r\nLOCATION:Local fixture room\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";return true;};
+    const auto localEvent=ComposeTileInstance(cfg.tiles[2],localState,SmtcMediaSnapshot{},true);
+    Check(localReads==1&&localEvent.calendarSource&&localEvent.detailRows.size()==1&&localEvent.detailRows.front().primary==L"Local status meeting"&&
+        localEvent.detailRows.front().secondary.find(L"Local fixture room")!=std::wstring::npos&&httpCalls==0,
+        "local agenda event title/time/location remain visible after setup text is removed from date-only calendars");
+    connectedState.googleCalendar=std::make_unique<ContentGoogleCalendarProvider>();const auto bound=GoogleCalendarConfigurationForTile(cfg.tiles[3]);
+    connectedState.googleCalendar->testHooks.unprotect=[&](const std::wstring&,std::wstring& raw){++decrypts;raw=aip::google_calendar::detail::Envelope(bound)+L"STATUS_REFRESH_FIXTURE";return true;};
+    connectedState.googleCalendar->testHooks.authorize=[&](const auto&,const auto&,const auto&,const auto&,auto&,auto&,auto&,const auto&){++authorizations;return false;};
+    connectedState.googleCalendar->testHooks.browser=[&](const auto&){++browsers;return false;};
+    connectedState.googleCalendar->testHooks.http=[&](const aip::HttpFetchOptions& options,aip::HttpFetchResponse& response,std::wstring&){++httpCalls;
+        if(options.url==L"https://oauth2.googleapis.com/token")GoogleCalendarHostReply(response,GoogleCalendarHostTokens);
+        else GoogleCalendarHostReply(response,std::string("{\"timeZone\":\"UTC\",\"items\":[{\"id\":\"status-event\",\"summary\":\"Connected status meeting\",\"location\":\"Cloud fixture room\",\"start\":{\"dateTime\":\"")+
+            aip::WideToUtf8(start)+"\"},\"end\":{\"dateTime\":\""+aip::WideToUtf8(end)+"\"}}]}");return true;};
+    const auto connected=ComposeTileInstance(cfg.tiles[3],connectedState,SmtcMediaSnapshot{},true);
+    Check(connected.calendarSource&&connected.detailRows.size()==1&&connected.detailRows.front().primary==L"Connected status meeting"&&
+        connected.detailRows.front().secondary.find(L"Cloud fixture room")!=std::wstring::npos&&httpCalls==2&&decrypts==1&&authorizations==0&&browsers==0,
+        "connected Calendar events still compose through injected token/event responses without interactive OAuth or browser work");
+    std::wstring connectedXml;Check(AppendDateTimeTileBinding(connectedXml,L"TileLarge",310,connected)&&connectedXml.find(L"Connected status meeting")!=std::wstring::npos&&
+        TileSnapshotVisibleText(connected,310,TileStatusLabels{},310).find(L"Cloud fixture room")!=std::wstring::npos,
+        "connected Calendar agenda content remains in both native XML and visible status");
+    Check(!cfg.tiles[3].googleCalendar.allCalendars,"existing single-calendar selection remains the default until aggregation is explicitly enabled");
+    auto allProfile=profile;
+    Check(aip::WriteIniValueToText(allProfile,L"Tile.connected",L"GoogleCalendar.AllCalendars",L"true")&&WriteContentFixture(allProfile),
+        "all-calendars selection is persisted only for the selected private Calendar tile");
+    TileInstanceConfiguration allCfg;
+    const bool allParsed=ReadCurrentTileInstances(allCfg,error)&&allCfg.tiles.size()==4&&allCfg.tiles[3].googleCalendar.allCalendars&&!allCfg.tiles[0].googleCalendar.allCalendars;
+    Check(allParsed,"typed host capture retains independent AllCalendars selection rather than a global source flag");
+    if(allParsed){
+        std::atomic<unsigned> lists{0};std::atomic<bool> hidden{false};
+        connectedState.googleCalendar->testHooks.http=[&](const aip::HttpFetchOptions& options,aip::HttpFetchResponse& response,std::wstring&){++httpCalls;
+            if(options.url==L"https://oauth2.googleapis.com/token")GoogleCalendarHostReply(response,GoogleCalendarHostTokens);
+            else if(options.url.find(L"calendarList")!=std::wstring::npos){++lists;hidden=options.url.find(L"showHidden=true")!=std::wstring::npos;
+                GoogleCalendarHostReply(response,R"({"items":[{"id":"primary-fixture","summary":"Primary","timeZone":"UTC","primary":true},{"id":"second-fixture","summary":"Shared","timeZone":"UTC"}]})");}
+            else{
+                const bool first=options.url.find(L"/calendars/primary-fixture/events")!=std::wstring::npos;
+                const bool second=options.url.find(L"/calendars/second-fixture/events")!=std::wstring::npos;
+                if(!first&&!second&&options.url.find(L"/calendars/primary/events")==std::wstring::npos)return false;
+                const auto title=first?L"Later primary meeting":second?L"Earlier shared meeting":L"Selected calendar only";
+                const auto firstTime=first?aip::google_calendar::Rfc3339(now+7200):start;
+                const auto lastTime=first?aip::google_calendar::Rfc3339(now+10800):end;
+                GoogleCalendarHostReply(response,std::string("{\"timeZone\":\"UTC\",\"items\":[{\"id\":\"same-id\",\"summary\":")+aip::JsonEscape(title)+
+                    ",\"start\":{\"dateTime\":\""+aip::WideToUtf8(firstTime)+"\"},\"end\":{\"dateTime\":\""+aip::WideToUtf8(lastTime)+"\"}}]}");
+            }return true;};
+        const auto allFrame=ComposeTileInstance(allCfg.tiles[3],connectedState,SmtcMediaSnapshot{},true);
+        Check(allFrame.calendarSource&&allFrame.detailRows.size()==2&&allFrame.detailRows[0].primary==L"Earlier shared meeting"&&allFrame.detailRows[1].primary==L"Later primary meeting"&&
+            httpCalls==6&&decrypts==2&&lists==1&&hidden&&authorizations==0&&browsers==0,
+            "all-calendars composition aggregates chronologically sorted rows with colliding raw IDs through one injected token and calendar list");
+        ComposeTileInstance(allCfg.tiles[3],connectedState,SmtcMediaSnapshot{},false);
+        Check(httpCalls==6&&lists==1&&decrypts==2,"unchanged all-calendar composition reuses its provider deadline and protected credential cache");
+        auto single=allCfg.tiles[3];single.googleCalendar.allCalendars=false;
+        const auto singleAgain=ComposeTileInstance(single,connectedState,SmtcMediaSnapshot{},true);
+        Check(singleAgain.calendarSource&&singleAgain.detailRows.size()==1&&singleAgain.detailRows.front().primary==L"Selected calendar only"&&httpCalls==8&&lists==1&&decrypts==3,
+            "switching back to one calendar invalidates aggregate provider content without retaining the other calendar's rows");
+    }
+    unconnectedState.Stop();dateState.Stop();localState.Stop();connectedState.Stop();restore();
+}
 static void TestGoogleCalendarHost()
 {
     using namespace aip::content;
@@ -200,4 +333,5 @@ static void TestGoogleCalendarHost()
             return aip::ReadIniValueFromDoc(invalidDoc,section,key,value)?value:std::wstring(fallback);},instances,issue)&&issue.find(L"31")!=std::wstring::npos,
             "typed Google look-ahead validation rejects an unsupported range before creating a provider");
     }
+    TestCalendarStatusPresentationHost();
 }

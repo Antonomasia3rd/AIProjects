@@ -1,5 +1,6 @@
 static void DispatchTrayCommand(HWND h, UINT cmd)
 {
+    if(cmd==ID_DESKTOPSTUB_SETTINGS_WINDOW){OpenDesktopStubSettings(h);return;}
     if (DispatchTileInstanceCommand(h, cmd)) return;
     if (DispatchMenuWordingCommand(h, cmd)) return;
     if (DispatchSmtcDisplaySettingsCommand(h, cmd)) return;

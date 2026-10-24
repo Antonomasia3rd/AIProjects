@@ -14,7 +14,7 @@ struct ContentKuroProvider {
         waitExpired = false;
         if (cfg.gameToken.empty() && cfg.gameTokenProtected.empty()) {
             Cancel();
-            immediateError = L"Configure a Wuthering Waves overseas game access token in this tile's settings.";
+            immediateError = L"Sign in to Kuro and choose your character in this tile's source settings.";
             return;
         }
         immediateError.clear();

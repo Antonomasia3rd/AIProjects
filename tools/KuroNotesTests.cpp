@@ -102,7 +102,18 @@ void TransportTests() {
     Check(calls == 1 && result.state == State::Error, "optional account decoder is used");
     cfg = Settings(); cfg.playerId = L"12345"; cfg.region = L"Europe"; calls = 0;
     result = Fetch(cfg, [&](const auto&, auto& response, auto&) { Respond(response, ++calls == 1 ? R"({"codes":0,"oauthCode":"CODE"})" : R"({"code":1005})"); return true; });
-    Check(calls == 4 && result.state == State::Error, "launcher data-not-ready retry is bounded to three attempts");
+    Check(calls == 5 && result.state == State::Error && result.line2.find(L"1005")!=std::wstring::npos,
+        "launcher retry matches the initial request plus three retries and reports a redacted stage/status");
+    calls=0;result=Fetch(cfg,[&](const auto&,auto& response,auto&){++calls;
+        Respond(response,calls==1?R"({"codes":0,"oauthCode":"CODE"})":calls<5?R"({"code":1005})":roleBody);return true;});
+    Check(calls==5&&result.state==State::Ok,"a launcher result becoming ready on the fourth attempt is accepted");
+    calls=0;bool returnedPending=false;unsigned cancelChecks=0;
+    result=Fetch(cfg,[&](const auto&,auto& response,auto&){++calls;returnedPending=calls>1;
+        Respond(response,calls==1?R"({"codes":0,"oauthCode":"CODE"})":R"({"code":1005})");return true;},{},[&]{return returnedPending&&++cancelChecks>=3;});
+    Check(calls==2&&result.state==State::Error&&cancelChecks>=3,"cancellation interrupts retry spacing before another launcher request");
+    auto shortDeadline=cfg;shortDeadline.timeoutSeconds=1;calls=0;
+    result=Fetch(shortDeadline,[&](const auto&,auto& response,auto&){Respond(response,++calls==1?R"({"codes":0,"oauthCode":"CODE"})":R"({"code":1005})");return true;});
+    Check(calls<=4&&result.state==State::Error,"retry spacing never extends the source's whole-flow deadline");
     cfg.gameToken.clear(); calls = 0;
     result = Fetch(cfg, [&](const auto&, auto&, auto&) { ++calls; return false; });
     Check(calls == 0 && result.line1 == L"Wuthering Waves setup", "unconfigured tile is inert and labels exact game credential");

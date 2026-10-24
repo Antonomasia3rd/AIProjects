@@ -303,7 +303,6 @@ static void AppendSecondaryTilesMenu(HMENU menu)
         const UINT base = ID_SECONDARY_TILE_COMMANDS + index * SECONDARY_TILE_COMMAND_STRIDE;
         HMENU child = aip::BeginTrayNestedMenu(menu);
         AppendSecondaryTilePinCommands(child, SecondaryTileApiId(descriptor.id), base + 1, base + 2, base);
-        aip::AppendTrayMenuItem(child, base + 3, SecondaryTileUiString(L"SelectedTileContents", L"Tile contents..."), false, true);
         aip::AppendTrayMenuItem(child, base + 4, L"Source and sign-in settings...", false, true);
         aip::AppendTrayMenuItem(child, base + 5, L"Rename...", false, true);
         AppendTileAppearanceMenu(child, section, base + 6);

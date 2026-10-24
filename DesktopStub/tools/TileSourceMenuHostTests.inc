@@ -16,6 +16,8 @@ static void TestTileSourceMenuHost()
     aip::content::TileInstance prayer;prayer.id=L"menu-prayer";prayer.name=L"Prayer";prayer.type=aip::content::TileInstanceType::PrayerTimes;
     ResetTileInstanceMenuCommands();HMENU menu=CreatePopupMenu();AppendTileInstanceDetails(menu,prayer);
     const auto source=SourceMenuChild(menu,L"Source settings"),alerts=SourceMenuChild(menu,L"Notifications for this tile");
+    Check(std::none_of(g_tileInstanceMenuCommands.begin(),g_tileInstanceMenuCommands.end(),[](const auto& entry){return entry.second.verb==TileInstanceMenuVerb::Status;}),
+        "individual tile menus omit the duplicate Tile contents entry");
     Check(source&&alerts&&!SourceMenuChild(source,L"Notifications for this tile"),"Prayer notifications are directly discoverable in the tile menu, outside source settings");
     const auto advanced=SourceMenuChild(source,L"Advanced");
     Check(advanced&&!SourceMenuHasField(source,L"PrayerTimes.TimeoutSeconds")&&SourceMenuHasField(advanced,L"PrayerTimes.TimeoutSeconds")&&
@@ -36,4 +38,7 @@ static void TestTileSourceMenuHost()
         signIn|=command!=g_tileInstanceMenuCommands.end()&&command->second.verb==TileInstanceMenuVerb::SignIn;}
     Check(signIn&&!SourceMenuHasField(menu,L"Kuro.GameToken")&&SourceMenuHasField(SourceMenuChild(menu,L"Advanced"),L"Kuro.GameToken"),
         "Kuro guides users through sign-in while manual token import remains an advanced option");DestroyMenu(menu);
+    ResetTileInstanceMenuCommands();menu=CreatePopupMenu();AppendTileInstancesMenu(menu);
+    Check(std::count_if(g_tileInstanceMenuCommands.begin(),g_tileInstanceMenuCommands.end(),[](const auto& entry){return entry.second.verb==TileInstanceMenuVerb::Overview;})==1,
+        "one All tile contents entry remains available for centralized status");DestroyMenu(menu);
 }

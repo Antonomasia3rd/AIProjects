@@ -21,12 +21,22 @@ static std::wstring UserConfirmationProfile()
 }
 static void QueueUserConfirmationAction(const std::wstring& arguments)
 {
+    auto action=arguments;
     aip::notifications::ConfirmationAction parsed;
-    if(!aip::notifications::ParseConfirmationAction(arguments,parsed))return;
+    if(!aip::notifications::ParseConfirmationAction(action,parsed)){
+        if(arguments.compare(0,6,L"--ini ")!=0||arguments.size()>33000)return;
+        int count=0;auto raw=CommandLineToArgvW((L"DesktopStub.exe "+arguments).c_str(),&count);if(!raw)return;
+        struct Release{LPWSTR* value;~Release(){LocalFree(value);}} release{raw};
+        std::vector<std::wstring> values;for(int i=0;i<count;++i)values.emplace_back(raw[i]?raw[i]:L"");
+        aip::notifications::ConfirmationLaunch launch;bool recognized=false;
+        if(!aip::notifications::ParseConfirmationLaunch(values,launch,recognized)||launch.review)return;
+        auto profile=launch.profile;std::transform(profile.begin(),profile.end(),profile.begin(),[](wchar_t ch){return static_cast<wchar_t>(towlower(ch));});
+        if(profile!=UserConfirmationProfile())return;action=std::move(launch.action);
+    }
     {
         std::lock_guard<std::mutex> lock(g_confirmationMutex);
         if(g_confirmationActions.size()>=64)return;
-        g_confirmationActions.push_back(arguments);
+        g_confirmationActions.push_back(action);
     }
 #ifndef DESKTOPSTUB_TEST_NOTIFICATION_TOAST
     if(g_hwnd)PostMessageW(g_hwnd,WM_APP_NOTIFICATION_CONFIRMATION,0,0);
@@ -82,21 +92,21 @@ static bool ShowUserConfirmationToast(const std::wstring& key,const std::wstring
         const auto factory=aip::AcquireUncachedActivationFactory<winrt::Windows::Data::Xml::Dom::XmlDocument,winrt::Windows::Foundation::IActivationFactory>();
         auto xml=factory.ActivateInstance<winrt::Windows::Data::Xml::Dom::XmlDocument>();
         xml.LoadXml(aip::notifications::XMLConfirmationXml(title,message,token,
-            IniReadS(L"Strings",L"NotificationConfirmationYes",L"Yes"),IniReadS(L"Strings",L"NotificationConfirmationNo",L"No")));
+            IniReadS(L"Strings",L"NotificationConfirmationYes",L"Yes"),IniReadS(L"Strings",L"NotificationConfirmationNo",L"No"),UserConfirmationProfile()));
         const auto toastFactory=aip::AcquireUncachedActivationFactory<ToastNotification,IToastNotificationFactory>();
         record.toast=toastFactory.CreateToastNotification(xml);
         record.toast.Tag(aip::notifications::StableId(L"confirmation-"+key));record.toast.Group(NotificationGroup());
         const auto expires=winrt::clock::now()+std::chrono::minutes(5);
         record.toast.ExpirationTime(winrt::box_value(expires).as<winrt::Windows::Foundation::IReference<winrt::Windows::Foundation::DateTime>>());
-        record.activated=record.toast.Activated([](const auto&,const winrt::Windows::Foundation::IInspectable& args){
+        record.activated=record.toast.Activated([](const auto&,const winrt::Windows::Foundation::IInspectable& args) noexcept{
             try{auto action=args.as<ToastActivatedEventArgs>();QueueUserConfirmationAction(std::wstring(action.Arguments()));}catch(...){}
         });
-        record.dismissed=record.toast.Dismissed([token](const auto&,const ToastDismissedEventArgs& args){
+        record.dismissed=record.toast.Dismissed([token](const auto&,const ToastDismissedEventArgs& args) noexcept{
             // TimedOut only hides the popup. Its Action Center buttons remain
             // usable until our own deadline, so it must not cancel consent.
-            if(args.Reason()!=ToastDismissalReason::TimedOut)QueueUserConfirmationAction(L"confirm="+token+L"&choice=no");
+            try{if(args.Reason()!=ToastDismissalReason::TimedOut)QueueUserConfirmationAction(L"confirm="+token+L"&choice=no");}catch(...){}
         });
-        record.failed=record.toast.Failed([token](const auto&,const auto&){QueueUserConfirmationAction(L"confirm="+token+L"&choice=no");});
+        record.failed=record.toast.Failed([token](const auto&,const auto&) noexcept{try{QueueUserConfirmationAction(L"confirm="+token+L"&choice=no");}catch(...){}});
         {
             std::lock_guard<std::mutex> lock(g_confirmationMutex);
             g_nativeConfirmations.emplace(token,record);

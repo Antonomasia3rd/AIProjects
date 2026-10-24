@@ -102,7 +102,7 @@ static void TestDateTimeTileHost(const std::wstring& directory,const std::wstrin
     kuroState.kuro=std::make_unique<ContentKuroProvider>();unsigned transportCalls=0;
     kuroState.kuro->testTransport=[&](const auto&,auto&,auto&){++transportCalls;return false;};
     const auto unsetKuro=ComposeTileInstance(cfg.tiles[3],kuroState,media,true);
-    Check(transportCalls==0&&unsetKuro.text.primary==L"Wuthering Waves setup"&&unsetKuro.text.secondary.find(L"game access token")!=std::wstring::npos,
+    Check(transportCalls==0&&unsetKuro.text.primary==L"Wuthering Waves setup"&&unsetKuro.text.secondary.find(L"Sign in to Kuro")!=std::wstring::npos,
         "unconfigured WuWa composition is inert, game-identified and independent from unrelated global credentials");
     auto configuredKuro=cfg.tiles[3];configuredKuro.kuro.gameToken=L"SYNTHETIC-INERT-TOKEN";configuredKuro.kuro.playerId=L"12345";configuredKuro.kuro.region=L"Europe";
     const auto details=L"{\"Base\":{\"Id\":12345,\"Name\":\"Rover\",\"Energy\":120,\"MaxEnergy\":240,\"StoreEnergy\":20,\"MaxStoreEnergy\":480,\"Liveness\":60,\"LivenessMaxCount\":100,\"LivenessUnlock\":true,\"WeeklyInstCount\":2}}";

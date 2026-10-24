@@ -21,6 +21,7 @@ struct CaptchaProof {
     ~CaptchaProof(){Clear();}
 };
 enum class Status { Error,CaptchaRequired,Authenticated };
+enum class CaptchaStage { Ready,Error };
 struct Result {
     Status status=Status::Error;
     std::wstring token,message;

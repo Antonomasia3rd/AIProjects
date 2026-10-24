@@ -305,8 +305,11 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         if(!view.ok){frame.text={L"Check tile settings",view.status,L""};frame.wrapSourceText=true;break;}
         frame.clockSource=tile.type==TileInstanceType::Clock;frame.calendarSource=!frame.clockSource;
         frame.dateTime={frame.clockSource?view.time:L"",view.weekday,view.dayNumber,view.date,view.location,view.shortWeekday,view.rightToLeft};
-        if(frame.calendarSource&&!view.events.empty())frame.sourceDiagnostic=view.status;
-        frame.text={frame.clockSource?view.time:view.weekday+L" "+view.dayNumber,frame.clockSource?view.location:view.status,view.date};
+        // Optional account setup, loading and empty-calendar notes belong in
+        // Tile contents. Keep the ordinary Calendar face focused on its date
+        // and event rows, including when no external account is connected.
+        if(frame.calendarSource)frame.sourceDiagnostic=view.status;
+        frame.text={frame.clockSource?view.time:view.weekday+L" "+view.dayNumber,frame.clockSource?view.location:L"",view.date};
         for(const auto& event:view.events)frame.detailRows.push_back({event.title,event.when+(event.location.empty()?L"":L"\n"+event.location),L""});
         break;
     }

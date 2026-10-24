@@ -40,6 +40,20 @@ static void TestNotificationConfirmationHost()
     token=confirmationHostTokens.back();ClearUserConfirmations();
     QueueUserConfirmationAction(L"confirm="+token+L"&choice=yes");DrainUserConfirmations();
     Check(approved==11&&g_confirmationCallbacks.empty(),"session cleanup invalidates all action tokens");
+    Check(ConfirmUserOperation(nullptr,L"scoped",L"Title",L"Question",[&]{++approved;}),"profile-scoped foreground confirmation fixture queued");
+    token=confirmationHostTokens.back();const auto scopedAction=L"confirm="+token+L"&choice=yes";
+    QueueUserConfirmationAction(aip::notifications::ConfirmationProfilePrefix(L"D:\\wrong-profile.ini")+scopedAction);DrainUserConfirmations();
+    Check(approved==11&&!g_confirmations.Entries().empty(),"another profile's callback cannot resolve a current confirmation");
+    QueueUserConfirmationAction(aip::notifications::ConfirmationProfilePrefix(UserConfirmationProfile())+scopedAction);DrainUserConfirmations();
+    Check(approved==12,"full foreground launch arguments resolve only their originating profile's live request");
+    Check(ConfirmUserOperation(nullptr,L"copy-data",L"Title",L"Question",[&]{++approved;}),"cold launch delivery fixture queued");
+    token=confirmationHostTokens.back();auto forwarded=L"confirm="+token+L"&choice=no";
+    COPYDATASTRUCT data{NOTIFICATION_CONFIRMATION_COPY_DATA,static_cast<DWORD>((forwarded.size()+1)*sizeof(wchar_t)),&forwarded[0]};
+    Check(WndProc(nullptr,WM_COPYDATA,0,reinterpret_cast<LPARAM>(&data))==TRUE&&approved==12,
+        "foreground launch IPC queues the choice without synchronous approval work");
+    DrainUserConfirmations();Check(approved==12&&g_confirmations.Entries().empty(),"forwarded No dismisses the live question without changing settings");
+    forwarded=L"confirm=malformed&choice=yes";data.cbData=static_cast<DWORD>((forwarded.size()+1)*sizeof(wchar_t));data.lpData=&forwarded[0];
+    Check(WndProc(nullptr,WM_COPYDATA,0,reinterpret_cast<LPARAM>(&data))==FALSE,"malformed foreground IPC is rejected before queueing");
     g_commandLine.renderOnly=true;
     Check(!ConfirmUserOperation(nullptr,L"offline",L"Title",L"Question",[&]{++approved;}),"render-only cannot ask for a confirmation or act on it");
     g_commandLine.renderOnly=oldRender;g_commandLine.configureOnly=oldConfigure;

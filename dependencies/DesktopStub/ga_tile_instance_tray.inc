@@ -434,7 +434,6 @@ static void AppendTileInstanceDetails(HMENU menu,const aip::content::TileInstanc
         else aip::AppendTrayMenuItem(menu,0,TileInstanceUi(L"TilePinStatusUnavailable",L"Pin status requires the registered app"),false,false);
         }
     }
-    AppendTileInstanceCommand(menu,TileInstanceUi(L"SelectedTileContents",L"Tile contents..."),{TileInstanceMenuVerb::Status,tile.id,L"",L"",L""});
     AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceRefresh",L"Refresh this tile now"),{TileInstanceMenuVerb::Refresh,tile.id,L"",L"",L""});
     if(tile.type==TileInstanceType::Rss||tile.type==TileInstanceType::PrayerTimes)AppendTileInstanceAlerts(menu,tile);
     AppendTileInstanceEditable(menu,tile,L"Name",L"Tile name",tile.name.c_str());

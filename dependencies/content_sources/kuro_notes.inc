@@ -7,6 +7,7 @@
 #include "notes.inc"
 #include "../dpapi.inc"
 #include <set>
+#include <thread>
 
 namespace aip { namespace kuro {
 using HttpTransport = std::function<bool(const aip::HttpFetchOptions&, aip::HttpFetchResponse&, std::wstring&)>;
@@ -185,14 +186,28 @@ struct Session {
         return true;
     }
     bool Query(const wchar_t* url, const std::string& body, Members& response, std::wstring& error) const {
-        for (int attempt = 0; attempt < 3; ++attempt) {
+        const bool discovering=wcscmp(url,L"https://pc-launcher-sdk-api.kurogame.net/game/queryPlayerInfo")==0;
+        const std::wstring stage=discovering?L"Wuthering Waves character lookup":L"Wuthering Waves character details";
+        // The reference client's max_attempts=3 means the initial call plus
+        // three retries. Give retryable materialization a short pause instead
+        // of consuming every attempt in one immediate request burst.
+        for (int attempt = 0; attempt < 4; ++attempt) {
             if (!Request(url, body, false, response, error)) return false;
             int status = -1;
-            if (!ApiStatus(response, "code", status)) { error = L"The Kuro launcher response has no valid status."; return false; }
+            if (!ApiStatus(response, "code", status)) { error = stage+L" returned no valid Kuro status."; return false; }
             if (status == 0) return true;
-            if (status != 1005) { error = L"The Kuro launcher rejected the role request. Check the game token, Wuthering Waves player ID, and region."; return false; }
+            if (status != 1005) { error = stage+L" was rejected by Kuro (code "+std::to_wstring(status)+L"). Check the game account and region, or sign in again."; return false; }
+            if(attempt<3){
+                const auto until=(std::min)(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(250u<<attempt));
+                while(std::chrono::steady_clock::now()<until){
+                    if(canceled&&canceled()){error=L"The Kuro request was canceled.";return false;}
+                    const auto remaining=std::chrono::duration_cast<std::chrono::milliseconds>(until-std::chrono::steady_clock::now());
+                    std::this_thread::sleep_for((std::min)(std::chrono::milliseconds(25),(std::max)(std::chrono::milliseconds(1),remaining)));
+                }
+                if((canceled&&canceled())||std::chrono::steady_clock::now()>=deadline){error=L"The Kuro request was canceled or exceeded its total timeout.";return false;}
+            }
         }
-        error = L"The Kuro launcher role data is temporarily unavailable. Retry at the next refresh."; return false;
+        error = stage+L" remains unavailable (Kuro code 1005 after 4 attempts). Wait briefly, then retry character lookup."; return false;
     }
 };
 inline bool ParseRoles(const Members& response, std::vector<Role>& roles, std::wstring& error) {

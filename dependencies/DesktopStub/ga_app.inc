@@ -116,6 +116,7 @@ static void QueueCommandLineGenerationRequest()
 }
 
 static constexpr ULONG_PTR TILE_INSTANCE_COPY_DATA = 0x41495054;
+static constexpr ULONG_PTR NOTIFICATION_CONFIRMATION_COPY_DATA=0x41495043;
 static constexpr UINT WM_APP_TILE_INSTANCE_ACTIVATE = WM_APP + 126;
 static std::deque<std::pair<std::wstring, bool>> g_tileInstanceActivations;
 static constexpr ULONG_PTR TILE_ACTIVATION_NOTICE_COPY_DATA=0x4149504e;
@@ -256,6 +257,8 @@ static void HandleSingleInstanceRequest(WPARAM request)
 
     switch (request & SINGLE_INSTANCE_REQUEST_MASK)
     {
+    case SINGLE_INSTANCE_REQUEST_SETTINGS_WINDOW:
+        OpenDesktopStubSettings(g_hwnd);return;
     case SINGLE_INSTANCE_REQUEST_SETUP_DESKTOP:
         PostMessageW(g_hwnd,WM_APP_REQUEST_DESKTOP_HOST_SETUP,0,0);return;
     case SINGLE_INSTANCE_REQUEST_EXIT:
@@ -341,6 +344,7 @@ static std::wstring ModeSwitchRelaunchArguments(bool forceGenerate, bool waitFor
         args += L" --generate";
     if (g_commandLine.customIniPath)
         args += L" --ini " + QuoteCommandLineArg(g_iniPath);
+    if(g_commandLine.settingsWindow)args+=L" --settings";
     return args;
 }
 
@@ -591,6 +595,15 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
     if(m==WM_APP_DESKTOP_HOST_SETUP_COMPLETE){CompleteDesktopHostSetup(h);return 0;}
     if (m == WM_COPYDATA) {
         const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(l);
+        if(data&&data->dwData==NOTIFICATION_CONFIRMATION_COPY_DATA){
+            try{
+            if(!data->lpData||data->cbData<2*sizeof(wchar_t)||data->cbData>53*sizeof(wchar_t)||data->cbData%sizeof(wchar_t)||g_shutdownState.IsRequested())return FALSE;
+            const auto* text=static_cast<const wchar_t*>(data->lpData);const auto count=data->cbData/sizeof(wchar_t);
+            if(text[count-1]!=L'\0')return FALSE;const std::wstring action(text,count-1);
+            aip::notifications::ConfirmationAction parsed;if(!aip::notifications::ParseConfirmationAction(action,parsed))return FALSE;
+            QueueUserConfirmationAction(action);return TRUE; // Callbacks run after SendMessage unwinds.
+            }catch(...){return FALSE;}
+        }
         if(data&&data->dwData==TILE_ACTIVATION_NOTICE_COPY_DATA){
             if(!data->lpData||data->cbData<4*sizeof(wchar_t)||data->cbData>131*sizeof(wchar_t)||data->cbData%sizeof(wchar_t)||g_tileActivationNotices.size()>=64||g_shutdownState.IsRequested())return FALSE;
             const auto* text=static_cast<const wchar_t*>(data->lpData);const auto count=data->cbData/sizeof(wchar_t);
@@ -783,6 +796,20 @@ static bool SignalTileInstanceActivation(const std::wstring& id, bool signIn)
         SMTO_ABORTIFHUNG | SMTO_BLOCK, 3000, &accepted) && accepted == TRUE;
 }
 
+static int HandleNotificationConfirmationLaunch(const std::vector<std::wstring>& arguments)
+try{
+    aip::notifications::ConfirmationLaunch launch;bool recognized=false;
+    const auto valid=aip::notifications::ParseConfirmationLaunch(arguments,launch,recognized);
+    if(!recognized)return -1;if(!valid)return 2;if(launch.review)return 0;
+    const auto executable=GetModulePath();aip::SidecarPaths paths;std::wstring error;
+    if(executable.empty()||!aip::TryBuildSidecarPathsFromExecutable(executable,L"DesktopStub",launch.profile,paths,&error))return 2;
+    g_exePath=paths.exePath; // Renamed hosts must target their own product identity.
+    ConfigureSingleInstanceIdentity(paths.exeDir,paths.configPath,!launch.profile.empty());
+    const auto target=FindWindowW(WINDOW_CLASS_NAME,g_instanceWindowTitle.empty()?nullptr:g_instanceWindowTitle.c_str());
+    if(target){COPYDATASTRUCT data{NOTIFICATION_CONFIRMATION_COPY_DATA,static_cast<DWORD>((launch.action.size()+1)*sizeof(wchar_t)),const_cast<wchar_t*>(launch.action.c_str())};
+        DWORD_PTR accepted=0;SendMessageTimeoutW(target,WM_COPYDATA,0,reinterpret_cast<LPARAM>(&data),SMTO_ABORTIFHUNG|SMTO_BLOCK,3000,&accepted);}
+    return 0; // Previous-session tokens are inert; never create another resident.
+}catch(...){return 2;}
 static bool TryGetAlreadyRunningRequest(WPARAM& request)
 {
     switch (CurrentAlreadyRunningAction())
@@ -1756,6 +1783,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         ConfigureDpiAwareness();
         return RunLiveWallpaperCaptureHelper(captureRequest);
     }
+    const auto notificationResult=HandleNotificationConfirmationLaunch(captureArguments);
+    if(notificationResult>=0)return notificationResult;
     auto appStart = steady_clock::now();
     ConfigureDpiAwareness();
 
@@ -1891,6 +1920,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         WPARAM singleInstanceRequest = SINGLE_INSTANCE_REQUEST_SHOW;
         bool explicitSingleInstanceRequest = false;
         if(g_commandLine.setupDesktop){singleInstanceRequest=SINGLE_INSTANCE_REQUEST_SETUP_DESKTOP;explicitSingleInstanceRequest=true;}
+        else if(g_commandLine.settingsWindow){singleInstanceRequest=SINGLE_INSTANCE_REQUEST_SETTINGS_WINDOW;explicitSingleInstanceRequest=true;}
         else if (!g_commandLine.mediaAction.empty()) {
             for (std::size_t index = 0; index < aip::content::TileActionCount; ++index)
                 if (g_commandLine.mediaAction == aip::content::TileActions[index].id)
@@ -2254,6 +2284,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             if (g_commandLine.mediaAction == aip::content::TileActions[index].id)
                 PostMessageW(g_hwnd, g_singleInstanceMessage, SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE + index, 0);
     }
+    if(g_commandLine.settingsWindow)PostMessageW(g_hwnd,g_singleInstanceMessage,SINGLE_INSTANCE_REQUEST_SETTINGS_WINDOW,0);
     if (!g_commandLine.tileSetupKey.empty()) {
         if (TileInstanceModeRequested()) {
             g_tileInstanceActivations.emplace_back(g_commandLine.tileSetupKey, g_commandLine.tileSignIn);
@@ -2388,7 +2419,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             messageLoopExitCode = 1;
             break;
         }
-        if(IsGoogleCalendarSetupMessage(msg))continue;
+        if(IsGoogleCalendarSetupMessage(msg)||IsKuroSignInMessage(msg)||IsDesktopStubSettingsMessage(msg))continue;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
@@ -2397,6 +2428,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     CloseEmbeddedNotesSignIns();
     CloseKuroSignIns();
     CloseGoogleCalendarSetups();
+    CloseDesktopStubSettings();
     ShutdownMediaTileActions();
     KillTimer(g_hwnd, APPX_ACTIVATION_REQUEST_TIMER_ID);
     g_running=false;

@@ -620,69 +620,6 @@ void ShowPSLog(HWND h)
     MessageBoxW(h, psOut.c_str(), g_ui.noPowerShellOutputTitle.c_str(), MB_OK | (psErr ? MB_ICONERROR : MB_ICONINFORMATION));
 }
 
-INT_PTR CALLBACK RenameDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) noexcept
-{
-    struct TextInputDialogState
-    {
-        std::wstring* value;
-        bool allowEmpty;
-    };
-    static TextInputDialogState* state = nullptr;
-
-    switch (msg)
-    {
-    case WM_INITDIALOG:
-    {
-        state = reinterpret_cast<TextInputDialogState*>(lParam);
-        if (state && state->value)
-            SetDlgItemTextW(hDlg, TEXT_INPUT_EDIT_ID, state->value->c_str());
-
-        HWND edit = GetDlgItem(hDlg, TEXT_INPUT_EDIT_ID);
-        if (edit)
-        {
-            SetFocus(edit);
-            SendMessageW(edit, EM_SETSEL, 0, 0);
-            SendMessageW(edit, EM_SCROLLCARET, 0, 0);
-            return FALSE;
-        }
-        return TRUE;
-    }
-
-    case WM_COMMAND:
-        switch (LOWORD(wParam))
-        {
-        case IDOK:
-        {
-            HWND edit = GetDlgItem(hDlg, TEXT_INPUT_EDIT_ID);
-            int len = GetWindowTextLengthW(edit);
-            std::vector<wchar_t> buf((size_t)len + 1);
-            GetWindowTextW(edit, buf.data(), (int)buf.size());
-
-            if ((buf[0] || (state && state->allowEmpty)) && state && state->value)
-            {
-                *state->value = buf.data();
-                EndDialog(hDlg, IDOK);
-            }
-            else
-            {
-                MessageBoxW(hDlg, g_ui.pathCannotBeEmpty.c_str(), g_ui.errorTitle.c_str(), MB_OK | MB_ICONWARNING);
-            }
-            return TRUE;
-        }
-
-        case IDCANCEL:
-            EndDialog(hDlg, IDCANCEL);
-            return TRUE;
-        }
-        break;
-
-    case WM_DESTROY:
-        state = nullptr;
-        return FALSE;
-    }
-    return FALSE;
-}
-
 static bool AppendMenuChecked(HMENU menu, UINT flags, UINT_PTR id, const wchar_t* text)
 {
     if (!menu)

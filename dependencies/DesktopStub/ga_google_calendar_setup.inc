@@ -3,6 +3,7 @@
 // browser cookie or credential from another application is inspected.
 #ifndef DESKTOPSTUB_INERT_HARDWARE
 #include "../content_sources/google_calendar.inc"
+#include "../content_sources/google_calendar_selection.h"
 #include "../content_sources/notes_signin_workers.h"
 namespace google_calendar_setup {
 static constexpr UINT WM_READY=WM_APP+187;
@@ -68,7 +69,7 @@ static bool Reload(const std::shared_ptr<State>& state){
     state->configuration=configuration;state->fingerprint=Fingerprint(tile);
     const auto status=state->configuration.clientId.empty()?Text(L"GoogleCalendarClientMissing",L"No Desktop OAuth client imported."):
         state->configuration.refreshTokenProtected.empty()?Text(L"GoogleCalendarClientReady",L"Desktop OAuth client ready. Choose Connect to Google."):
-        Text(L"GoogleCalendarClientConnected",L"Google account connected. Refresh the calendar list or choose a calendar.");
+        Text(L"GoogleCalendarClientConnected",L"Google account connected. Refresh the list, then choose All calendars or one calendar.");
     SetWindowTextW(state->client,UiLiteralText(status).c_str());Buttons(state,state->busy);return true;
 }
 static bool Save(const std::shared_ptr<State>& state,const std::vector<std::pair<const wchar_t*,std::wstring>>& settings,std::wstring& error){
@@ -104,8 +105,10 @@ static bool Import(const std::shared_ptr<State>& state,const std::wstring& path)
     const bool parsed=aip::google_calendar::ImportDesktopClientJson(json,configuration,error);
     aip::google_calendar::detail::Wipe(json);if(!bytes.empty())SecureZeroMemory(bytes.data(),bytes.size());
     if(!parsed){Status(state,error);return false;}
-    const bool saved=Save(state,{{L"GoogleCalendar.ClientId",configuration.clientId},{L"GoogleCalendar.ClientSecret",configuration.clientSecret},
-        {L"GoogleCalendar.RefreshTokenProtected",L""},{L"Calendar.Source",L"Google"}},error);
+    std::vector<std::pair<const wchar_t*,std::wstring>> imported={{L"GoogleCalendar.ClientId",configuration.clientId},
+        {L"GoogleCalendar.ClientSecret",configuration.clientSecret},{L"GoogleCalendar.RefreshTokenProtected",L""},{L"Calendar.Source",L"Google"}};
+    if(state->configuration.clientId.empty())imported.push_back({L"GoogleCalendar.AllCalendars",L"1"});
+    const bool saved=Save(state,imported,error);
     if(!saved){Status(state,error);return false;}Cancel(state);EmptyChoices(state);Buttons(state,false);
     Status(state,Text(L"GoogleCalendarImported",L"Desktop OAuth client imported. Choose Connect to Google, then approve read-only Calendar access in your browser."));return true;
 }
@@ -152,6 +155,18 @@ static std::wstring ChoiceLabel(const aip::google_calendar::CalendarChoice& cale
     auto label=calendar.name;for(auto& ch:label)if(ch<0x20||ch==0x7f)ch=L' ';if(label.size()>180)label=label.substr(0,177)+L"...";
     if(calendar.primary)label+=Text(L"GoogleCalendarPrimarySuffix",L" (primary)");return label;
 }
+static bool PopulateChoices(const std::shared_ptr<State>& state){
+    const auto allLabel=Text(L"GoogleCalendarAllCalendars",L"All calendars");
+    if(SendMessageW(state->calendars,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(allLabel.c_str()))!=0){EmptyChoices(state);return false;}
+    for(std::size_t index=0;index<state->choices.size();++index){const auto label=ChoiceLabel(state->choices[index]);
+        if(SendMessageW(state->calendars,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label.c_str()))!=static_cast<LRESULT>(index+1)){
+            EmptyChoices(state);return false;
+        }
+    }
+    const auto selected=aip::google_calendar::PickerSelection(state->configuration.allCalendars,state->configuration.calendarId,state->choices);
+    if(selected>=0)SendMessageW(state->calendars,CB_SETCURSEL,static_cast<WPARAM>(selected),0);
+    return true;
+}
 static void Complete(const std::shared_ptr<State>& state){
     if(!Live(state)||!state->job||!state->job->done.load(std::memory_order_acquire)||state->job->sequence!=state->sequence||state->job->canceled.load())return;
     const auto job=state->job;KillTimer(state->window,1);aip::content::TileInstance tile;std::wstring error;
@@ -163,13 +178,10 @@ static void Complete(const std::shared_ptr<State>& state){
             Text(L"GoogleCalendarConnectedMessage",L"Read-only Calendar access was saved for this tile with Windows protection."));
     }
     if(job->listed){
-        EmptyChoices(state);state->choices=job->calendars;state->choiceAccountKey=AccountKey(state->configuration);int selected=-1;
-        for(std::size_t index=0;index<state->choices.size();++index){const auto& choice=state->choices[index];const auto label=ChoiceLabel(choice);
-            SendMessageW(state->calendars,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label.c_str()));
-            if(choice.id==state->configuration.calendarId||(state->configuration.calendarId==L"primary"&&choice.primary))selected=static_cast<int>(index);}
-        if(selected<0&&state->choices.size()==1)selected=0;if(selected>=0)SendMessageW(state->calendars,CB_SETCURSEL,selected,0);
-        Status(state,state->choices.empty()?Text(L"GoogleCalendarNoCalendars",L"No readable calendars were returned. Check this account's calendar sharing permissions."):
-            Text(L"GoogleCalendarChoose",L"Choose a calendar and click Use selected calendar. Each Calendar tile can select its own account and calendar."));
+        EmptyChoices(state);state->choices=job->calendars;state->choiceAccountKey=AccountKey(state->configuration);
+        if(!PopulateChoices(state))Status(state,Text(L"GoogleCalendarPickerFailed",L"The calendar picker could not be prepared. Saved account settings were kept; refresh the list to retry."));
+        else Status(state,state->choices.empty()?Text(L"GoogleCalendarNoCalendars",L"No readable calendars were returned. Check this account's calendar sharing permissions."):
+            Text(L"GoogleCalendarChoose",L"Choose All calendars to combine upcoming events from every readable calendar, or select one calendar. Click Use selected calendars to save this tile's choice."));
     }else Status(state,job->error.empty()?Text(L"GoogleCalendarRequestFailed",L"Google Calendar could not complete this request. Previous saved settings were kept."):job->error);
     state->job.reset();Buttons(state,false);workers.ReapCompleted();
 }
@@ -177,12 +189,17 @@ static void SaveSelected(const std::shared_ptr<State>& state){
     if(state->busy)return;const auto selected=SendMessageW(state->calendars,CB_GETCURSEL,0,0);
     if(state->choiceAccountKey!=AccountKey(state->configuration)){EmptyChoices(state);Buttons(state,false);
         Status(state,Text(L"GoogleCalendarTileChanged",L"This tile or its Google settings changed. Reopen setup; no previous account was replaced."));return;}
-    if(selected==CB_ERR||static_cast<std::size_t>(selected)>=state->choices.size()){Status(state,Text(L"GoogleCalendarSelectFirst",L"Select a calendar from the list first."));return;}
-    const auto calendar=state->choices[static_cast<std::size_t>(selected)];std::wstring error;
-    if(!Save(state,{{L"GoogleCalendar.CalendarId",calendar.id},{L"Calendar.Source",L"Google"}},error)){Status(state,error);return;}
-    Status(state,Text(L"GoogleCalendarSelectedSaved",L"Selected calendar saved. This tile will refresh automatically. You may close this window."));
-    NotifyUserOperation(L"google-calendar-selected-"+state->tileId,Text(L"GoogleCalendarSelectedTitle",L"Calendar selected"),
-        Text(L"GoogleCalendarSelectedMessage",L"This Calendar tile will display the selected Google calendar's upcoming events."));
+    aip::google_calendar::SelectionSettings selection;
+    if(state->choices.empty()||!aip::google_calendar::PickerSettings(static_cast<std::ptrdiff_t>(selected),state->choices,selection)){
+        Status(state,Text(L"GoogleCalendarSelectFirst",L"Select All calendars or one calendar from the list first."));return;
+    }
+    std::wstring error;if(!Save(state,selection,error)){Status(state,error);return;}
+    const bool all=selected==0;
+    Status(state,all?Text(L"GoogleCalendarAllSelectedSaved",L"All readable calendars selected. Their upcoming events will be combined on this tile. You may close this window."):
+        Text(L"GoogleCalendarSelectedSaved",L"Selected calendar saved. This tile will refresh automatically. You may close this window."));
+    NotifyUserOperation(L"google-calendar-selected-"+state->tileId,Text(L"GoogleCalendarSelectedTitle",L"Calendars selected"),
+        all?Text(L"GoogleCalendarAllSelectedMessage",L"This Calendar tile will combine upcoming events from all readable calendars in this Google account."):
+            Text(L"GoogleCalendarSelectedMessage",L"This Calendar tile will display the selected Google calendar's upcoming events."));
 }
 static void Disconnect(const std::shared_ptr<State>& state){
     Cancel(state);std::wstring error;if(!Save(state,{{L"GoogleCalendar.RefreshTokenProtected",L""}},error)){Buttons(state,false);Status(state,error);return;}
@@ -244,14 +261,14 @@ static bool OpenGoogleCalendarSetup(HWND owner,const std::wstring& tileId) try {
         auto control=CreateWindowExW(std::wstring(type)==L"COMBOBOX"?WS_EX_CLIENTEDGE:0,type,UiLiteralText(caption).c_str(),WS_CHILD|WS_VISIBLE|style,
             0,0,1,1,state->window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),cls.hInstance,nullptr);
         SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE);return control;};
-    state->instructions=child(L"STATIC",Text(L"GoogleCalendarSetupInstructions",L"Import the credentials JSON for your Google Cloud Desktop app, then connect in your default browser. Only read-only Calendar access is requested; DesktopStub never asks for your Google password."),SS_NOPREFIX,0);
+    state->instructions=child(L"STATIC",Text(L"GoogleCalendarSetupInstructions",L"Import your Google Cloud Desktop app credentials, then connect in your browser. Choose All calendars to combine upcoming events or select one calendar. Access is read-only; DesktopStub never asks for your Google password."),SS_NOPREFIX,0);
     state->client=child(L"STATIC",L"",SS_NOPREFIX,0);
     state->import=child(L"BUTTON",Text(L"GoogleCalendarImportButton",L"Import Desktop OAuth JSON..."),BS_PUSHBUTTON|WS_TABSTOP,ID_IMPORT);
     state->connect=child(L"BUTTON",Text(L"GoogleCalendarConnectButton",L"Connect to Google..."),BS_PUSHBUTTON|WS_TABSTOP,ID_CONNECT);
     state->list=child(L"BUTTON",Text(L"GoogleCalendarListButton",L"Refresh calendar list"),BS_PUSHBUTTON|WS_TABSTOP,ID_LIST);
     state->calendars=child(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,ID_CALENDARS);
     SendMessageW(state->calendars,CB_SETDROPPEDWIDTH,640,0);
-    state->save=child(L"BUTTON",Text(L"GoogleCalendarUseButton",L"Use selected calendar"),BS_PUSHBUTTON|WS_TABSTOP,ID_SAVE);
+    state->save=child(L"BUTTON",Text(L"GoogleCalendarUseButton",L"Use selected calendars"),BS_PUSHBUTTON|WS_TABSTOP,ID_SAVE);
     state->disconnect=child(L"BUTTON",Text(L"GoogleCalendarDisconnectButton",L"Disconnect on this device"),BS_PUSHBUTTON|WS_TABSTOP,ID_DISCONNECT);
     state->cancelJob=child(L"BUTTON",Text(L"GoogleCalendarCancelButton",L"Cancel operation"),BS_PUSHBUTTON|WS_TABSTOP,ID_CANCEL_JOB);
     state->status=child(L"STATIC",Text(L"GoogleCalendarSetupInitial",L"No browser or account request starts until you choose Connect or Refresh calendar list."),SS_NOPREFIX,0);
