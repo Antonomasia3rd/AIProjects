@@ -157,6 +157,7 @@ inline bool RecoverySeconds(const Members& object, const char* key, std::int64_t
 struct Session {
     Configuration cfg; HttpTransport transport; Cancel canceled;
     std::chrono::steady_clock::time_point deadline;
+    mutable FailureKind failure=FailureKind::Transient;
     bool Request(const wchar_t* url, const std::string& body, bool form, Members& response, std::wstring& error) const {
         if ((canceled && canceled()) || std::chrono::steady_clock::now() >= deadline) { error = L"The Kuro request was canceled or exceeded its total timeout."; return false; }
         aip::HttpFetchOptions options; options.url = url; options.userAgent = L"DesktopStub";
@@ -170,9 +171,13 @@ struct Session {
         try { ok = transport && transport(options, result, transportError); } catch (...) {}
         // Never expose upstream error/message strings: they can echo tokens,
         // OAuth codes, player IDs, or request bodies.
-        if (!ok || result.statusCode < 200 || result.statusCode >= 300) { error = L"The Kuro service could not be reached or rejected the request."; return false; }
+        if (!ok) { failure=FailureKind::Transient; error = L"The Kuro service could not be reached. The saved login was kept; DesktopStub will retry."; return false; }
+        if (result.statusCode < 200 || result.statusCode >= 300) {
+            failure=result.statusCode==401||result.statusCode==403?FailureKind::Rejected:FailureKind::Transient;
+            error=L"The Kuro service returned HTTP "+std::to_wstring(result.statusCode)+L". The saved login was kept; DesktopStub will retry.";return false;
+        }
         if ((canceled && canceled()) || std::chrono::steady_clock::now() >= deadline) { error = L"The Kuro request was canceled or exceeded its total timeout."; return false; }
-        if (result.body.size() > static_cast<std::size_t>(cfg.maximumBytes) || !Object(std::string(result.body.begin(), result.body.end()), response)) { error = L"The Kuro service returned invalid or oversized JSON."; return false; }
+        if (result.body.size() > static_cast<std::size_t>(cfg.maximumBytes) || !Object(std::string(result.body.begin(), result.body.end()), response)) { failure=FailureKind::InvalidData; error = L"The Kuro service returned invalid or oversized JSON."; return false; }
         return true;
     }
     bool OAuth(std::wstring& code, std::wstring& error) const {
@@ -180,8 +185,10 @@ struct Session {
             FormValue(cfg.deviceId) + "&access_token=" + FormValue(cfg.gameToken);
         Members response; int status = -1;
         if (!Request(L"https://sdkapi.kurogame-service.com/sdkcom/v2/user/oauth/code/generate.lg", body, true, response, error)) return false;
-        if (!ApiStatus(response, "codes", status) || status != 0 || !Wide(response["oauthCode"], code) || code.empty() || !SafeText(code, 16384)) {
-            error = L"The Kuro game session expired or was rejected. Supply a current overseas game access token."; return false;
+        if (!ApiStatus(response, "codes", status)) { failure=FailureKind::InvalidData;error=L"Kuro OAuth returned no valid status. The saved login was kept.";return false; }
+        if(status!=0){failure=FailureKind::Rejected;error=L"Kuro OAuth rejected this request (code "+std::to_wstring(status)+L"). The saved login was kept; retry or check the account settings.";return false;}
+        if (!Wide(response["oauthCode"], code) || code.empty() || !SafeText(code, 16384)) {
+            failure=FailureKind::InvalidData;error = L"Kuro OAuth returned no valid authorization code. The saved login was kept."; return false;
         }
         return true;
     }
@@ -194,9 +201,9 @@ struct Session {
         for (int attempt = 0; attempt < 4; ++attempt) {
             if (!Request(url, body, false, response, error)) return false;
             int status = -1;
-            if (!ApiStatus(response, "code", status)) { error = stage+L" returned no valid Kuro status."; return false; }
+            if (!ApiStatus(response, "code", status)) { failure=FailureKind::InvalidData;error = stage+L" returned no valid Kuro status."; return false; }
             if (status == 0) return true;
-            if (status != 1005) { error = stage+L" was rejected by Kuro (code "+std::to_wstring(status)+L"). Check the game account and region, or sign in again."; return false; }
+            if (status != 1005) { failure=FailureKind::Rejected;error = stage+L" was rejected by Kuro (code "+std::to_wstring(status)+L"). The saved login was kept; retry or check the account and region."; return false; }
             if(attempt<3){
                 const auto until=(std::min)(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(250u<<attempt));
                 while(std::chrono::steady_clock::now()<until){
@@ -207,7 +214,7 @@ struct Session {
                 if((canceled&&canceled())||std::chrono::steady_clock::now()>=deadline){error=L"The Kuro request was canceled or exceeded its total timeout.";return false;}
             }
         }
-        error = stage+L" remains unavailable (Kuro code 1005 after 4 attempts). Wait briefly, then retry character lookup."; return false;
+        failure=FailureKind::Transient;error = stage+L" remains unavailable (Kuro code 1005 after 4 attempts). The saved login was kept; DesktopStub will retry."; return false;
     }
 };
 inline bool ParseRoles(const Members& response, std::vector<Role>& roles, std::wstring& error) {
@@ -275,14 +282,14 @@ inline bool DiscoverRoles(const Configuration& input, std::vector<Role>& roles, 
 inline Snapshot Fetch(const Configuration& input, const HttpTransport& transport = aip::FetchHttpBytes,
     const CredentialDecoder& decoder = detail::DecodeNativeCredential, const Cancel& canceled = {}) {
     Configuration cfg; std::wstring error;
-    if (!detail::Resolve(input, cfg, error, decoder)) return MakeError(L"Wuthering Waves setup", error);
+    if (!detail::Resolve(input, cfg, error, decoder)) return MakeError(L"Wuthering Waves setup", error,FailureKind::Setup);
     detail::Session session{cfg, transport, canceled, std::chrono::steady_clock::now() + std::chrono::seconds(cfg.timeoutSeconds)};
     std::wstring code;
-    if (!session.OAuth(code, error)) return MakeError(L"Kuro refresh failed", error);
+    if (!session.OAuth(code, error)) return MakeError(L"Kuro refresh failed", error,session.failure);
     Role role{cfg.playerId, cfg.region, L"", 0};
     if (role.playerId.empty() || role.region.empty()) {
         std::vector<Role> roles;
-        if (!detail::Discover(session, code, roles, error)) return MakeError(L"Kuro discovery failed", error);
+        if (!detail::Discover(session, code, roles, error)) return MakeError(L"Kuro discovery failed", error,session.failure);
         roles.erase(std::remove_if(roles.begin(), roles.end(), [&](const Role& candidate) {
             return (!role.playerId.empty() && candidate.playerId != role.playerId) || (!role.region.empty() && candidate.region != role.region);
         }), roles.end());
@@ -292,7 +299,7 @@ inline Snapshot Fetch(const Configuration& input, const HttpTransport& transport
     }
     detail::Members response;
     const std::string body = "{\"oauthCode\":" + aip::JsonEscape(code) + ",\"playerId\":" + aip::WideToUtf8(role.playerId) + ",\"region\":" + aip::JsonEscape(role.region) + "}";
-    if (!session.Query(L"https://pc-launcher-sdk-api.kurogame.net/game/queryRole", body, response, error)) return MakeError(L"Kuro refresh failed", error);
+    if (!session.Query(L"https://pc-launcher-sdk-api.kurogame.net/game/queryRole", body, response, error)) return MakeError(L"Kuro refresh failed", error,session.failure);
     // Reconstitute the already validated object without logging any response.
     std::string document = "{"; bool first = true;
     for (const auto& field : response) { if (!first) document += ','; first = false; document += aip::JsonEscape(aip::Utf8ToWide(field.first)) + ":" + field.second; }

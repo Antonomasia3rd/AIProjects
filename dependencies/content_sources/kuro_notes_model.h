@@ -3,12 +3,14 @@
 // kuro_notes.inc; this file never opens an account, browser, or network.
 #include <algorithm>
 #include <climits>
+#include <cstdint>
 #include <cwctype>
 #include <string>
 #include <vector>
 
 namespace aip { namespace kuro {
 enum class State { Loading, Ok, Full, Error };
+enum class FailureKind { None, Transient, Rejected, InvalidData, Setup };
 struct Configuration {
     std::wstring gameToken, gameTokenProtected, playerId, region, deviceId;
     int refreshSeconds = 300, timeoutSeconds = 15, maximumBytes = 1048576;
@@ -17,6 +19,10 @@ struct Role { std::wstring playerId, region, name; int level = 0; };
 struct Row { std::wstring label, value, iconTopic; };
 struct Snapshot {
     State state = State::Loading;
+    FailureKind failure = FailureKind::None;
+    bool stale = false;
+    std::uint64_t refreshSequence = 0;
+    std::wstring diagnostic;
     int current = 0, maximum = 0, recoverySeconds = -1;
     int refined = -1, refinedMaximum = -1, refinedRecoverySeconds = -1;
     int activity = -1, activityMaximum = -1, weeklyChallengesRemaining = -1;
@@ -81,8 +87,9 @@ inline std::wstring ConfigurationKey(const Configuration& cfg) {
     return cfg.gameToken + L"\n" + cfg.gameTokenProtected + L"\n" + cfg.playerId + L"\n" + cfg.region + L"\n" + cfg.deviceId +
         L"\n" + std::to_wstring(cfg.refreshSeconds) + L":" + std::to_wstring(cfg.timeoutSeconds) + L":" + std::to_wstring(cfg.maximumBytes);
 }
-inline Snapshot MakeError(const std::wstring& title, const std::wstring& description) {
-    Snapshot result; result.state = State::Error; result.line1 = title; result.line2 = description; return result;
+inline Snapshot MakeError(const std::wstring& title, const std::wstring& description,FailureKind failure=FailureKind::InvalidData) {
+    Snapshot result; result.state = State::Error; result.failure=failure;
+    result.line1 = title; result.line2 = description; result.diagnostic=description; return result;
 }
 inline std::wstring Count(int current, int maximum) { return std::to_wstring(current) + L"/" + std::to_wstring(maximum); }
 inline std::wstring Recovery(int seconds) {

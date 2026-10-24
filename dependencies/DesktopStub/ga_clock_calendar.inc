@@ -2,7 +2,12 @@
 // explicitly selected local files; no account store or network is inspected.
 #include "../content_sources/clock_calendar_model.h"
 #include "../content_source_host.h"
-struct ContentDateTimeEvent { std::wstring title,when,location; bool allDay=false; };
+struct ContentDateTimeEvent {
+    std::wstring title,when,location; bool allDay=false;
+    aip::content::CalendarEvent presentation;
+    std::wstring identity;
+    aip::datetime::UTC start=0,end=0;
+};
 struct ContentDateTimeView {
     bool ok=false,configured=true,pending=false;
     std::wstring time,weekday,dayNumber,date,location,status;
@@ -10,6 +15,7 @@ struct ContentDateTimeView {
     std::uint64_t nextDelayMs=60000;
     std::wstring shortWeekday;
     bool rightToLeft=false;
+    std::vector<aip::datetime::Occurrence> reminderOccurrences;
 };
 static SYSTEMTIME DateTimeSystemTime(const aip::datetime::Civil& c) {
     SYSTEMTIME s{};s.wYear=static_cast<WORD>(c.year);s.wMonth=static_cast<WORD>(c.month);s.wDay=static_cast<WORD>(c.day);
@@ -80,6 +86,32 @@ static ContentDateTimeView ContentDateTimeHeader(aip::datetime::UTC now,int mill
     if(GetDateFormatEx(LOCALE_NAME_USER_DEFAULT,0,&system,L"ddd",text,static_cast<int>(std::size(text)),nullptr))view.shortWeekday=text;
     if(GetDateFormatEx(LOCALE_NAME_USER_DEFAULT,DATE_LONGDATE,&system,nullptr,text,static_cast<int>(std::size(text)),nullptr))view.date=text;
     view.nextDelayMs=aip::datetime::MillisecondsToNextMinute(now,milliseconds);return view;
+}
+static bool BuildContentCalendarEvent(const aip::datetime::Occurrence& event,const aip::datetime::CalendarConfiguration& cfg,
+    const DYNAMIC_TIME_ZONE_INFORMATION& zone,aip::datetime::UTC now,ContentDateTimeEvent& output)
+{
+    using namespace aip::datetime;Civil start,end,today;
+    if(!ContentTimeZoneUtcToLocal(event.start,zone,start)||!ContentTimeZoneUtcToLocal(event.end,zone,end)||
+        !ContentTimeZoneUtcToLocal(now,zone,today))return false;
+    const auto day=[](Civil value){value.hour=value.minute=value.second=0;return Seconds(value);};
+    const auto startDay=day(start),todayDay=day(today);
+    const auto localizedDate=[&](const Civil& value,DWORD flags,const wchar_t* format){auto system=DateTimeSystemTime(value);wchar_t text[256]{};
+        return GetDateFormatEx(LOCALE_NAME_USER_DEFAULT,flags,&system,format,text,static_cast<int>(std::size(text)),nullptr)?std::wstring(text):std::wstring{};};
+    ContentDateTimeEvent row;row.title=event.summary;row.location=cfg.showLocation?event.location:L"";row.allDay=event.allDay;
+    row.identity=event.uid;row.start=event.start;row.end=event.end;
+    auto& native=row.presentation;native.title=row.title;native.location=row.location;native.allDay=event.allDay;
+    native.isToday=event.allDay?(startDay<=todayDay&&day(end)>todayDay):startDay==todayDay;
+    native.dateLabel=native.isToday?IniReadS(L"Strings",L"CalendarToday",L"Today"):
+        startDay==todayDay+86400?IniReadS(L"Strings",L"CalendarTomorrow",L"Tomorrow"):localizedDate(start,0,L"dddd d");
+    native.startTime=event.allDay?IniReadS(L"Strings",L"CalendarAllDay",L"All day"):ContentDateTimeFormat(start,cfg.timeFormat);
+    native.timeRange=event.allDay?native.dateLabel+L" "+IniReadS(L"Strings",L"CalendarAllDayLower",L"all day"):
+        native.startTime+L" - "+ContentDateTimeFormat(end,cfg.timeFormat);
+    if(!event.allDay&&!native.isToday)native.timeRange=native.dateLabel+L" "+native.timeRange;
+    native.mediumWhen=event.allDay?native.timeRange:native.isToday?native.startTime:native.dateLabel+L" "+native.startTime;
+    native.wideWhen=native.timeRange;
+    // Keep the full diagnostic representation independent of native tile rows.
+    row.when=localizedDate(start,DATE_SHORTDATE,nullptr)+L" · "+(event.allDay?IniReadS(L"Strings",L"CalendarAllDay",L"All day"):native.timeRange);
+    output=std::move(row);return true;
 }
 static bool CalendarFileAttributesAllowed(DWORD attributes,bool directory,std::wstring& error) {
     // The recall constants are literal for older SDK headers. Reject cloud
@@ -186,7 +218,7 @@ public:
         view.location=cfg.location.empty()?(aip::datetime::Lower(cfg.timeZone)==L"local"?L"Local time":cfg.timeZone):cfg.location;
         if(!cfg.showDate)view.date.clear();return view;
     }
-    ContentDateTimeView Calendar(const aip::datetime::CalendarConfiguration& cfg,aip::datetime::UTC now,int milliseconds=0,bool force=false,bool synchronous=true) {
+    ContentDateTimeView Calendar(const aip::datetime::CalendarConfiguration& cfg,aip::datetime::UTC now,int milliseconds=0,bool force=false,bool synchronous=true,bool includeReminders=false) {
         using namespace aip::datetime;auto view=Header(now,milliseconds,cfg.timeZone,cfg.timeFormat);if(!view.ok)return view;
         if(cfg.filePath.empty()){if(!requestKey.empty())Cancel();return view;}
         if(cfg.refreshSeconds<30||cfg.refreshSeconds>86400||cfg.daysAhead<1||cfg.daysAhead>366||cfg.maxEvents<1||cfg.maxEvents>10){view.ok=false;view.status=L"Calendar settings are outside their supported ranges.";return view;}
@@ -247,7 +279,11 @@ public:
         }
         waitExpired=false;
         if(!captured->ok){view.ok=false;view.status=captured->error;return view;}
+        if(includeReminders)view.reminderOccurrences=captured->occurrences;
         std::vector<const Occurrence*> selected;std::wstring newVisibleKey=zoneScope+L"\n"+cfg.timeFormat+L":"+std::to_wstring(cfg.showLocation)+L"|"+regionalKey;
+        Civil localNow;if(ContentTimeZoneUtcToLocal(now,zone,localNow))newVisibleKey+=L"|localDay:"+std::to_wstring(localNow.year)+L":"+std::to_wstring(localNow.month)+L":"+std::to_wstring(localNow.day);
+        for(const auto& label:{IniReadS(L"Strings",L"CalendarToday",L"Today"),IniReadS(L"Strings",L"CalendarTomorrow",L"Tomorrow"),
+            IniReadS(L"Strings",L"CalendarAllDay",L"All day"),IniReadS(L"Strings",L"CalendarAllDayLower",L"all day")})newVisibleKey+=L"|"+std::to_wstring(label.size())+L":"+label;
         for(const auto& event:captured->occurrences){if(selected.size()>=static_cast<std::size_t>(cfg.maxEvents))break;
             if(event.start>=now+static_cast<UTC>(cfg.daysAhead)*86400||!(event.end>now||(event.end==event.start&&event.start>=now)))continue;
             selected.push_back(&event);
@@ -256,9 +292,7 @@ public:
         }
         if(newVisibleKey!=visibleKey){
             visibleKey=std::move(newVisibleKey);visibleEvents.clear();
-            for(const auto* event:selected){Civil local;if(!ContentTimeZoneUtcToLocal(event->start,zone,local))continue;auto system=DateTimeSystemTime(local);wchar_t date[128]{};
-                GetDateFormatEx(LOCALE_NAME_USER_DEFAULT,DATE_SHORTDATE,&system,nullptr,date,static_cast<int>(std::size(date)),nullptr);
-                visibleEvents.push_back({event->summary,std::wstring(date)+L" · "+(event->allDay?L"All day":ContentDateTimeFormat(local,cfg.timeFormat)),cfg.showLocation?event->location:L"",event->allDay});}
+            for(const auto* event:selected){ContentDateTimeEvent row;if(BuildContentCalendarEvent(*event,cfg,zone,now,row))visibleEvents.push_back(std::move(row));}
         }
         view.events=visibleEvents;
         if(!captured->warnings.empty())view.status=captured->warnings.front();else if(view.events.empty())view.status=L"No upcoming events.";

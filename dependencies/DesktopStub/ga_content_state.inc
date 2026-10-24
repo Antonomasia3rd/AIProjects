@@ -64,7 +64,7 @@ struct GalleryBatchFailureGuard {
 };
 static std::wstring SecondaryDeliveryKey(const aip::content::Snapshot& frame)
 {
-    return frame.galleryFrame ? frame.secondaryTileId + L"|" + frame.nativeQueueTag : frame.secondaryTileId;
+    return frame.galleryFrame||(frame.calendarSource&&frame.nativeQueue)?frame.secondaryTileId+L"|"+frame.nativeQueueTag:frame.secondaryTileId;
 }
 static bool TileSnapshotUsesRegistration(const aip::content::Snapshot& frame);
 static bool GalleryWindowComplete(const std::vector<aip::content::Snapshot>& frames, const aip::content::Snapshot& wanted)
@@ -102,6 +102,20 @@ static std::vector<aip::content::Snapshot> CurrentSecondarySnapshots()
     std::lock_guard<std::mutex> lock(g_secondarySnapshotMutex);
     return g_secondarySnapshots;
 }
+static bool CalendarQueueFrameCurrent(const aip::content::Snapshot& frame)
+{
+    using namespace aip::content;
+    if(!frame.calendarSource||!frame.nativeQueue||frame.secondaryTileId.empty()||frame.nativeQueueLayout.empty())return false;
+    const bool first=frame.nativeQueueTag==L"cal1"&&frame.calendarFlavor==CalendarFlavor::NextEvent;
+    const bool agenda=frame.nativeQueueTag==L"cal2"&&frame.calendarFlavor==CalendarFlavor::Agenda;
+    if(!first&&!agenda)return false;
+    std::lock_guard<std::mutex> lock(g_secondarySnapshotMutex);
+    return std::any_of(g_secondarySnapshots.begin(),g_secondarySnapshots.end(),[&](const Snapshot& current){
+        return current.calendarSource&&current.nativeQueue&&current.secondaryTileId==frame.secondaryTileId&&
+            current.nativeQueueTag==frame.nativeQueueTag&&current.nativeQueueLayout==frame.nativeQueueLayout&&
+            current.secondaryFrameKey==frame.secondaryFrameKey;
+    });
+}
 static bool TileSnapshotUsesRegistration(const aip::content::Snapshot& frame);
 static bool TileRegistrationReadyForId(const std::wstring& id);
 static std::vector<aip::content::Snapshot> PrepareSecondaryBatch(const std::vector<aip::content::Snapshot>& frames, bool force = false)
@@ -117,6 +131,7 @@ static std::vector<aip::content::Snapshot> PrepareSecondaryBatch(const std::vect
         }
         if (!IsUsableWallpaperPath(frame.backgroundPath)) { ContentFailGalleryFrame(frame); continue; }
         const bool registration = TileSnapshotUsesRegistration(frame);
+        if(frame.calendarSource&&frame.nativeQueue&&!CalendarQueueFrameCurrent(frame))continue;
         if (registration && !TileRegistrationReadyForId(frame.policy.owner)) continue;
         if (!registration && !frame.secondaryTileId.empty() && pinned.find(frame.secondaryTileId) == pinned.end()) {
 #ifdef DESKTOPSTUB_TEST_SECONDARY_EXISTS
@@ -140,8 +155,9 @@ static void AcknowledgeSecondaryFrame(const aip::content::Snapshot& frame)
 {
     if (frame.secondaryFrameKey.empty()) return;
     std::lock_guard<std::mutex> lock(g_secondaryDeliveryMutex);
-    if (frame.galleryFrame && frame.nativeQueueReset) {
+    if (!frame.nativeQueue||((frame.galleryFrame||frame.calendarSource)&&frame.nativeQueueReset)) {
         const auto prefix = frame.secondaryTileId + L"|";
+        g_secondaryDelivered.erase(frame.secondaryTileId);
         for (auto entry = g_secondaryDelivered.begin(); entry != g_secondaryDelivered.end();) {
             if (entry->first.compare(0, prefix.size(), prefix) == 0) entry = g_secondaryDelivered.erase(entry); else ++entry;
         }

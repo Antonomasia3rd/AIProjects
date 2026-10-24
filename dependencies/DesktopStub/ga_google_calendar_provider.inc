@@ -21,7 +21,7 @@ public:
 #endif
     ~ContentGoogleCalendarProvider(){Stop();}
     ContentDateTimeView Calendar(const aip::datetime::CalendarConfiguration& display,const aip::google_calendar::Configuration& cfg,
-        aip::datetime::UTC now,int milliseconds=0,bool force=false,bool synchronous=false)
+        aip::datetime::UTC now,int milliseconds=0,bool force=false,bool synchronous=false,bool includeReminders=false)
     {
         using namespace aip::datetime;
         auto headerCfg=display;headerCfg.filePath.clear();auto view=header.Calendar(headerCfg,now,milliseconds,false,false);
@@ -69,13 +69,12 @@ public:
             view.pending=privateError.empty();view.ok=privateError.empty();view.status=view.pending?L"Fetching Google Calendar events...":L"Google Calendar could not refresh. Reconnect in source settings if needed.";return view;
         }
         if(!result->ok){view.ok=false;view.status=result->error.empty()?L"Google Calendar could not refresh.":result->error;return view;}
+        if(includeReminders)view.reminderOccurrences=result->occurrences;
         DYNAMIC_TIME_ZONE_INFORMATION zone{};ResolveContentTimeZone(display.timeZone,zone);
         for(const auto& event:result->occurrences){
             if(view.events.size()>=static_cast<size_t>(display.maxEvents))break;
             if(event.start>=now+static_cast<UTC>(display.daysAhead)*86400||!(event.end>now||(event.start==event.end&&event.start>=now)))continue;
-            Civil local;if(!ContentTimeZoneUtcToLocal(event.start,zone,local))continue;auto system=DateTimeSystemTime(local);wchar_t date[128]{};
-            GetDateFormatEx(LOCALE_NAME_USER_DEFAULT,DATE_SHORTDATE,&system,nullptr,date,static_cast<int>(std::size(date)),nullptr);
-            view.events.push_back({event.summary,std::wstring(date)+L" · "+(event.allDay?L"All day":ContentDateTimeFormat(local,display.timeFormat)),display.showLocation?event.location:L"",event.allDay});
+            ContentDateTimeEvent row;if(BuildContentCalendarEvent(event,display,zone,now,row))view.events.push_back(std::move(row));
         }
         if(view.events.empty())view.status=L"No upcoming events.";return view;
     }

@@ -230,6 +230,7 @@ static std::wstring BuildLegacyContentFixtureTemplate()
 #include "GalleryImageActivationHostTests.inc"
 #include "DateTimeTileHostTests.inc"
 #include "DateTimeParityHostTests.inc"
+#include "CalendarReminderHostTests.inc"
 #include "DesktopHostSetupHostTests.inc"
 #include "FreshPresetPreviewHostTests.inc"
 
@@ -1187,6 +1188,7 @@ int wmain()
     TestSourceAlertHost();
     TestPrayerNotificationRuntimeHost();
     TestGoogleCalendarHost();
+    TestCalendarReminderHost();
     TestUnpinnedAlertDemandHost();
     TestTileSourceMenuHost();
     TestNotificationConfirmationHost();

@@ -405,7 +405,8 @@ static bool DefaultStringNeedsFormatValidation(const std::string& defaults, cons
 static bool UiStringUsesSubjectSubstitution(const std::string& key)
 {
     // These strings use literal named tokens, never printf formatting.
-    if(key=="NotificationRssNewItems")return true;
+    if(key=="NotificationRssNewItems"||key=="CalendarReminderMinutes")return true;
+    if(key.compare(0,11,"TileOption_")==0)return true; // Menu captions are literal data, never format strings.
     return key == "NotificationSourceFailedMessage" || key == "NotificationSourceRecoveredMessage" ||
         key == "NotificationAccountSavedMessage" || key == "NotificationTileAddedMessage" ||
         key == "NotificationRegistrationPreparedMessage" || key == "NotificationLiveDeliveryChangedMessage";
@@ -429,6 +430,8 @@ static void AssertUiStringWired(const std::string& key, const std::string& defau
     // without retaining a duplicate field in the legacy g_ui structure.
     loadPattern += "|IniReadS\\(L\"Strings\",\\s*L\"" + key + "\"";
     loadPattern += "|(?:TileInstanceUi|SecondaryTileUiString)\\(L\"" + key + "\"";
+    if(key.compare(0,11,"TileOption_")==0)
+        loadPattern += "|TileInstanceUi\\(\\(L\"TileOption_\".*std::wstring\\(key\\).*L\""+key.substr(11)+"\"";
     if(key.compare(0,14,"GoogleCalendar")==0||key.compare(0,4,"Kuro")==0||key.compare(0,14,"SettingsWindow")==0)
         loadPattern += "|Text\\(L\"" + key + "\""; // Scoped setup/settings readers are guarded separately below.
     if (UiStringUsesSubjectSubstitution(key))
@@ -584,6 +587,8 @@ int main(int argc, char** argv)
             "..\\dependencies\\DesktopStub\\ga_gallery_image_activation.inc",
             "..\\dependencies\\DesktopStub\\ga_desktop_host_setup.inc",
             "..\\dependencies\\DesktopStub\\ga_source_alert_runtime.inc",
+            "..\\dependencies\\DesktopStub\\ga_calendar_reminders.inc",
+            "..\\dependencies\\DesktopStub\\ga_clock_calendar.inc",
             "..\\dependencies\\DesktopStub\\ga_tile_status.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_logging.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_state.inc",

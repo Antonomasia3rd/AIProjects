@@ -679,10 +679,18 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
     }
     if (snapshot.textMode != aip::content::TextMode::Off) {
     key+=L":datetime:"+std::to_wstring(snapshot.clockSource)+L":"+std::to_wstring(snapshot.calendarSource);
-    if(snapshot.clockSource||snapshot.calendarSource)key+=L":DateTimeNativeLayout3";
+    if(snapshot.clockSource||snapshot.calendarSource)key+=L":DateTimeNativeLayout4";
     if(snapshot.clockSource||snapshot.calendarSource)for(const auto& field:{snapshot.dateTime.time,snapshot.dateTime.weekday,snapshot.dateTime.dayNumber,snapshot.dateTime.date,snapshot.dateTime.location,snapshot.dateTime.shortWeekday})
         key+=L":"+std::to_wstring(field.size())+L":"+field;
     if(snapshot.clockSource||snapshot.calendarSource)key+=L":rtl:"+std::to_wstring(snapshot.dateTime.rightToLeft);
+    if(snapshot.calendarSource){
+        key+=L":calendarFlavor:"+std::to_wstring(static_cast<int>(snapshot.calendarFlavor))+L":"+std::to_wstring(snapshot.calendarAgendaHighlightThrough);
+        for(const auto& field:{snapshot.calendarAgendaHeader,snapshot.calendarAgendaEmpty})key+=L":"+std::to_wstring(field.size())+L":"+field;
+        for(const auto& event:snapshot.calendarEvents){
+            for(const auto& field:{event.title,event.timeRange,event.startTime,event.dateLabel,event.location,event.mediumWhen,event.wideWhen})key+=L":calendarEvent:"+std::to_wstring(field.size())+L":"+field;
+            key+=L":"+std::to_wstring(event.isToday)+L":"+std::to_wstring(event.allDay);
+        }
+    }
     for (const auto& headline : snapshot.rssHeadlines)
         key += L":" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
     for (const auto& row : snapshot.detailRows)
@@ -704,6 +712,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
 #include "ga_google_calendar_provider.inc"
 #include "ga_kuro_provider.inc"
 #include "ga_source_alert_runtime.inc"
+#include "ga_calendar_reminders.inc"
 #include "ga_tile_instance_runtime.inc"
 static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 {

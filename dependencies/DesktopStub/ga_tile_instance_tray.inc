@@ -319,6 +319,24 @@ static void AppendTileInstanceAlerts(HMENU parent,const aip::content::TileInstan
     }
     aip::EndTrayNestedMenu(parent,menu,TileInstanceUi(L"TileSourceNotifications",L"Notifications for this tile"));
 }
+static void AppendCalendarReminderMenu(HMENU parent,const aip::content::TileInstance& tile)
+{
+    HMENU menu=aip::BeginTrayNestedMenu(parent);
+    AppendTileInstanceEditable(menu,tile,L"CalendarReminders.Enabled",L"Enable Calendar reminders",L"0",true);
+    AppendTileInstanceEditable(menu,tile,L"CalendarReminders.LeadMinutes",L"Remind before event (minutes, 0 = at start)",L"15");
+    AppendTileInstanceChoices(menu,tile,L"CalendarReminders.Type",L"Notification type",{{L"General",L"General"},{L"Reminder",L"Reminder"},{L"Alarm",L"Alarm"}},L"Reminder");
+    AppendTileInstanceChoices(menu,tile,L"CalendarReminders.Sound",L"Notification sound",{{L"Silent",L"Silent"},{L"Default",L"Default"},{L"Alarm",L"Alarm sound"}},L"Default");
+    AppendTileInstanceEditable(menu,tile,L"CalendarReminders.IncludeAllDay",L"Include all-day events",L"0",true);
+    HMENU advanced=aip::BeginTrayNestedMenu(menu);
+    AppendTileInstanceEditable(advanced,tile,L"CalendarReminders.SnoozeMinutes",L"Snooze choices (minutes, up to 5)",L"5,10,15,30,60");
+    AppendTileInstanceEditable(advanced,tile,L"CalendarReminders.DefaultSnoozeMinutes",L"Default snooze (minutes)",L"15");
+    AppendTileInstanceEditable(advanced,tile,L"CalendarReminders.Title",L"Reminder title (%event%, %tile%, %minutes%)",L"%event%");
+    AppendTileInstanceEditable(advanced,tile,L"CalendarReminders.Body",L"Reminder body (%details%, %time%, %location%)",L"%details%");
+    aip::AppendTrayMenuItem(advanced,0,TileInstanceUi(L"CalendarReminderSourcePolicy",L"Uses this tile's reminder time, not imported event alarms"),false,false);
+    aip::AppendTrayMenuItem(advanced,0,TileInstanceUi(L"CalendarReminderBalloonLimit",L"Snooze and Dismiss buttons require the Toast notification API"),false,false);
+    aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"TileInstanceAdvanced",L"Advanced"));
+    aip::EndTrayNestedMenu(parent,menu,TileInstanceUi(L"TileSourceNotifications",L"Notifications for this tile"));
+}
 static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::TileInstance& tile)
 {
     using namespace aip::content;
@@ -436,6 +454,7 @@ static void AppendTileInstanceDetails(HMENU menu,const aip::content::TileInstanc
     }
     AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceRefresh",L"Refresh this tile now"),{TileInstanceMenuVerb::Refresh,tile.id,L"",L"",L""});
     if(tile.type==TileInstanceType::Rss||tile.type==TileInstanceType::PrayerTimes)AppendTileInstanceAlerts(menu,tile);
+    if(tile.type==TileInstanceType::Calendar)AppendCalendarReminderMenu(menu,tile);
     AppendTileInstanceEditable(menu,tile,L"Name",L"Tile name",tile.name.c_str());
     HMENU source = aip::BeginTrayNestedMenu(menu); AppendTileInstanceSourceSettings(source,tile);
     aip::EndTrayNestedMenu(menu,source,TileInstanceUi(L"TileInstanceSourceSettings",L"Source settings"));

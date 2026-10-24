@@ -14,6 +14,7 @@ struct Target {
     std::wstring hostAumid, hostArguments, hostPath, hostProduct = L"DesktopStub", displayName, publisher, publisherDisplayName;
     std::wstring packageVersion = L"1.0.0.1", backgroundColor = L"transparent", branding = L"Name";
     bool hideMediumName=false;
+    bool hideLargeName=false;
 };
 inline bool ScopeKey(const std::wstring& key) {
     return key.size() == 16 && std::all_of(key.begin(),key.end(),[](wchar_t c) {
@@ -102,7 +103,9 @@ inline bool BuildManifest(const Target& target, std::wstring& output, std::wstri
     if (branding == L"Name" || branding == L"NameAndLogo" || branding == L"Auto"){
         xml += L"<uap:ShowNameOnTiles>";
         if(!target.hideMediumName)xml+=L"<uap:ShowOn Tile=\"square150x150Logo\"/>";
-        xml+=L"<uap:ShowOn Tile=\"wide310x150Logo\"/><uap:ShowOn Tile=\"square310x310Logo\"/></uap:ShowNameOnTiles>";
+        xml+=L"<uap:ShowOn Tile=\"wide310x150Logo\"/>";
+        if(!target.hideLargeName)xml+=L"<uap:ShowOn Tile=\"square310x310Logo\"/>";
+        xml+=L"</uap:ShowNameOnTiles>";
     }
     xml += L"</uap:DefaultTile></uap:VisualElements></Application></Applications><Capabilities><rescap:Capability Name=\"runFullTrust\"/></Capabilities></Package>\r\n";
     output = std::move(xml); error.clear(); return true;

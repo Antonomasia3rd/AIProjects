@@ -118,6 +118,9 @@ static void TestDateTimeTileHost(const std::wstring& directory,const std::wstrin
     clock.dateTime={L"11:14 AM",L"Friday",L"23",L"October 23, 2026",L"Surabaya <fixture>"};clock.text={L"11:14 AM",L"Surabaya fixture",L"October 23, 2026"};
     calendar.dateTime={L"11:14 AM",L"Friday",L"23",L"October 23, 2026",L""};calendar.detailRows={
         {L"First meeting",L"11:30 AM",L""},{L"Second meeting",L"12:30 PM",L""},{L"Third meeting",L"1:30 PM",L""}};
+    calendar.calendarEvents={{L"First meeting",L"11:30 AM - noon",L"11:30 AM",L"Today",L"",true,false},
+        {L"Second meeting",L"12:30 PM - 1:00 PM",L"12:30 PM",L"Today",L"",true,false},
+        {L"Third meeting",L"1:30 PM - 2:00 PM",L"1:30 PM",L"Today",L"",true,false}};
     const auto clockKey=ContentSnapshotKey(clock);clock.dateTime.time=L"11:15 AM";
     Check(ContentSnapshotKey(clock)!=clockKey,"semantic clock minute invalidates content cache even when fallback strings are unchanged");clock.dateTime.time=L"11:14 AM";
     const auto calendarKey=ContentSnapshotKey(calendar);calendar.dateTime.dayNumber=L"24";
@@ -136,8 +139,9 @@ static void TestDateTimeTileHost(const std::wstring& directory,const std::wstrin
         Check(!xml.empty(),"native publication builder accepts all three sizes for Clock Calendar and WuWa");
         if(frame.clockSource)Check(xml.find(L"11:14 AM")!=std::wstring::npos&&xml.find(L"Surabaya &lt;fixture&gt;")!=std::wstring::npos,
             "native clock shows semantic time and escaped city label");
-        if(frame.calendarSource)Check(xml.find(L">23</text>")!=std::wstring::npos&&xml.find(L"First meeting")!=std::wstring::npos&&
-            (xml.find(L"Third meeting")!=std::wstring::npos)==(size==2),"native Calendar shows a day stamp and the same size-specific event count as status");
+        if(frame.calendarSource)Check(xml.find(L"First meeting")!=std::wstring::npos&&
+            (xml.find(L"Third meeting")!=std::wstring::npos)==(size==2)&&
+            (xml.find(L"headerNumeral")!=std::wstring::npos)==(size==1),"native Calendar uses its distinct per-size event form and keeps the numeral column only on Wide next-event");
         if(snapshot==&kuro)Check(xml.find(L"Waveplates")!=std::wstring::npos&&xml.find(L"Daily activity")!=std::wstring::npos,
             "native WuWa binding uses game detail rows rather than generic setup summary");
         const auto status=TileSnapshotVisibleText(frame,heights[size],TileStatusLabels{},widths[size]);

@@ -147,7 +147,8 @@ static void AppendLiveTileImageBinding(
         const bool isMediumSize=std::wstring(templateName)==L"TileMedium";
         const bool centered=isMediumSize&&aip::content::CalendarDateOnlyCentered(*g_renderContent,150,150);
         xml+=L"\" branding=\""+aip::content::DateTimeBindingBranding(*g_renderContent,centered,isMediumSize);
-        if(g_renderContent->clockSource)xml+=L"\" displayName=\""+aip::XmlEscape(g_renderContent->dateTime.location);
+        const auto displayName=aip::content::DateTimeBindingDisplayName(*g_renderContent,isMediumSize?150:310,std::wstring(templateName)==L"TileLarge"?310:150);
+        if(g_renderContent->clockSource||!displayName.empty())xml+=L"\" displayName=\""+aip::XmlEscape(displayName);
     }
     xml += L"\">\r\n";
     if (!omitBackgroundImage) {
@@ -312,10 +313,12 @@ static std::wstring BuildLiveTileXml(
     }
 
     if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->calendarSource&&
-        g_renderContent->textMode==aip::content::TextMode::Auto&&
+        g_renderContent->textMode!=aip::content::TextMode::Off&&
         aip::content::AppendDateTimeTileBinding(xml,L"TileSmall",71,*g_renderContent))hasUsableBinding=true;
     for (const auto& asset : liveTileAssets)
     {
+        if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->calendarSource&&
+            g_renderContent->calendarFlavor==aip::content::CalendarFlavor::Agenda&&std::wstring(asset.binding)!=L"TileWide")continue;
         std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file, asset.w, asset.h);
         if (LiveTileUsesWindows81PresetXml())
         {

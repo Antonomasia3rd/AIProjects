@@ -8,6 +8,7 @@
 #include "content_sources/google_calendar_model.h"
 #include "content_sources/kuro_notes_model.h"
 #include "tile_source_alerts.h"
+#include "calendar_reminders.h"
 #include <set>
 
 namespace aip { namespace content {
@@ -122,7 +123,7 @@ inline bool TileInstanceSourceSection(const TileInstance& tile, const std::wstri
     if (tile.type == TileInstanceType::NowPlaying) return s == L"smtc";
     if (tile.type == TileInstanceType::PrayerTimes) return s == L"prayertimes";
     if (tile.type == TileInstanceType::Clock) return s == L"clock";
-    if (tile.type == TileInstanceType::Calendar) return s == L"calendar" || s == L"googlecalendar";
+    if (tile.type == TileInstanceType::Calendar) return s == L"calendar" || s == L"googlecalendar" || s == L"calendarreminders";
     if (tile.type == TileInstanceType::Discord) return s == L"discord";
     const auto resource = DescribeTileInstanceType(tile.type).notesResource;
     return resource >= 0 && (s == L"notes" || s == L"notes." + Lower(NotesResources[resource].value));
@@ -220,6 +221,7 @@ inline bool NormalizeTileInstanceSetting(const std::wstring& section, const std:
         auto sourceSection = key.substr(0, dot), sourceKey = key.substr(dot + 1);
         const auto source = Lower(sourceSection);
         if (source == L"alerts") return aip::notifications::NormalizeAlertSetting(sourceKey, value, error);
+        if (source == L"calendarreminders") return aip::calendar_reminders::NormalizeSetting(sourceKey,value,error);
         if (source == L"kuro") return aip::kuro::NormalizeSetting(sourceKey, value, error);
         if (source == L"googlecalendar") return aip::google_calendar::NormalizeSetting(sourceKey, value, error);
         if (source == L"clock" || source == L"calendar") return aip::datetime::NormalizeSetting(sourceSection, sourceKey, value, error);
@@ -316,6 +318,14 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
             const auto value = TileInstanceRead(tile,read,sourceSection,key,fallback);
             tile.settings[Lower(sourceSection)+L"."+Lower(key)] = value;
         };
+        if(tile.type==TileInstanceType::Calendar){
+            aip::calendar_reminders::Settings reminders;
+            if(!aip::calendar_reminders::ReadSettings([&](const wchar_t* key,const wchar_t* fallback){
+                auto value=TileInstanceRead(tile,read,L"CalendarReminders",key,fallback);
+                if(aip::calendar_reminders::NormalizeSetting(key,value,error))tile.settings[L"calendarreminders."+Lower(key)]=value;
+                return value;
+            },reminders,error)){error=section+L": "+error;return false;}
+        }
         if (tile.type == TileInstanceType::Rss || tile.type == TileInstanceType::PrayerTimes) {
             for (const auto& field : aip::notifications::AlertFields) {
                 if(tile.type==TileInstanceType::Rss&&aip::notifications::IsPrayerAlertField(field.key))continue;

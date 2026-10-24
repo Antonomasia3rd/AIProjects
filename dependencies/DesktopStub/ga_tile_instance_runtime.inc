@@ -63,6 +63,7 @@ struct TileInstanceProviderState {
     std::unique_ptr<ContentDateTimeProvider> datetime;
     std::unique_ptr<ContentGoogleCalendarProvider> googleCalendar;
     std::unique_ptr<ContentKuroProvider> kuro;
+    std::uint64_t lastKuroDiagnosticSequence=0;
     std::wstring backgroundKey, backgroundPath;
     ULONGLONG nextBackgroundRead = 0;
     std::wstring fitKey;
@@ -104,7 +105,7 @@ static void StopTileInstanceProviders(bool preserveCurrentStatuses=false)
     // Ordinary process exit leaves the quiet entry to its native expiration.
     // Its persisted delivery ID intentionally prevents resurrecting a dismissed
     // card on restart. Configuration failure/provider reset retires it now.
-    if(!preserveCurrentStatuses&&!g_shutdownState.IsRequested()&&g_running.load())ClearPrayerCurrentStatuses();
+    if(!preserveCurrentStatuses&&!g_shutdownState.IsRequested()&&g_running.load()){ClearPrayerCurrentStatuses();ClearCalendarReminders();}
     g_tileSourceAlerts.clear();
 }
 static bool ReadTileInstancePlugins(aip::content::Configuration& result)
@@ -287,21 +288,36 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         if(!state.datetime)state.datetime=std::make_unique<ContentDateTimeProvider>(WakePollThread);
         SYSTEMTIME now{};GetSystemTime(&now);const auto utc=aip::datetime::Seconds(DateTimeCivil(now));
         ContentDateTimeView view;
+        const bool reminders=CalendarRemindersDemanded(tile);
         if(tile.type==TileInstanceType::Clock){
             if(state.googleCalendar){state.googleCalendar->Stop();state.googleCalendar.reset();}
             view=state.datetime->Clock(tile.clock,utc,now.wMilliseconds);
         }else if(tile.calendar.source==L"Google"){
             state.datetime->Cancel();
             if(!state.googleCalendar)state.googleCalendar=std::make_unique<ContentGoogleCalendarProvider>();
-            view=state.googleCalendar->Calendar(tile.calendar,GoogleCalendarConfigurationForTile(tile),utc,now.wMilliseconds,state.forceRefresh,synchronous);
+            view=state.googleCalendar->Calendar(tile.calendar,GoogleCalendarConfigurationForTile(tile),utc,now.wMilliseconds,state.forceRefresh,synchronous,reminders);
         }else{
             if(state.googleCalendar){state.googleCalendar->Stop();state.googleCalendar.reset();}
-            view=state.datetime->Calendar(tile.calendar,utc,now.wMilliseconds,state.forceRefresh,synchronous);
+            view=state.datetime->Calendar(tile.calendar,utc,now.wMilliseconds,state.forceRefresh,synchronous,reminders);
         }
         const bool googleUnconfigured=tile.type==TileInstanceType::Calendar&&tile.calendar.source==L"Google"&&
             (tile.googleCalendar.clientId.empty()||tile.googleCalendar.refreshTokenProtected.empty());
         NotifyTileSourceTransition(tile,state,googleUnconfigured?aip::notifications::SourceState::Unconfigured:view.pending?aip::notifications::SourceState::Pending:
             view.ok?aip::notifications::SourceState::Healthy:aip::notifications::SourceState::Failed);
+        if(tile.type==TileInstanceType::Calendar){
+            std::vector<aip::calendar_reminders::Occurrence> occurrences;
+            aip::calendar_reminders::Settings reminderSettings;ReadCalendarReminderSettings(tile,reminderSettings);
+            if(reminders){DYNAMIC_TIME_ZONE_INFORMATION zone{};ResolveContentTimeZone(tile.calendar.timeZone,zone);
+                for(const auto& event:view.reminderOccurrences){
+                    aip::calendar_reminders::Occurrence notice;notice.identity=event.uid.empty()?aip::notifications::StableId(event.summary+L"|"+std::to_wstring(event.start)+L"|"+std::to_wstring(event.end)):event.uid;
+                    notice.title=event.summary;notice.location=event.location;notice.startUtc=event.start;notice.endUtc=event.end;notice.allDay=event.allDay;
+                    const auto due=event.start-static_cast<aip::datetime::UTC>(reminderSettings.leadMinutes)*60;
+                    if(due<=utc&&utc-due<=90){ContentDateTimeEvent formatted;if(BuildContentCalendarEvent(event,tile.calendar,zone,utc,formatted))notice.timeText=formatted.when;}
+                    occurrences.push_back(std::move(notice));
+                }
+            }
+            ObserveCalendarReminders(tile,occurrences,utc,view.ok&&!view.pending&&view.configured);
+        }
         if(!view.ok){frame.text={L"Check tile settings",view.status,L""};frame.wrapSourceText=true;break;}
         frame.clockSource=tile.type==TileInstanceType::Clock;frame.calendarSource=!frame.clockSource;
         frame.dateTime={frame.clockSource?view.time:L"",view.weekday,view.dayNumber,view.date,view.location,view.shortWeekday,view.rightToLeft};
@@ -310,7 +326,13 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         // and event rows, including when no external account is connected.
         if(frame.calendarSource)frame.sourceDiagnostic=view.status;
         frame.text={frame.clockSource?view.time:view.weekday+L" "+view.dayNumber,frame.clockSource?view.location:L"",view.date};
-        for(const auto& event:view.events)frame.detailRows.push_back({event.title,event.when+(event.location.empty()?L"":L"\n"+event.location),L""});
+        frame.calendarAgendaHeader=IniReadS(L"Strings",L"CalendarToday",L"Today");
+        frame.calendarAgendaEmpty=IniReadS(L"Strings",L"CalendarNoOtherEventsToday",L"No other events today");
+        for(const auto& event:view.events){
+            frame.detailRows.push_back({event.title,event.when+(event.location.empty()?L"":L"\n"+event.location),L""});
+            if(frame.calendarSource)frame.calendarEvents.push_back(event.presentation);
+        }
+        for(std::size_t index=0;index<view.events.size()&&index<3;++index)if(view.events[index].start<=view.events.front().start)frame.calendarAgendaHighlightThrough=static_cast<unsigned>(index);
         break;
     }
     case TileInstanceType::Wuwa: {
@@ -319,7 +341,13 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         const auto notes=state.kuro->Read(tile.kuro,&completed);
         const bool configured=!tile.kuro.gameToken.empty()||!tile.kuro.gameTokenProtected.empty();
         NotifyTileSourceTransition(tile,state,!configured?aip::notifications::SourceState::Unconfigured:!completed?aip::notifications::SourceState::Pending:
+            notes.failure!=aip::kuro::FailureKind::None?(state.kuro->ShouldNotifyFailure()?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Pending):
             notes.state==aip::kuro::State::Error?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Healthy);
+        frame.sourceDiagnostic=notes.diagnostic;
+        if(!notes.diagnostic.empty()&&notes.refreshSequence!=state.lastKuroDiagnosticSequence){
+            state.lastKuroDiagnosticSequence=notes.refreshSequence;
+            Log(L"Wuthering Waves refresh: %ls",notes.diagnostic.c_str());
+        }
         frame.text={notes.line1,notes.line2,L""};frame.wrapSourceText=true;
         for(const auto& row:notes.rows)frame.detailRows.push_back({row.label,row.value,L""});
         break;
@@ -359,6 +387,23 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
     frame.secondaryFrameKey = ContentSnapshotKey(frame);
     return frame;
 }
+static std::vector<aip::content::Snapshot> BuildCalendarTileFrames(aip::content::Snapshot frame,bool nativeDelivery)
+{
+    using namespace aip::content;
+    if(!frame.calendarSource||!nativeDelivery||frame.secondaryTileId.empty())return {std::move(frame)};
+    const bool agenda=frame.textMode!=TextMode::Off&&!frame.calendarEvents.empty();
+    frame.nativeQueue=true;frame.nativeQueueTag=L"cal1";frame.nativeQueueReset=true;frame.calendarFlavor=CalendarFlavor::NextEvent;
+    frame.nativeQueueLayout=L"CalendarNative2:"+aip::notifications::StableId(ContentSnapshotKey(frame));
+    frame.secondaryFrameKey=ContentSnapshotKey(frame);frame.nativeQueueFrameKey=frame.secondaryFrameKey;
+    std::vector<Snapshot> frames;frames.push_back(frame);
+    if(agenda){frame.calendarFlavor=CalendarFlavor::Agenda;frame.nativeQueueTag=L"cal2";frame.nativeQueueReset=false;
+        frame.calendarAgendaHeader=frame.calendarEvents.front().dateLabel;
+        if(!frame.calendarEvents.front().isToday)frame.calendarAgendaEmpty=IniReadS(L"Strings",L"CalendarNoOtherEvents",L"No other events");
+        const auto day=frame.calendarEvents.front().dateLabel;
+        frame.calendarEvents.erase(std::remove_if(frame.calendarEvents.begin(),frame.calendarEvents.end(),[&](const CalendarEvent& event){return event.dateLabel!=day;}),frame.calendarEvents.end());
+        frame.secondaryFrameKey=ContentSnapshotKey(frame);frame.nativeQueueFrameKey=frame.secondaryFrameKey;frames.push_back(std::move(frame));}
+    return frames;
+}
 static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
 {
     using namespace aip::content;
@@ -388,7 +433,7 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     };
     const auto alertsDemanded=[&](const TileInstance& tile){
         aip::notifications::AlertSettings settings;
-        return (tile.type==TileInstanceType::PrayerTimes||tile.type==TileInstanceType::Rss)&&ReadTileSourceAlerts(tile,settings);
+        return CalendarRemindersDemanded(tile)||((tile.type==TileInstanceType::PrayerTimes||tile.type==TileInstanceType::Rss)&&ReadTileSourceAlerts(tile,settings));
     };
     std::set<std::wstring> used;
     bool smtcNeeded = false, artworkNeeded = false, appIconNeeded = false, nativeMediaNeeded = false;
@@ -413,6 +458,8 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     std::set<std::wstring> activePrayerStatuses;
     for(const auto& tile:cfg.tiles)if(tile.type==TileInstanceType::PrayerTimes&&used.count(tile.id)&&alertsDemanded(tile))activePrayerStatuses.insert(tile.id);
     PrunePrayerCurrentStatuses(activePrayerStatuses);
+    std::set<std::wstring> activeCalendars;for(const auto& tile:cfg.tiles)if(tile.type==TileInstanceType::Calendar&&CalendarRemindersDemanded(tile))activeCalendars.insert(tile.id);
+    PruneCalendarReminders(activeCalendars);
     for(auto it=g_tileSourceAlerts.begin();it!=g_tileSourceAlerts.end();)
         if(!used.count(it->first))it=g_tileSourceAlerts.erase(it);else ++it;
     if (smtcNeeded) g_contentSmtc.Refresh(smtcSeconds, synchronous, artworkNeeded, nativeMediaNeeded, appIconNeeded);
@@ -441,7 +488,12 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
         auto frame = ComposeTileInstance(tile, *state, media, synchronous,publishTile);
         if(!publishTile)continue;
         if (tile.primary) primary = frame;
-        if (IsUsableWallpaperPath(frame.backgroundPath)) frames.push_back(std::move(frame));
+        if (IsUsableWallpaperPath(frame.backgroundPath)) {
+            TilePolicyReadScope scope(frame.policy);
+            const bool calendarNative=frame.calendarSource&&!TileSnapshotUsesRegistration(frame)&&ContentDirectLiveDeliveryAvailable()&&LiveTileUsesAdaptiveXml();
+            auto prepared=BuildCalendarTileFrames(std::move(frame),calendarNative);
+            frames.insert(frames.end(),std::make_move_iterator(prepared.begin()),std::make_move_iterator(prepared.end()));
+        }
     }
     for (auto gallery : ContentGalleryFrames()) if (IsUsableWallpaperPath(gallery.backgroundPath)) frames.push_back(std::move(gallery));
     PublishContentSnapshot(primary);

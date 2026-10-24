@@ -112,8 +112,9 @@ static std::map<std::wstring, std::vector<LiveTileUpdateAsset>> g_secondaryTileA
 static std::vector<LiveTileUpdateAsset> g_primaryTileAssets;
 static void RetainSecondaryTileAssets(const aip::content::Snapshot& frame, const std::vector<LiveTileUpdateAsset>& assets)
 {
-    if (frame.galleryFrame && frame.nativeQueueReset) {
+    if (!frame.nativeQueue||((frame.galleryFrame||frame.calendarSource)&&frame.nativeQueueReset)) {
         const auto prefix = frame.secondaryTileId + L"|";
+        g_secondaryTileAssets.erase(frame.secondaryTileId);
         for (auto item = g_secondaryTileAssets.begin(); item != g_secondaryTileAssets.end();) {
             if (item->first.compare(0, prefix.size(), prefix) == 0) item = g_secondaryTileAssets.erase(item); else ++item;
         }
@@ -2283,8 +2284,9 @@ static void ApplyDateTimeRegistrationVisuals(const aip::content::Snapshot& frame
         if(!label.empty()&&label.back()>=0xd800&&label.back()<=0xdbff)label.pop_back();
         target.displayName=std::move(label);
     }
-    target.hideMediumName=aip::content::DateTimeNativeBranding(frame)&&
-        aip::content::CalendarDateOnlyCentered(frame,150,150);
+    const bool nativeCalendar=aip::content::DateTimeNativeBranding(frame)&&frame.calendarSource;
+    target.hideMediumName=nativeCalendar;
+    target.hideLargeName=nativeCalendar&&!frame.calendarEvents.empty();
 }
 bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnly = false,
     const aip::content::Snapshot* suppliedContent = nullptr)
@@ -2340,7 +2342,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         }
     }
     if (suppliedContent && suppliedContent->galleryFrame && !ContentGalleryFrameCurrent(*suppliedContent)) return false;
-    if (suppliedContent && suppliedContent->nativeQueue && !suppliedContent->galleryFrame &&
+    if(suppliedContent&&suppliedContent->calendarSource&&suppliedContent->nativeQueue&&!CalendarQueueFrameCurrent(*suppliedContent))return false;
+    if (suppliedContent && suppliedContent->nativeQueue && !suppliedContent->galleryFrame && !suppliedContent->calendarSource &&
         (!ContentNativeQueueAvailable(currentContentConfiguration) ||
             suppliedContent->nativeQueueLayout != ContentNativeQueueLayout(currentContentConfiguration))) return false;
     if ((instanceMode || suppliedContent) && !CurrentGenerationTargetAllows(contentScope.snapshot,

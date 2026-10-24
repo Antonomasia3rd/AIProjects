@@ -150,6 +150,16 @@ struct TileAppearance {
     std::wstring branding = L"Name";
     std::wstring backgroundColor = L"Auto";
 };
+// Calendar presentation is structured before formatting a particular tile.
+// Never recover date/time columns by splitting locale-dependent display text.
+struct CalendarEvent {
+    std::wstring title,timeRange,startTime,dateLabel,location;
+    bool isToday=false,allDay=false;
+    // Native Medium and Wide request different formatter flags. Keep their
+    // prepared labels separate from the Large range and compact agenda time.
+    std::wstring mediumWhen,wideWhen;
+};
+enum class CalendarFlavor { NextEvent, Agenda };
 struct Snapshot {
     bool active = false;
     int capturedWallpaperFit = -1; // Host FitMode ordinal; -1 keeps legacy desktop resolution.
@@ -174,6 +184,10 @@ struct Snapshot {
     aip::prayer::ClockText prayerClock;
     bool clockSource = false, calendarSource = false;
     struct DateTimeText { std::wstring time,weekday,dayNumber,date,location,shortWeekday; bool rightToLeft=false; } dateTime;
+    std::vector<CalendarEvent> calendarEvents;
+    CalendarFlavor calendarFlavor=CalendarFlavor::NextEvent;
+    std::wstring calendarAgendaHeader=L"Today",calendarAgendaEmpty=L"No other events today";
+    unsigned calendarAgendaHighlightThrough=0;
     std::wstring detailTopic;
     bool smtcSource = false, smtcShowRepeatShuffle = false, wrapSourceText = false;
     MediaPlaybackState smtcState = MediaPlaybackState::Unknown;

@@ -39,6 +39,12 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
         }
         else {
             const bool centered=aip::content::CalendarDateOnlyCentered(frame,width,height);
+            if(!frame.calendarEvents.empty()&&height>=150){
+                for(const auto& group:aip::content::BuildCalendarTilePlan(frame,width,height).groups)for(const auto& column:group.columns)for(const auto& field:column.texts)if(!field.spacer)AppendTileStatusLine(output,field.text);
+                const auto branding=aip::content::DateTimeBindingBranding(frame,false,width<=150);
+                if(branding==L"name"||branding==L"nameAndLogo")AppendTileStatusLine(output,aip::content::DateTimeBindingDisplayName(frame,width,height));
+                return output;
+            }
             AppendTileStatusLine(output,height<150&&!date.shortWeekday.empty()?date.shortWeekday:date.weekday);AppendTileStatusLine(output,date.dayNumber);
             if(!centered)AppendTileStatusLine(output,date.location);
             for(size_t i=0;i<(std::min)(frame.detailRows.size(),aip::content::DateTimeEventCount(height));++i){

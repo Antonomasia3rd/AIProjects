@@ -92,9 +92,11 @@ void TransportTests() {
     calls = 0; result = Fetch(cfg, [&](const auto&, auto&, auto&) { ++calls; return false; }, {}, [] { return true; });
     Check(calls == 0 && result.state == State::Error, "cancel before OAuth never executes a transport");
     result = Fetch(cfg, [&](const auto&, auto&, auto& transportError) { transportError = cfg.gameToken + L" leaked server diagnostic"; return false; });
-    Check(result.state == State::Error && result.line2.find(cfg.gameToken) == std::wstring::npos, "transport diagnostics never echo game credentials");
+    Check(result.state == State::Error && result.failure==FailureKind::Transient && result.line2.find(cfg.gameToken) == std::wstring::npos, "transport diagnostics never echo game credentials and classify a temporary connection failure");
     result = Fetch(cfg, [&](const auto&, auto& response, auto&) { Respond(response, R"({"codes":-1,"message":"PRIVATE+TOKEN&VALUE"})"); return true; });
     Check(result.state == State::Error && result.line2.find(cfg.gameToken) == std::wstring::npos, "upstream API errors never echo game credentials");
+    Check(result.failure==FailureKind::Rejected&&result.line2.find(L"code -1")!=std::wstring::npos&&result.line2.find(L"expired")==std::wstring::npos,
+        "numeric OAuth rejection does not invent credential expiration or expose upstream messages");
     cfg.gameTokenProtected = L"protected-test"; calls = 0;
     result = Fetch(cfg, [&](const auto&, auto&, auto&) { ++calls; return false; }, [](const auto&, auto&) { return false; });
     Check(calls == 0 && result.state == State::Error, "protected credential failure never falls back to plaintext or starts network");
@@ -102,7 +104,7 @@ void TransportTests() {
     Check(calls == 1 && result.state == State::Error, "optional account decoder is used");
     cfg = Settings(); cfg.playerId = L"12345"; cfg.region = L"Europe"; calls = 0;
     result = Fetch(cfg, [&](const auto&, auto& response, auto&) { Respond(response, ++calls == 1 ? R"({"codes":0,"oauthCode":"CODE"})" : R"({"code":1005})"); return true; });
-    Check(calls == 5 && result.state == State::Error && result.line2.find(L"1005")!=std::wstring::npos,
+    Check(calls == 5 && result.state == State::Error && result.failure==FailureKind::Transient && result.line2.find(L"1005")!=std::wstring::npos,
         "launcher retry matches the initial request plus three retries and reports a redacted stage/status");
     calls=0;result=Fetch(cfg,[&](const auto&,auto& response,auto&){++calls;
         Respond(response,calls==1?R"({"codes":0,"oauthCode":"CODE"})":calls<5?R"({"code":1005})":roleBody);return true;});
@@ -151,6 +153,42 @@ void ProviderTests() {
     cfg.gameToken.clear(); provider.Refresh(cfg, true); result = provider.Read(cfg, &completed);
     Check(completed && result.state == State::Error && calls == 3 && !provider.source.HasPendingWork(), "unconfigured host tile is inert without creating account work");
     provider.Stop();
+
+    ContentKuroProvider retained;auto selected=Settings();selected.playerId=L"12345";selected.region=L"Europe";
+    bool offline=false,invalid=false;
+    retained.testTransport=[&](const auto& options,auto& response,auto& transportError){
+        if(offline){transportError=L"PRIVATE+TOKEN&VALUE raw upstream account diagnostic";return false;}
+        Respond(response,invalid?"[]":options.url.find(L"oauth/code")!=std::wstring::npos?R"({"codes":0,"oauthCode":"CODE"})":roleBody);return true;
+    };
+    retained.Refresh(selected,true);result=retained.Read(selected,&completed);
+    Check(completed&&result.state==State::Ok&&!result.stale&&!retained.ShouldNotifyFailure(),"healthy per-account baseline has no failure notice");
+    offline=true;retained.Refresh(selected,true,true);result=retained.Read(selected,&completed);
+    Check(completed&&result.state==State::Ok&&result.stale&&result.current==120&&result.rows.size()==4&&result.failure==FailureKind::Transient,
+        "temporary refresh failure retains the last successful same-account notes with explicit stale metadata");
+    Check(result.diagnostic.find(L"last successful")!=std::wstring::npos&&result.diagnostic.find(selected.gameToken)==std::wstring::npos&&!retained.ShouldNotifyFailure(),
+        "first transient failure is diagnostic-only and never leaks raw transport details");
+    for(int i=0;i<10;++i)retained.Read(selected);
+    Check(!retained.ShouldNotifyFailure(),"poll reads of one completed failure do not count as additional failed attempts");
+    retained.Refresh(selected,true,true);result=retained.Read(selected);
+    Check(result.stale&&retained.ShouldNotifyFailure(),"a second completed transient refresh can produce one coalesced source failure notice");
+    offline=false;retained.Refresh(selected,true,true);result=retained.Read(selected);
+    Check(!result.stale&&result.failure==FailureKind::None&&!retained.ShouldNotifyFailure(),"successful refresh clears stale state and resets transient failure threshold");
+    const auto normalTransport=retained.testTransport;
+    retained.testTransport=[](const auto&,auto&,auto&)->bool{throw std::runtime_error("PRIVATE+TOKEN&VALUE upstream exception");};
+    retained.Refresh(selected,true,true);result=retained.Read(selected);
+    const auto exceptionSequence=result.refreshSequence;
+    Check(result.stale&&result.failure==FailureKind::Transient&&exceptionSequence!=0&&!retained.ShouldNotifyFailure()&&result.diagnostic.find(selected.gameToken)==std::wstring::npos,
+        "throwing transport has one nonzero completed attempt identity and a sanitized transient diagnostic");
+    for(int i=0;i<10;++i)result=retained.Read(selected);
+    Check(result.refreshSequence==exceptionSequence&&!retained.ShouldNotifyFailure(),"repeated reads of a throwing transport result cannot inflate its failure attempt count");
+    retained.Refresh(selected,true,true);result=retained.Read(selected);
+    Check(result.refreshSequence!=exceptionSequence&&retained.ShouldNotifyFailure(),"a new throwing transport attempt advances generation and reaches the transient notice threshold");
+    retained.testTransport=normalTransport;retained.Refresh(selected,true,true);retained.Read(selected);
+    invalid=true;retained.Refresh(selected,true,true);result=retained.Read(selected);
+    Check(result.stale&&result.failure==FailureKind::InvalidData&&retained.ShouldNotifyFailure(),"invalid service data retains prior notes but immediately reports a nontransient error");
+    auto otherAccount=selected;otherAccount.playerId=L"99999";retained.Refresh(otherAccount,true,true);result=retained.Read(otherAccount);
+    Check(result.state==State::Error&&!result.stale&&result.rows.empty(),"account changes cannot expose another role's retained notes");
+    retained.Cancel();Check(retained.Read(selected).state==State::Loading&&!retained.ShouldNotifyFailure(),"cancel releases retained account data and notice state");retained.Stop();
 }
 }
 int main() {
