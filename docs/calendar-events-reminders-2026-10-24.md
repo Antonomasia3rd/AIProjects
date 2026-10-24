@@ -100,3 +100,36 @@ Installed SHA-256:
 | DesktopStub.exe | `CC229C125F760240756846D0F2749E9C8445882E6236CA860FB70A8C3FB736A2` |
 | DesktopStubLiveTileBroker.exe | `DD4EA2599A27CB50BC1C30B61C0C0FB80667C89DE44997DD72D0BB7CAA297B43` |
 | DesktopStubTileLauncher.exe | `4B39C2B7CA1F611E05C76C701ED8105D77B85BB2453C29ADF3381DB5990179B5` |
+
+## Follow-up: agenda dimming and missing third row
+
+The follow-up screenshot shows two all-day entries on Monday26, with the second
+subdued, and an October29 third event omitted from the agenda rotation. A bounded
+read-only reinspection is recorded in the native evidence document's final
+subsection. No product behavior was changed or reinstalled for this investigation.
+
+Confirmed: the native agenda has capacity for three rows. It deliberately applies
+captionsubtle to both subject and time for row indexes above a prepared cutoff.
+The native counter initialization and zero-based comparison match our renderer;
+there is no demonstrated off-by-one. The Large tile's subtle secondary time text
+is a separate style rule, not that agenda cutoff.
+
+Not yet established: whether the native event getter supplies raw UTC starts or
+already-normalized all-day/local values. DesktopStub currently derives the cutoff
+from raw occurrence starts, so two displayed all-day dates from different source
+timezones can take different paths. The screenshot alone does not identify their
+actual timestamps or prove that explanation for these particular events.
+
+The two-row result is explained by DesktopStub's current first-day display-label
+filter: it excludes the October29 event. That is not a two-row capacity limit.
+Native preparation instead uses a local reference date, an earlier-start test and
+a tomorrow-primary exception; it cannot be described as an unconditional
+same-primary-day filter. The upstream reference/selection semantics need further
+comparison before replacing it with another approximation.
+
+Separate confirmed defect: a formatted dateLabel is not a stable grouping key.
+For example2026-02-26 and2026-03-26 both produce Thursday26, and custom Today /
+Tomorrow labels can also collide. Grouping must eventually use an explicit
+civil-day identity instead of display wording. Native screenshots with three
+same-day events and with an event on a later day will help resolve selection
+and all-day normalization without accessing the private Calendar event store.
