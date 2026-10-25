@@ -199,3 +199,11 @@ that claim; the sentence itself remains configurable as requested.
 This remains part of the deferred Battery implementation, alongside charge,
 plugged-in/not-charging state, wear level and current capacity in Wh. The active
 profile storage/command-line interoperability fix retains priority.
+
+October 25 follow-up: the profile storage fix is delivered. The Battery model,
+read-only Windows collector, source integration, four-size rendering and
+per-tile CLI/INI/GUI controls are now implemented. See
+[the Battery guide](battery-live-tiles-2026-10-25.md) and
+[collector evidence](battery-native-collector-2026-10-25.md). Validation and
+installation results are recorded in the Battery guide after the final gate.
+Real battery-driver/policy acceptance remains separate from inert fixtures.

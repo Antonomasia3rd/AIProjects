@@ -825,6 +825,37 @@ static bool DrawPrayerClockField(Graphics& graphics, const aip::content::Snapsho
     y += (std::min)(available,(std::max)(lineHeight,measured.Height)) + static_cast<REAL>(2 * scale);
     return result == Ok;
 }
+static bool RenderBatteryTileSimulation(Graphics& graphics,const aip::content::Snapshot& snapshot,int width,int height,double scale)
+{
+    const auto plan=aip::content::BuildBatteryTilePlan(snapshot.batteryText,width,height,snapshot.presentation);
+    const REAL margin=static_cast<REAL>(plan.margin*scale),bottom=static_cast<REAL>((height-plan.footer)*scale);
+    const REAL fullWidth=static_cast<REAL>(width*scale)-2*margin,gap=static_cast<REAL>(plan.columnGap*scale);
+    const auto draw=[&](REAL start,bool measure,REAL& end){
+        REAL y=start;
+        for(const auto& group:plan.groups){
+            unsigned total=0;for(const auto& column:group.columns)total+=column.weight;
+            if(!total||group.columns.empty())continue;
+            const REAL available=fullWidth-gap*static_cast<REAL>(group.columns.size()-1);
+            REAL x=margin,groupBottom=y;
+            for(const auto& column:group.columns){
+                const REAL columnWidth=available*column.weight/total;REAL columnY=y;
+                for(const auto& field:column.texts)
+                    if(!DrawPrayerClockField(graphics,snapshot,field.text,field.style.c_str(),static_cast<unsigned>(field.role),
+                        x,columnY,columnWidth,bottom,field.lines,scale,field.align==L"right",field.align==L"center",measure,field.wrap))return false;
+                groupBottom=(std::max)(groupBottom,columnY);x+=columnWidth+gap;
+            }
+            y=groupBottom+static_cast<REAL>(6*scale);
+        }
+        end=y;return true;
+    };
+    REAL start=margin,end=margin;
+    if(plan.stacking!=L"top"){
+        if(!draw(margin,true,end))return false;
+        const auto block=(std::max)(0.0f,end-margin-static_cast<REAL>(6*scale));
+        start=(std::max)(margin,plan.stacking==L"bottom"?bottom-block:margin+(bottom-margin-block)/2);
+    }
+    return draw(start,false,end);
+}
 static bool RenderMailTileSimulation(Graphics& graphics,const aip::content::Snapshot& snapshot,int width,int height,double scale)
 {
     const auto rows=aip::content::BuildMailTilePlan(snapshot,width,height);
@@ -975,7 +1006,9 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
 {
     const bool calendarSmall=g_renderContent&&g_renderContent->calendarSource&&IEquals(tileName?tileName:L"",L"SmallTile")&&
         g_renderContent->textMode!=aip::content::TextMode::Off;
-    if (!bitmap || !TileTextOverlayEnabled() || (!calendarSmall&&!TileTextAppliesToTileName(tileName)))
+    const bool batterySmall=g_renderContent&&g_renderContent->batterySource&&IEquals(tileName?tileName:L"",L"SmallTile")&&
+        g_renderContent->textMode!=aip::content::TextMode::Off;
+    if (!bitmap || !TileTextOverlayEnabled() || (!calendarSmall&&!batterySmall&&!TileTextAppliesToTileName(tileName)))
         return true;
 
     int bitmapWidth = 0;
@@ -1007,6 +1040,7 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
         return false;
     if(g_renderContent&&!DrawStaticSourceCorner(graphics,*g_renderContent,logicalWidth,logicalHeight,scale,TileSnapshotUsesRegistration(*g_renderContent)))return false;
     if(calendarSmall)return RenderDateTimeTileSimulation(graphics,*g_renderContent,logicalWidth,logicalHeight,scale);
+    if(g_renderContent&&g_renderContent->batterySource)return RenderBatteryTileSimulation(graphics,*g_renderContent,logicalWidth,logicalHeight,scale);
     if (g_renderContent && logicalWidth >= 150 && logicalHeight >= 150) {
         if (g_renderContent->presentation.Active() && !g_renderContent->smtcSource && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource && !g_renderContent->mailSource &&
             g_renderContent->detailRows.empty() && g_renderContent->rssHeadlines.empty()) {

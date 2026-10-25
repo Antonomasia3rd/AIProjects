@@ -663,6 +663,11 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
 {
     ContentRenderScope scope(&snapshot);
     std::wstring key = FileFingerprint(snapshot.backgroundPath) + L":" + std::to_wstring(static_cast<int>(snapshot.textMode));
+    if(snapshot.batterySource&&snapshot.textMode!=aip::content::TextMode::Off){
+        key+=L":Battery1:"+std::to_wstring(snapshot.batteryText.rightColumnPercent)+L":"+std::to_wstring(snapshot.batteryText.criticalView);
+        for(const auto& field:{snapshot.batteryText.charge,snapshot.batteryText.status,snapshot.batteryText.runtime,snapshot.batteryText.wear,
+            snapshot.batteryText.metricLabel,snapshot.batteryText.metricValue,snapshot.batteryText.details})key+=L":"+std::to_wstring(field.size())+L":"+field;
+    }
     if(snapshot.capturedWallpaperFit>=0)key+=L":capturedFit:"+std::to_wstring(snapshot.capturedWallpaperFit);
     if (snapshot.textMode != aip::content::TextMode::Off)
         for (const auto& value : {snapshot.text.primary, snapshot.text.secondary, snapshot.text.badge})
@@ -718,6 +723,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
 #include "ga_clock_calendar.inc"
 #include "ga_google_calendar_provider.inc"
 #include "ga_gmail_provider.inc"
+#include "ga_battery_provider.inc"
 #include "ga_kuro_provider.inc"
 #include "ga_source_alert_runtime.inc"
 #include "ga_calendar_reminders.inc"

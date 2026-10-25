@@ -190,9 +190,9 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
         drop.AddBezier(24, 62, 24, 94, 76, 94, 76, 62); drop.AddBezier(76, 62, 76, 47, 55, 29, 50, 12);
         drop.CloseFigure(); graphics.DrawPath(&pen, &drop); break;
     }
-    case Glyph::Stamina: case Glyph::Charge:
+    case Glyph::Stamina: case Glyph::Charge: case Glyph::Battery:
         graphics.DrawRectangle(&pen, 15.0f, 30.0f, 65.0f, 40.0f); graphics.FillRectangle(&brush, 83.0f, 42.0f, 7.0f, 16.0f);
-        if (topic->glyph == Glyph::Stamina) { for (REAL x : {25.0f, 40.0f, 55.0f}) graphics.FillRectangle(&brush, x, 40.0f, 8.0f, 20.0f); }
+        if (topic->glyph == Glyph::Stamina||topic->glyph==Glyph::Battery) { for (REAL x : {25.0f, 40.0f, 55.0f}) graphics.FillRectangle(&brush, x, 40.0f, 8.0f, 20.0f); }
         else { PointF bolt[6] = {{51, 36}, {34, 53}, {45, 53}, {41, 65}, {60, 46}, {49, 46}}; graphics.FillPolygon(&brush, bolt, 6); }
         break;
     }

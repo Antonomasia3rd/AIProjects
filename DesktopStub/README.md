@@ -1,5 +1,9 @@
 # DesktopStub
 
+Battery tiles show charge/status/runtime, capacity and wear, with a configurable
+critical-action view. See the [Battery guide](../docs/battery-live-tiles-2026-10-25.md)
+for per-tile GUI, INI and CLI controls and the meaning of the critical margin.
+
 See the [current topology](../docs/DESKTOPSTUB_TOPOLOGY.md) for what is compiled
 into the host, which helper executables are separate, and the status of source
 plugins versus shared source code.

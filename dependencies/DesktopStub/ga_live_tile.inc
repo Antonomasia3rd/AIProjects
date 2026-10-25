@@ -326,13 +326,27 @@ static std::wstring BuildLiveTileXml(
     if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->calendarSource&&
         g_renderContent->textMode!=aip::content::TextMode::Off&&
         aip::content::AppendDateTimeTileBinding(xml,L"TileSmall",71,*g_renderContent))hasUsableBinding=true;
+    if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->batterySource&&
+        g_renderContent->textMode==aip::content::TextMode::Auto&&
+        aip::content::AppendBatteryTileBinding(xml,L"TileSmall",71,71,g_renderContent->batteryText,g_renderContent->presentation))hasUsableBinding=true;
     for (const auto& asset : liveTileAssets)
     {
+        if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->batterySource&&g_renderContent->textMode==aip::content::TextMode::Auto&&std::wstring(asset.binding)==L"TileSmall")continue;
         if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->mailSource&&g_renderContent->textMode==aip::content::TextMode::Auto&&
             (std::wstring(asset.binding)==L"TileSmall"||(std::wstring(asset.binding)==L"TileLarge"&&!g_renderContent->mailIncludeLarge)))continue;
         if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->calendarSource&&
             g_renderContent->calendarFlavor==aip::content::CalendarFlavor::Agenda&&std::wstring(asset.binding)!=L"TileWide")continue;
         std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file, asset.w, asset.h);
+        if(g_renderContent&&g_renderContent->batterySource&&!LiveTileUsesAdaptiveXml()){
+            if(!uri.empty()){
+                const auto binding=std::wstring(asset.binding);
+                const wchar_t* imageTemplate=ConfiguredManifestCompatibilityTarget()==ManifestCompatibilityTarget::Windows10?
+                    binding==L"TileMedium"?L"TileSquare150x150Image":binding==L"TileWide"?L"TileWide310x150Image":binding==L"TileLarge"?L"TileSquare310x310Image":nullptr:
+                    LiveTileTemplateForTarget(asset.binding);
+                if(imageTemplate){AppendLiveTileImageBinding(xml,imageTemplate,uri,0,asset.name);hasUsableBinding=true;}
+            }
+            continue;
+        }
         if (LiveTileUsesWindows81PresetXml())
         {
             if (AppendWindows81PresetLiveTileBinding(xml, asset.binding, asset.name, uri))
@@ -341,6 +355,13 @@ static std::wstring BuildLiveTileXml(
         }
 
         const wchar_t* templateName = LiveTileTemplateForTarget(asset.binding);
+        if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->batterySource&&g_renderContent->textMode==aip::content::TextMode::Auto){
+            if(TileTextAppliesToTileName(asset.name)){
+                if(aip::content::AppendBatteryTileBinding(xml,templateName,asset.w,asset.h,g_renderContent->batteryText,
+                    g_renderContent->presentation,ContentHasTransparentBackground()?L"":uri))hasUsableBinding=true;
+            }else if(!uri.empty()){AppendLiveTileImageBinding(xml,templateName,uri,0,asset.name);hasUsableBinding=true;}
+            continue;
+        }
         if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->mailSource&&g_renderContent->textMode==aip::content::TextMode::Auto){
             if(aip::content::AppendMailTileBinding(xml,templateName,asset.h,*g_renderContent,ContentHasTransparentBackground()?L"":uri))hasUsableBinding=true;
             continue;
@@ -420,7 +441,7 @@ static std::wstring BuildLiveTileXml(
     xml += L"</tile>";
     const bool richRssPresentation = g_renderContent && !g_renderContent->rssHeadlines.empty() &&
         g_renderContent->textMode == aip::content::TextMode::Auto && aip::content::RssUsesRichLayout(g_renderContent->presentation);
-    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !richRssPresentation && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource && !g_renderContent->mailSource && !g_renderContent->gameSource)
+    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !richRssPresentation && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource && !g_renderContent->mailSource && !g_renderContent->gameSource && !g_renderContent->batterySource)
         xml = aip::content::ApplyTextPresentationXml(xml, g_renderContent->presentation);
     aip::tile_notification::Options options;
     if (g_renderContent) {

@@ -1,0 +1,44 @@
+# Battery collector: read-only Windows evidence and boundaries
+
+The DesktopStub battery collector is a separate adapter in `dependencies/content_sources/battery_win32.inc`. It reports Windows system charge/status, active AC/DC battery policy and, where the driver supplies usable absolute units, individual system-battery capacity, voltage and charge/discharge rate. It never writes a power setting or asks Windows to sleep, hibernate or shut down.
+
+## API and scheduler contract
+
+`aip::battery::native::Collect(const CollectOptions& = {}, const Hooks* injected = nullptr)` returns `Collection { RawSnapshot raw; uint64_t sampledUtcMilliseconds; bool canceled; }`.
+
+- `CollectOptions.timeoutMilliseconds` defaults to 1500, bounded to 100–10000 milliseconds.
+- `ioTimeoutMilliseconds` defaults to 250, bounded to 25–2000 milliseconds per driver operation and capped by the remaining overall budget.
+- `includeDevices` defaults to true; false skips device enumeration entirely.
+- `canceled` is an optional cancellation predicate. Cancellation clears partial results. A throwing cancellation predicate fails closed.
+
+The adapter creates no worker, resident, persistent timer or notification. The host must call it on its existing asynchronous source worker, never on the UI thread or shared source-poll thread. SetupAPI enumeration, `CreateFileW`, power-policy reads, and even the initial entry into a defective driver's I/O dispatch are synchronous Windows calls with no guaranteed wall-clock deadline. The implemented waits are bounded; the adapter does not promise to make a malfunctioning kernel driver responsive.
+
+`DESKTOPSTUB_INERT_HARDWARE` prevents default native collection. Injected `Hooks` replace all system, policy and device operations, including when a hook is omitted; there is no native fallback. The UTC clock may also be injected.
+
+## Source mapping and unknown values
+
+[SYSTEM_POWER_STATUS](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-system_power_status) supplies aggregate charge percent, AC/DC status, charging flags, estimated runtime and the battery-saver flag. The no-battery flag wins over a zero percent. Unknown 255/`MAXDWORD` values remain absent; valid zero charge/time remain zero. Runtime is retained only on DC. A failed API call is not interpreted as an empty battery.
+
+[Battery device enumeration](https://learn.microsoft.com/en-us/windows/win32/power/enumerating-battery-devices) uses SetupAPI's battery interface, then a read-only, overlapped handle. Only `IOCTL_BATTERY_QUERY_TAG`, `IOCTL_BATTERY_QUERY_INFORMATION` and `IOCTL_BATTERY_QUERY_STATUS` are issued. Their SDK definitions require read access; the adapter requests `GENERIC_READ`, never write access. The tag wait and status request timeout are both zero. Tags tie status and static information to the same current battery. Non-system peripheral batteries and short-term UPS devices are excluded from system-battery capacity totals.
+
+[BATTERY_INFORMATION](https://learn.microsoft.com/en-us/windows/win32/power/battery-information-str) and [BATTERY_STATUS](https://learn.microsoft.com/en-us/windows/win32/power/battery-status-str) specify mWh capacities, mW signed rates and mV voltage. With `BATTERY_CAPACITY_RELATIVE`, capacity/rate units have no fixed physical meaning, so the adapter provides no mWh/mW values for that device. It preserves the relative-units flag and independently valid voltage. Unknown sentinels, zero design/full capacities and zero voltage remain absent. Actual zero remaining capacity/rate are retained. It does not estimate Wh, wear or runtime from charge percent.
+
+Enumeration is capped at 16 device interfaces. Skipped/unreadable devices, a changed battery, enumeration overflow or an exhausted deadline mark `raw.deviceDetailsComplete=false`. Readable individual rows remain available, but the model suppresses aggregate Wh/wear/count rather than reporting a partial battery subset as the system total. Missing current status can leave independently valid design/full capacity readable, with current capacity/rate absent.
+
+[PowerReadACValueIndex](https://learn.microsoft.com/en-us/windows/win32/api/powrprof/nf-powrprof-powerreadacvalueindex) and its DC counterpart read configured critical/reserve percentages and the selected critical-action index from the active scheme. [PowerReadFriendlyName](https://learn.microsoft.com/en-us/windows/win32/api/powrprof/nf-powrprof-powerreadfriendlyname) supplies a bounded scheme label. The selected action index is explicitly resolved through [PowerReadPossibleValue](https://learn.microsoft.com/en-us/windows/win32/api/powrprof/nf-powrprof-powerreadpossiblevalue) before interpreting its returned data; it requires `REG_DWORD` and exactly four bytes. The installed SDK's `winnt.h` identifies `GUID_BATTERY_DISCHARGE_ACTION_x` values as [POWER_ACTION](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ne-winnt-power_action): None 0, Sleep 2, Hibernate 3 and ShutdownOff 6. Shutdown 4 is also recognized as shutdown; Reserved 1, reboot/reset 5 and unrelated values remain unknown. Read-only inspection of installed static setting metadata confirmed that enumeration subkeys 1/2/3 have `SettingValue` 2/3/6, respectively. Therefore a possible-setting index must not be decoded directly as a `POWER_ACTION`. Missing or malformed possible-value metadata fails closed without guessing either mapping. No active policy or hardware query was executed to establish this distinction. Unavailable/invalid policy values remain unknown.
+
+The configured critical threshold is not a guaranteed action countdown. Microsoft's [battery settings overview](https://learn.microsoft.com/en-us/windows-hardware/customize/power-settings/battery-settings) explains that firmware thresholds may cause an earlier critical state, and one critically low device can trigger the action on a multiple-battery system. The tile displays policy information, not a promise that Windows will keep running until a specific displayed percentage.
+
+## Canceled I/O lifetime
+
+[CancelIoEx](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex) does not wait for completion. It is unsafe to free an `OVERLAPPED`, its buffers or device handle merely because cancellation was requested. Each query therefore owns heap buffers, an event and shared device-handle lifetime. On timeout/cancellation, an incomplete operation is retained in a bounded 16-slot pool. Later collection reaps completed operations; a device with outstanding I/O is skipped until completion. There is no cleanup thread or unbounded wait. If a broken driver never completes, those bounded resources remain until process teardown, including through static destruction.
+
+## Battery Mode research
+
+The requested comparison used [tarcode-apps/BatteryMode](https://github.com/tarcode-apps/BatteryMode) at commit `933cc5ef86cdd46265c22a92eff563159bc954bd`. `Power/Power.System.pas` enumerates battery devices and obtains tagged information/status; its wear calculation compares full and design capacities. `Power/Power.Schemes.Providers.Default.pas` reads scheme labels and AC/DC battery policy. This confirmed the relevant Windows interfaces. DesktopStub's C++ adapter was independently written from Microsoft contracts; no Battery Mode implementation was copied. Battery Mode's repository has its own [license](https://github.com/tarcode-apps/BatteryMode/blob/933cc5ef86cdd46265c22a92eff563159bc954bd/LICENSE.txt).
+
+## Validation
+
+`tools/BuildBatteryNativeTests.cmd` builds only. It performs a native-path `/Zs` compile witness, links that same non-inert path with `/Od /OPT:NOREF` so unresolved native symbols cannot be discarded, and builds the injected inert executable with `/W4 /WX /O2`. The linked native witness has an empty `main` that never calls the collector. `tools/BatteryNativeTests.cpp` exercises status sentinels, AC/DC/charging differences, relative units, signed/unknown rates, multiple devices, partial enumeration, policy mapping, cancellation and exception containment. Both executables are scanned with Defender before execution via `tools/ReviewValidation.ps1`.
+
+The focused fixture passed 38 checks with no failures; the native link witness also linked and exited successfully. Defender reported no threats for either executable. Logs and scan bindings are in `build/review-validation/battery-native-inert-oct25*` and `battery-native-link-oct25*`. The adapter defines the documented battery-interface GUID locally because the installed SDK declares `GUID_DEVICE_BATTERY` without resolving it from `uuid.lib`; it does not alter global GUID-definition behavior. No battery/power-policy API, real driver I/O, power action, package, account, resident or user-profile mutation was exercised. Real hardware acceptance remains untested.

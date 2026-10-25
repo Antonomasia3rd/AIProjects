@@ -7,7 +7,7 @@
 namespace aip { namespace tile_visual {
 enum class Glyph { Music, Feed, Genshin, StarRail, Zenless, Chat, Toggle, Play, Pause,
     Previous, Next, Repeat, Shuffle, VolumeDown, VolumeUp, Stop, Unknown,
-    RepeatOff, RepeatTrack, ShuffleOff, Resin, Stamina, Charge, Photo, Prayer, Clock, Calendar, Game, Desktop, WorldClock };
+    RepeatOff, RepeatTrack, ShuffleOff, Resin, Stamina, Charge, Photo, Prayer, Clock, Calendar, Game, Desktop, WorldClock, Battery };
 struct Topic { const wchar_t* key; Glyph glyph; std::uint32_t rgb; };
 inline constexpr Topic Topics[] = {
     {L"smtc", Glyph::Music, 0x159b91}, {L"rss", Glyph::Feed, 0xe77924},
@@ -26,7 +26,7 @@ inline constexpr Topic Topics[] = {
     {L"gallery", Glyph::Photo, 0x477dac}, {L"prayer", Glyph::Prayer, 0x16876b},
     {L"desktop", Glyph::Desktop, 0x477dac},
     {L"clock",Glyph::Clock,0x477dac},{L"worldclock",Glyph::WorldClock,0x477dac},
-    {L"calendar",Glyph::Calendar,0x477dac},{L"wuwa",Glyph::Game,0x477dac}
+    {L"calendar",Glyph::Calendar,0x477dac},{L"wuwa",Glyph::Game,0x477dac},{L"battery",Glyph::Battery,0x477dac}
 };
 inline const Topic* FindTopic(std::wstring key) {
     const std::wstring source = L"AipSource_", action = L"AipAction_";
@@ -40,7 +40,7 @@ inline const Topic* FindTopic(std::wstring key) {
     for (auto& ch : key) if (ch >= L'A' && ch <= L'Z') ch += L'a' - L'A';
     if (sourceId) {
         bool known = false;
-        for (const auto* item : {L"smtc", L"rss", L"genshin", L"hsr", L"zzz", L"discord", L"prayer",L"clock",L"worldclock",L"calendar",L"wuwa"}) known = known || key == item;
+        for (const auto* item : {L"smtc", L"rss", L"genshin", L"hsr", L"zzz", L"discord", L"prayer",L"clock",L"worldclock",L"calendar",L"wuwa",L"battery"}) known = known || key == item;
         if (!known) return nullptr;
     }
     if (actionId) {

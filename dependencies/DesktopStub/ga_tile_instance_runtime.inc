@@ -63,6 +63,7 @@ struct TileInstanceProviderState {
     std::unique_ptr<ContentDateTimeProvider> datetime;
     std::unique_ptr<ContentGoogleCalendarProvider> googleCalendar;
     std::unique_ptr<ContentGmailProvider> gmail;
+    std::unique_ptr<ContentBatteryProvider> battery;
     std::unique_ptr<ContentKuroProvider> kuro;
     std::uint64_t lastKuroDiagnosticSequence=0;
     std::wstring backgroundKey, backgroundPath;
@@ -77,11 +78,13 @@ struct TileInstanceProviderState {
         if (datetime) datetime->Cancel();
         if (googleCalendar) googleCalendar->Cancel();
         if (gmail) gmail->Cancel();
+        if (battery) battery->Cancel();
         if (rss) rss->Stop(); if (prayer) prayer->Stop(); if (notes) notes->Stop(); if (discord) discord->Stop();
         if (kuro) kuro->Stop();
         if (datetime) datetime->Stop();
         if (googleCalendar) googleCalendar->Stop();
         if (gmail) gmail->Stop();
+        if (battery) battery->Stop();
     }
 };
 static void NotifyTileSourceTransition(const aip::content::TileInstance& tile,TileInstanceProviderState& state,
@@ -204,7 +207,7 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         RemovePrayerCurrentStatus(tile.id);
         NotifyTileSourceTransition(tile,state,aip::notifications::SourceState::Failed);
         state.Stop();
-        state.rss.reset(); state.prayer.reset(); state.notes.reset(); state.discord.reset(); state.kuro.reset();state.datetime.reset();state.googleCalendar.reset();state.gmail.reset();
+        state.rss.reset(); state.prayer.reset(); state.notes.reset(); state.discord.reset(); state.kuro.reset();state.datetime.reset();state.googleCalendar.reset();state.gmail.reset();state.battery.reset();
         Entry background; background.background = L"Transparent";
         frame.backgroundId = BackgroundId::Transparent;
         frame.capturedWallpaperFit = static_cast<int>(FitMode::Fill);
@@ -306,6 +309,17 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         frame.text = view.clock.Available() ? Text{view.clock.time, view.clock.prayer + L"\nat " + view.clock.location,
             view.clock.countdown + (view.clock.details.empty() ? L"" : L"\n" + view.clock.details)} : Text{view.title, view.secondary, view.badge};
         for (const auto& row : view.detailRows) frame.detailRows.push_back({row.label, row.value, L""});
+        break;
+    }
+    case TileInstanceType::Battery: {
+        if(!state.battery)state.battery=std::make_unique<ContentBatteryProvider>();
+        state.battery->Refresh(tile.battery,synchronous,state.forceRefresh);bool completed=false;
+        const auto view=state.battery->Read(tile.battery,completed,frame.sourceDiagnostic);
+        frame.batterySource=true;
+        frame.batteryText={view.charge,view.status,view.runtime,view.wear,view.metricLabel,view.metricValue,view.details,view.rightColumnPercent,view.criticalView};
+        frame.text={view.charge,view.status,view.runtime};frame.wrapSourceText=true;
+        NotifyTileSourceTransition(tile,state,!completed?aip::notifications::SourceState::Pending:
+            !view.hasBattery&&!view.noBattery?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Healthy);
         break;
     }
     case TileInstanceType::Clock: case TileInstanceType::Calendar: {

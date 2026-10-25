@@ -11,10 +11,11 @@
 #include "calendar_reminders.h"
 #include "app_launcher.h"
 #include "content_sources/gmail_model.h"
+#include "content_sources/battery_model.h"
 #include <set>
 
 namespace aip { namespace content {
-enum class TileInstanceType { Wallpaper, Gallery, Rss, NowPlaying, PrayerTimes, Genshin, Hsr, Zzz, Discord, QuickAction, Clock, Calendar, Wuwa, AppLauncher, Mail };
+enum class TileInstanceType { Wallpaper, Gallery, Rss, NowPlaying, PrayerTimes, Genshin, Hsr, Zzz, Discord, QuickAction, Clock, Calendar, Wuwa, AppLauncher, Mail, Battery };
 struct TileInstanceDescriptor {
     const wchar_t* value;
     const wchar_t* name;
@@ -39,6 +40,7 @@ inline constexpr TileInstanceDescriptor TileInstanceTypes[] = {
     {L"WuWa", L"Wuthering Waves", TileInstanceType::Wuwa, L"CustomText", L"Transparent", -1},
     {L"AppLauncher",L"App launcher",TileInstanceType::AppLauncher,L"CustomText",L"Transparent",-1},
     {L"Mail",L"Mail / Gmail",TileInstanceType::Mail,L"CustomText",L"Transparent",-1},
+    {L"Battery",L"Battery",TileInstanceType::Battery,L"CustomText",L"Transparent",-1},
 };
 inline const TileInstanceDescriptor* FindTileInstanceType(const std::wstring& value) {
     const auto canonical = Lower(Trim(value));
@@ -71,6 +73,7 @@ struct TileInstance {
     aip::kuro::Configuration kuro;
     aip::app_launcher::Configuration launcher;
     aip::gmail::Configuration mail;
+    aip::battery::Configuration battery;
     std::wstring clickAction = L"setup", accountReference;
     std::wstring error; // Optional host diagnostic for a dormant invalid tile.
     // Additional provider fields not represented by content::Configuration.
@@ -125,6 +128,7 @@ inline bool TileInstanceSourceSection(const TileInstance& tile, const std::wstri
     const auto s = Lower(section);
     if(tile.type==TileInstanceType::AppLauncher)return s==L"launcher";
     if(tile.type==TileInstanceType::Mail)return s==L"mail";
+    if(tile.type==TileInstanceType::Battery)return s==L"battery";
     if (s == L"alerts") return tile.type == TileInstanceType::Rss || tile.type == TileInstanceType::PrayerTimes;
     if (tile.type == TileInstanceType::Wuwa) return s == L"kuro";
     if (tile.type == TileInstanceType::Rss) return s == L"rssfeed";
@@ -233,6 +237,7 @@ inline bool NormalizeTileInstanceSetting(const std::wstring& section, const std:
         if (source == L"calendarreminders") return aip::calendar_reminders::NormalizeSetting(sourceKey,value,error);
         if (source == L"launcher") return aip::app_launcher::NormalizeSetting(sourceKey,value,error);
         if (source == L"mail") return aip::gmail::NormalizeSetting(sourceKey,value,error);
+        if (source == L"battery") return aip::battery::NormalizeSetting(sourceKey,value,error);
         if (source == L"kuro") return aip::kuro::NormalizeSetting(sourceKey, value, error);
         if (source == L"googlecalendar") return aip::google_calendar::NormalizeSetting(sourceKey, value, error);
         if (source == L"clock" || source == L"calendar") return aip::datetime::NormalizeSetting(sourceSection, sourceKey, value, error);
@@ -343,6 +348,13 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
                 if(aip::gmail::NormalizeSetting(key,value,error))tile.settings[L"mail."+Lower(key)]=value;
                 return value;
             },tile.mail,error)){error=section+L": "+error;return false;}
+        }
+        if(tile.type==TileInstanceType::Battery){
+            if(!aip::battery::ReadConfiguration([&](const wchar_t* key,const wchar_t* fallback){
+                auto value=TileInstanceRead(tile,read,L"Battery",key,fallback);
+                if(aip::battery::NormalizeSetting(key,value,error))tile.settings[L"battery."+Lower(key)]=value;
+                return value;
+            },tile.battery,error)){error=section+L": "+error;return false;}
         }
         if(tile.type==TileInstanceType::Calendar){
             aip::calendar_reminders::Settings reminders;

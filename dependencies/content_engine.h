@@ -18,6 +18,7 @@
 #include "content_sources/notes_signin_model.h"
 #include "content_sources/prayer_times_model.h"
 #include "tile_text_presentation.h"
+#include "battery_tile_layout.h"
 #include "tile_delivery_policy.h"
 #include "DiscordRPC/presence_defaults.h"
 
@@ -163,6 +164,8 @@ struct CalendarEvent {
 };
 enum class CalendarFlavor { NextEvent, Agenda };
 struct Snapshot {
+    bool batterySource=false;
+    BatteryTileText batteryText;
     bool appLauncherSource=false;
     aip::app_launcher::Configuration launcher;
     bool mailSource=false,mailIncludeLarge=true,mailBadgeEnabled=true;

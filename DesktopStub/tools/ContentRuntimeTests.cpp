@@ -225,6 +225,7 @@ static std::wstring BuildLegacyContentFixtureTemplate()
 #include "PrayerNotificationRuntimeHostTests.inc"
 #include "GoogleCalendarHostTests.inc"
 #include "GmailHostTests.inc"
+#include "BatteryTileHostTests.inc"
 #include "ProfileActivationHostTests.inc"
 #include "ProfileRoutingHostTests.inc"
 #include "TileSourceMenuHostTests.inc"
@@ -1192,6 +1193,10 @@ int wmain()
     TestPrayerNotificationRuntimeHost();
     TestGoogleCalendarHost();
     TestGmailHost();
+    TestBatteryTilePlanHost();
+    TestBatteryTileNativeHost();
+    TestBatteryTileMenuHost();
+    TestBatteryTileProviderHost();
     TestProfileActivationHost();
     TestProfileDefaultExitRoutingHost();
     TestTileInstanceTrayHost();

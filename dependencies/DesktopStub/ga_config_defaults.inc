@@ -542,6 +542,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"TileOption_Mail.MaximumBytes",L"Aggregate response limit (bytes)"},
     {L"TileOption_Mail.ClientId",L"Google Desktop OAuth client ID"},
     {L"TileOption_Mail.ClientSecret",L"Google Desktop OAuth client secret"},
+    {L"BatteryCriticalView",L"Critical-action view"},
+    {L"BatteryTextLabels",L"Text templates and labels"},
     {L"GoogleCalendarAllCalendars", L"All calendars"},
     {L"GoogleCalendarPickerFailed", L"The calendar picker could not be prepared. Saved account settings were kept; refresh the list to retry."},
     {L"GoogleCalendarAllSelectedSaved", L"All readable calendars selected. Their upcoming events will be combined on this tile. You may close this window."},

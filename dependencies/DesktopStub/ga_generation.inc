@@ -138,6 +138,7 @@ static void RetainPublishedLiveTileAssets(const aip::content::Snapshot& frame, c
         g_primaryTileAssets = assets;
     }
 }
+static bool LiveTileUsesAdaptiveXml(); // Defined by ga_live_tile.inc later in the host.
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath);
 static std::mutex g_generatedAssetPrecacheMutex;
 static std::condition_variable g_generatedAssetPrecacheCv;
@@ -1367,6 +1368,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
     if (SecondaryLiveAssetsOnly(UseExperimentalLiveTileUpdate())) state += L"secondaryLiveOnly=1;";
     const bool bakedText = !UseExperimentalLiveTileUpdate() ||
         ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10 ||
+        (g_renderContent&&g_renderContent->batterySource&&!LiveTileUsesAdaptiveXml()) ||
         (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay);
     if (g_renderContent)
     {
@@ -1380,6 +1382,11 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
         if (bakedText) for (const auto& headline : g_renderContent->rssHeadlines)
             state += L"rss=" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
         if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off) {
+            if(g_renderContent->batterySource){
+                state+=L"Battery1:"+std::to_wstring(g_renderContent->batteryText.rightColumnPercent)+L":"+std::to_wstring(g_renderContent->batteryText.criticalView)+L";";
+                for(const auto& field:{g_renderContent->batteryText.charge,g_renderContent->batteryText.status,g_renderContent->batteryText.runtime,g_renderContent->batteryText.wear,
+                    g_renderContent->batteryText.metricLabel,g_renderContent->batteryText.metricValue,g_renderContent->batteryText.details})state+=L"battery="+std::to_wstring(field.size())+L":"+field;
+            }
             if(g_renderContent->gameSource)state+=L"GameRows1:"+aip::content::TextPresentationKey(g_renderContent->presentation)+L";";
             if(g_renderContent->mailSource){
                 state+=L"MailNative1:"+std::to_wstring(g_renderContent->mailMessageIndex)+L":"+std::to_wstring(g_renderContent->mailIncludeLarge)+L";";
@@ -1642,6 +1649,7 @@ static bool ShouldBakeTileTextIntoAssets(bool liveTileUpdateMode)
 
     if (g_renderContent && g_renderContent->textMode == aip::content::TextMode::Overlay)
         return true;
+    if(g_renderContent&&g_renderContent->batterySource&&!LiveTileUsesAdaptiveXml())return true;
 
     // Windows 10 Live Tiles can carry text in adaptive or preset-catalog XML.
     // Static/registration tiles and older Live Tiles need it baked into PNGs.
@@ -2509,7 +2517,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
         logAssetDirIfNeeded(ParentDirectoryOfPath(outPath));
 
         bool staticWallpaperAssetEnabled = !liveTileUpdateMode && IniReadI(L"Assets", t.name, 0) != 0;
-        if(!liveTileUpdateMode&&contentScope.snapshot.calendarSource&&IEquals(t.name,L"SmallTile")&&
+        if(!liveTileUpdateMode&&(contentScope.snapshot.calendarSource||contentScope.snapshot.batterySource)&&IEquals(t.name,L"SmallTile")&&
             contentScope.snapshot.textMode!=aip::content::TextMode::Off)staticWallpaperAssetEnabled=true;
         if (separateRegistration && contentScope.snapshot.textMode == aip::content::TextMode::Off &&
             !contentScope.snapshot.artworkTopic.empty() && contentScope.snapshot.backgroundId == aip::content::BackgroundId::Transparent)

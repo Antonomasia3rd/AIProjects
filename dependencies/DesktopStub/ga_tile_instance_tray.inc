@@ -331,6 +331,41 @@ static void AppendTileInstanceAlerts(HMENU parent,const aip::content::TileInstan
     }
     aip::EndTrayNestedMenu(parent,menu,TileInstanceUi(L"TileSourceNotifications",L"Notifications for this tile"));
 }
+static void AppendBatteryTileSettings(HMENU menu,const aip::content::TileInstance& tile)
+{
+    using namespace aip::battery;
+    HMENU critical=aip::BeginTrayNestedMenu(menu),text=aip::BeginTrayNestedMenu(menu),advanced=aip::BeginTrayNestedMenu(menu);
+    for(const auto& field:Settings){
+        const std::wstring key=field.key,full=L"Battery."+key;
+        HMENU target=menu;
+        if(key.compare(0,8,L"Critical")==0)target=critical;
+        else if(field.type==FieldType::Template||field.type==FieldType::Text)target=text;
+        if(key==L"RefreshSeconds"||key==L"DeviceDetails"||key==L"CollectionTimeoutMs"||key==L"DeviceTimeoutMs")target=advanced;
+        std::wstring label;
+        for(std::size_t i=0;i<key.size();++i){
+            if(i&&key[i]>=L'A'&&key[i]<=L'Z'&&key[i-1]>=L'a'&&key[i-1]<=L'z')label+=L' ';
+            label+=key[i];
+        }
+        if(key==L"CriticalVisibility")label=L"When to show critical-action view";
+        if(key==L"CriticalThresholdPercent")label=L"Custom activation threshold (%)";
+        if(key==L"CriticalMarginPercent")label=L"Custom margin above Windows critical level (%)";
+        if(key==L"DeviceDetails")label=L"Read battery capacity and wear from devices";
+        if(key==L"CollectionTimeoutMs")label=L"Sampling budget (milliseconds)";
+        if(key==L"DeviceTimeoutMs")label=L"Each device I/O timeout (milliseconds)";
+        if(key==L"CornerMetric")label=L"Ordinary corner metric";
+        if(field.type==FieldType::Choice){
+            std::vector<std::pair<std::wstring,std::wstring>> choices;
+            const std::wstring values=field.choices;std::size_t start=0;
+            for(;;){const auto end=values.find(L'|',start);const auto value=values.substr(start,end==std::wstring::npos?end:end-start);
+                choices.emplace_back(value,value);if(end==std::wstring::npos)break;start=end+1;}
+            AppendTileInstanceChoices(target,tile,full.c_str(),label.c_str(),choices,field.fallback);
+        }else AppendTileInstanceEditable(target,tile,full.c_str(),label.c_str(),field.fallback,field.type==FieldType::Boolean);
+    }
+    aip::AppendTrayMenuItem(critical,0,L"Windows power policy is read only; this tile never performs a power action.",false,false);
+    aip::EndTrayNestedMenu(menu,critical,TileInstanceUi(L"BatteryCriticalView",L"Critical-action view"));
+    aip::EndTrayNestedMenu(menu,text,TileInstanceUi(L"BatteryTextLabels",L"Text templates and labels"));
+    aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"TileInstanceAdvancedSource",L"Advanced source settings"));
+}
 static void AppendCalendarReminderMenu(HMENU parent,const aip::content::TileInstance& tile)
 {
     HMENU menu=aip::BeginTrayNestedMenu(parent);
@@ -382,6 +417,7 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
         AppendTileInstanceEditable(menu,tile,L"SMTC.ShowRepeatShuffle",L"Show repeat and shuffle status",L"0",true);
         break;
     case TileInstanceType::PrayerTimes: AppendTileInstancePrayerSettings(menu,tile); break;
+    case TileInstanceType::Battery: AppendBatteryTileSettings(menu,tile); break;
     case TileInstanceType::Clock: case TileInstanceType::Calendar: {
         const bool clock=tile.type==TileInstanceType::Clock;const auto section=clock?L"Clock.":L"Calendar.";
         AppendTileInstanceEditable(menu,tile,(std::wstring(section)+L"TimeZone").c_str(),L"Time zone (Local or Windows/IANA zone ID)",L"Local");
