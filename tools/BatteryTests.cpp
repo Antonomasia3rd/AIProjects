@@ -12,6 +12,7 @@ void ConfigurationTests(){
     for(const auto& field:Settings){auto value=std::wstring(field.fallback);Check(names.insert(Lower(field.key)).second&&NormalizeSetting(field.key,value,error),"every Battery default is unique and normalizes successfully");}
     Check(ReadConfiguration([](const wchar_t*,const wchar_t* fallback){return std::wstring(fallback);},c,error),"compiled battery defaults read without an OS or INI dependency");
     Check(c.cornerMetric==Metric::CurrentCapacityWh&&c.rightColumnPercent==30&&c.showStatus&&c.showWear,"normal defaults provide charge/status/wear and current capacity corner");
+    Check(c.showRuntime&&!c.showUnavailableRuntime,"default runtime row shows only a supplied usable estimate");
     Check(c.criticalVisibility==Visibility::Reserve&&!c.criticalOnAC&&c.criticalOnDC&&c.criticalCornerMetric==Metric::CriticalDelta,"critical defaults use DC reserve gating and percentage-point corner");
     Check(c.collectionTimeoutMs==1500&&c.deviceTimeoutMs==250&&c.deviceDetails&&c.refreshSeconds==60,"collection budgets are explicit bounded configurable defaults");
     std::wstring value=L" reserve ";Check(NormalizeSetting(L"bAtTeRy.CriticalVisibility",value,error)&&value==L"Reserve","Battery prefix, key and enum casing normalize consistently");
@@ -32,8 +33,8 @@ void ConfigurationTests(){
     value=std::wstring(1025,L'x');Check(!NormalizeSetting(L"TitleTemplate",value,error),"template text is bounded");
     const auto original=c.refreshSeconds;
     Check(!ReadConfiguration([](const wchar_t* key,const wchar_t* fallback){return std::wstring(key)==L"RefreshSeconds"?L"0":std::wstring(fallback);},c,error)&&c.refreshSeconds==original,"a bad configuration read leaves the caller's previous configuration intact");
-    const std::map<std::wstring,std::wstring> custom{{L"ShowStatus",L"0"},{L"ShowRuntime",L"0"},{L"ShowWear",L"0"},{L"ShowDetails",L"0"},{L"DeviceDetails",L"0"},{L"CollectionTimeoutMs",L"3000"},{L"DeviceTimeoutMs",L"700"},{L"RightColumnPercent",L"42"},{L"NumberDecimals",L"3"},{L"CornerMetric",L"WearPercent"},{L"CriticalVisibility",L"Always"},{L"CriticalOnAC",L"1"},{L"CriticalOnDC",L"0"},{L"ActionShutdownLabel",L"Turn off"}};
-    Check(ReadConfiguration([&](const wchar_t* key,const wchar_t* fallback){const auto i=custom.find(key);return i==custom.end()?std::wstring(fallback):i->second;},c,error)&&!c.showStatus&&!c.showRuntime&&!c.showWear&&!c.showDetails&&!c.deviceDetails&&c.collectionTimeoutMs==3000&&c.deviceTimeoutMs==700&&c.rightColumnPercent==42&&c.numberDecimals==3&&c.cornerMetric==Metric::WearPercent&&c.criticalVisibility==Visibility::Always&&c.criticalOnAC&&!c.criticalOnDC&&c.actionShutdownLabel==L"Turn off","typed configuration applies independent acquisition, visibility, layout and label settings");
+    const std::map<std::wstring,std::wstring> custom{{L"ShowStatus",L"0"},{L"ShowRuntime",L"0"},{L"ShowUnavailableRuntime",L"1"},{L"ShowWear",L"0"},{L"ShowDetails",L"0"},{L"DeviceDetails",L"0"},{L"CollectionTimeoutMs",L"3000"},{L"DeviceTimeoutMs",L"700"},{L"RightColumnPercent",L"42"},{L"NumberDecimals",L"3"},{L"CornerMetric",L"WearPercent"},{L"CriticalVisibility",L"Always"},{L"CriticalOnAC",L"1"},{L"CriticalOnDC",L"0"},{L"ActionShutdownLabel",L"Turn off"}};
+    Check(ReadConfiguration([&](const wchar_t* key,const wchar_t* fallback){const auto i=custom.find(key);return i==custom.end()?std::wstring(fallback):i->second;},c,error)&&!c.showStatus&&!c.showRuntime&&c.showUnavailableRuntime&&!c.showWear&&!c.showDetails&&!c.deviceDetails&&c.collectionTimeoutMs==3000&&c.deviceTimeoutMs==700&&c.rightColumnPercent==42&&c.numberDecimals==3&&c.cornerMetric==Metric::WearPercent&&c.criticalVisibility==Visibility::Always&&c.criticalOnAC&&!c.criticalOnDC&&c.actionShutdownLabel==L"Turn off","typed configuration applies independent acquisition, visibility, layout and label settings");
 }
 void AggregationTests(){
     auto r=Sample();auto a=Aggregate(r);
@@ -95,16 +96,24 @@ void PresentationTests(){
     Configuration c;auto r=Sample();auto v=BuildView(c,r);
     Check(v.hasBattery&&!v.noBattery&&!v.criticalView&&v.charge==L"80%","ordinary charge view reflects the supplied system percentage");
     Check(v.status==L"Plugged in, not charging"&&v.wear==L"Wear level: 9.2%","default normal view provides power status and reported-capacity wear");
-    Check(v.metricLabel==L"current capacity (Wh)"&&v.metricValue==L"30"&&v.metricValue.find(L"Wh")==std::wstring::npos,"currentWh default has no duplicate unit in its numeric corner");
+    Check(v.metricLabel==L"(Wh)"&&v.metricValue==L"30"&&v.metricValue.find(L"Wh")==std::wstring::npos,"currentWh default has a compact unit caption without duplicate unit in its numeral");
     Check(v.runtime==L"1 h 0 min remaining"&&v.details.empty()&&v.rightColumnPercent==30,"normal runtime is a separate supplied estimate and default geometry is preserved");
-    r.remainingSeconds.reset();v=BuildView(c,r);Check(v.runtime==L"Unavailable"&&v.runtime.find(L"remaining")==std::wstring::npos,"unknown runtime is explicit without awkward or invented estimate wording");
+    r.remainingSeconds.reset();v=BuildView(c,r);Check(v.runtime.empty(),"unknown AC runtime is hidden by default");
+    r.chargeState=ChargeState::Charging;Check(BuildView(c,r).runtime.empty(),"charging does not add an unavailable runtime row by default");
+    r.powerSource=PowerSource::DC;r.chargeState=ChargeState::Discharging;Check(BuildView(c,r).runtime.empty(),"unknown DC runtime is also hidden by default");
+    c.showUnavailableRuntime=true;v=BuildView(c,r);Check(v.runtime==L"Unavailable"&&v.runtime.find(L"remaining")==std::wstring::npos,"advanced override restores unavailable runtime directly without a remaining-time claim");
+    c.unknownText=L"Estimate unavailable";Check(BuildView(c,r).runtime==L"Estimate unavailable","unavailable-runtime override uses the configurable unknown text");
+    c.showRuntime=false;Check(BuildView(c,r).runtime.empty(),"ShowRuntime off overrides ShowUnavailableRuntime for an unknown estimate");
+    r.remainingSeconds=120;Check(BuildView(c,r).runtime.empty(),"ShowRuntime off hides known estimates as well");
+    c={};r=Sample();r.remainingSeconds.reset();
     r.devices.clear();v=BuildView(c,r);Check(v.metricValue==L"Unavailable"&&v.wear==L"Wear level: Unavailable","percentage alone cannot fabricate capacity or battery wear");
     r=Sample();r.presence=Presence::Absent;v=BuildView(c,r);Check(v.noBattery&&!v.hasBattery&&v.charge==L"No battery"&&v.metricLabel.empty()&&v.metricValue.empty()&&v.status.empty(),"no-battery presentation contains no stale numeric metrics");
     r=Sample();r.chargeState=ChargeState::Charging;v=BuildView(c,r);Check(v.status==L"Plugged in, charging","charging state is explicit");
     r.powerSource=PowerSource::DC;r.percent=80;r.chargeState=ChargeState::Discharging;v=BuildView(c,r);Check(v.status==L"On battery","discharging battery source is not duplicated");
     r.powerSource=PowerSource::Unknown;r.chargeState=ChargeState::Unknown;v=BuildView(c,r);Check(v.status==L"Unavailable","unknown power status is never mislabeled as plugged in");
-    r=Sample();c.cornerMetric=Metric::FullCapacityWh;v=BuildView(c,r);Check(v.metricValue==L"45.4"&&v.metricLabel==L"full capacity (Wh)","full-capacity corner preserves mWh-to-Wh conversion");
-    c.cornerMetric=Metric::DesignCapacityWh;Check(BuildView(c,r).metricValue==L"50","design-capacity corner uses reported design energy");
+    r=Sample();c.cornerMetric=Metric::FullCapacityWh;v=BuildView(c,r);Check(v.metricValue==L"45.4"&&v.metricLabel==L"(Wh)","full-capacity corner preserves mWh-to-Wh conversion with a compact caption");
+    c.cornerMetric=Metric::DesignCapacityWh;v=BuildView(c,r);Check(v.metricValue==L"50"&&v.metricLabel==L"(Wh)","design-capacity corner uses reported energy with the same compact unit caption");
+    for(const auto metric:{Metric::CurrentCapacityWh,Metric::FullCapacityWh,Metric::DesignCapacityWh}){c.cornerMetric=metric;c.cornerLabel=L"My energy label";Check(BuildView(c,r).metricLabel==L"My energy label","explicit capacity caption overrides the compact automatic label");}c.cornerLabel.clear();
     c.cornerMetric=Metric::WearPercent;Check(BuildView(c,r).metricValue==L"9.2","wear corner uses percentage without duplicating the label unit");
     c.cornerMetric=Metric::Percent;Check(BuildView(c,r).metricValue==L"80","charge corner is distinct from critical percentage-point delta");
     c.cornerMetric=Metric::RuntimeMinutes;r.remainingSeconds=61;Check(BuildView(c,r).metricValue==L"2","runtime corner rounds supplied seconds upward to a whole display minute");

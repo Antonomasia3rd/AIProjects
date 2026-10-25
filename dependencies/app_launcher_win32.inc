@@ -91,8 +91,21 @@ inline std::unique_ptr<Gdiplus::Bitmap> IconBitmap(HICON icon){
         if(!info.hbmMask||!GetDIBits(screen,info.hbmMask,0,height,bits.data(),reinterpret_cast<BITMAPINFO*>(&mask),DIB_RGB_COLORS)){ReleaseDC(nullptr,screen);return {};}
         for(int y=0;y<height;++y)for(int x=0;x<width;++x)if(!(bits[static_cast<std::size_t>(y)*stride+x/8]&(0x80u>>(x%8))))pixels[static_cast<std::size_t>(y)*width+x]|=0xff000000u;
     }
-    ReleaseDC(nullptr,screen);Bitmap source(width,height,width*4,PixelFormat32bppPARGB,reinterpret_cast<BYTE*>(pixels.data()));
-    return std::unique_ptr<Bitmap>(source.Clone(0,0,width,height,PixelFormat32bppPARGB));
+    ReleaseDC(nullptr,screen);
+    // A PARGB Bitmap constructed over scan0 and then Clone'd can retain that
+    // borrowed storage. Own the pixels before this local vector is destroyed;
+    // one retained icon is rendered and PNG-encoded repeatedly by EnsureAssets.
+    auto result=std::make_unique<Bitmap>(width,height,PixelFormat32bppPARGB);
+    if(result->GetLastStatus()!=Ok)return {};
+    Rect bounds(0,0,width,height);BitmapData destination{};
+    if(result->LockBits(&bounds,ImageLockModeWrite,PixelFormat32bppPARGB,&destination)!=Ok)return {};
+    const auto stride=static_cast<std::ptrdiff_t>(destination.Stride),rowBytes=static_cast<std::ptrdiff_t>(width)*4;
+    const bool writable=destination.Scan0&&(stride>=rowBytes||stride<=-rowBytes);
+    if(writable)for(int row=0;row<height;++row)
+        memcpy(static_cast<BYTE*>(destination.Scan0)+static_cast<std::ptrdiff_t>(row)*stride,
+            pixels.data()+static_cast<std::size_t>(row)*width,static_cast<std::size_t>(rowBytes));
+    const auto unlocked=result->UnlockBits(&destination);
+    if(!writable||unlocked!=Ok)return {};return result;
 }
 inline std::unique_ptr<Gdiplus::Bitmap> LoadArtwork(const Configuration& configuration){
 #ifdef DESKTOPSTUB_INERT_HARDWARE

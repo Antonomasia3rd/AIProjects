@@ -82,7 +82,7 @@ inline AggregateSnapshot Aggregate(const RawSnapshot& raw){
 struct Configuration {
     int refreshSeconds=60,numberDecimals=1,rightColumnPercent=30,collectionTimeoutMs=1500,deviceTimeoutMs=250;
     bool deviceDetails=true;
-    bool showStatus=true,showRuntime=true,showWear=true,showDetails=true;
+    bool showStatus=true,showRuntime=true,showUnavailableRuntime=false,showWear=true,showDetails=true;
     Metric cornerMetric=Metric::CurrentCapacityWh,criticalCornerMetric=Metric::CriticalDelta;
     Visibility criticalVisibility=Visibility::Reserve;
     int criticalThresholdPercent=20,criticalMarginPercent=5;bool criticalOnAC=false,criticalOnDC=true;
@@ -97,7 +97,7 @@ struct Setting {const wchar_t* key;const wchar_t* fallback;FieldType type;int mi
 inline constexpr Setting Settings[]={
     {L"RefreshSeconds",L"60",FieldType::Integer,15,86400},{L"NumberDecimals",L"1",FieldType::Integer,0,3},{L"RightColumnPercent",L"30",FieldType::Integer,20,45},
     {L"DeviceDetails",L"1",FieldType::Boolean},{L"CollectionTimeoutMs",L"1500",FieldType::Integer,100,10000},{L"DeviceTimeoutMs",L"250",FieldType::Integer,25,2000},
-    {L"ShowStatus",L"1",FieldType::Boolean},{L"ShowRuntime",L"1",FieldType::Boolean},{L"ShowWear",L"1",FieldType::Boolean},{L"ShowDetails",L"1",FieldType::Boolean},
+    {L"ShowStatus",L"1",FieldType::Boolean},{L"ShowRuntime",L"1",FieldType::Boolean},{L"ShowUnavailableRuntime",L"0",FieldType::Boolean},{L"ShowWear",L"1",FieldType::Boolean},{L"ShowDetails",L"1",FieldType::Boolean},
     {L"CornerMetric",L"CurrentCapacityWh",FieldType::Choice,0,0,L"CurrentCapacityWh|FullCapacityWh|DesignCapacityWh|WearPercent|Percent|RuntimeMinutes|CriticalDelta|None"},
     {L"CornerLabel",L"",FieldType::Text},
     {L"CriticalVisibility",L"Reserve",FieldType::Choice,0,0,L"Reserve|Threshold|Margin|Always|Off"},
@@ -150,7 +150,7 @@ template<class Reader> bool ReadConfiguration(Reader read,Configuration& output,
     for(const auto& field:Settings){std::wstring value=read(field.key,field.fallback);if(!NormalizeSetting(field.key,value,error))return false;const std::wstring key=field.key;
         if(key==L"CornerMetric")cfg.cornerMetric=ReadMetric(value);else if(key==L"CriticalCornerMetric")cfg.criticalCornerMetric=ReadMetric(value);else if(key==L"CriticalVisibility")cfg.criticalVisibility=ReadVisibility(value);
         else if(field.type==FieldType::Integer){int number=0;Number(value,field.minimum,field.maximum,number);if(key==L"RefreshSeconds")cfg.refreshSeconds=number;else if(key==L"NumberDecimals")cfg.numberDecimals=number;else if(key==L"RightColumnPercent")cfg.rightColumnPercent=number;else if(key==L"CollectionTimeoutMs")cfg.collectionTimeoutMs=number;else if(key==L"DeviceTimeoutMs")cfg.deviceTimeoutMs=number;else if(key==L"CriticalThresholdPercent")cfg.criticalThresholdPercent=number;else cfg.criticalMarginPercent=number;}
-        else if(field.type==FieldType::Boolean){const bool enabled=value==L"1";if(key==L"ShowStatus")cfg.showStatus=enabled;else if(key==L"ShowRuntime")cfg.showRuntime=enabled;else if(key==L"ShowWear")cfg.showWear=enabled;else if(key==L"ShowDetails")cfg.showDetails=enabled;else if(key==L"DeviceDetails")cfg.deviceDetails=enabled;else if(key==L"CriticalOnAC")cfg.criticalOnAC=enabled;else cfg.criticalOnDC=enabled;}
+        else if(field.type==FieldType::Boolean){const bool enabled=value==L"1";if(key==L"ShowStatus")cfg.showStatus=enabled;else if(key==L"ShowRuntime")cfg.showRuntime=enabled;else if(key==L"ShowUnavailableRuntime")cfg.showUnavailableRuntime=enabled;else if(key==L"ShowWear")cfg.showWear=enabled;else if(key==L"ShowDetails")cfg.showDetails=enabled;else if(key==L"DeviceDetails")cfg.deviceDetails=enabled;else if(key==L"CriticalOnAC")cfg.criticalOnAC=enabled;else cfg.criticalOnDC=enabled;}
         else if(key==L"TitleTemplate")cfg.titleTemplate=value;else if(key==L"StatusTemplate")cfg.statusTemplate=value;else if(key==L"RuntimeTemplate")cfg.runtimeTemplate=value;else if(key==L"WearTemplate")cfg.wearTemplate=value;
         else if(key==L"CornerLabel")cfg.cornerLabel=value;else if(key==L"CriticalCornerLabel")cfg.criticalCornerLabel=value;else if(key==L"CriticalActionTemplate")cfg.criticalActionTemplate=value;
         else if(key==L"UnknownText")cfg.unknownText=value;else if(key==L"NoBatteryText")cfg.noBatteryText=value;
@@ -197,8 +197,8 @@ inline std::wstring FormatTemplate(const std::wstring& text,const std::map<std::
     if(out.size()>2048){out.resize(2048);if(!out.empty()&&out.back()>=0xd800&&out.back()<=0xdbff)out.pop_back();}return out;
 }
 inline std::wstring MetricLabel(Metric metric){
-    switch(metric){case Metric::CurrentCapacityWh:return L"current capacity (Wh)";case Metric::FullCapacityWh:return L"full capacity (Wh)";
-    case Metric::DesignCapacityWh:return L"design capacity (Wh)";case Metric::WearPercent:return L"wear (%)";case Metric::Percent:return L"charge (%)";
+    switch(metric){case Metric::CurrentCapacityWh:case Metric::FullCapacityWh:case Metric::DesignCapacityWh:return L"(Wh)";
+    case Metric::WearPercent:return L"wear (%)";case Metric::Percent:return L"charge (%)";
     case Metric::RuntimeMinutes:return L"remaining (min)";case Metric::CriticalDelta:return L"(%) remaining";default:return {};}
 }
 struct View {
@@ -227,7 +227,7 @@ inline View BuildView(const Configuration& cfg,const RawSnapshot& raw){
         {L"batteries",view.values.deviceDetailsComplete&&view.values.batteryCount?std::to_wstring(view.values.batteryCount):cfg.unknownText},{L"saver",raw.saverEnabled?(*raw.saverEnabled?L"On":L"Off"):cfg.unknownText}
     };
     view.charge=FormatTemplate(cfg.titleTemplate,tokens);if(cfg.showStatus)view.status=FormatTemplate(cfg.statusTemplate,tokens);
-    if(cfg.showRuntime)view.runtime=view.values.remainingSeconds?FormatTemplate(cfg.runtimeTemplate,tokens):cfg.unknownText;
+    if(cfg.showRuntime){if(view.values.remainingSeconds)view.runtime=FormatTemplate(cfg.runtimeTemplate,tokens);else if(cfg.showUnavailableRuntime)view.runtime=cfg.unknownText;}
     if(cfg.showWear)view.wear=view.values.wearPercent?FormatTemplate(cfg.wearTemplate,tokens):(cfg.unknownText.empty()?L"":FormatTemplate(cfg.wearTemplate,tokens));
     if(view.criticalView){
         if(cfg.showStatus)view.status=view.action==CriticalAction::Unknown?cfg.unknownText:FormatTemplate(cfg.criticalActionTemplate,tokens);

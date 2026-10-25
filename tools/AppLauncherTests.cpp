@@ -17,6 +17,18 @@ int checks=0,failures=0;
 void Check(bool condition,const char* message){++checks;if(!condition){++failures;std::cout<<"FAIL: "<<message<<'\n';}}
 using namespace aip::app_launcher;
 Configuration Base(){Configuration c;c.target=L"C:\\Program Files\\Fixture\\fixture.exe";return c;}
+HICON SyntheticArtworkIcon(){
+    constexpr int side=256;BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=side;
+    info.bmiHeader.biHeight=-side;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;
+    void* raw=nullptr;const auto color=CreateDIBSection(nullptr,&info,DIB_RGB_COLORS,&raw,nullptr,0);if(!color||!raw){if(color)DeleteObject(color);return nullptr;}
+    std::fill_n(static_cast<std::uint32_t*>(raw),side*side,UINT32_C(0xffe61428));std::vector<BYTE> maskBits(side*side/8,0);
+    const auto mask=CreateBitmap(side,side,1,1,maskBits.data());if(!mask){DeleteObject(color);return nullptr;}
+    ICONINFO icon{};icon.fIcon=TRUE;icon.hbmColor=color;icon.hbmMask=mask;const auto result=CreateIconIndirect(&icon);
+    DeleteObject(color);DeleteObject(mask);return result;
+}
+std::vector<std::vector<std::uint32_t>> ReuseArtworkScratch(){
+    std::vector<std::vector<std::uint32_t>> blocks;for(int index=0;index<8;++index)blocks.emplace_back(256u*256u,UINT32_C(0xff1fd641));return blocks;
+}
 void Model(){
     Configuration defaults;std::wstring error;Check(ReadConfiguration([](const wchar_t*,const wchar_t* fallback){return std::wstring(fallback);},defaults,error)&&
         defaults.target.empty()&&defaults.iconMode==L"Auto"&&defaults.iconSizePercent==64,"new launcher is inert and uses centered automatic artwork defaults");
@@ -76,7 +88,30 @@ void Artwork(){
     const bool ordinaryBase=!issue&&baseAttributes!=INVALID_FILE_ATTRIBUTES&&!(baseAttributes&FILE_ATTRIBUTE_REPARSE_POINT);
     const bool created=ordinaryBase&&std::filesystem::create_directory(directory,issue);
     Check(created&&!issue&&directory.parent_path()==base,"artwork fixture owns a newly created uniquely named temporary directory");
-    aip::tile_visual::Assets assets;std::wstring error;const bool ensured=created&&!issue&&EnsureAssets(c,directory.wstring(),L"private-profile/tile",{},assets,error);
+    std::wstring error;
+    {
+        struct IconOwner{HICON value=nullptr;~IconOwner(){if(value)DestroyIcon(value);}}icon{SyntheticArtworkIcon()};
+        Check(icon.value!=nullptr,"ordinary icon-pixel regression creates a synthetic local HICON without shell extraction or activation");
+        auto owned=icon.value?IconBitmap(icon.value):nullptr;auto scratch=ReuseArtworkScratch();Color retained;
+        Check(scratch.size()==8&&owned&&owned->GetLastStatus()==Ok&&owned->GetPixel(128,128,&retained)==Ok&&retained.GetValue()==UINT32_C(0xffe61428),
+            "converted HICON bitmap owns its PARGB pixels after the temporary vector is freed and its allocation size is reused");
+        unsigned conversions=0;
+        testArtwork=[&](const Configuration&){++conversions;auto converted=IconBitmap(icon.value);auto reused=ReuseArtworkScratch();
+            if(reused.size()!=8||(converted&&converted->GetPixel(128,128,&retained)!=Ok))return std::unique_ptr<Bitmap>{};return converted;};
+        aip::tile_visual::Assets iconAssets;
+        const bool exported=created&&icon.value&&EnsureAssets(c,directory.wstring(),L"synthetic-native-icon/tile",{},iconAssets,error);
+        Check(exported&&conversions==1,"one independently owned synthetic icon survives all six render and PNG-encoding iterations");
+        if(exported)for(const auto& asset:std::vector<std::pair<std::wstring,std::pair<UINT,UINT>>>{{iconAssets.medium,{150,150}},{iconAssets.wide,{310,150}},{iconAssets.large,{310,310}},
+            {iconAssets.smallTile,{70,70}},{iconAssets.logo44,{44,44}},{iconAssets.logo30,{30,30}}}){
+            Bitmap saved((directory/asset.first).c_str());Color center;
+            Check(saved.GetLastStatus()==Ok&&saved.GetWidth()==asset.second.first&&saved.GetHeight()==asset.second.second&&
+                saved.GetPixel(asset.second.first/2,asset.second.second/2,&center)==Ok&&center.GetA()>250&&center.GetR()>225&&center.GetG()<25&&center.GetB()<45,
+                "every saved icon PNG preserves the synthetic source color after heap reuse rather than only reporting successful encoding");}
+        aip::tile_visual::Assets repeatedIcon;Check(exported&&EnsureAssets(c,directory.wstring(),L"synthetic-native-icon/tile",{},repeatedIcon,error)&&
+            aip::tile_visual::SameLogos(iconAssets,repeatedIcon),"repeated icon export preserves complete stable assets after the first six-file export");
+        testArtwork={};
+    }
+    aip::tile_visual::Assets assets;const bool ensured=created&&!issue&&EnsureAssets(c,directory.wstring(),L"private-profile/tile",{},assets,error);
     Check(ensured&&!assets.medium.empty()&&!assets.wide.empty()&&!assets.large.empty()&&!assets.smallTile.empty(),"actual native artwork preparer creates all four tile size logos");
     if(ensured)for(const auto& asset:std::vector<std::pair<std::wstring,std::pair<UINT,UINT>>>{{assets.medium,{150,150}},{assets.wide,{310,150}},{assets.large,{310,310}},
         {assets.smallTile,{70,70}},{assets.logo44,{44,44}},{assets.logo30,{30,30}}}){Bitmap image((directory/asset.first).c_str());

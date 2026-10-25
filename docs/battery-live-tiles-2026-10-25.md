@@ -9,7 +9,11 @@ available in both GUIs, its INI, and `--set Tile.<id>.Battery.<key>=<value>`.
 
 Small shows charge only. Medium shows charge, status, supplied runtime and wear.
 Wide adds a separate right-hand metric; Large also has a full-width detail area.
-The ordinary corner defaults to current energy in Wh. Shared text controls
+The ordinary corner defaults to current energy with a compact `(Wh)` caption.
+Full/design capacity metrics use that same automatic caption; `CornerLabel`
+can replace it with any explicit label. An unavailable runtime row is hidden by
+default, including while charging. A supplied usable estimate still appears.
+Shared text controls
 govern the charge/body/corner numeral roles; name and corner-logo branding
 follows the ordinary independent-tile default.
 
@@ -38,10 +42,11 @@ Every key below has the `Battery.` prefix inside `[Tile.<id>]`.
 | Keys | Default / accepted values |
 | --- | --- |
 | `ShowStatus`, `ShowRuntime`, `ShowWear`, `ShowDetails` | `1`; boolean |
+| `ShowUnavailableRuntime` | `0`; show `UnknownText` for an unavailable estimate only when this and `ShowRuntime` are enabled |
 | `NumberDecimals` | `1`; `0..3`, trailing zeros removed |
 | `RightColumnPercent` | `30`; `20..45` |
 | `CornerMetric` | `CurrentCapacityWh`; also `FullCapacityWh`, `DesignCapacityWh`, `WearPercent`, `Percent`, `RuntimeMinutes`, `CriticalDelta`, `None` |
-| `CornerLabel` | blank uses automatic metric/unit caption |
+| `CornerLabel` | blank uses automatic metric/unit caption; capacity metrics use `(Wh)` |
 | `CriticalVisibility` | `Reserve`; also `Threshold`, `Margin`, `Always`, `Off` |
 | `CriticalThresholdPercent`, `CriticalMarginPercent` | `20`, `5`; `0..100` |
 | `CriticalOnAC`, `CriticalOnDC` | `0`, `1`; boolean |
@@ -51,7 +56,7 @@ Every key below has the `Battery.` prefix inside `[Tile.<id>]`.
 | `CriticalActionTemplate` | `Critical battery action: %action%` |
 | `UnknownText`, `NoBatteryText` | `Unavailable`, `No battery` |
 | `ACLabel`, `DCLabel` | `Plugged in`, `On battery` |
-| `ChargingLabel`, `NotChargingLabel`, `DischargingLabel` | `Charging`, `Not charging`, `Discharging` |
+| `ChargingLabel`, `NotChargingLabel`, `DischargingLabel` | `charging`, `not charging`, `discharging` |
 | `ActionNoneLabel`, `ActionSleepLabel`, `ActionHibernateLabel`, `ActionShutdownLabel` | `Do nothing`, `Sleep`, `Hibernate`, `Shut down` |
 | `RefreshSeconds` | `60`; `15..86400` |
 | `DeviceDetails` | `1`; disable to skip device capacity/wear queries |
@@ -66,8 +71,10 @@ Template tokens: `%charge%`, `%percent%`, `%status%`, `%runtime%`, `%wear%`,
 `%capacitywh%`, `%fullcapacitywh%`, `%designcapacitywh%`, `%critical%`, `%reserve%`,
 `%criticaldelta%`, `%action%`, `%scheme%`, `%source%`, `%batteries%`, `%saver%`.
 Use `%%` for a literal percent and `\n` for a line break. Unknown tokens and
-unbounded/control text are rejected. An unavailable runtime uses `UnknownText`
-directly, without a misleading "remaining" sentence.
+unbounded/control text are rejected. An unavailable runtime row is omitted by
+default. Set `ShowUnavailableRuntime=1` to display `UnknownText` directly,
+without a misleading "remaining" sentence. `ShowRuntime=0` hides both known and
+unavailable runtime rows. Other unavailable metrics still use `UnknownText`.
 
 This private configuration-only example queries no hardware and creates no pin,
 package or resident:

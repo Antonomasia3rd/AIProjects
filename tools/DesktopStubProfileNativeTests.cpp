@@ -142,5 +142,53 @@ void SharedRegistryTests(){
     common.context.legacyBaseRoots={legacy.context.baseRoot};fake.failWrite=true;
     Check(!common.ImportLegacyRegistry(error)&&!fake.files.count(common.RegistryPath())&&fake.files[legacy.RegistryPath()]==originalRegistry,"failed atomic metadata migration preserves the entire original registry");
 }
+void FreshMainRecoveryTests(){
+    Fake fake;Store store(Ctx(),fake.Io());std::wstring error;ProfileEntry main,other;
+    const auto factory=[](){return std::wstring(L"[Profile]\nIdentityMode=Auto\nStaticPackageName=\nStaticPublisher=\n[Settings]\nManifestIdentityName=\n[Tiles]\nInstances=desktop\n[Tile.desktop]\nType=Wallpaper\nPrimary=1\n");};
+    Check(store.Fresh(L"Main",store.context.mainIniPath,factory,main,error)&&store.Fresh(L"Work",L"",factory,other,error),"fresh-start fixture has independent owned Main and Work metadata");
+    aip::WriteIniValueToText(fake.files[main.iniPath],L"Account",L"Token",L"INERT_OLD_ACCOUNT_NOT_RESTORED");
+    aip::WriteIniValueToText(fake.files[other.iniPath],L"Account",L"Token",L"INERT_OTHER_ACCOUNT_KEPT");
+    const auto originalRegistry=fake.files[store.RegistryPath()],otherText=fake.files[other.iniPath];const auto randoms=fake.randoms;
+    fake.files.erase(main.iniPath); // User intentionally removed settings.
+    fake.files[main.iniPath]=factory(); // Normal factory-only creation, no backup.
+    const PackageIdentity oldManifest{L"Old.Uninstalled.Main",L"CN=Old Main"};bool adopt=true;
+    Check(CanAdoptOwnedManifest(store.io,oldManifest,store.context.sourceRoot,adopt,error)&&!adopt,"an old unregistered manifest cannot supply a static identity for recreated Main");
+    IdentityRecord restored;
+    Check(store.Identity(main.iniPath,main.profileKey,{},restored,error)&&store.recoveredProfileIdentity&&restored.id==main.id&&restored.mode==IdentityMode::Auto&&!restored.preservedLegacy&&Same(restored.package,AutomaticIdentity(store.context.userScope,main.id)),"identity-less factory Main reuses its coordinator ID with fresh Auto package identity");
+    Check(fake.randoms==randoms&&fake.files[main.iniPath].find(L"INERT_OLD_ACCOUNT_NOT_RESTORED")==std::wstring::npos&&fake.files[main.iniPath].find(L"Instances=desktop")!=std::wstring::npos,"recreation adds no random duplicate ID and restores no old account data or tile list");
+    Check(fake.files[store.RegistryPath()]==originalRegistry&&fake.files[other.iniPath]==otherText,"identity recovery leaves coordinator preferences and every other profile unchanged");
+    Check(store.Enroll(main,error),"recreated Main enrollment updates its existing metadata instead of appending the same path");
+    Registry registry;Check(store.Load(registry,error)&&registry.profiles.size()==2&&registry.defaultProfileId==main.id,"fresh recovery retains both profiles and the selected default without a duplicate path");
+    std::wstring newId; // Entropy represents the already-failed old build.
+    fake.Io().random(newId);
+    IdentityRecord staged{newId,store.context.ownerSid,main.profileKey,IdentityMode::Auto,AutomaticIdentity(store.context.userScope,newId),false};
+    auto partial=factory();for(const auto& field:IdentityValues(staged))aip::WriteIniValueToText(partial,L"ProfileIdentity",field.first.c_str(),field.second);
+    fake.files[main.iniPath]=partial;const auto beforePartialRegistry=fake.files[store.RegistryPath()];
+    Check(store.Identity(main.iniPath,main.profileKey,{},restored,error)&&store.recoveredProfileIdentity&&restored.id==main.id&&Same(restored.package,AutomaticIdentity(store.context.userScope,main.id)),"an unregistered Auto identity left before failed Enroll atomically reconciles to its Main coordinator ID");
+    Check(fake.files[main.iniPath]!=partial&&fake.files[main.iniPath].find(L"INERT_OLD_ACCOUNT_NOT_RESTORED")==std::wstring::npos&&fake.files[store.RegistryPath()]==beforePartialRegistry&&fake.files[other.iniPath]==otherText,"partial-commit repair changes identity fields only and preserves other profiles and fresh settings");
+    const auto repaired=fake.files[main.iniPath];Check(store.Enroll(main,error)&&store.Identity(main.iniPath,main.profileKey,{},restored,error)&&!store.recoveredProfileIdentity&&fake.files[main.iniPath]==repaired,"recovered Main enrollment and later identity reads are idempotent");
+    fake.files[main.iniPath]=partial;fake.registered[staged.package.name]={L"D:\\AlreadyRegisteredReplacement"};const auto writes=fake.writes;
+    Check(!store.Identity(main.iniPath,main.profileKey,{},restored,error)&&error.find(L"already registered")!=std::wstring::npos&&!store.recoveredProfileIdentity&&fake.files[main.iniPath]==partial&&fake.writes==writes,"a registered replacement identity cannot be silently rebound to the old Main ID");
+    fake.registered.clear();auto fixed=staged;fixed.mode=IdentityMode::Static;fixed.package={L"Explicit.Static.Main",L"CN=Explicit Main"};
+    auto staticText=factory();for(const auto& field:IdentityValues(fixed))aip::WriteIniValueToText(staticText,L"ProfileIdentity",field.first.c_str(),field.second);fake.files[main.iniPath]=staticText;
+    Check(!store.Identity(main.iniPath,main.profileKey,{},restored,error)&&fake.files[main.iniPath]==staticText,"an explicit Static mismatch is not treated as an interrupted fresh Main");
+    fake.files[main.iniPath]=partial;fake.foreign.insert(main.iniPath);const auto reads=fake.reads;
+    Check(!store.Identity(main.iniPath,main.profileKey,{},restored,error)&&fake.reads==reads&&fake.files[main.iniPath]==partial,"foreign file ownership fails before any profile settings or recovery read");fake.foreign.clear();
+    auto foreign=staged;foreign.ownerSid=L"SID:S-1-5-21-999-1001";auto foreignText=factory();for(const auto& field:IdentityValues(foreign))aip::WriteIniValueToText(foreignText,L"ProfileIdentity",field.first.c_str(),field.second);fake.files[main.iniPath]=foreignText;
+    Check(!store.Identity(main.iniPath,main.profileKey,{},restored,error)&&fake.files[main.iniPath]==foreignText,"foreign persisted identity is never repaired by path matching");
+    fake.files[main.iniPath]=partial;auto requestedStatic=partial;aip::WriteIniValueToText(requestedStatic,L"Profile",L"IdentityMode",L"Static");fake.files[main.iniPath]=requestedStatic;
+    Check(!store.Identity(main.iniPath,main.profileKey,{},restored,error)&&fake.files[main.iniPath]==requestedStatic,"an explicit pending Static request is not mistaken for an untouched fresh Auto attempt");
+    fake.files[main.iniPath]=factory();auto corruptRegistry=originalRegistry;
+    const auto quoted=[](const std::wstring& value){std::wostringstream output;output<<std::quoted(value);return output.str();};
+    const auto oldAssignment=L"ProfileKey="+quoted(other.profileKey),newAssignment=L"ProfileKey="+quoted(main.profileKey);const auto position=corruptRegistry.find(oldAssignment);
+    Check(position!=std::wstring::npos,"duplicate-path fixture identifies only the public metadata path");if(position!=std::wstring::npos)corruptRegistry.replace(position,oldAssignment.size(),newAssignment);
+    fake.files[store.RegistryPath()]=corruptRegistry;const auto cleanFactory=fake.files[main.iniPath];
+    Check(!store.Identity(main.iniPath,main.profileKey,{},restored,error)&&error.find(L"duplicate normalized INI path")!=std::wstring::npos&&fake.files[store.RegistryPath()]==corruptRegistry&&fake.files[main.iniPath]==cleanFactory,"a genuinely duplicate registry is explicit corruption, never automatically discarded or rewritten");
+    fake.files[store.RegistryPath()]=originalRegistry;fake.foreign.insert(store.RegistryPath());
+    Check(!store.Identity(main.iniPath,main.profileKey,{},restored,error)&&fake.files[store.RegistryPath()]==originalRegistry&&fake.files[main.iniPath]==cleanFactory,"foreign coordinator metadata is not replaced by a fresh Main");fake.foreign.clear();
+    fake.files[store.RegistryPath()]=L"broken metadata";
+    Check(!store.Identity(main.iniPath,main.profileKey,{},restored,error)&&fake.files[store.RegistryPath()]==L"broken metadata"&&fake.files[main.iniPath]==cleanFactory,"malformed coordinator metadata remains actionable rather than silently resetting other profiles");
+    Check(fake.launches==0&&fake.copies.empty(),"fresh-start regressions used only injected IO and never launched, copied or registered a real runtime");
 }
-int main(){StoreTests();MigrationTests();SharedRegistryTests();std::cout<<checks<<" checks, "<<failures<<" failures\n";return failures?1:0;}
+}
+int main(){StoreTests();MigrationTests();SharedRegistryTests();FreshMainRecoveryTests();std::cout<<checks<<" checks, "<<failures<<" failures\n";return failures?1:0;}

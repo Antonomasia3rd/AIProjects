@@ -157,8 +157,10 @@ inline bool Valid(const Registry& registry,std::wstring& error){
     if(!Sid(registry.ownerSid)||registry.profiles.size()>MaximumProfiles){error=L"The profile registry owner or entry count is invalid.";return false;}
     std::set<std::wstring> ids,paths;
     for(const auto& profile:registry.profiles){
-        if(!Hex(profile.id,32)||!Plain(profile.name,128)||!AbsoluteIniPath(profile.iniPath)||!AbsoluteIniPath(profile.profileKey)||
-            !ids.insert(LowerAscii(profile.id)).second||!paths.insert(LowerAscii(profile.profileKey)).second){error=L"A profile has invalid data, a duplicate ID or a duplicate normalized INI path.";return false;}
+        if(!Hex(profile.id,32)||!Plain(profile.name,128)||!AbsoluteIniPath(profile.iniPath)||!AbsoluteIniPath(profile.profileKey)){
+            error=L"A profile has an invalid ID, name or absolute INI path. Existing profile metadata was kept.";return false;}
+        if(!ids.insert(LowerAscii(profile.id)).second){error=L"The profile list contains a duplicate profile ID. Existing profile metadata was kept.";return false;}
+        if(!paths.insert(LowerAscii(profile.profileKey)).second){error=L"The profile list contains a duplicate normalized INI path. Existing profile metadata was kept.";return false;}
     }
     if(!registry.defaultProfileId.empty()&&(!Hex(registry.defaultProfileId,32)||!ids.count(LowerAscii(registry.defaultProfileId)))){error=L"The default profile is not in this user's profile list.";return false;}
     error.clear();return true;

@@ -193,6 +193,7 @@ class Store {
 public:
     Context context;Operations io;
     std::optional<IdentityPlan> pendingIdentity;
+    bool recoveredProfileIdentity=false;
     explicit Store(Context c,Operations operations=SystemOperations()):context(std::move(c)),io(std::move(operations)){}
     std::wstring RegistryPath()const{return context.baseRoot+L"\\profiles.ini";}
     bool ImportLegacyRegistry(std::wstring& error)const{
@@ -243,11 +244,41 @@ public:
         return io.locked(RegistryPath(),[&]{Registry registry;if(!Load(registry,error)||!mutate(registry,error))return false;const auto text=SerializeRegistry(registry);return !text.empty()&&io.write(RegistryPath(),text,false,error);},error);
     }
     bool Identity(const std::wstring& ini,const std::wstring& key,const std::optional<PackageIdentity>& ownedExisting,IdentityRecord& output,std::wstring& error){
-        pendingIdentity.reset();
+        pendingIdentity.reset();recoveredProfileIdentity=false;
         return io.locked(RegistryPath(),[&]{return io.locked(ini,[&]{if(!io.owner(ini,context.ownerSid,error))return false;std::wstring text;bool missing=false;if(!io.read(ini,text,missing,error)||missing){error=L"Create the profile INI before assigning its persistent identity.";return false;}
             const auto doc=aip::ParseIniDocument(text);const auto read=[&](const wchar_t* field,const wchar_t* fallback){std::wstring value;return aip::ReadIniValueFromDoc(doc,L"ProfileIdentity",field,value)?value:std::wstring(fallback);};
             std::optional<IdentityRecord> stored;if(!ReadIdentity(read,stored,error))return false;
+            // The settings file can intentionally be removed while this owned
+            // coordinator metadata survives. Keep that path's persistent ID;
+            // factory recreation must not append a second row for the same INI.
+            Registry profiles;if(!Load(profiles,error))return false;
+            const auto registeredPath=std::find_if(profiles.profiles.begin(),profiles.profiles.end(),[&](const auto& entry){return LowerAscii(entry.profileKey)==LowerAscii(key);});
+            bool recovering=false;
+            if(stored){
+                const auto registeredId=std::find_if(profiles.profiles.begin(),profiles.profiles.end(),[&](const auto& entry){return LowerAscii(entry.id)==LowerAscii(stored->id);});
+                if(registeredId!=profiles.profiles.end()&&LowerAscii(registeredId->profileKey)!=LowerAscii(key)){
+                    error=L"This INI's saved profile ID belongs to a different registered INI. Existing profiles were kept; use an explicit profile migration.";return false;}
+            }
+            if(stored&&registeredPath!=profiles.profiles.end()&&LowerAscii(stored->id)!=LowerAscii(registeredPath->id)){
+                std::wstring mainKey,requestedMode,requestedName,requestedPublisher,legacyName;
+                aip::ReadIniValueFromDoc(doc,L"Profile",L"IdentityMode",requestedMode);
+                aip::ReadIniValueFromDoc(doc,L"Profile",L"StaticPackageName",requestedName);
+                aip::ReadIniValueFromDoc(doc,L"Profile",L"StaticPublisher",requestedPublisher);
+                aip::ReadIniValueFromDoc(doc,L"Settings",L"ManifestIdentityName",legacyName);
+                const bool stagedMain=aip::named_objects::NormalizeFileIdentity(context.mainIniPath,mainKey)&&LowerAscii(key)==LowerAscii(mainKey)&&
+                    context.runtimeGeneration.empty()&&stored->ownerSid==context.ownerSid&&stored->profileKey==key&&
+                    stored->mode==IdentityMode::Auto&&!stored->preservedLegacy&&Same(stored->package,AutomaticIdentity(context.userScope,stored->id))&&
+                    (requestedMode.empty()||requestedMode==L"Auto")&&requestedName.empty()&&requestedPublisher.empty()&&legacyName.empty();
+                if(!stagedMain){error=L"This INI and its registered profile path have different saved IDs. Existing profiles were kept; choose an explicit fresh profile or migration.";return false;}
+                // Repair the partial first-run commit from older builds only
+                // while its generated package is still entirely unregistered.
+                std::vector<std::wstring> registeredRoots;
+                if(!io.registeredRoots||!io.registeredRoots(stored->package,registeredRoots,error))return false;
+                if(!registeredRoots.empty()){error=L"The replacement Main identity is already registered. Existing identities were kept; use an explicit profile migration.";return false;}
+                stored.reset();recovering=true;
+            }
             IdentityRequest request;request.ownerSid=context.ownerSid;request.userScope=context.userScope;request.profileKey=key;request.stored=stored;request.ownedExisting=ownedExisting;
+            if(!stored&&registeredPath!=profiles.profiles.end()){request.candidateId=LowerAscii(registeredPath->id);recovering=true;}
             // Explicit legacy overrides are honored for a fresh profile, never
             // used to silently replace a saved package identity.
             std::wstring mode,name,publisher,legacyName,legacyPublisher;
@@ -272,13 +303,12 @@ public:
             if(plan.status==IdentityResolution::MigrationRequired){pendingIdentity=plan;output=plan.current;error.clear();return true;}
             if(plan.requiresWrite){
                 std::wstring family;if(!PackageFamily(plan.proposed.package,family)){error=L"Windows rejected this profile's package identity or Publisher.";return false;}
-                Registry profiles;if(!Load(profiles,error))return false;
-                for(const auto& other:profiles.profiles)if(other.profileKey!=key){IdentityRecord identity;std::wstring otherFamily;
+                for(const auto& other:profiles.profiles)if(LowerAscii(other.profileKey)!=LowerAscii(key)){IdentityRecord identity;std::wstring otherFamily;
                     if(!CurrentIdentity(other,identity,error)||!PackageFamily(identity.package,otherFamily))return false;
                     if(_wcsicmp(family.c_str(),otherFamily.c_str())==0){error=L"Another current-user profile already uses this package identity. Choose a different static name or Publisher.";return false;}}
                 for(const auto& field:IdentityValues(plan.proposed))if(!aip::WriteIniValueToText(text,L"ProfileIdentity",field.first.c_str(),field.second)){error=L"The profile identity could not be staged.";return false;}
                 if(!io.write(ini,text,false,error))return false;}
-            output=plan.proposed;return true;
+            recoveredProfileIdentity=recovering;output=plan.proposed;return true;
         },error);},error);
     }
     bool Enroll(const ProfileEntry& entry,std::wstring& error){return Update([&](Registry& r,std::wstring& e){if(!AddOrUpdate(r,entry,e))return false;if(r.defaultProfileId.empty())r.defaultProfileId=entry.id;return true;},error);}

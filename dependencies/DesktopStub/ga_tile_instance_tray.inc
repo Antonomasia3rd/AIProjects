@@ -3,7 +3,7 @@
 static constexpr UINT ID_TILE_INSTANCE_FIRST = 60000, ID_TILE_INSTANCE_LAST = 63999;
 static constexpr std::size_t TileInstanceMenuPageSize = 16;
 enum class TileInstanceMenuVerb { Set, Edit, Toggle, Pin, Unpin, Inventory, Status, Overview, Refresh, Remove, Add,
-    Page, SignIn, ChooseAccount, AddGallery, BrowseLauncherTarget, BrowseLauncherIcon };
+    Page, SignIn, ChooseAccount, AddGallery, BrowseLauncherTarget, BrowseLauncherIcon, NowPlayingLayout };
 struct TileInstanceMenuCommand {
     TileInstanceMenuVerb verb;
     std::wstring id, key, value, prompt;
@@ -411,11 +411,18 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
         aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"TileInstanceAdvanced",L"Advanced"));
         break;
     }
-    case TileInstanceType::NowPlaying:
+    case TileInstanceType::NowPlaying: {
         aip::AppendTrayMenuItem(menu,0,TileInstanceUi(L"TileInstanceSmtcExplanation",L"Uses Windows' current media session"),false,false);
+        HMENU layouts=aip::BeginTrayNestedMenu(menu);
+        const bool artwork=!tile.configuration.entries.empty()&&tile.configuration.entries.front().background==L"SMTCArtwork"&&tile.configuration.textMode==TextMode::Off;
+        AppendTileInstanceCommand(layouts,TileInstanceUi(L"NowPlayingInfoPreset",L"Information"),{TileInstanceMenuVerb::NowPlayingLayout,tile.id,L"",L"Info",L""},!artwork);
+        AppendTileInstanceCommand(layouts,TileInstanceUi(L"NowPlayingArtworkPreset",L"Album art only"),{TileInstanceMenuVerb::NowPlayingLayout,tile.id,L"",L"AlbumArt",L""},artwork);
+        aip::EndTrayNestedMenu(menu,layouts,TileInstanceUi(L"NowPlayingPresentationPresets",L"Presentation presets"));
+        AppendTileInstanceChoices(menu,tile,L"Content.Background",L"Image source",{{L"Transparent",L"Nothing / transparent"},{L"SMTCArtwork",L"Album art from the current media session"}},L"Transparent");
         AppendTileInstanceChoices(menu,tile,L"SMTC.Indicator",L"Playback indicator",{{L"Status",L"Playback status"},{L"AppIcon",L"Source app icon"},{L"None",L"Hidden"}},L"Status");
         AppendTileInstanceEditable(menu,tile,L"SMTC.ShowRepeatShuffle",L"Show repeat and shuffle status",L"0",true);
         break;
+    }
     case TileInstanceType::PrayerTimes: AppendTileInstancePrayerSettings(menu,tile); break;
     case TileInstanceType::Battery: AppendBatteryTileSettings(menu,tile); break;
     case TileInstanceType::Clock: case TileInstanceType::Calendar: {
@@ -783,6 +790,18 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
     if (selected == cfg.tiles.end()) return true;
     const auto tile = *selected;
     const auto section = TileInstanceSection(tile.id), nativeId = TileInstanceNativeId(tile);
+    if(item.verb==TileInstanceMenuVerb::NowPlayingLayout){
+        if(tile.type!=TileInstanceType::NowPlaying||(item.value!=L"Info"&&item.value!=L"AlbumArt"))return true;
+        const bool artwork=item.value==L"AlbumArt";
+        SaveConfirmedTileInstanceSettings(owner,{{section,L"Content.Background",artwork?L"SMTCArtwork":L"Transparent"},
+            {section,L"TextMode",artwork?L"Off":L"Auto"},{section,L"Branding",artwork?L"Name":L"NameAndLogo"}},tile.id,
+            [section](const std::wstring& text,std::wstring& issue){
+                std::wstring type;const auto document=aip::ParseIniDocument(text);
+                if(aip::ReadIniValueFromDoc(document,section.c_str(),L"Type",type)&&Lower(type)==L"nowplaying")return true;
+                issue=L"The tile type changed. Reopen its settings before applying a Now Playing preset.";return false;
+            });
+        return true;
+    }
     if(item.verb==TileInstanceMenuVerb::BrowseLauncherTarget||item.verb==TileInstanceMenuVerb::BrowseLauncherIcon){
         if(tile.type!=TileInstanceType::AppLauncher)return true;const bool icon=item.verb==TileInstanceMenuVerb::BrowseLauncherIcon;
         std::wstring path;if(!BrowseAppLauncherFile(owner,icon,path))return true;
