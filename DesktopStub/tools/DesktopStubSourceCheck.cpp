@@ -432,7 +432,7 @@ static void AssertUiStringWired(const std::string& key, const std::string& defau
     loadPattern += "|(?:TileInstanceUi|SecondaryTileUiString)\\(L\"" + key + "\"";
     if(key.compare(0,11,"TileOption_")==0)
         loadPattern += "|TileInstanceUi\\(\\(L\"TileOption_\".*std::wstring\\(key\\).*L\""+key.substr(11)+"\"";
-    if(key.compare(0,14,"GoogleCalendar")==0||key.compare(0,4,"Kuro")==0||key.compare(0,14,"SettingsWindow")==0)
+    if(key.compare(0,14,"GoogleCalendar")==0||key.compare(0,5,"Gmail")==0||key.compare(0,4,"Kuro")==0||key.compare(0,14,"SettingsWindow")==0)
         loadPattern += "|Text\\(L\"" + key + "\""; // Scoped setup/settings readers are guarded separately below.
     if (UiStringUsesSubjectSubstitution(key))
         loadPattern += "|NotificationSubjectText.*L\"" + key + "\"";
@@ -588,6 +588,7 @@ int main(int argc, char** argv)
             "..\\dependencies\\DesktopStub\\ga_desktop_host_setup.inc",
             "..\\dependencies\\DesktopStub\\ga_source_alert_runtime.inc",
             "..\\dependencies\\DesktopStub\\ga_calendar_reminders.inc",
+            "..\\dependencies\\DesktopStub\\ga_tile_delivery_warning.inc",
             "..\\dependencies\\DesktopStub\\ga_clock_calendar.inc",
             "..\\dependencies\\DesktopStub\\ga_tile_status.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_logging.inc",
@@ -599,6 +600,7 @@ int main(int argc, char** argv)
             "..\\dependencies\\DesktopStub\\ga_notification_confirmation.inc",
             "..\\dependencies\\DesktopStub\\ga_ui_wording.inc",
             "..\\dependencies\\DesktopStub\\ga_settings_window.inc",
+            "..\\dependencies\\DesktopStub\\ga_properties_options.inc",
             "..\\dependencies\\DesktopStub\\ga_text_input_dialog.inc",
             "..\\dependencies\\DesktopStub\\ga_tray_menu.inc",
             "..\\dependencies\\DesktopStub\\ga_gallery_tray.inc",
@@ -609,6 +611,8 @@ int main(int argc, char** argv)
             "..\\dependencies\\DesktopStub\\ga_notes_signin.inc",
             "..\\dependencies\\DesktopStub\\ga_kuro_signin.inc",
             "..\\dependencies\\DesktopStub\\ga_google_calendar_setup.inc",
+            "..\\dependencies\\DesktopStub\\ga_gmail_setup.inc",
+            "..\\dependencies\\DesktopStub\\ga_profile_manager.inc",
             "..\\dependencies\\DesktopStub\\ga_prayer_settings_tray.inc",
             "..\\dependencies\\DesktopStub\\ga_secondary_tile_tray.inc",
             "..\\dependencies\\DesktopStub\\ga_content_runtime.inc",
@@ -891,6 +895,9 @@ int main(int argc, char** argv)
         checks.push_back({"Kuro setup strings use the configurable shared reader", "Kuro setup UI", ReadSource("..\\dependencies\\DesktopStub\\ga_kuro_signin.inc"),
             R"rx(namespace kuro_signin.*Text(const wchar_t* key,const wchar_t* fallback).*IniReadS(L"Strings",key,fallback))rx",
             "Kuro setup Text(key,fallback) must stay backed by the Strings INI section", false});
+        checks.push_back({"Gmail setup strings use the configurable shared reader","Gmail setup UI",ReadSource("..\\dependencies\\DesktopStub\\ga_gmail_setup.inc"),
+            R"rx(namespace gmail_setup.*Text(const wchar_t* key,const wchar_t* fallback).*IniReadS(L"Strings",key,fallback))rx",
+            "Gmail setup Text(key,fallback) must stay backed by the Strings INI section",false});
         checks.push_back({"Settings window strings use the scoped configurable reader", "native settings UI", settingsWindow,
             R"rx(namespace desktop_settings.*Text(const wchar_t* key,const wchar_t* fallback).*IniReadS(L"Strings",key,fallback))rx",
             "SettingsWindow wording must use its scoped Text reader backed by the Strings INI section", false});

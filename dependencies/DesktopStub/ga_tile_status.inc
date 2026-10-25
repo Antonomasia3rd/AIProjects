@@ -30,7 +30,11 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
     const auto* sizeSetting = height > 200 ? L"ApplyToLargeTile" : width > 200 ? L"ApplyToWideTile" : L"ApplyToMediumTile";
     if (!IniReadI(L"TileText",sizeSetting,1)) { AppendTileStatusLine(output,labels.textHidden); return output; }
     if (frame.textMode == aip::content::TextMode::Off) { AppendTileStatusLine(output, labels.textHidden); return output; }
-    if((frame.clockSource||frame.calendarSource)&&frame.textMode!=aip::content::TextMode::Off){
+    if(frame.mailSource){
+        for(const auto& row:aip::content::BuildMailTilePlan(frame,width,height)){
+            AppendTileStatusLine(output,row.primary.text);AppendTileStatusLine(output,row.secondary.text);
+        }
+    }else if((frame.clockSource||frame.calendarSource)&&frame.textMode!=aip::content::TextMode::Off){
         const auto& date=frame.dateTime;
         if(frame.clockSource){
             AppendTileStatusLine(output,date.time);if(!date.date.empty())AppendTileStatusLine(output,date.weekday);
@@ -64,7 +68,7 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
             AppendTileStatusLine(output, row.primary + L" " + row.secondary);
         }
     } else if (frame.textMode == aip::content::TextMode::Auto && !frame.smtcSource && !frame.detailRows.empty()) {
-        for (std::size_t i = 0; i < (std::min)(frame.detailRows.size(), aip::content::DetailTileRows(height)); ++i) {
+        for (std::size_t i = 0; i < (std::min)(frame.detailRows.size(),frame.gameSource?aip::content::GameTileRows(width,height):aip::content::DetailTileRows(height)); ++i) {
             AppendTileStatusLine(output, frame.detailRows[i].primary);
             AppendTileStatusLine(output, frame.detailRows[i].secondary);
         }
@@ -95,6 +99,7 @@ static std::wstring BuildTileStatusTextWithLabels(const std::vector<aip::content
         if (!output.empty()) output += L"\r\n";
         AppendTileStatusLine(output, frame.name.empty() ? labels.primary : frame.name);
         if(!frame.sourceDiagnostic.empty())AppendTileStatusLine(output,IniReadS(L"Strings",L"TileSourceDiagnostic",L"Source note")+L": "+frame.sourceDiagnostic);
+        if(!frame.deliveryDiagnostic.empty())AppendTileStatusLine(output,IniReadS(L"Strings",L"TileDeliveryDiagnostic",L"Delivery note")+L": "+frame.deliveryDiagnostic);
         if (frame.galleryFrame) {
             AppendTileStatusLine(output, TileSnapshotUsesRegistration(frame) ? labels.staticImage : labels.queue);
             for (const auto& image : frames) if (image.galleryFrame && image.secondaryTileId == frame.secondaryTileId && image.galleryTicket == frame.galleryTicket) {

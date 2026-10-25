@@ -516,7 +516,7 @@ static bool PrepareAppearanceAssets(const std::wstring& id, aip::tile_visual::As
     aip::content::PublishedTileAppearance& published, std::wstring& error)
 {
     aip::content::TileInstance instance;
-    if (FindConfiguredSecondaryTileInstance(id, instance) && instance.type == aip::content::TileInstanceType::QuickAction) {
+    if (FindConfiguredSecondaryTileInstance(id, instance) && (instance.type == aip::content::TileInstanceType::QuickAction||instance.type==aip::content::TileInstanceType::AppLauncher)) {
         // Type changes can leave the previous RSS/game notification covering a
         // static action logo. Clear that owned queue when applying its new
         // metadata, rather than publishing a blank Live Tile over the icon.
@@ -529,6 +529,12 @@ static bool PrepareAppearanceAssets(const std::wstring& id, aip::tile_visual::As
         }
     }
     const auto configured = ConfiguredAppearance(id);
+    if(instance.type==aip::content::TileInstanceType::AppLauncher){
+        published=aip::content::PublishTileAppearance(configured,0x202020);
+        std::wstring profile;{std::lock_guard<std::mutex> lock(g_pathMutex);profile=aip::MakeAbsolutePath(g_iniPath);}
+        return aip::app_launcher::EnsureAssets(instance.launcher,GetExeDir(),aip::notifications::StableId(profile+L"|"+id),
+            {configured.background==L"Color",aip::content::TileAppearanceRgb(configured,0x202020)},logos,error);
+    }
     const bool gallery = id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0;
     auto topicKey = gallery ? std::wstring(L"gallery") : id;
     if (TileInstanceModeRequested() && id.compare(0, 10, L"AipSource_") == 0) {

@@ -101,6 +101,8 @@ static bool BuildContentCalendarEvent(const aip::datetime::Occurrence& event,con
     row.identity=event.uid;row.start=event.start;row.end=event.end;
     auto& native=row.presentation;native.title=row.title;native.location=row.location;native.allDay=event.allDay;
     native.isToday=event.allDay?(startDay<=todayDay&&day(end)>todayDay):startDay==todayDay;
+    const auto& groupingDay=native.isToday?today:start;
+    native.dayKey=std::to_wstring(groupingDay.year)+L"/"+std::to_wstring(groupingDay.month)+L"/"+std::to_wstring(groupingDay.day);
     native.dateLabel=native.isToday?IniReadS(L"Strings",L"CalendarToday",L"Today"):
         startDay==todayDay+86400?IniReadS(L"Strings",L"CalendarTomorrow",L"Tomorrow"):localizedDate(start,0,L"dddd d");
     native.startTime=event.allDay?IniReadS(L"Strings",L"CalendarAllDay",L"All day"):ContentDateTimeFormat(start,cfg.timeFormat);
@@ -112,6 +114,13 @@ static bool BuildContentCalendarEvent(const aip::datetime::Occurrence& event,con
     // Keep the full diagnostic representation independent of native tile rows.
     row.when=localizedDate(start,DATE_SHORTDATE,nullptr)+L" · "+(event.allDay?IniReadS(L"Strings",L"CalendarAllDay",L"All day"):native.timeRange);
     output=std::move(row);return true;
+}
+static bool ContentCalendarDisplayEnd(const aip::datetime::CalendarConfiguration& cfg,aip::datetime::UTC now,
+    const DYNAMIC_TIME_ZONE_INFORMATION& zone,aip::datetime::UTC& end){
+    using namespace aip::datetime;
+    if(cfg.eventWindow!=L"TodayAndTomorrow"){end=now+static_cast<UTC>(cfg.daysAhead)*86400;return true;}
+    Civil local;if(!ContentTimeZoneUtcToLocal(now,zone,local))return false;
+    const auto boundary=FromDays(Days(local)+2);return ContentTimeZoneLocalToUtc(boundary,cfg.timeZone,end);
 }
 static bool CalendarFileAttributesAllowed(DWORD attributes,bool directory,std::wstring& error) {
     // The recall constants are literal for older SDK headers. Reject cloud
@@ -223,8 +232,9 @@ public:
         if(cfg.filePath.empty()){if(!requestKey.empty())Cancel();return view;}
         if(cfg.refreshSeconds<30||cfg.refreshSeconds>86400||cfg.daysAhead<1||cfg.daysAhead>366||cfg.maxEvents<1||cfg.maxEvents>10){view.ok=false;view.status=L"Calendar settings are outside their supported ranges.";return view;}
         DYNAMIC_TIME_ZONE_INFORMATION zone{};ResolveContentTimeZone(cfg.timeZone,zone);
+        const int queryDays=cfg.eventWindow==L"TodayAndTomorrow"?2:cfg.daysAhead;
         const auto zoneScope=cfg.timeZone+L"|"+zone.TimeZoneKeyName+L"|"+std::to_wstring(zone.Bias)+L":"+std::to_wstring(zone.DynamicDaylightTimeDisabled);
-        const auto key=cfg.filePath+L"\n"+zoneScope+L"\n"+std::to_wstring(cfg.daysAhead)+L":"+std::to_wstring(cfg.refreshSeconds)+L":"+std::to_wstring(now/86400);
+        const auto key=cfg.filePath+L"\n"+zoneScope+L"\n"+std::to_wstring(queryDays)+L":"+std::to_wstring(cfg.refreshSeconds)+L":"+std::to_wstring(now/86400);
         if(requestKey!=key){calendarSource.CancelPending();requestKey=key;waitExpired=false;}
         waitExpired=false;
         FileReader reader;
@@ -236,7 +246,7 @@ public:
 #endif
         const auto cache=workerCache;
         calendarSource.Request(key,std::chrono::milliseconds(static_cast<long long>(cfg.refreshSeconds)*1000),
-            [cache,cfg,now,force,reader,zoneScope](const CancelCheck& canceled)->Result {
+            [cache,cfg,now,force,reader,zoneScope,queryDays](const CancelCheck& canceled)->Result {
                 auto result=std::make_shared<ContentCalendarResult>();
                 if(canceled())return result;
                 const auto ticks=GetTickCount64();
@@ -261,11 +271,11 @@ public:
                 }
                 if(canceled())return result;
                 if(!cache->fileError.empty()){result->error=cache->fileError;return result;}
-                if(cache->expandedMinute!=now/86400||cache->expandedZone!=zoneScope||cache->expandedDays!=cfg.daysAhead){
-                    cache->expandedMinute=now/86400;cache->expandedZone=zoneScope;cache->expandedDays=cfg.daysAhead;cache->expansionWarnings=cache->calendar.warnings;
+                if(cache->expandedMinute!=now/86400||cache->expandedZone!=zoneScope||cache->expandedDays!=queryDays){
+                    cache->expandedMinute=now/86400;cache->expandedZone=zoneScope;cache->expandedDays=queryDays;cache->expansionWarnings=cache->calendar.warnings;
                     const auto day=now/86400*86400;
                     const auto resolve=[&](const Civil& civil,const std::wstring& zone,UTC& utc){return !canceled()&&ContentTimeZoneLocalToUtc(civil,zone,utc);};
-                    cache->expanded=Expand(cache->calendar,day,day+static_cast<UTC>(cfg.daysAhead+1)*86400,cfg.timeZone,resolve,cache->expansionWarnings);
+                    cache->expanded=Expand(cache->calendar,day,day+static_cast<UTC>(queryDays+1)*86400,cfg.timeZone,resolve,cache->expansionWarnings);
                 }
                 if(canceled()){cache->expandedMinute=-1;return result;}
                 result->ok=true;result->occurrences=cache->expanded;result->warnings=cache->expansionWarnings;return result;
@@ -284,8 +294,9 @@ public:
         Civil localNow;if(ContentTimeZoneUtcToLocal(now,zone,localNow))newVisibleKey+=L"|localDay:"+std::to_wstring(localNow.year)+L":"+std::to_wstring(localNow.month)+L":"+std::to_wstring(localNow.day);
         for(const auto& label:{IniReadS(L"Strings",L"CalendarToday",L"Today"),IniReadS(L"Strings",L"CalendarTomorrow",L"Tomorrow"),
             IniReadS(L"Strings",L"CalendarAllDay",L"All day"),IniReadS(L"Strings",L"CalendarAllDayLower",L"all day")})newVisibleKey+=L"|"+std::to_wstring(label.size())+L":"+label;
+        UTC displayEnd=0;if(!ContentCalendarDisplayEnd(cfg,now,zone,displayEnd)){view.ok=false;view.status=L"The Calendar display-window boundary could not be resolved in this time zone.";return view;}
         for(const auto& event:captured->occurrences){if(selected.size()>=static_cast<std::size_t>(cfg.maxEvents))break;
-            if(event.start>=now+static_cast<UTC>(cfg.daysAhead)*86400||!(event.end>now||(event.end==event.start&&event.start>=now)))continue;
+            if(event.start>=displayEnd||!(event.end>now||(event.end==event.start&&event.start>=now)))continue;
             selected.push_back(&event);
             newVisibleKey+=L"|"+std::to_wstring(event.start)+L":"+std::to_wstring(event.end)+L":"+std::to_wstring(event.allDay)+
                 L":"+std::to_wstring(event.summary.size())+L":"+event.summary+L":"+std::to_wstring(event.location.size())+L":"+event.location;

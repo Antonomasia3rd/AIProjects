@@ -5,6 +5,7 @@
 #include "../media_tile_layout.h"
 #include "../prayer_tile_layout.h"
 #include "../datetime_tile_layout.h"
+#include "../game_tile_layout.h"
 static bool CurrentProcessPackageFullName(std::wstring& packageFullName)
 {
     packageFullName.clear();
@@ -264,6 +265,16 @@ static std::wstring NotesTileIconUri(const std::wstring& topic, const std::wstri
     if (!bitmap || !EnsureParentDirectoryForFile(path, &error) || !SavePNG(bitmap.get(), path.c_str())) return {};
     return aip::tile_visual::PackageUri(relative);
 }
+static std::wstring GameRowSpacingUri(const std::wstring& directory,int width,int spacing){
+    if(spacing<=0||spacing>24||width<=20||width>1024)return {};
+    // Adaptive text has no arbitrary pixel margin. An immutable transparent
+    // inline image preserves the same row gap as the bitmap renderer.
+    const auto relative=L"Assets/GameRows/v1/Gap-"+std::to_wstring(width-20)+L"x"+std::to_wstring(spacing)+L".png";
+    const auto path=ResolveManifestAssetPath(directory,relative);if(GetFileAttributesW(path.c_str())!=INVALID_FILE_ATTRIBUTES)return aip::tile_visual::PackageUri(relative);
+    ScopedGdiPlus gdi;DWORD error=ERROR_SUCCESS;if(!gdi.ok()||!EnsureParentDirectoryForFile(path,&error))return {};
+    Bitmap bitmap(width-20,spacing,PixelFormat32bppARGB);Graphics graphics(&bitmap);graphics.Clear(Color(0,0,0,0));
+    return bitmap.GetLastStatus()==Ok&&graphics.GetLastStatus()==Ok&&SavePNG(&bitmap,path.c_str())?aip::tile_visual::PackageUri(relative):std::wstring{};
+}
 static const wchar_t* ContentLiveTileBrandingXmlValue()
 {
     if (!g_renderContent || (g_renderContent->secondaryTileId.empty() && g_renderContent->secondaryBranding.empty()))
@@ -317,6 +328,8 @@ static std::wstring BuildLiveTileXml(
         aip::content::AppendDateTimeTileBinding(xml,L"TileSmall",71,*g_renderContent))hasUsableBinding=true;
     for (const auto& asset : liveTileAssets)
     {
+        if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->mailSource&&g_renderContent->textMode==aip::content::TextMode::Auto&&
+            (std::wstring(asset.binding)==L"TileSmall"||(std::wstring(asset.binding)==L"TileLarge"&&!g_renderContent->mailIncludeLarge)))continue;
         if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->calendarSource&&
             g_renderContent->calendarFlavor==aip::content::CalendarFlavor::Agenda&&std::wstring(asset.binding)!=L"TileWide")continue;
         std::wstring uri = LiveTileAssetUriIfValid(exeDir, asset.file, asset.w, asset.h);
@@ -328,6 +341,10 @@ static std::wstring BuildLiveTileXml(
         }
 
         const wchar_t* templateName = LiveTileTemplateForTarget(asset.binding);
+        if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->mailSource&&g_renderContent->textMode==aip::content::TextMode::Auto){
+            if(aip::content::AppendMailTileBinding(xml,templateName,asset.h,*g_renderContent,ContentHasTransparentBackground()?L"":uri))hasUsableBinding=true;
+            continue;
+        }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && !g_renderContent->rssHeadlines.empty() &&
             g_renderContent->textMode == aip::content::TextMode::Auto && aip::content::RssUsesRichLayout(g_renderContent->presentation) &&
             aip::content::AppendRssRichTileBinding(xml, templateName, asset.h, g_renderContent->rssHeadlines,
@@ -364,10 +381,12 @@ static std::wstring BuildLiveTileXml(
             g_renderContent->textMode == aip::content::TextMode::Auto) {
             std::vector<aip::content::MediaIndicatorImage> rowIcons;
             for (const auto& row : g_renderContent->detailRows) {
-                auto icon = NotesTileIconUri(row.iconTopic, exeDir);
-                if (icon.empty() && !row.iconTopic.empty()) icon = MediaTopicUri(g_renderContent->detailTopic, exeDir);
+                auto icon = g_renderContent->gameSource&&g_renderContent->presentation.iconPlacement==L"None"?std::wstring{}:NotesTileIconUri(row.iconTopic, exeDir);
+                if (!g_renderContent->gameSource&&icon.empty() && !row.iconTopic.empty()) icon = MediaTopicUri(g_renderContent->detailTopic, exeDir);
                 rowIcons.push_back({icon, row.primary});
             }
+            if(g_renderContent->gameSource&&aip::content::AppendGameTileBinding(xml,templateName,asset.w,asset.h,*g_renderContent,ContentHasTransparentBackground()?L"":uri,rowIcons,
+                GameRowSpacingUri(exeDir,asset.w,g_renderContent->presentation.rowSpacing))){hasUsableBinding=true;continue;}
             if (aip::content::AppendDetailRowsBinding(xml, templateName, asset.h, g_renderContent->detailRows,
                 ContentHasTransparentBackground() ? L"" : uri, L"", rowIcons)) {
                 hasUsableBinding = true; continue;
@@ -401,7 +420,7 @@ static std::wstring BuildLiveTileXml(
     xml += L"</tile>";
     const bool richRssPresentation = g_renderContent && !g_renderContent->rssHeadlines.empty() &&
         g_renderContent->textMode == aip::content::TextMode::Auto && aip::content::RssUsesRichLayout(g_renderContent->presentation);
-    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !richRssPresentation && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource)
+    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !richRssPresentation && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource && !g_renderContent->mailSource && !g_renderContent->gameSource)
         xml = aip::content::ApplyTextPresentationXml(xml, g_renderContent->presentation);
     aip::tile_notification::Options options;
     if (g_renderContent) {
@@ -409,6 +428,8 @@ static std::wstring BuildLiveTileXml(
         options.tag = g_renderContent->nativeQueueTag;
         options.reset = g_renderContent->nativeQueueReset;
         options.secondaryTileId = g_renderContent->secondaryTileId;
+        if(g_renderContent->mailSource&&(!g_renderContent->nativeQueue||g_renderContent->nativeQueueReset))
+            options.badgeCount=g_renderContent->mailBadgeEnabled?g_renderContent->mailUnreadCount:0;
     }
     std::wstring transport, error;
     if (!aip::tile_notification::Encode(xml, options, transport, error)) {
@@ -467,7 +488,10 @@ static bool Appx_Update_LiveTileXmlBare(const std::wstring& tileXml, std::wstrin
     {
         WinrtApartmentGuard apartment(winrt::apartment_type::single_threaded);
 
-        return aip::tile_notification::DeliverWinrt(tileXml, failureMessage);
+        std::wstring badgeError;
+        const bool delivered=aip::tile_notification::DeliverWinrt(tileXml,failureMessage,&badgeError);
+        if(!badgeError.empty())LogText(L"[!] The tile updated, but Windows could not update its unread badge.");
+        return delivered;
     }
     catch (const winrt::hresult_error& e)
     {

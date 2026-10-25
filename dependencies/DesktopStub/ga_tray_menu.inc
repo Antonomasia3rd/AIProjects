@@ -67,8 +67,9 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
         if(!CurrentProcessHasPackageIdentity())addTo(tilesMenu,ID_SETUP_DESKTOP_HOST,
             IniReadS(L"Strings",L"DesktopHostSetup",L"Set up Desktop tile..."),false,!g_desktopHostSetupPending.load());
         AppendTileInstancesMenu(tilesMenu);
-        AppendQuickActionsMenu(tilesMenu);
-        AppendGalleryTilesMenu(tilesMenu);
+        if(IniReadI(L"QuickActions",L"Enabled",0)!=0)AppendQuickActionsMenu(tilesMenu);
+        aip::gallery::Configuration galleryMenuConfiguration;std::wstring galleryMenuError;
+        if(!ReadGalleryConfiguration(galleryMenuConfiguration,galleryMenuError)||!galleryMenuConfiguration.groupId.empty()||GalleryTransactionPending(GalleryProfilePath()))AppendGalleryTilesMenu(tilesMenu);
         endSection(tilesMenu, SecondaryTileUiString(L"TileInstancesTitle", L"Tiles"));
         HMENU pluginsMenu = beginSection(SecondaryTileUiString(L"TilePluginsTitle", L"Plugins"));
         AppendTileInstancePluginsMenu(pluginsMenu);
@@ -399,6 +400,8 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     }
 
     HMENU generalMenu = beginSection(g_ui.generalTitle);
+    AppendProfilesMenu(generalMenu);
+    addTo(generalMenu,ID_ALREADY_RUNNING_PROFILE_PROMPT,IniReadS(L"Strings",L"AlreadyRunningProfilePrompt",L"Offer a fresh profile when launched again"),IniReadI(L"Settings",L"AlreadyRunningProfilePrompt",1)!=0);
     AppendMenuWordingSettings(generalMenu);
     HMENU startupMenu = beginNestedMenu(generalMenu, L"CreatePopupMenu(Sign-in)");
     addTo(startupMenu, ID_RUN_AT_STARTUP, g_ui.runAtStartup.c_str(), startupInstalled);
@@ -412,6 +415,7 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     addTo(interfaceMenu, ID_TRAYICON, g_ui.trayIcon.c_str(), g_tray);
     addTo(interfaceMenu, ID_HIDE_DISABLED, g_ui.hideDisabledEntries.c_str(), g_hideDisabled);
     addTo(interfaceMenu, ID_CONSOLE, g_ui.showConsole.c_str(), g_console);
+    AppendDesktopStubPropertiesOptions(interfaceMenu);
     endNestedMenu(generalMenu, interfaceMenu, g_ui.trayInterfaceTitle);
     HMENU notificationsMenu = beginNestedMenu(generalMenu, L"CreatePopupMenu(Notifications)");
     addTo(notificationsMenu, ID_NOTIF_ENABLED, g_ui.notificationsEnabled.c_str(), g_notificationsEnabled);
@@ -445,7 +449,7 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     addTo(loggingMenu, ID_LOG_RENAME, g_ui.renamePath.c_str(), false, g_logging);
     addTo(loggingMenu, ID_LOG_OPEN, g_ui.openInExplorer.c_str(), false, g_logging);
     addTo(loggingMenu, ID_LOG_RESET, g_ui.resetDefault.c_str(), false, g_logging);
-    addTo(loggingMenu, ID_SHOW_PSLOG, g_ui.showPowerShellLog.c_str());
+    addTo(diagnosticsMenu, ID_SHOW_PSLOG, g_ui.showPowerShellLog.c_str());
 
     std::wstring pathLine = g_ui.logPathPrefix + GetLogPathCopy();
     HMENU hPath = CreatePopupMenu();
@@ -475,13 +479,13 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     else
     {
         AppendMenuChecked(hPs, MF_STRING | MF_DISABLED, 0, psLine.c_str());
-        if (!AppendMenuChecked(loggingMenu, MF_POPUP, (UINT_PTR)hPs, g_ui.psStatusTitle.c_str()))
+        if (!AppendMenuChecked(diagnosticsMenu, MF_POPUP, (UINT_PTR)hPs, g_ui.psStatusTitle.c_str()))
             DestroyMenu(hPs);
     }
-    endNestedMenu(diagnosticsMenu, loggingMenu, g_ui.loggingTitle);
     endSection(diagnosticsMenu, g_ui.diagnosticsTitle);
 
     HMENU advancedMenu = beginSection(g_ui.advancedTitle);
+    if(loggingMenu!=diagnosticsMenu)endNestedMenu(advancedMenu,loggingMenu,g_ui.loggingTitle);
     HMENU packageMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Package setup)");
         HMENU registrationMenu = CreatePopupMenu();
         if (registrationMenu)
@@ -571,8 +575,14 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     HMENU manifestCompatibilityMenu = beginNestedMenu(manifestDetailsMenu, L"CreatePopupMenu(Manifest compat)");
     HMENU manifestImagesMenu = beginNestedMenu(manifestDetailsMenu, L"CreatePopupMenu(Manifest images)");
     HMENU manifestHelpersMenu = beginNestedMenu(manifestDetailsMenu, L"CreatePopupMenu(Manifest helpers)");
-    addTo(manifestIdentityMenu, ID_MANIFEST_EDIT_IDENTITY_NAME, manifestIdentityLine);
-    addTo(manifestIdentityMenu, ID_MANIFEST_EDIT_PUBLISHER, manifestPublisherLine);
+    if(!IniReadS(L"ProfileIdentity",L"Id",L"").empty()){
+        AppendMenuChecked(manifestIdentityMenu,MF_STRING|MF_DISABLED,0,manifestIdentityLine.c_str());
+        AppendMenuChecked(manifestIdentityMenu,MF_STRING|MF_DISABLED,0,manifestPublisherLine.c_str());
+        AppendProfilesMenu(manifestIdentityMenu);
+    }else{
+        addTo(manifestIdentityMenu, ID_MANIFEST_EDIT_IDENTITY_NAME, manifestIdentityLine);
+        addTo(manifestIdentityMenu, ID_MANIFEST_EDIT_PUBLISHER, manifestPublisherLine);
+    }
     addTo(manifestIdentityMenu, ID_MANIFEST_EDIT_PACKAGE_VERSION, manifestPackageVersionLine);
     addTo(manifestDisplayMenu, ID_MANIFEST_EDIT_DISPLAY_NAME, manifestDisplayNameLine);
     addTo(manifestDisplayMenu, ID_MANIFEST_EDIT_PUBLISHER_DISPLAY_NAME, manifestPublisherDisplayNameLine);
@@ -614,7 +624,8 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
             DestroyMenu(manifestDetailsMenu);
     }
     endNestedMenu(packageMenu, manifestMenu, g_ui.manifestTitle);
-    endNestedMenu(advancedMenu, packageMenu, g_ui.trayPackageTitle);
+    endNestedMenu(advancedMenu, packageMenu,TileInstanceModeRequested()?IniReadS(L"Strings",L"ProfilePackageSetup",L"Profile package identity and setup"):g_ui.trayPackageTitle);
+    if(!TileInstanceModeRequested()){
     HMENU cachingMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Caching)");
     bool cacheEnabled = GeneratedAssetCacheEnabled();
     bool cacheCanStore = cacheEnabled && GeneratedAssetCacheMaxEntries() > 0;
@@ -626,6 +637,7 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     addTo(cachingMenu, ID_GENERATED_ASSET_CACHE_MAX_ENTRIES, cacheMaxEntriesLine);
     addTo(cachingMenu, ID_GENERATED_ASSET_PRECACHE_MAX_FILES, precacheMaxFilesLine, false, cacheCanStore);
     endNestedMenu(advancedMenu, cachingMenu, g_ui.cachingTitle);
+    }
 
     std::wstring pollLine = FormatWide(g_ui.pollIntervalLabel.c_str(), IniReadClampedI(L"Settings", L"PollIntervalMs", 2000, 250, 60000));
     std::wstring confirmLine = FormatWide(g_ui.confirmMsLabel.c_str(), IniReadClampedI(L"Settings", L"ConfirmMs", 800, 0, 10000));
@@ -679,30 +691,31 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     addTo(advancedShutdownMenu, ID_ADV_COMPACT_CRT_HEAP_ON_IDLE, g_ui.compactCrtHeapOnIdle.c_str(), g_compactCrtHeapOnIdle);
     endNestedMenu(advancedMenu, advancedShutdownMenu, g_ui.advancedShutdownTitle);
 
-    HMENU advancedRegistrationMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced registration)");
+    const auto registrationOptionsParent=TileInstanceModeRequested()?packageMenu:advancedMenu;
+    HMENU advancedRegistrationMenu = beginNestedMenu(registrationOptionsParent, L"CreatePopupMenu(Advanced registration)");
     addTo(advancedRegistrationMenu, ID_ADV_COM_REGISTRATION_TIMEOUT_MS, comRegistrationTimeoutLine);
     addTo(advancedRegistrationMenu, ID_ADV_COM_REGISTRATION_CANCEL_WAIT_MS, comRegistrationCancelWaitLine);
     addTo(advancedRegistrationMenu, ID_ADV_REGISTRATION_UNRESOLVED_BLOCK_MS, registrationUnresolvedBlockLine);
-    endNestedMenu(advancedMenu, advancedRegistrationMenu, g_ui.advancedRegistrationTitle);
+    endNestedMenu(registrationOptionsParent, advancedRegistrationMenu, g_ui.advancedRegistrationTitle);
 
-    HMENU advancedPowerShellMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced PowerShell)");
+    HMENU advancedPowerShellMenu = beginNestedMenu(registrationOptionsParent, L"CreatePopupMenu(Advanced PowerShell)");
     addTo(advancedPowerShellMenu, ID_ADV_POWER_SHELL_EXE, powerShellExeLine);
     addTo(advancedPowerShellMenu, ID_ADV_POWER_SHELL_POLL_MS, powerShellPollLine);
     addTo(advancedPowerShellMenu, ID_ADV_POWER_SHELL_TIMEOUT_MS, powerShellTimeoutLine);
     addTo(advancedPowerShellMenu, ID_ADV_POWER_SHELL_TERMINATE_WAIT_MS, powerShellTerminateWaitLine);
     addTo(advancedPowerShellMenu, ID_ADV_POWER_SHELL_OUTPUT_LIMIT, powerShellOutputLimitLine);
-    endNestedMenu(advancedMenu, advancedPowerShellMenu, g_ui.advancedPowerShellTitle);
+    endNestedMenu(registrationOptionsParent, advancedPowerShellMenu, g_ui.advancedPowerShellTitle);
 
-    HMENU advancedLoggingMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced logging)");
-    addTo(advancedLoggingMenu, ID_ADV_LOG_BUFFER_LINES, logBufferLine);
-    addTo(advancedLoggingMenu, ID_ADV_LOG_APPEND_LOCK_WAIT_MS, logAppendLockWaitLine);
-    endNestedMenu(advancedMenu, advancedLoggingMenu, g_ui.advancedLoggingTitle);
+    addTo(loggingMenu, ID_ADV_LOG_BUFFER_LINES, logBufferLine);
+    addTo(loggingMenu, ID_ADV_LOG_APPEND_LOCK_WAIT_MS, logAppendLockWaitLine);
 
     HMENU advancedPngSaveMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced PNG saving)");
+    if(!TileInstanceModeRequested()){
     addTo(advancedPngSaveMenu, ID_ADV_SAVE_PNG_REPLACE_RETRIES, savePngReplaceRetriesLine);
     addTo(advancedPngSaveMenu, ID_ADV_SAVE_PNG_REPLACE_RETRY_DELAY_MS, savePngReplaceRetryDelayLine);
+    }
     addTo(advancedPngSaveMenu, ID_ADV_KEEP_GDIPLUS_LOADED, g_ui.keepGdiPlusLoaded.c_str(), g_keepGdiPlusLoaded);
-    endNestedMenu(advancedMenu, advancedPngSaveMenu, g_ui.advancedPngSaveTitle);
+    endNestedMenu(advancedMenu, advancedPngSaveMenu,TileInstanceModeRequested()?IniReadS(L"Strings",L"ProfileImageEngine",L"Image engine (profile)"):g_ui.advancedPngSaveTitle);
 
     HMENU advancedSingleInstanceMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Advanced single instance)");
     addTo(advancedSingleInstanceMenu, ID_ADV_SINGLE_INSTANCE_SIGNAL_RETRIES, signalRetriesLine);

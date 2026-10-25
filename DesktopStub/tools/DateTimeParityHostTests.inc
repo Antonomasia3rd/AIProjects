@@ -139,9 +139,11 @@ static void TestCalendarEventParityHost(const std::wstring& directory,const std:
         "future-day agenda uses its already-prepared day label instead of a guessed Today header");
     frame.calendarEvents.clear();Check(BuildCalendarTileFrames(frame,true).size()==1,"a date-only Calendar resets to one native queue document");
 }
+#include "DateTimePolicyHostTests.inc"
 static void TestDateTimeParityHost()
 {
     TestDateTimeParityBaseHost();
+    TestCalendarDisplayWindowHost();TestClockIconPolicyHost();TestLiveTileWarningPolicyHost();
     using namespace aip::content;
     const auto oldTemplate=g_liveTileTemplateStyle.load(),oldTarget=g_manifestCompatibilityTarget.load();
     g_liveTileTemplateStyle=static_cast<int>(LiveTileTemplateStyle::Adaptive);

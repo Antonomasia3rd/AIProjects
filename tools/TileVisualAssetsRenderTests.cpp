@@ -40,8 +40,14 @@ int main() {
                 Check(bitmap.GetPixel(0, 0, &corner) == Ok && corner.GetA() == 0,
                     "all default source/action/status logos have no colored plate");
                 Color margin;
-                Check(bitmap.GetPixel(asset.width / 2, 1, &margin) == Ok && margin.GetA() == 0,
+                const bool branding=asset.width==asset.height&&(asset.width==44||asset.width==30);
+                Check(bitmap.GetPixel(asset.width / 2, branding?0:1, &margin) == Ok && margin.GetA() == 0,
                     "default fallback artwork has no colored halo or circular badge at its margins");
+                if(branding){UINT left=asset.width,top=asset.height,right=0,bottom=0;bool any=false,edgeClear=true;
+                    for(UINT y=0;y<asset.height;++y)for(UINT x=0;x<asset.width;++x){Color pixel;Check(bitmap.GetPixel(x,y,&pixel)==Ok,"corner logo pixel is readable");
+                        if(pixel.GetA()){any=true;left=(std::min)(left,x);right=(std::max)(right,x);top=(std::min)(top,y);bottom=(std::max)(bottom,y);if(x==0||y==0||x+1==asset.width||y+1==asset.height)edgeClear=false;}}
+                    const auto visible=any?(std::max)(right-left+1,bottom-top+1):0u;
+                    Check(any&&edgeClear&&visible>=asset.width-4&&visible<=asset.width-2,"corner logos match Desktop visible extent without clipping the transparent outer edge");}
             }
             Bitmap glyph(96, 96, PixelFormat32bppARGB);
             {

@@ -95,6 +95,12 @@ static void CompleteDesktopHostSetup(HWND owner){
         success=false;g_desktopHostSetupRecovered=true;
     }
     g_desktopHostSetupRequestId=0;g_desktopHostSetupPending=false;
+    bool migrationRelaunch=false;std::wstring migrationError;
+    if(!CompleteProfileIdentityMigration(success,migrationRelaunch,migrationError)){
+        success=false;
+        if(!g_shutdownState.IsRequested())DesktopHostSetupNotice(owner,L"ProfileIdentityMigrationFailed",migrationError.c_str(),true);
+    }
+    if(migrationRelaunch&&!g_shutdownState.IsRequested()){g_relaunchAfterExit=3;RequestGracefulShutdown(owner);return;}
     // An explicit Exit/session shutdown must never wait behind a new modal
     // setup-failure prompt, and must never acquire a packaged relaunch.
     if(g_shutdownState.IsRequested()){g_relaunchAfterExit=0;return;}

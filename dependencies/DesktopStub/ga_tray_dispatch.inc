@@ -1,5 +1,8 @@
 static void DispatchTrayCommand(HWND h, UINT cmd)
 {
+    if(DispatchProfileManagerCommand(h,cmd))return;
+    if(cmd==ID_ALREADY_RUNNING_PROFILE_PROMPT){IniWrite(L"Settings",L"AlreadyRunningProfilePrompt",IniReadI(L"Settings",L"AlreadyRunningProfilePrompt",1)?L"0":L"1");return;}
+    if(DispatchDesktopStubPropertiesOption(h,cmd))return;
     if(cmd==ID_DESKTOPSTUB_SETTINGS_WINDOW){OpenDesktopStubSettings(h);return;}
     if (DispatchTileInstanceCommand(h, cmd)) return;
     if (DispatchMenuWordingCommand(h, cmd)) return;

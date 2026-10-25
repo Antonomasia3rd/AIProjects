@@ -15,6 +15,7 @@ static void TestTileInstanceTrayHost()
     for (int index = 0; index < 40; ++index) { if (index) text += L","; text += L"feed-"+std::to_wstring(index); }
     text += L"\r\n";
     for (int index = 0; index < 40; ++index) text += L"[Tile.feed-"+std::to_wstring(index)+L"]\r\nType=RSS\r\nName=Feed "+std::to_wstring(index)+L"\r\nTextStyle=caption\r\nTextMode=Overlay\r\nDelivery.Mode=LiveTile\r\n";
+    text+=L"[QuickActions]\r\nEnabled=1\r\n";
     Check(WriteContentFixture(text),"instance tray fixture owns only the private profile");
     const std::function<bool(HMENU,UINT)> containsCommand = [&](HMENU target,UINT command) {
         for (int row = 0; row < GetMenuItemCount(target); ++row) {
@@ -24,6 +25,15 @@ static void TestTileInstanceTrayHost()
         }
         return false;
     };
+    Check(WriteContentFixture(L"[Tiles]\r\nSchemaVersion=1\r\nInstances=desktop\r\n[Tile.desktop]\r\nType=Wallpaper\r\nName=Desktop\r\n[QuickActions]\r\nEnabled=0\r\n"),"fresh tray discovery fixture owns only its private profile");
+    HMENU freshMenu=CreatePopupMenu();PopulateDesktopStubTrayMenu(freshMenu,true,false);
+    Check(!containsCommand(freshMenu,ID_QUICK_ACTIONS_PIN_ALL)&&!containsCommand(freshMenu,ID_GALLERY_PIN_ALL),"fresh Desktop-only tray omits empty Quick Actions and Gallery containers");
+    Check(std::any_of(g_tileInstanceMenuCommands.begin(),g_tileInstanceMenuCommands.end(),[](const auto& item){return item.second.verb==TileInstanceMenuVerb::AddGallery;}),"fresh tray still offers Gallery through Add tile");
+    TrayMenuCommands freshCommands;InspectTrayMenu(freshMenu,freshCommands);const auto logging=freshCommands.find(ID_LOG);
+    Check(logging!=freshCommands.end()&&logging->second.path.find(aip::TrayMenuTitle(g_ui.advancedTitle))!=std::wstring::npos&&logging->second.path.find(aip::TrayMenuTitle(g_ui.diagnosticsTitle))==std::wstring::npos,"Logging is available once under Advanced rather than Diagnostics");
+    for(const auto command:{ID_PROPERTIES_ACCENT,ID_PROPERTIES_CUSTOM,ID_PROPERTIES_COLOR,ID_PROPERTIES_CAPTION_CUSTOM,ID_PROPERTIES_CAPTION_SYSTEM})
+        Check(containsCommand(freshMenu,command),"Properties highlight and caption controls are exposed through the real tray model");
+    DestroyMenu(freshMenu);Check(WriteContentFixture(text),"legacy Quick Actions checks opt into their explicit enabled setting");
     HMENU completeMenu = CreatePopupMenu(); PopulateDesktopStubTrayMenu(completeMenu,true,false);
     bool ownAuto=false,ownNative=false,ownStatic=false,ownTemplate=false,ownClear=false,ownCache=false;
     for(const auto& command:g_tileInstanceMenuCommands)if(command.second.id==L"feed-0"&&containsCommand(completeMenu,command.first)){

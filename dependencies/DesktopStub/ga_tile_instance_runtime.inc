@@ -62,6 +62,7 @@ struct TileInstanceProviderState {
     std::unique_ptr<ContentDiscordProvider> discord;
     std::unique_ptr<ContentDateTimeProvider> datetime;
     std::unique_ptr<ContentGoogleCalendarProvider> googleCalendar;
+    std::unique_ptr<ContentGmailProvider> gmail;
     std::unique_ptr<ContentKuroProvider> kuro;
     std::uint64_t lastKuroDiagnosticSequence=0;
     std::wstring backgroundKey, backgroundPath;
@@ -75,10 +76,12 @@ struct TileInstanceProviderState {
         if (kuro) kuro->Cancel();
         if (datetime) datetime->Cancel();
         if (googleCalendar) googleCalendar->Cancel();
+        if (gmail) gmail->Cancel();
         if (rss) rss->Stop(); if (prayer) prayer->Stop(); if (notes) notes->Stop(); if (discord) discord->Stop();
         if (kuro) kuro->Stop();
         if (datetime) datetime->Stop();
         if (googleCalendar) googleCalendar->Stop();
+        if (gmail) gmail->Stop();
     }
 };
 static void NotifyTileSourceTransition(const aip::content::TileInstance& tile,TileInstanceProviderState& state,
@@ -201,7 +204,7 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         RemovePrayerCurrentStatus(tile.id);
         NotifyTileSourceTransition(tile,state,aip::notifications::SourceState::Failed);
         state.Stop();
-        state.rss.reset(); state.prayer.reset(); state.notes.reset(); state.discord.reset(); state.kuro.reset();state.datetime.reset();state.googleCalendar.reset();
+        state.rss.reset(); state.prayer.reset(); state.notes.reset(); state.discord.reset(); state.kuro.reset();state.datetime.reset();state.googleCalendar.reset();state.gmail.reset();
         Entry background; background.background = L"Transparent";
         frame.backgroundId = BackgroundId::Transparent;
         frame.capturedWallpaperFit = static_cast<int>(FitMode::Fill);
@@ -226,6 +229,27 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
     if(publishTile)frame.backgroundPath = state.backgroundPath;
     if (frame.backgroundId == BackgroundId::SmtcArtwork) frame.backgroundLease = media.artwork;
     switch (tile.type) {
+    case TileInstanceType::Mail: {
+        frame.mailSource=true;frame.mailBadgeEnabled=tile.mail.badgeEnabled;
+        if(!state.gmail)state.gmail=std::make_unique<ContentGmailProvider>();
+        const auto cfg=GmailConfigurationForTile(tile);
+        state.gmail->Refresh(cfg,synchronous,state.forceRefresh);bool completed=false;
+        const auto view=state.gmail->Read(cfg,&completed);
+        NotifyTileSourceTransition(tile,state,!view.configured?aip::notifications::SourceState::Unconfigured:view.pending?
+            aip::notifications::SourceState::Pending:view.ok&&!view.stale?aip::notifications::SourceState::Healthy:aip::notifications::SourceState::Failed);
+        frame.sourceDiagnostic=view.status;frame.mailboxAddress=view.mailboxAddress;
+        frame.mailUnreadCount=view.ok?view.unreadMessages:0;
+        for(const auto& message:view.messages){
+            const auto display=aip::gmail::DisplayMessage(message,cfg,
+                IniReadS(L"Strings",L"MailUnknownSender",L"Unknown sender"),IniReadS(L"Strings",L"MailNoSubject",L"(No subject)"));
+            frame.mailRows.push_back({display.first,display.second,L""});
+        }
+        // Setup/status belongs in the settings window. An empty mailbox uses
+        // the normal static icon; private account data never enters launch args.
+        frame.text=frame.mailRows.empty()?Text{}:frame.mailRows.front();
+        if(frame.mailRows.empty())frame.textMode=TextMode::Off;
+        break;
+    }
     case TileInstanceType::Wallpaper:
         frame.text = entry.custom;
         break;
@@ -336,6 +360,7 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         break;
     }
     case TileInstanceType::Wuwa: {
+        frame.gameSource=true;
         if(!state.kuro)state.kuro=std::make_unique<ContentKuroProvider>();
         state.kuro->Refresh(tile.kuro,synchronous,state.forceRefresh);bool completed=false;
         const auto notes=state.kuro->Read(tile.kuro,&completed);
@@ -349,10 +374,11 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
             Log(L"Wuthering Waves refresh: %ls",notes.diagnostic.c_str());
         }
         frame.text={notes.line1,notes.line2,L""};frame.wrapSourceText=true;
-        for(const auto& row:notes.rows)frame.detailRows.push_back({row.label,row.value,L""});
+        for(const auto& row:notes.rows){Text text{row.label,row.value,L""};text.iconTopic=row.iconTopic;frame.detailRows.push_back(std::move(text));}
         break;
     }
     case TileInstanceType::Genshin: case TileInstanceType::Hsr: case TileInstanceType::Zzz: {
+        frame.gameSource=true;
         if (!state.notes) state.notes = std::make_unique<ContentNotesProvider>();
         const auto resource = DescribeTileInstanceType(tile.type).notesResource;
         if (state.forceRefresh) state.notes->refreshRequested.fetch_or(1u << resource);
@@ -379,6 +405,9 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
     case TileInstanceType::QuickAction:
         frame.textMode = TextMode::Off;
         break;
+    case TileInstanceType::AppLauncher:
+        frame.appLauncherSource=true;frame.launcher=tile.launcher;frame.textMode=TextMode::Off;
+        break;
     case TileInstanceType::Gallery:
         frame.text = {L"Photo gallery", L"Choose a folder and gallery tiles in Photo galleries.", L""};
         break;
@@ -400,8 +429,27 @@ static std::vector<aip::content::Snapshot> BuildCalendarTileFrames(aip::content:
         frame.calendarAgendaHeader=frame.calendarEvents.front().dateLabel;
         if(!frame.calendarEvents.front().isToday)frame.calendarAgendaEmpty=IniReadS(L"Strings",L"CalendarNoOtherEvents",L"No other events");
         const auto day=frame.calendarEvents.front().dateLabel;
-        frame.calendarEvents.erase(std::remove_if(frame.calendarEvents.begin(),frame.calendarEvents.end(),[&](const CalendarEvent& event){return event.dateLabel!=day;}),frame.calendarEvents.end());
+        const auto dayKey=frame.calendarEvents.front().dayKey;
+        frame.calendarEvents.erase(std::remove_if(frame.calendarEvents.begin(),frame.calendarEvents.end(),[&](const CalendarEvent& event){return dayKey.empty()?event.dateLabel!=day:event.dayKey!=dayKey;}),frame.calendarEvents.end());
         frame.secondaryFrameKey=ContentSnapshotKey(frame);frame.nativeQueueFrameKey=frame.secondaryFrameKey;frames.push_back(std::move(frame));}
+    return frames;
+}
+static std::vector<aip::content::Snapshot> BuildMailTileFrames(aip::content::Snapshot frame,bool nativeDelivery)
+{
+    if(!frame.mailSource||!nativeDelivery||frame.secondaryTileId.empty())return {std::move(frame)};
+    if(frame.mailRows.empty()||frame.textMode!=aip::content::TextMode::Auto){
+        frame.nativeQueue=false;frame.nativeQueueTag.clear();frame.nativeQueueReset=true;
+        frame.secondaryFrameKey=ContentSnapshotKey(frame);return {std::move(frame)};
+    }
+    const auto count=(std::min)(frame.mailRows.size(),std::size_t(5));
+    const auto layout=L"MailNative1:"+aip::notifications::StableId(ContentSnapshotKey(frame));
+    std::vector<aip::content::Snapshot> frames;
+    for(std::size_t i=0;i<count;++i){
+        auto message=frame;message.nativeQueue=true;message.nativeQueueTag=L"mail"+std::to_wstring(i+1);
+        message.nativeQueueReset=i==0;message.mailMessageIndex=i;message.mailIncludeLarge=i+1==count;
+        message.nativeQueueLayout=layout;message.secondaryFrameKey=ContentSnapshotKey(message);
+        message.nativeQueueFrameKey=message.secondaryFrameKey;frames.push_back(std::move(message));
+    }
     return frames;
 }
 static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
@@ -439,7 +487,7 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     bool smtcNeeded = false, artworkNeeded = false, appIconNeeded = false, nativeMediaNeeded = false;
     int smtcSeconds = 86400;
     for (const auto& tile : cfg.tiles) if (demanded(tile)||alertsDemanded(tile)) {
-        if (tile.type == TileInstanceType::QuickAction && tile.error.empty()) {
+        if ((tile.type == TileInstanceType::QuickAction||tile.type==TileInstanceType::AppLauncher) && tile.error.empty()) {
             TilePolicyReadScope scope(tile.policy);
             if (!TilePolicyUsesRegistration(tile.policy)) continue;
         }
@@ -475,7 +523,7 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     for (const auto& tile : cfg.tiles) if (demanded(tile)||alertsDemanded(tile)) {
         // Quick Actions are static native topic logos. They need metadata and
         // activation only; sending a transparent notification would hide them.
-        if (tile.type == TileInstanceType::QuickAction && tile.error.empty()) {
+        if ((tile.type == TileInstanceType::QuickAction||tile.type==TileInstanceType::AppLauncher) && tile.error.empty()) {
             TilePolicyReadScope scope(tile.policy);
             if (!TilePolicyUsesRegistration(tile.policy)) continue;
         }
@@ -487,15 +535,17 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
         const bool publishTile=demanded(tile);
         auto frame = ComposeTileInstance(tile, *state, media, synchronous,publishTile);
         if(!publishTile)continue;
+        frame.deliveryDiagnostic=ObserveLiveTilePermission(frame);
         if (tile.primary) primary = frame;
         if (IsUsableWallpaperPath(frame.backgroundPath)) {
             TilePolicyReadScope scope(frame.policy);
             const bool calendarNative=frame.calendarSource&&!TileSnapshotUsesRegistration(frame)&&ContentDirectLiveDeliveryAvailable()&&LiveTileUsesAdaptiveXml();
-            auto prepared=BuildCalendarTileFrames(std::move(frame),calendarNative);
+            const bool mailNative=frame.mailSource&&!TileSnapshotUsesRegistration(frame)&&ContentDirectLiveDeliveryAvailable()&&LiveTileUsesAdaptiveXml();
+            auto prepared=mailNative?BuildMailTileFrames(std::move(frame),true):BuildCalendarTileFrames(std::move(frame),calendarNative);
             frames.insert(frames.end(),std::make_move_iterator(prepared.begin()),std::make_move_iterator(prepared.end()));
         }
     }
-    for (auto gallery : ContentGalleryFrames()) if (IsUsableWallpaperPath(gallery.backgroundPath)) frames.push_back(std::move(gallery));
+    for (auto gallery : ContentGalleryFrames()) if (IsUsableWallpaperPath(gallery.backgroundPath)){gallery.deliveryDiagnostic=ObserveLiveTilePermission(gallery);frames.push_back(std::move(gallery));}
     PublishContentSnapshot(primary);
     static bool primarySeen = false;
     static Snapshot cleared;
@@ -515,6 +565,8 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
         clearUsable = IsUsableWallpaperPath(cleared.backgroundPath);
     }
     if (clearUsable) frames.push_back(cleared);
+    std::set<std::wstring> permissionOwners;for(const auto& frame:frames)permissionOwners.insert(frame.secondaryTileId);
+    PruneLiveTilePermissions(permissionOwners);
     PublishSecondarySnapshots(frames);
     if (primary.active && !primarySeen && g_hwnd && !g_contentFrameReadyPosted.exchange(true)) {
         if (!PostMessageW(g_hwnd, WM_APP_CONTENT_FRAME_READY, 0, 0)) g_contentFrameReadyPosted = false;

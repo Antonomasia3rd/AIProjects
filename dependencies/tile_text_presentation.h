@@ -8,12 +8,13 @@ namespace aip { namespace content {
 inline constexpr const wchar_t* TextPresentationStyles[] = {L"caption",L"captionSubtle",L"body",L"bodySubtle",L"base",L"baseSubtle",
     L"subtitle",L"subtitleSubtle",L"title",L"titleSubtle",L"titleNumeral",L"subheader",L"subheaderSubtle",L"subheaderNumeral",L"header",L"headerSubtle",L"headerNumeral"};
 inline constexpr const wchar_t* TextPresentationKeys[] = {L"TextPreset",L"TextStyle",L"TextSecondaryStyle",L"TextBadgeStyle",L"TextWrap",
-    L"TextMaxLines",L"TextSecondaryMaxLines",L"TextBadgeMaxLines",L"TextAlign",L"TextStacking",L"TextGapLines"};
+    L"TextMaxLines",L"TextSecondaryMaxLines",L"TextBadgeMaxLines",L"TextAlign",L"TextStacking",L"TextGapLines",L"TextIconPlacement",L"TextIconScalePercent",L"TextRowSpacing"};
 struct TextPresentation {
     std::wstring preset = L"Default", primaryStyle = L"caption", secondaryStyle = L"captionSubtle", badgeStyle = L"captionSubtle";
     bool wrap = true;
     int primaryLines = 2, secondaryLines = 2, badgeLines = 2, gapLines = 0;
     std::wstring align = L"left", stacking = L"top";
+    std::wstring iconPlacement=L"Right";int iconScalePercent=100,rowSpacing=6;
     bool Active() const { return preset != L"Default"; }
 };
 inline std::wstring TextPresentationLower(std::wstring value) {
@@ -26,6 +27,7 @@ inline bool IsTextPresentationKey(const std::wstring& key) {
     for (const auto* known : TextPresentationKeys) if (TextPresentationLower(key) == TextPresentationLower(known)) return true;
     return false;
 }
+inline bool IsGameTextLayoutKey(const std::wstring& key){const auto k=TextPresentationLower(key);return k==L"texticonplacement"||k==L"texticonscalepercent"||k==L"textrowspacing";}
 inline bool NormalizeTextPresentationSetting(const std::wstring& key, std::wstring& value, std::wstring& error, bool inherit = false) {
     const auto k = TextPresentationLower(key), v = TextPresentationLower(value);
     error = key + L": invalid text presentation value.";
@@ -37,6 +39,12 @@ inline bool NormalizeTextPresentationSetting(const std::wstring& key, std::wstri
         if (v == L"true" || v == L"yes" || v == L"on" || v == L"1") value = L"1";
         else if (v == L"false" || v == L"no" || v == L"off" || v == L"0") value = L"0"; else return false;
         error.clear(); return true;
+    } else if(k==L"texticonplacement"){
+        for(const auto* choice:{L"Right",L"Left",L"None"})if(v==TextPresentationLower(choice)){value=choice;error.clear();return true;}
+    } else if(k==L"texticonscalepercent"||k==L"textrowspacing"){
+        if(v.empty()||v.size()>3||!std::all_of(v.begin(),v.end(),[](wchar_t c){return c>=L'0'&&c<=L'9';}))return false;
+        int number=0;for(const auto c:v)number=number*10+c-L'0';const int minimum=k==L"textrowspacing"?0:25,maximum=k==L"textrowspacing"?24:200;
+        if(number<minimum||number>maximum)return false;value=std::to_wstring(number);error.clear();return true;
     } else if (k == L"textalign" || k == L"textstacking") {
         const std::vector<std::wstring> choices = k == L"textalign" ? std::vector<std::wstring>{L"left",L"center",L"right"} : std::vector<std::wstring>{L"top",L"center",L"bottom"};
         if (std::find(choices.begin(), choices.end(), v) != choices.end()) { value = v; error.clear(); return true; }
@@ -65,11 +73,15 @@ template<class Reader> bool ReadTextPresentation(Reader read, const std::wstring
     if (!get(L"TextSecondaryMaxLines", std::to_wstring(value.secondaryLines), parsed)) return false; value.secondaryLines = parsed[0] - L'0';
     if (!get(L"TextBadgeMaxLines", std::to_wstring(value.badgeLines), parsed)) return false; value.badgeLines = parsed[0] - L'0';
     if (!get(L"TextGapLines", std::to_wstring(value.gapLines), parsed)) return false; value.gapLines = parsed[0] - L'0';
+    if(!get(L"TextIconPlacement",value.iconPlacement,value.iconPlacement))return false;
+    if(!get(L"TextIconScalePercent",std::to_wstring(value.iconScalePercent),parsed))return false;value.iconScalePercent=std::stoi(parsed);
+    if(!get(L"TextRowSpacing",std::to_wstring(value.rowSpacing),parsed))return false;value.rowSpacing=std::stoi(parsed);
     output = std::move(value); error.clear(); return true;
 }
 inline std::wstring TextPresentationKey(const TextPresentation& p) {
     return p.preset+L":"+p.primaryStyle+L":"+p.secondaryStyle+L":"+p.badgeStyle+L":"+std::to_wstring(p.wrap)+L":"+
-        std::to_wstring(p.primaryLines)+L":"+std::to_wstring(p.secondaryLines)+L":"+std::to_wstring(p.badgeLines)+L":"+p.align+L":"+p.stacking+L":"+std::to_wstring(p.gapLines);
+        std::to_wstring(p.primaryLines)+L":"+std::to_wstring(p.secondaryLines)+L":"+std::to_wstring(p.badgeLines)+L":"+p.align+L":"+p.stacking+L":"+std::to_wstring(p.gapLines)+
+        L":"+p.iconPlacement+L":"+std::to_wstring(p.iconScalePercent)+L":"+std::to_wstring(p.rowSpacing);
 }
 inline int TextStylePixels(const std::wstring& style) {
     if (style.compare(0,9,L"subheader") == 0) return 34;

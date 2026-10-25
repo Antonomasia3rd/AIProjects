@@ -16,6 +16,9 @@ struct FakeState {
     bool queued = false;
     int loads = 0, factories = 0, updaterFactories = 0, clears = 0, updates = 0;
     bool rejectXml = false, rejectNotification = false, rejectTag = false;
+    bool rejectUpdate=false,rejectBadge=false;
+    int badgeCalls=0,badgeCount=-1;
+    std::wstring badgeTarget;
     std::wstring updaterTarget;
     std::vector<std::string> events;
     std::vector<FakeNotification> notifications;
@@ -26,6 +29,7 @@ struct FakeUpdater {
     void Clear() { ++state.clears; state.notifications.clear(); state.events.push_back("clear"); }
     void Update(const FakeNotification& notification) {
         ++state.updates; state.events.push_back("update");
+        if(state.rejectUpdate)throw std::runtime_error("fake tile update rejected");
         if (!state.queued) state.notifications.clear();
         else state.notifications.erase(std::remove_if(state.notifications.begin(), state.notifications.end(),
             [&](const auto& old) { return old.tag == notification.tag; }), state.notifications.end());
@@ -33,7 +37,7 @@ struct FakeUpdater {
         if (state.notifications.size() > 5) state.notifications.erase(state.notifications.begin());
     }
 };
-static bool Deliver(const std::wstring& transport, FakeState& state, std::wstring& error) {
+static bool Deliver(const std::wstring& transport, FakeState& state, std::wstring& error,std::wstring* badgeError=nullptr) {
     return notification::Deliver(transport,
         [&](const std::wstring& xml) {
             ++state.loads; state.events.push_back("load");
@@ -50,7 +54,9 @@ static bool Deliver(const std::wstring& transport, FakeState& state, std::wstrin
             if (state.rejectTag) throw std::runtime_error("fake tag rejected");
             value.tag = tag;
         },
-        [&](const std::wstring& target) { ++state.updaterFactories; state.updaterTarget = target; state.events.push_back("updater"); return FakeUpdater{state}; }, error);
+        [&](const std::wstring& target) { ++state.updaterFactories; state.updaterTarget = target; state.events.push_back("updater"); return FakeUpdater{state}; }, error,
+        [&](const std::wstring& target,int count){++state.badgeCalls;state.badgeTarget=target;state.badgeCount=count;state.events.push_back("badge");
+            if(state.rejectBadge)throw std::runtime_error("fake badge rejected");},badgeError);
 }
 static std::wstring Encode(const std::wstring& xml, bool queued, const std::wstring& tag, bool reset) {
     std::wstring transport, error;
@@ -198,9 +204,53 @@ static void TestSecondaryTargets() {
         Check(!notification::Encode(xml,{false,{},false,invalid},transport,error) && transport.empty() && !error.empty(),
             "independent tile hyphen support retains target punctuation, control, first-character and length rejection");
 }
+static void TestNumericBadges(){
+    const std::wstring xml=L"<tile><visual/></tile>";std::wstring transport,error;notification::Payload payload;
+    for(const auto* target:{L"",L"AipSource_mail-fixture"})for(const int count:{0,1,99,100,(std::numeric_limits<int>::max)()}){
+        notification::Options options{true,L"Mail1",true,target};options.badgeCount=count;
+        Check(notification::Encode(xml,options,transport,error)&&transport.find(notification::BadgeMarker)==0&&
+            notification::Decode(transport,payload,error)&&payload.xml==xml&&payload.options.badgeCount==count&&payload.options.secondaryTileId==target,
+            "version-three transport preserves app/secondary badge count and independent tile XML");
+        FakeState state;std::wstring badgeError;
+        Check(Deliver(transport,state,error,&badgeError)&&error.empty()&&badgeError.empty()&&state.badgeCalls==1&&state.badgeCount==count&&state.badgeTarget==target,
+            "numeric badge uses the same chosen tile target only after successful delivery");
+        Check(state.events==std::vector<std::string>{"load","notification","tag","updater","queue=1","clear","update","badge"},
+            "tile preparation reset and update precede every badge side effect");
+    }
+    notification::Options plain;plain.badgeCount=0;
+    Check(notification::Encode(xml,plain,transport,error)&&notification::Decode(transport,payload,error)&&payload.options.secondaryTileId.empty()&&payload.options.badgeCount==0,
+        "version-three application target can be empty and unqueued when clearing a badge");
+    const auto prefix=std::wstring(notification::BadgeMarker);
+    for(const auto& number:std::vector<std::wstring>{L"",L"-1",L"-0",L"+1",L" 1",L"1 ",L"1.0",L"1x",L"01",L"00",L"2147483648",L"999999999999999999"}){
+        const auto invalid=prefix+L"1\t1\tMail1\tAipSource_mail\t"+number+L"\r\n"+xml;FakeState state;
+        Check(!notification::Decode(invalid,payload,error)&&payload.options.badgeCount==-1&&!error.empty(),"malformed badge count cannot retain a previous decoded badge");
+        Check(!Deliver(invalid,state,error)&&state.events.empty()&&state.badgeCalls==0,"malformed badge header cannot load clear update or badge any tile");
+    }
+    for(const auto& invalid:std::vector<std::wstring>{prefix+L"1\t1\tMail1\tAipSource_mail\r\n"+xml,
+        prefix+L"1\t1\tMail1\tbad/target\t1\r\n"+xml,prefix+L"1\t1\tMail1\tAipSource_mail\t1\textra\r\n"+xml}){
+        FakeState state;Check(!Deliver(invalid,state,error)&&state.events.empty(),"badge header retains strict target and field-count rejection");}
+    notification::Options maximum{true,L"1234567890ABCDEF",true,std::wstring(64,L'a')};maximum.badgeCount=(std::numeric_limits<int>::max)();
+    Check(notification::Encode(xml,maximum,transport,error)&&notification::Decode(transport,payload,error)&&transport.find(L"\r\n")<=notification::MaximumHeaderCharacters,
+        "maximum tag target and numeric badge still fit the bounded private header");
+    notification::Options invalid;invalid.badgeCount=-2;Check(!notification::Encode(xml,invalid,transport,error)&&transport.empty(),"invalid negative badge state is rejected before transport creation");
+    notification::Options badge{true,L"Mail1",true,L"AipSource_mail"};badge.badgeCount=7;Check(notification::Encode(xml,badge,transport,error),"encode badge delivery fixture");
+    FakeState rejectedBadge;rejectedBadge.rejectBadge=true;std::wstring badgeError;
+    Check(Deliver(transport,rejectedBadge,error,&badgeError)&&error.empty()&&!badgeError.empty()&&rejectedBadge.updates==1&&rejectedBadge.clears==1&&rejectedBadge.badgeCalls==1,
+        "failed badge reports separately and cannot convert successful tile delivery into a queue reset retry");
+    FakeState rejectedTile;rejectedTile.rejectUpdate=true;bool threw=false;
+    try{Deliver(transport,rejectedTile,error,&badgeError);}catch(const std::runtime_error&){threw=true;}
+    Check(threw&&rejectedTile.badgeCalls==0,"failed tile delivery never publishes its otherwise valid badge");
+    int calls=0;
+    Check(!notification::Deliver(transport,[&](const auto& text){++calls;return text;},[&](const auto& text){++calls;return FakeNotification{text,{}};},
+        [&](auto&,const auto&){++calls;},[&](const std::wstring&){++calls;return FakeUpdater{rejectedTile};},error)&&calls==0,
+        "a badge-unaware consumer rejects version-three badge requests before any tile side effect");
+    for(const auto& old:std::vector<std::wstring>{xml,Encode(xml,true,L"Legacy",true)}){FakeState state;Check(Deliver(old,state,error)&&state.badgeCalls==0,"legacy/raw payloads never create a badge side effect");}
+    Check(notification::BadgeXml(0)==L"<badge value=\"0\"/>"&&notification::BadgeXml(100)==L"<badge value=\"100\"/>"&&notification::BadgeXml(-1).empty(),
+        "numeric badge XML contains only the validated number and leaves display caps to Windows");
+}
 int main() {
     try {
-        TestLegacyAndRoundTrips(); TestMalformed(); TestXmlBoundsAndUnicode(); TestDeliveryAndReset(); TestSecondaryTargets();
+        TestLegacyAndRoundTrips(); TestMalformed(); TestXmlBoundsAndUnicode(); TestDeliveryAndReset(); TestSecondaryTargets();TestNumericBadges();
         std::cout << "Tile notification payload: " << checks << " checks passed; no Windows APIs invoked\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }

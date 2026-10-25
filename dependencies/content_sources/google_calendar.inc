@@ -41,6 +41,7 @@ inline Cancel Deadline(const Cancel& cancel,unsigned milliseconds=45000,const st
 inline bool SafeToken(const std::wstring& token){return !token.empty()&&token.size()<=16384&&
     std::none_of(token.begin(),token.end(),[](wchar_t c){return c<=0x20||c==0x7f;});}
 inline bool Configured(const Configuration& c,std::wstring& error,bool token=false) {
+    if(c.oauthPurpose!=OAuthPurpose::Calendar&&c.oauthPurpose!=OAuthPurpose::GmailMetadata&&c.oauthPurpose!=OAuthPurpose::GmailReadOnly){error=L"Unsupported Google authorization purpose.";return false;}
     for(const auto& pair:std::vector<std::pair<std::wstring,std::wstring>>{{L"ClientId",c.clientId},{L"ClientSecret",c.clientSecret},
         {L"RefreshTokenProtected",c.refreshTokenProtected},{L"CalendarId",c.calendarId}}){auto key=pair.first,value=pair.second;if(!NormalizeSetting(key,value,error))return false;}
     if(c.clientId.empty()){error=L"Set the OAuth client ID from your Google Cloud Desktop app before connecting.";return false;}
@@ -79,7 +80,7 @@ inline bool NewPkce(std::wstring& verifier,std::wstring& challenge,std::wstring&
 }
 inline std::wstring AuthorizationUrl(const Configuration& c,const std::wstring& redirect,const std::wstring& challenge,const std::wstring& state) {
     return L"https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id="+Query(c.clientId)+L"&redirect_uri="+Query(redirect)+
-        L"&scope="+Query(L"https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/calendar.calendarlist.readonly")+
+        L"&scope="+Query(OAuthScopes(c.oauthPurpose))+
         L"&code_challenge_method=S256&code_challenge="+Query(challenge)+L"&state="+Query(state)+L"&access_type=offline&prompt=consent";
 }
 // Parse only our exact callback path, rejecting duplicate query keys and any
@@ -190,7 +191,11 @@ inline bool Request(const Configuration& c,const Hooks& hooks,const Cancel& canc
         response.statusCode==429?L"Google Calendar rate limit reached. DesktopStub will retry at the configured refresh interval.":L"Google Calendar request failed. Reconnect if the account grant is no longer valid.";return false;}
     json.assign(response.body.begin(),response.body.end());if(!response.body.empty())SecureZeroMemory(response.body.data(),response.body.size());return true;
 }
-inline std::wstring Envelope(const Configuration& c){return L"DesktopStub.GoogleCalendar.v1\n"+c.ownerKey+L"\n"+c.clientId+L"\n";}
+inline std::wstring Envelope(const Configuration& c){
+    const auto prefix=c.oauthPurpose==OAuthPurpose::Calendar?L"DesktopStub.GoogleCalendar.v1\n":
+        c.oauthPurpose==OAuthPurpose::GmailMetadata?L"DesktopStub.Gmail.Metadata.v1\n":L"DesktopStub.Gmail.ReadOnly.v1\n";
+    return prefix+c.ownerKey+L"\n"+c.clientId+L"\n";
+}
 inline bool Protect(const Configuration& c,const std::wstring& token,const Hooks& hooks,std::wstring& protectedValue,std::wstring& error) {
     if(!SafeToken(token)){error=L"Google returned an invalid refresh credential.";return false;}
     Sensitive envelope;envelope.value=Envelope(c)+token;
@@ -213,7 +218,15 @@ inline bool Token(const Configuration& c,const Hooks& hooks,const Cancel& cancel
     std::wstring type;if(!valid||!String(object,"token_type",type,64)||aip::datetime::Lower(type)!=L"bearer"){error=L"Google returned an invalid access credential.";return false;}
     if(refresh&&(!String(object,"refresh_token",refresh->value,16384,true)||(!refresh->value.empty()&&!SafeToken(refresh->value)))){error=L"Google returned an invalid refresh credential.";return false;}
     std::wstring scopes;if(!String(object,"scope",scopes,8192,true)){error=L"Google returned an invalid permission list.";return false;}
-    if(!scopes.empty()){
+    if(c.oauthPurpose!=OAuthPurpose::Calendar){
+        if(refresh&&scopes.empty()){error=L"Google did not confirm the requested Gmail read permission.";return false;}
+        if(!scopes.empty()){
+            const auto grants=L" "+scopes+L" ";
+            const bool readOnly=grants.find(L" https://www.googleapis.com/auth/gmail.readonly ")!=std::wstring::npos||grants.find(L" https://mail.google.com/ ")!=std::wstring::npos;
+            const bool metadata=grants.find(L" https://www.googleapis.com/auth/gmail.metadata ")!=std::wstring::npos;
+            if(!readOnly&&!(c.oauthPurpose==OAuthPurpose::GmailMetadata&&metadata)){error=L"Google did not grant this Mail tile's requested read permission. Connect the Mail tile again.";return false;}
+        }
+    }else if(!scopes.empty()){
         const auto grants=L" "+scopes+L" ";const bool broad=grants.find(L" https://www.googleapis.com/auth/calendar.readonly ")!=std::wstring::npos||
             grants.find(L" https://www.googleapis.com/auth/calendar ")!=std::wstring::npos;
         if(!broad&&(grants.find(L" https://www.googleapis.com/auth/calendar.events.readonly ")==std::wstring::npos||

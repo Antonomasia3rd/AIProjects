@@ -67,6 +67,7 @@ enum {
     ID_NOTIFY_FAILURE,
     ID_NOTIFY_BUSY,
     ID_NOTIFY_ALREADY_RUNNING,
+    ID_ALREADY_RUNNING_PROFILE_PROMPT,
     ID_NOTIFY_SINGLE_INSTANCE_FAILURE,
     ID_SHOW_PSLOG,
     ID_LISTEN_WP,
@@ -498,6 +499,7 @@ static void ChoosePowerShellExe(HWND owner)
 static bool EnsureTrayIcon(DWORD* err = nullptr)
 {
     if (err) *err = ERROR_SUCCESS;
+    if (ProfileManagerSuppressTray()) return true;
 
     std::lock_guard<std::mutex> lk(g_trayMutex);
     if (g_nid.hWnd)

@@ -19,6 +19,19 @@ are in each tile's direct **Notifications for this tile** menu; technical source
 controls are under **Source settings > Advanced**. See the
 [account and notification setup guide](../docs/calendar-accounts-prayer-notifications-2026-10-24.md).
 
+**Application > Profiles...** manages independent residents with separate INIs,
+accounts, persistent package identities and runtime folders. Separate tray icons
+are the default; fresh profiles include their name in the tooltip. Startup of
+selected profiles, unified tray presentation and crash notices are opt-in.
+Use `--profile-manager` or `--profile-list` for the corresponding command-line
+entry points. See the [profile architecture and CLI guide](../docs/desktopstub-profile-architecture-2026-10-25.md).
+
+**Add tile > Mail** supports Gmail / Google Workspace through a separate Google
+consent. Headers are the default; snippets require read-only Gmail permission.
+**Add tile > App launcher** creates app, document, folder and URL shortcuts with
+custom artwork in Small, Medium, Wide and Large sizes. The [October 25 update](../docs/desktopstub-profiles-mail-ux-2026-10-25.md)
+records setup, settings/layout changes, validation and remaining acceptance work.
+
 ## Fresh VM quick start
 
 Live Tiles need **Windows 10's Start menu/screen**, or an already working legacy
@@ -204,7 +217,15 @@ On first launch the app creates `DesktopStub.ini` next to the executable. The tr
 
 Command-line settings are saved as one all-or-nothing batch to `DesktopStub.ini`, the same configuration file used by the tray menu. A Startup shortcut change is rolled back if the matching INI commit fails. Action-only commands such as `--once`, `--generate`, `--no-monitor`, and `--exit` affect only that invocation.
 
-Ordinary second launches are configurable through `[Settings] AlreadyRunningAction` or **Advanced > Single instance > Second-launch action**. `ShowTray` preserves the default behavior, `Generate` requests a fresh generation in the resident instance, `ShowConsole` opens its diagnostic console for the current session without changing `ShowConsole`, and `Ignore` exits the new process without signaling the resident instance. Explicit command-line requests such as `--generate`, `--exit`, or persistent `--set` changes always take precedence. This is intentionally coordinated single-instance behavior: use a separate `--ini` path for an independently running instance so concurrent copies do not write the same configuration, assets, and package registration.
+Ordinary second launches offer a fresh independent profile when
+`Settings.AlreadyRunningProfilePrompt=1` (the default). Disable that offer to use
+the legacy `Settings.AlreadyRunningAction` choice. Explicit Generate, Console
+and Ignore choices remain effective, and explicit command-line requests such as
+`--generate`, `--exit` and persistent `--set` changes take precedence. Use the
+Profile Manager or `--profile ID` for another resident with its own package
+files. An explicit owned `--ini` remains supported; normal residents are routed
+to that profile's isolated runtime. Offline `--configure-only` and `--render-only`
+retain their explicit-file behavior and do not launch residents or set up packages.
 
 Live wallpaper capture is configurable from the tray menu, from command-line flags, or from `DesktopStub.ini`:
 

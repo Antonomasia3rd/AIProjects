@@ -20,6 +20,7 @@ struct CommandLineOptions
     bool helpRequested = false;
     bool setupDesktop = false;
     bool settingsWindow = false;
+    bool profileManager = false;
     std::wstring tileSetupKey;
     std::wstring windowsTileId, mediaAction;
     bool tileSignIn = false;
@@ -96,6 +97,8 @@ static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SHOW_CONSOLE = 6;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_NOTES_REFRESH_BASE = 7;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SETUP_DESKTOP = 11;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_SETTINGS_WINDOW = 12;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_PROFILE_MANAGER = 13;
+static constexpr WPARAM SINGLE_INSTANCE_REQUEST_FRESH_PROFILE = 14;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MASK = 0x00FF;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_TILE_SETUP_BASE = 32;
 static constexpr WPARAM SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE = 64;
@@ -536,6 +539,7 @@ static constexpr DesktopStubDisplaySetting g_displaySettings[] = {
     {L"Settings", L"GenerateOnStartupOnlyWhenChanged", L"1", DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"ShowMenuAsDropdown", L"1", DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"NotificationsEnabled", L"1", DesktopStubDisplaySettingType::Boolean},
+    {L"Settings",L"AlreadyRunningProfilePrompt",L"1",DesktopStubDisplaySettingType::Boolean},
     {L"Settings", L"NotificationApi", L"Auto", DesktopStubDisplaySettingType::NotificationApi},
     {L"Settings", L"NotificationProgressIntervalMs", L"750", DesktopStubDisplaySettingType::NotificationInterval},
     {L"Settings", L"NotifyOnOperations", L"1", DesktopStubDisplaySettingType::Boolean},
@@ -801,12 +805,16 @@ static bool RssFeedIntegerRange(
 }
 
 #include "../tile_instances.h"
+#include "../properties_ui_model.h"
+#include "../desktopstub_profiles.h"
 static bool NormalizeDesktopStubTypedSetting(
     const std::wstring& section,
     const std::wstring& key,
     std::wstring& value,
     std::wstring& error)
 {
+    if(IEquals(section,L"Properties"))return aip::properties::NormalizeSetting(key,value,error);
+    if(IEquals(section,L"Profile"))return aip::profiles::NormalizeSetting(key,value,error);
     if (aip::content::IsTileInstanceSetting(section, key)) {
         if (!aip::content::NormalizeTileInstanceSetting(section, key, value, error)) return false;
         if(const auto* policy=aip::content::FindTilePolicyField(key)){
@@ -1213,6 +1221,7 @@ static bool ParseCommandLineOptions()
 
         if(IEquals(arg,L"--setup-desktop")){g_commandLine.setupDesktop=true;continue;}
         if(IEquals(arg,L"--settings")){g_commandLine.settingsWindow=true;continue;}
+        if(IEquals(arg,L"--profile-manager")){g_commandLine.profileManager=true;continue;}
         if (TryParseAppxActivationArgument(arg, value))
         {
             g_commandLine.appxActivationServer = true;
@@ -2189,6 +2198,10 @@ static std::wstring CommandLineUsageText()
         g_commandLineHelpDefaults[0].value);
     return FormatCommandLineHelpTemplate(iniTemplate.c_str()) +
         L"\nSettings window: --settings [--ini FILE] opens the native Properties window; the tray menu remains available.\n"
+        L"Profiles: --profile-manager; --profile-list; --profile-create NAME [--profile-path FILE]; --profile ID [other options].\n"
+        L"  --profile-start ID; --profile-stop ID; --profile-settings ID; --profile-default ID; --profile-autostart ID on|off.\n"
+        L"  --profiles-startup on|off; --profiles-unified-tray on|off; --profiles-crash-notifications on|off.\n"
+        L"  Each profile has its own INI, accounts, persistent package identity and generated assets; tray icons are separate by default.\n"
         L"\nDesktop setup: --setup-desktop [--ini FILE] registers the main Desktop host, then restarts with Live Tile identity. Explicit action only.\n"
         L"\nNotes: --notes-import-profile INI; --notes-import-cookie GAME=JSON; --notes-clear GAME (configuration only).\n"
         L"       --notes-refresh GAME|All (existing resident only; no new process).\n"

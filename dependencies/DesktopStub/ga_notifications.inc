@@ -45,6 +45,9 @@ static bool NotificationBalloon(const std::wstring& title, const std::wstring& m
 #elif defined(DESKTOPSTUB_INERT_HARDWARE)
     (void)title; (void)message; (void)icon; (void)force; return false;
 #else
+    // A hidden profile may need Balloon after a Toast transport failure. Give
+    // it a visible icon for this session instead of silently losing the notice.
+    if(!EnsureProfileBalloonTray())return false;
     NOTIFYICONDATAW nid{};
     {
         std::lock_guard<std::mutex> lock(g_trayMutex);

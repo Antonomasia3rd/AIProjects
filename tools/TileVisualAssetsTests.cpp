@@ -53,6 +53,8 @@ static void TestFontFallback() {
         !IsKnownSecondaryArtworkId(L"AipSource_worldclock"),
         "world-clock topic resolves for rendering without becoming a new legacy pin destination");
     aip::content::TileInstance clock;clock.type=aip::content::TileInstanceType::Clock;
+    Check(aip::content::TileInstanceArtworkTopic(clock)==L"clock","local Clock defaults to the ordinary native clock symbol");
+    clock.clock.iconStyle=L"WorldClock";
     Check(aip::content::TileInstanceArtworkTopic(clock)==L"worldclock"&&
         AssetPlan(*worldClock)[3].relative.find(L"/worldclock/Small.png")!=std::wstring::npos&&
         AssetPlan(*worldClock)[3].relative!=AssetPlan(*FindTopic(L"clock"))[3].relative,
@@ -101,6 +103,18 @@ static void TestExistingLogoRefresh() {
         Check(!IsKnownSecondaryArtworkId(id) && !NeedsTopicLogoUpdate(id, {}, {L"changed", {}, {}, {}, {}, {}}),
             "primary, foreign, aliases and render-only status IDs cannot be migrated or created");
 }
+static void TestScopedBrandingDefaults(){
+    for(const auto& choice:std::vector<std::pair<std::wstring,std::wstring>>{{L"Genshin",L"NameAndLogo"},{L"HSR",L"NameAndLogo"},{L"ZZZ",L"NameAndLogo"},{L"Wuwa",L"NameAndLogo"},{L"PrayerTimes",L"NameAndLogo"},{L"RSS",L"NameAndLogo"},{L"Clock",L"Auto"},{L"Calendar",L"Auto"}}){
+        for(const auto* explicitValue:{L"",L"Name",L"None"}){aip::content::TileInstanceConfiguration cfg;std::wstring error;
+            const auto read=[&](const wchar_t* section,const wchar_t* key,const wchar_t* fallback)->std::wstring{
+                if(std::wstring(section)==L"Tiles"){if(std::wstring(key)==L"SchemaVersion")return L"1";if(std::wstring(key)==L"Instances")return L"probe";}
+                if(std::wstring(section)==L"Tile.probe"){if(std::wstring(key)==L"Type")return choice.first;if(std::wstring(key)==L"Branding"&&*explicitValue)return explicitValue;}
+                return fallback;};
+            Check(aip::content::ReadTileInstanceConfiguration(read,cfg,error)&&cfg.tiles.size()==1,"scoped branding fixture parses a fresh independent tile");
+            Check(cfg.tiles[0].appearance.branding==(*explicitValue?std::wstring(explicitValue):choice.second),"coherent missing defaults preserve explicitly saved Name and None values");
+        }
+    }
+}
 int main() {
     try {
         using namespace aip::tile_visual;
@@ -114,9 +128,9 @@ int main() {
             Check(plan[3].width == 70 && plan[3].height == 70 && plan[3].transparent &&
                 plan[4].width == 44 && plan[4].height == 44 && plan[4].transparent &&
                 plan[5].width == 30 && plan[5].height == 30 && plan[5].transparent, "small and branding icons preserve transparent margins");
-            for (const auto& asset : plan) Check(paths.insert(asset.relative).second &&
-                asset.relative.find(L"..") == std::wstring::npos && PackageUri(asset.relative).find(L"ms-appx:///Assets/TopicTiles/v3/vector/transparent/") == 0 && asset.transparent,
-                "topic logos are isolated and use stable package-relative URIs");
+            for (size_t index=0;index<plan.size();++index){const auto& asset=plan[index];Check(paths.insert(asset.relative).second &&
+                asset.relative.find(L"..") == std::wstring::npos && PackageUri(asset.relative).find(index<4?L"ms-appx:///Assets/TopicTiles/v3/vector/transparent/":L"ms-appx:///Assets/TopicCorners/v1/vector/transparent/") == 0 && asset.transparent,
+                "body assets retain v3 while corner-only artwork has independent cache invalidation");}
         }
         Check(FindTopic(L"AipSource_smtc")->glyph == Glyph::Music && FindTopic(L"SMTC")->glyph == Glyph::Music, "source runtime ID and provider key resolve music glyph");
         Check(FindTopic(L"RssFeed")->glyph == Glyph::Feed && FindTopic(L"DiscordRPC")->glyph == Glyph::Chat, "provider aliases match topic glyphs");
@@ -135,7 +149,7 @@ int main() {
                 AssetPlan(*topic, FontStyle::Mdl2)[0].relative != AssetPlan(*topic)[0].relative,
                 "versioned font-specific paths prevent stale Windows shell artwork after style changes");
         }
-        TestFontFallback(); TestExistingLogoRefresh();
+        TestFontFallback(); TestExistingLogoRefresh();TestScopedBrandingDefaults();
         for (const auto& topic : Topics) {
             const auto transparent = AssetPlan(topic);
             const auto colored = AssetPlan(topic, FontStyle::Vector, {true, 0x123456});

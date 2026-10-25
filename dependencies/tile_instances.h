@@ -9,10 +9,12 @@
 #include "content_sources/kuro_notes_model.h"
 #include "tile_source_alerts.h"
 #include "calendar_reminders.h"
+#include "app_launcher.h"
+#include "content_sources/gmail_model.h"
 #include <set>
 
 namespace aip { namespace content {
-enum class TileInstanceType { Wallpaper, Gallery, Rss, NowPlaying, PrayerTimes, Genshin, Hsr, Zzz, Discord, QuickAction, Clock, Calendar, Wuwa };
+enum class TileInstanceType { Wallpaper, Gallery, Rss, NowPlaying, PrayerTimes, Genshin, Hsr, Zzz, Discord, QuickAction, Clock, Calendar, Wuwa, AppLauncher, Mail };
 struct TileInstanceDescriptor {
     const wchar_t* value;
     const wchar_t* name;
@@ -35,6 +37,8 @@ inline constexpr TileInstanceDescriptor TileInstanceTypes[] = {
     {L"Clock", L"Clock / world clock", TileInstanceType::Clock, L"CustomText", L"Transparent", -1},
     {L"Calendar", L"Calendar", TileInstanceType::Calendar, L"CustomText", L"Transparent", -1},
     {L"WuWa", L"Wuthering Waves", TileInstanceType::Wuwa, L"CustomText", L"Transparent", -1},
+    {L"AppLauncher",L"App launcher",TileInstanceType::AppLauncher,L"CustomText",L"Transparent",-1},
+    {L"Mail",L"Mail / Gmail",TileInstanceType::Mail,L"CustomText",L"Transparent",-1},
 };
 inline const TileInstanceDescriptor* FindTileInstanceType(const std::wstring& value) {
     const auto canonical = Lower(Trim(value));
@@ -65,6 +69,8 @@ struct TileInstance {
     aip::datetime::CalendarConfiguration calendar;
     aip::google_calendar::Configuration googleCalendar;
     aip::kuro::Configuration kuro;
+    aip::app_launcher::Configuration launcher;
+    aip::gmail::Configuration mail;
     std::wstring clickAction = L"setup", accountReference;
     std::wstring error; // Optional host diagnostic for a dormant invalid tile.
     // Additional provider fields not represented by content::Configuration.
@@ -117,6 +123,8 @@ inline bool IsTileInstanceSetting(const std::wstring& section, const std::wstrin
 }
 inline bool TileInstanceSourceSection(const TileInstance& tile, const std::wstring& section) {
     const auto s = Lower(section);
+    if(tile.type==TileInstanceType::AppLauncher)return s==L"launcher";
+    if(tile.type==TileInstanceType::Mail)return s==L"mail";
     if (s == L"alerts") return tile.type == TileInstanceType::Rss || tile.type == TileInstanceType::PrayerTimes;
     if (tile.type == TileInstanceType::Wuwa) return s == L"kuro";
     if (tile.type == TileInstanceType::Rss) return s == L"rssfeed";
@@ -203,6 +211,7 @@ inline bool NormalizeTileInstanceSetting(const std::wstring& section, const std:
         value = Trim(value);
         if (!ValidTileAccountReference(value)) return fail(L"expected an explicit Notes.<resource> or Account.<id> reference.");
     } else if (k == L"clickaction") {
+        if(Lower(Trim(value))==L"launch"){value=L"launch";error.clear();return true;}
         if (Lower(Trim(value)) == L"source") { value = L"source"; error.clear(); return true; }
         return NormalizeTileActionSetting(section, key, value, error);
     } else if (k == L"background" || k == L"branding" || k == L"backgroundcolor") {
@@ -222,6 +231,8 @@ inline bool NormalizeTileInstanceSetting(const std::wstring& section, const std:
         const auto source = Lower(sourceSection);
         if (source == L"alerts") return aip::notifications::NormalizeAlertSetting(sourceKey, value, error);
         if (source == L"calendarreminders") return aip::calendar_reminders::NormalizeSetting(sourceKey,value,error);
+        if (source == L"launcher") return aip::app_launcher::NormalizeSetting(sourceKey,value,error);
+        if (source == L"mail") return aip::gmail::NormalizeSetting(sourceKey,value,error);
         if (source == L"kuro") return aip::kuro::NormalizeSetting(sourceKey, value, error);
         if (source == L"googlecalendar") return aip::google_calendar::NormalizeSetting(sourceKey, value, error);
         if (source == L"clock" || source == L"calendar") return aip::datetime::NormalizeSetting(sourceSection, sourceKey, value, error);
@@ -279,9 +290,10 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
         if (!get(L"Type", L"", type)) return false;
         const auto* descriptor = FindTileInstanceType(type); tile.type = descriptor->type;
         if (!get(L"Name", descriptor->name, tile.name) || !get(L"Primary", L"0", primary) ||
-            !get(L"ClickAction", tile.type == TileInstanceType::NowPlaying ? L"toggle" : tile.type == TileInstanceType::Rss ? L"source" : L"setup", tile.clickAction) ||
+            !get(L"ClickAction", tile.type == TileInstanceType::AppLauncher?L"launch":tile.type == TileInstanceType::NowPlaying ? L"toggle" : tile.type == TileInstanceType::Rss||tile.type==TileInstanceType::Mail ? L"source" : L"setup", tile.clickAction) ||
             !get(L"Account", L"", tile.accountReference)) return false;
-        if (tile.clickAction == L"source" && tile.type != TileInstanceType::Rss) { error = section + L".ClickAction=source is only available for RSS tiles."; return false; }
+        if (tile.clickAction == L"source" && tile.type != TileInstanceType::Rss&&tile.type!=TileInstanceType::Mail) { error = section + L".ClickAction=source is only available for RSS and Mail tiles."; return false; }
+        if(tile.clickAction==L"launch"&&tile.type!=TileInstanceType::AppLauncher){error=section+L".ClickAction=launch is only available for App launcher tiles.";return false;}
         tile.primary = primary == L"1";
         if (tile.primary && (tile.type != TileInstanceType::Wallpaper || primarySeen)) {
             error = section + L".Primary: only one Wallpaper tile can own the primary Desktop identity."; return false;
@@ -291,8 +303,8 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
         // Date/time bindings have native size-specific branding defaults.
         // An absent preference must remain distinguishable from explicit Name.
         const auto appearanceRead=[&](const wchar_t* area,const wchar_t* key,const wchar_t* fallback){
-            const bool dateTime=tile.type==TileInstanceType::Clock||tile.type==TileInstanceType::Calendar;
-            return read(area,key,dateTime&&Lower(key)==L"branding"?L"Auto":fallback);
+            const bool native=tile.type==TileInstanceType::Clock||tile.type==TileInstanceType::Calendar||tile.type==TileInstanceType::Mail;
+            return read(area,key,Lower(key)==L"branding"?(native?L"Auto":tile.type==TileInstanceType::Gallery?L"Name":L"NameAndLogo"):fallback);
         };
         if (!ReadTileAppearance(appearanceRead, section, tile.appearance, error)) return false;
         if (!ReadTileDeliveryPolicy(read,section,tile.id,tile.policy,error)) return false;
@@ -318,6 +330,20 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
             const auto value = TileInstanceRead(tile,read,sourceSection,key,fallback);
             tile.settings[Lower(sourceSection)+L"."+Lower(key)] = value;
         };
+        if(tile.type==TileInstanceType::AppLauncher){
+            if(!aip::app_launcher::ReadConfiguration([&](const wchar_t* key,const wchar_t* fallback){
+                auto value=TileInstanceRead(tile,read,L"Launcher",key,fallback);
+                if(aip::app_launcher::NormalizeSetting(key,value,error))tile.settings[L"launcher."+Lower(key)]=value;
+                return value;
+            },tile.launcher,error)){error=section+L": "+error;return false;}
+        }
+        if(tile.type==TileInstanceType::Mail){
+            if(!aip::gmail::ReadConfiguration([&](const wchar_t* key,const wchar_t* fallback){
+                auto value=TileInstanceRead(tile,read,L"Mail",key,fallback);
+                if(aip::gmail::NormalizeSetting(key,value,error))tile.settings[L"mail."+Lower(key)]=value;
+                return value;
+            },tile.mail,error)){error=section+L": "+error;return false;}
+        }
         if(tile.type==TileInstanceType::Calendar){
             aip::calendar_reminders::Settings reminders;
             if(!aip::calendar_reminders::ReadSettings([&](const wchar_t* key,const wchar_t* fallback){

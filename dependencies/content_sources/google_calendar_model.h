@@ -5,6 +5,12 @@
 #include <functional>
 
 namespace aip { namespace google_calendar {
+enum class OAuthPurpose {Calendar,GmailMetadata,GmailReadOnly};
+inline const wchar_t* OAuthScopes(OAuthPurpose purpose){
+    return purpose==OAuthPurpose::GmailMetadata?L"https://www.googleapis.com/auth/gmail.metadata":
+        purpose==OAuthPurpose::GmailReadOnly?L"https://www.googleapis.com/auth/gmail.readonly":
+        L"https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+}
 struct Configuration {
     std::wstring clientId,clientSecret,refreshTokenProtected,calendarId=L"primary";
     // Host-supplied stable profile identity and tile ID, never a display name.
@@ -12,6 +18,7 @@ struct Configuration {
     std::wstring ownerKey;
     int refreshSeconds=300,timeoutSeconds=15,maximumBytes=2097152;
     bool allCalendars=false;
+    OAuthPurpose oauthPurpose=OAuthPurpose::Calendar; // Chosen by the provider, never an arbitrary scope/endpoint setting.
 };
 struct Credentials {std::wstring refreshTokenProtected;};
 struct CalendarChoice {std::wstring id,name,timeZone;bool primary=false;};
@@ -71,7 +78,7 @@ inline bool NormalizeGoogleCalendarSetting(std::wstring& key,std::wstring& value
 inline std::wstring ConfigurationKey(const Configuration& c) {
     // Private revision key only. Never write to diagnostics or notifications.
     return c.ownerKey+L"\n"+c.clientId+L"\n"+c.clientSecret+L"\n"+c.refreshTokenProtected+L"\n"+c.calendarId+L"\n"+
-        std::to_wstring(c.refreshSeconds)+L":"+std::to_wstring(c.timeoutSeconds)+L":"+std::to_wstring(c.maximumBytes)+L":"+std::to_wstring(c.allCalendars);
+        std::to_wstring(c.refreshSeconds)+L":"+std::to_wstring(c.timeoutSeconds)+L":"+std::to_wstring(c.maximumBytes)+L":"+std::to_wstring(c.allCalendars)+L":"+std::to_wstring(static_cast<int>(c.oauthPurpose));
 }
 inline bool ParseDate(const std::wstring& text,aip::datetime::Civil& out) {
     if(text.size()!=10||text[4]!=L'-'||text[7]!=L'-')return false;

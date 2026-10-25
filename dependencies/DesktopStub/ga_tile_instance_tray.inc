@@ -3,7 +3,7 @@
 static constexpr UINT ID_TILE_INSTANCE_FIRST = 60000, ID_TILE_INSTANCE_LAST = 63999;
 static constexpr std::size_t TileInstanceMenuPageSize = 16;
 enum class TileInstanceMenuVerb { Set, Edit, Toggle, Pin, Unpin, Inventory, Status, Overview, Refresh, Remove, Add,
-    Page, SignIn, ChooseAccount, AddGallery };
+    Page, SignIn, ChooseAccount, AddGallery, BrowseLauncherTarget, BrowseLauncherIcon };
 struct TileInstanceMenuCommand {
     TileInstanceMenuVerb verb;
     std::wstring id, key, value, prompt;
@@ -18,6 +18,7 @@ static bool DispatchTileInstanceCommand(HWND owner, UINT command);
 static bool OpenTileInstanceManager(HWND owner);
 static bool OfferTileDeliveryMigration(HWND owner,const std::wstring& tileId,const std::wstring& newMode);
 static bool OpenGoogleCalendarSetup(HWND owner,const std::wstring& tileId);
+static bool OpenGmailSetup(HWND owner,const std::wstring& tileId);
 #ifdef DESKTOPSTUB_INERT_HARDWARE
 static bool (*g_testTileDeliveryMigration)(HWND,const std::wstring&,const std::wstring&)=nullptr;
 #endif
@@ -147,7 +148,8 @@ static bool SaveTileInstanceSettingsWithRemovalConfirmation(HWND owner,const std
     }
     if (std::any_of(settings.begin(), settings.end(), [](const auto& setting) {
         const auto key = aip::content::Lower(setting.key);
-        return key == L"name" || key == L"type" || key == L"background" || key == L"branding" || key == L"backgroundcolor";
+        return key == L"name" || key == L"type" || key == L"background" || key == L"branding" || key == L"backgroundcolor" ||
+            key==L"launcher.target"||key==L"launcher.iconmode"||key==L"launcher.iconpath"||key==L"launcher.iconindex"||key==L"launcher.iconsizepercent";
     })) RequestRefreshExistingSecondaryTileLogos(g_hwnd, true);
     WakePollThread(); return true;
 }
@@ -197,7 +199,7 @@ static void AppendTileInstanceAppearance(HMENU parent, const aip::content::TileI
     AppendTileInstanceEditable(menu,tile,L"BackgroundColor",L"Background color (#RRGGBB or Auto)",L"Auto");
     std::vector<std::pair<std::wstring,std::wstring>> branding;
     for (const auto* item : aip::content::TileBrandingChoices) branding.emplace_back(item,item);
-    AppendTileInstanceChoices(menu,tile,L"Branding",L"Name and corner icon",branding,L"Name");
+    AppendTileInstanceChoices(menu,tile,L"Branding",L"Name and corner icon",branding,tile.appearance.branding.c_str());
     aip::EndTrayNestedMenu(parent,menu,TileInstanceUi(L"TileInstanceAppearance",L"Appearance"));
 }
 static void AppendTileInstanceText(HMENU parent, const aip::content::TileInstance& tile)
@@ -211,12 +213,18 @@ static void AppendTileInstanceText(HMENU parent, const aip::content::TileInstanc
     const wchar_t* styleDefaults[] = {L"caption",L"captionSubtle",L"captionSubtle"};
     std::vector<std::pair<std::wstring,std::wstring>> styles;
     for (const auto* style : aip::content::TextPresentationStyles) styles.emplace_back(style,std::wstring(style) + L" (" + std::to_wstring(aip::content::TextStylePixels(style)) + L")");
-    for (std::size_t i = 0; i < _countof(styleKeys); ++i) AppendTileInstanceChoices(menu,tile,styleKeys[i],styleLabels[i],styles,styleDefaults[i]);
+    for (std::size_t i = 0; i < _countof(styleKeys); ++i) AppendTileInstanceChoices(menu,tile,styleKeys[i],styleLabels[i],styles,
+        i==0&&!tile.presentation.Active()&&(aip::content::DescribeTileInstanceType(tile.type).notesResource>=0||tile.type==aip::content::TileInstanceType::Wuwa)?L"base":styleDefaults[i]);
     AppendTileInstanceEditable(menu,tile,L"TextWrap",L"Wrap text onto multiple lines",L"1",true);
     AppendTileInstanceEditable(menu,tile,L"TextMaxLines",L"Primary text maximum lines (1-8)",L"2");
     AppendTileInstanceEditable(menu,tile,L"TextSecondaryMaxLines",L"Secondary text maximum lines (1-8)",L"2");
     AppendTileInstanceEditable(menu,tile,L"TextBadgeMaxLines",L"Other text maximum lines (1-8)",L"2");
     AppendTileInstanceEditable(menu,tile,L"TextGapLines",L"Blank lines between text fields (0-2)",L"0");
+    if(aip::content::DescribeTileInstanceType(tile.type).notesResource>=0||tile.type==aip::content::TileInstanceType::Wuwa){
+        AppendTileInstanceChoices(menu,tile,L"TextIconPlacement",L"Row icon placement",{{L"Right",L"Right"},{L"Left",L"Left"},{L"None",L"No icons"}},L"Right");
+        AppendTileInstanceEditable(menu,tile,L"TextIconScalePercent",L"Row icon scale (%)",L"100");
+        AppendTileInstanceEditable(menu,tile,L"TextRowSpacing",L"Space between rows (pixels)",L"6");
+    }
     AppendTileInstanceChoices(menu,tile,L"TextAlign",L"Text alignment",{{L"left",L"Left"},{L"center",L"Center"},{L"right",L"Right"}},L"left");
     AppendTileInstanceChoices(menu,tile,L"TextStacking",L"Text vertical position",{{L"top",L"Top"},{L"center",L"Center"},{L"bottom",L"Bottom"}},L"top");
     std::vector<std::pair<std::wstring,std::wstring>> delivery;
@@ -237,7 +245,11 @@ static void AppendTileInstancePolicyMenu(HMENU parent,const aip::content::TileIn
                 std::wstring(field.key)!=L"Wallpaper.DecodeLowMemory"&&std::wstring(field.key)!=L"Wallpaper.DecodeMaxLongEdge")continue;
             HMENU target=menu;
             const auto key=std::wstring(field.key);
-            if(std::wstring(prefix)==L"Delivery."&&key!=L"Delivery.Mode"&&key!=L"Delivery.Template"&&key!=L"Delivery.ClearOnShutdown"&&key!=L"Delivery.ManifestTarget"){
+            const bool registration=tile.policy.Mode()==L"Registration";
+            const bool permission=key==L"Delivery.DisabledWarning"||key==L"Delivery.DisabledCheckSeconds";
+            const bool backend=std::wstring(prefix)==L"Delivery."&&!permission&&key!=L"Delivery.Mode"&&key!=L"Delivery.Template"&&key!=L"Delivery.ClearOnShutdown"&&key!=L"Delivery.ManifestTarget";
+            if((backend&&!registration)||(permission&&registration))continue;
+            if(backend){
                 if(!advanced)advanced=aip::BeginTrayNestedMenu(menu);target=advanced;
             }
             if(field.kind==TilePolicyValueKind::Choice){
@@ -375,6 +387,7 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
         AppendTileInstanceEditable(menu,tile,(std::wstring(section)+L"TimeZone").c_str(),L"Time zone (Local or Windows/IANA zone ID)",L"Local");
         AppendTileInstanceChoices(menu,tile,(std::wstring(section)+L"TimeFormat").c_str(),L"Time format",{{L"12Hour",L"12-hour (AM/PM)"},{L"24Hour",L"24-hour"},{L"System",L"Windows setting"}},clock?L"System":L"12Hour");
         if(clock){
+            AppendTileInstanceChoices(menu,tile,L"Clock.IconStyle",L"Static icon",{{L"Auto",L"Automatic (local or world clock)"},{L"Clock",L"Clock"},{L"WorldClock",L"World clock"}},L"Auto");
             AppendTileInstanceEditable(menu,tile,L"Clock.Location",L"Location label (optional)",L"");
             AppendTileInstanceEditable(menu,tile,L"Clock.ShowDate",L"Show date",L"1",true);
         }else{
@@ -382,7 +395,8 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
             if(tile.calendar.source==L"Google") {
                 AppendTileInstanceCommand(menu,TileInstanceUi(L"GoogleCalendarSetup",L"Google account and calendars..."),{TileInstanceMenuVerb::SignIn,tile.id,L"",L"",L""});
             }else AppendTileInstanceEditable(menu,tile,L"Calendar.FilePath",L"Local calendar file (.ics, optional)",L"");
-            AppendTileInstanceEditable(menu,tile,L"Calendar.DaysAhead",tile.calendar.source==L"Google"?L"Look ahead (1-31 days)":L"Look ahead (days)",L"7");
+            AppendTileInstanceChoices(menu,tile,L"Calendar.EventWindow",L"Events displayed",{{L"TodayAndTomorrow",L"Today and tomorrow"},{L"DaysAhead",L"Custom days ahead"}},L"DaysAhead");
+            if(tile.calendar.eventWindow==L"DaysAhead")AppendTileInstanceEditable(menu,tile,L"Calendar.DaysAhead",tile.calendar.source==L"Google"?L"Look ahead (1-31 days)":L"Look ahead (days)",L"7");
             AppendTileInstanceEditable(menu,tile,L"Calendar.MaxEvents",L"Upcoming events to keep (1-10)",L"3");
             AppendTileInstanceEditable(menu,tile,L"Calendar.ShowLocation",L"Show event location",L"1",true);
             HMENU advanced=aip::BeginTrayNestedMenu(menu);
@@ -434,6 +448,34 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
         AppendTileInstanceEditable(menu,tile,L"VolumeStepPercent",L"Volume step (percentage points, 1-100)",L"5");
         break;
     }
+    case TileInstanceType::AppLauncher: {
+        AppendTileInstanceCommand(menu,TileInstanceUi(L"AppLauncherBrowseTarget",L"Choose program or document..."),{TileInstanceMenuVerb::BrowseLauncherTarget,tile.id,L"",L"",L""});
+        AppendTileInstanceEditable(menu,tile,L"Launcher.Target",L"Program, document, folder or URL",L"");
+        AppendTileInstanceEditable(menu,tile,L"Launcher.Arguments",L"Program arguments",L"");
+        AppendTileInstanceEditable(menu,tile,L"Launcher.WorkingDirectory",L"Working directory (optional)",L"");
+        AppendTileInstanceChoices(menu,tile,L"Launcher.IconMode",L"Icon source",{{L"Auto",L"Use the program/file icon"},{L"Custom",L"Use a custom icon or image"},{L"None",L"No icon"}},L"Auto");
+        AppendTileInstanceCommand(menu,TileInstanceUi(L"AppLauncherBrowseIcon",L"Choose custom icon or image..."),{TileInstanceMenuVerb::BrowseLauncherIcon,tile.id,L"",L"",L""});
+        AppendTileInstanceEditable(menu,tile,L"Launcher.IconPath",L"Custom icon/image file",L"");
+        AppendTileInstanceEditable(menu,tile,L"Launcher.IconIndex",L"Icon resource index",L"0");
+        AppendTileInstanceEditable(menu,tile,L"Launcher.IconSizePercent",L"Icon size (% of shorter tile side)",L"64");
+        break;
+    }
+    case TileInstanceType::Mail: {
+        AppendTileInstanceCommand(menu,TileInstanceUi(L"GmailSetup",L"Google account for this Mail tile..."),{TileInstanceMenuVerb::SignIn,tile.id,L"",L"",L""});
+        AppendTileInstanceChoices(menu,tile,L"Mail.Preview",L"Read access",{{L"Headers",L"Sender and subject only"},{L"Snippet",L"Also read message previews (reconnect required)"}},L"Headers");
+        AppendTileInstanceEditable(menu,tile,L"Mail.UnreadOnly",L"Show only unread Inbox messages",L"1",true);
+        AppendTileInstanceEditable(menu,tile,L"Mail.BadgeEnabled",L"Show unread count badge",L"1",true);
+        AppendTileInstanceEditable(menu,tile,L"Mail.MaxMessages",L"Messages to rotate (1-5)",L"3");
+        AppendTileInstanceChoices(menu,tile,L"Mail.PrimaryField",L"Primary message text",{{L"Sender",L"Sender"},{L"Subject",L"Subject"}},L"Sender");
+        AppendTileInstanceChoices(menu,tile,L"Mail.SecondaryField",L"Secondary message text",{{L"SubjectAndSnippet",L"Subject and permitted preview"},{L"Subject",L"Subject"},{L"Snippet",L"Permitted preview only"}},L"SubjectAndSnippet");
+        HMENU advanced=aip::BeginTrayNestedMenu(menu);
+        AppendTileInstanceEditable(advanced,tile,L"Mail.RefreshSeconds",L"Fetch Inbox every (seconds)",L"120");
+        AppendTileInstanceEditable(advanced,tile,L"Mail.TimeoutSeconds",L"HTTP timeout (seconds)",L"15");
+        AppendTileInstanceEditable(advanced,tile,L"Mail.MaximumBytes",L"Aggregate response limit (bytes)",L"2097152");
+        AppendTileInstanceEditable(advanced,tile,L"Mail.ClientId",L"Google Desktop OAuth client ID",L"");
+        AppendTileInstanceEditable(advanced,tile,L"Mail.ClientSecret",L"Google Desktop OAuth client secret",L"",false,true);
+        aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"TileInstanceAdvanced",L"Advanced"));break;
+    }
     case TileInstanceType::Gallery: break; // Existing ownership-aware gallery editor is used instead.
     }
 }
@@ -468,8 +510,10 @@ static void AppendTileInstanceDetails(HMENU menu,const aip::content::TileInstanc
     if (tile.type != TileInstanceType::QuickAction) {
         std::vector<std::pair<std::wstring,std::wstring>> actions{{L"setup",L"Open this tile's settings"}};
         if (tile.type == TileInstanceType::Rss) actions.push_back({L"source",L"Open this tile's featured article"});
+        if(tile.type==TileInstanceType::Mail)actions.push_back({L"source",TileInstanceUi(L"GmailOpenInbox",L"Open the Gmail inbox")});
+        if(tile.type==TileInstanceType::AppLauncher)actions.push_back({L"launch",TileInstanceUi(L"AppLauncherOpenTarget",L"Open this tile's program or target")});
         for (const auto& action : TileActions) actions.emplace_back(action.id,action.label);
-        AppendTileInstanceChoices(menu,tile,L"ClickAction",L"Click action",actions,tile.type == TileInstanceType::NowPlaying ? L"toggle" : tile.type == TileInstanceType::Rss ? L"source" : L"setup");
+        AppendTileInstanceChoices(menu,tile,L"ClickAction",L"Click action",actions,tile.type==TileInstanceType::AppLauncher?L"launch":tile.type == TileInstanceType::NowPlaying ? L"toggle" : tile.type == TileInstanceType::Rss||tile.type==TileInstanceType::Mail ? L"source" : L"setup");
     }
     const bool removable = registration||tile.primary || (SecondaryTileInventoryReady() && !SecondaryTileExists(nativeId));
     AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceRemove",L"Remove tile settings (unpin first)"),{TileInstanceMenuVerb::Remove,tile.id,L"",L"",L""},false,removable);
@@ -663,6 +707,25 @@ static bool OpenTileInstanceManager(HWND owner)
     }
 }
 static bool OpenKuroSignInForTile(HWND owner,const std::wstring& tileId);
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+static bool (*g_testBrowseAppLauncher)(HWND,bool,std::wstring&)=nullptr;
+#endif
+static bool BrowseAppLauncherFile(HWND owner,bool icon,std::wstring& path)
+{
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    return g_testBrowseAppLauncher&&g_testBrowseAppLauncher(owner,icon,path);
+#else
+    auto filter=TileInstanceUi(icon?L"AppLauncherIconFilter":L"AppLauncherTargetFilter",icon?
+        L"Icons and images|*.ico;*.exe;*.dll;*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files|*.*|":
+        L"Programs and shortcuts|*.exe;*.com;*.lnk|All files|*.*|");
+    std::replace(filter.begin(),filter.end(),L'|',L'\0');filter.push_back(L'\0');
+    const auto title=TileInstanceUi(icon?L"AppLauncherBrowseIcon":L"AppLauncherBrowseTarget",icon?L"Choose custom icon or image...":L"Choose program or document...");
+    std::vector<wchar_t> file(32768,L'\0');OPENFILENAMEW picker{};picker.lStructSize=sizeof(picker);picker.hwndOwner=owner;
+    picker.lpstrTitle=title.c_str();picker.lpstrFilter=filter.c_str();picker.lpstrFile=file.data();picker.nMaxFile=static_cast<DWORD>(file.size());
+    picker.Flags=OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR|OFN_DONTADDTORECENT;
+    if(!GetOpenFileNameW(&picker))return false;path=file.data();return true;
+#endif
+}
 static bool DispatchTileInstanceCommand(HWND owner,UINT command)
 {
     const auto found = g_tileInstanceMenuCommands.find(command); if (found == g_tileInstanceMenuCommands.end()) return false;
@@ -684,6 +747,18 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
     if (selected == cfg.tiles.end()) return true;
     const auto tile = *selected;
     const auto section = TileInstanceSection(tile.id), nativeId = TileInstanceNativeId(tile);
+    if(item.verb==TileInstanceMenuVerb::BrowseLauncherTarget||item.verb==TileInstanceMenuVerb::BrowseLauncherIcon){
+        if(tile.type!=TileInstanceType::AppLauncher)return true;const bool icon=item.verb==TileInstanceMenuVerb::BrowseLauncherIcon;
+        std::wstring path;if(!BrowseAppLauncherFile(owner,icon,path))return true;
+        std::vector<aip::IniSetting> settings{{section,icon?L"Launcher.IconPath":L"Launcher.Target",path}};
+        if(icon){settings.push_back({section,L"Launcher.IconMode",L"Custom"});settings.push_back({section,L"Launcher.IconIndex",L"0"});}
+        SaveConfirmedTileInstanceSettings(owner,settings,tile.id,[section](const std::wstring& text,std::wstring& issue){
+            const auto document=aip::ParseIniDocument(text);std::wstring type;
+            if(!aip::ReadIniValueFromDoc(document,section.c_str(),L"Type",type)||Lower(type)!=L"applauncher"){
+                issue=L"This tile changed while the file picker was open. Reopen its current settings before choosing a target or icon.";return false;}
+            return true;
+        });return true;
+    }
     if (item.verb == TileInstanceMenuVerb::Pin) {
         if(TileInstanceUsesRegistration(tile)){
 #ifdef DESKTOPSTUB_INERT_HARDWARE
@@ -699,6 +774,7 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
     if (item.verb == TileInstanceMenuVerb::Refresh) { RefreshTileInstanceNow(tile.id); return true; }
     if (item.verb == TileInstanceMenuVerb::ChooseAccount) { ChooseTileInstanceAccount(owner,tile); return true; }
     if (item.verb == TileInstanceMenuVerb::SignIn) {
+        if(tile.type==TileInstanceType::Mail){OpenGmailSetup(owner,tile.id);return true;}
         if(tile.type==TileInstanceType::Calendar){OpenGoogleCalendarSetup(owner,tile.id);return true;}
         if(tile.type==TileInstanceType::Wuwa){OpenKuroSignInForTile(owner,tile.id);return true;}
         const auto resource = DescribeTileInstanceType(tile.type).notesResource;
@@ -751,7 +827,12 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
         settings.push_back({section,L"TextAlign",L"left"});
         settings.push_back({section,L"TextStacking",L"top"});
     }
-    if (IsTextPresentationKey(item.key) && Lower(item.key) != L"textpreset"){
+    if (IsTextPresentationKey(item.key) && Lower(item.key) != L"textpreset"&&!IsGameTextLayoutKey(item.key)){
+        if((DescribeTileInstanceType(tile.type).notesResource>=0||tile.type==TileInstanceType::Wuwa)&&!tile.presentation.Active()){
+            const std::pair<const wchar_t*,const wchar_t*> defaults[]={{L"TextStyle",L"base"},{L"TextSecondaryStyle",L"captionSubtle"},{L"TextBadgeStyle",L"captionSubtle"},
+                {L"TextWrap",L"1"},{L"TextMaxLines",L"2"},{L"TextSecondaryMaxLines",L"2"},{L"TextGapLines",L"0"},{L"TextAlign",L"left"},{L"TextStacking",L"top"}};
+            for(const auto& field:defaults)if(Lower(field.first)!=Lower(item.key))settings.push_back({section,field.first,field.second});
+        }
         if((tile.type==TileInstanceType::PrayerTimes||tile.type==TileInstanceType::Clock||tile.type==TileInstanceType::Calendar)&&!tile.presentation.Active()) {
             const std::pair<const wchar_t*,const wchar_t*> defaults[]={{L"TextStyle",L"title"},{L"TextSecondaryStyle",L"captionSubtle"},
                 {L"TextBadgeStyle",L"headerNumeral"},{L"TextMaxLines",L"1"},{L"TextSecondaryMaxLines",L"2"},{L"TextBadgeMaxLines",L"1"}};

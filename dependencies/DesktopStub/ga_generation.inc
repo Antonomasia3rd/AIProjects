@@ -21,6 +21,11 @@ static bool RenderDeleteDisabled() { return ScopedTileFlag(L"DeleteDisabledAsset
 static bool RenderScaleAuto() { return ScopedTileFlag(L"GenerateScaleAuto", g_generateScaleAuto); }
 static Bitmap* RenderDisabledTileAsset(int width, int height, int logicalWidth, int logicalHeight)
 {
+    if(g_renderContent&&g_renderContent->appLauncherSource){
+        const auto& appearance=g_renderContent->registrationAppearance;
+        return aip::app_launcher::RenderAsset(g_renderContent->launcher,width,height,
+            {appearance.background==L"Color",aip::content::TileAppearanceRgb(appearance,0x202020)},RenderIconForDisabled());
+    }
     if (g_renderContent && g_renderContent->policy.included && !g_renderContent->artworkTopic.empty()) {
         // Keep the original Desktop icon and its historical geometry on the
         // main Desktop tile. Topic artwork is for distinct source/gallery pins.
@@ -112,7 +117,7 @@ static std::map<std::wstring, std::vector<LiveTileUpdateAsset>> g_secondaryTileA
 static std::vector<LiveTileUpdateAsset> g_primaryTileAssets;
 static void RetainSecondaryTileAssets(const aip::content::Snapshot& frame, const std::vector<LiveTileUpdateAsset>& assets)
 {
-    if (!frame.nativeQueue||((frame.galleryFrame||frame.calendarSource)&&frame.nativeQueueReset)) {
+    if (!frame.nativeQueue||((frame.galleryFrame||frame.calendarSource||frame.mailSource)&&frame.nativeQueueReset)) {
         const auto prefix = frame.secondaryTileId + L"|";
         g_secondaryTileAssets.erase(frame.secondaryTileId);
         for (auto item = g_secondaryTileAssets.begin(); item != g_secondaryTileAssets.end();) {
@@ -1375,6 +1380,11 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
         if (bakedText) for (const auto& headline : g_renderContent->rssHeadlines)
             state += L"rss=" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
         if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off) {
+            if(g_renderContent->gameSource)state+=L"GameRows1:"+aip::content::TextPresentationKey(g_renderContent->presentation)+L";";
+            if(g_renderContent->mailSource){
+                state+=L"MailNative1:"+std::to_wstring(g_renderContent->mailMessageIndex)+L":"+std::to_wstring(g_renderContent->mailIncludeLarge)+L";";
+                for(const auto& row:g_renderContent->mailRows)for(const auto& field:{row.primary,row.secondary})state+=L"mail="+std::to_wstring(field.size())+L":"+field;
+            }
             if (g_renderContent->presentation.Active()) state += L"textPresentation=" + aip::content::TextPresentationKey(g_renderContent->presentation) + L";";
             state += L"prayerSource=" + std::to_wstring(g_renderContent->prayerSource) + L";";
             if (g_renderContent->prayerSource) {
@@ -2343,7 +2353,8 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
     }
     if (suppliedContent && suppliedContent->galleryFrame && !ContentGalleryFrameCurrent(*suppliedContent)) return false;
     if(suppliedContent&&suppliedContent->calendarSource&&suppliedContent->nativeQueue&&!CalendarQueueFrameCurrent(*suppliedContent))return false;
-    if (suppliedContent && suppliedContent->nativeQueue && !suppliedContent->galleryFrame && !suppliedContent->calendarSource &&
+    if(suppliedContent&&suppliedContent->mailSource&&suppliedContent->nativeQueue&&!MailQueueFrameCurrent(*suppliedContent))return false;
+    if (suppliedContent && suppliedContent->nativeQueue && !suppliedContent->galleryFrame && !suppliedContent->calendarSource && !suppliedContent->mailSource &&
         (!ContentNativeQueueAvailable(currentContentConfiguration) ||
             suppliedContent->nativeQueueLayout != ContentNativeQueueLayout(currentContentConfiguration))) return false;
     if ((instanceMode || suppliedContent) && !CurrentGenerationTargetAllows(contentScope.snapshot,

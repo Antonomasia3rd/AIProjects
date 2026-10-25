@@ -7,23 +7,27 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <limits>
 
 namespace aip { namespace tile_notification {
 inline constexpr std::size_t MaximumXmlUtf8Bytes = 64u * 1024u;
 inline constexpr std::size_t MaximumHeaderCharacters = 128u;
 inline constexpr wchar_t Marker[] = L"AIP-TILE-NOTIFICATION/1\t";
 inline constexpr wchar_t SecondaryMarker[] = L"AIP-TILE-NOTIFICATION/2\t";
+inline constexpr wchar_t BadgeMarker[] = L"AIP-TILE-NOTIFICATION/3\t";
 
 struct Options {
     bool queued = false;
     std::wstring tag;
     bool reset = false;
     std::wstring secondaryTileId{};
+    int badgeCount=-1; // -1 leaves the badge alone; 0 clears; positive updates.
 };
 struct Payload { Options options; std::wstring xml; };
 
 inline bool ValidOptions(const Options& options, std::wstring& error)
 {
+    if(options.badgeCount < -1){error=L"A tile badge count must be -1 (unchanged), zero (clear), or a positive integer.";return false;}
     if (options.queued != !options.tag.empty() || options.tag.size() > 16u) {
         error = L"Queued tile notifications require a tag of 1-16 alphanumeric characters; single notifications have no tag.";
         return false;
@@ -96,12 +100,13 @@ inline bool Encode(const std::wstring& xml, const Options& options, std::wstring
 {
     transport.clear(); error.clear();
     if (!ValidOptions(options, error) || !ValidXmlText(xml, error)) return false;
-    if (!options.queued && !options.reset && options.secondaryTileId.empty()) { transport = xml; return true; }
-    transport = options.secondaryTileId.empty() ? Marker : SecondaryMarker;
+    if (!options.queued && !options.reset && options.secondaryTileId.empty()&&options.badgeCount<0) { transport = xml; return true; }
+    transport = options.badgeCount>=0?BadgeMarker:options.secondaryTileId.empty() ? Marker : SecondaryMarker;
     transport += options.queued ? L'1' : L'0';
     transport += L'\t'; transport += options.reset ? L'1' : L'0';
     transport += L'\t'; transport += options.tag;
-    if (!options.secondaryTileId.empty()) { transport += L'\t'; transport += options.secondaryTileId; }
+    if (!options.secondaryTileId.empty()||options.badgeCount>=0) { transport += L'\t'; transport += options.secondaryTileId; }
+    if(options.badgeCount>=0){transport+=L'\t';transport+=std::to_wstring(options.badgeCount);}
     transport += L"\r\n";
     transport += xml;
     return true;
@@ -117,10 +122,12 @@ inline bool Decode(const std::wstring& transport, Payload& payload, std::wstring
     std::size_t offset = transport.front() == 0xfeff ? 1u : 0u;
     const std::wstring marker = Marker;
     const std::wstring secondaryMarker = SecondaryMarker;
+    const std::wstring badgeMarker=BadgeMarker;
     Payload candidate;
     const bool secondary = transport.compare(offset, secondaryMarker.size(), secondaryMarker) == 0;
-    if (secondary || transport.compare(offset, marker.size(), marker) == 0) {
-        const auto markerSize = secondary ? secondaryMarker.size() : marker.size();
+    const bool badge=transport.compare(offset,badgeMarker.size(),badgeMarker)==0;
+    if (badge||secondary || transport.compare(offset, marker.size(), marker) == 0) {
+        const auto markerSize = badge?badgeMarker.size():secondary ? secondaryMarker.size() : marker.size();
         const auto end = transport.find(L"\r\n", offset + markerSize);
         if (end == std::wstring::npos || end - offset > MaximumHeaderCharacters) {
             error = L"The private tile notification header is incomplete or oversized.";
@@ -134,7 +141,18 @@ inline bool Decode(const std::wstring& transport, Payload& payload, std::wstring
         }
         candidate.options.queued = fields[0] == L'1';
         candidate.options.reset = fields[2] == L'1';
-        if (secondary) {
+        if(badge){
+            const auto target=fields.find(L'\t',4),count=target==std::wstring::npos?target:fields.find(L'\t',target+1);
+            if(target==std::wstring::npos||count==std::wstring::npos||count+1==fields.size()){
+                error=L"The badge notification header requires a target field and numeric count.";return false;}
+            candidate.options.tag=fields.substr(4,target-4);candidate.options.secondaryTileId=fields.substr(target+1,count-target-1);
+            const auto number=fields.substr(count+1);int parsed=0;
+            if(number.size()>10||(number.size()>1&&number[0]==L'0')){error=L"The tile badge count is not a canonical bounded integer.";return false;}
+            for(const auto digit:number){if(digit<L'0'||digit>L'9'||parsed>((std::numeric_limits<int>::max)()-(digit-L'0'))/10){
+                error=L"The tile badge count is outside the supported integer range.";return false;}
+                parsed=parsed*10+digit-L'0';}
+            candidate.options.badgeCount=parsed;
+        }else if (secondary) {
             const auto targetSeparator = fields.find(L'\t', 4);
             if (targetSeparator == std::wstring::npos || targetSeparator + 1 == fields.size()) {
                 error = L"The secondary tile notification header requires a target ID.";
@@ -154,12 +172,16 @@ inline bool Decode(const std::wstring& transport, Payload& payload, std::wstring
 // Validation and XML/notification/tag construction precede updater creation.
 // A malformed transport or loader/factory exception cannot clear an old queue.
 // Windows chooses queue rotation; the caller explicitly requests layout resets.
-template<class LoadXml, class MakeNotification, class SetTag, class MakeUpdater>
+template<class LoadXml, class MakeNotification, class SetTag, class MakeUpdater,class ApplyBadge=std::nullptr_t>
 bool Deliver(const std::wstring& transport, LoadXml loadXml, MakeNotification makeNotification,
-    SetTag setTag, MakeUpdater makeUpdater, std::wstring& error)
+    SetTag setTag, MakeUpdater makeUpdater, std::wstring& error,ApplyBadge applyBadge=nullptr,std::wstring* badgeError=nullptr)
 {
+    if(badgeError)badgeError->clear();
     Payload payload;
     if (!Decode(transport, payload, error)) return false;
+    if constexpr(std::is_same_v<std::decay_t<ApplyBadge>,std::nullptr_t>){
+        if(payload.options.badgeCount>=0){error=L"This tile notification consumer does not support numeric badges.";return false;}
+    }
     if constexpr (!std::is_invocable_v<MakeUpdater, const std::wstring&>) {
         if (!payload.options.secondaryTileId.empty()) {
             error = L"This notification consumer does not support secondary tile targeting.";
@@ -176,6 +198,19 @@ bool Deliver(const std::wstring& transport, LoadXml loadXml, MakeNotification ma
     updater.EnableNotificationQueue(payload.options.queued);
     if (payload.options.reset) updater.Clear();
     updater.Update(notification);
+    if constexpr(!std::is_same_v<std::decay_t<ApplyBadge>,std::nullptr_t>){
+        if(payload.options.badgeCount>=0){
+            const auto report=[&]() noexcept {if(badgeError)try{*badgeError=L"Tile content was delivered, but its numeric badge could not be updated.";}catch(...){}};
+            // The tile update is committed. A badge failure must never make
+            // the caller retry/reset an otherwise successfully delivered queue.
+            try{
+                if constexpr(std::is_same_v<std::invoke_result_t<ApplyBadge,const std::wstring&,int>,bool>){
+                    if(!applyBadge(payload.options.secondaryTileId,payload.options.badgeCount))report();
+                }else applyBadge(payload.options.secondaryTileId,payload.options.badgeCount);
+            }catch(...){report();}
+        }
+    }
     return true;
 }
+inline std::wstring BadgeXml(int count){return count<0?std::wstring():L"<badge value=\""+std::to_wstring(count)+L"\"/>";}
 } }

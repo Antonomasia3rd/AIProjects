@@ -8,7 +8,8 @@ inline std::wstring TileInstanceArtworkTopic(const TileInstance& tile) {
     case TileInstanceType::Rss: return L"rss";
     case TileInstanceType::NowPlaying: return L"smtc";
     case TileInstanceType::PrayerTimes: return L"prayer";
-    case TileInstanceType::Clock: return L"worldclock";
+    case TileInstanceType::Clock:return tile.clock.iconStyle==L"Clock"?L"clock":tile.clock.iconStyle==L"WorldClock"?L"worldclock":
+        aip::datetime::Lower(tile.clock.timeZone)==L"local"&&(tile.clock.location.empty()||tile.clock.location==L"Local time")?L"clock":L"worldclock";
     case TileInstanceType::Calendar: return L"calendar";
     case TileInstanceType::Wuwa: return L"wuwa";
     case TileInstanceType::Genshin: return L"genshin";
@@ -16,6 +17,7 @@ inline std::wstring TileInstanceArtworkTopic(const TileInstance& tile) {
     case TileInstanceType::Zzz: return L"zzz";
     case TileInstanceType::Discord: return L"discord";
     case TileInstanceType::QuickAction: return tile.clickAction;
+    case TileInstanceType::AppLauncher:return L"desktop";
     }
     return {};
 }

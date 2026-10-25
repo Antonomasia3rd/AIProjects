@@ -428,6 +428,8 @@ static bool IsManifestVersion(const std::wstring& version)
 
 static std::wstring EffectiveManifestIdentityName()
 {
+    const auto identity=IniReadS(L"ProfileIdentity",L"PackageName",L"");
+    if(!identity.empty()&&identity==SanitizeManifestIdentityName(identity))return identity;
     std::wstring configured = ManifestSetting(L"IdentityName", L"", L"ManifestIdentityName");
     if (configured.empty())
         configured = L"dev.local." + ExeBaseName();
@@ -436,6 +438,8 @@ static std::wstring EffectiveManifestIdentityName()
 
 static std::wstring EffectiveManifestPublisher()
 {
+    const auto identity=IniReadS(L"ProfileIdentity",L"Publisher",L"");
+    if(!identity.empty()&&IsManifestPublisherValue(identity))return identity;
     std::wstring publisher = ManifestSettingValidated(L"Publisher", L"CN={ProductRuntimeBaseName}", L"ManifestPublisher", IsManifestPublisherValue);
     if (ToLowerCopy(publisher).rfind(L"cn=", 0) != 0)
         publisher = L"CN=" + publisher;
@@ -456,7 +460,10 @@ static std::wstring EffectiveManifestDisplayName()
 
 static std::wstring EffectiveManifestPublisherDisplayName()
 {
-    return ManifestSetting(L"PublisherDisplayName", L"{ProductRuntimeBaseName}", L"ManifestPublisherDisplayName");
+    std::wstring user;wchar_t name[257]{};DWORD length=_countof(name);
+    if(GetUserNameW(name,&length))user=name;
+    if(user.empty())user=ExeBaseName();
+    return ManifestSetting(L"PublisherDisplayName",user.c_str(),L"ManifestPublisherDisplayName");
 }
 
 static std::wstring EffectiveManifestDescription()

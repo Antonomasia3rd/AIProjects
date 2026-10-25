@@ -1,4 +1,5 @@
 #pragma once
+#include "app_launcher.h"
 
 // Platform-neutral composition policy. Providers return data; the host owns
 // rendering and delivery. No provider writes the user's configuration.
@@ -158,14 +159,22 @@ struct CalendarEvent {
     // Native Medium and Wide request different formatter flags. Keep their
     // prepared labels separate from the Large range and compact agenda time.
     std::wstring mediumWhen,wideWhen;
+    std::wstring dayKey; // Locale-independent civil day identity; never group by display labels.
 };
 enum class CalendarFlavor { NextEvent, Agenda };
 struct Snapshot {
+    bool appLauncherSource=false;
+    aip::app_launcher::Configuration launcher;
+    bool mailSource=false,mailIncludeLarge=true,mailBadgeEnabled=true;
+    std::vector<Text> mailRows;
+    std::size_t mailMessageIndex=0;
+    int mailUnreadCount=0;
+    std::wstring mailboxAddress; // Private current-account activation hint; not XML text/arguments.
     bool active = false;
     int capturedWallpaperFit = -1; // Host FitMode ordinal; -1 keeps legacy desktop resolution.
     TileDeliveryPolicy policy;
     TileAppearance registrationAppearance;
-    std::wstring artworkTopic, sourceDiagnostic;
+    std::wstring artworkTopic, sourceDiagnostic,deliveryDiagnostic;
     std::wstring name, backgroundPath, activationArguments;
     Text text;
     TextMode textMode = TextMode::Auto;
@@ -189,6 +198,7 @@ struct Snapshot {
     std::wstring calendarAgendaHeader=L"Today",calendarAgendaEmpty=L"No other events today";
     unsigned calendarAgendaHighlightThrough=0;
     std::wstring detailTopic;
+    bool gameSource=false;
     bool smtcSource = false, smtcShowRepeatShuffle = false, wrapSourceText = false;
     MediaPlaybackState smtcState = MediaPlaybackState::Unknown;
     MediaIndicatorMode smtcIndicator = MediaIndicatorMode::Status;

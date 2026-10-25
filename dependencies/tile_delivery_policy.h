@@ -21,6 +21,8 @@ struct TilePolicyField {
     const wchar_t* choices = L"";
 };
 inline constexpr TilePolicyField TilePolicyFields[] = {
+    {L"Delivery.DisabledWarning",L"Settings",L"LiveTileDisabledWarning",L"Startup",L"Warn when Windows disables this tile's updates",TilePolicyValueKind::Choice,0,0,L"Off|Startup|OnChange"},
+    {L"Delivery.DisabledCheckSeconds",L"Settings",L"LiveTileDisabledCheckSeconds",L"300",L"Disabled-update check interval (seconds)",TilePolicyValueKind::Integer,30,86400},
     {L"Delivery.Mode",L"Settings",L"ExperimentalLiveTileUpdate",L"Auto",L"Tile delivery",TilePolicyValueKind::Choice,0,0,L"Auto|LiveTile|Registration"},
     {L"Delivery.Template",L"Settings",L"LiveTileTemplateStyle",L"Adaptive",L"Native notification template",TilePolicyValueKind::Choice,0,0,L"Adaptive|Windows81Preset"},
     {L"Delivery.ClearOnShutdown",L"Settings",L"ClearLiveTileOnShutdown",L"1",L"Clear this tile's native notifications on exit",TilePolicyValueKind::Boolean},
@@ -41,6 +43,8 @@ inline constexpr TilePolicyField TilePolicyFields[] = {
     {L"Cache.PrecacheMaxFiles",L"Settings",L"GeneratedAssetPrecacheMaxFiles",L"16",L"Slideshow files to pre-cache (0-256)",TilePolicyValueKind::Integer,0,256},
     {L"Cache.Directory",L"Settings",L"GeneratedAssetCacheDirectory",L"",L"Cache parent folder (blank uses application cache)",TilePolicyValueKind::Directory},
     {L"Assets.ScaleAuto",L"Settings",L"GenerateScaleAuto",L"1",L"Use current display scale automatically",TilePolicyValueKind::Boolean},
+    {L"Assets.PngReplaceRetries",L"Settings",L"SavePngReplaceRetries",L"3",L"PNG replace retries",TilePolicyValueKind::Integer,0,20},
+    {L"Assets.PngReplaceRetryDelayMs",L"Settings",L"SavePngReplaceRetryDelayMs",L"75",L"PNG replace retry delay (milliseconds)",TilePolicyValueKind::Integer,0,5000},
     {L"Assets.Scale100",L"Settings",L"GenerateScale100",L"1",L"100% scale assets",TilePolicyValueKind::Boolean},
     {L"Assets.Scale125",L"Settings",L"GenerateScale125",L"1",L"125% scale assets",TilePolicyValueKind::Boolean},
     {L"Assets.Scale150",L"Settings",L"GenerateScale150",L"1",L"150% scale assets",TilePolicyValueKind::Boolean},

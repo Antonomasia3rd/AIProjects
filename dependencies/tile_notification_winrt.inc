@@ -6,7 +6,7 @@
 
 namespace aip { namespace tile_notification {
 // The caller owns its existing WinRT apartment and exception reporting policy.
-inline bool DeliverWinrt(const std::wstring& transport, std::wstring& error)
+inline bool DeliverWinrt(const std::wstring& transport, std::wstring& error,std::wstring* badgeError=nullptr)
 {
     using namespace winrt::Windows::Data::Xml::Dom;
     using namespace winrt::Windows::UI::Notifications;
@@ -17,7 +17,11 @@ inline bool DeliverWinrt(const std::wstring& transport, std::wstring& error)
         [](const std::wstring& target) {
             return target.empty() ? TileUpdateManager::CreateTileUpdaterForApplication()
                 : TileUpdateManager::CreateTileUpdaterForSecondaryTile(winrt::hstring(target));
-        }, error);
+        }, error,[](const std::wstring& target,int count){
+            const auto updater=target.empty()?BadgeUpdateManager::CreateBadgeUpdaterForApplication():BadgeUpdateManager::CreateBadgeUpdaterForSecondaryTile(winrt::hstring(target));
+            if(count==0){updater.Clear();return;}
+            XmlDocument document;document.LoadXml(winrt::hstring(BadgeXml(count)));updater.Update(BadgeNotification(document));
+        },badgeError);
 }
 } }
 #endif

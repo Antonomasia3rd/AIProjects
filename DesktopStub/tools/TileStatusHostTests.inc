@@ -155,5 +155,30 @@ static void TestTileStatusHost()
             everyRowHasLeftIcon = everyRowHasLeftIcon && painted;
         }
         Check(everyRowHasLeftIcon, "each resource/activity row paints its icon in the left column instead of only the first row's right column");
+        auto game=notes;game.gameSource=true;game.presentation={};game.detailRows={{L"Readable commission title that can wrap",L"5/5 complete",L"",L"notes-genshin-resin_full"}};
+        const auto coloredIn=[](Gdiplus::Bitmap& bitmap,int first,int last){unsigned count=0;for(int y=0;y<static_cast<int>(bitmap.GetHeight());++y)for(int x=first;x<last;++x){Gdiplus::Color pixel;
+                if(bitmap.GetPixel(x,y,&pixel)==Gdiplus::Ok&&pixel.GetA()&&
+                    (std::max)({pixel.GetR(),pixel.GetG(),pixel.GetB()})-(std::min)({pixel.GetR(),pixel.GetG(),pixel.GetB()})>12)++count;}return count;};
+        // Match ApplyTileTextOverlay's grayscale PNG text configuration. The
+        // system default can bake colored ClearType fringes into white text.
+        const auto drawGame=[&](Gdiplus::Bitmap& bitmap){Gdiplus::Graphics graphics(&bitmap);graphics.Clear(Gdiplus::Color(0,0,0,0));
+            return ConfigureTileTextGraphics(graphics)&&RenderDetailRowsSimulation(graphics,game,150,150,1);};
+        Gdiplus::Bitmap gameRight(150,150,PixelFormat32bppARGB);Check(drawGame(gameRight),"readable game rows render offscreen without a global content pointer");
+        Check(coloredIn(gameRight,110,140)>0&&coloredIn(gameRight,10,40)==0,"default game row artwork is on the right beside wrapped text");
+        game.presentation.iconPlacement=L"Left";Gdiplus::Bitmap gameLeft(150,150,PixelFormat32bppARGB);Check(drawGame(gameLeft)&&coloredIn(gameLeft,10,40)>0,"explicit Left restores the icon column without changing fetched notes");
+        game.presentation.iconPlacement=L"None";Gdiplus::Bitmap gameNone(150,150,PixelFormat32bppARGB);Check(drawGame(gameNone)&&coloredIn(gameNone,0,150)==0,"None draws readable notes without row images");
+        game.presentation.iconPlacement=L"Right";game.detailRows[0].iconTopic=L"unavailable-wuwa-topic";Gdiplus::Bitmap gameMissing(150,150,PixelFormat32bppARGB);
+        Check(drawGame(gameMissing)&&coloredIn(gameMissing,0,150)==0,"missing WuWa artwork uses the text fallback instead of a misleading resource icon");
+        const auto gap=GameRowSpacingUri(aip::GetDirectoryName(g_iniPath),150,6);Check(!gap.empty(),"pixel row spacing resolves to a private immutable package asset");
+        auto prayer=game;prayer.artworkTopic=L"prayer";prayer.prayerSource=true;prayer.secondaryBranding=L"NameAndLogo";
+        Gdiplus::Bitmap prayerCorner(150,150,PixelFormat32bppARGB);{Gdiplus::Graphics graphics(&prayerCorner);graphics.Clear(Gdiplus::Color(0,0,0,0));
+            Check(DrawStaticSourceCorner(graphics,prayer,150,150,1,true),"Registration source corner uses the same tight glyph artwork as native branding");}
+        bool visible=false,outside=false;for(int y=0;y<150;++y)for(int x=0;x<150;++x){Gdiplus::Color pixel;if(prayerCorner.GetPixel(x,y,&pixel)==Gdiplus::Ok&&pixel.GetA()){
+                visible=true;if(x<124||x>=140||y<126||y>=142)outside=true;}}
+        Check(visible&&!outside,"Registration corner is small, bottom-right and clear of the text footer");
+        Check(StaticSourceCornerTopic(prayer,false).empty(),"native Live Tile and Overlay delivery do not bake a duplicate source corner");
+        prayer.secondaryBranding=L"Name";Check(StaticSourceCornerTopic(prayer,true).empty(),"explicit Name continues to omit the corner icon");
+        prayer.secondaryBranding=L"Logo";prayer.galleryFrame=true;Check(StaticSourceCornerTopic(prayer,true).empty(),"photo frames retain their entire image without forced branding overlays");
+        prayer.galleryFrame=false;prayer.clockSource=true;Check(StaticSourceCornerTopic(prayer,true).empty(),"Clock keeps its separate native branding contract");
     }
 }

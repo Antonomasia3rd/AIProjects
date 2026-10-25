@@ -142,8 +142,20 @@ static void TestDateTimeTileHost(const std::wstring& directory,const std::wstrin
         if(frame.calendarSource)Check(xml.find(L"First meeting")!=std::wstring::npos&&
             (xml.find(L"Third meeting")!=std::wstring::npos)==(size==2)&&
             (xml.find(L"headerNumeral")!=std::wstring::npos)==(size==1),"native Calendar uses its distinct per-size event form and keeps the numeral column only on Wide next-event");
-        if(snapshot==&kuro)Check(xml.find(L"Waveplates")!=std::wstring::npos&&xml.find(L"Daily activity")!=std::wstring::npos,
-            "native WuWa binding uses game detail rows rather than generic setup summary");
+        if(snapshot==&kuro)Check(frame.gameSource&&xml.find(L"<group><subgroup hint-textStacking=\"top\">")!=std::wstring::npos&&
+            xml.find(L"hint-style=\"base\" hint-wrap=\"true\" hint-maxLines=\"2\" hint-align=\"left\">Waveplates</text>")!=std::wstring::npos&&
+            xml.find(L"hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\"2\" hint-align=\"left\">120/240")!=std::wstring::npos&&
+            (xml.find(L"Daily activity")!=std::wstring::npos)==(size>0)&&xml.find(L"Wuthering Waves setup")==std::wstring::npos&&
+            xml.find(L" alt=\"")==std::wstring::npos,
+            "native WuWa uses wrapped own-game groups, size-bounded rows and a text fallback without fabricated row icons");
+        if(snapshot==&kuro){auto illustrated=frame;illustrated.detailRows.front().iconTopic=L"notes-genshin-resin_full";
+            ContentRenderScope illustratedScope(&illustrated);const auto illustratedXml=BuildLiveTileXml(ParentDirectoryOfPath(bitmapPath),manifest,assets);
+            const auto rowText=illustratedXml.find(L">Waveplates</text>"),rowArt=illustratedXml.find(L" alt=\"Waveplates\"");
+            const auto geometry=ComputeGameRowGeometry(widths[size],true,GameTextPresentation(illustrated.presentation));
+            Check(rowText!=std::wstring::npos&&rowArt!=std::wstring::npos&&rowText<rowArt&&
+                illustratedXml.find(L"<subgroup hint-weight=\""+std::to_wstring(geometry.iconWeight)+L"\" hint-textStacking=\"center\">")!=std::wstring::npos&&
+                geometry.iconX>geometry.textX+geometry.textWidth,
+                "native game publication keeps available bundled row art in its separately weighted right column");}
         const auto status=TileSnapshotVisibleText(frame,heights[size],TileStatusLabels{},widths[size]);
         Check(frame.clockSource?(status.find(L"11:14 AM\r\nFriday\r\nSurabaya <fixture>")!=std::wstring::npos&&status.find(L"October 23, 2026")==std::wstring::npos):
             frame.calendarSource?(status.find(L"First meeting")!=std::wstring::npos&&(status.find(L"Third meeting")!=std::wstring::npos)==(size==2)):

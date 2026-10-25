@@ -119,9 +119,10 @@ inline std::vector<Asset> AssetPlan(const Topic& topic, FontStyle style = FontSt
     const auto base = std::wstring(L"Assets/TopicTiles/v3/") +
         (style == FontStyle::Fluent ? L"fluent/" : style == FontStyle::Mdl2 ? L"mdl2/" : L"vector/") +
         BackgroundAssetKey(background) + L"/" + topic.key + L"/";
+    const auto corner=std::wstring(L"Assets/TopicCorners/v1/")+(style==FontStyle::Fluent?L"fluent/":style==FontStyle::Mdl2?L"mdl2/":L"vector/")+BackgroundAssetKey(background)+L"/"+topic.key+L"/";
     return {{base + L"Medium.png", 150, 150, !background.colored}, {base + L"Wide.png", 310, 150, !background.colored},
         {base + L"Large.png", 310, 310, !background.colored}, {base + L"Small.png", 70, 70, !background.colored},
-        {base + L"Logo44.png", 44, 44, true}, {base + L"Logo30.png", 30, 30, true}};
+        {corner + L"Logo44.png", 44, 44, true}, {corner + L"Logo30.png", 30, 30, true}};
 }
 struct Assets { std::wstring medium, wide, large, smallTile, logo44, logo30; };
 inline std::wstring PackageUri(const std::wstring& relative) { return L"ms-appx:///" + relative; }

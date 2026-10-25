@@ -202,7 +202,12 @@ static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn
     aip::content::TileInstanceConfiguration cfg; std::wstring error;
     if (!ReadCurrentTileInstances(cfg, error)){NotifyTileActivationProblem(id,error,false);return false;}
     for (const auto& tile : cfg.tiles) if (tile.id == id) {
+        if(!signIn&&tile.type==aip::content::TileInstanceType::AppLauncher&&tile.clickAction==L"launch"){
+            if(aip::app_launcher::Execute(tile.launcher,owner,error))return true;
+            NotifyTileActivationProblem(id,error,false);return false;
+        }
         if(signIn&&tile.type==aip::content::TileInstanceType::Calendar)return OpenGoogleCalendarSetup(owner,tile.id);
+        if(signIn&&tile.type==aip::content::TileInstanceType::Mail)return OpenGmailSetup(owner,tile.id);
         if(signIn&&tile.type==aip::content::TileInstanceType::Wuwa)return OpenKuroSignInForTile(owner,tile.id);
         const auto resource = aip::content::DescribeTileInstanceType(tile.type).notesResource;
         if (resource >= 0) {
@@ -219,6 +224,10 @@ static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn
         if (tile.clickAction == L"source") for (const auto& frame : CurrentSecondarySnapshots())
             if (frame.secondaryTileId == aip::content::TileInstanceNativeId(tile)) {
                 std::wstring url;
+                if(tile.type==aip::content::TileInstanceType::Mail){
+                    url=aip::gmail::InboxUrl(frame.mailboxAddress);
+                    return reinterpret_cast<INT_PTR>(ShellExecuteW(owner,L"open",url.c_str(),nullptr,nullptr,SW_SHOWNORMAL))>32;
+                }
                 if (ReadTileInstanceSourceActivation(frame.activationArguments, url)) {
                     ShellExecuteW(owner, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL); return true;
                 }
@@ -257,6 +266,10 @@ static void HandleSingleInstanceRequest(WPARAM request)
 
     switch (request & SINGLE_INSTANCE_REQUEST_MASK)
     {
+    case SINGLE_INSTANCE_REQUEST_PROFILE_MANAGER:
+        ShowProfileManager(g_hwnd);return;
+    case SINGLE_INSTANCE_REQUEST_FRESH_PROFILE:
+        OfferFreshDesktopStubProfile(g_hwnd);return;
     case SINGLE_INSTANCE_REQUEST_SETTINGS_WINDOW:
         OpenDesktopStubSettings(g_hwnd);return;
     case SINGLE_INSTANCE_REQUEST_SETUP_DESKTOP:
@@ -306,7 +319,7 @@ static void MaybeClearLiveTileOnShutdown()
 
     // When switching from unpackaged/static mode to packaged Live Tile mode,
     // do not clear immediately before the packaged instance starts and updates.
-    if (g_relaunchAfterExit.load() == 1)
+    if (g_relaunchAfterExit.load() == 1||g_relaunchAfterExit.load()==3)
         return;
 
     ManifestCompatibilityTarget target = ConfiguredManifestCompatibilityTarget();
@@ -342,10 +355,18 @@ static std::wstring ModeSwitchRelaunchArguments(bool forceGenerate, bool waitFor
         args += L" --once";
     else if (forceGenerate)
         args += L" --generate";
-    if (g_commandLine.customIniPath)
+    // A restart belongs to this resident even if another profile has since
+    // become the default. Always carry the effective INI into the relaunch.
+    if (!g_iniPath.empty())
         args += L" --ini " + QuoteCommandLineArg(g_iniPath);
     if(g_commandLine.settingsWindow)args+=L" --settings";
     return args;
+}
+static void RequestDesktopStubRestart(HWND)
+{
+    if(g_shutdownState.IsRequested())return;
+    g_relaunchAfterExit=CurrentProcessHasPackageIdentity()?1:2;
+    RequestGracefulShutdown(g_hwnd);
 }
 
 static bool LiveTileRuntimeConditionMismatch(bool& shouldRunPackaged)
@@ -585,6 +606,7 @@ static void ExecutePendingRelaunchAfterExit()
 
 LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l)
 {
+    if(HandleProfileManagerMessage(m))return 0;
     if(m==WM_APP_NOTIFICATION_CONFIRMATION){DrainUserConfirmations();return 0;}
     if(m==WM_APP_TILE_ACTIVATION_NOTICE){
         if(!g_tileActivationNotices.empty()){const auto notice=std::move(g_tileActivationNotices.front());g_tileActivationNotices.pop_front();
@@ -1274,6 +1296,10 @@ struct LiveTileOopInspectable final : ::IInspectable
 
 static void ConfigureAppxStubHostIniForActivation()
 {
+    // A managed runtime or explicit --ini already supplies the owning profile.
+    // Compatibility stub activation must not replace that binding with a
+    // nonexistent sidecar in the package's runtime generation.
+    if(g_commandLine.customIniPath)return;
     std::wstring exeName = FileNameOfPath(g_exePath);
     if (!IEquals(exeName, ManifestAppxActivationStubExecutableName()))
         return;
@@ -1719,6 +1745,14 @@ static bool OpenGalleryFolder(const std::wstring& directory)
     return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", directory.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
 #endif
 }
+static bool BeginApprovedProfileIdentityMigration(HWND owner,const aip::profiles::ProfileEntry& entry,
+    const aip::profiles::IdentityPlan& plan,std::wstring& error)
+{
+    bool shutdown=false;
+    if(!PrepareProfileIdentityMigration(owner,entry,plan,shutdown,error))return false;
+    if(shutdown){g_relaunchAfterExit=3;RequestGracefulShutdown(g_hwnd);return true;}
+    return FinalizePendingProfileIdentityMigration(error);
+}
 
 static bool HandleGalleryImageActivation(CommandLineOptions& options,int& result,bool* folderFallback=nullptr)
 {
@@ -1791,11 +1825,25 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     g_exePath = GetModulePath();
     if (g_exePath.empty())
         return 1;
+    g_profileIdentityMigrationHook=BeginApprovedProfileIdentityMigration;
+
+    int profileExitCode=0;std::wstring profileError;
+    if(HandleProfileManagerArguments(captureArguments,profileExitCode,profileError)){
+        if(!profileError.empty())ShowCommandLineMessage(profileError,true);
+        return profileExitCode;
+    }
 
     if (!ParseCommandLineOptions())
     {
         ShowCommandLineMessage(g_commandLine.parseError, true);
         return 2;
+    }
+
+    if(!g_commandLine.customIniPath&&!g_commandLine.renderOnly&&!g_commandLine.configureOnly&&
+        !g_commandLine.helpRequested&&!CommandLineShouldShowVersion()){
+        std::wstring managedIni;
+        if(!ResolveManagedRuntimeDefaultIni(managedIni,profileError)){ShowCommandLineMessage(profileError,true);return 2;}
+        if(!managedIni.empty()){g_commandLine.iniPath=managedIni;g_commandLine.customIniPath=true;}
     }
 
     aip::SidecarPaths sidecarPaths;
@@ -1827,6 +1875,18 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     {
         ShowCommandLineMessage(CommandLineVersionText(), false);
         return 0;
+    }
+
+    // Ownership is checked before resident settings, accounts or manifests are
+    // read. Offline commands retain their inert, explicit-file behavior.
+    if(!g_commandLine.renderOnly&&!g_commandLine.configureOnly){
+        if(!g_commandLine.customIniPath&&RouteDefaultProfileForCurrentUser(g_iniPath,captureArguments,profileExitCode,profileError)){
+            if(!profileError.empty())ShowCommandLineMessage(profileError,true);
+            return profileExitCode;
+        }
+        if(!ProfileManagerCurrentIniOwnerAllowed(g_iniPath,profileError)){
+            ShowCommandLineMessage(profileError,true);return 2;
+        }
     }
 
     int galleryClickResult=0;bool galleryFolderFallback=false;
@@ -1919,7 +1979,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     {
         WPARAM singleInstanceRequest = SINGLE_INSTANCE_REQUEST_SHOW;
         bool explicitSingleInstanceRequest = false;
-        if(g_commandLine.setupDesktop){singleInstanceRequest=SINGLE_INSTANCE_REQUEST_SETUP_DESKTOP;explicitSingleInstanceRequest=true;}
+        if(g_commandLine.profileManager){singleInstanceRequest=SINGLE_INSTANCE_REQUEST_PROFILE_MANAGER;explicitSingleInstanceRequest=true;}
+        else if(g_commandLine.setupDesktop){singleInstanceRequest=SINGLE_INSTANCE_REQUEST_SETUP_DESKTOP;explicitSingleInstanceRequest=true;}
         else if(g_commandLine.settingsWindow){singleInstanceRequest=SINGLE_INSTANCE_REQUEST_SETTINGS_WINDOW;explicitSingleInstanceRequest=true;}
         else if (!g_commandLine.mediaAction.empty()) {
             for (std::size_t index = 0; index < aip::content::TileActionCount; ++index)
@@ -1996,6 +2057,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             return 0;
         }
 
+        if(!explicitSingleInstanceRequest&&singleInstanceRequest==SINGLE_INSTANCE_REQUEST_SHOW&&!g_commandLine.launchedFromModeSwitch&&!g_commandLine.launchedFromAppxStub&&
+            IniReadI(L"Settings",L"AlreadyRunningProfilePrompt",1)!=0)
+            singleInstanceRequest=SINGLE_INSTANCE_REQUEST_FRESH_PROFILE;
+
         if (CommandLineTrayIconChanged())
             singleInstanceRequest |= SINGLE_INSTANCE_FLAG_APPLY_TRAY_ICON;
         if (CommandLineShouldRegenerateManifest())
@@ -2064,6 +2129,18 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
         ShowCommandLineMessage(g_commandLine.applyError, true);
         ReleaseSingleInstanceMutex();
         return 2;
+    }
+    bool migrationRelaunch=false;
+    if(!RecoverProfileIdentityMigration(g_commandLine.setupDesktop,migrationRelaunch,profileError)){
+        ShowCommandLineMessage(profileError,true);ReleaseSingleInstanceMutex();return 2;
+    }
+    if(migrationRelaunch){ReleaseSingleInstanceMutex();return FinalizePendingProfileIdentityMigration(profileError)?0:2;}
+    if(!EnsureCurrentProfileIdentity(profileError)){
+        ShowCommandLineMessage(profileError,true);ReleaseSingleInstanceMutex();return 2;
+    }
+    if(RouteCurrentProfileToOwnedRuntime(captureArguments,[]{ReleaseSingleInstanceMutex();},profileExitCode,profileError)){
+        if(!profileError.empty())ShowCommandLineMessage(profileError,true);
+        ReleaseSingleInstanceMutex();return profileExitCode;
     }
     LoadUiStrings();
     ValidateFormatStrings();
@@ -2285,6 +2362,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
                 PostMessageW(g_hwnd, g_singleInstanceMessage, SINGLE_INSTANCE_REQUEST_MEDIA_ACTION_BASE + index, 0);
     }
     if(g_commandLine.settingsWindow)PostMessageW(g_hwnd,g_singleInstanceMessage,SINGLE_INSTANCE_REQUEST_SETTINGS_WINDOW,0);
+    if(g_commandLine.profileManager)PostMessageW(g_hwnd,g_singleInstanceMessage,SINGLE_INSTANCE_REQUEST_PROFILE_MANAGER,0);
+    StartConfiguredProfiles();
+    InstallProfileCoordinatorWatch();
     if (!g_commandLine.tileSetupKey.empty()) {
         if (TileInstanceModeRequested()) {
             g_tileInstanceActivations.emplace_back(g_commandLine.tileSetupKey, g_commandLine.tileSignIn);
@@ -2419,7 +2499,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             messageLoopExitCode = 1;
             break;
         }
-        if(IsGoogleCalendarSetupMessage(msg)||IsKuroSignInMessage(msg)||IsDesktopStubSettingsMessage(msg))continue;
+        if(IsGoogleCalendarSetupMessage(msg)||IsGmailSetupMessage(msg)||IsKuroSignInMessage(msg)||IsDesktopStubSettingsMessage(msg)||IsProfileManagerDialogMessage(&msg))continue;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
@@ -2428,7 +2508,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     CloseEmbeddedNotesSignIns();
     CloseKuroSignIns();
     CloseGoogleCalendarSetups();
+    CloseGmailSetups();
     CloseDesktopStubSettings();
+    ClearProfileManager();
     ShutdownMediaTileActions();
     KillTimer(g_hwnd, APPX_ACTIVATION_REQUEST_TIMER_ID);
     g_running=false;
@@ -2443,7 +2525,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
     TrayRemove();
     ShutdownGdiPlusForExit();
+    if(g_hwnd&&IsWindow(g_hwnd))DestroyWindow(g_hwnd);
     ReleaseSingleInstanceMutex();
+    if(g_relaunchAfterExit.load()==3){
+        if(!FinalizePendingProfileIdentityMigration(profileError))LogText(L"[!] Profile identity migration could not finish: "+profileError);
+        return messageLoopExitCode;
+    }
     ExecutePendingRelaunchAfterExit();
     return messageLoopExitCode;
 }

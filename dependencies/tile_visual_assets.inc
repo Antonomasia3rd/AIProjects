@@ -198,6 +198,19 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
     }
     const auto result = graphics.GetLastStatus(); graphics.Restore(saved); return result == Ok;
 }
+inline bool DrawCornerTopicGlyph(Gdiplus::Graphics& destination,const std::wstring& topic,unsigned width,unsigned height,Gdiplus::Color ink){
+    using namespace Gdiplus;Bitmap source(128,128,PixelFormat32bppARGB);
+    {Graphics graphics(&source);graphics.Clear(Color(0,0,0,0));if(source.GetLastStatus()!=Ok||!DrawTileTopicGlyph(graphics,topic,RectF(0,0,128,128),ink))return false;}
+    Rect area(0,0,128,128);BitmapData pixels{};if(source.LockBits(&area,ImageLockModeRead,PixelFormat32bppARGB,&pixels)!=Ok)return false;
+    INT left=128,top=128,right=-1,bottom=-1;for(INT y=0;y<128;++y){const auto* row=reinterpret_cast<const std::uint32_t*>(static_cast<const BYTE*>(pixels.Scan0)+static_cast<std::ptrdiff_t>(y)*pixels.Stride);
+        for(INT x=0;x<128;++x)if(row[x]>>24){left=(std::min)(left,x);top=(std::min)(top,y);right=(std::max)(right,x);bottom=(std::max)(bottom,y);}}
+    if(source.UnlockBits(&pixels)!=Ok||right<left||bottom<top||width<=2||height<=2)return false;
+    const REAL factor=(std::min)(static_cast<REAL>(width-2)/(right-left+1),static_cast<REAL>(height-2)/(bottom-top+1));
+    const REAL drawnWidth=(right-left+1)*factor,drawnHeight=(bottom-top+1)*factor;const auto saved=destination.Save();
+    destination.SetClip(Rect(1,1,static_cast<INT>(width-2),static_cast<INT>(height-2)));destination.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+    const auto status=destination.DrawImage(&source,RectF((width-drawnWidth)*.5f,(height-drawnHeight)*.5f,drawnWidth,drawnHeight),static_cast<REAL>(left),static_cast<REAL>(top),static_cast<REAL>(right-left+1),static_cast<REAL>(bottom-top+1),UnitPixel);
+    destination.Restore(saved);return status==Ok;
+}
 
 inline bool EnsureTileTopicAssets(const std::wstring& key, const std::wstring& directory,
         Assets& result, std::wstring& error, AssetBackground background = {}) {
@@ -246,7 +259,9 @@ inline bool EnsureTileTopicAssets(const std::wstring& key, const std::wstring& d
         const REAL width = static_cast<REAL>(asset.width), height = static_cast<REAL>(asset.height);
         const REAL side = (std::min)(width, height) * .64f;
         const auto ink = DarkArtworkInk(background) ? Color(255, 20, 20, 20) : Color(255, 255, 255, 255);
-        if (!DrawTileTopicGlyph(graphics, topic->key, RectF((width - side) / 2, (height - side) / 2, side, side), ink)) {
+        const bool corner=asset.width==asset.height&&(asset.width==44||asset.width==30);
+        if (!(corner?DrawCornerTopicGlyph(graphics,topic->key,asset.width,asset.height,ink):
+            DrawTileTopicGlyph(graphics, topic->key, RectF((width - side) / 2, (height - side) / 2, side, side), ink))) {
             error = L"Could not draw tile topic glyph."; return false;
         }
         const auto temporary = path + L".tmp-" + std::to_wstring(GetCurrentProcessId());

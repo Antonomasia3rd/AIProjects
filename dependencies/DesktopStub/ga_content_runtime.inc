@@ -669,6 +669,13 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
             key += L":" + std::to_wstring(value.size()) + L":" + value;
     key += L":" + std::to_wstring(snapshot.activationArguments.size()) + L":" + snapshot.activationArguments;
     key += L":branding:" + snapshot.secondaryBranding;
+    if(snapshot.appLauncherSource)key+=L":launcher:"+aip::app_launcher::ConfigurationKey(snapshot.launcher);
+    if(snapshot.gameSource)key+=L":GameRows1:"+aip::content::TextPresentationKey(snapshot.presentation);
+    if(snapshot.mailSource){
+        key+=L":MailNative1:"+std::to_wstring(snapshot.mailMessageIndex)+L":"+std::to_wstring(snapshot.mailIncludeLarge)+
+            L":"+std::to_wstring(snapshot.mailBadgeEnabled)+L":"+std::to_wstring(snapshot.mailUnreadCount);
+        for(const auto& row:snapshot.mailRows)for(const auto& field:{row.primary,row.secondary})key+=L":"+std::to_wstring(field.size())+L":"+field;
+    }
     if (snapshot.textMode != aip::content::TextMode::Off && snapshot.presentation.Active()) key += L":presentation:" + aip::content::TextPresentationKey(snapshot.presentation);
     if (snapshot.textMode != aip::content::TextMode::Off) key += L":prayer:" + std::to_wstring(snapshot.prayerSource);
     if (snapshot.textMode != aip::content::TextMode::Off && snapshot.prayerSource) {
@@ -687,7 +694,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
         key+=L":calendarFlavor:"+std::to_wstring(static_cast<int>(snapshot.calendarFlavor))+L":"+std::to_wstring(snapshot.calendarAgendaHighlightThrough);
         for(const auto& field:{snapshot.calendarAgendaHeader,snapshot.calendarAgendaEmpty})key+=L":"+std::to_wstring(field.size())+L":"+field;
         for(const auto& event:snapshot.calendarEvents){
-            for(const auto& field:{event.title,event.timeRange,event.startTime,event.dateLabel,event.location,event.mediumWhen,event.wideWhen})key+=L":calendarEvent:"+std::to_wstring(field.size())+L":"+field;
+            for(const auto& field:{event.title,event.timeRange,event.startTime,event.dateLabel,event.location,event.mediumWhen,event.wideWhen,event.dayKey})key+=L":calendarEvent:"+std::to_wstring(field.size())+L":"+field;
             key+=L":"+std::to_wstring(event.isToday)+L":"+std::to_wstring(event.allDay);
         }
     }
@@ -710,9 +717,11 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
 
 #include "ga_clock_calendar.inc"
 #include "ga_google_calendar_provider.inc"
+#include "ga_gmail_provider.inc"
 #include "ga_kuro_provider.inc"
 #include "ga_source_alert_runtime.inc"
 #include "ga_calendar_reminders.inc"
+#include "ga_tile_delivery_warning.inc"
 #include "ga_tile_instance_runtime.inc"
 static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 {

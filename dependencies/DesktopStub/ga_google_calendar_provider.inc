@@ -31,8 +31,9 @@ public:
             Cancel();view.configured=false;view.status=cfg.clientId.empty()?L"Set up Google Calendar in this tile's source settings.":L"Connect Google Calendar in this tile's source settings.";
             return view;
         }
-        if(display.daysAhead<1||display.daysAhead>31||display.maxEvents<1||display.maxEvents>10){Cancel();view.ok=false;view.status=L"Google Calendar supports a look-ahead of 1 to 31 days and 1 to 10 visible events.";return view;}
-        const auto requested=aip::google_calendar::ConfigurationKey(cfg)+L"|"+std::to_wstring(now/86400)+L"|"+std::to_wstring(display.daysAhead);
+        if((display.eventWindow==L"DaysAhead"&&(display.daysAhead<1||display.daysAhead>31))||display.maxEvents<1||display.maxEvents>10){Cancel();view.ok=false;view.status=L"Google Calendar supports a look-ahead of 1 to 31 days and 1 to 10 visible events.";return view;}
+        const int queryDays=display.eventWindow==L"TodayAndTomorrow"?2:display.daysAhead;
+        const auto requested=aip::google_calendar::ConfigurationKey(cfg)+L"|"+std::to_wstring(now/86400)+L"|"+std::to_wstring(queryDays);
         if(key!=requested){source.CancelPending();session->Clear();key=requested;}
         aip::google_calendar::Hooks hooks;
 #ifdef DESKTOPSTUB_INERT_HARDWARE
@@ -40,11 +41,11 @@ public:
 #endif
         const auto sharedSession=session;
         source.Request(requested,std::chrono::milliseconds(static_cast<long long>(cfg.refreshSeconds)*1000),
-            [cfg,now,display,hooks,sharedSession](const aip::content::AsyncSource<Result>::Cancel& canceled)->Result {
+            [cfg,now,queryDays,hooks,sharedSession](const aip::content::AsyncSource<Result>::Cancel& canceled)->Result {
                 auto result=std::make_shared<ContentCalendarResult>();std::vector<aip::google_calendar::Event> events;
                 const auto cancel=[&]{return canceled()||!g_running.load();};
                 const auto day=now/86400*86400;
-                if(!aip::google_calendar::FetchEvents(cfg,day,day+static_cast<UTC>(display.daysAhead+1)*86400,
+                if(!aip::google_calendar::FetchEvents(cfg,day,day+static_cast<UTC>(queryDays+1)*86400,
                     events,result->error,cancel,hooks,sharedSession.get()))return result;
                 const auto resolve=[](const Civil& civil,const std::wstring& iana,UTC& utc){
                     std::wstring windows;
@@ -71,9 +72,10 @@ public:
         if(!result->ok){view.ok=false;view.status=result->error.empty()?L"Google Calendar could not refresh.":result->error;return view;}
         if(includeReminders)view.reminderOccurrences=result->occurrences;
         DYNAMIC_TIME_ZONE_INFORMATION zone{};ResolveContentTimeZone(display.timeZone,zone);
+        UTC displayEnd=0;if(!ContentCalendarDisplayEnd(display,now,zone,displayEnd)){view.ok=false;view.status=L"The Calendar display-window boundary could not be resolved in this time zone.";return view;}
         for(const auto& event:result->occurrences){
             if(view.events.size()>=static_cast<size_t>(display.maxEvents))break;
-            if(event.start>=now+static_cast<UTC>(display.daysAhead)*86400||!(event.end>now||(event.start==event.end&&event.start>=now)))continue;
+            if(event.start>=displayEnd||!(event.end>now||(event.start==event.end&&event.start>=now)))continue;
             ContentDateTimeEvent row;if(BuildContentCalendarEvent(event,display,zone,now,row))view.events.push_back(std::move(row));
         }
         if(view.events.empty())view.status=L"No upcoming events.";return view;

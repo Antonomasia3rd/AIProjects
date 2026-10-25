@@ -32,6 +32,7 @@ using std::min;
 #include <utility>
 #include <cstdint>
 #include <memory>
+#include <functional>
 #include <new>
 #include <cmath>
 #include <commdlg.h>
@@ -153,6 +154,25 @@ static std::wstring g_instanceWindowTitle;
 static UINT g_singleInstanceMessage = 0;
 static UINT g_taskbarCreatedMessage = 0;
 static HANDLE g_singleInstanceMutex = nullptr;
+static bool ProfileManagerSuppressTray();
+static bool EnsureProfileBalloonTray();
+static bool ProfileManagerCurrentIniOwnerAllowed(const std::wstring&,std::wstring&);
+static bool RouteDefaultProfileForCurrentUser(const std::wstring&,const std::vector<std::wstring>&,int&,std::wstring&);
+static bool RouteCurrentProfileToOwnedRuntime(const std::vector<std::wstring>&,const std::function<void()>&,int&,std::wstring&);
+static bool EnsureCurrentProfileIdentity(std::wstring&);
+static bool ResolveManagedRuntimeDefaultIni(std::wstring&,std::wstring&);
+static bool HandleProfileManagerArguments(const std::vector<std::wstring>&,int&,std::wstring&);
+static void ShowProfileManager(HWND);
+static void OfferFreshDesktopStubProfile(HWND);
+static void AppendProfilesMenu(HMENU);
+static bool DispatchProfileManagerCommand(HWND,UINT);
+static void StartConfiguredProfiles();
+static void ClearProfileManager();
+static bool HandleProfileManagerMessage(UINT);
+static bool IsProfileManagerDialogMessage(MSG*);
+static bool FinalizePendingProfileIdentityMigration(std::wstring&);
+static bool CompleteProfileIdentityMigration(bool,bool&,std::wstring&);
+static bool RecoverProfileIdentityMigration(bool,bool&,std::wstring&);
 
 #include "..\dependencies\desktop_app_baseline.h"
 #include "..\dependencies\startup_shortcut.inc"
@@ -176,8 +196,10 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "../dependencies/DesktopStub/ga_wallpaper.inc"
 #include "../dependencies/DesktopStub/ga_content_state.inc"
 #include "../dependencies/DesktopStub/ga_gallery_runtime.inc"
+#include "../dependencies/app_launcher_win32.inc"
 #include "../dependencies/DesktopStub/ga_secondary_tile_api.inc"
 #include "../dependencies/DesktopStub/tile_text_layout.h"
+#include "../dependencies/mail_tile_layout.h"
 #include "../dependencies/DesktopStub/ga_image.inc"
 #include "../dependencies/DesktopStub/ga_registration.inc"
 #include "../dependencies/DesktopStub/ga_generation.inc"
@@ -188,6 +210,7 @@ static HANDLE g_singleInstanceMutex = nullptr;
 #include "../dependencies/DesktopStub/ga_discord_profile.inc"
 #include "../dependencies/DesktopStub/ga_media_actions.inc"
 #include "../dependencies/DesktopStub/ga_tray.inc"
+#include "../dependencies/DesktopStub/ga_profile_manager.inc"
 #include "../dependencies/DesktopStub/ga_render_only.inc"
 #include "../dependencies/DesktopStub/ga_app.inc"
 #undef MessageBoxW

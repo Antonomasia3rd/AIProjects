@@ -168,3 +168,34 @@ spacing, icon scale/placement and branding, with deliberate native/type-specific
 exceptions explained and configurable. Window Capture is currently a proposal
 for periodically captured window snapshots; API choice, fastest useful cadence,
 minimized/occluded/protected-window behavior and idle cost require research.
+
+October 25 continuation: Gmail / Google Workspace is the selected first Mail
+provider. Separate tray icons are the selected profile default. Current source,
+validation and remaining acceptance boundaries are tracked in
+[desktopstub-profiles-mail-ux-2026-10-25.md](desktopstub-profiles-mail-ux-2026-10-25.md).
+
+## Battery critical-action feedback, October 25
+
+User addition for the upcoming Battery source: support a dynamic critical-action
+view. Example: at 25% charge with Windows Critical Battery Level 20%, show the
+ordinary 25% and available runtime estimate, a configurable action sentence such
+as "Your computer is about to Hibernate", and a top-right "(%) remaining" with
+5. That corner number is percentage points before the critical threshold,
+`max(0, currentPercent - criticalPercent)`, not current charge or runtime.
+
+Read the active Windows battery policy/action for the relevant power source;
+do not hardcode Hibernate or assume the configured action is guaranteed to run
+immediately. Keep any runtime estimate separate and omit/replace it if unknown.
+All aspects follow the standing CLI/INI/GUI rule: visibility mode (Windows
+reserve threshold, custom absolute threshold, custom margin above critical,
+Always, Off), thresholds/margin, enabled power-source states, action text and
+label templates, top-right metric/label, typography, layout, and unknown-data
+fallbacks. Reserve is a useful default gate, but must not be the only gate:
+some users intentionally configure unusual or inverted reserve/critical levels.
+Always must work independently of Reserve. Avoid warning about an imminent
+action solely from a percentage estimate when the active policy cannot support
+that claim; the sentence itself remains configurable as requested.
+
+This remains part of the deferred Battery implementation, alongside charge,
+plugged-in/not-charging state, wear level and current capacity in Wh. The active
+profile storage/command-line interoperability fix retains priority.
