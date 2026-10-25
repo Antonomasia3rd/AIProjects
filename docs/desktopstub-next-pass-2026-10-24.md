@@ -187,6 +187,19 @@ explicit existing-profile choices; audit legacy upgrades separately. Validate
 fresh PC/VM, uninstall/reinstall and deleted-INI paths, and reassess packaging/
 single-EXE portability from evidence before promising the old copy-and-run flow.
 
+Additional Windows 10 1809 findings, October 25: the user reports the main
+Desktop tile does not show wallpaper (the screenshot shows its static icon),
+and Prayer Times lacks its static icon; other tile types may also be affected.
+The live Prayer face in the screenshot additionally lacks corner branding.
+These remain unresolved. The screenshot reports an 1809/build 17763 VM, with
+Prayer data updating, so do not blame a general lack of Live Tile support.
+Establish the DesktopStub version, delivery mode and exact OS configuration;
+compare primary/secondary and Registration/LiveTile paths. Check real rendered
+assets, manifest/logo metadata, 1809 API behavior and installed icon-font glyphs
+plus vector fallback. Existing host font/fallback code is not proof of native
+1809 acceptance. Private screenshot evidence is retained under
+`build/review-validation/Feedback-Win10-1809-20261025/`.
+
 ## Battery critical-action feedback, October 25
 
 User addition for the upcoming Battery source: support a dynamic critical-action
