@@ -174,6 +174,19 @@ provider. Separate tray icons are the selected profile default. Current source,
 validation and remaining acceptance boundaries are tracked in
 [desktopstub-profiles-mail-ux-2026-10-25.md](desktopstub-profiles-mail-ux-2026-10-25.md).
 
+Latest first-run direction, October 25: the user explicitly requests the familiar
+v25-and-earlier first-run behavior, with the Desktop tile using **Registration
+by default**. This supersedes the intended future LiveTile-first default; the
+LiveTile reset/delivery records above remain historical descriptions of what
+was installed. This change is unresolved and has not been applied to code or
+the active configuration. Verify the actual v25 defaults and setup behavior,
+keep Desktop wallpaper as the sole initial tile with optional modules/Startup
+off, and remove confusing missing-package retry/setup behavior from the ordinary
+fresh launch. All delivery options remain configurable in CLI/INI/GUI. Preserve
+explicit existing-profile choices; audit legacy upgrades separately. Validate
+fresh PC/VM, uninstall/reinstall and deleted-INI paths, and reassess packaging/
+single-EXE portability from evidence before promising the old copy-and-run flow.
+
 ## Battery critical-action feedback, October 25
 
 User addition for the upcoming Battery source: support a dynamic critical-action
