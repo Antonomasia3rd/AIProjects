@@ -79,3 +79,36 @@ Calendar parity, lyrics, timetable, fitness, Window Capture, Widgets, charging
 ETA/Smart Charging, performance/raster investigations and native acceptance.
 Injected/offscreen gates are not proof of real sign-in, hardware, Start image
 display or every multi-user/mixed-delivery deployment.
+
+## Delivered validation and reset
+
+The source change is `1950eee`. The shareable ZIP is
+`DesktopStub/releases/DesktopStub-v27-beta1-x64.zip`, SHA256
+`E48C80FBC8C30013C209DE01CBCF0ED5893F0F526B3E2F2FAF2F9DEB34D96D12`.
+All three matching EXEs carry version 27.0.0.1 and scanned clean.
+
+Final gates: 2,040 combined host checks, 2,285 source checks, 180 synthetic/native
+SMTC contracts with system media reads disabled, 4,010 historical migration
+checks, 69 existing instance checks, 1,644 icon-policy checks, 161 native icon
+checks, 774 existing asset checks, 398,520 pixel/render checks, 39 registration
+model checks and 60 activation-binding checks. Private compiled CLI configuration
+round-tripped the new source/font fields and rejected an invalid occurrence
+without writing or assigning a resident identity.
+
+After pushing, the user-authorized reset archived the old project build,
+validation build, installation profile coordinators and owned Registration
+state at `artifacts/desktopstub-reset-20261026-175309-dad291`. It removed only
+matching current-user packages. An ordinary first launch was then tested for
+75 seconds with the broker and launcher temporarily absent: it retained
+Registration/Main, generated Medium/Wide/Large wallpaper assets and registered
+exactly one main package at its own directory, with a successful four-second
+generation/registration batch. No explicit setup command was used.
+
+The trial resident was stopped and its package/configuration removed too.
+Both helpers were restored. The final project build contains seven release
+files, no INI/generated manifest/images, and no running resident. The shared
+installation profile directory is absent. The previous developer output is
+recoverable in the ignored archive, rather than mixed into the beta payload.
+The core Desktop copy-and-run path is therefore verified on the host; the full
+three-file payload remains recommended for the additional features. Real 1809
+Start image display and arbitrary account/custom-INI acceptance remain open.

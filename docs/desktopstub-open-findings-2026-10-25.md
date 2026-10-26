@@ -2,7 +2,7 @@
 
 This is a current reconciliation of the user's feedback, not a copy of every historical TODO. It checks the current source against [the original audit](REWORK_AUDIT.md), [October 14 feedback](next-work-user-feedback-2026-10-14.md), [the October 24 checkpoint](desktopstub-next-pass-2026-10-24.md), and later delivery records. **Implemented** means source/validation evidence exists; **native acceptance** means real Windows/account/hardware behavior still needs evidence. Neither means every original requirement is closed.
 
-Snapshot: October 26 beta implementation is complete and source/inert gates pass; final native cold-start/reset acceptance is being recorded. Preserve the user's current settings, accounts, photo files, package identities and Start pins. Earlier authorized resets were completed with backups; another reset is not an outstanding action. Final delivery hashes/health belong in the relevant delivery record, not an assumed new installation here.
+Snapshot: October 26 beta implementation is complete and source/inert gates pass; the host native cold-start/reset check passed, and the shareable beta is delivered. Preserve the user's current settings, accounts, photo files, package identities and Start pins. Earlier authorized resets were completed with backups; another reset is not an outstanding action. Final delivery hashes/health belong in the relevant delivery record, not an assumed new installation here.
 
 ## Current priority findings
 
