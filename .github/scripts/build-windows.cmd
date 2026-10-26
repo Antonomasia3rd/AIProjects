@@ -220,6 +220,8 @@ if not "%STATUS%"=="0" exit /b %STATUS%
 call :RecordArtifact "%REPO%\DesktopStub\build\DesktopStub.exe"
 if errorlevel 1 exit /b %ERRORLEVEL%
 call :RecordArtifact "%REPO%\DesktopStub\build\DesktopStubLiveTileBroker.exe"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :RecordArtifact "%REPO%\DesktopStub\build\DesktopStubTileLauncher.exe"
 exit /b %ERRORLEVEL%
 
 :BuildCharmTray

@@ -25,6 +25,11 @@ on:
           - CharmTray
           - SecureDesktopLauncher
           - TaskSchedulerMigration
+      desktopstub_draft_beta:
+        description: Create a draft DesktopStub beta release test (select DesktopStub)
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: windows-build-${{ github.ref }}
@@ -109,6 +114,8 @@ jobs:
     name: Build Windows binaries
     needs: [detect-projects, test-portable-layout]
     runs-on: windows-2022
+    outputs:
+      desktopstub_beta_tag: ${{ steps.desktopstub-beta.outputs.tag }}
     permissions:
       contents: read
 
@@ -163,13 +170,30 @@ jobs:
         run: tools\TestCapsBlinkEngine.cmd
 
       - name: Prepare reusable release versions
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-projects.outputs.release_project_list != ''
+        if: vars.AUTO_RELEASE_ENABLED == 'true' && !contains(github.event.head_commit.message, '[ci-artifacts-only]') && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-projects.outputs.release_project_list != ''
         shell: cmd
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PROJECT_LIST: ${{ needs.detect-projects.outputs.release_project_list }}
           REPO: ${{ github.repository }}
         run: .github\scripts\Prepare-ReleaseVersions.cmd
+
+      - name: Configure DesktopStub beta testing
+        id: desktopstub-beta
+        if: needs.detect-projects.outputs.build_desktop_stub == 'true' && (vars.AUTO_RELEASE_ENABLED != 'true' || contains(github.event.head_commit.message, '[ci-artifacts-only]') || inputs.desktopstub_draft_beta)
+        shell: pwsh
+        env:
+          DRAFT_BETA: ${{ inputs.desktopstub_draft_beta }}
+          SELECTED_PROJECT: ${{ inputs.project }}
+        run: |
+          if ($env:DRAFT_BETA -eq 'true' -and $env:SELECTED_PROJECT -ne 'DesktopStub') {
+            throw 'Select DesktopStub when requesting a draft beta release test.'
+          }
+          $tag = 'DesktopStub-v27-beta2'
+          if ($env:DRAFT_BETA -eq 'true') { $tag += '-actions-' + $env:GITHUB_RUN_ID + '-' + $env:GITHUB_RUN_ATTEMPT }
+          "DESKTOPSTUB_VERSION=27.0.0.2" >> $env:GITHUB_ENV
+          "DESKTOPSTUB_RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Build
         shell: cmd
@@ -274,6 +298,7 @@ jobs:
           path: |
             DesktopStub/build/DesktopStub.exe
             DesktopStub/build/DesktopStubLiveTileBroker.exe
+            DesktopStub/build/DesktopStubTileLauncher.exe
           if-no-files-found: error
 
       - name: Upload CharmTray artifact
@@ -328,10 +353,11 @@ jobs:
 
   auto-release:
     name: Create project releases
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-projects.outputs.release_project_list != ''
+    if: vars.AUTO_RELEASE_ENABLED == 'true' && !contains(github.event.head_commit.message, '[ci-artifacts-only]') && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-projects.outputs.release_project_list != ''
     needs:
       - detect-projects
       - build-windows
+      - attest-build-provenance
     runs-on: windows-2022
     permissions:
       contents: write
@@ -356,3 +382,34 @@ jobs:
           REPO: ${{ github.repository }}
           FULL_SHA: ${{ github.sha }}
         run: .github\scripts\Publish-ProjectReleases.cmd -ArtifactsRoot artifacts
+
+  desktopstub-draft-beta:
+    name: Create draft DesktopStub beta release test
+    if: github.event_name == 'workflow_dispatch' && inputs.desktopstub_draft_beta && inputs.project == 'DesktopStub'
+    needs: [build-windows, attest-build-provenance]
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified DesktopStub payload
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: DesktopStub
+          path: payload
+      - name: Create draft prerelease without publishing or overwriting
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BETA_TAG: ${{ needs.build-windows.outputs.desktopstub_beta_tag }}
+        run: |
+          if ($env:BETA_TAG -notmatch '^DesktopStub-v27-beta2-actions-[0-9]+-[0-9]+$') { throw 'Unexpected beta test tag.' }
+          $files = @('DesktopStub.exe','DesktopStubLiveTileBroker.exe','DesktopStubTileLauncher.exe') | ForEach-Object {
+            $file = Get-Item -LiteralPath (Join-Path 'payload' $_) -ErrorAction Stop
+            if ($file.VersionInfo.FileVersion -ne '27.0.0.2') { throw ('Unexpected beta FileVersion: ' + $file.Name) }
+            $file.FullName
+          }
+          $files | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetFileName($_) } | Set-Content -LiteralPath payload/SHA256SUMS.txt
+          $notes = 'Draft-only GitHub Actions beta test. Source commit: ' + $env:GITHUB_SHA + '. Not a stable release; no installed settings or accounts are included.'
+          $notes | Set-Content -LiteralPath payload/release-notes.txt
+          & gh release create $env:BETA_TAG @files payload/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title $env:BETA_TAG --notes-file payload/release-notes.txt --draft --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) { throw 'Draft prerelease creation failed; no existing release was edited or deleted.' }

@@ -228,7 +228,8 @@
     "releaseTagEnvironment": "DESKTOPSTUB_RELEASE_TAG",
     "artifactPaths": [
       "DesktopStub/build/DesktopStub.exe",
-      "DesktopStub/build/DesktopStubLiveTileBroker.exe"
+      "DesktopStub/build/DesktopStubLiveTileBroker.exe",
+      "DesktopStub/build/DesktopStubTileLauncher.exe"
     ]
   },
   {
