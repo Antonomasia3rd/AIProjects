@@ -4,10 +4,17 @@ Source-only local Windhawk mods and the LockScreenWin10 research project.
 Windhawk manages their settings, loading and compilation; these sources remain
 under `legacy/` rather than the shared AIProjects application runtime.
 
-This catalog covers the **20 tracked `.wh.cpp` files, representing 16 distinct
-mod IDs**, as of 2026-10-15. Names, versions and declared purposes come from the
-source headers. This metadata review does not verify runtime behavior, Windows
-build compatibility or safe combinations of mods.
+The 2026-10-26 [LogonUI Tweaks alpha5g candidate](LogonUiTweaksCandidate.md)
+adds a workspace copy of the installed alpha5f source with two audited fixes.
+It is not ready to install or hot-reload; its inherited XAML lifetime issue and
+the native Back restoration remain open. Its dedicated build and inert tests
+are separate from `TestWindhawkMods.cmd`.
+
+The original 2026-10-15 catalog covered 20 `.wh.cpp` files and 16 distinct mod
+IDs. With the alpha5g candidate it now lists **21 files and 17 distinct IDs**.
+Names, versions and declared purposes come from the source headers. This
+metadata review does not verify runtime behavior, Windows build compatibility
+or safe combinations of mods.
 
 ## Local mod catalog
 
@@ -22,6 +29,7 @@ build compatibility or safe combinations of mods.
 | [local@lockapp-xaml-dumper.wh.cpp](local@lockapp-xaml-dumper.wh.cpp) | `lockapp-xaml-dumper` | LockApp XAML Dumper · 0.5.0 | Records LockApp's XAML tree, properties, geometry and visual states for offline comparison. |
 | [local@logonui-battery-volume-controls.wh.cpp](local@logonui-battery-volume-controls.wh.cpp) | `logonui-battery-volume-controls` | LogonUI Battery & Volume Controls · 1.0.0 | Adds configurable battery and volume controls to sign-in and security screens. |
 | [local@logonui-scale.wh.cpp](local@logonui-scale.wh.cpp) | `logonui-scale` | LogonUI Custom Scale · 1.0.0 | Gives the sign-in screen independent XAML scaling and input-coordinate compensation. |
+| [local@logonui-tweaks.wh.cpp](local@logonui-tweaks.wh.cpp) | `logonui-tweaks` | LogonUI Tweaks · 0.1.0-alpha5g candidate | Adds native-style system-control and user-list tweaks; source candidate with unresolved lifecycle work. |
 | [local@mouse-7.wh.cpp](local@mouse-7.wh.cpp) | `mouse-7` | MOUSE-7 — Tablet Mode mouse diagnostic suite · 1.0.16 | Collects Tablet Mode mouse and shell window-management diagnostics. |
 | [local@snipping-tool-border-fix.wh.cpp](local@snipping-tool-border-fix.wh.cpp) | `snipping-tool-border-fix` | Snipping Tool Border Fix · 1.0 | Disables extended-frame-bound queries in Snipping Tool to avoid the Smart Crop border issue. |
 | [local@soft-lock-screen-combined-lab.wh.cpp](local@soft-lock-screen-combined-lab.wh.cpp) | `soft-lock-screen-combined-lab` | Soft Lock Screen Combined Lab · 0.3.0 | Experiments with dismissible lock-screen presentation and passive LockApp validation for a specific Windows build. |
