@@ -1,5 +1,11 @@
 # Resume checkpoint — October 26, after v27 beta 1
 
+**Latest repository state:** all checkpoints are merged/pushed on `main` in the
+original D: checkout. See [main consolidation](main-consolidation-2026-10-26.md)
+for the two remaining follow-ups: Codex blocks removing this chat's primary
+extra checkout; hosted CI now reaches the mixed native/managed INI fixture and
+fails because the native worker exits 2. Use D: main explicitly for next work.
+
 **Latest completion:** [beta 2 delivery](desktopstub-beta2-2026-10-26.md)
 supersedes the initial request snapshot below. Properties/Profiles/Kuro/host
 preparation changes are implemented and validated, research reports are saved,
