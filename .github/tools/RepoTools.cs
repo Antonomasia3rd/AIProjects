@@ -555,6 +555,8 @@ static class RepoTools
             relative.StartsWith("asusblink/", StringComparison.OrdinalIgnoreCase) ||
             relative.Equals("content_sources", StringComparison.OrdinalIgnoreCase) ||
             relative.StartsWith("content_sources/", StringComparison.OrdinalIgnoreCase) ||
+            relative.Equals("third_party", StringComparison.OrdinalIgnoreCase) ||
+            relative.StartsWith("third_party/", StringComparison.OrdinalIgnoreCase) ||
             relative.Equals("hardware", StringComparison.OrdinalIgnoreCase) ||
             relative.StartsWith("hardware/", StringComparison.OrdinalIgnoreCase))
             return null;
@@ -729,6 +731,9 @@ static class RepoTools
             ProductOwnedDependencyOwner("dependencies/asusblink/service.cpp") != null ||
             ProductOwnedDependencyOwner("dependencies/content_sources") != null ||
             ProductOwnedDependencyOwner("dependencies/content_sources/smtc.inc") != null ||
+            ProductOwnedDependencyOwner("dependencies/third_party") != null ||
+            ProductOwnedDependencyOwner("dependencies/third_party/WebView2") != null ||
+            ProductOwnedDependencyOwner("dependencies/third_party_other/module.inc") != "third_party_other" ||
             ProductOwnedDependencyOwner("dependencies/content_sources_other/module.inc") != "content_sources_other")
             throw new InvalidOperationException("Shared content-source namespace classification is incorrect.");
 
