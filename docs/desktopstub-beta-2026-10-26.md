@@ -76,7 +76,10 @@ their normal Windows WebView2 runtime; a basic Desktop tile does not.
 
 See [current open findings](desktopstub-open-findings-2026-10-25.md) for incomplete
 Calendar parity, lyrics, timetable, fitness, Window Capture, Widgets, charging
-ETA/Smart Charging, performance/raster investigations and native acceptance.
+ETA/Smart Charging, the raster investigation and native acceptance. Performance
+is completed for now based on the user's October 26 feedback; do not reopen its
+historical investigations without a new regression. New UI/provider requests
+are checkpointed in [the latest resume note](desktopstub-next-pass-2026-10-26.md).
 Injected/offscreen gates are not proof of real sign-in, hardware, Start image
 display or every multi-user/mixed-delivery deployment.
 
@@ -109,6 +112,9 @@ Both helpers were restored. The final project build contains seven release
 files, no INI/generated manifest/images, and no running resident. The shared
 installation profile directory is absent. The previous developer output is
 recoverable in the ignored archive, rather than mixed into the beta payload.
+That is the historical end-of-reset snapshot, not a current-state guarantee:
+the user has since relaunched the beta and edited preferences. Preserve the
+present INI, package and resident state rather than repeating that reset.
 The core Desktop copy-and-run path is therefore verified on the host; the full
 three-file payload remains recommended for the additional features. Real 1809
 Start image display and arbitrary account/custom-INI acceptance remain open.

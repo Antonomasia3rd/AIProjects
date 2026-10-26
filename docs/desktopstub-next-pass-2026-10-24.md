@@ -1,5 +1,10 @@
 # Resume checkpoint and standing requirements, October 24
 
+Latest resume instructions: [October 26 checkpoint](desktopstub-next-pass-2026-10-26.md).
+Older state snapshots and pending directions below are chronological; do not
+override the latest user clarifications, performance closure or current-state
+preservation instructions with them.
+
 The user explicitly deferred Mail and the remaining findings to the next turn /
 usage reset. Usage was checked at97% consumed. This checkpoint changes no product
 code/settings, runs no builds/tests, and performs no installation or reset.
