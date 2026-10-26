@@ -26,6 +26,8 @@ static void TestDesktopHostSetup(const std::wstring& image){
     }
     contentTestCommandLine=L"DesktopStub.exe --setup-desktop --ini C:\\private-setup.ini";
     Check(ParseCommandLineOptions()&&g_commandLine.setupDesktop&&g_commandLine.customIniPath,"explicit Desktop setup accepts only its profile selector");
+    contentTestCommandLine=L"DesktopStub.exe --prepare-live-tile-host --ini C:\\private-setup.ini";
+    Check(ParseCommandLineOptions()&&g_commandLine.setupDesktop&&g_commandLine.customIniPath,"discoverable host preparation alias has the same explicit admission");
     g_commandLine=command;g_commandLine.renderOnly=false;g_commandLine.configureOnly=false;
     const std::wstring profile=L"[Tiles]\r\nSchemaVersion=1\r\nInstances=desktop,unused-notes\r\n[Tile.desktop]\r\nType=Wallpaper\r\nName=Desktop\r\nPrimary=1\r\nDelivery.Mode=Registration\r\nContent.Background=Image\r\nContent.ImagePath="+image+
         L"\r\n[Tile.unused-notes]\r\nType=Genshin\r\nName=Unused game\r\nDelivery.Mode=LiveTile\r\n";
@@ -34,25 +36,47 @@ static void TestDesktopHostSetup(const std::wstring& image){
     g_testDesktopHostSetupIdentity=DesktopSetupTestIdentity;g_testDesktopHostSetupQueue=DesktopSetupTestQueue;g_testDesktopHostSetupShutdown=DesktopSetupTestShutdown;
     desktopSetupIdentity=false;desktopSetupQueues=desktopSetupShutdowns=0;desktopSetupFrames.clear();
     HMENU menu=CreatePopupMenu();PopulateDesktopStubTrayMenu(menu,true,false);
-    const std::function<bool(HMENU)> findSetup=[&](HMENU current){for(int i=0;i<GetMenuItemCount(current);++i){if(GetMenuItemID(current,i)==ID_SETUP_DESKTOP_HOST)return true;const auto child=GetSubMenu(current,i);if(child&&findSetup(child))return true;}return false;};
-    Check(findSetup(menu),"unpackaged Tiles menu exposes explicit Desktop host setup");DestroyMenu(menu);
+    const std::function<bool(HMENU,UINT)> findCommand=[&](HMENU current,UINT command){for(int i=0;i<GetMenuItemCount(current);++i){if(GetMenuItemID(current,i)==command)return true;const auto child=GetSubMenu(current,i);if(child&&findCommand(child,command))return true;}return false;};
+    const auto findSetup=[&](HMENU current){return findCommand(current,ID_SETUP_DESKTOP_HOST);};
+    Check(findSetup(menu),"unpackaged advanced package page exposes explicit host preparation");
+    HMENU tilesMenu=nullptr,advancedMenu=nullptr;for(int i=0;i<GetMenuItemCount(menu);++i){const auto child=GetSubMenu(menu,i);if(!child)continue;
+        if(findCommand(child,ID_USE_PS))advancedMenu=child;
+        for(const auto& command:g_tileInstanceMenuCommands)if(command.second.verb==TileInstanceMenuVerb::Add&&findCommand(child,command.first))tilesMenu=child;}
+    Check(tilesMenu&&!findSetup(tilesMenu)&&advancedMenu&&findSetup(advancedMenu),"ordinary Tiles menu has no mandatory-looking setup action; advanced page keeps it available");DestroyMenu(menu);
     const auto providers=g_tileInstanceProviders.size();
     Check(RequestDesktopHostSetup(nullptr)&&g_desktopHostSetupPending&&desktopSetupQueues==1,"explicit setup queues background main-package work");
-    Check(desktopSetupFrames.size()==1&&desktopSetupFrames.front().secondaryTileId.empty()&&desktopSetupFrames.front().policy.Mode()==L"LiveTile"&&
+    Check(desktopSetupFrames.size()==1&&desktopSetupFrames.front().secondaryTileId.empty()&&desktopSetupFrames.front().policy.Mode()==L"Registration"&&
         desktopSetupFrames.front().backgroundPath==image&&g_tileInstanceProviders.size()==providers,
         "setup freezes only the primary Wallpaper snapshot and starts no unused game provider");
+    Check(IniReadS(L"Tile.desktop",L"Delivery.Mode",L"")==L"Registration"&&
+        desktopSetupFrames.front().policy.Read(L"Settings",L"PrimaryRegistration",L"")==L"Main","preparing Live Tile support preserves Desktop Registration and freezes main host routing");
+    desktopSetupAdmissions=0;
+    Check(Generate(image.c_str(),L"Explicit Separate to main host preparation",false,&desktopSetupFrames.front())&&desktopSetupAdmissions==1,
+        "actual generation admission permits a captured Separate policy only for the explicitly prepared Main host job");
+    IniWrite(L"Tile.desktop",L"Delivery.ComTimeoutMs",L"12345");
+    Check(!Generate(image.c_str(),L"Changed setup policy must be rejected",false,&desktopSetupFrames.front())&&desktopSetupAdmissions==1,
+        "host preparation receipt cannot bypass a policy change after capture");
+    WriteContentFixture(profile);PersistDesktopHostSetupState(true,true,false);
+    auto alteredSetup=desktopSetupFrames.front();alteredSetup.policy.values[L"settings.usepowershell"]=L"1";
+    Check(!Generate(image.c_str(),L"Unapproved policy override must be rejected",false,&alteredSetup)&&desktopSetupAdmissions==1,
+        "setup admission permits only Main routing and refuses unrelated frozen policy overrides");
     Check(g_relaunchAfterExit==0&&IniReadI(L"State",L"LiveTileModeReregistrationPending",0)==1,"setup defers packaged relaunch until successful generation completion");
     Check(!RequestDesktopHostSetup(nullptr)&&desktopSetupQueues==1,"duplicate setup does not queue another registration");
     CompleteDesktopHostSetup(nullptr);Check(g_desktopHostSetupPending&&desktopSetupShutdowns==0,"unknown completion cannot restart host");
     RecordGenerationCompletion(g_desktopHostSetupRequestId,false);CompleteDesktopHostSetup(nullptr);
     Check(!g_desktopHostSetupPending&&g_relaunchAfterExit==0&&desktopSetupShutdowns==0&&IniReadI(L"State",L"LiveTileModeReregistrationPending",1)==0,
         "failed main registration restores prior pending state and preserves resident");
+    Check(IniReadS(L"Tile.desktop",L"Delivery.Mode",L"")==L"Registration","failed host preparation cannot silently switch Desktop delivery");
     Check(RequestDesktopHostSetup(nullptr),"failed explicit setup can be retried");
     RecordGenerationCompletion(g_desktopHostSetupRequestId,true);CompleteDesktopHostSetup(nullptr);
     Check(!g_desktopHostSetupPending&&g_relaunchAfterExit==1&&desktopSetupShutdowns==1&&IniReadI(L"State",L"DesktopHostSetupPending",1)==0,
         "successful main registration alone authorizes packaged restart and clears progress marker");
     g_relaunchAfterExit=0;desktopSetupIdentity=true;
     Check(RequestDesktopHostSetup(nullptr)&&desktopSetupQueues==2,"already packaged host reports ready without registration");
+    desktopSetupIdentity=false;g_testDesktopHostSetupForeignIdentity=true;
+    Check(!RequestDesktopHostSetup(nullptr)&&desktopSetupQueues==2&&!g_desktopHostSetupPending,
+        "a foreign packaged context cannot claim this profile's host is ready or start deployment under the wrong caller");
+    g_testDesktopHostSetupForeignIdentity=false;
     desktopSetupIdentity=false;IniWrite(L"State",L"DesktopHostSetupPending",L"1");IniWrite(L"State",L"DesktopHostSetupPreviousPending",L"0");IniWrite(L"State",L"LiveTileModeReregistrationPending",L"1");
     Check(RecoverInterruptedDesktopHostSetup()&&g_desktopHostSetupRecovered&&IniReadI(L"State",L"DesktopHostSetupPending",1)==0&&
         IniReadI(L"State",L"LiveTileModeReregistrationPending",1)==0&&desktopSetupQueues==2,"interrupted setup restores marker without automatically queueing registration");

@@ -9,14 +9,20 @@
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <string_view>
+#include <winrt/Windows.UI.ViewManagement.h>
 #include "../properties_ui_model.h"
+#include "../profile_manager_ui.h"
+static bool ReadProfileManagerUi(aip::profiles::UiSnapshot&,std::wstring&);
+static bool ExecuteProfileManagerUi(HWND,const aip::profiles::UiAction&,std::wstring&);
 #ifndef DESKTOPSTUB_INERT_HARDWARE
 namespace desktop_settings {
+static constexpr int ProfilesSection=5,SectionCount=6;
 enum class Kind {Info,Page,Choice,Toggle,Edit,Action,Special};
 enum Special {SelectTile=1,AddTile,Back,ReloadPage,OpenIni,Contents};
 struct Node {
     Kind kind=Kind::Info;std::wstring label;std::vector<Node> children;
     TileInstanceMenuCommand command{};bool typed=false,checked=false,enabled=true;UINT global=0;int special=0;
+    bool profileCommand=false;aip::profiles::UiAction profileAction;std::wstring stableKey;
 };
 struct Tile {aip::content::TileInstance value;int gallery=-1;};
 using Navigation=aip::properties::NavigationRow;
@@ -56,7 +62,7 @@ struct State {
     std::wstring profile,revision,tileId;std::vector<Tile> tiles;aip::gallery::Configuration gallery;
     std::map<std::wstring,std::wstring> wording;
     std::vector<Node> root,globalRows;std::vector<std::size_t> path;std::vector<Navigation> navigation;std::vector<Hit> hits;
-    std::array<std::vector<Node>,5> sections;std::set<std::wstring> expanded{L"0"};
+    std::array<std::vector<Node>,SectionCount> sections;std::set<std::wstring> expanded{L"0"};
     std::vector<Node*> rows;Node tileRow,addRow,backRow,reloadRow;
     int section=0,focus=0,scroll=0,navScroll=0;bool closed=false;ULONGLONG lastClick=0;int lastHit=-1;
     ~State(){for(auto font:{regular,heading,sectionFont,selectedFont})if(font)DeleteObject(font);
@@ -117,6 +123,21 @@ static bool ContainsCommand(const Node& node,UINT id){if(node.global==id)return 
 static void GlobalRows(const std::shared_ptr<State>& s){
     s->globalRows.clear();if(s->section==0)return;
     const auto info=[&](const std::wstring& value){Node n;n.label=value;n.enabled=false;s->globalRows.push_back(std::move(n));};
+    if(s->section==ProfilesSection){
+        aip::profiles::UiSnapshot view;std::wstring error;
+        if(!ReadProfileManagerUi(view,error)){info(error);return;}
+        const auto convert=[&](const auto& self,const aip::profiles::UiRow& row)->Node{
+            Node node;node.label=row.label;node.checked=row.checked;node.enabled=row.enabled;node.stableKey=row.key;
+            switch(row.kind){case aip::profiles::UiKind::Info:node.kind=Kind::Info;break;
+            case aip::profiles::UiKind::Page:node.kind=Kind::Page;break;
+            case aip::profiles::UiKind::Action:node.kind=Kind::Action;node.profileCommand=true;break;
+            case aip::profiles::UiKind::Toggle:node.kind=Kind::Toggle;node.profileCommand=true;break;}
+            node.profileAction=row.action;for(const auto& child:row.children)node.children.push_back(self(self,child));return node;
+        };
+        for(const auto& row:aip::profiles::BuildUiRows(view,[](const wchar_t* key,const wchar_t* fallback){return Text(key,fallback);}))
+            s->globalRows.push_back(convert(convert,row));
+        return;
+    }
     if(s->section==4){info(L"DesktopStub "+DesktopStubVersionDisplayText());info(Text(L"SettingsWindowReference",L"ExplorerPatcher-style presentation, independently implemented for DesktopStub."));info(s->profile);return;}
     RegistryScope registry;WordingScope wording;HMENU menu=CreatePopupMenu();if(!menu)return;
     struct MenuOwner{HMENU menu;~MenuOwner(){DestroyMenu(menu);}} owned{menu};
@@ -136,11 +157,11 @@ static void GlobalRows(const std::shared_ptr<State>& s){
 }
 static void RebuildNavigation(const std::shared_ptr<State>& s){
     using aip::properties::Branch;std::vector<Branch> branches;
-    const std::pair<const wchar_t*,const wchar_t*> pages[]={{L"SettingsWindowTiles",L"Tiles"},{L"SettingsWindowPlugins",L"Plugins"},{L"SettingsWindowApplication",L"Application"},{L"SettingsWindowDiagnostics",L"Diagnostics"},{L"SettingsWindowAboutTitle",L"About"}};
+    const std::pair<const wchar_t*,const wchar_t*> pages[]={{L"SettingsWindowTiles",L"Tiles"},{L"SettingsWindowPlugins",L"Plugins"},{L"SettingsWindowApplication",L"Application"},{L"SettingsWindowDiagnostics",L"Diagnostics"},{L"SettingsWindowAboutTitle",L"About"},{L"SettingsWindowProfiles",L"Profiles"}};
     const auto children=[&](const auto& self,const std::vector<Node>& nodes,Branch& parent,unsigned depth)->void{if(depth>=8)return;
-        for(size_t i=0;i<nodes.size();++i)if(nodes[i].kind==Kind::Page){Branch child;child.label=nodes[i].label;child.key=parent.key+L"/"+std::to_wstring(i);child.section=parent.section;child.path=parent.path;child.path.push_back(i);
+        for(size_t i=0;i<nodes.size();++i)if(nodes[i].kind==Kind::Page){Branch child;child.label=nodes[i].label;child.key=parent.key+L"/"+(nodes[i].stableKey.empty()?std::to_wstring(i):nodes[i].stableKey);child.section=parent.section;child.path=parent.path;child.path.push_back(i);
             self(self,nodes[i].children,child,depth+1);parent.children.push_back(std::move(child));}};
-    for(int section=0;section<5;++section){Branch branch;branch.key=std::to_wstring(section);branch.label=Text(pages[section].first,pages[section].second);branch.section=section;
+    for(const int section:{0,ProfilesSection,1,2,3,4}){Branch branch;branch.key=std::to_wstring(section);branch.label=Text(pages[section].first,pages[section].second);branch.section=section;
         children(children,s->sections[section],branch,0);branches.push_back(std::move(branch));}
     s->navigation=aip::properties::Navigation(branches,s->expanded);
     RECT area{};GetClientRect(s->window,&area);const auto visible=(std::max)(1,(static_cast<int>(area.bottom)-D(*s,38)-ContentTop(*s))/D(*s,32));
@@ -150,8 +171,8 @@ static int SelectedNavigation(const State& s){int result=-1;size_t length=0;for(
     if(row.section==s.section&&row.path.size()<=s.path.size()&&std::equal(row.path.begin(),row.path.end(),s.path.begin())&&row.path.size()>=length){result=static_cast<int>(i);length=row.path.size();}}return result;}
 static void Reload(const std::shared_ptr<State>& s,bool preservePage=true){
     if(!s||s->closed||!IsWindow(s->window))return;
-    std::vector<std::wstring> trail;auto* before=s->section==0?&s->root:&s->globalRows;
-    for(const auto index:s->path){if(index>=before->size())break;trail.push_back((*before)[index].label);before=&(*before)[index].children;}
+    std::vector<std::pair<std::wstring,std::wstring>> trail;auto* before=s->section==0?&s->root:&s->globalRows;
+    for(const auto index:s->path){if(index>=before->size())break;trail.push_back({(*before)[index].stableKey,(*before)[index].label});before=&(*before)[index].children;}
     const auto previousTile=s->tileId;const auto previousFocus=s->focus,previousScroll=s->scroll;
     s->profile=Profile();std::wstring revision;if(!ReadIniFileForMutation(revision)){Status(s,L"The settings file could not be read.");return;}
     if(!s->revision.empty())SecureZeroMemory(&s->revision[0],s->revision.size()*sizeof(wchar_t));s->revision=std::move(revision);
@@ -180,10 +201,10 @@ static void Reload(const std::shared_ptr<State>& s,bool preservePage=true){
         }
     }else s->tileId.clear();
     const int activeSection=s->section;s->sections[0]=s->root;
-    for(int section=1;section<5;++section){s->section=section;GlobalRows(s);s->sections[section]=std::move(s->globalRows);}
+    for(int section=1;section<SectionCount;++section){s->section=section;GlobalRows(s);s->sections[section]=std::move(s->globalRows);}
     s->section=activeSection;s->globalRows=s->sections[activeSection];s->path.clear();s->focus=s->scroll=0;s->pointer.Cancel();
     if(preservePage&&(s->section!=0||previousTile==s->tileId)){auto* after=s->section==0?&s->root:&s->globalRows;
-        for(const auto& label:trail){const auto found=std::find_if(after->begin(),after->end(),[&](const Node& node){return node.label==label&&!node.children.empty();});
+        for(const auto& part:trail){const auto found=std::find_if(after->begin(),after->end(),[&](const Node& node){return (part.first.empty()?node.label==part.second:node.stableKey==part.first)&&!node.children.empty();});
             if(found==after->end())break;s->path.push_back(static_cast<std::size_t>(found-after->begin()));after=&found->children;}s->focus=previousFocus;s->scroll=previousScroll;}
     RebuildNavigation(s);InvalidateRect(s->window,nullptr,FALSE);
 }
@@ -231,6 +252,37 @@ static bool SupportsMainWindowMaterial(){
     OSVERSIONINFOW version{};version.dwOSVersionInfoSize=sizeof(version);
     return get&&get(&version)>=0&&version.dwMajorVersion>=10&&version.dwBuildNumber>=22621;
 }
+static COLORREF PropertiesHighlight(const std::shared_ptr<State>& s){
+    const auto toRgb=[](COLORREF c){return (static_cast<std::uint32_t>(GetRValue(c))<<16)|(GetGValue(c)<<8)|GetBValue(c);};
+    auto color=toRgb(GetSysColor(COLOR_HOTLIGHT));
+    const auto& cfg=s->properties;
+    if(s->contrast){auto safe=cfg;safe.highlightContrast=L"Readable";color=aip::properties::ReadableHighlight(color,toRgb(s->background),safe);}
+    else{
+        if(cfg.highlightMode==L"Custom")color=aip::properties::ColorRgb(cfg);
+        else{
+            const auto source=cfg.highlightSource;
+            DWORD dwm=0;BOOL opaque=FALSE;
+            if(s->composition.color&&SUCCEEDED(s->composition.color(&dwm,&opaque)))color=dwm&0xFFFFFF;
+            if(source==L"SystemHighlight")color=toRgb(GetSysColor(COLOR_HIGHLIGHT));
+            else if(source==L"SystemHotlight")color=toRgb(GetSysColor(COLOR_HOTLIGHT));
+            else if(source!=L"Dwm"){
+                try{using namespace winrt::Windows::UI::ViewManagement;
+                    auto type=UIColorType::Accent;
+                    if(source==L"Auto")type=s->dark?UIColorType::AccentLight1:UIColorType::AccentDark1;
+                    else if(source==L"AccentLight1")type=UIColorType::AccentLight1;else if(source==L"AccentLight2")type=UIColorType::AccentLight2;else if(source==L"AccentLight3")type=UIColorType::AccentLight3;
+                    else if(source==L"AccentDark1")type=UIColorType::AccentDark1;else if(source==L"AccentDark2")type=UIColorType::AccentDark2;else if(source==L"AccentDark3")type=UIColorType::AccentDark3;
+                    const auto value=UISettings{}.GetColorValue(type);color=(static_cast<std::uint32_t>(value.R)<<16)|(value.G<<8)|value.B;
+                }catch(...){/* DWM/system color already selected: no worker or retry timer. */}
+            }
+        }
+        // Mica has a slight tint; test a conservative theme surface as well as
+        // the opaque fallback rather than using an unreadable raw accent.
+        const auto surface=s->dark?0x202020u:0xF3F3F3u;
+        color=aip::properties::ReadableHighlight(color,surface,cfg);
+        color=aip::properties::ReadableHighlight(color,toRgb(s->background),cfg);
+    }
+    return RGB((color>>16)&255,(color>>8)&255,color&255);
+}
 static void Theme(const std::shared_ptr<State>& s){
     HIGHCONTRASTW high{};high.cbSize=sizeof(high);SystemParametersInfoW(SPI_GETHIGHCONTRAST,sizeof(high),&high,0);s->contrast=(high.dwFlags&HCF_HIGHCONTRASTON)!=0;
     DWORD light=1,bytes=sizeof(light);RegGetValueW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",L"AppsUseLightTheme",RRF_RT_REG_DWORD,nullptr,&light,&bytes);
@@ -241,10 +293,7 @@ static void Theme(const std::shared_ptr<State>& s){
     std::wstring preferenceError;aip::properties::Configuration preferences;
     if(aip::properties::ReadConfiguration([](const wchar_t* key,const wchar_t* fallback){return IniReadS(L"Properties",key,fallback);},preferences,preferenceError))s->properties=std::move(preferences);
     else s->properties={};
-    DWORD accent=0;BOOL opaque=FALSE;s->highlight=GetSysColor(COLOR_HIGHLIGHT);
-    if(c.color&&SUCCEEDED(c.color(&accent,&opaque)))s->highlight=RGB((accent>>16)&255,(accent>>8)&255,accent&255);
-    if(s->properties.highlightMode==L"Custom"){const auto color=aip::properties::ColorRgb(s->properties);s->highlight=RGB((color>>16)&255,(color>>8)&255,color&255);}
-    if(s->contrast)s->highlight=GetSysColor(COLOR_HIGHLIGHT);
+    s->highlight=PropertiesHighlight(s);
     const BOOL dark=s->dark;if(c.set&&FAILED(c.set(s->window,static_cast<DWMWINDOWATTRIBUTE>(20),&dark,sizeof(dark))))c.set(s->window,static_cast<DWMWINDOWATTRIBUTE>(19),&dark,sizeof(dark));
     BOOL composed=FALSE;bool glass=!s->contrast&&SupportsMainWindowMaterial()&&c.initialized&&c.set&&c.get&&c.enabled&&c.extend&&c.def&&c.active&&c.active()&&c.open&&c.close&&c.text&&c.begin&&c.end&&c.bits&&
         SUCCEEDED(c.enabled(&composed))&&composed;
@@ -266,15 +315,9 @@ static void Paint(const std::shared_ptr<State>& s,HDC destination){
         surface.previous=SelectObject(surface.dc,surface.bitmap);FillRect(surface.dc,&area,s->backgroundBrush);}
     const auto dc=surface.dc;SetBkMode(dc,TRANSPARENT);bool textFailed=false;
     RGBQUAD* bits=nullptr;int stride=0;if(surface.buffer&&(FAILED(s->composition.bits(surface.buffer,&bits,&stride))||!bits||stride<area.right)){surface.commit=false;FrameMode(s,false);InvalidateRect(s->window,nullptr,FALSE);return;}
-    const auto mark=[&](RECT r,int first,int last){const bool hover=s->pointer.hover>=first&&s->pointer.hover<=last,pressed=hover&&s->pointer.pressed>=first&&s->pointer.pressed<=last;
-        const auto alpha=aip::properties::InteractionAlpha(hover,pressed);if(!alpha)return false;
-        r.left=(std::max)(0L,r.left);r.top=(std::max)(0L,r.top);r.right=(std::min)(area.right,r.right);r.bottom=(std::min)(area.bottom,r.bottom);
-        if(surface.buffer&&bits&&stride>=area.right){for(LONG y=r.top;y<r.bottom;++y)for(LONG x=r.left;x<r.right;++x){auto& pixel=bits[y*stride+x];
-                pixel.rgbRed=static_cast<BYTE>((GetRValue(s->highlight)*alpha+127)/255);pixel.rgbGreen=static_cast<BYTE>((GetGValue(s->highlight)*alpha+127)/255);
-                pixel.rgbBlue=static_cast<BYTE>((GetBValue(s->highlight)*alpha+127)/255);pixel.rgbReserved=static_cast<BYTE>(alpha);}}
-        else {const auto blend=[&](BYTE front,BYTE back){return static_cast<BYTE>((front*alpha+back*(255-alpha)+127)/255);};const auto color=s->contrast?s->highlight:RGB(blend(GetRValue(s->highlight),GetRValue(s->background)),blend(GetGValue(s->highlight),GetGValue(s->background)),blend(GetBValue(s->highlight),GetBValue(s->background)));
-            const auto brush=CreateSolidBrush(color);if(brush){FillRect(dc,&r,brush);DeleteObject(brush);}}
-        return true;};
+    // Interaction is expressed through readable text/weight and the existing
+    // underlined navigation selection. Never tint the row's background.
+    const auto mark=[&](RECT,int first,int last){return s->pointer.hover>=first&&s->pointer.hover<=last;};
     const auto draw=[&](std::wstring_view text,RECT r,HFONT font,COLORREF color){if(text.empty()||r.right<=r.left||r.bottom<=r.top)return;SelectObject(dc,font?font:GetStockObject(DEFAULT_GUI_FONT));SetTextColor(dc,color);
         const DWORD flags=DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX;
         if(surface.buffer){DTTOPTS options{};options.dwSize=sizeof(options);options.dwFlags=DTT_COMPOSITED|DTT_TEXTCOLOR;options.crText=color;
@@ -295,7 +338,7 @@ static void Paint(const std::shared_ptr<State>& s,HDC destination){
     for(int index=s->navScroll;index<static_cast<int>(s->navigation.size());++index){RECT r{D(*s,15),top+(index-s->navScroll)*navHeight,D(*s,180),top+(index-s->navScroll+1)*navHeight};if(r.bottom>bottom)break;
         const auto& nav=s->navigation[index];const bool selected=index==selectedNavigation;const int left=r.left+D(*s,static_cast<int>(nav.depth)*14),first=static_cast<int>(s->hits.size());
         RECT label=r;label.left=left+D(*s,18);if(nav.expandable){RECT arrow=r;arrow.left=left;arrow.right=label.left;s->hits.push_back({arrow,true,index,true});}
-        s->hits.push_back({label,true,index});const bool mouse=mark(r,first,static_cast<int>(s->hits.size()-1));const auto color=s->contrast&&mouse?GetSysColor(COLOR_HIGHLIGHTTEXT):selected||mouse?s->highlight:s->foreground;
+        s->hits.push_back({label,true,index});const bool mouse=mark(r,first,static_cast<int>(s->hits.size()-1));const auto color=selected||mouse?s->highlight:s->foreground;
         if(nav.expandable){RECT arrow=r;arrow.left=left;arrow.right=label.left;draw(nav.expanded?L"\u25be":L"\u25b8",arrow,s->regular,color);}
         draw(nav.label,label,selected?s->selectedFont:s->sectionFont,color);}
     for(int index=s->scroll;index<static_cast<int>(s->rows.size());++index){RECT r{D(*s,195),top+(index-s->scroll)*rowHeight,area.right-D(*s,15),top+(index-s->scroll+1)*rowHeight};if(r.bottom>bottom)break;
@@ -305,11 +348,11 @@ static void Paint(const std::shared_ptr<State>& s,HDC destination){
         if(node.kind==Kind::Choice){for(const auto& choice:node.children)if(choice.checked){label+=L" : "+choice.label;break;}label+=L" \u25be";}
         if(node.kind==Kind::Page)label+=L" \u203a";
         bool mouse=false;if(node.enabled&&node.kind!=Kind::Info){const auto hit=static_cast<int>(s->hits.size());s->hits.push_back({r,false,index});mouse=mark(r,hit,hit);}
-        const auto color=!node.enabled?GetSysColor(COLOR_GRAYTEXT):s->contrast&&mouse?GetSysColor(COLOR_HIGHLIGHTTEXT):(index==s->focus&&s->focusArea==0)||mouse?s->highlight:s->foreground;
+        const auto color=!node.enabled?GetSysColor(COLOR_GRAYTEXT):(index==s->focus&&s->focusArea==0)||mouse?s->highlight:s->foreground;
         draw(label,r,s->pointer.pressed>=0&&s->pointer.pressed==s->pointer.hover&&mouse?s->sectionFont:s->regular,color);
     }
     RECT restart{D(*s,15),bottom+D(*s,6),D(*s,180),area.bottom-D(*s,6)};const auto hit=static_cast<int>(s->hits.size());s->hits.push_back({restart,false,-1,false,true});const bool restartMouse=mark(restart,hit,hit);
-    draw(Text(L"SettingsWindowRestart",L"Restart DesktopStub"),restart,s->regular,s->contrast&&restartMouse?GetSysColor(COLOR_HIGHLIGHTTEXT):restartMouse||s->focusArea==2?s->highlight:s->foreground);
+    draw(Text(L"SettingsWindowRestart",L"Restart DesktopStub"),restart,s->regular,restartMouse||s->focusArea==2?s->highlight:s->foreground);
     const RECT footer{D(*s,195),bottom+D(*s,6),area.right-D(*s,15),area.bottom-D(*s,6)};draw(s->actionFailed?std::wstring_view(FailureText):std::wstring_view(s->statusText),footer,s->regular,s->foreground);
     // The STATIC remains a name-change accessibility target. Its text is
     // painted here so an ordinary child control cannot cover Mica with RGB.
@@ -340,6 +383,13 @@ static void Apply(const std::shared_ptr<State>& s,Node node,const std::wstring* 
 static void Activate(const std::shared_ptr<State>& s,int index){
     Rows(s);if(index<0||static_cast<std::size_t>(index)>=s->rows.size())return;const Node node=*s->rows[index];if(!node.enabled)return;
     if(node.kind==Kind::Info)return;
+    if(node.profileCommand){
+        if(!RevisionMatches(s))return;std::wstring status;
+        const bool ok=ExecuteProfileManagerUi(s->window,node.profileAction,status);
+        Reload(s);Status(s,status.empty()?Text(ok?L"ProfilesActionComplete":L"ProfilesActionFailed",
+            ok?L"Profile action completed.":L"The profile action could not complete. Existing profiles were kept."):status);
+        if(!ok){s->actionFailed=true;InvalidateRect(s->window,nullptr,FALSE);}return;
+    }
     if(node.kind==Kind::Page){auto& page=Page(*s);for(std::size_t i=0;i<page.size();++i)if(&page[i]==s->rows[index]){s->path.push_back(i);break;}s->focus=s->scroll=0;InvalidateRect(s->window,nullptr,FALSE);return;}
     if(node.kind==Kind::Choice){HMENU menu=CreatePopupMenu();if(!menu)return;for(std::size_t i=0;i<node.children.size();++i)aip::AppendTrayMenuItem(menu,static_cast<UINT>(i+1),node.children[i].label,node.children[i].checked,node.children[i].enabled);
         POINT point{D(*s,195),ContentTop(*s)+D(*s,(index-s->scroll+1)*26)};ClientToScreen(s->window,&point);const auto chosen=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,s->window,nullptr);DestroyMenu(menu);
@@ -353,7 +403,7 @@ static void Activate(const std::shared_ptr<State>& s,int index){
         return;
     }
     if(node.kind==Kind::Special){
-        if(node.special==ReloadPage){Reload(s);Status(s,Text(L"SettingsWindowReloaded",L"Settings reloaded."));return;}
+        if(node.special==ReloadPage){Theme(s);Fonts(s);Reload(s);Status(s,Text(L"SettingsWindowReloaded",L"Settings reloaded."));return;}
         if(node.special==Back){if(!s->path.empty())s->path.pop_back();s->focus=s->scroll=0;InvalidateRect(s->window,nullptr,FALSE);return;}
         if(node.special==OpenIni){ShellExecuteW(s->window,L"open",s->profile.c_str(),nullptr,nullptr,SW_SHOWNORMAL);return;}
         if(node.special==Contents){ShowPagedTextDialog(s->window,L"All tile contents",BuildCurrentTileStatusPages());return;}
@@ -426,7 +476,7 @@ static LRESULT CALLBACK WindowProc(HWND window,UINT message,WPARAM wParam,LPARAM
             }else{switch(LOWORD(wParam)){case SB_LINEUP:--s->scroll;break;case SB_LINEDOWN:++s->scroll;break;case SB_PAGEUP:s->scroll-=visible;break;case SB_PAGEDOWN:s->scroll+=visible;break;
                 case SB_THUMBTRACK:{SCROLLINFO scroll{};scroll.cbSize=sizeof(scroll);scroll.fMask=SIF_TRACKPOS;GetScrollInfo(window,SB_VERT,&scroll);s->scroll=scroll.nTrackPos;break;}}}
             InvalidateRect(window,nullptr,FALSE);return 0;}
-        if(message==WM_KEYDOWN){Rows(s);if(wParam==VK_F5){Reload(s);return 0;}if(wParam==VK_ESCAPE){if(!s->path.empty()){s->path.pop_back();s->focus=s->scroll=0;InvalidateRect(window,nullptr,FALSE);}else DestroyWindow(window);return 0;}
+        if(message==WM_KEYDOWN){Rows(s);if(wParam==VK_F5){Theme(s);Fonts(s);Reload(s);return 0;}if(wParam==VK_ESCAPE){if(!s->path.empty()){s->path.pop_back();s->focus=s->scroll=0;InvalidateRect(window,nullptr,FALSE);}else DestroyWindow(window);return 0;}
             if(wParam==VK_F6){s->focusArea=(s->focusArea+1)%3;s->pointer.Cancel();InvalidateRect(window,nullptr,FALSE);return 0;}
             if(wParam==VK_LEFT||wParam==VK_RIGHT){const int selected=SelectedNavigation(*s);if(selected<0)return 0;const auto nav=s->navigation[selected];s->focusArea=1;
                 if(wParam==VK_RIGHT&&nav.expandable&&!nav.expanded)Expand(s,selected,true);
@@ -470,11 +520,18 @@ static bool OpenDesktopStubSettings(HWND owner) try {
     if(!s->status){DestroyWindow(s->window);return false;}Theme(s);Fonts(s);Reload(s);ShowWindow(s->window,SW_SHOW);SetForegroundWindow(s->window);SetFocus(s->window);return true;
 }catch(...){if(desktop_settings::current&&desktop_settings::current->window)DestroyWindow(desktop_settings::current->window);desktop_settings::current.reset();return false;}
 static void CloseDesktopStubSettings(){if(desktop_settings::current&&IsWindow(desktop_settings::current->window))DestroyWindow(desktop_settings::current->window);}
+static bool OpenDesktopStubProfilesSettings(HWND owner){
+    if(!OpenDesktopStubSettings(owner))return false;
+    const auto state=desktop_settings::current;if(!state||state->closed)return false;
+    state->section=desktop_settings::ProfilesSection;state->path.clear();state->expanded.insert(std::to_wstring(state->section));
+    desktop_settings::Reload(state,false);desktop_settings::Rows(state);return true;
+}
 static bool IsDesktopStubSettingsMessage(MSG&){return false;}
 static void PropertiesOptionsChanged(){const auto state=desktop_settings::current;if(state&&!state->closed&&IsWindow(state->window))PostMessageW(state->window,desktop_settings::PropertiesChangedMessage,0,0);}
 #else
 static bool OpenDesktopStubSettings(HWND){return false;}
 static void CloseDesktopStubSettings(){}
+static bool OpenDesktopStubProfilesSettings(HWND){return false;}
 static bool IsDesktopStubSettingsMessage(MSG&){return false;}
 static void PropertiesOptionsChanged(){}
 #endif

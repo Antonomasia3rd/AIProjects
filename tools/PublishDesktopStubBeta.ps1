@@ -46,8 +46,17 @@ generation and checks actual glyph support. Independent Registration now uses
 an owned activation binding rather than uap10 parameters, with a 15063 baseline.
 1809 Start image display and real account/hardware flows still need acceptance.
 
-Optional LiveTile host setup: DesktopStub.exe --setup-desktop. This deliberately
-selects LiveTile on the primary Desktop; ordinary first startup needs no command.
+Optional LiveTile host setup: DesktopStub.exe --prepare-live-tile-host (the old
+--setup-desktop alias also works). It keeps every tile's delivery choice;
+ordinary Registration first startup needs no command. The GUI action is under
+Advanced > Profile package identity and setup.
+
+PROPERTIES: Profiles now opens inside the same settings window. The unwanted
+filled row highlight is removed; Application > Interface > Properties window
+offers Windows color sources and readable contrast, including custom colors.
+
+WUWA: Source settings > Data freshness and failures keeps last-good values,
+shows their age and configures independent tile/popup failure thresholds.
 
 Read-only 1809 report (PowerShell 5.1+):
   .\InspectDesktopStubTileImages.ps1 -Directory . -OutputPath .\tile-report.json

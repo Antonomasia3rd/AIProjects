@@ -15,7 +15,12 @@ int main(){using namespace aip::properties;std::wstring error;
     pointer.Down(4);pointer.Leave();Check(pointer.hover==-1&&pointer.pressed==4,"leaving clears hover while preserving capture");Check(pointer.Up(-1)==-1,"release outside does not activate");
     pointer.Down(4);pointer.Move(-1);pointer.Move(4);Check(pointer.Up(4)==4,"returning to original pressed target permits a click");
     pointer.Down(4);pointer.Cancel();Check(pointer.Up(4)==-1&&pointer.pressed==-1,"capture cancellation prevents stale activation");
-    Check(InteractionAlpha(false,false)==0&&InteractionAlpha(true,false)>0&&InteractionAlpha(true,true)>InteractionAlpha(true,false),"hover and press have distinct visible strengths");
+    for(const auto* source:HighlightSources){std::wstring value=source;Check(NormalizeSetting(L"HighlightSource",value,error),"every supported native source validates");}
+    for(const auto* key:{L"HighlightSource",L"HighlightContrast"}){std::wstring value=L"invalid";Check(!NormalizeSetting(key,value,error)&&!error.empty(),"invalid color policies fail with a useful diagnostic");}
+    for(const auto background:{0u,0x202020u,0xF3F3F3u,0xFFFFFFu})for(unsigned r=0;r<=255;r+=51)for(unsigned g=0;g<=255;g+=51)for(unsigned b=0;b<=255;b+=51){
+        const auto rgb=(r<<16)|(g<<8)|b;const auto result=ReadableHighlight(rgb,background,cfg);Check(Contrast(result,background)>=4.5,"readable palette handles dark light and custom extremes");
+        if(Contrast(rgb,background)>=4.5)Check(result==rgb,"already readable colors are preserved");}
+    cfg.highlightContrast=L"Exact";Check(ReadableHighlight(0,0,cfg)==0&&ReadableHighlight(0xFFFFFF,0xFFFFFF,cfg)==0xFFFFFF,"exact colors require an explicit contrast opt-out");
     Branch tiles{L"tiles",L"Tiles",0,{},{{L"source",L"Source",0,{0},{{L"advanced",L"Advanced",0,{0,1},{}}}},{L"appearance",L"Appearance",0,{2},{}}}};
     Branch app{L"app",L"Application",2,{},{{L"interface",L"Interface",2,{0},{}}}};
     std::vector<Branch> tree{tiles,app};std::set<std::wstring> expanded;

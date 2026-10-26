@@ -336,6 +336,32 @@ static void AppendTileInstanceAlerts(HMENU parent,const aip::content::TileInstan
     }
     aip::EndTrayNestedMenu(parent,menu,TileInstanceUi(L"TileSourceNotifications",L"Notifications for this tile"));
 }
+static void AppendTileSourceHealthSettings(HMENU parent,const aip::content::TileInstance& tile)
+{
+    using namespace aip::source_health;
+    HMENU menu=aip::BeginTrayNestedMenu(parent),tileMenu=aip::BeginTrayNestedMenu(menu),popupMenu=aip::BeginTrayNestedMenu(menu),textMenu=aip::BeginTrayNestedMenu(menu);
+    for(const auto& field:Settings){const std::wstring key=field.key,full=L"SourceHealth."+key;HMENU target=menu;
+        if(key.compare(0,4,L"Tile")==0)target=tileMenu;if(key.compare(0,5,L"Popup")==0)target=popupMenu;
+        if(field.type==FieldType::Template)target=textMenu;
+        std::wstring label;for(std::size_t i=0;i<key.size();++i){if(i&&key[i]>=L'A'&&key[i]<=L'Z'&&key[i-1]>=L'a'&&key[i-1]<=L'z')label+=L' ';label+=key[i];}
+        if(key==L"AgeDisplay")label=L"Show last successful refresh age";
+        else if(key==L"RetainLastGood")label=L"Keep the last successful resource values during failures";
+        else if(key==L"AuthenticationImmediate")label=L"Show rejected-account/setup failures immediately";
+        else if(key==L"TileFailureAttempts"||key==L"PopupFailureAttempts")label=L"Consecutive failed refreshes before showing an error (0 disables)";
+        else if(key==L"TileFailureSeconds"||key==L"PopupFailureSeconds")label=L"Seconds since first consecutive failure (0 disables)";
+        else if(key==L"TileThreshold"||key==L"PopupThreshold")label=L"Require either or both enabled failure thresholds";
+        else if(key==L"AgeResolutionSeconds")label=L"Refresh-age display granularity (seconds)";
+        if(field.type==FieldType::Choice){std::vector<std::pair<std::wstring,std::wstring>> choices;const std::wstring values=field.choices;std::size_t begin=0;
+            for(;;){const auto end=values.find(L'|',begin);const auto value=values.substr(begin,end==std::wstring::npos?end:end-begin);choices.emplace_back(value,value);if(end==std::wstring::npos)break;begin=end+1;}
+            AppendTileInstanceChoices(target,tile,full.c_str(),label.c_str(),choices,field.fallback);
+        }else AppendTileInstanceEditable(target,tile,full.c_str(),label.c_str(),field.fallback,field.type==FieldType::Boolean);
+    }
+    aip::AppendTrayMenuItem(tileMenu,0,L"Counts completed source refreshes, not idle polling ticks or inner HTTP retries.",false,false);
+    aip::EndTrayNestedMenu(menu,tileMenu,L"Failure text on the tile");aip::EndTrayNestedMenu(menu,popupMenu,L"Failure and recovery popup notices");
+    aip::AppendTrayMenuItem(textMenu,0,L"Tokens: %age%, %ageSeconds%, %ageMinutes%, %failures%, %elapsedSeconds%, %error%, %tile%; %% writes percent.",false,false);
+    aip::EndTrayNestedMenu(menu,textMenu,L"Text templates (blank popup text uses application wording)");
+    aip::EndTrayNestedMenu(parent,menu,L"Data freshness and failures");
+}
 static void AppendBatteryTileSettings(HMENU menu,const aip::content::TileInstance& tile)
 {
     using namespace aip::battery;
@@ -466,6 +492,7 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
         }break;
     }
     case TileInstanceType::Wuwa: {
+        AppendTileSourceHealthSettings(menu,tile);
         AppendTileInstanceCommand(menu,TileInstanceUi(L"KuroSignIn",L"Sign in to Kuro and choose character..."),{TileInstanceMenuVerb::SignIn,tile.id,L"",L"",L""});
         AppendTileInstanceEditable(menu,tile,L"Kuro.PlayerId",L"WuWa player ID (blank discovers a single linked role)",L"");
         AppendTileInstanceEditable(menu,tile,L"Kuro.Region",L"WuWa region (blank discovers a single linked role)",L"");

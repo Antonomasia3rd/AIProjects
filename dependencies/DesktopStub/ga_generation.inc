@@ -2262,11 +2262,18 @@ static bool CurrentGenerationTargetAllows(const aip::content::Snapshot& frame,
     const aip::content::TileInstanceConfiguration* instances, const aip::content::Configuration& composition,
     const aip::content::SecondaryTileConfiguration& secondary, bool renderOnly = false)
 {
+    if(!frame.mainHostSetupPolicyKey.empty()&&(!instances||frame.galleryFrame))return false;
     if (frame.galleryFrame) return true; // Receipt/epoch checks remain at the gallery boundary.
     if (instances) {
         if (!instances->configured) return false;
         const auto* tile = FindCurrentGenerationTileInstance(*instances, frame);
-        if (tile && frame.policy.included && aip::content::TileDeliveryPolicyKey(frame.policy) !=
+        if(!frame.mainHostSetupPolicyKey.empty()){
+            if(!g_desktopHostSetupPending.load()||!frame.active||!tile||!tile->primary||tile->type!=aip::content::TileInstanceType::Wallpaper||
+                !frame.secondaryTileId.empty()||frame.nativeQueue||!frame.policy.included||
+                frame.mainHostSetupPolicyKey!=aip::content::TileDeliveryPolicyKey(tile->policy))return false;
+            auto expected=tile->policy;expected.values[L"settings.primaryregistration"]=L"Main";
+            if(aip::content::TileDeliveryPolicyKey(frame.policy)!=aip::content::TileDeliveryPolicyKey(expected))return false;
+        }else if (tile && frame.policy.included && aip::content::TileDeliveryPolicyKey(frame.policy) !=
             aip::content::TileDeliveryPolicyKey(tile->policy)) return false;
         if (tile && TileSnapshotUsesRegistration(frame)) return (tile->primary&&!TileSnapshotUsesSeparateRegistration(frame)) || renderOnly || TileRegistrationReadyForId(tile->id);
         if (frame.secondaryTileId.empty()) return tile || IsPrimaryRetirementGenerationFrame(frame);

@@ -1198,7 +1198,7 @@ static bool ParseCommandLineOptions()
     for (int i = 1; i < argc; ++i)
     {
         std::wstring arg = argv[i] ? argv[i] : L"";
-        if(!IEquals(arg,L"--setup-desktop")&&!IEquals(arg,L"--ini")&&!CommandLineStartsWithI(arg,L"--ini=")&&
+        if(!IEquals(arg,L"--setup-desktop")&&!IEquals(arg,L"--prepare-live-tile-host")&&!IEquals(arg,L"--ini")&&!CommandLineStartsWithI(arg,L"--ini=")&&
             !IEquals(arg,L"--help")&&!IEquals(arg,L"-h")&&!IEquals(arg,L"/?")&&!IEquals(arg,L"/help")&&
             !IEquals(arg,L"--version")&&!IEquals(arg,L"-v")&&!IEquals(arg,L"/version"))desktopSetupOtherOption=true;
         std::wstring value;
@@ -1221,7 +1221,7 @@ static bool ParseCommandLineOptions()
             continue;
         }
 
-        if(IEquals(arg,L"--setup-desktop")){g_commandLine.setupDesktop=true;continue;}
+        if(IEquals(arg,L"--setup-desktop")||IEquals(arg,L"--prepare-live-tile-host")){g_commandLine.setupDesktop=true;continue;}
         if(IEquals(arg,L"--settings")){g_commandLine.settingsWindow=true;continue;}
         if(IEquals(arg,L"--profile-manager")){g_commandLine.profileManager=true;continue;}
         if (TryParseAppxActivationArgument(arg, value))
@@ -2204,7 +2204,7 @@ static std::wstring CommandLineUsageText()
         L"  --profile-start ID; --profile-stop ID; --profile-settings ID; --profile-default ID; --profile-autostart ID on|off.\n"
         L"  --profiles-startup on|off; --profiles-unified-tray on|off; --profiles-crash-notifications on|off.\n"
         L"  Each profile has its own INI, accounts, persistent package identity and generated assets; tray icons are separate by default.\n"
-        L"\nDesktop setup: --setup-desktop [--ini FILE] registers the main Desktop host, then restarts with Live Tile identity. Explicit action only.\n"
+        L"\nOptional Live Tile support: --prepare-live-tile-host [--ini FILE] registers the main host, then restarts with package identity. Keeps every tile's delivery choice. --setup-desktop is an alias. Ordinary Registration first run needs no command.\n"
         L"\nNotes: --notes-import-profile INI; --notes-import-cookie GAME=JSON; --notes-clear GAME (configuration only).\n"
         L"       --notes-refresh GAME|All (existing resident only; no new process).\n"
         L"Hardware profiles: --caps-import-profile INI; --asus-import-profile INI (configuration only).\n"

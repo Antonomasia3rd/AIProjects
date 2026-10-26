@@ -97,6 +97,8 @@ static const IniDefault g_defaults[] = {
     {L"Settings",L"AlreadyRunningProfilePrompt",L"1"},
     {L"Properties",L"HighlightMode",L"Accent"},
     {L"Properties",L"HighlightColor",L"#0078D4"},
+    {L"Properties",L"HighlightSource",L"Auto"},
+    {L"Properties",L"HighlightContrast",L"Readable"},
     {L"Properties",L"CaptionMode",L"Properties"},
     {L"Settings",L"LiveTileDisabledWarning",L"Startup"},
     {L"Settings",L"LiveTileDisabledCheckSeconds",L"300"},
@@ -1696,6 +1698,7 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%d ms, poll=%d ms, terminate wait=%d ms)", L"[i] PowerShell executable: %s (timeout=%s, poll=%d ms, terminate wait=%d ms)");
     UpgradeStringDefaultIfUnmodified(L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s.", L"Starting wallpaper generation: %s");
     UpgradeStringDefaultIfUnmodified(L"DesktopHostSetup",L"Set up Desktop tile...",L"Set up main Live Tile host...");
+    UpgradeStringDefaultIfUnmodified(L"DesktopHostSetup",L"Set up main Live Tile host...",L"Prepare Live Tile support (keep tile delivery)...");
     UpgradeStringDefaultIfUnmodified(L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s", L"[i] Regenerated AppxManifest.xml from configured defaults: %s");
     UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from INI if missing", L"generated from configured defaults if missing");
     UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from built-in defaults if missing", L"generated from configured defaults if missing");

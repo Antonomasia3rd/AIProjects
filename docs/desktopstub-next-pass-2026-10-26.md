@@ -2,7 +2,10 @@
 
 This checkpoint records the user's latest requested work for resumption after
 context compaction. Updating these documents does not implement the new work
-or authorize another reset. [Current findings](desktopstub-open-findings-2026-10-25.md)
+or authorize another reset. The user subsequently resumed implementation and
+explicitly renewed reset permission after compaction: they have not configured
+the app for daily use yet. Preserve the old state in the recovery archive when
+resetting for the next validated beta. [Current findings](desktopstub-open-findings-2026-10-25.md)
 remain the reconciled status list.
 
 ## Delivered baseline and current-state caution
@@ -22,8 +25,10 @@ remain the reconciled status list.
   are recoverable at
   `artifacts/desktopstub-reset-20261026-175309-dad291/`. In particular, old
   `build/review-validation/` scripts are now below its `validation-build/`.
-- **The user has since relaunched the beta and changed preferences. Preserve
-  current state. Do not assume no INI/package/resident and do not reset again.**
+- **Historical checkpoint caution:** the user had relaunched the beta. Do not
+  assume no INI/package/resident. Later explicit reset permission supersedes
+  the earlier preserve-only instruction; any reset must stay scoped to this
+  installation and current user and retain a recovery archive.
 - Previous gates: 2,040 combined host, 2,285 source, 180 SMTC, 4,010 historical
   migration, 69 instance, 1,644 icon policy, 161 native icon, 774 asset,
   398,520 pixel/render, 39 registration and 60 activation-binding checks.
@@ -116,7 +121,8 @@ Every new behavior, including advanced controls, needs the same validated
 CLI/INI/GUI representation. Match actual native/reference versions with
 evidence; do not equate injected tests with complete 1:1 parity. Keep tiles
 independent with coherent defaults and unused workers/observers inactive.
-Preserve present settings, credentials and pins; consent/CAPTCHA remains human.
+Preserve present settings, credentials and pins except for the explicitly
+renewed fresh-beta reset, which retains recovery archives. Consent/CAPTCHA remains human.
 Use bounded inert/offscreen checks and scan new binaries before execution.
 Capacity-error turns are interruptions: verify saved files and test receipts
 before treating an agent's work as complete. No model changes are implied.

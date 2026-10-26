@@ -178,6 +178,9 @@ struct Snapshot {
     bool active = false;
     int capturedWallpaperFit = -1; // Host FitMode ordinal; -1 keeps legacy desktop resolution.
     TileDeliveryPolicy policy;
+    // In-memory explicit host-preparation receipt; ordinary source frames leave
+    // it empty. Admission must still verify the captured current tile policy.
+    std::wstring mainHostSetupPolicyKey;
     TileAppearance registrationAppearance;
     std::wstring artworkTopic, sourceDiagnostic,deliveryDiagnostic;
     std::wstring name, backgroundPath, activationArguments;

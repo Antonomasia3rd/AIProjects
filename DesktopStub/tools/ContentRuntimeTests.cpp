@@ -240,6 +240,8 @@ static std::wstring BuildLegacyContentFixtureTemplate()
 #include "DateTimeParityHostTests.inc"
 #include "CalendarReminderHostTests.inc"
 #include "DesktopHostSetupHostTests.inc"
+#include "KuroSourceHealthHostTests.inc"
+#include "PropertiesPreferencesHostTests.inc"
 #include "FreshPresetPreviewHostTests.inc"
 
 static bool SeedContentFixtureDefaults()
@@ -1222,6 +1224,8 @@ int wmain()
     TestDateTimeTileHost(directory,bitmapPath);
     TestDateTimeParityHost();
     TestDesktopHostSetup(bitmapPath);
+    TestKuroSourceHealthHost();
+    TestPropertiesPreferencesHost();
     TestFreshPresetPreview(directory);
     TestGalleryImageActivationHost(bitmapPath);
 #else

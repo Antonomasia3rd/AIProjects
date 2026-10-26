@@ -1,6 +1,7 @@
 // Per-user profile coordination. Each profile remains an independent resident;
 // this UI never deploys a package, pins a tile, copies accounts or uses RunAs.
 #include "../desktopstub_profiles_native.inc"
+#include "../profile_manager_ui.h"
 #include "../desktopstub_profile_migration.inc"
 #include <deque>
 #include <map>
@@ -26,7 +27,7 @@ static bool EnsureProfileBalloonTray()
     LogText(L"[i] A profile tray icon was restored for this session because its notification needed Balloon delivery.");
     return true;
 }
-static HWND g_profileManagerWindow=nullptr;
+
 static std::unique_ptr<aip::profiles::native::Store> g_profileStore;
 #ifdef DESKTOPSTUB_INERT_HARDWARE
 static bool (*g_testProfileContext)(aip::profiles::native::Context&,std::wstring&)=nullptr;
@@ -171,7 +172,7 @@ static void ClearProfileManager()
     std::vector<std::shared_ptr<ProfileChildWatch>> children;
     {std::lock_guard<std::mutex> lock(g_profileChildMutex);for(auto& row:g_profileChildren)children.push_back(row.second);g_profileChildren.clear();g_profileExited.clear();}
     for(const auto& child:children){if(child->wait)UnregisterWaitEx(child->wait,INVALID_HANDLE_VALUE);if(child->process)CloseHandle(child->process);}
-    if(g_profileManagerWindow)DestroyWindow(g_profileManagerWindow);
+
 }
 static bool HandleProfileManagerMessage(UINT message)
 {
@@ -520,77 +521,89 @@ static void ShowProfileIdentity(HWND owner,const aip::profiles::ProfileEntry& en
     ConfirmUserOperation(g_hwnd,L"profile-identity-"+entry.id,L"Migrate profile identity",prompt,[entry,current]{std::wstring detail;auto* store=ProfileManagerStore(detail);ProfileEntry verified;
         if(store&&store->Find(entry.id,verified,detail)&&verified.profileKey==entry.profileKey&&g_profileIdentityMigrationHook&&!g_profileIdentityMigrationHook(g_hwnd,verified,current,detail))NotifyUserOperation(L"profile-identity-"+entry.id,L"Profile identity migration",detail,NIIF_WARNING,false);});
 }
-static UINT ProfileManagerDpi(HWND window){using GetDpi=UINT(WINAPI*)(HWND);const auto get=reinterpret_cast<GetDpi>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"GetDpiForWindow"));const auto dpi=get?get(window):96;return dpi?dpi:96;}
-struct ProfileManagerUi {
-    struct Placement {HWND child;int x,y,width,height;};
-    HWND window=nullptr,list=nullptr,status=nullptr,startup=nullptr,unified=nullptr,crashes=nullptr;
-    HFONT font=nullptr;UINT dpi=96;std::vector<Placement> controls;aip::profiles::Registry registry;
-    ~ProfileManagerUi(){if(font)DeleteObject(font);}
-};
-static void LayoutProfileManager(ProfileManagerUi& state,UINT dpi)
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+static std::function<bool(const aip::profiles::ProfileEntry&,const std::wstring&,std::wstring&)> g_testProfileUiStart;
+#endif
+static bool ReadProfileManagerUi(aip::profiles::UiSnapshot& output,std::wstring& error)
 {
-    NONCLIENTMETRICSW metrics{};metrics.cbSize=sizeof(metrics);
-    using Metrics=BOOL(WINAPI*)(UINT,UINT,PVOID,UINT,UINT);const auto get=reinterpret_cast<Metrics>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SystemParametersInfoForDpi"));
-    if(!(get&&get(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0,dpi))){SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0);metrics.lfMessageFont.lfHeight=-MulDiv(9,static_cast<int>(dpi),72);}
-    const auto font=CreateFontIndirectW(&metrics.lfMessageFont);const auto previous=state.font;if(font)state.font=font;
-    state.dpi=dpi;for(const auto& row:state.controls){SetWindowPos(row.child,nullptr,MulDiv(row.x,static_cast<int>(dpi),96),MulDiv(row.y,static_cast<int>(dpi),96),MulDiv(row.width,static_cast<int>(dpi),96),MulDiv(row.height,static_cast<int>(dpi),96),SWP_NOZORDER|SWP_NOACTIVATE);if(state.font)SendMessageW(row.child,WM_SETFONT,reinterpret_cast<WPARAM>(state.font),TRUE);}
-    if(font&&previous)DeleteObject(previous);
+    auto* store=ProfileManagerStore(error);if(!store)return false;
+    aip::profiles::UiSnapshot snapshot;if(!store->Load(snapshot.registry,error))return false;
+    snapshot.revision=std::make_shared<const std::wstring>(aip::profiles::SerializeRegistry(snapshot.registry));
+    for(const auto& profile:snapshot.registry.profiles)if(store->io.window(profile.iniPath))snapshot.running.insert(profile.id);
+    output=std::move(snapshot);error.clear();return true;
 }
-static void RefreshProfileManager(ProfileManagerUi& state)
+static bool ExecuteProfileManagerUi(HWND owner,const aip::profiles::UiAction& action,std::wstring& status)
 {
-    std::wstring error;auto* store=ProfileManagerStore(error);if(!store||!store->Load(state.registry,error)){SetWindowTextW(state.status,error.c_str());return;}
-    SendMessageW(state.list,LB_RESETCONTENT,0,0);
-    for(const auto& entry:state.registry.profiles){auto label=entry.name+(entry.id==state.registry.defaultProfileId?L" (default)":L"")+(entry.autoStart?L" [startup]":L"");SendMessageW(state.list,LB_ADDSTRING,0,reinterpret_cast<LPARAM>(label.c_str()));}
-    if(!state.registry.profiles.empty())SendMessageW(state.list,LB_SETCURSEL,0,0);
-    SendMessageW(state.startup,BM_SETCHECK,state.registry.startupEnabled?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(state.unified,BM_SETCHECK,state.registry.unifiedTray?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(state.crashes,BM_SETCHECK,state.registry.notifyCrashes?BST_CHECKED:BST_UNCHECKED,0);
-    SetWindowTextW(state.status,L"Profiles have separate settings, accounts, tiles and tray icons. New profiles start with factory defaults.");
-}
-static LRESULT CALLBACK ProfileManagerWindowProc(HWND window,UINT message,WPARAM w,LPARAM l)noexcept
-{
-    auto* state=reinterpret_cast<ProfileManagerUi*>(GetWindowLongPtrW(window,GWLP_USERDATA));
-    try{
-        if(message==WM_NCCREATE){auto* pending=static_cast<std::unique_ptr<ProfileManagerUi>*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);state=pending->release();state->window=window;SetWindowLongPtrW(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(state));return DefWindowProcW(window,message,w,l);}
-        if(message==WM_CREATE&&state){const auto font=reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-            const auto control=[&](const wchar_t* cls,const wchar_t* label,DWORD style,int x,int y,int width,int height,int id){const auto child=CreateWindowExW(0,cls,label,WS_CHILD|WS_VISIBLE|style,x,y,width,height,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),GetModuleHandleW(nullptr),nullptr);SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(font),FALSE);state->controls.push_back({child,x,y,width,height});return child;};
-            state->list=control(L"LISTBOX",L"",LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|WS_VSCROLL|WS_TABSTOP,12,12,420,220,1);
-            control(L"BUTTON",L"Create...",WS_TABSTOP,444,12,120,28,10);control(L"BUTTON",L"Start",WS_TABSTOP,444,46,120,28,11);control(L"BUTTON",L"Stop",WS_TABSTOP,444,80,120,28,12);control(L"BUTTON",L"Settings...",WS_TABSTOP,444,114,120,28,13);control(L"BUTTON",L"Auto-start",WS_TABSTOP,444,148,120,28,14);control(L"BUTTON",L"Make default",WS_TABSTOP,444,182,120,28,15);
-            control(L"BUTTON",L"Identity...",WS_TABSTOP,444,216,120,24,16);
-            state->startup=control(L"BUTTON",L"Start selected profiles when the main resident starts",BS_AUTOCHECKBOX|WS_TABSTOP,12,242,550,24,20);
-            state->unified=control(L"BUTTON",L"Use one tray icon for Toast profiles (after restart)",BS_AUTOCHECKBOX|WS_TABSTOP,12,270,550,24,21);
-            state->crashes=control(L"BUTTON",L"Notify if a profile started here crashes",BS_AUTOCHECKBOX|WS_TABSTOP,12,298,550,24,22);
-            state->status=control(L"STATIC",L"",0,12,332,550,52,2);control(L"BUTTON",L"Close",WS_TABSTOP,444,390,120,28,IDCANCEL);LayoutProfileManager(*state,ProfileManagerDpi(window));RefreshProfileManager(*state);return 0;
+    using namespace aip::profiles;
+    const auto stale=[&]{status=L"Profiles changed since this page loaded. Reload before applying another action.";return false;};
+    if(action.verb==UiVerb::None||!action.revision||action.revision->empty())return stale();
+    auto* store=ProfileManagerStore(status);if(!store)return false;Registry registry;
+    if(!store->Load(registry,status))return false;if(SerializeRegistry(registry)!=*action.revision)return stale();
+    if(action.verb==UiVerb::Create){
+        std::wstring name=L"New profile";
+        if(ShowTextInputDialog(owner,L"Create profile",L"Profile name:",name,false)!=IDOK){status=L"Profile creation cancelled.";return true;}
+        Registry current;if(!store->Load(current,status))return false;if(SerializeRegistry(current)!=*action.revision)return stale();
+        ProfileEntry entry;if(!store->Fresh(name,L"",BuildInitialIniTemplate,entry,status))return false;
+        status=L"Created "+entry.name+L" with independent factory settings.";return true;
+    }
+    if(action.verb==UiVerb::Startup||action.verb==UiVerb::UnifiedTray||action.verb==UiVerb::CrashNotices){
+        if(!store->Update([&](Registry& current,std::wstring& issue){
+            if(SerializeRegistry(current)!=*action.revision){issue=L"Profiles changed. Reload before changing a preference.";return false;}
+            if(action.verb==UiVerb::Startup)current.startupEnabled=!action.checked;
+            else if(action.verb==UiVerb::UnifiedTray)current.unifiedTray=!action.checked;
+            else current.notifyCrashes=!action.checked;return true;
+        },status))return false;
+        status=action.verb==UiVerb::UnifiedTray?L"Tray layout preference saved; it applies after profiles restart.":L"Profile preference saved.";return true;
+    }
+    const auto found=std::find_if(registry.profiles.begin(),registry.profiles.end(),[&](const ProfileEntry& item){return item.id==action.expected.id;});
+    if(found==registry.profiles.end()||found->profileKey!=action.expected.profileKey||found->iniPath!=action.expected.iniPath)return stale();
+    const auto entry=*found;
+    if(action.verb==UiVerb::Identity){ShowProfileIdentity(owner,entry);status=L"Identity information opened. Any migration still requires its own confirmation.";return true;}
+    if(action.verb==UiVerb::Start||action.verb==UiVerb::Settings){
+        if(store->io.window(entry.iniPath)){
+            ConfirmUserOperation(g_hwnd,L"profile-running-"+entry.id,L"Profile already running",
+                entry.name+L" is already running with its own settings and tiles. Open that profile's Settings?",[entry]{
+                    std::wstring detail;auto* current=ProfileManagerStore(detail);ProfileEntry verified;
+                    if(current&&current->Find(entry.id,verified,detail)&&verified.profileKey==entry.profileKey){
+                        const auto target=current->io.window(verified.iniPath);if(target)current->io.signal(target,12);
+                    }
+                });
+            status=L"Confirmation requested to open the running profile's settings.";return true;
         }
-        if(message==WM_COMMAND&&state){const auto command=LOWORD(w);if(command==IDCANCEL){DestroyWindow(window);return 0;}
-            std::wstring error;auto* store=ProfileManagerStore(error);if(!store)return 0;
-            if(command==10){std::wstring name=L"New profile";if(ShowTextInputDialog(window,L"Create profile",L"Profile name:",name,false)==IDOK){aip::profiles::ProfileEntry entry;if(store->Fresh(name,L"",BuildInitialIniTemplate,entry,error))RefreshProfileManager(*state);else SetWindowTextW(state->status,error.c_str());}return 0;}
-            if(command>=20&&command<=22){const bool on=SendMessageW(command==20?state->startup:command==21?state->unified:state->crashes,BM_GETCHECK,0,0)==BST_CHECKED;
-                if(!store->Update([&](auto& registry,auto&){if(command==20)registry.startupEnabled=on;else if(command==21)registry.unifiedTray=on;else registry.notifyCrashes=on;return true;},error))SetWindowTextW(state->status,error.c_str());return 0;}
-            const auto index=SendMessageW(state->list,LB_GETCURSEL,0,0);if(index==LB_ERR||static_cast<std::size_t>(index)>=state->registry.profiles.size())return 0;
-            const auto entry=state->registry.profiles[static_cast<std::size_t>(index)];
-            if(command==16){ShowProfileIdentity(window,entry);return 0;}
-            if(command==11||command==13){
-                if(store->io.window(entry.iniPath)){ConfirmUserOperation(g_hwnd,L"profile-running-"+entry.id,L"Profile already running",entry.name+L" is already running with its own settings and tiles. Open that profile's Settings?",[entry]{std::wstring detail;auto* current=ProfileManagerStore(detail);aip::profiles::ProfileEntry verified;if(current&&current->Find(entry.id,verified,detail)&&verified.profileKey==entry.profileKey){const auto target=current->io.window(verified.iniPath);if(target)current->io.signal(target,12);}});}
-                else if(!StartManagedProfile(entry,command==13?L"--settings":L"",error))SetWindowTextW(state->status,error.c_str());return 0;
-            }
-            if(command==12){if(!StopManagedProfile(entry,error))SetWindowTextW(state->status,error.c_str());return 0;}
-            if(command==14||command==15){if(store->Update([&](auto& registry,auto& detail){if(command==15){registry.defaultProfileId=entry.id;return true;}auto changed=entry;changed.autoStart=!entry.autoStart;return aip::profiles::AddOrUpdate(registry,changed,detail);},error))RefreshProfileManager(*state);else SetWindowTextW(state->status,error.c_str());return 0;}
-            if(command==1&&HIWORD(w)==LBN_SELCHANGE)SetWindowTextW(state->status,entry.iniPath.c_str());return 0;
-        }
-        if(message==WM_CLOSE){DestroyWindow(window);return 0;}
-        if(message==WM_DPICHANGED&&state){const auto* rectangle=reinterpret_cast<const RECT*>(l);SetWindowPos(window,nullptr,rectangle->left,rectangle->top,rectangle->right-rectangle->left,rectangle->bottom-rectangle->top,SWP_NOZORDER|SWP_NOACTIVATE);LayoutProfileManager(*state,LOWORD(w));return 0;}
-        if(message==WM_NCDESTROY){SetWindowLongPtrW(window,GWLP_USERDATA,0);if(g_profileManagerWindow==window)g_profileManagerWindow=nullptr;delete state;return DefWindowProcW(window,message,w,l);}
-    }catch(...){if(state&&state->status)SetWindowTextW(state->status,L"The profile action could not complete. Existing profiles were kept.");}
-    return DefWindowProcW(window,message,w,l);
+        const std::wstring extra=action.verb==UiVerb::Settings?L"--settings":L"";
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+        if(g_testProfileUiStart){if(!g_testProfileUiStart(entry,extra,status))return false;}
+        else
+#endif
+        if(!StartManagedProfile(entry,extra,status))return false;
+        status=L"Start requested for "+entry.name+L".";return true;
+    }
+    if(action.verb==UiVerb::Stop){
+        if(!StopManagedProfile(entry,status))return false;status=L"Stop requested for "+entry.name+L".";return true;
+    }
+    if(action.verb==UiVerb::AutoStart||action.verb==UiVerb::MakeDefault){
+        if(!store->Update([&](Registry& current,std::wstring& issue){
+            if(SerializeRegistry(current)!=*action.revision){issue=L"Profiles changed. Reload before editing this profile.";return false;}
+            auto selected=std::find_if(current.profiles.begin(),current.profiles.end(),[&](const ProfileEntry& item){return item.id==entry.id;});
+            if(selected==current.profiles.end()||selected->profileKey!=entry.profileKey){issue=L"The selected profile changed; its preferences were kept.";return false;}
+            if(action.verb==UiVerb::MakeDefault)current.defaultProfileId=entry.id;
+            else selected->autoStart=!action.checked;return true;
+        },status))return false;
+        status=L"Profile preference saved.";return true;
+    }
+    status=L"This profile action is unavailable.";return false;
 }
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+static bool (*g_testOpenProfilesSettings)(HWND)=nullptr;
+#endif
 static void ShowProfileManager(HWND owner)
 {
-    if(g_profileManagerWindow&&IsWindow(g_profileManagerWindow)){ShowWindow(g_profileManagerWindow,SW_RESTORE);SetForegroundWindow(g_profileManagerWindow);return;}
-    WNDCLASSW cls{};cls.lpfnWndProc=ProfileManagerWindowProc;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"DesktopStubProfileManager";cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);cls.hbrBackground=GetSysColorBrush(COLOR_BTNFACE);RegisterClassW(&cls);
-    auto state=std::make_unique<ProfileManagerUi>();const auto dpi=ProfileManagerDpi(owner);RECT rectangle{0,0,MulDiv(580,static_cast<int>(dpi),96),MulDiv(430,static_cast<int>(dpi),96)};AdjustWindowRectEx(&rectangle,WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,FALSE,WS_EX_DLGMODALFRAME);
-    MONITORINFO monitor{};monitor.cbSize=sizeof(monitor);RECT work{};if(GetMonitorInfoW(MonitorFromWindow(owner,MONITOR_DEFAULTTONEAREST),&monitor))work=monitor.rcWork;else SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0);const auto width=rectangle.right-rectangle.left,height=rectangle.bottom-rectangle.top;
-    g_profileManagerWindow=CreateWindowExW(WS_EX_DLGMODALFRAME,cls.lpszClassName,L"DesktopStub profiles",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,(work.right+work.left-width)/2,(work.bottom+work.top-height)/2,width,height,owner,nullptr,cls.hInstance,&state);
-    if(!g_profileManagerWindow)return;ShowWindow(g_profileManagerWindow,SW_SHOW);SetForegroundWindow(g_profileManagerWindow);
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    if(g_testOpenProfilesSettings){g_testOpenProfilesSettings(owner);return;}
+#endif
+    if(!OpenDesktopStubProfilesSettings(owner))
+        NotifyUserOperation(L"profile-properties",L"Profiles",L"The Properties window could not be opened. Existing profiles were kept.",NIIF_WARNING,false);
 }
 static void AppendProfilesMenu(HMENU parent){AppendMenuW(parent,MF_STRING,PROFILE_MANAGER_MENU,L"Profiles...");}
 static bool DispatchProfileManagerCommand(HWND owner,UINT command){if(command!=PROFILE_MANAGER_MENU)return false;ShowProfileManager(owner);return true;}
-static bool IsProfileManagerDialogMessage(MSG* message){return message&&g_profileManagerWindow&&IsWindow(g_profileManagerWindow)&&IsDialogMessageW(g_profileManagerWindow,message);}
+static bool IsProfileManagerDialogMessage(MSG*){return false;}

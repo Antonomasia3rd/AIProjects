@@ -64,8 +64,6 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
 
     if (TileInstanceModeRequested()) {
         HMENU tilesMenu = beginSection(SecondaryTileUiString(L"TileInstancesTitle", L"Tiles"));
-        if(!CurrentProcessHasPackageIdentity())addTo(tilesMenu,ID_SETUP_DESKTOP_HOST,
-            IniReadS(L"Strings",L"DesktopHostSetup",L"Set up main Live Tile host..."),false,!g_desktopHostSetupPending.load());
         AppendTileInstancesMenu(tilesMenu);
         if(IniReadI(L"QuickActions",L"Enabled",0)!=0)AppendQuickActionsMenu(tilesMenu);
         aip::gallery::Configuration galleryMenuConfiguration;std::wstring galleryMenuError;
@@ -79,8 +77,6 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     const auto& sourcesTitle = g_ui.traySourcesTitle;
     const auto& updatesTitle = g_ui.trayUpdatesTitle;
     HMENU secondaryTilesMenu = beginSection(L"Tiles");
-    if(!CurrentProcessHasPackageIdentity())addTo(secondaryTilesMenu,ID_SETUP_DESKTOP_HOST,
-        IniReadS(L"Strings",L"DesktopHostSetup",L"Set up main Live Tile host..."),false,!g_desktopHostSetupPending.load());
     AppendSecondaryTilesMenu(secondaryTilesMenu);
     AppendQuickActionsMenu(secondaryTilesMenu);
     AppendGalleryTilesMenu(secondaryTilesMenu);
@@ -487,6 +483,10 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     HMENU advancedMenu = beginSection(g_ui.advancedTitle);
     if(loggingMenu!=diagnosticsMenu)endNestedMenu(advancedMenu,loggingMenu,g_ui.loggingTitle);
     HMENU packageMenu = beginNestedMenu(advancedMenu, L"CreatePopupMenu(Package setup)");
+        if(!DesktopHostSetupHasIdentity())addTo(packageMenu,ID_SETUP_DESKTOP_HOST,
+            IniReadS(L"Strings",L"DesktopHostSetup",L"Prepare Live Tile support (keep tile delivery)..."),false,!g_desktopHostSetupPending.load());
+        else AppendMenuChecked(packageMenu,MF_STRING|MF_DISABLED,0,IniReadS(L"Strings",L"DesktopHostSetupReadyStatus",L"Live Tile support: ready for this profile").c_str());
+        AppendMenuChecked(packageMenu,MF_STRING|MF_DISABLED,0,IniReadS(L"Strings",L"DesktopHostSetupPurpose",L"Registration Desktop needs no extra setup").c_str());
         HMENU registrationMenu = CreatePopupMenu();
         if (registrationMenu)
         {

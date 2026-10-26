@@ -94,17 +94,23 @@ struct TileInstanceProviderState {
     }
 };
 static void NotifyTileSourceTransition(const aip::content::TileInstance& tile,TileInstanceProviderState& state,
-    aip::notifications::SourceState current)
+    aip::notifications::SourceState current,const aip::source_health::Configuration* policy=nullptr,
+    const aip::source_health::State* sourceHealth=nullptr,std::uint64_t now=0,const std::wstring& detail={})
 {
     using namespace aip::notifications;
     const auto notice=state.notificationTransitions.Observe(current);
     if(notice==SourceNotice::None||g_shutdownState.IsRequested()||!IniReadI(L"Settings",L"NotifySourceErrors",1))return;
     const bool failed=notice==SourceNotice::Failed;
-    const auto title=IniReadS(L"Strings",failed?L"NotificationSourceFailed":L"NotificationSourceRecovered",
+    if(policy&&(failed?!policy->popupFailureEnabled:!policy->popupRecoveryEnabled))return;
+    auto title=IniReadS(L"Strings",failed?L"NotificationSourceFailed":L"NotificationSourceRecovered",
         failed?L"A tile source needs attention":L"A tile source is available again");
-    const auto message=NotificationSubjectText(failed?L"NotificationSourceFailedMessage":L"NotificationSourceRecoveredMessage",
+    auto message=NotificationSubjectText(failed?L"NotificationSourceFailedMessage":L"NotificationSourceRecoveredMessage",
         failed?L"%s could not refresh. Open this tile's settings or status for details. DesktopStub will retry automatically.":
             L"%s refreshed successfully. Its tile will update when Windows displays the new content.",tile.name);
+    if(policy&&sourceHealth){const auto& customTitle=failed?policy->popupFailureTitle:policy->popupRecoveryTitle;
+        const auto& customBody=failed?policy->popupFailureBody:policy->popupRecoveryBody;
+        if(!customTitle.empty())title=aip::source_health::Format(customTitle,*policy,*sourceHealth,now,detail,tile.name);
+        if(!customBody.empty())message=aip::source_health::Format(customBody,*policy,*sourceHealth,now,detail,tile.name);}
     DispatchUserNotification(L"source-"+tile.id,title,message,failed?NIIF_WARNING:NIIF_INFO,false);
 }
 static std::map<std::wstring, std::unique_ptr<TileInstanceProviderState>> g_tileInstanceProviders;
@@ -384,11 +390,13 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         frame.gameSource=true;
         if(!state.kuro)state.kuro=std::make_unique<ContentKuroProvider>();
         state.kuro->Refresh(tile.kuro,synchronous,state.forceRefresh);bool completed=false;
-        const auto notes=state.kuro->Read(tile.kuro,&completed);
+        const auto notes=state.kuro->Read(tile.kuro,tile.sourceHealth,&completed,tile.name);
         const bool configured=!tile.kuro.gameToken.empty()||!tile.kuro.gameTokenProtected.empty();
+        const auto health=state.kuro->HealthState();
         NotifyTileSourceTransition(tile,state,!configured?aip::notifications::SourceState::Unconfigured:!completed?aip::notifications::SourceState::Pending:
-            notes.failure!=aip::kuro::FailureKind::None?(state.kuro->ShouldNotifyFailure()?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Pending):
-            notes.state==aip::kuro::State::Error?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Healthy);
+            notes.failure!=aip::kuro::FailureKind::None?(state.kuro->PopupFailureReached(tile.sourceHealth)?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Pending):
+            notes.state==aip::kuro::State::Error?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Healthy,
+            &tile.sourceHealth,&health,state.kuro->Now(),notes.diagnostic);
         frame.sourceDiagnostic=notes.diagnostic;
         if(!notes.diagnostic.empty()&&notes.refreshSequence!=state.lastKuroDiagnosticSequence){
             state.lastKuroDiagnosticSequence=notes.refreshSequence;

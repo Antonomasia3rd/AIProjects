@@ -163,14 +163,16 @@ void ProviderTests() {
     retained.Refresh(selected,true);result=retained.Read(selected,&completed);
     Check(completed&&result.state==State::Ok&&!result.stale&&!retained.ShouldNotifyFailure(),"healthy per-account baseline has no failure notice");
     offline=true;retained.Refresh(selected,true,true);result=retained.Read(selected,&completed);
-    Check(completed&&result.state==State::Ok&&result.stale&&result.current==120&&result.rows.size()==4&&result.failure==FailureKind::Transient,
+    Check(completed&&result.state==State::Ok&&result.stale&&result.current==120&&result.rows.size()==5&&result.failure==FailureKind::Transient&&result.rows.front().value.find(L"Refreshed")!=std::wstring::npos,
         "temporary refresh failure retains the last successful same-account notes with explicit stale metadata");
     Check(result.diagnostic.find(L"last successful")!=std::wstring::npos&&result.diagnostic.find(selected.gameToken)==std::wstring::npos&&!retained.ShouldNotifyFailure(),
         "first transient failure is diagnostic-only and never leaks raw transport details");
     for(int i=0;i<10;++i)retained.Read(selected);
     Check(!retained.ShouldNotifyFailure(),"poll reads of one completed failure do not count as additional failed attempts");
     retained.Refresh(selected,true,true);result=retained.Read(selected);
-    Check(result.stale&&retained.ShouldNotifyFailure(),"a second completed transient refresh can produce one coalesced source failure notice");
+    Check(result.stale&&!retained.ShouldNotifyFailure(),"a second completed transient refresh remains below the configurable default five-attempt notice threshold");
+    for(int attempt=0;attempt<3;++attempt){retained.Refresh(selected,true,true);result=retained.Read(selected);}
+    Check(result.stale&&retained.ShouldNotifyFailure(),"fifth completed transient refresh reaches the configured default notice threshold");
     offline=false;retained.Refresh(selected,true,true);result=retained.Read(selected);
     Check(!result.stale&&result.failure==FailureKind::None&&!retained.ShouldNotifyFailure(),"successful refresh clears stale state and resets transient failure threshold");
     const auto normalTransport=retained.testTransport;
@@ -182,17 +184,46 @@ void ProviderTests() {
     for(int i=0;i<10;++i)result=retained.Read(selected);
     Check(result.refreshSequence==exceptionSequence&&!retained.ShouldNotifyFailure(),"repeated reads of a throwing transport result cannot inflate its failure attempt count");
     retained.Refresh(selected,true,true);result=retained.Read(selected);
-    Check(result.refreshSequence!=exceptionSequence&&retained.ShouldNotifyFailure(),"a new throwing transport attempt advances generation and reaches the transient notice threshold");
+    Check(result.refreshSequence!=exceptionSequence&&!retained.ShouldNotifyFailure(),"a new throwing transport attempt advances actual attempt count without bypassing the five-attempt policy");
     retained.testTransport=normalTransport;retained.Refresh(selected,true,true);retained.Read(selected);
     invalid=true;retained.Refresh(selected,true,true);result=retained.Read(selected);
-    Check(result.stale&&result.failure==FailureKind::InvalidData&&retained.ShouldNotifyFailure(),"invalid service data retains prior notes but immediately reports a nontransient error");
+    Check(result.stale&&result.failure==FailureKind::InvalidData&&!retained.ShouldNotifyFailure(),"invalid service data preserves notes and follows the configured completed-attempt threshold");
     auto otherAccount=selected;otherAccount.playerId=L"99999";retained.Refresh(otherAccount,true,true);result=retained.Read(otherAccount);
-    Check(result.state==State::Error&&!result.stale&&result.rows.empty(),"account changes cannot expose another role's retained notes");
+    Check(result.state==State::Loading&&!result.stale&&result.rows.empty(),"account changes cannot expose another role's retained notes while quietly waiting for first success");
     retained.Cancel();Check(retained.Read(selected).state==State::Loading&&!retained.ShouldNotifyFailure(),"cancel releases retained account data and notice state");retained.Stop();
+}
+void HealthProviderTests(){
+    ContentKuroProvider provider;auto cfg=Settings();cfg.playerId=L"12345";cfg.region=L"Europe";
+    std::atomic<std::uint64_t> now{0};provider.testNow=[&]{return now.load();};bool offline=false;unsigned requests=0;
+    provider.testTransport=[&](const auto& options,auto& response,auto&){++requests;if(offline)return false;
+        Respond(response,options.url.find(L"oauth/code")!=std::wstring::npos?R"({"codes":0,"oauthCode":"CODE"})":roleBody);return true;};
+    provider.Refresh(cfg,true);bool completed=false;auto result=provider.Read(cfg,&completed);
+    Check(completed&&provider.HealthState().hasSuccess&&provider.HealthState().attempts==1&&result.rows.size()==4,"worker completion captures success time and useful rows before any age decoration");
+    offline=true;now=300000;provider.Refresh(cfg,true,true);result=provider.Read(cfg);
+    Check(result.stale&&result.rows.front().value==L"Refreshed 5m ago"&&result.rows[1].value.find(L"120/240")!=std::wstring::npos,"stale presentation shows configurable last-success age without replacing original resource values");
+    const auto failureCount=provider.HealthState().consecutiveFailures;const auto calls=requests;
+    for(int i=0;i<50;++i)result=provider.Read(cfg);
+    Check(provider.HealthState().consecutiveFailures==failureCount&&requests==calls,"many idle reads start no HTTP and add no failed source attempts");
+    aip::source_health::Configuration policy;policy.tileFailureAttempts=0;policy.tileFailureSeconds=600;policy.popupFailureAttempts=7;
+    now=899999;result=provider.Read(cfg,policy);Check(result.rows.front().value.find(L"Refresh delayed")==std::wstring::npos&&!provider.ShouldNotifyFailure(policy),"independent elapsed tile gate stays quiet before its exact deadline");
+    now=900000;result=provider.Read(cfg,policy);Check(result.rows.front().value.find(L"Refresh delayed")!=std::wstring::npos&&!provider.ShouldNotifyFailure(policy)&&provider.HealthState().consecutiveFailures==1,"elapsed time opens tile error without adding attempts or prematurely notifying");
+    policy.tileFailureMode=L"Off";policy.popupFailureAttempts=1;
+    Check(provider.Read(cfg,policy).rows.front().value.find(L"Refresh delayed")==std::wstring::npos&&provider.ShouldNotifyFailure(policy),"tile failure text and popup failure can be controlled independently");
+    policy.tileFailureMode=L"Replace";result=provider.Read(cfg,policy);Check(result.state==State::Error&&result.rows.size()==1,"explicit Replace policy hides retained resources only in the presentation");
+    policy.tileFailureMode=L"Append";result=provider.Read(cfg,policy);Check(result.stale&&result.current==120&&result.rows.size()==5,"changing presentation policy recovers retained resources without another source request");
+    policy.popupFailureEnabled=false;Check(!provider.ShouldNotifyFailure(policy),"per-tile popup disabling is independent of retained tile values");
+    policy.ageDisplay=L"Off";policy.tileFailureMode=L"Off";result=provider.Read(cfg,policy);Check(result.rows.size()==4&&result.stale,"age can be hidden while stale resource values stay intact");
+    offline=false;now=960000;provider.Refresh(cfg,true,true);result=provider.Read(cfg);
+    Check(!result.stale&&result.rows.size()==4&&provider.HealthState().consecutiveFailures==0&&!provider.ShouldNotifyFailure(),"a successful completed refresh removes age/error rows and resets failure notices");
+    policy={};policy.ageDisplay=L"Always";now=1260000;result=provider.Read(cfg,policy);Check(result.rows.front().value==L"Refreshed 5m ago","optional healthy age uses actual completion time and no extra timer");
+    policy.ageTemplate=L"%tile% refreshed %age% ago";result=provider.Read(cfg,policy,nullptr,L"Named WuWa");Check(result.rows.front().value==L"Named WuWa refreshed 5m ago","tile templates receive the same human-readable tile-name context as popup templates");
+    auto slower=cfg;slower.refreshSeconds=600;offline=true;now=1320000;provider.Refresh(slower,true);result=provider.Read(slower);
+    Check(result.stale&&result.current==120&&provider.HealthState().lastSuccess==960000&&provider.HealthState().consecutiveFailures==1,"changing cadence keeps same-account last-good data and its true success time");
+    provider.Cancel();Check(!provider.HealthState().hasSuccess&&!provider.HealthState().failing,"cancel or account change discards previous account health and last-success data");provider.Stop();
 }
 }
 int main() {
-    ParseTests(); TransportTests(); SettingsTests(); ProviderTests();
+    ParseTests(); TransportTests(); SettingsTests(); ProviderTests();HealthProviderTests();
     std::cout << checks << " checks, " << failures << " failures\n";
     return failures ? 1 : 0;
 }

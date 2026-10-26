@@ -12,6 +12,7 @@
 #include "app_launcher.h"
 #include "content_sources/gmail_model.h"
 #include "content_sources/battery_model.h"
+#include "source_health.h"
 #include <set>
 
 namespace aip { namespace content {
@@ -71,6 +72,7 @@ struct TileInstance {
     aip::datetime::CalendarConfiguration calendar;
     aip::google_calendar::Configuration googleCalendar;
     aip::kuro::Configuration kuro;
+    aip::source_health::Configuration sourceHealth;
     aip::app_launcher::Configuration launcher;
     aip::gmail::Configuration mail;
     aip::battery::Configuration battery;
@@ -130,7 +132,7 @@ inline bool TileInstanceSourceSection(const TileInstance& tile, const std::wstri
     if(tile.type==TileInstanceType::Mail)return s==L"mail";
     if(tile.type==TileInstanceType::Battery)return s==L"battery";
     if (s == L"alerts") return tile.type == TileInstanceType::Rss || tile.type == TileInstanceType::PrayerTimes;
-    if (tile.type == TileInstanceType::Wuwa) return s == L"kuro";
+    if (tile.type == TileInstanceType::Wuwa) return s == L"kuro"||s==L"sourcehealth";
     if (tile.type == TileInstanceType::Rss) return s == L"rssfeed";
     if (tile.type == TileInstanceType::NowPlaying) return s == L"smtc";
     if (tile.type == TileInstanceType::PrayerTimes) return s == L"prayertimes";
@@ -238,6 +240,7 @@ inline bool NormalizeTileInstanceSetting(const std::wstring& section, const std:
         if (source == L"launcher") return aip::app_launcher::NormalizeSetting(sourceKey,value,error);
         if (source == L"mail") return aip::gmail::NormalizeSetting(sourceKey,value,error);
         if (source == L"battery") return aip::battery::NormalizeSetting(sourceKey,value,error);
+        if (source == L"sourcehealth") return aip::source_health::NormalizeSetting(sourceKey,value,error);
         if (source == L"kuro") return aip::kuro::NormalizeSetting(sourceKey, value, error);
         if (source == L"googlecalendar") return aip::google_calendar::NormalizeSetting(sourceKey, value, error);
         if (source == L"clock" || source == L"calendar") return aip::datetime::NormalizeSetting(sourceSection, sourceKey, value, error);
@@ -373,6 +376,11 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
             }
         }
         if(tile.type==TileInstanceType::Wuwa) {
+            if(!aip::source_health::ReadConfiguration([&](const wchar_t* key,const wchar_t* fallback){
+                auto value=TileInstanceRead(tile,read,L"SourceHealth",key,fallback);
+                if(aip::source_health::NormalizeSetting(key,value,error))tile.settings[L"sourcehealth."+Lower(key)]=value;
+                return value;
+            },tile.sourceHealth,error)){error=section+L": "+error;return false;}
             const auto getKuro=[&](const wchar_t* key,const wchar_t* fallback,std::wstring& value) {
                 auto inherited=std::wstring(fallback);
                 if(std::wstring(key)==L"PlayerId")inherited=TileInstanceRead(tile,read,L"Kuro",L"UID",fallback);
