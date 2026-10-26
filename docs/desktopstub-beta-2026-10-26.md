@@ -1,5 +1,8 @@
 # DesktopStub v27 beta 1 — October 26
 
+Historical beta 1 record. [Beta 2](desktopstub-beta2-2026-10-26.md) is the newer
+delivered build and records the latest native validation and fresh reset.
+
 Fresh installations start with one Desktop wallpaper tile using Registration
 on the **main package**, optional sources/plugins and login startup off. Run
 DesktopStub.exe normally, allow its first image/registration update to finish,

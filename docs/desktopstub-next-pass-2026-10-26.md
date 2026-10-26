@@ -1,5 +1,12 @@
 # Resume checkpoint — October 26, after v27 beta 1
 
+**Latest completion:** [beta 2 delivery](desktopstub-beta2-2026-10-26.md)
+supersedes the initial request snapshot below. Properties/Profiles/Kuro/host
+preparation changes are implemented and validated, research reports are saved,
+and the renewed fresh reset is complete. The source workspace is now the
+managed C: worktree described there; the installed app remains at the canonical
+D: path. Verify current state before any subsequent integration/reset.
+
 This checkpoint records the user's latest requested work for resumption after
 context compaction. Updating these documents does not implement the new work
 or authorize another reset. The user subsequently resumed implementation and

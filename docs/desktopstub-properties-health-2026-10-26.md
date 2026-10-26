@@ -123,3 +123,9 @@ unchanged and remains open.
 Portable/host checks do not establish every real account, Windows 1809 or
 lock-screen behavior. Final native appearance/reset receipts accompany the
 beta delivery record.
+
+Native follow-up passed on the current machine: shared Profiles/Main pages,
+unfilled rows, black custom color corrected for the dark surface after F5,
+and ordinary Registration/Main wallpaper generation. The trial was reset
+afterward. [Beta 2 delivery and recovery evidence](desktopstub-beta2-2026-10-26.md)
+records the precise scope and remaining native acceptance.

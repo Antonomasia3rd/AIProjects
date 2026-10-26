@@ -6,6 +6,14 @@ Snapshot: October 26 beta implementation is complete and source/inert gates pass
 
 ## Current priority findings
 
+The [beta 2 delivery record](desktopstub-beta2-2026-10-26.md) confirms current
+machine native appearance/cold-start checks and the completed fresh reset.
+The Properties rows below remain open only for broader theme/OS/accessibility
+acceptance. Provider research and 1809/lock-screen feasibility are saved in
+[the provider report](desktopstub-provider-parity-feasibility-2026-10-26.md) and
+[the platform investigation](desktopstub-1809-history-and-lockscreen-2026-10-26.md);
+they do not claim those missing providers/features are implemented.
+
 | Request or report | Current status and evidence | Remaining action |
 | --- | --- | --- |
 | Windows 10 1809: Desktop/main tile does not show wallpaper | **Longstanding report; unresolved. The user confirms it occurs in v24 and earlier.** The VM shows Desktop's static icon/name instead of wallpaper while Prayer Times displays live data. The newer independent-Registration 19041/uap10 restriction was a real separate defect, but cannot by itself explain this older history. The user specifically suspects Win32/Centennial primary-tile support. | Deeply investigate actual v24/earlier binaries and configuration on build 17763. Compare Win32/Desktop Bridge and UWP primary/secondary senders, package/AUMID identity, activation, manifest type, Registration versus native LiveTile publication, asset paths/ACLs and Start caching. General Live Tile support and passing host XML contracts do not settle this report. Establish platform restrictions from native evidence rather than assuming either an app bug or unsupported Windows behavior. |
