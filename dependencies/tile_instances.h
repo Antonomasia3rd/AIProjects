@@ -408,12 +408,19 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
     output = std::move(candidate); error.clear(); return true;
 }
 struct TileInstanceSetting { std::wstring section, key, value; };
-struct TileInstanceMigrationPlan { bool changed = false; std::vector<TileInstanceSetting> settings; };
+struct TileInstanceMigrationPlan {
+    bool changed = false, legacyModeRequired = false;
+    std::wstring legacyReason;
+    std::vector<TileInstanceSetting> settings;
+};
 // The host applies this complete plan to an in-memory INI copy, writes a backup,
 // validates native provider fields, then commits with its existing atomic writer.
 template<class Reader> bool PlanLegacyTileInstanceMigration(Reader read, TileInstanceMigrationPlan& output, std::wstring& error) {
     const std::wstring absent = L"\x1f AIP tile list absent \x1f";
     TileInstanceMigrationPlan plan;
+    const auto retainLegacy=[&](const wchar_t* reason){
+        plan.legacyModeRequired=true;plan.legacyReason=reason;output=std::move(plan);error.clear();return true;
+    };
     if (read(L"Tiles", L"Instances", absent.c_str()) != absent) {
         TileInstanceConfiguration existing;
         if (!ReadTileInstanceConfiguration(read, existing, error)) return false;
@@ -425,6 +432,40 @@ template<class Reader> bool PlanLegacyTileInstanceMigration(Reader read, TileIns
             plan.settings.push_back({section,field.key,value});
         }
         plan.changed=!plan.settings.empty();output=std::move(plan);error.clear();return true;
+    }
+    // Before v26, a profile contained only the main Desktop and optional global
+    // TileText. It must not acquire seven unrelated source tiles during an
+    // upgrade. The host calls this on the original INI before filling defaults.
+    bool numberedSchema=read(L"Content",L"Enabled",absent.c_str())!=absent ||
+        read(L"Content",L"Count",absent.c_str())!=absent ||
+        read(L"Content.1",L"Name",absent.c_str())!=absent ||
+        read(L"Content.1",L"Background",absent.c_str())!=absent;
+    for(const auto* id:{L"smtc",L"rss",L"genshin",L"hsr",L"zzz",L"discord",L"prayer"})
+        numberedSchema=numberedSchema || read(TileInstanceSection(id).c_str(),L"Content",absent.c_str())!=absent;
+    // A single independent Wallpaper cannot express the old primary's source
+    // composition or numbered slideshow. Keep these profiles on the existing
+    // legacy engine rather than silently flattening their contents. Original
+    // sections and the caller's prior plan remain untouched on this result.
+    int legacyCount=1;
+    if(!ParseInt(read(L"Content",L"Count",L"1"),1,MaxEntries,legacyCount)){
+        error=L"The saved legacy Content.Count is invalid; its settings were kept.";return false;
+    }
+    const auto legacySource=Lower(Trim(read(L"Settings",L"ContentSource",L"Wallpaper")));
+    if(legacyCount>1 || legacySource!=L"wallpaper"){
+        return retainLegacy(L"Numbered contents or the primary source cannot be converted to one independent Desktop without changing its behavior.");
+    }
+    bool composed=false;
+    if(!ParseBool(read(L"Content",L"Enabled",L"0"),composed)){
+        error=L"The saved legacy Content.Enabled is invalid; its settings were kept.";return false;
+    }
+    if(composed){
+        std::vector<std::wstring> sources;
+        if(!ParseSources(read(L"Content.1",L"TextSources",L""),sources)){
+            error=L"The saved legacy Content.1.TextSources is invalid; its settings were kept.";return false;
+        }
+        if(std::any_of(sources.begin(),sources.end(),[](const auto& source){return Lower(source)!=L"customtext";})){
+            return retainLegacy(L"The primary text-source composition requires the legacy engine; no content was discarded.");
+        }
     }
     auto add = [&](const std::wstring& section, const std::wstring& key, const std::wstring& value) { plan.settings.push_back({section,key,value}); };
     const auto copy = [&](const std::wstring& target, const std::wstring& sourceSection, const wchar_t* key, const std::wstring& targetKey) {
@@ -465,6 +506,35 @@ template<class Reader> bool PlanLegacyTileInstanceMigration(Reader read, TileIns
         return section;
     };
     make(L"desktop", L"Wallpaper", L"Desktop", 1, L"");
+    if(!numberedSchema || !composed){
+        const auto desktop=TileInstanceSection(L"desktop");
+        if(!numberedSchema&&read(desktop.c_str(),L"Name",absent.c_str())==absent){
+            const auto name=read(L"Settings",L"ManifestDisplayName",L"Desktop");
+            if(!Trim(name).empty())add(desktop,L"Name",name);
+        }
+        for(const auto* key:{L"Text",L"SecondaryText",L"BadgeText"}){
+            const auto value=read(L"TileText",key,absent.c_str());
+            if(value!=absent)add(desktop,L"Content."+std::wstring(key),Trim(value));
+        }
+        bool visible=false;
+        if(!ParseBool(read(L"TileText",L"Enabled",L"0"),visible)){
+            error=L"The saved legacy TileText.Enabled is invalid; its settings were kept.";return false;
+        }
+        add(desktop,L"TextMode",visible?L"Auto":L"Off");
+    }else if(Trim(read(L"Content.1",L"TextSources",L"")).empty()){
+        add(TileInstanceSection(L"desktop"),L"TextMode",L"Off");
+    }
+    if(!numberedSchema){
+        const auto desktop=TileInstanceSection(L"desktop");
+        if(read(desktop.c_str(),L"Delivery.PrimaryRegistration",absent.c_str())==absent)
+            add(desktop,L"Delivery.PrimaryRegistration",L"Main");
+        if(read(desktop.c_str(),L"Branding",absent.c_str())==absent)
+            add(desktop,L"Branding",read(L"Settings",L"LiveTileBranding",L"Auto"));
+        // A command-line compatibility adapter can recognize profiles converted
+        // from the old global Desktop settings without changing modern profiles.
+        add(L"State",L"LegacyDesktopSettingsMigrated",L"1");
+    }
+    if(numberedSchema){
     const auto smtc = make(L"smtc", L"NowPlaying", L"Now playing", 2, L"");
     const auto rss = make(L"rss", L"RSS", L"RSS", 3, L"");
     make(L"genshin", L"Genshin", L"Genshin Impact", 4, L"Notes.Resin");
@@ -478,10 +548,11 @@ template<class Reader> bool PlanLegacyTileInstanceMigration(Reader read, TileIns
     for (const auto* key : {L"ProfilePath",L"ClientId",L"Name",L"Details",L"State",L"SendPresence",L"ClearOnStop",L"RefreshSeconds",L"OperationTimeoutMs"}) copy(discord, L"Discord", key, L"Discord." + std::wstring(key));
     for (const auto* key : aip::prayer::SettingKeys) copy(prayer, L"PrayerTimes", key, L"PrayerTimes." + std::wstring(key));
     for (const auto* id : {L"genshin",L"hsr",L"zzz"}) for (const auto* key : {L"RefreshSeconds",L"HttpTimeoutSeconds",L"MaximumBytes"}) copy(TileInstanceSection(id), L"Notes", key, L"Notes." + std::wstring(key));
+    }
     // Pin identities are unchanged. Existing gallery identities/ledger remain in
     // their current independent group engine; migration never changes them.
     add(L"Tiles", L"SchemaVersion", L"1");
-    add(L"Tiles", L"Instances", L"desktop,smtc,rss,genshin,hsr,zzz,discord,prayer");
+    add(L"Tiles", L"Instances", numberedSchema?L"desktop,smtc,rss,genshin,hsr,zzz,discord,prayer":L"desktop");
     const auto stagedRead = [&](const wchar_t* section, const wchar_t* key, const wchar_t* fallback) {
         for (auto it = plan.settings.rbegin(); it != plan.settings.rend(); ++it)
             if (Lower(it->section) == Lower(section) && Lower(it->key) == Lower(key)) return it->value;
@@ -500,5 +571,42 @@ template<class Reader, class Mutator> bool StageLegacyTileInstances(Reader read,
     std::wstring candidate = original;
     for (const auto& setting : plan.settings) if (!mutate(candidate, setting.section, setting.key, setting.value, error)) return false;
     staged = std::move(candidate); error.clear(); return true;
+}
+// Old Desktop-only scripts wrote globals. For explicitly migrated profiles,
+// mirror unambiguous legacy fields to the current primary Desktop while keeping
+// the original global value for rollback/readback. Modern profiles opt in only
+// through migration state; direct Tile.* updates remain ordinary updates.
+template<class Reader> bool PlanLegacyDesktopSettingAlias(Reader read,const std::wstring& section,const std::wstring& key,
+        const std::wstring& value,std::vector<TileInstanceSetting>& output,std::wstring& error){
+    std::vector<TileInstanceSetting> aliases;
+    if(read(L"State",L"LegacyDesktopSettingsMigrated",L"0")!=L"1"){output=std::move(aliases);error.clear();return true;}
+    const auto s=Lower(Trim(section)),k=Lower(Trim(key));std::wstring target,valueToStore=value;
+    if(s==L"tiletext"){
+        if(k==L"enabled"){
+            bool enabled=false;if(!ParseBool(value,enabled)){error=L"Legacy TileText.Enabled requires a boolean.";return false;}
+            target=L"TextMode";valueToStore=enabled?L"Auto":L"Off";
+        }else if(k==L"text"||k==L"secondarytext"||k==L"badgetext"){target=L"Content."+key;valueToStore=Trim(value);}
+        else if(IsTextPresentationKey(key)){
+            target=key;if(k==L"textpreset"&&Lower(Trim(valueToStore))==L"inherit")valueToStore=L"Default";
+        }
+    }
+    if(s==L"settings"&&k==L"livetilebranding")target=L"Branding";
+    if(target.empty())for(const auto& field:TilePolicyFields)
+        if(Lower(field.section)==s&&Lower(field.setting)==k){target=field.key;break;}
+    if(target.empty()){output=std::move(aliases);error.clear();return true;}
+    std::vector<std::wstring> ids;if(!ParseTileInstanceIds(read(L"Tiles",L"Instances",L""),ids,error))return false;
+    std::wstring primary;
+    for(const auto& id:ids){
+        const auto area=TileInstanceSection(id);bool selected=false;
+        if(!ParseBool(read(area.c_str(),L"Primary",L"0"),selected)){error=L"Legacy Desktop alias could not resolve a valid primary tile.";return false;}
+        if(!selected)continue;
+        if(!primary.empty()||Lower(read(area.c_str(),L"Type",L""))!=L"wallpaper"){
+            error=L"Legacy Desktop alias requires one primary Wallpaper tile. Use an explicit Tile.<id> setting.";return false;
+        }
+        primary=area;
+    }
+    if(primary.empty()){error=L"The migrated primary Desktop was removed. Use an explicit Tile.<id> setting; no global-only update was saved.";return false;}
+    if(!NormalizeTileInstanceSetting(primary,target,valueToStore,error))return false;
+    aliases.push_back({primary,target,std::move(valueToStore)});output=std::move(aliases);error.clear();return true;
 }
 } }

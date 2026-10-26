@@ -74,10 +74,13 @@ static void TestTileRegistrationHost(const std::wstring& bitmapPath)
     std::vector<BYTE> copied;
     Check(aip::ReadWholeFileBytes(target.launcherPath,copied) && copied==launcher,"staging copies only the small launcher instead of the complete resident host");
     Check(WriteTileRegistrationManifest(target,error) && target.packageVersion==L"1.0.0.1","first static image publication receives its independent package revision");
-    std::wstring xml;
+    std::wstring xml,activation;
+    aip::tile_registration::ActivationBinding bound;
     Check(TileRegistrationReadText(target.manifestPath,xml) && xml.find(target.identityName)!=std::wstring::npos &&
-        xml.find(L"Canonical.Main_123456789abcd!App")!=std::wstring::npos && xml.find(L"--tile-id &quot;reg-tile&quot;")!=std::wstring::npos,
-        "private staged manifest targets the canonical app and selected tile without account data");
+        xml.find(L"uap10:")==std::wstring::npos&&xml.find(L"10.0.15063.0")!=std::wstring::npos&&
+        TileRegistrationReadText(target.root+L"\\"+aip::tile_registration::ActivationBindingFileName,activation)&&
+        aip::tile_registration::ReadActivationBinding(activation,bound,error)&&bound.hostAumid==L"Canonical.Main_123456789abcd!App"&&bound.tileId==L"reg-tile"&&bound.profile==target.profile,
+        "older-compatible private manifest and owned activation file retain the canonical app and selected tile without account data");
     Check(WriteTileRegistrationManifest(target,error) && target.packageVersion==L"1.0.0.2","background image changes increment only that tile's package version");
     Check(!RegisterTileRegistrationPackage(target,false,error) && error.find(L"inert")!=std::wstring::npos,
         "default fixture cannot register even an explicitly staged real Windows package");

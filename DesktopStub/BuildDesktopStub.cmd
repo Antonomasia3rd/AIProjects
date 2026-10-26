@@ -101,6 +101,7 @@ set "CPP_FEATURE_DEFINES=/DDESKTOPSTUB_ENABLE_HARDWARE_SOURCES=%DESKTOPSTUB_ENAB
 set "CPP_VERSION_DEFINES_FILE=%OBJECT_DIR%\DesktopStubVersionDefines.inc"
 set "RC_HOST_DEFINES_FILE=%OBJECT_DIR%\DesktopStubHostResourceDefines.rc.inc"
 set "RC_BROKER_DEFINES_FILE=%OBJECT_DIR%\DesktopStubBrokerResourceDefines.rc.inc"
+set "RC_LAUNCHER_DEFINES_FILE=%OBJECT_DIR%\DesktopStubLauncherResourceDefines.rc.inc"
 call :WriteCppVersionDefines "%CPP_VERSION_DEFINES_FILE%" "%DESKTOPSTUB_RELEASE_TAG%"
 if errorlevel 1 (
     set "STATUS=!ERRORLEVEL!"
@@ -114,6 +115,12 @@ if errorlevel 1 (
     exit /b !STATUS!
 )
 call :WriteRcDefines "%RC_BROKER_DEFINES_FILE%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_BROKER_EXE_NAME%" "%DESKTOPSTUB_BROKER_EXE_NAME%"
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+call :WriteRcDefines "%RC_LAUNCHER_DEFINES_FILE%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_PRODUCT_NAME%" "%DESKTOPSTUB_LAUNCHER_EXE_NAME%" "%DESKTOPSTUB_LAUNCHER_EXE_NAME%"
 if errorlevel 1 (
     set "STATUS=!ERRORLEVEL!"
     popd
@@ -173,8 +180,14 @@ if exist "%BROKER_EXE%.manifest" (
     )
 )
 
-echo Building main DesktopStub host...
-cl /nologo %OPTIMIZATION_FLAGS% /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE TileLauncher.cpp /Fe"build\%DESKTOPSTUB_LAUNCHER_EXE_NAME%" /Fo"%OBJECT_DIR%\DesktopStubTileLauncher.obj" /link user32.lib shell32.lib ole32.lib uuid.lib /SUBSYSTEM:WINDOWS
+echo Building transient tile launcher...
+rc /nologo %RC_VERSION_DEFINES% %RC_INCLUDE_DEFINES% /fo"%OBJECT_DIR%\TileLauncher.res" TileLauncher.rc
+if errorlevel 1 (
+    set "STATUS=!ERRORLEVEL!"
+    popd
+    exit /b !STATUS!
+)
+cl /nologo %OPTIMIZATION_FLAGS% /utf-8 /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE TileLauncher.cpp "%OBJECT_DIR%\TileLauncher.res" /Fe"build\%DESKTOPSTUB_LAUNCHER_EXE_NAME%" /Fo"%OBJECT_DIR%\DesktopStubTileLauncher.obj" /link user32.lib shell32.lib ole32.lib uuid.lib /SUBSYSTEM:WINDOWS
 if errorlevel 1 (
     set "STATUS=!ERRORLEVEL!"
     popd
@@ -188,6 +201,7 @@ if exist "build\%DESKTOPSTUB_LAUNCHER_EXE_NAME%.manifest" (
         exit /b !STATUS!
     )
 )
+echo Building main DesktopStub host...
 rc /nologo %RC_VERSION_DEFINES% %RC_INCLUDE_DEFINES% /fo"%RES_FILE%" DesktopStub.rc
 if errorlevel 1 (
     set "STATUS=!ERRORLEVEL!"

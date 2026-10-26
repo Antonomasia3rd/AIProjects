@@ -19,6 +19,7 @@
 #include "content_sources/prayer_times_model.h"
 #include "tile_text_presentation.h"
 #include "battery_tile_layout.h"
+#include "smtc_selection.h"
 #include "tile_delivery_policy.h"
 #include "DiscordRPC/presence_defaults.h"
 
@@ -32,6 +33,7 @@ enum class MediaRepeatMode { Unknown, Off, List, Track };
 enum class MediaToggleState { Unknown, Off, On };
 enum class MediaIndicatorMode { Status, AppIcon, None };
 struct SmtcConfiguration {
+    SmtcSelection selection;
     MediaIndicatorMode indicatorMode = MediaIndicatorMode::Status;
     bool showRepeatShuffle = false;
 };
@@ -336,6 +338,7 @@ inline bool NormalizeSetting(const std::wstring& section, const std::wstring& ke
         return aip::prayer::NormalizeSetting(canonicalKey, value, error);
     }
     if (Lower(section) == L"smtc") {
+        if(k==L"sessionmode"||k==L"sessionappid"||k==L"sessioninstance")return NormalizeSmtcSelectionSetting(k,value,error);
         if (k == L"indicator") {
             const auto mode = Lower(Trim(value));
             if (mode == L"status") value = L"Status";
@@ -574,6 +577,9 @@ template<class Reader> bool ReadConfiguration(Reader read, Configuration& result
     cfg.smtc.indicatorMode = mediaIndicator == L"AppIcon" ? MediaIndicatorMode::AppIcon :
         mediaIndicator == L"None" ? MediaIndicatorMode::None : MediaIndicatorMode::Status;
     cfg.smtc.showRepeatShuffle = get(L"SMTC", L"ShowRepeatShuffle", L"0") == L"1";
+    cfg.smtc.selection.mode=get(L"SMTC",L"SessionMode",L"Current");
+    cfg.smtc.selection.appId=get(L"SMTC",L"SessionAppId",L"");
+    ParseInt(get(L"SMTC",L"SessionInstance",L"0"),0,64,cfg.smtc.selection.instance);
     const bool externalDiscordProfile = !Trim(cfg.discord.profilePath).empty();
     const auto discordInline = [&](const wchar_t* key, const wchar_t* fallback) {
         // Preserve dormant inline values for repair/switching. Only the active

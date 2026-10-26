@@ -12,6 +12,7 @@
 #include <cstdint>
 #include "../dependencies/baseline_app.h"
 #include "../dependencies/tile_registration.h"
+#include "../dependencies/tile_registration_binding_win32.inc"
 
 static bool ValidTileId(const std::wstring& id) {
     return !id.empty() && id.size() <= 54 && std::all_of(id.begin(),id.end(),[](wchar_t c) {
@@ -74,6 +75,16 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR,int) {
     int count = 0; auto** argv = CommandLineToArgvW(GetCommandLineW(),&count);
     if (!argv) return 2;
     std::map<std::wstring,std::wstring> values; bool validateOnly = false, valid = true;
+    if(count==1){
+        aip::tile_registration::ActivationBinding binding;std::wstring error;
+        if(!aip::tile_registration::binding_native::Load(binding,error)){
+            LocalFree(argv);
+            MessageBoxW(nullptr,(error+L"\nOpen DesktopStub and refresh this Registration tile's setup.").c_str(),L"DesktopStub tile",MB_OK|MB_ICONWARNING);
+            return 2;
+        }
+        values={{L"--host",binding.hostPath},{L"--profile",binding.profile},{L"--tile-id",binding.tileId},
+            {L"--product",binding.hostProduct},{L"--activate-aumid",binding.hostAumid}};
+    }
     for (int index = 1; index < count; ++index) {
         const std::wstring key = argv[index];
         if (key == L"--validate-only") { if (validateOnly) valid = false; validateOnly = true; continue; }

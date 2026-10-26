@@ -1361,8 +1361,10 @@ static void AppendRectFingerprint(std::wstring& out, const wchar_t* name, const 
 
 static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
 {
+    const auto iconPreference=IniReadS(L"Settings",L"TileIconFont",L"Auto");
     std::wstring state;
     state += L"v=10;";
+    state+=L"iconFont="+iconPreference+L";";
     if (const auto* policy = aip::content::CurrentTileDeliveryPolicy())
         state += aip::content::TileDeliveryPolicyKey(*policy);
     if (SecondaryLiveAssetsOnly(UseExperimentalLiveTileUpdate())) state += L"secondaryLiveOnly=1;";
@@ -2266,7 +2268,7 @@ static bool CurrentGenerationTargetAllows(const aip::content::Snapshot& frame,
         const auto* tile = FindCurrentGenerationTileInstance(*instances, frame);
         if (tile && frame.policy.included && aip::content::TileDeliveryPolicyKey(frame.policy) !=
             aip::content::TileDeliveryPolicyKey(tile->policy)) return false;
-        if (tile && TileSnapshotUsesRegistration(frame)) return renderOnly || TileRegistrationReadyForId(tile->id);
+        if (tile && TileSnapshotUsesRegistration(frame)) return (tile->primary&&!TileSnapshotUsesSeparateRegistration(frame)) || renderOnly || TileRegistrationReadyForId(tile->id);
         if (frame.secondaryTileId.empty()) return tile || IsPrimaryRetirementGenerationFrame(frame);
         if (!tile) return false;
         if (renderOnly) return true;
@@ -2393,7 +2395,7 @@ bool Generate(const wchar_t* wp, const wchar_t* reason = nullptr, bool renderOnl
 
     std::wstring exeDir = GetExeDir();
     ManifestDisplayInfo manifestInfo = CurrentManifestDisplayInfo();
-    const bool separateRegistration = TileSnapshotUsesRegistration(contentScope.snapshot);
+    const bool separateRegistration = TileSnapshotUsesSeparateRegistration(contentScope.snapshot);
     aip::tile_registration::Target registrationTarget;
     if (separateRegistration) {
         if (ConfiguredManifestCompatibilityTarget() != ManifestCompatibilityTarget::Windows10) {

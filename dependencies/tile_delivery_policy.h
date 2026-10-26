@@ -21,6 +21,8 @@ struct TilePolicyField {
     const wchar_t* choices = L"";
 };
 inline constexpr TilePolicyField TilePolicyFields[] = {
+    {L"Artwork.IconFont",L"Settings",L"TileIconFont",L"Auto",L"Icon font (Auto follows Windows version)",TilePolicyValueKind::Choice,0,0,L"Auto|MDL2|Fluent|Vector"},
+    {L"Delivery.PrimaryRegistration",L"Settings",L"PrimaryRegistration",L"Separate",L"Primary Desktop Registration target",TilePolicyValueKind::Choice,0,0,L"Main|Separate"},
     {L"Delivery.DisabledWarning",L"Settings",L"LiveTileDisabledWarning",L"Startup",L"Warn when Windows disables this tile's updates",TilePolicyValueKind::Choice,0,0,L"Off|Startup|OnChange"},
     {L"Delivery.DisabledCheckSeconds",L"Settings",L"LiveTileDisabledCheckSeconds",L"300",L"Disabled-update check interval (seconds)",TilePolicyValueKind::Integer,30,86400},
     {L"Delivery.Mode",L"Settings",L"ExperimentalLiveTileUpdate",L"Auto",L"Tile delivery",TilePolicyValueKind::Choice,0,0,L"Auto|LiveTile|Registration"},
@@ -137,7 +139,10 @@ template<class Reader> bool ReadTileDeliveryPolicy(Reader read,const std::wstrin
         if(!NormalizeTilePolicySetting(field.key,value,error)){error=section+L"."+error;return false;}
         candidate.values[TilePolicyLower(field.section)+L"."+TilePolicyLower(field.setting)]=std::move(value);
     }
-    if(candidate.Mode()==L"Registration"&&candidate.Read(L"Settings",L"AppxManifestTarget",L"Windows10")!=L"Windows10"){
+    const auto primaryFlag=TilePolicyLower(read(section.c_str(),L"Primary",L"0"));
+    const bool primary=primaryFlag==L"1"||primaryFlag==L"true"||primaryFlag==L"on"||primaryFlag==L"yes";
+    if(candidate.Mode()==L"Registration"&&candidate.Read(L"Settings",L"AppxManifestTarget",L"Windows10")!=L"Windows10"&&
+        !(primary&&candidate.Read(L"Settings",L"PrimaryRegistration",L"Separate")==L"Main")){
         error=section+L": Separate Registration tile requires Windows10 manifest target. Use Delivery.ManifestTarget=Windows10 or select LiveTile delivery.";return false;
     }
     output=std::move(candidate);error.clear();return true;

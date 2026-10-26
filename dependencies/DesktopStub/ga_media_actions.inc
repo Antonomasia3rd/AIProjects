@@ -13,10 +13,14 @@ static std::atomic<bool> g_mediaActionBusy{false};
 static std::mutex g_mediaActionResultMutex;
 static std::wstring g_mediaActionError;
 
-static bool RunNativeMediaAction(const std::wstring& key, int volumeStep, std::wstring& error)
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+static std::function<bool(const std::wstring&,const aip::content::SmtcSelection&)> g_testMediaActionSelection;
+#endif
+static bool RunNativeMediaAction(const std::wstring& key, int volumeStep, std::wstring& error,const aip::content::SmtcSelection& selection={})
 {
 #ifdef DESKTOPSTUB_INERT_HARDWARE
     (void)key; (void)volumeStep;
+    if(g_testMediaActionSelection){error.clear();return g_testMediaActionSelection(key,selection);}
     error = L"Media actions are disabled in inert validation."; return false;
 #else
     using namespace winrt::Windows::Media::Control;
@@ -39,8 +43,8 @@ static bool RunNativeMediaAction(const std::wstring& key, int volumeStep, std::w
         }
         const auto deadline = aip::content::smtc_detail::Clock::now() + std::chrono::seconds(3);
         auto manager = aip::content::AcquireNativeSmtcManager(deadline, {});
-        auto session = manager.GetCurrentSession();
-        if (!session) { error = L"No current Windows media session. Start playback in your music app first."; return false; }
+        auto session = aip::content::SelectNativeSmtcSession(manager,selection);
+        if (!session) { error = L"The selected Windows media session is unavailable. Start playback in the configured app first."; return false; }
         auto info = session.GetPlaybackInfo();
         if (!info) { error = L"The player has no playback controls available yet."; return false; }
         auto controls = info.Controls();
@@ -72,16 +76,16 @@ static bool RunNativeMediaAction(const std::wstring& key, int volumeStep, std::w
     return false;
 #endif
 }
-static void QueueMediaTileAction(HWND owner, const std::wstring& action, int requestedStep = -1)
+static void QueueMediaTileAction(HWND owner, const std::wstring& action, int requestedStep = -1,const aip::content::SmtcSelection& selection={})
 {
     if (!aip::content::FindTileAction(action)) return;
     if (g_mediaActionBusy.exchange(true)) return; // Do not accumulate repeated clicks.
     if (g_mediaActionThread.joinable()) g_mediaActionThread.join();
     const int step = requestedStep > 0 ? std::clamp(requestedStep, 1, 100) : IniReadClampedI(L"MediaActions", L"VolumeStepPercent", 5, 1, 100);
     try {
-        g_mediaActionThread = std::thread([owner, action, step] {
+        g_mediaActionThread = std::thread([owner, action, step,selection] {
             std::wstring error;
-            RunNativeMediaAction(action, step, error);
+            RunNativeMediaAction(action, step, error,selection);
             { std::lock_guard<std::mutex> lock(g_mediaActionResultMutex); g_mediaActionError = std::move(error); }
             g_mediaActionBusy = false;
             PostMessageW(owner, WM_APP_MEDIA_ACTION_COMPLETE, 0, 0);

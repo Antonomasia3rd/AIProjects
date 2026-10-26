@@ -43,31 +43,32 @@ Start implementation on Windows 11 that supports Live Tiles. The standard
 Windows 11 Start menu [does not display them](https://learn.microsoft.com/en-us/windows/uwp/launch-resume/chaseable-tile-notifications). Selecting a Windows 8/8.1 manifest
 does not add Live Tile support to that menu.
 
-1. Keep the extracted release/build files together in a permanent, writable
-   folder. Open a terminal in the folder containing `DesktopStub.exe` and run:
-
-   ```powershell
-   .\DesktopStub.exe --setup-desktop
-   ```
-
-2. Wait for the setup result. It prepares the wallpaper assets, registers the
-   main app identity once, then restarts DesktopStub with that identity. If you
-   already opened the EXE normally, **Tiles > Set up Desktop tile...** performs
-   the same explicit setup. Check Windows Developer Mode/sideloading policy if
-   Windows refuses package registration; setup reports the error and can be
-   retried from that menu.
+1. Extract the beta/release into a permanent, writable local folder. Keep
+   `DesktopStub.exe`, `DesktopStubLiveTileBroker.exe` and
+   `DesktopStubTileLauncher.exe` together for the complete feature set. Start
+   `DesktopStub.exe` normally as your Windows user.
+2. The initial Desktop wallpaper tile uses **Registration** and updates the
+   original main package, restoring the familiar initial workflow. It generates
+   its images and registers that entry during normal startup; no setup command
+   or separate per-tile launcher is required for this primary Desktop path.
+   If Windows refuses registration, check the reported error and the machine's
+   Developer Mode/sideloading policy, then refresh Desktop from the tray.
 3. Open Start's **All apps** list and pin **Desktop** to Start. This is the
    default app display name, not `DesktopStub`; a customized manifest/display
-   name can change it. Select Medium, Wide or Large and leave its Live Tile
-   enabled. Keep DesktopStub running for wallpaper updates.
+   name can change it. Select Medium, Wide or Large. Keep DesktopStub running
+   for wallpaper updates.
 
-Fresh defaults use **LiveTile** delivery and **NameAndLogo** branding, with no
-optional source tiles pinned or enabled automatically. Native updates avoid
-repeated static Registration updates; the one-time identity registration above
-is still required. **Launch at sign-in is off by default** for both startup
-methods. Enable one later under **Application > Launch at sign-in** if wanted.
-After setup, normal launches can use `DesktopStub.exe` without repeating setup.
-See the [fresh Desktop defaults and setup details](../docs/desktop-factory-defaults-2026-10-23.md).
+Fresh defaults use **Registration/Main** delivery and **NameAndLogo** branding,
+with Desktop as the sole tile and optional modules/sign-in startup off. Existing
+explicit preferences are preserved. v1–v25 literal defaults used Auto; their
+usual unpackaged first launch also took the main Registration path. New
+independent Registration tiles use their own packages. A primary's advanced
+`Delivery.PrimaryRegistration=Separate` retains that previously available path.
+For an explicit Live Tile setup, choose **Set up main Live Tile host...** or run
+`DesktopStub.exe --setup-desktop`; that command intentionally selects LiveTile
+for the primary Desktop and restarts with package identity after setup succeeds.
+See [the October 26 beta guide](../docs/desktopstub-beta-2026-10-26.md) and
+[legacy migration evidence](../docs/desktopstub-legacy-upgrade-2026-10-26.md).
 
 The app monitors configured wallpaper, fitting and DPI changes and publishes
 updates through the selected tile delivery method. Static Registration delivery
@@ -184,16 +185,15 @@ The default binary smoke copies its inputs into a temporary directory and uses o
 ## Run
 
 For a first installation, use the [fresh VM quick start](#fresh-vm-quick-start)
-and perform explicit main Desktop setup:
+and start the normal executable:
 
 ```cmd
-DesktopStub\build\DesktopStub.exe --setup-desktop
+DesktopStub\build\DesktopStub.exe
 ```
 
-Once setup succeeds, launch `DesktopStub\build\DesktopStub.exe` normally, or
-open the registered **Desktop** app from Start. Starting an unpackaged EXE on a
-fresh VM by itself does not install the identity needed for native Live Tile
-updates. Neither setup nor a normal launch enables sign-in startup by default.
+Open the registered **Desktop** app from Start to activate its main tile. Use
+the explicit Live Tile host setup only when choosing that delivery mode. Neither
+setup nor a normal launch enables sign-in startup by default.
 
 You do not need to run `--manifest-win8` or `--manifest-win81` unless you are deliberately switching this build into the Windows 8/8.1 compatibility experiment. The generated manifest target defaults to Windows 10, which the Desktop setup action requires.
 

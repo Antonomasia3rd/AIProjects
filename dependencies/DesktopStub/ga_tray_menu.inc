@@ -65,7 +65,7 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     if (TileInstanceModeRequested()) {
         HMENU tilesMenu = beginSection(SecondaryTileUiString(L"TileInstancesTitle", L"Tiles"));
         if(!CurrentProcessHasPackageIdentity())addTo(tilesMenu,ID_SETUP_DESKTOP_HOST,
-            IniReadS(L"Strings",L"DesktopHostSetup",L"Set up Desktop tile..."),false,!g_desktopHostSetupPending.load());
+            IniReadS(L"Strings",L"DesktopHostSetup",L"Set up main Live Tile host..."),false,!g_desktopHostSetupPending.load());
         AppendTileInstancesMenu(tilesMenu);
         if(IniReadI(L"QuickActions",L"Enabled",0)!=0)AppendQuickActionsMenu(tilesMenu);
         aip::gallery::Configuration galleryMenuConfiguration;std::wstring galleryMenuError;
@@ -80,7 +80,7 @@ static void PopulateDesktopStubTrayMenu(HMENU m, bool showMenuAsDropdown, bool s
     const auto& updatesTitle = g_ui.trayUpdatesTitle;
     HMENU secondaryTilesMenu = beginSection(L"Tiles");
     if(!CurrentProcessHasPackageIdentity())addTo(secondaryTilesMenu,ID_SETUP_DESKTOP_HOST,
-        IniReadS(L"Strings",L"DesktopHostSetup",L"Set up Desktop tile..."),false,!g_desktopHostSetupPending.load());
+        IniReadS(L"Strings",L"DesktopHostSetup",L"Set up main Live Tile host..."),false,!g_desktopHostSetupPending.load());
     AppendSecondaryTilesMenu(secondaryTilesMenu);
     AppendQuickActionsMenu(secondaryTilesMenu);
     AppendGalleryTilesMenu(secondaryTilesMenu);

@@ -198,6 +198,12 @@ static bool RecoverProfileIdentityMigration(bool,bool&,std::wstring&);
 #include "../dependencies/DesktopStub/ga_gallery_runtime.inc"
 #include "../dependencies/app_launcher_win32.inc"
 #include "../dependencies/DesktopStub/ga_secondary_tile_api.inc"
+static aip::tile_visual::FontPreference DesktopStubIconFontPreference()
+{
+    aip::tile_visual::FontPreference preference=aip::tile_visual::FontPreference::Auto;
+    aip::tile_visual::ParseFontPreference(IniReadS(L"Settings",L"TileIconFont",L"Auto"),preference);
+    return preference;
+}
 #include "../dependencies/DesktopStub/tile_text_layout.h"
 #include "../dependencies/mail_tile_layout.h"
 #include "../dependencies/DesktopStub/ga_image.inc"

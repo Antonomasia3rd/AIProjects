@@ -92,12 +92,13 @@ inline bool BuildManifest(const Target& target, std::wstring& output, std::wstri
     std::wstring xml = L"<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
         L"<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\" "
         L"xmlns:uap=\"http://schemas.microsoft.com/appx/manifest/uap/windows10\" "
-        L"xmlns:uap10=\"http://schemas.microsoft.com/appx/manifest/uap/windows10/10\" "
-        L"xmlns:rescap=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities\" IgnorableNamespaces=\"uap uap10 rescap\">\r\n";
+        L"xmlns:rescap=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities\" IgnorableNamespaces=\"uap rescap\">\r\n";
     xml += L"<Identity Name=\""+Escape(target.identityName)+L"\" Publisher=\""+Escape(target.publisher)+L"\" Version=\""+Escape(target.packageVersion)+L"\" ProcessorArchitecture=\"x64\"/>\r\n";
     xml += L"<Properties><DisplayName>"+Escape(target.displayName)+L"</DisplayName><PublisherDisplayName>"+Escape(target.publisherDisplayName)+L"</PublisherDisplayName><Logo>Assets\\StoreLogo.png</Logo></Properties>\r\n";
-    xml += L"<Dependencies><TargetDeviceFamily Name=\"Windows.Desktop\" MinVersion=\"10.0.19041.0\" MaxVersionTested=\"10.0.26100.0\"/></Dependencies><Resources><Resource Language=\"en-us\"/></Resources>\r\n";
-    xml += L"<Applications><Application Id=\"Tile\" Executable=\""+std::wstring(LauncherFileName)+L"\" EntryPoint=\"Windows.FullTrustApplication\" uap10:Parameters=\""+Escape(LauncherArguments(target))+L"\">\r\n";
+    xml += L"<Dependencies><TargetDeviceFamily Name=\"Windows.Desktop\" MinVersion=\"10.0.15063.0\" MaxVersionTested=\"10.0.26100.0\"/></Dependencies><Resources><Resource Language=\"en-us\"/></Resources>\r\n";
+    // No uap10:Parameters: the package's ordinary owned activation binding is
+    // supported by the launcher on the Windows 10 Desktop Bridge baseline.
+    xml += L"<Applications><Application Id=\"Tile\" Executable=\""+std::wstring(LauncherFileName)+L"\" EntryPoint=\"Windows.FullTrustApplication\">\r\n";
     xml += L"<uap:VisualElements DisplayName=\""+Escape(target.displayName)+L"\" Description=\""+Escape(target.displayName)+L"\" Square150x150Logo=\"Assets\\MediumTile.png\" Square44x44Logo=\"Assets\\Square44x44Logo.png\" BackgroundColor=\""+Escape(target.backgroundColor)+L"\">\r\n";
     xml += L"<uap:DefaultTile Square71x71Logo=\"Assets\\SmallTile.png\" Wide310x150Logo=\"Assets\\WideTile.png\" Square310x310Logo=\"Assets\\LargeTile.png\">";
     if (branding == L"Name" || branding == L"NameAndLogo" || branding == L"Auto"){

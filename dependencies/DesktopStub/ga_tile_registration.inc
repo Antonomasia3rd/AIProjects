@@ -2,7 +2,10 @@
 // PNGs only. No resident host copy, Startup entry, automatic pin/unpin, or
 // mutation of the main package is performed by this backend.
 #include "../tile_registration.h"
+#include "../tile_registration_binding.h"
 #include <shlobj.h>
+#include <aclapi.h>
+#include <sddl.h>
 #ifndef DESKTOPSTUB_CONTENT_MESSAGEBOX
 #define DESKTOPSTUB_CONTENT_MESSAGEBOX MessageBoxW
 #endif
@@ -48,10 +51,10 @@ static std::wstring TileRegistrationOwnerText(const aip::tile_registration::Targ
     return L"AIP_TILE_REGISTRATION_V1\r\n" + target.userScope + L"\r\n" + target.profileScope + L"\r\n" +
         target.tileScope + L"\r\n" + identity + L"\r\n" + target.tileId + L"\r\n";
 }
-static bool TileRegistrationReadText(const std::wstring& path,std::wstring& output)
+static bool TileRegistrationReadText(const std::wstring& path,std::wstring& output,std::size_t maximumBytes=131072)
 {
     std::vector<BYTE> bytes;
-    if (!aip::ReadWholeFileBytes(path,bytes,131072)) return false;
+    if (!aip::ReadWholeFileBytes(path,bytes,maximumBytes)) return false;
     output = aip::Utf8ToWide(std::string(bytes.begin(),bytes.end())); return !output.empty();
 }
 static bool TileRegistrationWriteText(const std::wstring& path,const std::wstring& value)
@@ -79,7 +82,7 @@ static bool TileRegistrationTargetPathsValid(const aip::tile_registration::Targe
             error = L"A registration tile cache path is not a plain owned directory."; return false;
         }
     }
-    for (const auto* file : {L"registration.owner",L"registration.authorized",L"registration.revision",L"registration.published",L"AppxManifest.xml",aip::tile_registration::LauncherFileName}) {
+    for (const auto* file : {L"registration.owner",L"registration.authorized",L"registration.revision",L"registration.published",aip::tile_registration::ActivationBindingFileName,L"AppxManifest.xml",aip::tile_registration::LauncherFileName}) {
         const auto attributes = GetFileAttributesW((target.root+L"\\"+file).c_str());
         if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & (FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))) {
             error = L"A registration tile file is not an ordinary owned file."; return false;
@@ -161,6 +164,34 @@ static bool PrepareTileRegistrationPackage(const aip::tile_registration::Target&
         }
     }
     if (!EnsureDirectoryTreeExists(target.assetsDirectory)) { error = L"Could not prepare the registration tile image directory."; return false; }
+    std::wstring currentSid;if(!aip::named_objects::CurrentUserIdentity(currentSid)){error=L"Could not verify this Registration tile's Windows user.";return false;}
+    const auto currentUserOwns=[&](const std::wstring& path,bool optional){
+        const auto attr=GetFileAttributesW(path.c_str());if(attr==INVALID_FILE_ATTRIBUTES)return optional&&(GetLastError()==ERROR_FILE_NOT_FOUND||GetLastError()==ERROR_PATH_NOT_FOUND);
+        PSID ownerSid=nullptr;PSECURITY_DESCRIPTOR descriptor=nullptr;
+        if(GetNamedSecurityInfoW(const_cast<wchar_t*>(path.c_str()),SE_FILE_OBJECT,OWNER_SECURITY_INFORMATION,&ownerSid,nullptr,nullptr,nullptr,&descriptor)!=ERROR_SUCCESS)return false;
+        LPWSTR text=nullptr;const bool resolved=ownerSid&&ConvertSidToStringSidW(ownerSid,&text)!=FALSE;
+        const bool same=resolved&&IEquals(currentSid,L"SID:"+std::wstring(text));if(text)LocalFree(text);if(descriptor)LocalFree(descriptor);return same;
+    };
+    if(!currentUserOwns(ownerPath,false)||!currentUserOwns(target.root+L"\\"+aip::tile_registration::ActivationBindingFileName,true)){
+        error=L"The Registration activation files belong to another Windows user; existing files were kept.";return false;
+    }
+    std::wstring activation;
+    if(!aip::tile_registration::WriteActivationBinding(aip::tile_registration::ActivationBindingForTarget(target),activation,error))return false;
+    const auto activationPath=target.root+L"\\"+aip::tile_registration::ActivationBindingFileName;
+    std::wstring previousActivation;
+    if(!TileRegistrationReadText(activationPath,previousActivation,aip::tile_registration::MaximumActivationBytes)||previousActivation!=activation){
+        // Keep a click from observing a truncated identity/profile record while
+        // the host republishes. This file contains public activation data only.
+        const auto temporary=activationPath+L".tmp-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64());
+        std::string encoded;if(!aip::TryWideToUtf8(activation,encoded)){error=L"Registration activation text could not be encoded.";return false;}
+        HANDLE file=CreateFileW(temporary.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_WRITE_THROUGH,nullptr);
+        if(file==INVALID_HANDLE_VALUE){error=L"Could not prepare the Registration activation record.";return false;}
+        DWORD written=0;const bool saved=WriteFile(file,encoded.data(),static_cast<DWORD>(encoded.size()),&written,nullptr)&&written==encoded.size()&&FlushFileBuffers(file);
+        CloseHandle(file);
+        if(!saved||!MoveFileExW(temporary.c_str(),activationPath.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){
+            DeleteFileW(temporary.c_str());error=L"Could not publish the Registration activation record; retry this tile's setup.";return false;
+        }
+    }
     auto source = ParentDirectoryOfPath(target.hostPath)+L"\\"+aip::tile_registration::LauncherFileName;
 #ifdef DESKTOPSTUB_INERT_HARDWARE
     if (!g_testTileRegistrationLauncherSource.empty()) source = g_testTileRegistrationLauncherSource;

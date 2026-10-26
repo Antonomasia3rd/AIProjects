@@ -233,3 +233,12 @@ per-tile CLI/INI/GUI controls are now implemented. See
 [collector evidence](battery-native-collector-2026-10-25.md). Validation and
 installation results are recorded in the Battery guide after the final gate.
 Real battery-driver/policy acceptance remains separate from inert fixtures.
+
+October 26 continuation: v1-v25 exact-default migration audit, original primary
+Registration bootstrap, older independent-Registration activation binding and
+explicit icon-font policy are implemented in the beta. New SMTC application/
+occurrence selection keeps Windows-current as default and routes playback
+controls to the same chosen source. See desktopstub-beta-2026-10-26.md for scope
+and validation, and the current open-findings table for remaining native work.
+The user explicitly authorizes resetting this installation after the push and
+moving development output to a separate recovery archive for fresh beta testing.

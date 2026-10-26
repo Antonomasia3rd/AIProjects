@@ -83,6 +83,48 @@ bool EnsureIniDefaults()
     auto doc = ParseIniDocument(iniText);
     bool changed = false;
 
+    // Inspect the saved schema before this version's defaults manufacture
+    // Content/provider sections. In particular v1..v25 had only Desktop and
+    // global TileText; adding modern defaults first loses that distinction.
+    std::wstring existingInstances;
+    if(!ReadIniValueFromDoc(doc,L"Tiles",L"Instances",existingInstances))
+    {
+        const auto originalRead=[&](const wchar_t* section,const wchar_t* key,const wchar_t* fallback){
+            std::wstring value;return ReadIniValueFromDoc(doc,section,key,value)?value:std::wstring(fallback);
+        };
+        aip::content::TileInstanceMigrationPlan plan;std::wstring conversionError;
+        if(!aip::content::PlanLegacyTileInstanceMigration(originalRead,plan,conversionError))
+        {
+            QueueStartupWarning(L"[!] Legacy tile conversion was not applied; the original profile was kept: "+conversionError);
+            return false;
+        }
+        if(plan.changed)
+        {
+            auto staged=iniText;
+            for(const auto& setting:plan.settings)
+                if(!WriteIniValueToText(staged,setting.section.c_str(),setting.key.c_str(),setting.value.c_str()))return false;
+            const auto stagedDoc=ParseIniDocument(staged);aip::content::TileInstanceConfiguration converted;
+            if(!ValidateTileInstanceHostConfiguration([&](const wchar_t* section,const wchar_t* key,const wchar_t* fallback){
+                std::wstring value;return ReadIniValueFromDoc(stagedDoc,section,key,value)?value:std::wstring(fallback);
+            },converted,conversionError))
+            {
+                QueueStartupWarning(L"[!] Legacy tile conversion failed validation; the original profile was kept: "+conversionError);
+                return false;
+            }
+            const auto backup=g_iniPath+L".before-tile-instances.bak";
+            const auto attributes=GetFileAttributesW(backup.c_str());std::wstring prior;
+            if(attributes!=INVALID_FILE_ATTRIBUTES&&((attributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))||!ReadTextFile(backup,prior)))
+            {
+                QueueStartupWarning(L"[!] The legacy tile backup is not an ordinary readable file; the original profile was kept.");return false;
+            }
+            if(attributes==INVALID_FILE_ATTRIBUTES&&!CopyFileW(g_iniPath.c_str(),backup.c_str(),TRUE))
+            {
+                QueueStartupWarning(L"[!] The legacy tile backup could not be created; the original profile was kept.");return false;
+            }
+            iniText=std::move(staged);doc=ParseIniDocument(iniText);changed=true;
+        }
+    }
+
     for (const auto& d : g_defaults)
     {
         std::wstring value;

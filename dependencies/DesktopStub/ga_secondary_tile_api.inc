@@ -218,8 +218,9 @@ static bool CurrentSecondaryAppearanceFingerprint(std::wstring& result, aip::con
         candidate = L"Instances;";
         for (const auto& tile : instances.tiles) if (!tile.primary)
             candidate += aip::content::TileInstanceNativeId(tile) + L":" + aip::content::TileInstanceArtworkTopic(tile) + L":" +
-                tile.appearance.background + L":" + tile.appearance.branding + L":" + tile.appearance.backgroundColor + L";";
-    } else if (appearanceValid) appearanceValid = aip::content::ReadSecondaryAppearanceFingerprint(read, candidate, error);
+                tile.appearance.background + L":" + tile.appearance.branding + L":" + tile.appearance.backgroundColor + L":"+
+                tile.policy.Read(L"Settings",L"TileIconFont",L"Auto")+L";";
+    } else if (appearanceValid) {appearanceValid = aip::content::ReadSecondaryAppearanceFingerprint(read, candidate, error);candidate+=L"IconFont:"+read(L"Settings",L"TileIconFont",L"Auto");}
     aip::content::SourceTileNames capturedNames;
     captured->namesValid = aip::content::ReadSourceTileNames(read, capturedNames, error);
     aip::content::SourceTileNameIntents capturedIntents; std::uint64_t sequence = 0;
@@ -237,7 +238,7 @@ static bool CurrentSecondaryAppearanceFingerprint(std::wstring& result, aip::con
         // folders, photo order/cadence, and ordinary text never trigger COM.
         candidate += L"Gallery:" + gallery.groupId + L":" + std::to_wstring(gallery.tiles.size()) + L";";
         for (const auto& tile : gallery.tiles)
-            candidate += tile.id + L":" + tile.appearance.background + L":" + tile.appearance.branding + L":" + tile.appearance.backgroundColor + L";";
+            candidate += tile.id + L":" + tile.appearance.background + L":" + tile.appearance.branding + L":" + tile.appearance.backgroundColor + L":"+tile.delivery.Read(L"Settings",L"TileIconFont",L"Auto")+L";";
     }
     captured->fingerprint = std::move(candidate); captured->names = std::move(capturedNames); captured->matchingIntents = std::move(capturedIntents);
     view = std::move(captured); g_secondaryAppearanceView = view;
@@ -516,7 +517,8 @@ static bool PrepareAppearanceAssets(const std::wstring& id, aip::tile_visual::As
     aip::content::PublishedTileAppearance& published, std::wstring& error)
 {
     aip::content::TileInstance instance;
-    if (FindConfiguredSecondaryTileInstance(id, instance) && (instance.type == aip::content::TileInstanceType::QuickAction||instance.type==aip::content::TileInstanceType::AppLauncher)) {
+    const bool configuredInstance=FindConfiguredSecondaryTileInstance(id, instance);
+    if (configuredInstance && (instance.type == aip::content::TileInstanceType::QuickAction||instance.type==aip::content::TileInstanceType::AppLauncher)) {
         // Type changes can leave the previous RSS/game notification covering a
         // static action logo. Clear that owned queue when applying its new
         // metadata, rather than publishing a blank Live Tile over the icon.
@@ -528,6 +530,8 @@ static bool PrepareAppearanceAssets(const std::wstring& id, aip::tile_visual::As
             ForgetSecondaryTileDelivery(id);
         }
     }
+    std::optional<aip::content::TilePolicyReadScope> iconPolicy;
+    if(configuredInstance)iconPolicy.emplace(instance.policy);
     const auto configured = ConfiguredAppearance(id);
     if(instance.type==aip::content::TileInstanceType::AppLauncher){
         published=aip::content::PublishTileAppearance(configured,0x202020);
@@ -536,6 +540,10 @@ static bool PrepareAppearanceAssets(const std::wstring& id, aip::tile_visual::As
             {configured.background==L"Color",aip::content::TileAppearanceRgb(configured,0x202020)},logos,error);
     }
     const bool gallery = id.compare(0, std::wstring(aip::gallery::NativeTilePrefix).size(), aip::gallery::NativeTilePrefix) == 0;
+    if(gallery&&!configuredInstance){
+        const auto view=CaptureGalleryConfigurationView(error,false);
+        if(view)for(const auto& tile:view->configuration.tiles)if(aip::gallery::NativeTileId(view->configuration.groupId,tile.id)==id){iconPolicy.emplace(tile.delivery);break;}
+    }
     auto topicKey = gallery ? std::wstring(L"gallery") : id;
     if (TileInstanceModeRequested() && id.compare(0, 10, L"AipSource_") == 0) {
         aip::content::TileInstance tile;

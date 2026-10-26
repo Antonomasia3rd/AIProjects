@@ -189,6 +189,7 @@ void TestContract()
 }
 
 struct FakeManagerState {
+    std::vector<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession> sessions;
     std::atomic<int> created{0}, released{0}, reads{0}, invalidRelease{0}, acquisitionAttempts{0};
     std::atomic<HRESULT> readFailure{S_OK}, acquisitionFailure{S_OK};
     DWORD thread = 0;
@@ -215,7 +216,7 @@ struct FakeSmtcManager : winrt::implements<FakeSmtcManager,
         std::lock_guard<std::mutex> lock(state->eventMutex); return state->current;
     }
     winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession> GetSessions() {
-        return winrt::single_threaded_vector<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession>().GetView();
+        return winrt::single_threaded_vector<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession>(std::vector<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession>(state->sessions)).GetView();
     }
     winrt::event_token CurrentSessionChanged(const winrt::Windows::Foundation::TypedEventHandler<aip::content::SmtcManager,
         winrt::Windows::Media::Control::CurrentSessionChangedEventArgs>& handler) {
@@ -234,6 +235,7 @@ using FakeSession = winrt::Windows::Media::Control::GlobalSystemMediaTransportCo
 using FakeMediaHandler = winrt::Windows::Foundation::TypedEventHandler<FakeSession, winrt::Windows::Media::Control::MediaPropertiesChangedEventArgs>;
 using FakePlaybackHandler = winrt::Windows::Foundation::TypedEventHandler<FakeSession, winrt::Windows::Media::Control::PlaybackInfoChangedEventArgs>;
 struct FakeSessionState {
+    std::wstring appId=L"Fixture.Player";
     std::mutex gate;
     FakeMediaHandler media{nullptr}; FakePlaybackHandler playback{nullptr};
     std::atomic<int> propertyReads{0}, mediaAdds{0}, playbackAdds{0}, mediaRemoves{0}, playbackRemoves{0}, timelineAdds{0};
@@ -242,7 +244,7 @@ struct FakeEventSession : winrt::implements<FakeEventSession,
     winrt::Windows::Media::Control::IGlobalSystemMediaTransportControlsSession> {
     std::shared_ptr<FakeSessionState> state;
     explicit FakeEventSession(std::shared_ptr<FakeSessionState> value) : state(std::move(value)) {}
-    winrt::hstring SourceAppUserModelId() { return L"Fixture.Player"; }
+    winrt::hstring SourceAppUserModelId() { return winrt::hstring(state->appId); }
     winrt::Windows::Foundation::IAsyncOperation<winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties> TryGetMediaPropertiesAsync() {
         ++state->propertyReads;
         // The event-binding fixture deliberately has no system property API.
@@ -550,6 +552,26 @@ static void TestExplicitPresentationMetadata()
         media.repeat == MediaRepeatMode::Unknown, "an absent session clears old icon/metadata and reports no active playback");
 }
 
+void TestApplicationSelection()
+{
+    using namespace aip::content;smtc_detail::Apartment apartment;
+    auto state=std::make_shared<FakeManagerState>();state->thread=GetCurrentThreadId();
+    auto a=std::make_shared<FakeSessionState>(),b=std::make_shared<FakeSessionState>(),a2=std::make_shared<FakeSessionState>();a->appId=a2->appId=L"A";b->appId=L"B";
+    auto first=winrt::make<FakeEventSession>(a).as<FakeSession>(),second=winrt::make<FakeEventSession>(b).as<FakeSession>(),third=winrt::make<FakeEventSession>(a2).as<FakeSession>();
+    state->sessions={first,second,third};state->current=second;
+    auto manager=winrt::make<FakeSmtcManager>(state).as<SmtcManager>();std::vector<std::wstring> roster;
+    Check(winrt::get_abi(SelectNativeSmtcSession(manager,{},&roster))==winrt::get_abi(second)&&roster==std::vector<std::wstring>({L"A",L"B"}),"real native selector retains Windows-current and catalogs distinct applications without reading track properties");
+    SmtcSelection select;select.mode=L"Application";select.appId=L"A";
+    Check(winrt::get_abi(SelectNativeSmtcSession(manager,select))==winrt::get_abi(first),"chosen application does not follow another application's current session");
+    state->current=third;Check(winrt::get_abi(SelectNativeSmtcSession(manager,select))==winrt::get_abi(third),"default occurrence prefers Windows-current when it belongs to the chosen application");
+    select.instance=1;Check(winrt::get_abi(SelectNativeSmtcSession(manager,select))==winrt::get_abi(first),"explicit first occurrence bypasses the current-session preference");
+    select.instance=2;Check(winrt::get_abi(SelectNativeSmtcSession(manager,select))==winrt::get_abi(third),"second session from the same application can be selected independently");
+    select.instance=3;Check(SelectNativeSmtcSession(manager,select)==nullptr,"missing selected occurrence never controls a different session");
+    select.instance=0;select.appId=L"missing";Check(SelectNativeSmtcSession(manager,select)==nullptr,"missing selected application never falls through to Windows-current");
+    std::wstring value=L"65",error;Check(!NormalizeSmtcSelectionSetting(L"sessioninstance",value,error),"session occurrence is bounded");
+    value=L"bad\napp";Check(!NormalizeSmtcSelectionSetting(L"sessionappid",value,error),"application identifiers reject multiline content");
+    state->current=nullptr;state->sessions.clear();manager=nullptr;
+}
 int main(int argc, char** argv)
 {
     bool allowSystemMedia = false;
@@ -565,6 +587,7 @@ int main(int argc, char** argv)
     TestEventEpochCoalescing();
     TestRetainedManagerEvents();
     TestSelectedSessionEvents();
+    TestApplicationSelection();
     if (allowSystemMedia) TestSystemReadOnly();
     std::cout << checks << " checks; " << failures << " failures; system media reads " <<
         (allowSystemMedia ? "explicitly enabled" : "disabled") << ".\n";

@@ -100,6 +100,11 @@ static const IniDefault g_defaults[] = {
     {L"Properties",L"CaptionMode",L"Properties"},
     {L"Settings",L"LiveTileDisabledWarning",L"Startup"},
     {L"Settings",L"LiveTileDisabledCheckSeconds",L"300"},
+    {L"Settings",L"TileIconFont",L"Auto"},
+    {L"SMTC",L"SessionMode",L"Current"},
+    {L"SMTC",L"SessionAppId",L""},
+    {L"SMTC",L"SessionInstance",L"0"},
+    {L"Settings",L"PrimaryRegistration",L"Separate"},
     // Settings
     {L"Settings", L"PollIntervalMs", L"2000"},
     {L"Settings", L"ConfirmMs", L"800"},
@@ -547,6 +552,8 @@ static const StringDefault g_stringDefaults[] = {
     {L"NowPlayingInfoPreset",L"Information"},
     {L"NowPlayingArtworkPreset",L"Album art only"},
     {L"NowPlayingPresentationPresets",L"Presentation presets"},
+    {L"SmtcWindowsCurrent",L"Windows current session"},
+    {L"SmtcSourceSelection",L"Media application (last refresh)"},
     {L"GoogleCalendarAllCalendars", L"All calendars"},
     {L"GoogleCalendarPickerFailed", L"The calendar picker could not be prepared. Saved account settings were kept; refresh the list to retry."},
     {L"GoogleCalendarAllSelectedSaved", L"All readable calendars selected. Their upcoming events will be combined on this tile. You may close this window."},
@@ -569,6 +576,7 @@ static const StringDefault g_stringDefaults[] = {
     {L"TileDeliveryDiagnostic",L"Delivery note"},
     {L"SettingsWindowRestart",L"Restart DesktopStub"},
     {L"PropertiesOptions",L"Properties window"},
+    {L"DefaultIconFont",L"Default icon font (legacy and newly added tiles)"},
     {L"AlreadyRunningProfilePrompt",L"Offer a fresh profile when launched again"},
     {L"MailUnknownSender",L"Unknown sender"},
     {L"MailNoSubject",L"(No subject)"},
@@ -1414,7 +1422,8 @@ static std::wstring BuildInitialIniTemplate()
     lines.push_back(FormatIniAssignment(L"Name",L"Desktop"));
     lines.push_back(FormatIniAssignment(L"Primary",L"1"));
     lines.push_back(FormatIniAssignment(L"Content.Background",L"Wallpaper"));
-    lines.push_back(FormatIniAssignment(L"Delivery.Mode",L"LiveTile"));
+    lines.push_back(FormatIniAssignment(L"Delivery.Mode",L"Registration"));
+    lines.push_back(FormatIniAssignment(L"Delivery.PrimaryRegistration",L"Main"));
     lines.push_back(FormatIniAssignment(L"Branding",L"NameAndLogo"));
     lines.push_back(L"");
     lines.push_back(L"[PowerShellErrorMessages]");
@@ -1686,6 +1695,7 @@ static void UpgradeRenamedStringDefaults()
     UpgradeStringDefaultIfUnmodified(L"ComRegistrationTimeoutDetails", L"[i] COM registration timeout=%d ms, cancel wait=%d ms", L"[i] COM registration timeout=%s, cancel wait=%d ms");
     UpgradeStringDefaultIfUnmodified(L"PowerShellLaunchDetails", L"[i] PowerShell executable: %s (timeout=%d ms, poll=%d ms, terminate wait=%d ms)", L"[i] PowerShell executable: %s (timeout=%s, poll=%d ms, terminate wait=%d ms)");
     UpgradeStringDefaultIfUnmodified(L"StartingWallpaperGeneration", L"Starting wallpaper generation due to %s.", L"Starting wallpaper generation: %s");
+    UpgradeStringDefaultIfUnmodified(L"DesktopHostSetup",L"Set up Desktop tile...",L"Set up main Live Tile host...");
     UpgradeStringDefaultIfUnmodified(L"AppxManifestRegenerated", L"[i] Regenerated AppxManifest.xml from built-in defaults: %s", L"[i] Regenerated AppxManifest.xml from configured defaults: %s");
     UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from INI if missing", L"generated from configured defaults if missing");
     UpgradeStringDefaultIfUnmodified(L"ManifestSourceGenerated", L"generated from built-in defaults if missing", L"generated from configured defaults if missing");

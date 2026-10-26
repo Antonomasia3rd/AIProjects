@@ -11,6 +11,7 @@
 #include <cwchar>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.Media.h>
 #include <winrt/Windows.Media.Control.h>
@@ -112,6 +113,7 @@ struct SmtcSessionData {
     MediaToggleState shuffle = MediaToggleState::Unknown;
     std::vector<std::uint8_t> appIconBytes;
     std::wstring appIconError;
+    std::vector<std::wstring> availableApplications;
 };
 struct SmtcMediaSnapshot {
     bool hasSession = false;
@@ -124,6 +126,7 @@ struct SmtcMediaSnapshot {
     MediaToggleState shuffle = MediaToggleState::Unknown;
     std::wstring appIconError;
     std::shared_ptr<const SmtcArtworkFile> appIcon;
+    std::vector<std::wstring> availableApplications;
 };
 // Injection replaces the complete session/property read, so fixtures never
 // request real system media sessions. Native text and thumbnail use one session,
@@ -133,6 +136,25 @@ using SmtcSessionReader = std::function<SmtcSessionData(
 
 using SmtcManager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
 using SmtcManagerFactory = std::function<SmtcManager(smtc_detail::Clock::time_point, const SmtcCancel&)>;
+inline winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession SelectNativeSmtcSession(
+    const SmtcManager& manager,const SmtcSelection& selection,std::vector<std::wstring>* applications=nullptr)
+{
+    using Session=winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession;
+    const auto current=manager.GetCurrentSession();
+    if(selection.mode==L"Current"&&!applications)return current;
+    std::vector<Session> sessions;std::vector<std::wstring> ids;std::size_t currentIndex=64;
+    try{for(const auto& session:manager.GetSessions()){
+        if(sessions.size()>=64)break;const auto id=std::wstring(session.SourceAppUserModelId());
+        std::wstring checked=id,issue;if(!NormalizeSmtcSelectionSetting(L"sessionappid",checked,issue)||checked.empty())continue;
+        if(winrt::get_abi(session)==winrt::get_abi(current))currentIndex=sessions.size();
+        sessions.push_back(session);ids.push_back(id);
+    }}catch(...){if(selection.mode!=L"Current")throw;}
+    if(applications){*applications=ids;std::sort(applications->begin(),applications->end());applications->erase(std::unique(applications->begin(),applications->end()),applications->end());}
+    if(selection.mode==L"Current")return current;
+    if(!selection.instance&&current!=nullptr&&std::wstring(current.SourceAppUserModelId())==selection.appId&&!selection.appId.empty())return current;
+    const auto index=SelectSmtcApplicationIndex(selection,ids,currentIndex);
+    return index<sessions.size()?sessions[index]:Session{nullptr};
+}
 
 inline SmtcManager AcquireNativeSmtcManager(smtc_detail::Clock::time_point deadline, const SmtcCancel& canceled)
 {
@@ -263,8 +285,8 @@ class SmtcWorkerSession {
     SmtcManager manager_{nullptr};
     SmtcManagerFactory factory_;
     Session watchedSession_{nullptr};
-    winrt::event_token currentToken_{}, mediaToken_{}, playbackToken_{};
-    bool managerSubscribed_ = false, mediaSubscribed_ = false, playbackSubscribed_ = false;
+    winrt::event_token currentToken_{}, sessionsToken_{}, mediaToken_{}, playbackToken_{};
+    bool managerSubscribed_ = false, sessionsSubscribed_=false, mediaSubscribed_ = false, playbackSubscribed_ = false;
     bool managerEventsAttempted_ = false, sessionEventsAttempted_ = false;
     std::shared_ptr<SmtcEventState> eventState_;
     std::shared_ptr<SmtcSessionEventEpoch> sessionEpoch_;
@@ -316,10 +338,12 @@ class SmtcWorkerSession {
         if (auto state = std::atomic_load(&eventState_)) state->Close();
         RevokeSession();
         if (manager_ != nullptr && managerSubscribed_) { try { manager_.CurrentSessionChanged(currentToken_); } catch (...) {} }
+        if (manager_ != nullptr && sessionsSubscribed_) { try { manager_.SessionsChanged(sessionsToken_); } catch (...) {} }
+        sessionsSubscribed_=false;
         managerSubscribed_ = managerEventsAttempted_ = false;
         std::atomic_store(&eventState_, std::shared_ptr<SmtcEventState>{});
     }
-    void Watch(const Session& session, bool useEvents, const std::function<void()>& wake) {
+    void Watch(const Session& session, bool useEvents, const std::function<void()>& wake,bool rosterNeeded=false) {
         if (!useEvents) { DisableEvents(); return; }
         auto state = std::atomic_load(&eventState_);
         if (!state) {
@@ -333,6 +357,8 @@ class SmtcWorkerSession {
                 currentToken_ = manager_.CurrentSessionChanged([weak](const auto&, const auto&) { SmtcEventState::Notify(weak); });
                 managerSubscribed_ = true;
             } catch (...) { managerSubscribed_ = false; }
+            try{sessionsToken_=manager_.SessionsChanged([weak](const auto&,const auto&){SmtcEventState::Notify(weak);});sessionsSubscribed_=true;}
+            catch(...){sessionsSubscribed_=false;}
         }
         if (winrt::get_abi(watchedSession_) != winrt::get_abi(session)) { RevokeSession(); watchedSession_ = session; }
         if (session != nullptr && !sessionEventsAttempted_) {
@@ -349,7 +375,7 @@ class SmtcWorkerSession {
                 mediaSubscribed_ = playbackSubscribed_ = false;
             }
         }
-        state->supported = managerSubscribed_ && (session == nullptr || (mediaSubscribed_ && playbackSubscribed_));
+        state->supported = managerSubscribed_ && (!rosterNeeded||sessionsSubscribed_) && (session == nullptr || (mediaSubscribed_ && playbackSubscribed_));
     }
 public:
     explicit SmtcWorkerSession(SmtcManagerFactory factory = {}) : factory_(std::move(factory)) {}
@@ -371,7 +397,7 @@ public:
         return state && state->dirty.exchange(false);
     }
     SmtcSessionData Read(smtc_detail::Clock::time_point deadline, bool includeArtwork, const SmtcCancel& canceled,
-        bool useEvents = false, const std::function<void()>& wake = {}, bool includeAppIcon = false) {
+        bool useEvents = false, const std::function<void()>& wake = {}, bool includeAppIcon = false,const SmtcSelection& selection={}) {
         if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
         if (!apartment_) {
             auto apartment = std::make_unique<smtc_detail::Apartment>();
@@ -382,9 +408,10 @@ public:
             if (manager_ == nullptr) manager_ = factory_ ? factory_(deadline, canceled) : AcquireNativeSmtcManager(deadline, canceled);
             if (manager_ == nullptr) throw winrt::hresult_error(E_UNEXPECTED, L"The media session manager is unavailable.");
             if (canceled && canceled()) { Reset(); throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED)); }
-            const auto session = manager_.GetCurrentSession();
-            Watch(session, useEvents, wake);
+            std::vector<std::wstring> applications;const auto session=SelectNativeSmtcSession(manager_,selection,&applications);
+            Watch(session, useEvents, wake,selection.mode==L"Application");
             auto data = ReadSmtcSessionProperties(session, deadline, includeArtwork, canceled);
+            data.availableApplications=std::move(applications);
             if (includeAppIcon && data.hasSession) ReadAppIcon(data, deadline, canceled);
             return data;
         } catch (const winrt::hresult_error& exception) {
@@ -431,12 +458,14 @@ inline bool ReadSmtcMedia(
         if (canceled && canceled()) throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_CANCELLED));
         if (!data.hasSession)
         {
+            media.availableApplications=data.availableApplications;
             media.text = {L"No media playing", L"SMTC", L""};
             media.title = media.text.primary; media.source = L"SMTC"; media.status = L"Idle";
             media.playbackState = MediaPlaybackState::Stopped;
             return true;
         }
         SmtcMediaSnapshot snapshot;
+        snapshot.availableApplications=data.availableApplications;
         snapshot.hasSession = true;
         snapshot.title = smtc_detail::Clean(std::move(data.title));
         if (snapshot.title.empty()) snapshot.title = L"(untitled media)";

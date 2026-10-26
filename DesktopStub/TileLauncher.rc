@@ -1,0 +1,3 @@
+#include "DesktopStubLauncherResourceDefines.rc.inc"
+#define DESKTOPSTUB_FILE_DESCRIPTION DESKTOPSTUB_PRODUCT_NAME " tile launcher"
+#include "..\\dependencies\\DesktopStub\\DesktopStubVersionResource.rc.inc"

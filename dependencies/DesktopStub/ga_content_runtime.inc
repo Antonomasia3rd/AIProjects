@@ -216,6 +216,9 @@ static void RequestContentNotesRefresh(int resource)
     WakePollThread();
 }
 
+static std::mutex g_smtcCatalogMutex;
+static std::vector<std::wstring> g_smtcApplications;
+static std::vector<std::wstring> CurrentSmtcApplications(){std::lock_guard<std::mutex> lock(g_smtcCatalogMutex);return g_smtcApplications;}
 struct ContentSmtcProvider
 {
     // Declared before source: source joins/cleans its worker before the last
@@ -231,12 +234,13 @@ struct ContentSmtcProvider
     ContentSmtcProvider()
         : nativeSession(std::make_shared<aip::content::SmtcWorkerSession>()),
           source([session = nativeSession] { session->Reset(); }) {}
-    void Refresh(int seconds, bool synchronous, bool artworkNeeded = false, bool useEvents = false, bool appIconNeeded = false)
+    void Refresh(int seconds, bool synchronous, bool artworkNeeded = false, bool useEvents = false, bool appIconNeeded = false,const aip::content::SmtcSelection& selection={})
     {
         waitExpired = false;
         std::wstring currentProfile;
         { std::lock_guard<std::mutex> lock(g_pathMutex); currentProfile = aip::MakeAbsolutePath(g_iniPath); }
-        if (profile != currentProfile) { profile = currentProfile; cache = std::make_shared<aip::content::SmtcArtworkCache>(L"DesktopStub", profile); }
+        const auto selectedProfile=currentProfile+(selection.mode==L"Current"?L"":L"\n"+aip::content::SmtcSelectionKey(selection));
+        if (profile != selectedProfile) { profile = selectedProfile; cache = std::make_shared<aip::content::SmtcArtworkCache>(L"DesktopStub", profile); }
         const auto requestedKey = L"SMTC:" + profile + (artworkNeeded ? L":artwork" : L":text") + (useEvents ? L":events" : L":poll") + (appIconNeeded ? L":appicon" : L"");
         const bool changed = requestedKey != key;
         key = requestedKey;
@@ -257,8 +261,8 @@ struct ContentSmtcProvider
             throw std::runtime_error("The inert host has no system SMTC reader.");
         };
 #else
-        reader = [session = nativeSession, useEvents, appIconNeeded](auto deadline, bool artwork, const auto& canceled) {
-            return session->Read(deadline, artwork, canceled, useEvents, WakePollThread, appIconNeeded);
+        reader = [session = nativeSession, useEvents, appIconNeeded,selection](auto deadline, bool artwork, const auto& canceled) {
+            return session->Read(deadline, artwork, canceled, useEvents, WakePollThread, appIconNeeded,selection);
         };
 #endif
         source.Request(key, milliseconds(static_cast<long long>(effectiveSeconds) * 1000),
@@ -282,12 +286,18 @@ struct ContentSmtcProvider
             result.text.primary = L"Now playing";
             result.text.secondary = error.empty() ? L"Loading media information..." : aip::Utf8ToWide(error);
         }
+        else{std::lock_guard<std::mutex> lock(g_smtcCatalogMutex);g_smtcApplications=result.availableApplications;}
         return result;
     }
     void Cancel() { source.CancelPending(); }
     void Stop() { source.Stop(); }
 };
 static ContentSmtcProvider g_contentSmtc;
+static std::map<std::wstring,std::unique_ptr<ContentSmtcProvider>> g_selectedSmtcProviders;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+static std::function<aip::content::SmtcSessionReader(const aip::content::SmtcSelection&)> g_testSelectedSmtcReader;
+#endif
+static void StopSelectedSmtcProviders(){for(auto& item:g_selectedSmtcProviders)item.second->Stop();g_selectedSmtcProviders.clear();}
 
 struct ContentRssProvider
 {
@@ -733,6 +743,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
 {
     if(g_desktopHostSetupPending.load())return false;
     if (TileInstanceModeRequested()) return TileInstanceEngineTick(synchronous, queueGeneration);
+    if(!g_selectedSmtcProviders.empty())StopSelectedSmtcProviders();
     static aip::content::Cycle cycle;
     static std::wstring lastFrame, lastError, lastWarning, lastSecondaryBackgroundError;
     struct BackgroundCache { std::wstring path; ULONGLONG nextRead = 0; };
@@ -854,7 +865,7 @@ static bool ContentEngineTick(bool synchronous, bool queueGeneration)
         return candidate.enabled && aip::content::BackgroundIdFor(candidate.background) == aip::content::BackgroundId::SmtcArtwork;
     });
     if (needsSmtc) g_contentSmtc.Refresh(cfg.refreshSeconds, synchronous, needsArtwork, ContentDirectLiveDeliveryAvailable(),
-        cfg.smtc.indicatorMode == aip::content::MediaIndicatorMode::AppIcon);
+        cfg.smtc.indicatorMode == aip::content::MediaIndicatorMode::AppIcon,cfg.smtc.selection);
     else g_contentSmtc.Cancel();
     // Read once so a worker publication cannot pair one track's text with
     // another track's background while this frame is composed.

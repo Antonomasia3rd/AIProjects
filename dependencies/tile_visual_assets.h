@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "tile_icon_font_policy.h"
 
 namespace aip { namespace tile_visual {
 enum class Glyph { Music, Feed, Genshin, StarRail, Zenless, Chat, Toggle, Play, Pause,
@@ -97,12 +98,19 @@ inline NativeGlyph NativeGlyphFor(Glyph glyph) {
     default: return {};
     }
 }
-template<class Available> FontStyle SelectFont(Glyph glyph, Available available) {
+template<class Available> FontStyle SelectFont(Glyph glyph,FontPreference preference,unsigned windowsBuild,Available available) {
     const auto native = NativeGlyphFor(glyph);
-    if (!native.primary) return FontStyle::Vector;
-    for (const auto style : {FontStyle::Fluent, FontStyle::Mdl2})
+    if (preference==FontPreference::Vector||!native.primary) return FontStyle::Vector;
+    const auto preferred=PreferFluent(preference,windowsBuild)?FontStyle::Fluent:FontStyle::Mdl2;
+    for (const auto style : {preferred,preferred==FontStyle::Fluent?FontStyle::Mdl2:FontStyle::Fluent})
         if (available(style, native.primary) && (!native.secondary || available(style, native.secondary))) return style;
     return FontStyle::Vector;
+}
+// Preserve the old portable overload's Fluent-first contract for callers that
+// have already selected their platform policy. The native adapter passes the
+// real OS build and explicit preference through the overload above.
+template<class Available> FontStyle SelectFont(Glyph glyph,Available available) {
+    return SelectFont(glyph,FontPreference::Auto,22000,available);
 }
 struct AssetBackground { bool colored = false; std::uint32_t rgb = 0; };
 inline std::wstring BackgroundAssetKey(AssetBackground background) {

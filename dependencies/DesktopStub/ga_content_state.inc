@@ -67,6 +67,7 @@ static std::wstring SecondaryDeliveryKey(const aip::content::Snapshot& frame)
     return frame.galleryFrame||((frame.calendarSource||frame.mailSource)&&frame.nativeQueue)?frame.secondaryTileId+L"|"+frame.nativeQueueTag:frame.secondaryTileId;
 }
 static bool TileSnapshotUsesRegistration(const aip::content::Snapshot& frame);
+static bool TileSnapshotUsesSeparateRegistration(const aip::content::Snapshot& frame);
 static bool GalleryWindowComplete(const std::vector<aip::content::Snapshot>& frames, const aip::content::Snapshot& wanted)
 {
     if (!wanted.gallerySlotCount || wanted.gallerySlotCount > 5) return false;
@@ -144,7 +145,7 @@ static std::vector<aip::content::Snapshot> PrepareSecondaryBatch(const std::vect
         const bool registration = TileSnapshotUsesRegistration(frame);
         if(frame.calendarSource&&frame.nativeQueue&&!CalendarQueueFrameCurrent(frame))continue;
         if(frame.mailSource&&frame.nativeQueue&&!MailQueueFrameCurrent(frame))continue;
-        if (registration && !TileRegistrationReadyForId(frame.policy.owner)) continue;
+        if (registration && TileSnapshotUsesSeparateRegistration(frame) && !TileRegistrationReadyForId(frame.policy.owner)) continue;
         if (!registration && !frame.secondaryTileId.empty() && pinned.find(frame.secondaryTileId) == pinned.end()) {
 #ifdef DESKTOPSTUB_TEST_SECONDARY_EXISTS
             pinned[frame.secondaryTileId] = DESKTOPSTUB_TEST_SECONDARY_EXISTS(frame.secondaryTileId);
@@ -217,6 +218,11 @@ static bool TilePolicyUsesRegistration(const aip::content::TileDeliveryPolicy& p
 static bool TileSnapshotUsesRegistration(const aip::content::Snapshot& frame)
 {
     return TilePolicyUsesRegistration(frame.policy);
+}
+static bool TileSnapshotUsesSeparateRegistration(const aip::content::Snapshot& frame)
+{
+    return TileSnapshotUsesRegistration(frame)&&(!frame.secondaryTileId.empty()||
+        frame.policy.Read(L"Settings",L"PrimaryRegistration",L"Separate")!=L"Main");
 }
 static bool ContentNativeQueueAvailable(const aip::content::Configuration& configuration)
 {

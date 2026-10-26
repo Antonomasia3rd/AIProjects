@@ -7,8 +7,27 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <atomic>
+#include <tuple>
 
 namespace aip { namespace tile_visual {
+using FontPreferenceReader=FontPreference(*)();
+inline std::atomic<FontPreferenceReader>& FontPreferenceReaderSlot(){static std::atomic<FontPreferenceReader> reader{nullptr};return reader;}
+inline void SetFontPreferenceReader(FontPreferenceReader reader){FontPreferenceReaderSlot().store(reader);}
+inline FontPreference CurrentFontPreference(){
+    const auto reader=FontPreferenceReaderSlot().load();
+    try{return reader?reader():FontPreference::Auto;}catch(...){return FontPreference::Auto;}
+}
+inline unsigned WindowsIconFontBuild(){
+    static const unsigned build=[]()->unsigned{
+        using RtlGetVersionFunction=LONG(WINAPI*)(OSVERSIONINFOW*);
+        const auto module=GetModuleHandleW(L"ntdll.dll");
+        const auto version=module?reinterpret_cast<RtlGetVersionFunction>(GetProcAddress(module,"RtlGetVersion")):nullptr;
+        OSVERSIONINFOW info{};info.dwOSVersionInfoSize=sizeof(info);
+        return version&&version(&info)==0?info.dwBuildNumber:0u;
+    }();
+    return build;
+}
 inline const wchar_t* FontFamilyFor(FontStyle style) {
     return style == FontStyle::Fluent ? L"Segoe Fluent Icons" : L"Segoe MDL2 Assets";
 }
@@ -30,12 +49,15 @@ inline bool InstalledGlyph(FontStyle style, wchar_t character) {
     DeleteDC(dc); return available;
 }
 inline FontStyle FontForGlyph(Glyph glyph) {
-    static std::mutex mutex; static std::map<Glyph, FontStyle> cache;
+    const auto preference=CurrentFontPreference();const auto build=WindowsIconFontBuild();
+    using Key=std::tuple<Glyph,FontPreference,unsigned>;
+    const Key key{glyph,preference,build};
+    static std::mutex mutex; static std::map<Key, FontStyle> cache;
     std::lock_guard<std::mutex> lock(mutex);
-    const auto found = cache.find(glyph);
+    const auto found = cache.find(key);
     if (found != cache.end()) return found->second;
-    const auto selected = SelectFont(glyph, InstalledGlyph);
-    cache.emplace(glyph, selected); return selected;
+    const auto selected = SelectFont(glyph,preference,build,InstalledGlyph);
+    cache.emplace(key, selected); return selected;
 }
 inline bool DrawNativeTopicGlyph(Gdiplus::Graphics& graphics, const NativeGlyph& native,
         FontStyle style, Gdiplus::Color ink) {
@@ -64,8 +86,8 @@ inline bool DrawNativeTopicGlyph(Gdiplus::Graphics& graphics, const NativeGlyph&
 // The caller already owns GDI+ when drawing an inline glyph. Geometry is
 // normalized and kept inside the supplied square bounds. Missing system-font
 // glyphs use the repo's vector fallback rather than font substitution/tofu.
-inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& key,
-        const Gdiplus::RectF& bounds, Gdiplus::Color ink = Gdiplus::Color(255, 255, 255, 255)) {
+inline bool DrawTileTopicGlyphWithStyle(Gdiplus::Graphics& graphics, const std::wstring& key,
+        const Gdiplus::RectF& bounds, Gdiplus::Color ink,FontStyle font) {
     const auto* topic = FindTopic(key);
     if (!topic || bounds.Width <= 0 || bounds.Height <= 0) return false;
     using namespace Gdiplus;
@@ -74,7 +96,6 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
     graphics.TranslateTransform(bounds.X + (bounds.Width - side) / 2, bounds.Y + (bounds.Height - side) / 2);
     graphics.ScaleTransform(side / 100, side / 100);
     graphics.SetSmoothingMode(SmoothingModeAntiAlias);
-    const auto font = FontForGlyph(topic->glyph);
     if (font != FontStyle::Vector && DrawNativeTopicGlyph(graphics, NativeGlyphFor(topic->glyph), font, ink)) {
         graphics.Restore(saved); return true;
     }
@@ -198,10 +219,15 @@ inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics, const std::wstring& 
     }
     const auto result = graphics.GetLastStatus(); graphics.Restore(saved); return result == Ok;
 }
-inline bool DrawCornerTopicGlyph(Gdiplus::Graphics& destination,const std::wstring& topic,unsigned width,unsigned height,Gdiplus::Color ink){
+inline bool DrawTileTopicGlyph(Gdiplus::Graphics& graphics,const std::wstring& key,
+        const Gdiplus::RectF& bounds,Gdiplus::Color ink=Gdiplus::Color(255,255,255,255)) {
+    const auto* topic=FindTopic(key);return topic&&DrawTileTopicGlyphWithStyle(graphics,key,bounds,ink,FontForGlyph(topic->glyph));
+}
+inline bool DrawCornerTopicGlyphWithStyle(Gdiplus::Graphics& destination,const std::wstring& topic,unsigned width,unsigned height,Gdiplus::Color ink,FontStyle font){
     using namespace Gdiplus;Bitmap source(128,128,PixelFormat32bppARGB);
-    {Graphics graphics(&source);graphics.Clear(Color(0,0,0,0));if(source.GetLastStatus()!=Ok||!DrawTileTopicGlyph(graphics,topic,RectF(0,0,128,128),ink))return false;}
+    {Graphics graphics(&source);graphics.Clear(Color(0,0,0,0));if(source.GetLastStatus()!=Ok||!DrawTileTopicGlyphWithStyle(graphics,topic,RectF(0,0,128,128),ink,font))return false;}
     Rect area(0,0,128,128);BitmapData pixels{};if(source.LockBits(&area,ImageLockModeRead,PixelFormat32bppARGB,&pixels)!=Ok)return false;
+    if(!pixels.Scan0||(pixels.Stride<128*4&&pixels.Stride>-128*4)){source.UnlockBits(&pixels);return false;}
     INT left=128,top=128,right=-1,bottom=-1;for(INT y=0;y<128;++y){const auto* row=reinterpret_cast<const std::uint32_t*>(static_cast<const BYTE*>(pixels.Scan0)+static_cast<std::ptrdiff_t>(y)*pixels.Stride);
         for(INT x=0;x<128;++x)if(row[x]>>24){left=(std::min)(left,x);top=(std::min)(top,y);right=(std::max)(right,x);bottom=(std::max)(bottom,y);}}
     if(source.UnlockBits(&pixels)!=Ok||right<left||bottom<top||width<=2||height<=2)return false;
@@ -211,6 +237,22 @@ inline bool DrawCornerTopicGlyph(Gdiplus::Graphics& destination,const std::wstri
     const auto status=destination.DrawImage(&source,RectF((width-drawnWidth)*.5f,(height-drawnHeight)*.5f,drawnWidth,drawnHeight),static_cast<REAL>(left),static_cast<REAL>(top),static_cast<REAL>(right-left+1),static_cast<REAL>(bottom-top+1),UnitPixel);
     destination.Restore(saved);return status==Ok;
 }
+inline bool DrawCornerTopicGlyph(Gdiplus::Graphics& destination,const std::wstring& topic,unsigned width,unsigned height,Gdiplus::Color ink){
+    const auto* descriptor=FindTopic(topic);return descriptor&&DrawCornerTopicGlyphWithStyle(destination,topic,width,height,ink,FontForGlyph(descriptor->glyph));
+}
+inline bool TopicBitmapContainsInk(Gdiplus::Bitmap& bitmap,AssetBackground background,bool transparent){
+    using namespace Gdiplus;const auto width=bitmap.GetWidth(),height=bitmap.GetHeight();
+    if(!width||!height||width>4096||height>4096)return false;
+    Rect bounds(0,0,static_cast<INT>(width),static_cast<INT>(height));BitmapData pixels{};
+    if(bitmap.LockBits(&bounds,ImageLockModeRead,PixelFormat32bppARGB,&pixels)!=Ok)return false;
+    const auto bytes=static_cast<std::ptrdiff_t>(width)*4,stride=static_cast<std::ptrdiff_t>(pixels.Stride);
+    bool ink=false;const std::uint32_t clear=0xff000000u|(background.rgb&0xffffffu);
+    if(pixels.Scan0&&(stride>=bytes||stride<=-bytes))for(UINT y=0;y<height&&!ink;++y){
+        const auto* row=reinterpret_cast<const std::uint32_t*>(static_cast<const BYTE*>(pixels.Scan0)+static_cast<std::ptrdiff_t>(y)*stride);
+        for(UINT x=0;x<width;++x)if(transparent?(row[x]>>24)!=0:row[x]!=clear){ink=true;break;}
+    }
+    return bitmap.UnlockBits(&pixels)==Ok&&ink;
+}
 
 inline bool EnsureTileTopicAssets(const std::wstring& key, const std::wstring& directory,
         Assets& result, std::wstring& error, AssetBackground background = {}) {
@@ -218,7 +260,10 @@ inline bool EnsureTileTopicAssets(const std::wstring& key, const std::wstring& d
     const auto* topic = FindTopic(key);
     if (!topic || directory.empty()) { error = L"Unknown tile artwork topic or empty package directory."; return false; }
     static std::mutex mutex; std::lock_guard<std::mutex> lock(mutex);
-    const auto plan = AssetPlan(*topic, FontForGlyph(topic->glyph), background);
+    // Freeze one resolved preference for all six images. A concurrent global
+    // edit cannot draw another font into this immutable font-qualified path.
+    const auto font=FontForGlyph(topic->glyph);
+    const auto plan = AssetPlan(*topic,font,background);
     const auto cachedKey = directory + L"/" + plan.front().relative;
     static std::set<std::wstring> ensured;
     const auto publish = [&] { result = {plan[0].relative, plan[1].relative, plan[2].relative, plan[3].relative, plan[4].relative, plan[5].relative}; };
@@ -245,10 +290,12 @@ inline bool EnsureTileTopicAssets(const std::wstring& key, const std::wstring& d
         std::replace(path.begin(), path.end(), L'/', L'\\');
         if (aip::FileExists(path)) {
             Bitmap old(path.c_str());
-            if (old.GetLastStatus() == Ok && old.GetWidth() == asset.width && old.GetHeight() == asset.height) continue;
+            if (old.GetLastStatus() == Ok && old.GetWidth() == asset.width && old.GetHeight() == asset.height&&
+                TopicBitmapContainsInk(old,background,asset.transparent)) continue;
         }
         aip::EnsureDirectory(path.substr(0, path.find_last_of(L'\\')));
         Bitmap bitmap(static_cast<INT>(asset.width), static_cast<INT>(asset.height), PixelFormat32bppARGB);
+        {
         Graphics graphics(&bitmap);
         if (bitmap.GetLastStatus() != Ok || graphics.GetLastStatus() != Ok) { error = L"Could not create tile artwork bitmap."; return false; }
         const BYTE r = static_cast<BYTE>(background.rgb >> 16), g = static_cast<BYTE>(background.rgb >> 8), b = static_cast<BYTE>(background.rgb);
@@ -260,10 +307,12 @@ inline bool EnsureTileTopicAssets(const std::wstring& key, const std::wstring& d
         const REAL side = (std::min)(width, height) * .64f;
         const auto ink = DarkArtworkInk(background) ? Color(255, 20, 20, 20) : Color(255, 255, 255, 255);
         const bool corner=asset.width==asset.height&&(asset.width==44||asset.width==30);
-        if (!(corner?DrawCornerTopicGlyph(graphics,topic->key,asset.width,asset.height,ink):
-            DrawTileTopicGlyph(graphics, topic->key, RectF((width - side) / 2, (height - side) / 2, side, side), ink))) {
+        if (!(corner?DrawCornerTopicGlyphWithStyle(graphics,topic->key,asset.width,asset.height,ink,font):
+            DrawTileTopicGlyphWithStyle(graphics, topic->key, RectF((width - side) / 2, (height - side) / 2, side, side), ink,font))) {
             error = L"Could not draw tile topic glyph."; return false;
         }
+        }
+        if(!TopicBitmapContainsInk(bitmap,background,asset.transparent)){error=L"Tile topic artwork contains no visible glyph.";return false;}
         const auto temporary = path + L".tmp-" + std::to_wstring(GetCurrentProcessId());
         const auto status = bitmap.Save(temporary.c_str(), &png, nullptr);
         if (status != Ok || !MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {

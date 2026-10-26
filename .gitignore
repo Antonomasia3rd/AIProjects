@@ -14,6 +14,8 @@
 # Build products: ignore every build directory, regardless of project/location.
 # Examples: DesktopStub/build/, DiscordRPC/build/, legacy/*/build/, .github/build/.
 **/build/
+/artifacts/
+/DesktopStub/releases/
 
 # Local/reference/vendor scratch folders; keep only source files in git unless explicitly vendored.
 **/references/

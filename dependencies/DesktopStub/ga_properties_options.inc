@@ -3,9 +3,10 @@
 #include "../properties_ui_model.h"
 static constexpr UINT ID_PROPERTIES_ACCENT=64910,ID_PROPERTIES_CUSTOM=64911,ID_PROPERTIES_COLOR=64912,
     ID_PROPERTIES_CAPTION_CUSTOM=64913,ID_PROPERTIES_CAPTION_SYSTEM=64914,ID_PROPERTIES_RESTART=64915;
+static constexpr UINT ID_TOPIC_FONT_FIRST=64916,ID_TOPIC_FONT_LAST=64919;
 static void PropertiesOptionsChanged();
 static void RequestDesktopStubRestart(HWND owner);
-static bool IsDesktopStubPropertiesChoice(UINT id){return id==ID_PROPERTIES_ACCENT||id==ID_PROPERTIES_CUSTOM||id==ID_PROPERTIES_CAPTION_CUSTOM||id==ID_PROPERTIES_CAPTION_SYSTEM;}
+static bool IsDesktopStubPropertiesChoice(UINT id){return id==ID_PROPERTIES_ACCENT||id==ID_PROPERTIES_CUSTOM||id==ID_PROPERTIES_CAPTION_CUSTOM||id==ID_PROPERTIES_CAPTION_SYSTEM||(id>=ID_TOPIC_FONT_FIRST&&id<=ID_TOPIC_FONT_LAST);}
 static void AppendDesktopStubPropertiesOptions(HMENU parent){
     HMENU menu=aip::BeginTrayNestedMenu(parent),highlight=aip::BeginTrayNestedMenu(menu);
     const auto mode=IniReadS(L"Properties",L"HighlightMode",L"Accent"),caption=IniReadS(L"Properties",L"CaptionMode",L"Properties");
@@ -17,9 +18,18 @@ static void AppendDesktopStubPropertiesOptions(HMENU parent){
     aip::AppendTrayMenuItem(title,ID_PROPERTIES_CAPTION_CUSTOM,IniReadS(L"Strings",L"PropertiesCaptionCustom",L"Properties heading"),IEquals(caption,L"Properties"),true);
     aip::AppendTrayMenuItem(title,ID_PROPERTIES_CAPTION_SYSTEM,IniReadS(L"Strings",L"PropertiesCaptionSystem",L"Windows title bar"),IEquals(caption,L"System"),true);
     aip::EndTrayNestedMenu(menu,title,IniReadS(L"Strings",L"PropertiesCaption",L"Title bar"));
+    HMENU icons=aip::BeginTrayNestedMenu(menu);const auto font=IniReadS(L"Settings",L"TileIconFont",L"Auto");
+    const wchar_t* fonts[]={L"Auto",L"MDL2",L"Fluent",L"Vector"};
+    for(UINT i=0;i<4;++i)aip::AppendTrayMenuItem(icons,ID_TOPIC_FONT_FIRST+i,fonts[i],IEquals(font,fonts[i]),true);
+    aip::EndTrayNestedMenu(menu,icons,IniReadS(L"Strings",L"DefaultIconFont",L"Default icon font (legacy and newly added tiles)"));
     aip::EndTrayNestedMenu(parent,menu,IniReadS(L"Strings",L"PropertiesOptions",L"Properties window"));
 }
 static bool DispatchDesktopStubPropertiesOption(HWND owner,UINT command){
+    if(command>=ID_TOPIC_FONT_FIRST&&command<=ID_TOPIC_FONT_LAST){
+        const wchar_t* fonts[]={L"Auto",L"MDL2",L"Fluent",L"Vector"};
+        if(IniWrite(L"Settings",L"TileIconFont",fonts[command-ID_TOPIC_FONT_FIRST])){WakePollThread();PropertiesOptionsChanged();}
+        return true;
+    }
     if(command<ID_PROPERTIES_ACCENT||command>ID_PROPERTIES_RESTART)return false;
     if(command==ID_PROPERTIES_RESTART){RequestDesktopStubRestart(owner);return true;}
     std::wstring profile;{std::lock_guard<std::mutex> lock(g_pathMutex);profile=aip::MakeAbsolutePath(g_iniPath);}

@@ -2,8 +2,9 @@
 // photo scan or hardware discovery runs while these menus are constructed.
 static constexpr UINT ID_TILE_INSTANCE_FIRST = 60000, ID_TILE_INSTANCE_LAST = 63999;
 static constexpr std::size_t TileInstanceMenuPageSize = 16;
+static bool RequestDesktopHostSetup(HWND);
 enum class TileInstanceMenuVerb { Set, Edit, Toggle, Pin, Unpin, Inventory, Status, Overview, Refresh, Remove, Add,
-    Page, SignIn, ChooseAccount, AddGallery, BrowseLauncherTarget, BrowseLauncherIcon, NowPlayingLayout };
+    Page, SignIn, ChooseAccount, AddGallery, BrowseLauncherTarget, BrowseLauncherIcon, NowPlayingLayout, SelectSmtcSource };
 struct TileInstanceMenuCommand {
     TileInstanceMenuVerb verb;
     std::wstring id, key, value, prompt;
@@ -200,6 +201,8 @@ static void AppendTileInstanceAppearance(HMENU parent, const aip::content::TileI
     std::vector<std::pair<std::wstring,std::wstring>> branding;
     for (const auto* item : aip::content::TileBrandingChoices) branding.emplace_back(item,item);
     AppendTileInstanceChoices(menu,tile,L"Branding",L"Name and corner icon",branding,tile.appearance.branding.c_str());
+    if(tile.type!=aip::content::TileInstanceType::AppLauncher)
+        AppendTileInstanceChoices(menu,tile,L"Artwork.IconFont",L"Icon font",{{L"Auto",L"Auto (Windows 10 MDL2 / Windows 11 Fluent)"},{L"MDL2",L"Segoe MDL2 Assets"},{L"Fluent",L"Segoe Fluent Icons"},{L"Vector",L"Drawn fallback icons"}},L"Auto");
     aip::EndTrayNestedMenu(parent,menu,TileInstanceUi(L"TileInstanceAppearance",L"Appearance"));
 }
 static void AppendTileInstanceText(HMENU parent, const aip::content::TileInstance& tile)
@@ -245,6 +248,7 @@ static void AppendTileInstancePolicyMenu(HMENU parent,const aip::content::TileIn
                 std::wstring(field.key)!=L"Wallpaper.DecodeLowMemory"&&std::wstring(field.key)!=L"Wallpaper.DecodeMaxLongEdge")continue;
             HMENU target=menu;
             const auto key=std::wstring(field.key);
+            if(key==L"Delivery.PrimaryRegistration"&&!tile.primary)continue;
             const bool registration=tile.policy.Mode()==L"Registration";
             const bool permission=key==L"Delivery.DisabledWarning"||key==L"Delivery.DisabledCheckSeconds";
             const bool backend=std::wstring(prefix)==L"Delivery."&&!permission&&key!=L"Delivery.Mode"&&key!=L"Delivery.Template"&&key!=L"Delivery.ClearOnShutdown"&&key!=L"Delivery.ManifestTarget";
@@ -268,6 +272,7 @@ static void AppendTileInstancePolicyMenu(HMENU parent,const aip::content::TileIn
     appendGroup(L"Cache.",L"Image cache");
     appendGroup(L"Assets.",L"Generated assets and scales");
     appendGroup(L"Text.",L"Text on tile sizes");
+    if(tile.type==TileInstanceType::Gallery)appendGroup(L"Artwork.",L"Fallback icon rendering");
     if(tile.type==TileInstanceType::Wallpaper||(!tile.configuration.entries.empty()&&
         BackgroundIdFor(tile.configuration.entries.front().background)!=BackgroundId::Transparent&&
         BackgroundIdFor(tile.configuration.entries.front().background)!=BackgroundId::None))appendGroup(L"Wallpaper.",L"Image fitting, decode and capture");
@@ -413,6 +418,15 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
     }
     case TileInstanceType::NowPlaying: {
         aip::AppendTrayMenuItem(menu,0,TileInstanceUi(L"TileInstanceSmtcExplanation",L"Uses Windows' current media session"),false,false);
+        HMENU players=aip::BeginTrayNestedMenu(menu);const auto& selection=tile.configuration.smtc.selection;
+        AppendTileInstanceCommand(players,TileInstanceUi(L"SmtcWindowsCurrent",L"Windows current session"),{TileInstanceMenuVerb::SelectSmtcSource,tile.id,L"",L"",L""},selection.mode==L"Current");
+        const auto applications=CurrentSmtcApplications();
+        for(const auto& app:applications)AppendTileInstanceCommand(players,ContentMenuValue(app),{TileInstanceMenuVerb::SelectSmtcSource,tile.id,L"",app,L""},selection.mode==L"Application"&&selection.appId==app);
+        if(applications.empty())aip::AppendTrayMenuItem(players,0,L"Applications appear after a pinned Now Playing tile refreshes.",false,false);
+        aip::EndTrayNestedMenu(menu,players,TileInstanceUi(L"SmtcSourceSelection",L"Media application (last refresh)"));
+        AppendTileInstanceChoices(menu,tile,L"SMTC.SessionMode",L"Session selection",{{L"Current",L"Windows current session"},{L"Application",L"Chosen application"}},L"Current");
+        AppendTileInstanceEditable(menu,tile,L"SMTC.SessionAppId",L"Application ID (optional in current-session mode)",L"");
+        AppendTileInstanceEditable(menu,tile,L"SMTC.SessionInstance",L"Session within application (0 = current or first, 1-64 = occurrence)",L"0");
         HMENU layouts=aip::BeginTrayNestedMenu(menu);
         const bool artwork=!tile.configuration.entries.empty()&&tile.configuration.entries.front().background==L"SMTCArtwork"&&tile.configuration.textMode==TextMode::Off;
         AppendTileInstanceCommand(layouts,TileInstanceUi(L"NowPlayingInfoPreset",L"Information"),{TileInstanceMenuVerb::NowPlayingLayout,tile.id,L"",L"Info",L""},!artwork);
@@ -634,6 +648,13 @@ static bool AddIndependentTile(HWND owner,const std::wstring& type)
     const auto* descriptor = FindTileInstanceType(type); if (!descriptor || descriptor->type == TileInstanceType::Gallery) return false;
     TileInstanceConfiguration cfg; std::wstring error;
     if (!ReadTileInstanceMenuConfiguration(cfg,error)) return false;
+    if(!cfg.configured){
+        aip::content::TileInstanceMigrationPlan plan;
+        if(!aip::content::PlanLegacyTileInstanceMigration(IniReadS,plan,error)||plan.legacyModeRequired){
+            NotifyUserOperation(L"legacy-layout-kept",L"Legacy layout preserved",L"This profile uses a legacy composition that cannot be converted without changing its layout. Keep using it, or create a separate profile before adding independent tiles.",NIIF_WARNING);
+            return false;
+        }
+    }
     const auto fresh = NewGalleryIdentity();
     if (fresh.empty()) return false;
     const auto id = Lower(descriptor->value)+L"-"+fresh.substr(1,16), section = TileInstanceSection(id);
@@ -652,6 +673,7 @@ static bool AddIndependentTile(HWND owner,const std::wstring& type)
     }
     for(const auto& field:TilePolicyFields){
         auto value=IniReadS(field.section,field.setting,field.fallback);
+        if(primary&&std::wstring(field.key)==L"Delivery.PrimaryRegistration")value=L"Main";
         if(!NormalizeTilePolicySetting(field.key,value,error))return false;
         settings.push_back({section,field.key,value});
     }
@@ -696,6 +718,7 @@ static void AppendGalleryTilePolicySettings(HMENU menu,const aip::gallery::Confi
     const auto& row=cfg.tiles[index];
     aip::content::TileInstance adapter;adapter.id=aip::gallery::NativeTileId(cfg.groupId,row.id);adapter.name=row.name;adapter.type=aip::content::TileInstanceType::Gallery;
     adapter.configuration.entries.emplace_back();adapter.configuration.entries.front().background=L"Image";
+    adapter.policy=row.delivery;
     const auto previous=g_tilePolicyMenuSection;g_tilePolicyMenuSection=L"Gallery.Tile."+std::to_wstring(index+1);
     AppendTileInstancePolicyMenu(menu,adapter);g_tilePolicyMenuSection=previous;
 }
@@ -790,6 +813,16 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
     if (selected == cfg.tiles.end()) return true;
     const auto tile = *selected;
     const auto section = TileInstanceSection(tile.id), nativeId = TileInstanceNativeId(tile);
+    if(item.verb==TileInstanceMenuVerb::SelectSmtcSource){
+        if(tile.type!=TileInstanceType::NowPlaying)return true;
+        auto app=item.value;if(!NormalizeSmtcSelectionSetting(L"sessionappid",app,error))return true;
+        SaveConfirmedTileInstanceSettings(owner,{{section,L"SMTC.SessionMode",app.empty()?L"Current":L"Application"},{section,L"SMTC.SessionAppId",app},{section,L"SMTC.SessionInstance",L"0"}},tile.id,
+            [section](const std::wstring& text,std::wstring& issue){
+                std::wstring type;const auto document=aip::ParseIniDocument(text);
+                if(aip::ReadIniValueFromDoc(document,section.c_str(),L"Type",type)&&Lower(type)==L"nowplaying")return true;
+                issue=L"This tile changed. Reopen its settings before choosing a media source.";return false;
+            });return true;
+    }
     if(item.verb==TileInstanceMenuVerb::NowPlayingLayout){
         if(tile.type!=TileInstanceType::NowPlaying||(item.value!=L"Info"&&item.value!=L"AlbumArt"))return true;
         const bool artwork=item.value==L"AlbumArt";
@@ -849,6 +882,14 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
         bool enabled = false; ParseBool(IniReadS(section.c_str(),item.key.c_str(),item.value.c_str()),enabled); value = enabled ? L"0" : L"1";
     }
     if(Lower(item.key)==L"delivery.mode"){
+        if(tile.primary&&tile.policy.Read(L"Settings",L"PrimaryRegistration",L"Separate")==L"Main"){
+            if(!NormalizeTilePolicySetting(item.key,value,error))return true;
+            if(!SaveTileInstanceSettings(owner,{{section,item.key,value}},tile.id))return true;
+            if(value==L"Registration"&&tile.policy.Mode()==L"LiveTile")SetLiveTileModeReregistrationPending(true);
+            if(value==L"LiveTile"&&!CurrentProcessHasPackageIdentity())RequestDesktopHostSetup(owner);
+            else RefreshTileInstanceNow(tile.id);
+            return true;
+        }
 #ifdef DESKTOPSTUB_INERT_HARDWARE
         if(g_testTileDeliveryMigration)g_testTileDeliveryMigration(owner,tile.id,value);
 #else

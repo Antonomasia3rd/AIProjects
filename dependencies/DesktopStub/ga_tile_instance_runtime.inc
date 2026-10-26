@@ -10,6 +10,12 @@ static bool EnsureTileInstanceProfile(std::wstring& error)
         };
         aip::content::TileInstanceMigrationPlan plan;
         if (!aip::content::PlanLegacyTileInstanceMigration(read, plan, error)) return false;
+        if(plan.legacyModeRequired){
+            static std::wstring reported;
+            const auto issue=g_iniPath+L"|"+plan.legacyReason;
+            if(reported!=issue){Log(L"Using saved legacy contents without conversion: %ls",plan.legacyReason.c_str());reported=issue;}
+            return true;
+        }
         if (!read(L"Gallery",L"GroupId",L"").empty()) {
             aip::gallery::Configuration gallery;
             if (!aip::gallery::ReadConfiguration(read,gallery,error)) return false;
@@ -106,6 +112,7 @@ static std::mutex g_tileInstanceRefreshMutex;
 static std::set<std::wstring> g_tileInstanceRefreshRequests;
 static void StopTileInstanceProviders(bool preserveCurrentStatuses=false)
 {
+    StopSelectedSmtcProviders();
     for (auto& item : g_tileInstanceProviders) item.second->Stop();
     g_tileInstanceProviders.clear();
     // Ordinary process exit leaves the quiet entry to its native expiration.
@@ -490,6 +497,7 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     { std::lock_guard<std::mutex> lock(g_tileInstanceRefreshMutex); refresh.swap(g_tileInstanceRefreshRequests); }
     const auto demanded = [&](const TileInstance& tile) {
         TilePolicyReadScope scope(tile.policy);
+        if(tile.primary&&tile.policy.Read(L"Settings",L"PrimaryRegistration",L"Separate")==L"Main")return true;
         if (TilePolicyUsesRegistration(tile.policy)) return TileRegistrationReadyForId(tile.id);
         return tile.primary || pins.count(TileInstanceNativeId(tile)) != 0;
     };
@@ -500,6 +508,8 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     std::set<std::wstring> used;
     bool smtcNeeded = false, artworkNeeded = false, appIconNeeded = false, nativeMediaNeeded = false;
     int smtcSeconds = 86400;
+    struct SmtcDemand {SmtcSelection selection;int seconds=86400;bool artwork=false,icon=false,events=false;};
+    std::map<std::wstring,SmtcDemand> selectedDemand;
     for (const auto& tile : cfg.tiles) if (demanded(tile)||alertsDemanded(tile)) {
         if ((tile.type == TileInstanceType::QuickAction||tile.type==TileInstanceType::AppLauncher) && tile.error.empty()) {
             TilePolicyReadScope scope(tile.policy);
@@ -508,6 +518,14 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
         used.insert(tile.id);
         if (demanded(tile)&&tile.error.empty() && (tile.type == TileInstanceType::NowPlaying || (!tile.configuration.entries.empty() &&
             BackgroundIdFor(tile.configuration.entries.front().background) == BackgroundId::SmtcArtwork))) {
+            if(tile.configuration.smtc.selection.mode==L"Application"){
+                const auto& selection=tile.configuration.smtc.selection;auto& demand=selectedDemand[SmtcSelectionKey(selection)];demand.selection=selection;
+                demand.seconds=(std::min)(demand.seconds,tile.configuration.refreshSeconds);
+                demand.artwork|=BackgroundIdFor(tile.configuration.entries.front().background)==BackgroundId::SmtcArtwork;
+                demand.icon|=tile.configuration.smtc.indicatorMode==MediaIndicatorMode::AppIcon;
+                TilePolicyReadScope scope(tile.policy);demand.events|=!TilePolicyUsesRegistration(tile.policy)&&ContentDirectLiveDeliveryAvailable();
+                continue;
+            }
             smtcNeeded = true; smtcSeconds = (std::min)(smtcSeconds, tile.configuration.refreshSeconds);
             artworkNeeded |= BackgroundIdFor(tile.configuration.entries.front().background) == BackgroundId::SmtcArtwork;
             appIconNeeded |= tile.configuration.smtc.indicatorMode == MediaIndicatorMode::AppIcon;
@@ -527,6 +545,15 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
     if (smtcNeeded) g_contentSmtc.Refresh(smtcSeconds, synchronous, artworkNeeded, nativeMediaNeeded, appIconNeeded);
     else g_contentSmtc.Cancel();
     const auto media = smtcNeeded ? g_contentSmtc.Read() : SmtcMediaSnapshot{};
+    for(auto it=g_selectedSmtcProviders.begin();it!=g_selectedSmtcProviders.end();)if(!selectedDemand.count(it->first)){it->second->Stop();it=g_selectedSmtcProviders.erase(it);}else ++it;
+    std::map<std::wstring,SmtcMediaSnapshot> selectedMedia;
+    for(const auto& item:selectedDemand){const auto& demand=item.second;auto& provider=g_selectedSmtcProviders[item.first];if(!provider)provider=std::make_unique<ContentSmtcProvider>();
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+        if(g_testSelectedSmtcReader)provider->testReader=g_testSelectedSmtcReader(demand.selection);
+#endif
+        provider->Refresh(demand.seconds,synchronous,demand.artwork,demand.events,demand.icon,demand.selection);selectedMedia[item.first]=provider->Read();
+    }
+    if(!smtcNeeded&&selectedDemand.empty()){std::lock_guard<std::mutex> lock(g_smtcCatalogMutex);g_smtcApplications.clear();}
     // Independent plugins intentionally don't contribute text to any tile.
     Configuration plugins;
     if (ReadTileInstancePlugins(plugins)) {
@@ -547,7 +574,8 @@ static bool TileInstanceEngineTick(bool synchronous, bool queueGeneration)
         state->forceRefresh = refresh.count(tile.id) != 0;
         if (state->forceRefresh) ForgetSecondaryTileDelivery(TileInstanceNativeId(tile));
         const bool publishTile=demanded(tile);
-        auto frame = ComposeTileInstance(tile, *state, media, synchronous,publishTile);
+        const auto selected=selectedMedia.find(SmtcSelectionKey(tile.configuration.smtc.selection));
+        auto frame = ComposeTileInstance(tile, *state, selected==selectedMedia.end()?media:selected->second, synchronous,publishTile);
         if(!publishTile)continue;
         frame.deliveryDiagnostic=ObserveLiveTilePermission(frame);
         if (tile.primary) primary = frame;

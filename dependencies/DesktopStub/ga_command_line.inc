@@ -814,6 +814,8 @@ static bool NormalizeDesktopStubTypedSetting(
     std::wstring& error)
 {
     if(IEquals(section,L"Properties"))return aip::properties::NormalizeSetting(key,value,error);
+    if(IEquals(section,L"Settings")&&IEquals(key,L"TileIconFont"))return aip::content::NormalizeTilePolicySetting(L"Artwork.IconFont",value,error);
+    if(IEquals(section,L"Settings")&&IEquals(key,L"PrimaryRegistration"))return aip::content::NormalizeTilePolicySetting(L"Delivery.PrimaryRegistration",value,error);
     if(IEquals(section,L"Profile"))return aip::profiles::NormalizeSetting(key,value,error);
     if (aip::content::IsTileInstanceSetting(section, key)) {
         if (!aip::content::NormalizeTileInstanceSetting(section, key, value, error)) return false;
@@ -2263,8 +2265,22 @@ static bool RemoveContentAsusEvents(std::wstring& text)
     return true;
 }
 
-static bool WriteContentProfileSetting(std::wstring& text, const aip::IniSetting& setting)
+static bool WriteContentProfileSetting(std::wstring& text, const aip::IniSetting& setting,std::wstring* issue=nullptr)
 {
+    const auto originalDocument=aip::ParseIniDocument(text);
+    std::vector<aip::content::TileInstanceSetting> aliases;std::wstring aliasError;
+    if(!aip::content::PlanLegacyDesktopSettingAlias([&](const wchar_t* section,const wchar_t* key,const wchar_t* fallback){
+        std::wstring value;return aip::ReadIniValueFromDoc(originalDocument,section,key,value)?value:std::wstring(fallback);
+    },setting.section,setting.key,setting.value,aliases,aliasError)){
+        if(issue)*issue=aliasError;SetLastError(ERROR_INVALID_DATA);return false;
+    }
+    if(!aliases.empty()){
+        auto candidate=text;
+        if(!WriteIniValueToText(candidate,setting.section.c_str(),setting.key.c_str(),setting.value.c_str()))return false;
+        for(const auto& alias:aliases)
+            if(!WriteIniValueToText(candidate,alias.section.c_str(),alias.key.c_str(),alias.value.c_str()))return false;
+        text=std::move(candidate);return true;
+    }
     if (IEquals(setting.section, L"AsusBlink") && AsusEventKey(setting.key)) {
         const auto canonical = aip::hardware_profile::CanonicalAsusKey(setting.key);
         const auto document = aip::ParseIniDocument(text);
@@ -3062,7 +3078,7 @@ static bool ApplyCommandLinePersistentSettings()
             const wchar_t* value = entry.value.c_str();
             if (IsDesktopStubStartupSetting(entry.section, entry.key))
                 value = startupDesired ? L"1" : L"0";
-            if (!WriteContentProfileSetting(text, {entry.section, entry.key, value}))
+            if (!WriteContentProfileSetting(text, {entry.section, entry.key, value},&g_commandLine.applyError))
             {
                 return false;
             }

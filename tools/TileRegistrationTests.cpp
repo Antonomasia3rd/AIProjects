@@ -1,4 +1,5 @@
 #include "../dependencies/tile_registration.h"
+#include "../dependencies/tile_registration_binding.h"
 #include <iostream>
 namespace {
 unsigned checks = 0, failures = 0;
@@ -17,8 +18,29 @@ void TestManifest() {
     Check(IdentityName(L"not-a-hash",target.profileScope,target.tileScope).empty(),"identity builder refuses an unscoped or malformed user identity");
     std::wstring xml,error;
     Check(BuildManifest(target,xml,error),"build a complete independent full-trust static tile manifest without deployment");
-    Check(xml.find(L"RSS &lt;&amp;&gt; news") != std::wstring::npos && xml.find(L"uap10:Parameters=") != std::wstring::npos &&
-        xml.find(L"&quot;C:\\private profile\\settings.ini&quot;") != std::wstring::npos,"manifest escapes display text and quoted profile activation arguments");
+    Check(xml.find(L"RSS &lt;&amp;&gt; news") != std::wstring::npos&&xml.find(L"uap10:")==std::wstring::npos&&
+        xml.find(L"MinVersion=\"10.0.15063.0\"")!=std::wstring::npos&&xml.find(target.profile)==std::wstring::npos,
+        "manifest escapes display text and supports 1809 without newer activation attributes or embedded profile arguments");
+    const auto expectedBinding=ActivationBindingForTarget(target);std::wstring encoded;
+    ActivationBinding parsed;
+    Check(WriteActivationBinding(expectedBinding,encoded,error)&&ReadActivationBinding(encoded,parsed,error)&&
+        parsed.profile==target.profile&&parsed.hostAumid==target.hostAumid&&parsed.tileId==target.tileId&&parsed.publisher==target.publisher,
+        "separate bounded activation record retains the exact canonical profile host tile and package binding");
+    Check(encoded.find(L"--host")==std::wstring::npos&&encoded.find(L"AIP_TILE_ACTIVATION_V1")==0,
+        "activation metadata is versioned data rather than an evaluated command line");
+    auto unpackaged=expectedBinding;unpackaged.hostAumid.clear();std::wstring unpackagedText;ActivationBinding unpackagedRead;
+    Check(WriteActivationBinding(unpackaged,unpackagedText,error)&&ReadActivationBinding(unpackagedText,unpackagedRead,error)&&unpackagedRead.hostAumid.empty(),
+        "an explicitly absent main AUMID preserves the existing unpackaged-host fallback without a fabricated package identity");
+    const auto rejectBinding=[&](const std::wstring& candidate){ActivationBinding kept=parsed;return !ReadActivationBinding(candidate,kept,error)&&kept.profile==parsed.profile;};
+    Check(rejectBinding(encoded+L"extra\r\n"),"activation record refuses trailing fields without replacing a previous valid result");
+    Check(rejectBinding(encoded.substr(0,encoded.size()-1)),"activation record requires a complete terminal line");
+    Check(rejectBinding(L"AIP_TILE_ACTIVATION_V2\r\n"+encoded.substr(encoded.find(L'\n')+1)),"unknown activation record versions fail closed");
+    Check(rejectBinding(std::wstring(MaximumActivationCharacters+1,L'x')),"activation records have a fixed character limit");
+    auto bad=expectedBinding;bad.profile=L"\\\\server\\private\\settings.ini";
+    Check(!WriteActivationBinding(bad,encoded,error),"no-argument legacy activation refuses network profile paths");
+    bad=expectedBinding;bad.identityName=L"foreign.package";Check(!WriteActivationBinding(bad,encoded,error),"activation package name cannot drift from its three scopes");
+    bad=expectedBinding;bad.tileId=L"../../other";Check(!WriteActivationBinding(bad,encoded,error),"activation tile ID cannot become a path");
+    bad=expectedBinding;bad.hostProduct+=L"\r\nextra";Check(!WriteActivationBinding(bad,encoded,error),"activation values cannot insert extra records");
     Check(xml.find(L"Executable=\"DesktopStubTileLauncher.exe\"") != std::wstring::npos && xml.find(L"Executable=\"D:") == std::wstring::npos &&
         xml.find(L"AllowExternalContent") == std::wstring::npos,"package uses its tiny launcher rather than an invalid external host executable or sparse identity mismatch");
     Check(xml.find(L"Startup") == std::wstring::npos && xml.find(L"BackgroundColor=\"transparent\"") != std::wstring::npos &&

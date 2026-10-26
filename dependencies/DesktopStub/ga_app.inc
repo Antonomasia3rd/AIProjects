@@ -219,7 +219,7 @@ static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn
         }
         if (const auto* action = aip::content::FindTileAction(tile.clickAction)) {
             int step = IniReadClampedI(aip::content::TileInstanceSection(id).c_str(), L"VolumeStepPercent", 5, 1, 100);
-            QueueMediaTileAction(owner, action->id, step); return true;
+            QueueMediaTileAction(owner, action->id, step,tile.type==aip::content::TileInstanceType::NowPlaying?tile.configuration.smtc.selection:aip::content::SmtcSelection{}); return true;
         }
         if (tile.clickAction == L"source") for (const auto& frame : CurrentSecondarySnapshots())
             if (frame.secondaryTileId == aip::content::TileInstanceNativeId(tile)) {
@@ -253,7 +253,15 @@ static void HandleSingleInstanceRequest(WPARAM request)
         else {
             const auto click = IniReadS(aip::content::SecondaryTileSection(tile.id).c_str(), L"ClickAction",
                 std::wstring(tile.id) == L"smtc" ? L"toggle" : L"setup");
-            if (const auto* media = aip::content::FindTileAction(click)) QueueMediaTileAction(g_hwnd, media->id);
+            if (const auto* media = aip::content::FindTileAction(click)) {
+                aip::content::SmtcSelection selection;
+                if(std::wstring(tile.id)==L"smtc"){
+                    aip::content::Configuration content;std::wstring issue;
+                    if(!ReadContentConfiguration(content,issue)){NotifyTileActivationProblem(tile.id,issue,false);return;}
+                    selection=content.smtc.selection;
+                }
+                QueueMediaTileAction(g_hwnd,media->id,-1,selection);
+            }
             else OpenSecondaryTileSetup(g_hwnd, tile.id);
         }
         return;
@@ -384,6 +392,10 @@ static bool LiveTileRuntimeConditionMismatch(bool& shouldRunPackaged)
         if (gallery) liveRequired |= std::any_of(gallery->configuration.tiles.begin(), gallery->configuration.tiles.end(), [](const auto& tile) {
             return tile.delivery.Mode() == L"LiveTile";
         });
+        const bool mainRegistration=std::any_of(instances.tiles.begin(),instances.tiles.end(),[](const auto& tile){
+            return tile.primary&&tile.policy.Mode()==L"Registration"&&tile.policy.Read(L"Settings",L"PrimaryRegistration",L"Separate")==L"Main";
+        });
+        if(mainRegistration&&!liveRequired){shouldRunPackaged=false;return CurrentProcessHasPackageIdentity();}
         // The one host can update separate static packages while packaged.
         // Auto preserves its current runtime; static tiles never force it out
         // of the identity required by a sibling's Live Tile.
@@ -1820,6 +1832,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     const auto notificationResult=HandleNotificationConfirmationLaunch(captureArguments);
     if(notificationResult>=0)return notificationResult;
     auto appStart = steady_clock::now();
+    aip::tile_visual::SetFontPreferenceReader(DesktopStubIconFontPreference);
     ConfigureDpiAwareness();
 
     g_exePath = GetModulePath();
@@ -2057,7 +2070,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hi, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
             return 0;
         }
 
-        if(!explicitSingleInstanceRequest&&singleInstanceRequest==SINGLE_INSTANCE_REQUEST_SHOW&&!g_commandLine.launchedFromModeSwitch&&!g_commandLine.launchedFromAppxStub&&
+        if(!explicitSingleInstanceRequest&&singleInstanceRequest==SINGLE_INSTANCE_REQUEST_SHOW&&!g_commandLine.launchedFromModeSwitch&&!g_commandLine.launchedFromAppxStub&&!CurrentProcessHasPackageIdentity()&&
             IniReadI(L"Settings",L"AlreadyRunningProfilePrompt",1)!=0)
             singleInstanceRequest=SINGLE_INSTANCE_REQUEST_FRESH_PROFILE;
 

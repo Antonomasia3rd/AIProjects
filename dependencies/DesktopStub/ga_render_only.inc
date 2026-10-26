@@ -117,7 +117,7 @@ static int RunRenderOnlyCommand()
             if (!g_commandLine.nowPlayingImports.empty() && !aip::now_playing_profile::RemoveContentEntriesFromText(text)) return false;
             if (ReplacesCommandLineAsusEvents() && !RemoveContentAsusEvents(text)) return false;
             for (const auto& setting : g_commandLine.settings)
-                if (!WriteContentProfileSetting(text, setting)) return false;
+                if (!WriteContentProfileSetting(text, setting,&g_commandLine.applyError)) return false;
             if (!StageExplicitSourceTileNameIntents(text, g_commandLine.settings, g_commandLine.applyError)) return false;
             // Notes imports/clear validate the complete prospective profile
             // again under the INI mutation lock, including concurrent changes.
