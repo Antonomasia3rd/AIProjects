@@ -15,6 +15,7 @@
 # Examples: DesktopStub/build/, DiscordRPC/build/, legacy/*/build/, .github/build/.
 **/build/
 /artifacts/
+/analysis/
 /DesktopStub/releases/
 
 # Local/reference/vendor scratch folders; keep only source files in git unless explicitly vendored.
