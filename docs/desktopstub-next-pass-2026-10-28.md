@@ -66,8 +66,10 @@ main-content selector is saved as follow-up; primary still requires Wallpaper.
 See [step-by-step guide and diagram](discord-source-ux-2026-10-28.md).
 Local focused checks pass 67 layout / 57 actual host cases, including stale
 account Yes, warning No, no-auth-before-approval, nonmodal notice routing and
-primary removal rejection. The final 27.0.0.5 local candidate build is being
-validated. Preserve the user's current INI/accounts; do not reset again.
+primary removal rejection. The final 27.0.0.5 candidate built and scanned clean
+and replaced the canonical payload while its resident was already stopped.
+The INI SHA256 was unchanged; no reset or automatic restart was performed.
+The new menus take effect at next launch. Preserve current INI/accounts.
 
 The user moved richer Discord tiles ahead of the remaining feature backlog,
 with Luna review still last. The selected default click is compose for review,
