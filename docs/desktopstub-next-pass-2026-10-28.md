@@ -99,6 +99,14 @@ INI on rejection, and creates no non-INI file in its private fixture directory.
 The canonical beta3 payload has not been replaced. The ignored receipt is
 `artifacts/discord-reader-acceptance-20261028/candidate-build-receipt.json`.
 
+That snapshot is superseded by the user's subsequent explicit fresh-start
+request: the canonical local payload is now the 27.0.0.4 candidate, initialized
+and running with one Desktop Wallpaper / Registration / Main tile and sign-in
+startup off. Native wallpaper generation and its own registered Desktop Start
+entry were verified. [Fresh-start receipt](desktopstub-fresh-start-2026-10-28.md).
+The user then began changing delivery/adding Discord during final verification;
+inspect and preserve that later setup instead of repeating this reset.
+
 Hosted [run 40695585270](https://github.com/Antonomasia3rd/AIProjects/actions/runs/40695585270)
 at that exact source passes portable contracts/project detection and the new
 Discord fixtures, including all 45 host checks. It stops at PngCrc32 because
