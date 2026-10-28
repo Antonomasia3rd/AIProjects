@@ -31,7 +31,7 @@ static class ManagedIniInteropTests
             var stderr = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(5000)) { process.Kill(); throw new TimeoutException("Native fixture worker exceeded five seconds."); }
             string output = stdout.Result + stderr.Result;
-            if (process.ExitCode != expected) throw new IOException("Unexpected native fixture exit: " + process.ExitCode + " " + output);
+            if (process.ExitCode != expected) throw new IOException("Unexpected native fixture exit for " + arguments[0] + ": " + process.ExitCode + " " + output);
             return output.Trim();
         }
     }

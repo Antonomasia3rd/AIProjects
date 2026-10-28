@@ -17,10 +17,12 @@ bool FixturePath(const std::wstring& path) {
     if (!count || count >= _countof(buffer) || !aip::named_objects::NormalizeFileIdentity(buffer, temporary)) return false;
     const auto directory = std::filesystem::path(full).parent_path();
     const std::wstring prefix = L"AIPROJECTS-INIINTEROP-";
-    return directory.parent_path().wstring() == temporary && directory.filename().wstring().compare(0, prefix.size(), prefix) == 0;
+    const bool allowed=directory.parent_path().wstring() == temporary && directory.filename().wstring().compare(0, prefix.size(), prefix) == 0;
+    if(!allowed)aip::WriteCommandLineText(L"Fixture path rejected: parent="+directory.parent_path().wstring()+L"; native-temp="+temporary+L"; fixture="+directory.filename().wstring(),true);
+    return allowed;
 }
 int Run(int argc, wchar_t** argv) {
-    if (argc < 3) return 2;
+    if (argc < 3) { aip::WriteCommandLineText(L"Native fixture requires a mode and value; argc="+std::to_wstring(argc),true); return 2; }
     const std::wstring mode = argv[1], path = argv[2];
     if (mode == L"--name") {
         std::wstring identity, name;
