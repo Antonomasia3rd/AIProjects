@@ -20,13 +20,14 @@ struct Configuration {
     std::array<int, 5> adjustmentsMinutes{};
     int refreshSeconds = 43200, timeoutSeconds = 10, maximumBytes = 262144;
     bool showSunrise = true, twentyFourHour = false, showTimetable = true, nextIncludesSunrise = false;
+    int timetableGapLines = 1;
 };
 inline constexpr const wchar_t* SettingKeys[] = {L"City", L"Country", L"State", L"TimeZone", L"Method", L"School",
     L"LatitudeAdjustmentMethod", L"FajrAdjustmentMinutes", L"DhuhrAdjustmentMinutes", L"AsrAdjustmentMinutes",
     L"MaghribAdjustmentMinutes", L"IshaAdjustmentMinutes", L"RefreshSeconds", L"TimeoutSeconds", L"MaximumBytes",
-    L"ShowSunrise", L"TwentyFourHour", L"ShowTimetable", L"NextIncludesSunrise"};
+    L"ShowSunrise", L"TwentyFourHour", L"ShowTimetable", L"NextIncludesSunrise", L"TimetableGapLines"};
 inline constexpr const wchar_t* SettingDefaults[] = {L"",L"",L"",L"",L"Auto",L"0",L"3",L"0",L"0",L"0",L"0",L"0",
-    L"43200",L"10",L"262144",L"1",L"0",L"1",L"0"};
+    L"43200",L"10",L"262144",L"1",L"0",L"1",L"0",L"1"};
 inline std::wstring Trim(std::wstring value) {
     const auto first = value.find_first_not_of(L" \t\r\n");
     return first == std::wstring::npos ? L"" : value.substr(first, value.find_last_not_of(L" \t\r\n") - first + 1);
@@ -72,7 +73,7 @@ inline bool NormalizeSetting(std::wstring& key, std::wstring& value, std::wstrin
         }
         return true;
     }
-    if (index >= 15) {
+    if (index >= 15 && index <= 18) {
         const auto boolean = Lower(value);
         if (boolean == L"true" || boolean == L"yes" || boolean == L"on" || boolean == L"1") value = L"1";
         else if (boolean == L"false" || boolean == L"no" || boolean == L"off" || boolean == L"0") value = L"0";
@@ -85,7 +86,7 @@ inline bool NormalizeSetting(std::wstring& key, std::wstring& value, std::wstrin
     bool valid = index == 4 ? number == -1 || (number >= 0 && number <= 23 && number != 6) :
         index == 5 ? number >= 0 && number <= 1 : index == 6 ? number >= 1 && number <= 3 :
         index <= 11 ? number >= -180 && number <= 180 : index == 12 ? number >= 300 && number <= 604800 :
-        index == 13 ? number >= 1 && number <= 60 : number >= 4096 && number <= 1048576;
+        index == 13 ? number >= 1 && number <= 60 : index == 19 ? number >= 0 && number <= 3 : number >= 4096 && number <= 1048576;
     if (!valid) { error = key + L" is outside its supported range."; return false; }
     value = index == 4 && number == -1 ? L"Auto" : std::to_wstring(number); return true;
 }
@@ -95,7 +96,7 @@ template<class Reader> inline bool ReadConfiguration(Reader get, Configuration& 
         std::wstring key = SettingKeys[i], value = get(SettingKeys[i], SettingDefaults[i]);
         if (!NormalizeSetting(key, value, error)) return false;
         int number = 0;
-        if (i >= 4 && i < 15) { if (value == L"Auto") number = -1; else Integer(value, number); }
+        if ((i >= 4 && i < 15) || i == 19) { if (value == L"Auto") number = -1; else Integer(value, number); }
         switch (i) {
         case 0: result.city = value; break; case 1: result.country = value; break;
         case 2: result.state = value; break; case 3: result.timeZone = value; break;
@@ -106,6 +107,7 @@ template<class Reader> inline bool ReadConfiguration(Reader get, Configuration& 
         case 16: result.twentyFourHour = value == L"1"; break;
         case 17: result.showTimetable = value == L"1"; break;
         case 18: result.nextIncludesSunrise = value == L"1"; break;
+        case 19: result.timetableGapLines = number; break;
         default: result.adjustmentsMinutes[i - 7] = number; break;
         }
     }
@@ -128,6 +130,7 @@ inline bool Validate(Configuration& cfg, std::wstring& error, bool requireLocati
         if (std::wstring(key) == L"TwentyFourHour") return input.twentyFourHour ? L"1" : L"0";
         if (std::wstring(key) == L"ShowTimetable") return input.showTimetable ? L"1" : L"0";
         if (std::wstring(key) == L"NextIncludesSunrise") return input.nextIncludesSunrise ? L"1" : L"0";
+        if (std::wstring(key) == L"TimetableGapLines") return std::to_wstring(input.timetableGapLines);
         for (size_t i = 0; i < 5; ++i) if (std::wstring(key) == SettingKeys[i + 7]) return std::to_wstring(input.adjustmentsMinutes[i]);
         return L"";
     }, cfg, error);
@@ -217,6 +220,7 @@ struct DetailRow { PrayerId id = PrayerId::Fajr; std::wstring label, value; bool
 struct ClockText {
     std::wstring time, prayer, location, minutes, countdown, details;
     bool showTimetable = true;
+    int timetableGapLines = 1;
     bool Available() const { return !time.empty() && !prayer.empty(); }
 };
 struct View {
@@ -284,6 +288,7 @@ inline View Compose(const Configuration& input, const Data& data, UTC now) {
         view.clock.minutes = std::to_wstring(minutes);
         view.clock.countdown = L"in " + view.clock.minutes + (minutes == 1 ? L" minute" : L" minutes");
         view.clock.showTimetable = cfg.showTimetable;
+        view.clock.timetableGapLines = cfg.timetableGapLines;
         view.secondary = std::wstring(L"Next: ") + PrayerName(next->id) + L" " + TimeText(nextUtc,next->offsetMinutes,cfg.twentyFourHour) + L" - " + std::to_wstring(minutes) + L" min";
         view.nextUTCDeadline = minutes ? nextUtc - (minutes - 1) * 60 : now + 1;
     } else view.secondary = L"Next prayer schedule unavailable";

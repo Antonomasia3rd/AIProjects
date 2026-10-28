@@ -1,5 +1,7 @@
 # Resume checkpoint — October 26, after v27 beta 1
 
+Superseded for current work by [the October28 checkpoint](desktopstub-next-pass-2026-10-28.md).
+
 **Latest repository state:** all checkpoints are merged/pushed on `main` in the
 original D: checkout. See [main consolidation](main-consolidation-2026-10-26.md)
 for the two remaining follow-ups: Codex blocks removing this chat's primary

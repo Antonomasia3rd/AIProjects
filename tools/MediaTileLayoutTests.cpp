@@ -3,6 +3,8 @@
 #include "../dependencies/prayer_tile_layout.h"
 #include "../dependencies/rss_tile_layout.h"
 #include "../dependencies/secondary_tile_anchor.h"
+#include "../dependencies/datetime_tile_layout.h"
+#include "../dependencies/battery_tile_layout.h"
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -53,8 +55,8 @@ void TestLayouts() {
         const auto plain = ComputeMediaTileGeometry(widths[size], heights[size], false);
         Check(plain.textWidth > layout.textWidth && plain.iconSide == 0, "no-indicator mode gives the caption the full available width");
         const auto extras = ComputeMediaTileGeometry(widths[size], heights[size], true, 2);
-        Check(extras.iconY + extras.iconSide * 3 + 8 <= heights[size] - 20,
-            "playback plus repeat/shuffle indicators remain inside every supported tile height");
+        Check(extras.iconY + extras.iconSide * 3 + 16 <= heights[size] - 26+.0001,
+            "playback plus repeat/shuffle include both gaps and stay above the name/logo footer");
         std::wstring xml;
         Check(AppendMediaTileBinding(xml, names[size], {L"Song <&>", L"Artist", L"Paused - Player"}, L"ms-appx:///pause.png", {}, {}, L"Paused") &&
             xml.find(L"hint-textStacking=\"center\"") == std::wstring::npos &&
@@ -90,7 +92,7 @@ void TestLayouts() {
             "absent icons have a clean full-width text fallback with no empty column");
         xml.clear();
         Check(AppendWrappedSourceBinding(xml, names[size], {L"Discord presence", L"Set Details and State in Discord settings.", L""}) &&
-            xml.find(L"hint-wrap=\"true\" hint-maxLines=\"5\"") != std::wstring::npos,
+            xml.find(L"hint-wrap=\"true\" hint-maxLines=\""+std::to_wstring(StatusWrappedSecondaryLines(widths[size],heights[size]))+L"\"") != std::wstring::npos,
             "compact source headlines keep setup instructions in a wrapped lower field");
     }
     std::wstring xml;
@@ -142,6 +144,43 @@ void TestPresentation() {
     std::vector<Text> headlines;for(int i=0;i<5;++i)headlines.push_back({L"Wrapped headline\nsecond line "+std::to_wstring(i),L"Description",L""});
     std::wstring rich;AppendRssRichTileBinding(rich,L"TileMedium",150,headlines,L"");
     Check(Count(rich,L"<group>")==1&&rich.find(L"\nsecond line")!=std::wstring::npos&&rich.find(L"Description")!=std::wstring::npos,"RSS rich preset explicitly selects one larger wrapped Medium headline with its description");
+}
+void TestStatusHeadingDefaults() {
+    const wchar_t* bindings[]={L"TileMedium",L"TileWide",L"TileLarge"};
+    const int widths[]={150,310,310},heights[]={150,150,310},pixels[]={15,24,34};
+    const wchar_t* styles[]={L"base",L"title",L"subheader"};
+    for(size_t i=0;i<3;++i){
+        Check(ClockTimeStyle(widths[i],heights[i])==std::wstring(styles[i])&&
+            StatusTilePrimaryStyle(bindings[i])==std::wstring(styles[i])&&StatusTilePrimaryPixels(widths[i],heights[i])==pixels[i],
+            "shared status headings retain the traced native Clock contract for each size");
+        BatteryTileText battery;battery.charge=L"80%";std::wstring batteryXml;
+        AppendBatteryTileBinding(batteryXml,bindings[i],widths[i],heights[i],battery);
+        const auto chargeStyle=L"<text hint-style=\""+std::wstring(styles[i])+L"\"";
+        Check(batteryXml.find(chargeStyle)!=std::wstring::npos&&BuildBatteryTilePlan(battery,widths[i],heights[i]).groups.front().columns.front().texts.front().style==styles[i],
+            "Battery native XML and bitmap plan share the size-dependent Clock heading");
+        std::wstring media,wrapped;AppendMediaTileBinding(media,bindings[i],{L"Song",L"Artist",L"Paused"},L"");
+        AppendWrappedSourceBinding(wrapped,bindings[i],{L"Presence",L"Details",L""});
+        Check(media.find(chargeStyle)!=std::wstring::npos&&wrapped.find(chargeStyle)!=std::wstring::npos,
+            "Now Playing and Discord-style wrapped headings follow the same Clock defaults");
+        TextPresentation custom;custom.preset=L"Custom";custom.primaryStyle=L"headerNumeral";
+        const auto customMedia=ApplyTextPresentationXml(media,custom);batteryXml.clear();
+        AppendBatteryTileBinding(batteryXml,bindings[i],widths[i],heights[i],battery,custom);
+        Check(customMedia.find(L"hint-style=\"headerNumeral\"")!=std::wstring::npos&&batteryXml.find(L"hint-style=\"headerNumeral\"")!=std::wstring::npos,
+            "explicit custom typography remains effective instead of being overwritten by shared defaults");
+        std::wstring gameFallback;AppendWrappedSourceBinding(gameFallback,bindings[i],{L"Game setup",L"Details",L""},{},L"base");
+        Check(gameFallback.find(L"hint-style=\"base\"")!=std::wstring::npos,
+            "empty/error game rows retain the RSS-style heading exception at every size");
+        std::wstring noIconMetadata;AppendMediaTileBinding(noIconMetadata,bindings[i],{L"Title",L"Artist",L"Repeat track\nShuffle on"},L"",{}, {},L"Playback status",true);
+        Check(noIconMetadata.find(L"hint-maxLines=\""+std::to_wstring(StatusMediaTextBudget(widths[i],heights[i],true).badge)+L"\">Repeat track")!=std::wstring::npos&&
+            noIconMetadata.find(L"<image")==std::wstring::npos,
+            "known metadata keeps its text allocation when optional icon export is unavailable");
+    }
+    Snapshot clock;clock.clockSource=true;Snapshot calendar;calendar.calendarSource=true;Snapshot mail;mail.mailSource=true;
+    Snapshot image;Snapshot game;game.gameSource=true;game.wrapSourceText=true;
+    for(const auto& exception:{clock,calendar,mail,image,game})Check(!HasDefaultStatusHeading(exception),
+        "unchanged native and source-specific layouts receive no unrelated status cache-version invalidation");
+    Snapshot status;status.smtcSource=true;Check(HasDefaultStatusHeading(status),"a status layout invalidates old implicit font caches");
+    status.presentation.preset=L"Custom";Check(!HasDefaultStatusHeading(status),"explicit custom layouts retain their existing cache policy");
 }
 void TestRssReadableDefaults() {
     std::vector<Text> headlines;
@@ -199,6 +238,6 @@ void TestCenteredPinAnchor() {
 }
 }
 int main() {
-    try { TestStatus(); TestLayouts(); TestSettings(); TestPresentation(); TestRssReadableDefaults(); TestCenteredPinAnchor(); std::cout << checks << " media presentation checks passed\n"; return 0; }
+    try { TestStatus(); TestLayouts(); TestSettings(); TestPresentation(); TestStatusHeadingDefaults(); TestRssReadableDefaults(); TestCenteredPinAnchor(); std::cout << checks << " media presentation checks passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << "After " << checks << " checks: " << error.what() << '\n'; return 1; }
 }

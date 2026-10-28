@@ -54,6 +54,15 @@ static void TestFontFallback() {
         "world-clock topic resolves for rendering without becoming a new legacy pin destination");
     aip::content::TileInstance clock;clock.type=aip::content::TileInstanceType::Clock;
     Check(aip::content::TileInstanceArtworkTopic(clock)==L"clock","local Clock defaults to the ordinary native clock symbol");
+    for(const auto* label:{L"Home",L"Waktu lokal",L"local time",L"本地时间"}){
+        clock.clock.location=label;
+        Check(aip::content::TileInstanceArtworkTopic(clock)==L"clock","Auto Clock artwork follows the time-zone mode rather than localized display text");
+    }
+    clock.clock.timeZone=L"UTC";
+    Check(aip::content::TileInstanceArtworkTopic(clock)==L"worldclock","an explicit named time zone selects world-clock artwork regardless of label");
+    clock.clock.iconStyle=L"Clock";
+    Check(aip::content::TileInstanceArtworkTopic(clock)==L"clock","explicit ordinary Clock artwork remains authoritative for a named time zone");
+    clock.clock.timeZone=L"Local";
     clock.clock.iconStyle=L"WorldClock";
     Check(aip::content::TileInstanceArtworkTopic(clock)==L"worldclock"&&
         AssetPlan(*worldClock)[3].relative.find(L"/worldclock/Small.png")!=std::wstring::npos&&

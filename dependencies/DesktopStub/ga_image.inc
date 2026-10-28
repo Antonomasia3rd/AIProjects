@@ -653,7 +653,7 @@ static bool DrawStaticSourceCorner(Graphics& graphics,const aip::content::Snapsh
 
 static bool DrawTopSourceField(Graphics& graphics, const std::wstring& text, Font& font,
     REAL x, REAL& y, REAL width, REAL bottom, int maxLines, BYTE alpha, REAL gap,
-    const aip::content::TextPresentation* overridePresentation = nullptr,bool measureOnly=false)
+    const aip::content::TextPresentation* overridePresentation = nullptr,bool measureOnly=false,const wchar_t* defaultStyle=nullptr)
 {
     if (text.empty() || width <= 0 || y >= bottom) return true;
     std::unique_ptr<Font> presented;
@@ -671,6 +671,13 @@ static bool DrawTopSourceField(Graphics& graphics, const std::wstring& text, Fon
         maxLines = presentation->wrap ? (alpha == 255 ? presentation->primaryLines : badge ? presentation->badgeLines : presentation->secondaryLines) : 1;
         alpha = style.find(L"Subtle") == std::wstring::npos ? 255 : 153;
         gap += static_cast<REAL>(presentation->gapLines * 12) * scale;
+    }else if(defaultStyle){
+        const std::wstring style=defaultStyle;
+        const REAL scale=font.GetSize()/12;
+        const bool base=style==L"base",light=style==L"title"||style==L"subheader";
+        presented=std::make_unique<Font>(base?L"Segoe UI Semibold":light?L"Segoe UI Light":L"Segoe UI",
+            static_cast<REAL>(aip::content::TextStylePixels(style))*scale,FontStyleRegular,UnitPixel);
+        if(presented->GetLastStatus()!=Ok)return false;selected=presented.get();
     }
     const REAL lineHeight = selected->GetHeight(&graphics);
     if (lineHeight <= 0 || selected->GetLastStatus() != Ok) return false;
@@ -716,9 +723,10 @@ static bool RenderMediaTileSimulation(Graphics& graphics, const aip::content::Sn
     REAL y = static_cast<REAL>(layout.textY * scale) + PresentedTextOffset(snapshot, logicalHeight, scale);
     const REAL bottom = (std::min)(static_cast<REAL>((layout.textY + layout.textHeight) * scale),static_cast<REAL>((logicalHeight-SourceTextBottomInset(snapshot))*scale));
     const REAL x = static_cast<REAL>(layout.textX * scale), width = static_cast<REAL>(layout.textWidth * scale);
-    if (!DrawTopSourceField(graphics, snapshot.text.primary, font, x, y, width, bottom, 2, 255, static_cast<REAL>(3 * scale)) ||
-        !DrawTopSourceField(graphics, snapshot.text.secondary, font, x, y, width, bottom, 2, 153, static_cast<REAL>(3 * scale)) ||
-        !DrawTopSourceField(graphics, snapshot.text.badge, font, x, y, width, bottom, 4, 153, 0)) return false;
+    const auto budget=aip::content::StatusMediaTextBudget(logicalWidth,logicalHeight,!extras.empty());
+    if (!DrawTopSourceField(graphics, snapshot.text.primary, font, x, y, width, bottom, budget.primary, 255, static_cast<REAL>(3 * scale),nullptr,false,aip::content::StatusTilePrimaryStyle(logicalWidth,logicalHeight)) ||
+        !DrawTopSourceField(graphics, snapshot.text.secondary, font, x, y, width, bottom, budget.secondary, 153, static_cast<REAL>(3 * scale)) ||
+        !DrawTopSourceField(graphics, snapshot.text.badge, font, x, y, width, bottom, budget.badge, 153, 0)) return false;
     const RectF iconBounds(static_cast<REAL>(layout.iconX * scale), static_cast<REAL>(layout.iconY * scale),
         static_cast<REAL>(layout.iconSide * scale), static_cast<REAL>(layout.iconSide * scale));
     if (mainIcon) {
@@ -742,22 +750,24 @@ static bool RenderMediaTileSimulation(Graphics& graphics, const aip::content::Sn
 #include "ga_notes_tile_icons.inc"
 #include "../game_tile_layout.h"
 static bool RenderGameRowsSimulation(Graphics& graphics,const aip::content::Snapshot& snapshot,int width,int height,double scale){
-    using namespace aip::content;auto presentation=GameTextPresentation(snapshot.presentation);const auto stacking=presentation.stacking;presentation.stacking=L"top";auto secondaryPresentation=presentation;secondaryPresentation.gapLines=0;
-    const auto count=(std::min)(snapshot.detailRows.size(),GameTileRows(width,height));if(!count)return true;
+    using namespace aip::content;auto presentation=GameTextPresentation(snapshot.presentation,width,height);const auto stacking=presentation.stacking;presentation.stacking=L"top";
+    const auto count=GameVisibleRowCount(snapshot,width,height);if(!count)return true;
     Font font(L"Segoe UI",static_cast<REAL>(12*scale),FontStyleRegular,UnitPixel);if(font.GetLastStatus()!=Ok)return false;
     const REAL margin=static_cast<REAL>(10*scale),bottom=static_cast<REAL>((height-25)*scale),spacing=static_cast<REAL>(presentation.rowSpacing*scale);
-    struct Prepared {const Text* row;std::unique_ptr<Bitmap> icon;GameRowGeometry geometry;REAL height;};std::vector<Prepared> rows;REAL total=0;
+    const REAL labelGap=GameUsesRssLayout(snapshot.presentation)?0:static_cast<REAL>(2*scale);
+    struct Prepared {const Text* row;std::unique_ptr<Bitmap> icon;GameRowGeometry geometry;REAL height;TextPresentation primary,secondary;};std::vector<Prepared> rows;REAL total=0;
     for(size_t index=0;index<count;++index){const auto& row=snapshot.detailRows[index];auto icon=presentation.iconPlacement==L"None"?std::unique_ptr<Bitmap>{}:LoadNotesTileIcon(row.iconTopic);
+        const auto rowPresentation=GameRowPresentation(snapshot,presentation,index,width,height);auto secondaryPresentation=rowPresentation;secondaryPresentation.gapLines=0;
         const auto geometry=ComputeGameRowGeometry(width,icon!=nullptr,presentation);REAL y=0;const auto textWidth=static_cast<REAL>(geometry.textWidth*scale);
-        if(!DrawTopSourceField(graphics,row.primary,font,0,y,textWidth,100000,2,255,static_cast<REAL>(2*scale),&presentation,true)||
+        if(!DrawTopSourceField(graphics,row.primary,font,0,y,textWidth,100000,2,255,labelGap,&rowPresentation,true)||
             !DrawTopSourceField(graphics,row.secondary,font,0,y,textWidth,100000,2,153,0,&secondaryPresentation,true))return false;
         const REAL rowHeight=(std::max)(y,static_cast<REAL>(geometry.iconSide*scale));const REAL required=total+(rows.empty()?0:spacing)+rowHeight;
-        if(required>bottom-margin+.01f)break;total=required;rows.push_back({&row,std::move(icon),geometry,rowHeight});
+        if(required>bottom-margin+.01f)break;total=required;rows.push_back({&row,std::move(icon),geometry,rowHeight,rowPresentation,secondaryPresentation});
     }
     REAL y=margin;if(stacking!=L"top")y+=(std::max)(0.0f,bottom-margin-total)*(stacking==L"bottom"?1.0f:.5f);
     for(const auto& row:rows){REAL textY=y;const auto x=static_cast<REAL>(row.geometry.textX*scale),textWidth=static_cast<REAL>(row.geometry.textWidth*scale);
-        if(!DrawTopSourceField(graphics,row.row->primary,font,x,textY,textWidth,y+row.height,2,255,static_cast<REAL>(2*scale),&presentation)||
-            !DrawTopSourceField(graphics,row.row->secondary,font,x,textY,textWidth,y+row.height,2,153,0,&secondaryPresentation))return false;
+        if(!DrawTopSourceField(graphics,row.row->primary,font,x,textY,textWidth,y+row.height,2,255,labelGap,&row.primary)||
+            !DrawTopSourceField(graphics,row.row->secondary,font,x,textY,textWidth,y+row.height,2,153,0,&row.secondary))return false;
         if(row.icon){const REAL side=static_cast<REAL>(row.geometry.iconSide*scale),ratio=(std::min)(side/row.icon->GetWidth(),side/row.icon->GetHeight());
             const REAL iconWidth=row.icon->GetWidth()*ratio,iconHeight=row.icon->GetHeight()*ratio;
             if(graphics.DrawImage(row.icon.get(),RectF(static_cast<REAL>(row.geometry.iconX*scale)+(side-iconWidth)*.5f,y+(row.height-iconHeight)*.5f,iconWidth,iconHeight))!=Ok)return false;}
@@ -804,7 +814,7 @@ static bool DrawPrayerClockField(Graphics& graphics, const aip::content::Snapsho
     }
     if (width <= 0 || y >= bottom) return true;
     const bool light = style.compare(0,5,L"title") == 0 || style.compare(0,9,L"subheader") == 0 || style.compare(0,6,L"header") == 0;
-    const bool clockBase=snapshot.clockSource&&style==L"base";
+    const bool clockBase=(snapshot.clockSource||(!presentation.Active()&&(snapshot.prayerSource||snapshot.batterySource)))&&style==L"base";
     Font font(clockBase?L"Segoe UI Semibold":light ? L"Segoe UI Light" : L"Segoe UI", static_cast<REAL>(aip::content::TextStylePixels(style) * scale),
         !clockBase&&style.compare(0,4,L"base") == 0 ? FontStyleBold : FontStyleRegular, UnitPixel);
     const REAL lineHeight = font.GetHeight(&graphics);
@@ -879,7 +889,7 @@ static bool RenderPrayerTileSimulation(Graphics& graphics, const aip::content::S
         const REAL margin = static_cast<REAL>(layout.margin * scale), bottom = static_cast<REAL>(layout.bottom * scale);
         const REAL mainWidth = static_cast<REAL>(layout.mainWidth * scale), headerBottom = static_cast<REAL>(layout.clockBottom * scale);
         REAL y = margin, countY = margin; unsigned role = 0;
-        if (!DrawPrayerClockField(graphics,snapshot,clock.time,aip::content::PrayerTimeStyle(layout.countdownColumn),role,
+        if (!DrawPrayerClockField(graphics,snapshot,clock.time,aip::content::PrayerTimeStyle(width,height),role,
                 margin,y,mainWidth,headerBottom,1,scale) ||
             !DrawPrayerClockField(graphics,snapshot,clock.prayer,L"captionSubtle",1,margin,y,mainWidth,headerBottom,1,scale) ||
             !DrawPrayerClockField(graphics,snapshot,aip::content::PrayerLocationText(clock),L"captionSubtle",1,
@@ -896,6 +906,11 @@ static bool RenderPrayerTileSimulation(Graphics& graphics, const aip::content::S
         if (!DrawPrayerClockField(graphics,snapshot,clock.details,L"captionSubtle",1,margin,y,fullWidth,headerBottom,2,scale)) return false;
         if (layout.schedule) {
             y = (std::min)(y,headerBottom);
+            if(layout.timetableGapLines){
+                Font spacer(L"Segoe UI",static_cast<REAL>(12*scale),FontStyleRegular,UnitPixel);
+                const auto line=spacer.GetHeight(&graphics);if(spacer.GetLastStatus()!=Ok||line<=0)return false;
+                y=(std::min)(bottom,y+(line+static_cast<REAL>(2*scale))*layout.timetableGapLines);
+            }
             const REAL rowHeight = (bottom - y) / static_cast<REAL>(snapshot.detailRows.size());
             for (const auto& row : snapshot.detailRows) {
                 REAL labelY = y, valueY = y;
@@ -913,13 +928,16 @@ static bool RenderPrayerTileSimulation(Graphics& graphics, const aip::content::S
     const REAL margin = static_cast<REAL>(10 * scale), textWidth = static_cast<REAL>((width - 20) * scale);
     const REAL bottom = static_cast<REAL>((height - SourceTextBottomInset(snapshot)) * scale);
     const bool full = aip::content::PrayerTileShowsSchedule(height, snapshot.detailRows, snapshot.prayerClock);
-    const REAL headerBottom = snapshot.presentation.Active() && full ? bottom - (bottom - margin) * .65f : bottom;
+    const REAL headerBottom = full ? (std::min)(bottom,static_cast<REAL>(126*scale)) : bottom;
     REAL y = margin;
-    if (!DrawTopSourceField(graphics, snapshot.text.primary, font, margin, y, textWidth, headerBottom, 2, 255, static_cast<REAL>(2 * scale)) ||
-        !DrawTopSourceField(graphics, snapshot.text.secondary, font, margin, y, textWidth, headerBottom, 1, 180, static_cast<REAL>(2 * scale)) ||
-        !DrawTopSourceField(graphics, snapshot.text.badge, font, margin, y, textWidth, headerBottom, 2, 180, static_cast<REAL>(3 * scale))) return false;
+    if (!DrawPrayerClockField(graphics,snapshot,snapshot.text.primary,aip::content::PrayerTimeStyle(width,height),0,margin,y,textWidth,headerBottom,2,scale) ||
+        !DrawPrayerClockField(graphics,snapshot,snapshot.text.secondary,L"captionSubtle",1,margin,y,textWidth,headerBottom,1,scale) ||
+        !DrawPrayerClockField(graphics,snapshot,snapshot.text.badge,L"captionSubtle",2,margin,y,textWidth,headerBottom,2,scale)) return false;
     if (full) {
         if (snapshot.presentation.Active()) y = (std::min)(y,headerBottom);
+        const auto gap=(std::clamp)(snapshot.prayerClock.timetableGapLines,0,3);
+        if(gap){const auto line=font.GetHeight(&graphics);if(line<=0)return false;
+            y=(std::min)(bottom,y+(line+static_cast<REAL>(2*scale))*gap);}
         // Reserve equal space for all five obligatory prayers; Sunrise is in
         // the header, never a sixth row that can push Isha out of the tile.
         const REAL rowHeight = (bottom - y) / static_cast<REAL>(snapshot.detailRows.size());
@@ -1062,8 +1080,8 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
             REAL y = static_cast<REAL>(10 * scale);
             const REAL margin = y, bottom = static_cast<REAL>((logicalHeight - SourceTextBottomInset(*g_renderContent)) * scale);
             const REAL width = static_cast<REAL>(bitmapWidth) - margin * 2;
-            return DrawTopSourceField(graphics, primaryText, font, margin, y, width, bottom, 2, 255, static_cast<REAL>(3 * scale)) &&
-                DrawTopSourceField(graphics, secondaryText, font, margin, y, width, bottom, 5, 153, 0);
+            return DrawTopSourceField(graphics, primaryText, font, margin, y, width, bottom, 2, 255, static_cast<REAL>(3 * scale),nullptr,false,g_renderContent->gameSource?L"base":aip::content::StatusTilePrimaryStyle(logicalWidth,logicalHeight)) &&
+                DrawTopSourceField(graphics, secondaryText, font, margin, y, width, bottom, g_renderContent->gameSource?5:aip::content::StatusWrappedSecondaryLines(logicalWidth,logicalHeight), 153, 0);
         }
     }
     if (g_renderContent && !g_renderContent->rssHeadlines.empty() && logicalHeight >= 150 && logicalWidth >= 150) {

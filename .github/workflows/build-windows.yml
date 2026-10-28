@@ -151,6 +151,9 @@ jobs:
 
       - name: Test source profiles and composed host with inert fixtures
         shell: pwsh
+        env:
+          CONTENT_OPTIMIZE: '1'
+          _CL_: /Ob1
         run: tools\TestContentIntegration.ps1 -Run
 
       - name: Test smoke runner interruption cleanup
@@ -189,9 +192,9 @@ jobs:
           if ($env:DRAFT_BETA -eq 'true' -and $env:SELECTED_PROJECT -ne 'DesktopStub') {
             throw 'Select DesktopStub when requesting a draft beta release test.'
           }
-          $tag = 'DesktopStub-v27-beta2'
+          $tag = 'DesktopStub-v27-beta3'
           if ($env:DRAFT_BETA -eq 'true') { $tag += '-actions-' + $env:GITHUB_RUN_ID + '-' + $env:GITHUB_RUN_ATTEMPT }
-          "DESKTOPSTUB_VERSION=27.0.0.2" >> $env:GITHUB_ENV
+          "DESKTOPSTUB_VERSION=27.0.0.3" >> $env:GITHUB_ENV
           "DESKTOPSTUB_RELEASE_TAG=$tag" >> $env:GITHUB_ENV
           "tag=$tag" >> $env:GITHUB_OUTPUT
 
@@ -402,10 +405,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BETA_TAG: ${{ needs.build-windows.outputs.desktopstub_beta_tag }}
         run: |
-          if ($env:BETA_TAG -notmatch '^DesktopStub-v27-beta2-actions-[0-9]+-[0-9]+$') { throw 'Unexpected beta test tag.' }
+          if ($env:BETA_TAG -notmatch '^DesktopStub-v27-beta3-actions-[0-9]+-[0-9]+$') { throw 'Unexpected beta test tag.' }
           $files = @('DesktopStub.exe','DesktopStubLiveTileBroker.exe','DesktopStubTileLauncher.exe') | ForEach-Object {
             $file = Get-Item -LiteralPath (Join-Path 'payload' $_) -ErrorAction Stop
-            if ($file.VersionInfo.FileVersion -ne '27.0.0.2') { throw ('Unexpected beta FileVersion: ' + $file.Name) }
+            if ($file.VersionInfo.FileVersion -ne '27.0.0.3') { throw ('Unexpected beta FileVersion: ' + $file.Name) }
             $file.FullName
           }
           $files | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetFileName($_) } | Set-Content -LiteralPath payload/SHA256SUMS.txt

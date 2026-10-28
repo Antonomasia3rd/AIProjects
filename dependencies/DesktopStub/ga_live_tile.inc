@@ -388,13 +388,14 @@ static std::wstring BuildLiveTileXml(
             if (icon.empty() && g_renderContent->smtcIndicator != aip::content::MediaIndicatorMode::None)
                 icon = MediaTopicUri(aip::content::MediaStatusTopic(g_renderContent->smtcState), exeDir);
             std::vector<aip::content::MediaIndicatorImage> extras;
-            for (const auto& topic : aip::content::MediaExtraTopics(*g_renderContent)) {
+            const auto extraTopics=aip::content::MediaExtraTopics(*g_renderContent);
+            for (const auto& topic : extraTopics) {
                 const auto extra = MediaTopicUri(topic, exeDir);
                 if (!extra.empty()) extras.push_back({extra, topic});
             }
             if (aip::content::AppendMediaTileBinding(xml, templateName, g_renderContent->text,
                     icon, ContentHasTransparentBackground() ? L"" : uri, extras,
-                    appIcon ? g_renderContent->smtcAppName : aip::content::MediaStatusLabel(g_renderContent->smtcState))) {
+                    appIcon ? g_renderContent->smtcAppName : aip::content::MediaStatusLabel(g_renderContent->smtcState),!extraTopics.empty())) {
                 hasUsableBinding = true; continue;
             }
         }
@@ -416,7 +417,7 @@ static std::wstring BuildLiveTileXml(
         if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->wrapSourceText &&
             g_renderContent->textMode == aip::content::TextMode::Auto) {
             if (aip::content::AppendWrappedSourceBinding(xml, templateName, g_renderContent->text,
-                ContentHasTransparentBackground() ? L"" : uri)) { hasUsableBinding = true; continue; }
+                ContentHasTransparentBackground() ? L"" : uri,g_renderContent->gameSource?L"base":nullptr,g_renderContent->gameSource?5:0)) { hasUsableBinding = true; continue; }
         }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && !g_renderContent->rssHeadlines.empty() &&
             g_renderContent->textMode == aip::content::TextMode::Auto) {
@@ -441,7 +442,7 @@ static std::wstring BuildLiveTileXml(
     xml += L"</tile>";
     const bool richRssPresentation = g_renderContent && !g_renderContent->rssHeadlines.empty() &&
         g_renderContent->textMode == aip::content::TextMode::Auto && aip::content::RssUsesRichLayout(g_renderContent->presentation);
-    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !richRssPresentation && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource && !g_renderContent->mailSource && !g_renderContent->gameSource && !g_renderContent->batterySource)
+    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !richRssPresentation && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource && !g_renderContent->mailSource && (!g_renderContent->gameSource || g_renderContent->detailRows.empty()) && !g_renderContent->batterySource)
         xml = aip::content::ApplyTextPresentationXml(xml, g_renderContent->presentation);
     aip::tile_notification::Options options;
     if (g_renderContent) {

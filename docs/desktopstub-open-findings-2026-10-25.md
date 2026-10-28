@@ -6,6 +6,14 @@ Snapshot: October 26 beta implementation is complete and source/inert gates pass
 
 ## Current priority findings
 
+October28 continuation is recorded in [the latest checkpoint](desktopstub-next-pass-2026-10-28.md).
+The new Prayer timetable gap, shared status-heading defaults, RSS-style Games
+budgets and Clock Auto localization fix are implemented with local host/raster
+evidence. They retain native Start/cross-version acceptance boundaries. CI temp
+alias and broad fixture fixes are locally validated; hosted acceptance is tracked
+separately. The user deferred chat/worktree cleanup until this queue and then
+the requested Luna Windhawk reviews are complete.
+
 The [beta 2 delivery record](desktopstub-beta2-2026-10-26.md) confirms current
 machine native appearance/cold-start checks and the completed fresh reset.
 The Properties rows below remain open only for broader theme/OS/accessibility

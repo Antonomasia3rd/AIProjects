@@ -1,5 +1,10 @@
 # DesktopStub Actions release safety, October 26
 
+October 28 update: the same gated workflow now builds beta3 metadata
+(`27.0.0.3`, `DesktopStub-v27-beta3`), and unique draft tags use the beta3 stem.
+The beta2 wording below records the initial setup; publication safeguards are
+unchanged. The INI alias/compiler/fixture corrections are tracked separately.
+
 The previous main-push workflow could publish stable Project-vN releases after
 building; its publisher ultimately changed draft=false and did not wait for the
 separate provenance job. DesktopStub's artifact and checksum/release inventory

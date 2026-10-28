@@ -226,6 +226,7 @@ static std::wstring BuildLegacyContentFixtureTemplate()
 #include "GoogleCalendarHostTests.inc"
 #include "GmailHostTests.inc"
 #include "BatteryTileHostTests.inc"
+#include "StatusTileDefaultsHostTests.inc"
 #include "AlbumArtTileHostTests.inc"
 #include "PrimaryImageTileHostTests.inc"
 #include "LegacySettingsMigrationHostTests.inc"
@@ -241,6 +242,7 @@ static std::wstring BuildLegacyContentFixtureTemplate()
 #include "CalendarReminderHostTests.inc"
 #include "DesktopHostSetupHostTests.inc"
 #include "KuroSourceHealthHostTests.inc"
+#include "GameRssParityHostTests.inc"
 #include "PropertiesPreferencesHostTests.inc"
 #include "FreshPresetPreviewHostTests.inc"
 
@@ -453,9 +455,17 @@ static void TestCapsHostAndShutdownCache()
     g_shutdownState.Cancel();
 }
 
-static void TestOfflineConfigurationPersistence(const std::wstring& directory)
+static void TestOfflineConfigurationPersistence(const std::wstring& parentDirectory)
 {
+    // Earlier broad-host groups deliberately generate Assets in their shared
+    // root. Offline persistence must observe its own initially empty scope.
+    const auto directory=parentDirectory+L"\\offline-persistence";
+    const bool createdDirectory=CreateDirectoryW(directory.c_str(),nullptr)!=FALSE;
+    Check(createdDirectory,"offline persistence owns a fresh private subdirectory");
+    if(!createdDirectory)return;
     const auto savedPath = g_iniPath;
+    std::wstring savedExe;
+    {std::lock_guard<std::mutex> lock(g_pathMutex);savedExe=g_exePath;g_exePath=directory+L"\\"+FileNameFromPath(savedExe);}
     const auto savedCommandLine = g_commandLine;
     g_commandLine = {};
     g_commandLine.configureOnly = true;
@@ -518,7 +528,13 @@ static void TestOfflineConfigurationPersistence(const std::wstring& directory)
         GetFileAttributesW((directory + L"\\Assets").c_str()) == INVALID_FILE_ATTRIBUTES,
         "configure-only persistence fixtures do not generate package files or images");
     Check(DeleteFileW(fixturePath.c_str()) != FALSE, "remove temporary configure-only profile");
+    // These names belong only to the new fixture profile. Keep cleanup
+    // nonrecursive so unexpected image/package directories remain evidence.
+    DeleteFileW((fixturePath+L".before-tile-instances.bak").c_str());
+    DeleteFileW((fixturePath+L".before-profile-manager.bak").c_str());
+    Check(RemoveDirectoryW(directory.c_str())!=FALSE,"remove the owned offline persistence scope without recursive cleanup");
     g_iniPath = savedPath;
+    {std::lock_guard<std::mutex> lock(g_pathMutex);g_exePath=savedExe;}
     g_commandLine = savedCommandLine;
     std::wstring restored;
     Check(ReadIniFileForMutation(restored), "restore the original fixture profile cache");
@@ -1197,6 +1213,7 @@ int wmain()
     fixtureGroup("source alerts and date/time/WuWa integration");
     TestSourceAlertHost();
     TestPrayerNotificationRuntimeHost();
+    TestPrayerTimesHost(bitmapPath);
     TestGoogleCalendarHost();
     TestGmailHost();
     TestBatteryTilePlanHost();
@@ -1225,6 +1242,8 @@ int wmain()
     TestDateTimeParityHost();
     TestDesktopHostSetup(bitmapPath);
     TestKuroSourceHealthHost();
+    TestGameRssParityHost();
+    TestStatusTileDefaultsHost();
     TestPropertiesPreferencesHost();
     TestFreshPresetPreview(directory);
     TestGalleryImageActivationHost(bitmapPath);

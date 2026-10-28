@@ -2,6 +2,7 @@
 // Pure presentation of an already-prepared battery view. This header neither
 // queries hardware nor interprets capacities, power policies or display text.
 #include "tile_text_presentation.h"
+#include "standard_tile_layout.h"
 #include <utility>
 namespace aip { namespace content {
 struct BatteryTileText {
@@ -39,7 +40,7 @@ inline BatteryTilePlan BuildBatteryTilePlan(const BatteryTileText& text,int widt
         add(main,BatteryField(text.charge,text.charge.size()>4?L"base":L"titleNumeral",BatteryFieldRole::Primary,1,L"center"));
         if(!main.texts.empty()){top.columns.push_back(std::move(main));plan.groups.push_back(std::move(top));}return plan;
     }
-    add(main,BatteryField(text.charge,height>200?L"subheader":L"title",BatteryFieldRole::Primary));
+    add(main,BatteryField(text.charge,StatusTilePrimaryStyle(width,height),BatteryFieldRole::Primary));
     if(text.criticalView)add(main,BatteryField(text.runtime,L"captionSubtle",BatteryFieldRole::Secondary));
     add(main,BatteryField(text.status,L"caption",BatteryFieldRole::Secondary,2));
     if(!text.criticalView)add(main,BatteryField(text.runtime,L"captionSubtle",BatteryFieldRole::Secondary));

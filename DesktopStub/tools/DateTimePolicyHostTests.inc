@@ -61,10 +61,16 @@ static void TestClockIconPolicyHost()
 {
     using namespace aip::content;TileInstance tile;tile.type=TileInstanceType::Clock;
     Check(TileInstanceArtworkTopic(tile)==L"clock","Auto local Clock uses its plain native clock icon");
+    for(const auto* label:{L"Home",L"Waktu lokal",L"local time",L"本地时间"}){
+        tile.clock.location=label;
+        Check(TileInstanceArtworkTopic(tile)==L"clock","renaming or translating the local Clock label does not select a world-clock icon");
+    }
     tile.clock.timeZone=L"UTC";Check(TileInstanceArtworkTopic(tile)==L"worldclock","Auto named-zone Clock uses the clock-and-globe topic");
     tile.clock.iconStyle=L"Clock";Check(TileInstanceArtworkTopic(tile)==L"clock","explicit plain Clock icon overrides a nonlocal time zone");
     tile.clock.iconStyle=L"WorldClock";tile.clock.timeZone=L"Local";
     Check(TileInstanceArtworkTopic(tile)==L"worldclock","explicit WorldClock icon overrides a local time zone");
+    tile.clock.location=L"Waktu lokal";
+    Check(TileInstanceArtworkTopic(tile)==L"worldclock","explicit world-clock artwork remains available for a named city using the local zone");
     for(const auto& option:std::vector<std::pair<const wchar_t*,const wchar_t*>>{{L"auto",L"Auto"},{L"clock",L"Clock"},{L"worldclock",L"WorldClock"}}){
         std::wstring value=option.first,error;Check(NormalizeDesktopStubTypedSetting(L"Tile.clock",L"Clock.IconStyle",value,error)&&value==option.second,
             "typed Clock icon setting accepts and canonicalizes each supported native icon policy");}
@@ -75,6 +81,11 @@ static void TestClockIconPolicyHost()
         return aip::ReadIniValueFromDoc(doc,section,name,value)?value:std::wstring(fallback);},parsed,error)&&parsed.tiles.size()==1&&
         parsed.tiles.front().clock.iconStyle==L"Clock"&&TileInstanceArtworkTopic(parsed.tiles.front())==L"clock",
         "actual immutable Clock configuration carries its icon override into the artwork metadata");
+    const auto localized=aip::ParseIniDocument(L"[Tiles]\r\nInstances=clock\r\n[Tile.clock]\r\nType=Clock\r\nClock.IconStyle=Auto\r\nClock.TimeZone=Local\r\nClock.Location=Waktu lokal\r\n");
+    Check(ReadTileInstanceConfiguration([&](const wchar_t* section,const wchar_t* name,const wchar_t* fallback){std::wstring value;
+        return aip::ReadIniValueFromDoc(localized,section,name,value)?value:std::wstring(fallback);},parsed,error)&&parsed.tiles.size()==1&&
+        parsed.tiles.front().clock.location==L"Waktu lokal"&&TileInstanceArtworkTopic(parsed.tiles.front())==L"clock",
+        "immutable CLI/INI configuration keeps a translated local label independent of automatic artwork");
 }
 static unsigned dateTimePolicyPermissionQueries=0,dateTimePolicyPermissionNotices=0;
 static int dateTimePolicyPermissionValue=0;

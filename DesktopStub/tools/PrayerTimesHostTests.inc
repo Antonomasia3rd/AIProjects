@@ -37,6 +37,13 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
     for (const auto& method : g_prayerMethods) namedMethods = namedMethods && settingsCommands.count(PrayerMethodCommand(method.id)) != 0;
     Check(namedMethods && !settingsCommands.count(ID_PRAYER_SETTINGS + 12) && !settingsCommands.count(ID_PRAYER_SETTINGS + 106),
         "every supported calculation method has a named menu choice without requiring an ID prompt");
+    Check(settingsCommands.count(ID_PRAYER_SETTINGS+34)!=0,"legacy Prayer menu exposes the configurable timetable separation");
+    std::wstring gapValue=L"2";
+    Check(NormalizeDesktopStubTypedSetting(L"PrayerTimes",L"TimetableGapLines",gapValue,error)&&gapValue==L"2"&&
+        NormalizeDesktopStubTypedSetting(L"Tile.prayer",L"PrayerTimes.TimetableGapLines",gapValue,error),
+        "global and per-tile CLI/INI validators accept the same timetable spacing setting");
+    gapValue=L"4";Check(!NormalizeDesktopStubTypedSetting(L"Tile.prayer",L"PrayerTimes.TimetableGapLines",gapValue,error),
+        "typed timetable spacing rejects unsupported values before settings are written");
     Check(settingsCommands.at(ID_PRAYER_SETTINGS + 130).path.find(L"Middle of the night") != std::wstring::npos &&
         settingsCommands.at(ID_PRAYER_SETTINGS + 131).path.find(L"One seventh") != std::wstring::npos &&
         settingsCommands.at(ID_PRAYER_SETTINGS + 132).path.find(L"Angle based") != std::wstring::npos,
@@ -107,6 +114,8 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
     auto adjusted = prayer; adjusted.adjustmentsMinutes[1] = 5; adjusted.twentyFourHour = false;
     const auto adjustedView = provider.Read(adjusted);
     Check(adjustedView.detailRows.size() == 6 && adjustedView.detailRows[2].value == L"12:05 PM" && http == 4, "local adjustment/display edits reformat cached data without new HTTP");
+    adjusted.timetableGapLines=3;Check(provider.Read(adjusted).clock.timetableGapLines==3&&http==4,
+        "gap-only changes invalidate the cached formatted view without fetching the schedule again");
     provider.forceRequested = true; provider.Refresh(prayer, true);
     Check(http == 8 && loads == 1 && provider.Read(prayer).available, "explicit force refresh refetches unexpired daily schedules rather than only clearing the retry deadline");
     provider.Stop();
@@ -144,8 +153,8 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
     frame.prayerClock = {L"11:14 AM",L"Dhuhr",L"Surabaya",L"44",L"in 44 minutes",L"Sunrise 05:06"};
     std::wstring clockMedium,clockWide,clockLarge;
     Check(AppendPrayerTileBinding(clockMedium,L"TileMedium",150,frame.text,frame.detailRows,L"",frame.prayerClock) &&
-        clockMedium.find(L"hint-style=\"title\"") != std::wstring::npos && clockMedium.find(L"in 44 minutes") != std::wstring::npos,
-        "clock Medium layout gives the next prayer time a larger style and keeps a readable countdown sentence");
+        clockMedium.find(L"hint-style=\"base\"") != std::wstring::npos && clockMedium.find(L"in 44 minutes") != std::wstring::npos,
+        "Prayer Medium uses native Clock base styling and keeps a readable countdown sentence");
     Check(AppendPrayerTileBinding(clockWide,L"TileWide",150,frame.text,frame.detailRows,L"",frame.prayerClock) &&
         clockWide.find(L"headerNumeral") != std::wstring::npos && clockWide.find(L">minutes<") != std::wstring::npos &&
         clockWide.find(L"Isha") == std::wstring::npos,
@@ -163,6 +172,9 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
     Check(TileSnapshotVisibleText(frame,310,TileStatusLabels{}).find(L"Isha")==std::wstring::npos && ContentSnapshotKey(frame)!=clockKey,
         "timetable visibility updates both tile status and the presentation cache key");
     frame.prayerClock.showTimetable=true;
+    frame.prayerClock.timetableGapLines=0;const auto unspacedKey=ContentSnapshotKey(frame);
+    frame.prayerClock.timetableGapLines=1;
+    Check(ContentSnapshotKey(frame)!=unspacedKey,"timetable separation changes invalidate the real presentation cache key");
     {
         const auto tagFor = [](const std::wstring& xml, const std::wstring& text) {
             const auto content = xml.find(L">" + text + L"</text>");
@@ -185,9 +197,10 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
         for(int size=0;size<3;++size) {
             const auto xml=native(frame,size);
             const auto time=tagFor(xml,L"11:14 AM"), prayerName=tagFor(xml,L"Dhuhr"), location=tagFor(xml,L"at Surabaya");
-            Check(!xml.empty() && time.find(L"hint-style=\"title\"")!=std::wstring::npos && TextStylePixels(L"title")==24 &&
-                ComputePrayerClockGeometry(widths[size],heights[size],frame.prayerClock,frame.detailRows).timePixels==24,
-                "actual native notification keeps the default time at title24 on Medium Wide and Large");
+            const wchar_t* expectedStyle=size==0?L"base":size==1?L"title":L"subheader";const int expectedPixels=size==0?15:size==1?24:34;
+            Check(!xml.empty() && time.find(L"hint-style=\""+std::wstring(expectedStyle)+L"\"")!=std::wstring::npos && TextStylePixels(expectedStyle)==expectedPixels &&
+                ComputePrayerClockGeometry(widths[size],heights[size],frame.prayerClock,frame.detailRows).timePixels==expectedPixels,
+                "actual native Prayer notification follows the per-size native Clock heading contract");
             Check(prayerName.find(L"hint-style=\"captionSubtle\"")!=std::wstring::npos && location.find(L"hint-style=\"captionSubtle\"")!=std::wstring::npos,
                 "default prayer name and location share the same subdued text style on every tile size");
         }
@@ -211,6 +224,14 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
         Check(tagFor(noWrap,L"Dhuhr").find(L"hint-wrap=\"false\"")!=std::wstring::npos && tagFor(noWrap,L"at Surabaya").find(L"hint-maxLines=\"1\"")!=std::wstring::npos,
             "turning off wrapping applies to both prayer name and location in the final notification");
         frame.presentation.wrap=true;
+        const auto savedPresentation=frame.presentation;frame.presentation={};const auto gapXml=L"<text hint-style=\"caption\" hint-minLines=\"1\" hint-maxLines=\"1\"> </text>";
+        const auto largeWithGap=native(frame,2);
+        Check(largeWithGap.find(gapXml)!=std::wstring::npos&&largeWithGap.find(gapXml)<largeWithGap.find(L">Fajr</text>"),
+            "final native Large notification places a structural blank line before the timetable");
+        frame.prayerClock.timetableGapLines=0;
+        Check(native(frame,2).find(gapXml)==std::wstring::npos,"explicit zero removes the timetable spacer from the final native notification");
+        frame.prayerClock.timetableGapLines=1;
+        frame.presentation=savedPresentation;
         g_liveTileTemplateStyle=oldTemplate;g_manifestCompatibilityTarget=oldTarget;
     }
     { ScopedGdiPlus gdi; Check(gdi.ok(), "Prayer renderer fixture starts only offscreen GDI+");
@@ -228,6 +249,33 @@ static void TestPrayerTimesHost(const std::wstring& bitmapPath)
             Gdiplus::Bitmap compact(150,150,PixelFormat32bppARGB);Gdiplus::Graphics compactGraphics(&compact);
             compactGraphics.Clear(Gdiplus::Color(0,0,0,0));
             Check(RenderPrayerTileSimulation(compactGraphics,frame,150,150,1),"compact bitmap clock uses the single-column fallback without a device or live tile");
+            wchar_t witnessDirectory[32768]{};const auto witnessLength=GetEnvironmentVariableW(L"DESKTOPSTUB_TEST_LAYOUT_WITNESSES",witnessDirectory,static_cast<DWORD>(std::size(witnessDirectory)));
+            if(witnessLength>0&&witnessLength<std::size(witnessDirectory)){
+                Check(SHCreateDirectoryExW(nullptr,witnessDirectory,nullptr)==ERROR_SUCCESS||GetFileAttributesW(witnessDirectory)!=INVALID_FILE_ATTRIBUTES,
+                    "explicitly requested layout witness directory is available");
+                const auto saveWitness=[&](Gdiplus::Bitmap& image,const wchar_t* name){std::unique_ptr<Gdiplus::Bitmap> copy(image.Clone(Gdiplus::Rect(0,0,image.GetWidth(),image.GetHeight()),PixelFormat32bppARGB));
+                    Check(copy&&SavePNG(copy.get(),(std::wstring(witnessDirectory)+L"\\"+name).c_str()),"actual Prayer renderer witness is retained outside temporary fixture cleanup");};
+                graphics.Flush(Gdiplus::FlushIntentionSync);compactGraphics.Flush(Gdiplus::FlushIntentionSync);
+                saveWitness(canvas,L"Prayer-Large-gap1-100.png");saveWitness(compact,L"Prayer-Medium-100.png");
+                auto unspaced=frame;unspaced.prayerClock.timetableGapLines=0;
+                Gdiplus::Bitmap unspacedImage(310,310,PixelFormat32bppARGB);Gdiplus::Graphics unspacedGraphics(&unspacedImage);unspacedGraphics.Clear(Gdiplus::Color(0,0,0,0));
+                Check(RenderPrayerTileSimulation(unspacedGraphics,unspaced,310,310,1),"gap-zero comparison uses the same actual renderer");unspacedGraphics.Flush(Gdiplus::FlushIntentionSync);
+                saveWitness(unspacedImage,L"Prayer-Large-gap0-100.png");
+            }
+            for(const auto scale:{1.0,1.5}){
+                const auto size=static_cast<int>(310*scale);auto clean=frame;clean.presentation={};
+                clean.prayerClock.minutes.clear();clean.prayerClock.countdown.clear();clean.prayerClock.location.clear();clean.prayerClock.details=L"Status";
+                auto header=clean;header.prayerClock.showTimetable=false;
+                Gdiplus::Bitmap headerPixels(size,size,PixelFormat32bppARGB);Gdiplus::Graphics headerGraphics(&headerPixels);headerGraphics.Clear(Gdiplus::Color(0,0,0,0));
+                Check(RenderPrayerTileSimulation(headerGraphics,header,310,310,scale),"offscreen header reference renders at the requested scale");headerGraphics.Flush(Gdiplus::FlushIntentionSync);
+                int previous=-1;
+                for(int gap=0;gap<=3;++gap){clean.prayerClock.timetableGapLines=gap;Gdiplus::Bitmap spacedPixels(size,size,PixelFormat32bppARGB);Gdiplus::Graphics spacedGraphics(&spacedPixels);
+                    spacedGraphics.Clear(Gdiplus::Color(0,0,0,0));Check(RenderPrayerTileSimulation(spacedGraphics,clean,310,310,scale),"bounded timetable gaps render without dropping the table");spacedGraphics.Flush(Gdiplus::FlushIntentionSync);
+                    int first=-1;for(int y=0;y<size&&first<0;++y)for(int x=0;x<size;++x){Gdiplus::Color a,b;
+                        if(spacedPixels.GetPixel(x,y,&a)==Gdiplus::Ok&&headerPixels.GetPixel(x,y,&b)==Gdiplus::Ok&&a.GetA()&&!b.GetA()){first=y;break;}}
+                    Check(first>=0&&(previous<0||first-previous>=static_cast<int>(12*scale)),"each configured blank line visibly separates timetable ink in both 100 and 150 percent renders");previous=first;
+                }
+            }
             Gdiplus::Bitmap prayerField(180,180,PixelFormat32bppARGB),cityField(180,180,PixelFormat32bppARGB),singleLine(180,180,PixelFormat32bppARGB);
             Gdiplus::Graphics prayerGraphics(&prayerField),cityGraphics(&cityField),singleGraphics(&singleLine);
             prayerGraphics.Clear(Gdiplus::Color(0,0,0,0));cityGraphics.Clear(Gdiplus::Color(0,0,0,0));singleGraphics.Clear(Gdiplus::Color(0,0,0,0));

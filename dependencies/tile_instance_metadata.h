@@ -9,7 +9,9 @@ inline std::wstring TileInstanceArtworkTopic(const TileInstance& tile) {
     case TileInstanceType::NowPlaying: return L"smtc";
     case TileInstanceType::PrayerTimes: return L"prayer";
     case TileInstanceType::Clock:return tile.clock.iconStyle==L"Clock"?L"clock":tile.clock.iconStyle==L"WorldClock"?L"worldclock":
-        aip::datetime::Lower(tile.clock.timeZone)==L"local"&&(tile.clock.location.empty()||tile.clock.location==L"Local time")?L"clock":L"worldclock";
+        // Location is display text, never a mode discriminator. In particular,
+        // translating or renaming "Local time" must not change the icon.
+        aip::datetime::Lower(tile.clock.timeZone)==L"local"?L"clock":L"worldclock";
     case TileInstanceType::Calendar: return L"calendar";
     case TileInstanceType::Battery: return L"battery";
     case TileInstanceType::Wuwa: return L"wuwa";

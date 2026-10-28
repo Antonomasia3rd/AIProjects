@@ -2,7 +2,7 @@
 #include "prayer_tile_layout.h"
 namespace aip { namespace content {
 inline size_t DateTimeEventCount(int height) { return height > 200 ? 3u : 1u; }
-inline const wchar_t* ClockTimeStyle(int width,int height) {return height>200?L"subheader":width>200?L"title":L"base";}
+inline const wchar_t* ClockTimeStyle(int width,int height) {return StatusTilePrimaryStyle(width,height);}
 inline bool CalendarDateOnlyCentered(const Snapshot& frame,int width,int height) {
     return frame.calendarSource&&width<=150&&(height<150||frame.calendarEvents.empty());
 }

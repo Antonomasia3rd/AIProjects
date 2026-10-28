@@ -445,7 +445,7 @@ struct ContentPrayerProvider {
         if (captured.data.configKey.empty()) captured.data.configKey = aip::prayer::ConfigurationKey(cfg);
         if (captured.data.schedule.days.empty() && captured.data.error.empty() && !cfg.city.empty() && !cfg.country.empty())
             captured.data.error = error.empty() ? IniReadS(L"Strings", L"PrayerLoading", L"Loading prayer schedule...") : aip::Utf8ToWide(error);
-        auto formatting = aip::prayer::ConfigurationKey(cfg) + L":" + std::to_wstring(cfg.showSunrise) + L":" + std::to_wstring(cfg.twentyFourHour) + L":" + std::to_wstring(cfg.showTimetable) + L":" + std::to_wstring(cfg.nextIncludesSunrise);
+        auto formatting = aip::prayer::ConfigurationKey(cfg) + L":" + std::to_wstring(cfg.showSunrise) + L":" + std::to_wstring(cfg.twentyFourHour) + L":" + std::to_wstring(cfg.showTimetable) + L":" + std::to_wstring(cfg.nextIncludesSunrise) + L":" + std::to_wstring(cfg.timetableGapLines);
         for (const auto adjustment : cfg.adjustmentsMinutes) formatting += L":" + std::to_wstring(adjustment);
         const auto now = Now(), minute = now / 60;
         if (!haveView || minute != viewedMinute || (view.nextUTCDeadline > 0 && now >= view.nextUTCDeadline) || viewedSerial != captured.serial || formatting != formatKey) {
@@ -673,6 +673,8 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
 {
     ContentRenderScope scope(&snapshot);
     std::wstring key = FileFingerprint(snapshot.backgroundPath) + L":" + std::to_wstring(static_cast<int>(snapshot.textMode));
+    if(snapshot.textMode!=aip::content::TextMode::Off&&aip::content::HasDefaultStatusHeading(snapshot))key+=L":StatusHeadingClock1";
+    if(snapshot.textMode!=aip::content::TextMode::Off&&snapshot.smtcSource)key+=L":MediaIndicatorGeometry2";
     if(snapshot.batterySource&&snapshot.textMode!=aip::content::TextMode::Off){
         key+=L":Battery1:"+std::to_wstring(snapshot.batteryText.rightColumnPercent)+L":"+std::to_wstring(snapshot.batteryText.criticalView);
         for(const auto& field:{snapshot.batteryText.charge,snapshot.batteryText.status,snapshot.batteryText.runtime,snapshot.batteryText.wear,
@@ -685,7 +687,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
     key += L":" + std::to_wstring(snapshot.activationArguments.size()) + L":" + snapshot.activationArguments;
     key += L":branding:" + snapshot.secondaryBranding;
     if(snapshot.appLauncherSource)key+=L":launcher:"+aip::app_launcher::ConfigurationKey(snapshot.launcher);
-    if(snapshot.gameSource)key+=L":GameRows1:"+aip::content::TextPresentationKey(snapshot.presentation);
+    if(snapshot.gameSource)key+=L":GameRows2:"+aip::content::TextPresentationKey(snapshot.presentation);
     if(snapshot.mailSource){
         key+=L":MailNative1:"+std::to_wstring(snapshot.mailMessageIndex)+L":"+std::to_wstring(snapshot.mailIncludeLarge)+
             L":"+std::to_wstring(snapshot.mailBadgeEnabled)+L":"+std::to_wstring(snapshot.mailUnreadCount);
@@ -698,6 +700,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
             snapshot.prayerClock.minutes,snapshot.prayerClock.countdown,snapshot.prayerClock.details})
             key += L":prayerClock:" + std::to_wstring(field.size()) + L":" + field;
         key += L":prayerTimetable:" + std::to_wstring(snapshot.prayerClock.showTimetable);
+        key += L":prayerTimetableGap:" + std::to_wstring(snapshot.prayerClock.timetableGapLines);
     }
     if (snapshot.textMode != aip::content::TextMode::Off) {
     key+=L":datetime:"+std::to_wstring(snapshot.clockSource)+L":"+std::to_wstring(snapshot.calendarSource);

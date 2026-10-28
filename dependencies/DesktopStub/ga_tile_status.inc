@@ -71,7 +71,7 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
             AppendTileStatusLine(output, row.primary + L" " + row.secondary);
         }
     } else if (frame.textMode == aip::content::TextMode::Auto && !frame.smtcSource && !frame.detailRows.empty()) {
-        for (std::size_t i = 0; i < (std::min)(frame.detailRows.size(),frame.gameSource?aip::content::GameTileRows(width,height):aip::content::DetailTileRows(height)); ++i) {
+        for (std::size_t i = 0; i < (frame.gameSource?aip::content::GameVisibleRowCount(frame,width,height):(std::min)(frame.detailRows.size(),aip::content::DetailTileRows(height))); ++i) {
             AppendTileStatusLine(output, frame.detailRows[i].primary);
             AppendTileStatusLine(output, frame.detailRows[i].secondary);
         }

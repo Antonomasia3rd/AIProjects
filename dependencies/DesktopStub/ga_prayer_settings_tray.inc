@@ -69,6 +69,7 @@ static void AppendPrayerSettingsMenu(HMENU menu)
     bool nextSunrise=false;
     aip::content::ParseBool(IniReadS(L"PrayerTimes",L"NextIncludesSunrise",L"0"),nextSunrise);
     aip::AppendTrayMenuItem(menu,ID_PRAYER_SETTINGS+33,PrayerUiString(L"PrayerNextSunrise",L"Include Sunrise / Shuruq in next-event countdown"),nextSunrise,true);
+    aip::AppendTrayMenuItem(menu,ID_PRAYER_SETTINGS+34,PrayerUiString(L"PrayerTimetableGap",L"Blank lines before timetable (0–3)")+L": "+IniReadS(L"PrayerTimes",L"TimetableGapLines",L"1"),false,true);
     HMENU advanced=aip::BeginTrayNestedMenu(menu);
     aip::AppendTrayMenuItem(advanced,ID_PRAYER_SETTINGS+40,PrayerUiString(L"PrayerRefreshSeconds",L"Schedule refresh (seconds)")+L": "+ContentMenuValue(IniReadS(L"PrayerTimes",L"RefreshSeconds",L"")),false,true);
     aip::AppendTrayMenuItem(advanced,ID_PRAYER_SETTINGS+41,PrayerUiString(L"PrayerTimeoutSeconds",L"HTTP timeout (seconds)")+L": "+ContentMenuValue(IniReadS(L"PrayerTimes",L"TimeoutSeconds",L"")),false,true);
@@ -108,7 +109,7 @@ static bool DispatchPrayerSettingsCommand(HWND owner, UINT command)
     }
     const wchar_t* key = offset == 1 ? L"City" : offset == 2 ? L"Country" : offset == 3 ? L"State" : offset == 4 ? L"TimeZone" :
         offset == 12 ? L"Method" : offset == 15 ? L"LatitudeAdjustmentMethod" : offset == 40 ? L"RefreshSeconds" :
-        offset == 41 ? L"TimeoutSeconds" : offset == 42 ? L"MaximumBytes" : offset >= 20 && offset < 25 ? g_prayerAdjustmentKeys[offset - 20] : nullptr;
+        offset == 41 ? L"TimeoutSeconds" : offset == 42 ? L"MaximumBytes" : offset == 34 ? L"TimetableGapLines" : offset >= 20 && offset < 25 ? g_prayerAdjustmentKeys[offset - 20] : nullptr;
     if (!key) return true;
     auto value = IniReadS(L"PrayerTimes", key, L"");
     if (ShowTextInputDialog(owner, PrayerUiString(L"PrayerSettingsTitle", L"Prayer times settings"),

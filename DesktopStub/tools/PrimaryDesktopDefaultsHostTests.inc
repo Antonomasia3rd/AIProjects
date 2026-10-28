@@ -21,8 +21,9 @@ static void TestPrimaryDesktopFactoryDefaults()
     if(factory.tiles.size()!=1)return;
     const auto& desktop=factory.tiles.front();
     Check(desktop.id==L"desktop"&&desktop.primary&&desktop.type==TileInstanceType::Wallpaper&&desktop.name==L"Desktop"&&
-        desktop.policy.Mode()==L"LiveTile"&&desktop.appearance.branding==L"NameAndLogo"&&desktop.configuration.entries.front().background==L"Wallpaper",
-        "fresh Desktop owns the primary wallpaper identity with explicit Live Tile delivery and name-plus-logo branding");
+        desktop.policy.Mode()==L"Registration"&&desktop.policy.Read(L"Settings",L"PrimaryRegistration",L"")==L"Main"&&
+        desktop.appearance.branding==L"NameAndLogo"&&desktop.configuration.entries.front().background==L"Wallpaper",
+        "fresh Desktop owns the original main Registration wallpaper identity with name-plus-logo branding");
     Check(read(L"Settings",L"RunAtStartup",L"1")==L"0"&&read(L"Settings",L"RunAtStartupPackaged",L"1")==L"0",
         "fresh defaults do not enable either sign-in mechanism implicitly");
     Check(std::none_of(std::begin(g_defaults),std::end(g_defaults),[](const auto& setting){return IEquals(setting.section,L"Tiles")||IEquals(setting.section,L"Tile.desktop");}),

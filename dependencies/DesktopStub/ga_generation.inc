@@ -1384,12 +1384,14 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
         if (bakedText) for (const auto& headline : g_renderContent->rssHeadlines)
             state += L"rss=" + std::to_wstring(headline.primary.size()) + L":" + headline.primary + L":" + headline.secondary;
         if (bakedText && g_renderContent->textMode != aip::content::TextMode::Off) {
+            if(aip::content::HasDefaultStatusHeading(*g_renderContent))state+=L"StatusHeadingClock1;";
+            if(g_renderContent->smtcSource)state+=L"MediaIndicatorGeometry2;";
             if(g_renderContent->batterySource){
                 state+=L"Battery1:"+std::to_wstring(g_renderContent->batteryText.rightColumnPercent)+L":"+std::to_wstring(g_renderContent->batteryText.criticalView)+L";";
                 for(const auto& field:{g_renderContent->batteryText.charge,g_renderContent->batteryText.status,g_renderContent->batteryText.runtime,g_renderContent->batteryText.wear,
                     g_renderContent->batteryText.metricLabel,g_renderContent->batteryText.metricValue,g_renderContent->batteryText.details})state+=L"battery="+std::to_wstring(field.size())+L":"+field;
             }
-            if(g_renderContent->gameSource)state+=L"GameRows1:"+aip::content::TextPresentationKey(g_renderContent->presentation)+L";";
+            if(g_renderContent->gameSource)state+=L"GameRows2:"+aip::content::TextPresentationKey(g_renderContent->presentation)+L";";
             if(g_renderContent->mailSource){
                 state+=L"MailNative1:"+std::to_wstring(g_renderContent->mailMessageIndex)+L":"+std::to_wstring(g_renderContent->mailIncludeLarge)+L";";
                 for(const auto& row:g_renderContent->mailRows)for(const auto& field:{row.primary,row.secondary})state+=L"mail="+std::to_wstring(field.size())+L":"+field;
@@ -1401,6 +1403,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
                     g_renderContent->prayerClock.minutes,g_renderContent->prayerClock.countdown,g_renderContent->prayerClock.details})
                     state += L"prayerClock=" + std::to_wstring(field.size()) + L":" + field;
                 state += L"prayerTimetable=" + std::to_wstring(g_renderContent->prayerClock.showTimetable) + L";";
+                state += L"prayerTimetableGap=" + std::to_wstring(g_renderContent->prayerClock.timetableGapLines) + L";";
             }
             state += L"wrapSourceText=" + std::to_wstring(g_renderContent->wrapSourceText) + L";";
             state += L"detailTopic=" + g_renderContent->detailTopic + L";";

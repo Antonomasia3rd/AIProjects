@@ -296,6 +296,7 @@ static void AppendTileInstancePrayerSettings(HMENU menu,const aip::content::Tile
     AppendTileInstanceEditable(menu,tile,L"PrayerTimes.ShowSunrise",L"Show sunrise in details and timetable",L"1",true);
     AppendTileInstanceEditable(menu,tile,L"PrayerTimes.NextIncludesSunrise",L"Include sunrise in next event countdown",L"0",true);
     AppendTileInstanceEditable(menu,tile,L"PrayerTimes.ShowTimetable",L"Show timetable on large tiles",L"1",true);
+    AppendTileInstanceEditable(menu,tile,L"PrayerTimes.TimetableGapLines",L"Blank lines before timetable (0–3)",L"1");
     HMENU advanced=aip::BeginTrayNestedMenu(menu);
     AppendTileInstanceEditable(advanced,tile,L"PrayerTimes.RefreshSeconds",L"Schedule refresh interval (seconds)",L"43200");
     AppendTileInstanceEditable(advanced,tile,L"PrayerTimes.TimeoutSeconds",L"HTTP timeout (seconds)",L"10");

@@ -1,5 +1,6 @@
 #pragma once
 #include "content_engine.h"
+#include "standard_tile_layout.h"
 namespace aip { namespace content {
 inline std::wstring MediaXmlEscape(const std::wstring& text) {
     std::wstring out;
@@ -69,6 +70,10 @@ inline MediaTileGeometry ComputeMediaTileGeometry(int width, int height, bool ic
     result.textHeight = (std::max)(0.0, static_cast<double>(height) - 30);
     const double usable = (std::max)(0.0, static_cast<double>(width) - 20);
     result.iconSide = iconColumn ? (std::min)(48.0, usable * (extraCount ? .12 : .2)) : 0;
+    // The bitmap path has an 8px gap between every indicator and reserves the
+    // Registration name/logo footer. Three Wide icons must not overlap it.
+    const double iconHeight=(std::max)(0.0,static_cast<double>(height)-result.margin-26.0-8.0*static_cast<double>(extraCount));
+    result.iconSide=(std::min)(result.iconSide,iconHeight/(1.0+static_cast<double>(extraCount)));
     result.iconX = width - result.margin - result.iconSide;
     result.textWidth = (std::max)(0.0, usable - (iconColumn ? result.iconSide + 8 : 0));
     result.extraY = result.iconY + result.iconSide + 8;
@@ -77,15 +82,16 @@ inline MediaTileGeometry ComputeMediaTileGeometry(int width, int height, bool ic
 struct MediaIndicatorImage { std::wstring uri, label; };
 inline bool AppendMediaTileBinding(std::wstring& xml, const wchar_t* tileTemplate, const Text& text,
     const std::wstring& iconUri, const std::wstring& backgroundUri = {},
-    const std::vector<MediaIndicatorImage>& extras = {}, const std::wstring& iconLabel = L"Playback status") {
+    const std::vector<MediaIndicatorImage>& extras = {}, const std::wstring& iconLabel = L"Playback status",bool metadata=false) {
     if (!tileTemplate || !*tileTemplate) return false;
     const bool icons = !iconUri.empty() || !extras.empty();
+    const auto budget=StatusMediaTextBudget(tileTemplate,metadata||!extras.empty());
     xml += L"<binding template=\"" + std::wstring(tileTemplate) + L"\" hint-textStacking=\"top\">";
     if (!backgroundUri.empty()) xml += L"<image placement=\"background\" src=\"" + MediaXmlEscape(backgroundUri) + L"\"/>";
     if (icons) xml += L"<group><subgroup hint-weight=\"" + std::wstring(extras.empty() ? L"80" : L"88") + L"\" hint-textStacking=\"top\">";
-    xml += L"<text hint-style=\"caption\" hint-wrap=\"true\" hint-maxLines=\"2\">" + MediaXmlEscape(text.primary) + L"</text>";
-    if (!text.secondary.empty()) xml += L"<text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\"2\">" + MediaXmlEscape(text.secondary) + L"</text>";
-    if (!text.badge.empty()) xml += L"<text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\"4\">" + MediaXmlEscape(text.badge) + L"</text>";
+    xml += L"<text hint-style=\""+std::wstring(StatusTilePrimaryStyle(tileTemplate))+L"\" hint-wrap=\"true\" hint-maxLines=\""+std::to_wstring(budget.primary)+L"\">" + MediaXmlEscape(text.primary) + L"</text>";
+    if (!text.secondary.empty()) xml += L"<text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\""+std::to_wstring(budget.secondary)+L"\">" + MediaXmlEscape(text.secondary) + L"</text>";
+    if (!text.badge.empty()) xml += L"<text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\""+std::to_wstring(budget.badge)+L"\">" + MediaXmlEscape(text.badge) + L"</text>";
     if (icons) {
         xml += L"</subgroup><subgroup hint-weight=\"" + std::wstring(extras.empty() ? L"20" : L"12") + L"\" hint-textStacking=\"top\">";
         if (!iconUri.empty()) xml += L"<image src=\"" + MediaXmlEscape(iconUri) + L"\" alt=\"" + MediaXmlEscape(iconLabel) + L"\" hint-removeMargin=\"true\"/>";
@@ -128,12 +134,12 @@ inline bool AppendDetailRowsBinding(std::wstring& xml, const wchar_t* tileTempla
     xml += L"</binding>"; return true;
 }
 inline bool AppendWrappedSourceBinding(std::wstring& xml, const wchar_t* tileTemplate, const Text& text,
-    const std::wstring& backgroundUri = {}) {
+    const std::wstring& backgroundUri = {},const wchar_t* primaryStyle=nullptr,int secondaryLines=0) {
     if (!tileTemplate || !*tileTemplate) return false;
     xml += L"<binding template=\"" + std::wstring(tileTemplate) + L"\" hint-textStacking=\"top\">";
     if (!backgroundUri.empty()) xml += L"<image placement=\"background\" src=\"" + MediaXmlEscape(backgroundUri) + L"\"/>";
-    xml += L"<text hint-style=\"caption\" hint-wrap=\"true\" hint-maxLines=\"2\">" + MediaXmlEscape(text.primary) + L"</text>";
-    if (!text.secondary.empty()) xml += L"<text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\"5\">" + MediaXmlEscape(text.secondary) + L"</text>";
+    xml += L"<text hint-style=\""+std::wstring(primaryStyle?primaryStyle:StatusTilePrimaryStyle(tileTemplate))+L"\" hint-wrap=\"true\" hint-maxLines=\"2\">" + MediaXmlEscape(text.primary) + L"</text>";
+    if (!text.secondary.empty()) xml += L"<text hint-style=\"captionSubtle\" hint-wrap=\"true\" hint-maxLines=\""+std::to_wstring(secondaryLines>0?secondaryLines:StatusWrappedSecondaryLines(tileTemplate))+L"\">" + MediaXmlEscape(text.secondary) + L"</text>";
     xml += L"</binding>"; return true;
 }
 } }
