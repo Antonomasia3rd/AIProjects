@@ -10,9 +10,9 @@ call "%TRANSPARENT_VS%\VC\Auxiliary\Build\vcvars64.bat" >nul
 if errorlevel 1 exit /b 1
 pushd "%TRANSPARENT_ROOT%" || exit /b 1
 set "TRANSPARENT_OUT=build\content-integration"
-set "TRANSPARENT_OPTIMIZATION=/fp:precise"
+set "TRANSPARENT_OPTIMIZATION=/fp:precise /bigobj"
 if "%CONTENT_OPTIMIZE%"=="1" set "TRANSPARENT_OUT=build\content-integration-optimized"
-if "%CONTENT_OPTIMIZE%"=="1" set "TRANSPARENT_OPTIMIZATION=/O2 /fp:precise"
+if "%CONTENT_OPTIMIZE%"=="1" set "TRANSPARENT_OPTIMIZATION=/O2 /fp:precise /bigobj"
 if not exist "%TRANSPARENT_OUT%" mkdir "%TRANSPARENT_OUT%"
 rem Reuse only dependency objects built in this same validation run. The caller
 rem first compiles DiscordService, DiscordEditor and inert AsusService stages.
