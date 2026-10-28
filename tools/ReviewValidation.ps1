@@ -43,6 +43,32 @@ function Invoke-ReviewProcess {
         $p.Dispose()
     }
 }
+function Write-ReviewDefenderHealthDiagnostics {
+    param([string]$Label)
+    # Read status only after a terminal scan block. Diagnostic errors must not
+    # replace the original gate failure or change Defender/service settings.
+    try {
+        $health=[ordered]@{ CollectedAt=(Get-Date).ToString('o'); ComputerStatus=[ordered]@{}; Services=@() }
+        try {
+            $status=Get-MpComputerStatus -ErrorAction Stop
+            foreach($field in @('AMServiceEnabled','AntivirusEnabled','AntispywareEnabled',
+                'BehaviorMonitorEnabled','IoavProtectionEnabled','NISEnabled',
+                'OnAccessProtectionEnabled','RealTimeProtectionEnabled','IsTamperProtected')) {
+                $property=if($null -ne $status){$status.PSObject.Properties[$field]}else{$null}
+                $health.ComputerStatus[$field]=if($null -ne $property -and $property.Value -is [bool]){$property.Value}else{$null}
+            }
+        } catch { $health['ComputerStatusError']=$_.Exception.Message }
+        foreach($name in @('WinDefend','WdNisSvc','MdCoreSvc')) {
+            try {
+                $service=Get-Service -Name $name -ErrorAction Stop
+                $health.Services+=@{Name=$name;Status=$service.Status.ToString();StartType=$service.StartType.ToString()}
+            } catch { $health.Services+=@{Name=$name;Error=$_.Exception.Message} }
+        }
+        $summary=$health | ConvertTo-Json -Depth 5
+        [IO.File]::WriteAllText((Join-Path $ReviewLogs ($Label+'-defender-health.log')),$summary)
+        Write-Output ('Read-only Defender health after scan block: '+$summary)
+    } catch { Write-Output ('Read-only Defender health diagnostics unavailable: '+$_.Exception.Message) }
+}
 function Assert-ReviewScan {
     param([string]$Path, [string]$Label)
     $Path = [IO.Path]::GetFullPath($Path)
@@ -99,7 +125,10 @@ function Assert-ReviewScan {
             [IO.File]::WriteAllText($receipt, $before + '  ' + $Path)
             return
         }
-        if ($decision.Action -ne 'Retry') { throw ($decision.Reason + " Stage blocked: $Label") }
+        if ($decision.Action -ne 'Retry') {
+            Write-ReviewDefenderHealthDiagnostics -Label $Label
+            throw ($decision.Reason + " Stage blocked: $Label")
+        }
         Write-Output ("Defender RPC unavailable; retrying scan in two seconds (attempt $attempt of 3).")
         Start-Sleep -Seconds $decision.DelaySeconds
         & $assertInput

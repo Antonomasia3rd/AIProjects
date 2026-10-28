@@ -29,6 +29,11 @@ function Get-ReviewScanDecision {
     if ($Attempt -lt 1 -or $Attempt -gt 3) { return & $block 'Invalid scan-attempt number.' }
     if (-not $InputUnchanged) { return & $block 'The input is missing or changed.' }
     if ($DetectedThreat) { return & $block 'Defender reported a matching detection.' }
+    # MpCmdRun can exit zero after explicitly skipping an excluded file. An
+    # empty threat query does not turn that unperformed scan into a clean one.
+    if ($ScanOutput -match '(?im)^[ \t]*Scanning[ \t]+[^\r\n]+[ \t]+was[ \t]+skipped\.[ \t]*\r?$') {
+        return & $block 'Defender explicitly skipped this scan.'
+    }
     $scanRpc = Test-ReviewScanRpcUnavailable -ExitCode $ScanExitCode -FailureText $ScanOutput
     $reportedCodes = @([regex]::Matches($ScanOutput, '(?i)(?<![a-z0-9_\\/])0x([0-9a-f]{8})(?![0-9a-f])') |
         ForEach-Object { $_.Groups[1].Value.ToLowerInvariant() })

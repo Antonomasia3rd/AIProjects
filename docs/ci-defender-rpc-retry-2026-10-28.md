@@ -38,3 +38,13 @@ GameTileLayout fixture also passed, producing an attempt log, fresh inspection
 result and matching SHA256 receipt. This does not establish that every future
 provider outage will recover within three attempts; exhaustion remains a
 blocked validation stage, not permission to execute an unscanned fixture.
+
+Later run `40695585270` exposed explicit zero-exit `Scanning ... was skipped.`
+output before the repeated RPC block. The gate now rejects that complete native
+skip line immediately, even with mixed RPC output, while preserving unrelated
+filename/prose controls and language-neutral normal exit handling. The updated
+pure suite passes 100 checks. Blocked scans also collect read-only health
+booleans/service state without changing the original verdict. No protection,
+exclusion, service or remediation setting is changed. The exact hosted image's
+broad exclusions and remaining scanner-ready-runner prerequisite are recorded
+in [the CI investigation](ci-revision-host-contracts-2026-10-28.md).

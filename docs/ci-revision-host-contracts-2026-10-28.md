@@ -91,3 +91,54 @@ Fresh main receipts under `build/review-validation/`:
 - `ci-main-ContentRevisionHostTests-20261028-build.log`
 - `ci-main-ContentRevisionHostTests-20261028-tests.log`
 - `ci-main-ContentRevisionHostTests-20261028-scan.sha256`
+
+## Hosted scan gate at `c5ba`
+
+Run `40695585270`, Windows job `122842792372`, reached the PngCrc32 fixture
+build and then stopped on the scan gate. MpCmdRun reported `0x800106ba` on all
+three attempts, with the existing two-second retry delays. Revision was not
+reached. Microsoft documents this HRESULT as the Defender Antivirus service
+being disabled; the live service state in this job was not captured, so it is
+not evidence of a transient outage or a specific transition during this run.
+See [Microsoft's MpCmdRun reference](https://learn.microsoft.com/en-us/defender-endpoint/command-line-arguments-microsoft-defender-antivirus).
+
+Earlier scans in the same job explicitly printed `Scanning ... was skipped.`,
+starting with the native/managed INI workers and including the four new
+Discord fixtures and AdaptiveTileTextRenderTests. Their fixture assertions ran
+and passed, but those passes must not be described as successful Defender
+scans. The existing policy accepted a zero scanner exit plus a successful
+empty threat query without rejecting that explicit skipped outcome.
+
+The job used `windows-2022` image `20261022.344.1`. Its
+[pinned image-build script](https://github.com/actions/runner-images/blob/win22/20261022.344/images/windows/scripts/build/Configure-WindowsDefender.ps1)
+intentionally disables multiple Defender protections and configures exclusions
+for both `C:\` and `D:\`. Those exclusions explain why ordinary custom file
+scans under the checkout were skipped. This image-build configuration does not
+establish the later runtime service status; a read-only status receipt is
+needed for that. Repeating the same scan for longer does not remove an image
+exclusion or prove scanner health.
+
+The narrow gate repair treats an explicit complete `Scanning ... was skipped.`
+output line as a terminal block, even with a zero exit or accompanying RPC
+diagnostic. It does not require a single English positive-success phrase.
+Existing threat, changed-input, unknown-error and exact RPC handling remain.
+After a terminal block only, ReviewValidation records selected
+Get-MpComputerStatus booleans and read-only WinDefend/WdNisSvc/MdCoreSvc statuses.
+Missing fields stay null and diagnostic failures cannot replace the original
+scan failure. No service, policy, exclusion, remediation or scanner arguments
+are changed.
+
+Validation: all 100 pure scan-policy checks passed, including skipped output
+with zero/nonzero exits, mixed RPC diagnostics, all attempts and unrelated
+filename/prose controls. ReviewValidation parsed successfully. An ordinary
+local scan of the existing Revision fixture passed with no threats and a fresh
+threat inspection; receipt:
+`build/review-validation/ci-scan-policy-clean-20261028-scan.sha256`. No binary
+was compiled or executed for this scan-policy follow-up.
+
+The next CI prerequisite is a runner environment where the existing required
+scan can actually inspect the checkout and the Defender service is available.
+The stricter gate will now stop at the first explicit skip and supply health
+diagnostics. It will not make this default hosted image satisfy that
+prerequisite or authorize a release. Keep hosted acceptance open until a
+scanner-ready run completes the gate and then reaches Runtime/Revision.

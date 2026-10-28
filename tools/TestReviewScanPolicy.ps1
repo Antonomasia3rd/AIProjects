@@ -37,6 +37,26 @@ Check ((Decision @{ScanExitCode=2;ScanOutput='[Failed][0x800106ba]';InspectionSu
 Check ((Decision @{ScanOutput='[Failed][0x800106ba]'}).Action -eq 'Retry') 'an RPC failure marker cannot pass solely because the native exit was zero'
 Check ((Decision @{ScanOutput='[Failed][0x80070005]'}).Action -eq 'Block') 'a zero scanner exit cannot mask an unknown reported failure'
 Check ((Decision @{ScanOutput='[Failed]'}).Action -eq 'Block') 'an unclassified failure marker remains blocked even with zero exit'
+foreach($exit in @(0,2)) {
+    foreach($attempt in @(1,2,3)) {
+        foreach($output in @('Scanning C:\fixtures\worker.exe was skipped.',
+            "Scan starting...`r`nScan finished.`r`nScanning C:\fixtures\worker.exe was skipped.`r`n",
+            "[Failed][0x800106ba]`nScanning C:\fixtures\worker.exe was skipped.",
+            "Scanning C:\fixtures\worker.exe was skipped.`n[Failed][0x800706ba]",
+            '  SCANNING C:\fixtures\worker.exe WAS SKIPPED.  ')) {
+            $skipped=Decision @{Attempt=$attempt;ScanExitCode=$exit;ScanOutput=$output}
+            Check ($skipped.Action -eq 'Block' -and $skipped.DelaySeconds -eq 0) 'an explicit skipped scan is terminal even with zero exit or mixed RPC output'
+        }
+    }
+}
+Check ((Decision @{ScanOutput='Scanning C:\fixtures\worker.exe was skipped.';InspectionSucceeded=$false;
+    InspectionError='HRESULT 0x800706ba'}).Action -eq 'Block') 'an inspection RPC outage cannot make a skipped scan retryable'
+foreach($output in @('Scanning C:\fixtures\was skipped.exe found no threats.',
+    'Scanning C:\fixtures\was skipped.\worker.exe found no threats.',
+    'Diagnostic filename: Scanning worker was skipped.',
+    'Scan finished.', 'Scananalyse abgeschlossen.')) {
+    Check ((Decision @{ScanOutput=$output}).Action -eq 'Pass') 'path spelling and unrelated prose do not force an English positive scan witness'
+}
 foreach($exit in @(1,4,99,[Convert]::ToInt64('80508023',16))) {
     Check (-not (Test-ReviewScanRpcUnavailable -ExitCode $exit -FailureText '[Failed][0x800106ba]')) 'unknown native exit codes cannot be normalized away by RPC text'
     Check ((Decision @{ScanExitCode=$exit;ScanOutput='[Failed][0x800106ba]'}).Action -eq 'Block') 'an unknown scanner exit remains blocked in the full decision'

@@ -24,11 +24,14 @@ live Gateway, real Start display and outbound delivery remain open. See
 [native HTTP evidence](discord-reader-native-acceptance-2026-10-28.md).
 No actual message or read acknowledgement has been sent during acceptance.
 
-The latest CI run at `1ee1c4e` stopped on one stale broad-host assertion before
-reaching the Registration staging diagnostic. The fixture now distinguishes
-an unchanged locked import from a required changed write; local and hosted
-results are tracked in [the CI note](ci-revision-host-contracts-2026-10-28.md).
-Do not mark the original hosted Registration issue resolved without its cause.
+The `1ee1c4e` CI run stopped on a stale broad-host assertion. Its correction
+passes locally and distinguishes an unchanged locked import from a required
+changed write. The subsequent `c5ba428` run passes the new Discord fixtures but
+stops on persistent Defender RPC unavailability before Registration; previous
+scanner output in that run explicitly reports skipped scans. Those passing
+checks are functional evidence, not successful antivirus scans. Hosted scanner
+trust/readiness and the original Registration staging cause remain open;
+attestation/release were skipped. See [the CI note](ci-revision-host-contracts-2026-10-28.md).
 
 The [beta 2 delivery record](desktopstub-beta2-2026-10-26.md) confirms current
 machine native appearance/cold-start checks and the completed fresh reset.

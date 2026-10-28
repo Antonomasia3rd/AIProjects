@@ -91,6 +91,33 @@ have sent zero real messages and zero read acknowledgements. The user's new
 reply explicitly permits this alternative account for future testing; exact
 action/scope confirmation requirements still apply where the tools require it.
 
+Delivery checkpoint: source `c5ba428` is pushed to main. The final separately
+named 27.0.0.4 candidate host, broker and launcher all build and pass actual
+local Defender scans. Its real configure-only CLI saves the reader settings,
+rejects an unprotected credential without echoing the value, preserves the
+INI on rejection, and creates no non-INI file in its private fixture directory.
+The canonical beta3 payload has not been replaced. The ignored receipt is
+`artifacts/discord-reader-acceptance-20261028/candidate-build-receipt.json`.
+
+Hosted [run 40695585270](https://github.com/Antonomasia3rd/AIProjects/actions/runs/40695585270)
+at that exact source passes portable contracts/project detection and the new
+Discord fixtures, including all 45 host checks. It stops at PngCrc32 because
+Defender RPC remains unavailable through all three allowed retries. Earlier
+fixture scanner output explicitly says scans were skipped: their passing
+checks are functional evidence, not completed antivirus scans. Registration
+diagnostics remain unreached. Attestation and all release jobs are skipped;
+this is not a successful hosted release. Do not lengthen retries or bypass
+scans to manufacture a pass. Scanner trust/health handling is the next CI task.
+
+The follow-up gate now explicitly blocks terminal skipped-scan output instead
+of treating exit zero and an empty threat query as a scan. It records selected
+read-only Defender/service health fields on block. All 100 pure policy checks
+pass; an ordinary actual local clean scan and syntax validation pass as well.
+No protection, exclusions, service configuration or remediation behavior was
+changed. The pinned hosted image intentionally configures broad drive
+exclusions, so a scanner-ready runner remains a prerequisite. Original hosted
+Registration diagnostics are still outstanding; see the updated CI note.
+
 The [reconciled findings](desktopstub-open-findings-2026-10-25.md) retain the
 unresolved 1809 report, Calendar behavior/providers/reminder overrides, real
 account/session/native acceptance, full Notes parity, missing tile sources,
