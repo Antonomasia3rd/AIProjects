@@ -881,9 +881,14 @@ static bool MutateDesktopStubIniWithWait(Mutator&& mutator, DWORD writeMutexWait
     if (!writeLock.IsLocked())
         return false;
 
+    const auto originalPath=g_iniPath;
+    const auto originalAttributes=GetFileAttributesW(originalPath.c_str());
+    const bool existingOrdinary=originalAttributes!=INVALID_FILE_ATTRIBUTES&&
+        !(originalAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT));
     std::wstring text;
     if (!ReadIniFileForMutation(text))
         return false;
+    const auto originalText=text;
 
     SetLastError(ERROR_SUCCESS);
     if (!std::forward<Mutator>(mutator)(text))
@@ -893,7 +898,11 @@ static bool MutateDesktopStubIniWithWait(Mutator&& mutator, DWORD writeMutexWait
         return false;
     }
 
-    if (!WriteUtf8BomTextFile(g_iniPath, text))
+    // A retained legacy plan or identical assignment must not re-encode an
+    // existing UTF-16/ANSI profile merely because its mutator succeeded. A
+    // missing file is still a write request, preserving initialization errors.
+    const bool unchangedExisting=existingOrdinary&&g_iniPath==originalPath&&text==originalText;
+    if (!unchangedExisting&&!WriteUtf8BomTextFile(g_iniPath, text))
         return false;
 
     {

@@ -3,9 +3,50 @@
 static unsigned tileInstanceFitReads=0;
 static FitMode tileInstanceFitResult=FitMode::Fill;
 static FitMode ReadPrivateTileInstanceFit(){++tileInstanceFitReads;return tileInstanceFitResult;}
+static void TestUnchangedIniMutationHost()
+{
+    const auto previousPath=g_iniPath;
+    struct RestoreNoOpPath{std::wstring path;~RestoreNoOpPath(){g_iniPath=path;std::lock_guard<std::mutex> lock(g_iniCacheMutex);g_iniCacheLoaded=false;g_iniCacheDoc.clear();}}restore{previousPath};
+    const auto directory=ParentDirectoryOfPath(previousPath)+L"\\no-op-ini-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64());
+    const bool created=CreateDirectoryW(directory.c_str(),nullptr)!=FALSE;Check(created,"no-op mutation fixture owns a fresh private directory");if(!created)return;
+    g_iniPath=directory+L"\\existing.ini";
+    std::wstring text=L"; exact UTF-16 original\r\n";aip::WriteIniValueToText(text,L"Saved",L"Value",L"1");
+    std::vector<BYTE> original{0xff,0xfe};for(const auto c:text){original.push_back(static_cast<BYTE>(c&0xff));original.push_back(static_cast<BYTE>((c>>8)&0xff));}
+    Check(WriteWholeFileBytes(g_iniPath,original),"write an explicitly encoded no-op fixture");
+    FILETIME oldTime{};GetSystemTimeAsFileTime(&oldTime);ULARGE_INTEGER stamp{};stamp.LowPart=oldTime.dwLowDateTime;stamp.HighPart=oldTime.dwHighDateTime;stamp.QuadPart-=36000000000ULL;oldTime={stamp.LowPart,stamp.HighPart};
+    HANDLE stampFile=CreateFileW(g_iniPath.c_str(),FILE_WRITE_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);
+    Check(stampFile!=INVALID_HANDLE_VALUE&&SetFileTime(stampFile,nullptr,nullptr,&oldTime),"no-op witness uses an earlier distinct write timestamp");if(stampFile!=INVALID_HANDLE_VALUE)CloseHandle(stampFile);
+    FILETIME beforeTime{},afterTime{};std::vector<BYTE> after;
+    Check(GetFileWriteTime(g_iniPath,beforeTime)&&MutateDesktopStubIniWithWait([](std::wstring&){return true;},1500)&&
+        ReadWholeFileBytes(g_iniPath,after)&&after==original&&GetFileWriteTime(g_iniPath,afterTime)&&FileTimeEquals(beforeTime,afterTime),
+        "an unchanged mutator preserves exact UTF-16 bytes and the file timestamp");
+    Check(MutateDesktopStubIniWithWait([](std::wstring& candidate){return aip::WriteIniValueToText(candidate,L"Saved",L"Value",L"1");},1500)&&
+        ReadWholeFileBytes(g_iniPath,after)&&after==original&&IniReadS(L"Saved",L"Value",L"")==L"1",
+        "an identical canonical INI assignment keeps bytes and refreshes the readable cache");
+    Check(!MutateDesktopStubIniWithWait([](std::wstring& candidate){candidate+=L"Rejected=1\r\n";return false;},1500)&&ReadWholeFileBytes(g_iniPath,after)&&after==original,
+        "a rejected mutator cannot write its changed candidate");
+    HANDLE reader=CreateFileW(g_iniPath.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);
+    Check(reader!=INVALID_HANDLE_VALUE,"no-op fixture holds its original against replacement");
+    if(reader!=INVALID_HANDLE_VALUE){
+        Check(MutateDesktopStubIniWithWait([](std::wstring&){return true;},1500),"an existing unchanged profile needs no publication even when replacement is locked");
+        Check(!MutateDesktopStubIniWithWait([](std::wstring& candidate){return aip::WriteIniValueToText(candidate,L"Saved",L"Value",L"2");},1500),
+            "a changed candidate still reports the locked publication failure");CloseHandle(reader);
+    }
+    Check(ReadWholeFileBytes(g_iniPath,after)&&after==original,"locked publication failure retains every original byte");
+    Check(DeleteFileW(g_iniPath.c_str())!=FALSE,"remove only the private existing no-op fixture");
+    g_iniPath=directory+L"\\created-empty.ini";
+    Check(MutateDesktopStubIniWithWait([](std::wstring&){return true;},1500)&&GetFileAttributesW(g_iniPath.c_str())!=INVALID_FILE_ATTRIBUTES,
+        "a successful empty mutator still creates a missing profile");
+    Check(DeleteFileW(g_iniPath.c_str())!=FALSE,"remove the private newly created empty profile");
+    g_iniPath=directory+L"\\missing-parent\\empty.ini";
+    Check(!MutateDesktopStubIniWithWait([](std::wstring&){return true;},1500)&&GetFileAttributesW(g_iniPath.c_str())==INVALID_FILE_ATTRIBUTES,
+        "an empty mutator cannot hide a missing-parent initialization failure");
+    Check(RemoveDirectoryW(directory.c_str())!=FALSE,"remove the empty no-op fixture scope without recursive cleanup");
+}
 static void TestTileInstanceRuntimeHost()
 {
     using namespace aip::content;
+    TestUnchangedIniMutationHost();
     {
         using namespace aip::notifications;
         SourceTransitions source;
@@ -233,7 +274,25 @@ static void TestTileInstanceRuntimeHost()
     const auto backup=g_iniPath+L".before-tile-instances.bak";
     const bool backupExists=GetFileAttributesW(backup.c_str())!=INVALID_FILE_ATTRIBUTES;
     std::wstring priorBackup;if(backupExists)Check(aip::ReadTextFileUtf8BomAware(backup,priorBackup),"preexisting private conversion backup is readable");
-    const std::wstring legacy=L"[Content]\r\nEnabled=1\r\nCount=8\r\n[Content.1]\r\nBackground=Image\r\nImagePath=fixture.bmp\r\n"
+    const std::wstring complexLegacy=L"[Content]\r\nEnabled=1\r\nCount=8\r\n[Content.1]\r\nBackground=Image\r\nImagePath=fixture.bmp\r\n"
+        L"[RssFeed]\r\nFeedUrl=https://rss-fixture.invalid/legacy.atom\r\nUpdateIntervalSeconds=900\r\n"
+        L"[PrayerTimes]\r\nCity=Fixture City\r\nCountry=ID\r\nShowTimetable=0\r\n"
+        L"[Notes.Resin]\r\nUID=123456789\r\nLToken=synthetic-credential\r\nLTUid=123\r\n";
+    std::vector<BYTE> complexBytes{0xff,0xfe};for(const auto ch:complexLegacy){complexBytes.push_back(static_cast<BYTE>(ch&0xff));complexBytes.push_back(static_cast<BYTE>((ch>>8)&0xff));}
+    std::wstring complexRead;Check(WriteWholeFileBytes(g_iniPath,complexBytes)&&ReadIniFileForMutation(complexRead)&&complexRead==complexLegacy,
+        "complex legacy fixture retains an explicitly encoded original");
+    const auto complexDocument=aip::ParseIniDocument(complexLegacy);aip::content::TileInstanceMigrationPlan complexPlan;
+    Check(aip::content::PlanLegacyTileInstanceMigration([&](const wchar_t* section,const wchar_t* key,const wchar_t* fallback){std::wstring value;
+            return aip::ReadIniValueFromDoc(complexDocument,section,key,value)?value:std::wstring(fallback);},complexPlan,error)&&
+        complexPlan.legacyModeRequired&&!complexPlan.changed&&complexPlan.settings.empty(),
+        "numbered legacy compositions explicitly require their retained engine rather than eight manufactured tiles");
+    std::vector<BYTE> complexAfter;
+    Check(EnsureTileInstanceProfile(error)&&ReadCurrentTileInstances(cfg,error)&&!cfg.configured&&ReadWholeFileBytes(g_iniPath,complexAfter)&&complexAfter==complexBytes,
+        "actual startup preserves all complex legacy bytes and does not flatten its composition");
+    Check(EnsureTileInstanceProfile(error)&&ReadWholeFileBytes(g_iniPath,complexAfter)&&complexAfter==complexBytes,
+        "retaining a complex legacy engine is idempotent");
+    const std::wstring legacy=L"; Desktop-only upgrade with dormant saved provider preferences\r\n[Settings]\r\nContentSource=Wallpaper\r\nExperimentalLiveTileUpdate=Registration\r\n"
+        L"[TileText]\r\nEnabled=1\r\nText=Preserved Desktop caption\r\n"
         L"[RssFeed]\r\nFeedUrl=https://rss-fixture.invalid/legacy.atom\r\nUpdateIntervalSeconds=900\r\n"
         L"[PrayerTimes]\r\nCity=Fixture City\r\nCountry=ID\r\nShowTimetable=0\r\n"
         L"[Notes.Resin]\r\nUID=123456789\r\nLToken=synthetic-credential\r\nLTUid=123\r\n";
@@ -254,16 +313,18 @@ static void TestTileInstanceRuntimeHost()
     }else Check(WriteContentFixture(legacy),"write the private legacy conversion profile");
     Check(EnsureTileInstanceProfile(error),"legacy conversion uses the real atomic private-profile mutation path");
     std::wstring converted,backupText;
-    Check(ReadIniFileForMutation(converted)&&ReadCurrentTileInstances(cfg,error)&&cfg.configured&&cfg.tiles.size()==8&&
+    Check(ReadIniFileForMutation(converted)&&ReadCurrentTileInstances(cfg,error)&&cfg.configured&&cfg.tiles.size()==1&&cfg.tiles.front().primary&&
+        cfg.tiles.front().type==TileInstanceType::Wallpaper&&cfg.tiles.front().policy.Mode()==L"Registration"&&
+        cfg.tiles.front().policy.Read(L"Settings",L"PrimaryRegistration",L"")==L"Main"&&
         aip::ReadTextFileUtf8BomAware(backup,backupText)&&backupText==(backupExists?priorBackup:legacy),
-        "conversion creates independent instances and preserves an exact immutable pre-conversion backup");
+        "Desktop-only conversion retains one main Registration wallpaper tile and an exact immutable original backup");
     if(originalEncoding){std::vector<BYTE> copied;Check(ReadWholeFileBytes(backup,copied)&&copied==legacyBytes,
         "conversion backup preserves the original BOM and every encoded source byte");}
     Check(IniReadS(L"Notes.Resin",L"LToken",L"")==L"synthetic-credential"&&
-        IniReadS(L"Tile.genshin",L"Account",L"")==L"Notes.Resin"&&
-        IniReadS(L"Tile.rss",L"RssFeed.FeedUrl",L"")==L"https://rss-fixture.invalid/legacy.atom"&&
-        IniReadS(L"Tile.prayer",L"PrayerTimes.ShowTimetable",L"")==L"0",
-        "conversion retains explicit credential references, the RSS URL and Prayer display preferences");
+        IniReadS(L"RssFeed",L"FeedUrl",L"")==L"https://rss-fixture.invalid/legacy.atom"&&
+        IniReadS(L"PrayerTimes",L"ShowTimetable",L"")==L"0"&&
+        IniReadS(L"Tile.genshin",L"Account",L"").empty()&&IniReadS(L"Tile.rss",L"Type",L"").empty()&&IniReadS(L"Tile.prayer",L"Type",L"").empty(),
+        "conversion preserves dormant credential/RSS/Prayer settings without silently adding their tiles");
     Check(EnsureTileInstanceProfile(error)&&ReadIniFileForMutation(backupText)&&backupText==converted,
         "repeating conversion is idempotent and cannot overwrite configured tile instances");
     if(!backupExists)DeleteFileW(backup.c_str());

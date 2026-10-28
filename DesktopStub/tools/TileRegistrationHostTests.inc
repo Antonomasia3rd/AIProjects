@@ -4,6 +4,20 @@ static unsigned registrationHostDeployments = 0;
 static bool registrationHostDeploySucceeds = false;
 static std::wstring registrationHostDeploymentPath,registrationHostLogicalRoot,registrationHostPhysicalRoot;
 static bool registrationHostWrongPhysicalParent=false;
+static std::wstring RegistrationHostLongPath(const std::wstring& path) {
+    const auto length=GetLongPathNameW(path.c_str(),nullptr,0);if(!length||length>32768)return {};
+    std::vector<wchar_t> value(static_cast<std::size_t>(length)+1);const auto copied=GetLongPathNameW(path.c_str(),value.data(),static_cast<DWORD>(value.size()));
+    return copied&&copied<value.size()?std::wstring(value.data(),copied):std::wstring{};
+}
+static std::wstring RegistrationHostOwnerClass(const std::wstring& path) {
+    PSID owner=nullptr;PSECURITY_DESCRIPTOR descriptor=nullptr;
+    if(GetNamedSecurityInfoW(const_cast<wchar_t*>(path.c_str()),SE_FILE_OBJECT,OWNER_SECURITY_INFORMATION,&owner,nullptr,nullptr,nullptr,&descriptor)!=ERROR_SUCCESS)return L"unreadable";
+    LPWSTR text=nullptr;std::wstring current;const bool resolved=owner&&ConvertSidToStringSidW(owner,&text)!=FALSE;
+    const bool same=resolved&&aip::named_objects::CurrentUserIdentity(current)&&IEquals(current,L"SID:"+std::wstring(text));
+    const bool administrators=owner&&IsWellKnownSid(owner,WinBuiltinAdministratorsSid)!=FALSE;
+    if(text)LocalFree(text);if(descriptor)LocalFree(descriptor);
+    return same?L"current user":administrators?L"Administrators group":L"another owner";
+}
 static bool RegistrationHostAumid(std::wstring& value,std::wstring& error) { value=L"Canonical.Main_123456789abcd!App";error.clear();return true; }
 static bool RegistrationHostDeploy(const std::wstring& path,std::wstring& error) {
     registrationHostDeploymentPath=path;
@@ -69,7 +83,9 @@ static void TestTileRegistrationHost(const std::wstring& bitmapPath)
         GetFileAttributesW(target.root.c_str())==INVALID_FILE_ATTRIBUTES,
         "unsupported Registration manifest targets preserve the selected mode and stage no package files");
     Check(WriteContentFixture(profile),"registration migration restores the supported private target before staging");
-    Check(PrepareTileRegistrationPackage(target,true,error) && TileRegistrationReady(target,error) && TileRegistrationReadyForId(L"reg-tile"),
+    const bool prepared=PrepareTileRegistrationPackage(target,true,error);
+    if(!prepared)aip::WriteCommandLineText(L"Private Registration fixture preparation failed: "+error+L" Owner classification: "+RegistrationHostOwnerClass(target.root+L"\\registration.owner"),true);
+    Check(prepared && TileRegistrationReady(target,error) && TileRegistrationReadyForId(L"reg-tile"),
         "explicit staging authorizes the queued first registration and invalidates a cached negative demand immediately");
     std::vector<BYTE> copied;
     Check(aip::ReadWholeFileBytes(target.launcherPath,copied) && copied==launcher,"staging copies only the small launcher instead of the complete resident host");
@@ -92,7 +108,7 @@ static void TestTileRegistrationHost(const std::wstring& bitmapPath)
     Check(RegisterTileRegistrationPackage(target,false,error) && registrationHostDeployments==2 &&
         GetFileAttributesW((target.root+L"\\registration.published").c_str())!=INVALID_FILE_ATTRIBUTES,
         "successful injected deployment writes a receipt only after the package operation succeeds");
-    Check(IEquals(registrationHostDeploymentPath,target.manifestPath),
+    Check(IEquals(registrationHostDeploymentPath,RegistrationHostLongPath(target.manifestPath)),
         "ordinary unpackaged Registration deployment resolves the existing owned manifest to its physical file");
     const auto physicalRoot=directory+L"\\registration-physical-root";
     Check(EnsureDirectoryTreeExists(physicalRoot)&&CopyFileW(target.manifestPath.c_str(),(physicalRoot+L"\\AppxManifest.xml").c_str(),TRUE),
@@ -101,7 +117,7 @@ static void TestTileRegistrationHost(const std::wstring& bitmapPath)
     g_testTileRegistrationDeploymentOpen=RegistrationHostPhysicalOpen;
     const auto beforePhysicalDeploy=registrationHostDeployments;
     Check(RegisterTileRegistrationPackage(target,false,error)&&registrationHostDeployments==beforePhysicalDeploy+1&&
-        IEquals(registrationHostDeploymentPath,physicalRoot+L"\\AppxManifest.xml"),
+        IEquals(registrationHostDeploymentPath,RegistrationHostLongPath(physicalRoot+L"\\AppxManifest.xml")),
         "Registration deployment sends the opened physical manifest path instead of a process-private virtualized AppData name");
     Check(EnsureDirectoryTreeExists(physicalRoot+L"\\other")&&CopyFileW(target.manifestPath.c_str(),(physicalRoot+L"\\other\\AppxManifest.xml").c_str(),TRUE),
         "Registration redirection fixture prepares a mismatched physical-parent negative case");
