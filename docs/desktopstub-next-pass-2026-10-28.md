@@ -56,6 +56,14 @@ release from the local build. Stable release safeguards remain enabled.
 
 ## Remaining work and review ordering
 
+October 29: the user explicitly requested a new reset. The modified Main setup
+and its old package were removed from active use, and 27.0.0.5 was launched with
+fresh Desktop-only Wallpaper / Registration / Main defaults and sign-in startup
+off. The new package, wallpaper assets, Start entry and resident were verified.
+This supersedes the earlier preserve-current-setup snapshot. See
+[the reset receipt](desktopstub-reset-2026-10-29.md). Inspect later user changes
+before resetting again; this request was fulfilled.
+
 Latest user feedback and source changes: Discord setup placeholders and contextual
 basic/Advanced menus replace an empty unconfigured tile and the four-method
 confusion. Notices use the configured notification API; policy/account/send
