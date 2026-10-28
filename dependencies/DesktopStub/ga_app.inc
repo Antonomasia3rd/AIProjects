@@ -202,6 +202,7 @@ static bool ActivateTileInstance(HWND owner, const std::wstring& id, bool signIn
     aip::content::TileInstanceConfiguration cfg; std::wstring error;
     if (!ReadCurrentTileInstances(cfg, error)){NotifyTileActivationProblem(id,error,false);return false;}
     for (const auto& tile : cfg.tiles) if (tile.id == id) {
+        if(tile.type==aip::content::TileInstanceType::Discord){if(signIn)return ConfigureDiscordReader(owner,id,false);if(tile.clickAction==L"discord")return ActivateDiscordReader(owner,id);}
         if(!signIn&&tile.type==aip::content::TileInstanceType::AppLauncher&&tile.clickAction==L"launch"){
             if(aip::app_launcher::Execute(tile.launcher,owner,error))return true;
             NotifyTileActivationProblem(id,error,false);return false;

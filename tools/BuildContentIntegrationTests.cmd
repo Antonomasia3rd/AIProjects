@@ -19,6 +19,10 @@ if not exist "%CONTENT_OUT%" mkdir "%CONTENT_OUT%"
 set "CONTENT_NATIVE_LIBS=gdiplus.lib windowscodecs.lib gdi32.lib user32.lib shlwapi.lib shell32.lib ole32.lib uuid.lib comdlg32.lib advapi32.lib winhttp.lib crypt32.lib windowsapp.lib runtimeobject.lib"
 if /i "%~1"=="DiscordService" goto DiscordService
 if /i "%~1"=="DiscordServiceTests" goto DiscordServiceFixture
+if /i "%~1"=="DiscordTileModelTests" goto DiscordTileModel
+if /i "%~1"=="DiscordReaderLayoutTests" goto DiscordReaderLayout
+if /i "%~1"=="DiscordAccountReaderTests" goto DiscordAccountReader
+if /i "%~1"=="DiscordReaderHostTests" goto DiscordReaderHost
 if /i "%~1"=="DiscordEditor" goto DiscordEditor
 if /i "%~1"=="AsusService" goto AsusService
 if /i "%~1"=="HardwareProfileImportTests" goto Hardware
@@ -65,6 +69,18 @@ cl %CONTENT_FLAGS% /WX /c dependencies\DiscordRPC\profile_edit.cpp /Fo:%CONTENT_
 goto Result
 :DiscordServiceFixture
 cl %CONTENT_FLAGS% /WX tools\DiscordServiceTests.cpp %CONTENT_OUT%\DiscordService.obj /Fe:%CONTENT_OUT%\DiscordServiceTests.exe /Fo:%CONTENT_OUT%\DiscordServiceTests.obj /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib uuid.lib winhttp.lib crypt32.lib
+goto Result
+:DiscordTileModel
+cl %CONTENT_FLAGS% /WX tools\DiscordTileModelTests.cpp /Fe:%CONTENT_OUT%\DiscordTileModelTests.exe /Fo:%CONTENT_OUT%\DiscordTileModelTests.obj
+goto Result
+:DiscordReaderLayout
+cl %CONTENT_FLAGS% /WX tools\DiscordReaderLayoutTests.cpp /Fe:%CONTENT_OUT%\DiscordReaderLayoutTests.exe /Fo:%CONTENT_OUT%\DiscordReaderLayoutTests.obj
+goto Result
+:DiscordAccountReader
+cl %CONTENT_FLAGS% /WX tools\DiscordAccountReaderTests.cpp %CONTENT_OUT%\DiscordService.obj /Fe:%CONTENT_OUT%\DiscordAccountReaderTests.exe /Fo:%CONTENT_OUT%\DiscordAccountReaderTests.obj /link user32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib uuid.lib winhttp.lib crypt32.lib
+goto Result
+:DiscordReaderHost
+cl %CONTENT_FLAGS% DesktopStub\tools\DiscordReaderHostTests.cpp %CONTENT_OUT%\DiscordService.obj %CONTENT_OUT%\DiscordEditor.obj %CONTENT_OUT%\AsusService.obj /Fe:%CONTENT_OUT%\DiscordReaderHostTests.exe /Fo:%CONTENT_OUT%\DiscordReaderHostTests.obj /link %CONTENT_NATIVE_LIBS%
 goto Result
 :AsusService
 cl %CONTENT_FLAGS% /WX /DAIP_ASUS_NO_NATIVE_BACKEND /c dependencies\asusblink\service.cpp /Fo:%CONTENT_OUT%\AsusService.obj

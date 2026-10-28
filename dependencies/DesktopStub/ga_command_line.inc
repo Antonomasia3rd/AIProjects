@@ -814,6 +814,7 @@ static bool NormalizeDesktopStubTypedSetting(
     std::wstring& error)
 {
     if(IEquals(section,L"Properties"))return aip::properties::NormalizeSetting(key,value,error);
+    if(IEquals(section,L"DiscordReader"))return aip::discord_tiles::NormalizeReaderSetting(key,value,error);
     if(IEquals(section,L"Settings")&&IEquals(key,L"TileIconFont"))return aip::content::NormalizeTilePolicySetting(L"Artwork.IconFont",value,error);
     if(IEquals(section,L"Settings")&&IEquals(key,L"PrimaryRegistration"))return aip::content::NormalizeTilePolicySetting(L"Delivery.PrimaryRegistration",value,error);
     if(IEquals(section,L"Profile"))return aip::profiles::NormalizeSetting(key,value,error);

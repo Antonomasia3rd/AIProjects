@@ -13,6 +13,7 @@ static bool RecoverInterruptedDesktopHostSetup();
 #include "ga_kuro_signin.inc"
 #include "ga_google_calendar_setup.inc"
 #include "ga_gmail_setup.inc"
+#include "ga_discord_reader_ui.inc"
 #include "ga_desktop_host_setup.inc"
 #include "ga_menu_wording.inc"
 #include "ga_properties_options.inc"

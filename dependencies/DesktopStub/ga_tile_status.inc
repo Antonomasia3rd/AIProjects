@@ -30,7 +30,10 @@ static std::wstring TileSnapshotVisibleText(const aip::content::Snapshot& frame,
     const auto* sizeSetting = height > 200 ? L"ApplyToLargeTile" : width > 200 ? L"ApplyToWideTile" : L"ApplyToMediumTile";
     if (!IniReadI(L"TileText",sizeSetting,1)) { AppendTileStatusLine(output,labels.textHidden); return output; }
     if (frame.textMode == aip::content::TextMode::Off) { AppendTileStatusLine(output, labels.textHidden); return output; }
-    if(frame.batterySource){
+    if(frame.discordAccountSource){
+        AppendTileStatusLine(output,frame.text.primary);AppendTileStatusLine(output,frame.text.secondary);AppendTileStatusLine(output,frame.text.badge);
+        for(std::size_t i=0;i<aip::content::DiscordReaderVisibleRows(frame,width,height);++i)AppendTileStatusLine(output,frame.discordAccountRows[i].primary);
+    }else if(frame.batterySource){
         for(const auto& group:aip::content::BuildBatteryTilePlan(frame.batteryText,width,height,frame.presentation).groups)
             for(const auto& column:group.columns)for(const auto& field:column.texts)AppendTileStatusLine(output,field.text);
     }else if(frame.mailSource){

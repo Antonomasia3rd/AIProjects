@@ -60,11 +60,12 @@ struct ContentDiscordProvider
         stopping = service && !service->Stop(0);
         if (!stopping) started = false;
     }
-    void Refresh(const aip::content::DiscordConfiguration& cfg, bool synchronous)
+    void Refresh(const aip::content::DiscordConfiguration& cfg, bool synchronous,bool gatewayAcknowledged=false)
     {
         if (stopping) { RequestStop(); if (stopping) return; }
         if (!service) service = std::make_unique<aip::discord::Service>();
         aip::discord::Options options;
+        options.experimentalGatewayAcknowledged=gatewayAcknowledged;
         options.sendEnabled = cfg.send; options.clearOnStop = cfg.clearOnStop;
         options.refreshMs = cfg.refreshSeconds * 1000; options.operationTimeoutMs = cfg.timeoutMs;
         auto path = TrimCopy(cfg.profilePath);
@@ -83,7 +84,7 @@ struct ContentDiscordProvider
 #ifdef DESKTOPSTUB_INERT_HARDWARE
         if (configureTestOptions) configureTestOptions(options);
 #endif
-        auto requestedKey = std::to_wstring(cfg.send) + L":" + std::to_wstring(cfg.clearOnStop) + L":" + std::to_wstring(cfg.refreshSeconds) + L":" + std::to_wstring(cfg.timeoutMs);
+        auto requestedKey = std::to_wstring(cfg.send) + L":" + std::to_wstring(cfg.clearOnStop) + L":" + std::to_wstring(cfg.refreshSeconds) + L":" + std::to_wstring(cfg.timeoutMs)+L":"+std::to_wstring(gatewayAcknowledged);
         for (const auto& field : {path, FileFingerprint(path), cfg.clientId, cfg.name, cfg.details, cfg.state})
             requestedKey += L":" + std::to_wstring(field.size()) + L":" + field;
         if (started && !service->Read().running) { RequestStop(); if (stopping) return; key.clear(); }
@@ -119,6 +120,7 @@ struct ContentDiscordProvider
     void Stop() { Cancel(); if (service && service->Stop(5000)) { service.reset(); stopping = false; } started = false; }
 };
 static ContentDiscordProvider g_contentDiscord;
+#include "ga_discord_reader_runtime.inc"
 
 struct ContentNotesProvider
 {
@@ -688,6 +690,7 @@ static std::wstring ContentSnapshotKey(const aip::content::Snapshot& snapshot)
     key += L":branding:" + snapshot.secondaryBranding;
     if(snapshot.appLauncherSource)key+=L":launcher:"+aip::app_launcher::ConfigurationKey(snapshot.launcher);
     if(snapshot.gameSource)key+=L":GameRows2:"+aip::content::TextPresentationKey(snapshot.presentation);
+    if(snapshot.discordAccountSource)key+=aip::content::DiscordAccountPresentationKey(snapshot)+L":"+FileFingerprint(snapshot.discordAvatarPath);
     if(snapshot.mailSource){
         key+=L":MailNative1:"+std::to_wstring(snapshot.mailMessageIndex)+L":"+std::to_wstring(snapshot.mailIncludeLarge)+
             L":"+std::to_wstring(snapshot.mailBadgeEnabled)+L":"+std::to_wstring(snapshot.mailUnreadCount);

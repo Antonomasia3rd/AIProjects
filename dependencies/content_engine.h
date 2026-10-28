@@ -166,6 +166,11 @@ struct CalendarEvent {
 };
 enum class CalendarFlavor { NextEvent, Agenda };
 struct Snapshot {
+    bool discordAccountSource=false,discordProfileSource=false;
+    std::vector<Text> discordAccountRows;
+    std::wstring discordAvatarPath;
+    std::shared_ptr<const void> discordAvatarLease;
+    int discordAvatarScalePercent=100;
     bool batterySource=false;
     BatteryTileText batteryText;
     bool appLauncherSource=false;

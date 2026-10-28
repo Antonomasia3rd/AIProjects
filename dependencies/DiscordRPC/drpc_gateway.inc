@@ -1,3 +1,4 @@
+#include "gateway_identify.h"
 static bool JsonIntegerTokenRange(const std::string& json, size_t valueStart, size_t valueEnd, size_t& tokenStart, size_t& tokenEnd)
 {
     tokenStart = valueStart;
@@ -102,11 +103,6 @@ static int JsonExtractInt(const std::string& json, const char* key, int fallback
 {
     int value = fallback;
     return JsonTryExtractInt(json, key, value) ? value : fallback;
-}
-
-static bool JsonExtractOptionalInt(const std::string& json, const char* key, int& value)
-{
-    return JsonTryExtractInt(json, key, value);
 }
 
 static void RemoveGatewayUnsupportedInstanceField(std::string& activity)
@@ -302,19 +298,25 @@ public:
         std::wstring clientId,
         bool verbose,
         GatewayOptions options,
-        std::function<bool()> cancellationRequested)
+        std::function<bool()> cancellationRequested,
+        bool readerOnly=false,
+        std::function<void(const std::string&)> observer={})
         : token_(std::move(token)),
           clientId_(std::move(clientId)),
           verbose_(verbose),
           options_(std::move(options)),
-          cancellationRequested_(std::move(cancellationRequested))
+          cancellationRequested_(std::move(cancellationRequested)),
+          readerOnly_(readerOnly),observer_(std::move(observer))
     {
     }
 
     ~DiscordGatewayClient()
     {
         Close();
+        if(!token_.empty())SecureZeroMemory(&token_[0],token_.size()*sizeof(wchar_t));
     }
+
+    bool AuthenticationFailed()const{return closeStatus_.load()==4004;}
 
     bool IsConnected() const
     {
@@ -325,11 +327,13 @@ public:
     void Connect(const std::string& initialActivityJson, const std::wstring& initialStatus)
     {
         Close();
+        const auto retainedSequence=lastSequence_.load();
+        const bool resume=readerOnly_&&!resumeSessionId_.empty()&&retainedSequence!=LLONG_MIN;
         if (Trim(token_).empty())
         {
             throw std::runtime_error("Missing [general] token_protected for Discord Gateway. Legacy plaintext token is only read for migration.");
         }
-        if (Trim(clientId_).empty())
+        if (!readerOnly_&&Trim(clientId_).empty())
         {
             throw std::runtime_error("Missing [general] client_id for Discord Gateway.");
         }
@@ -338,7 +342,8 @@ public:
         heartbeatIntervalMs_ = 0;
         identified_ = false;
         heartbeatAcked_ = true;
-        lastSequence_ = INT_MIN;
+        lastSequence_ = resume?retainedSequence:LLONG_MIN;
+        closeStatus_=0;
 
         session_ = WinHttpOpen(
             options_.browserUserAgent.c_str(),
@@ -459,7 +464,7 @@ public:
             Close();
             throw;
         }
-        Identify(initialActivityJson, initialStatus);
+        if(resume)Resume();else Identify(initialActivityJson, initialStatus);
 
         if (!WaitFor([this]() {
                 return identified_.load() || !GetLastConnectError().empty() || !connected_.load() || CancellationRequested();
@@ -491,6 +496,7 @@ public:
 
     void SetPresence(const std::string& activityJson, const std::wstring& status)
     {
+        if(readerOnly_)throw std::runtime_error("A Discord account reader cannot write presence.");
         if (!IsConnected())
         {
             throw std::runtime_error("Gateway is not connected.");
@@ -512,6 +518,7 @@ public:
 
     void ClearPresence(const std::wstring& status)
     {
+        if(readerOnly_)return;
         if (!IsConnected())
         {
             return;
@@ -605,6 +612,10 @@ private:
     bool verbose_ = false;
     GatewayOptions options_;
     std::function<bool()> cancellationRequested_;
+    bool readerOnly_=false;
+    std::function<void(const std::string&)> observer_;
+    std::wstring resumeSessionId_;
+    std::atomic<unsigned> closeStatus_{0};
     mutable std::mutex sendMutex_;
     std::mutex errorMutex_;
     std::thread reader_;
@@ -613,7 +624,7 @@ private:
     std::atomic<bool> identified_{ false };
     std::atomic<bool> heartbeatAcked_{ true };
     std::atomic<int> heartbeatIntervalMs_{ 0 };
-    std::atomic<int> lastSequence_{ INT_MIN };
+    std::atomic<long long> lastSequence_{ LLONG_MIN };
     std::wstring lastConnectError_;
     std::map<std::wstring, std::wstring, std::less<>> assetIdCache_;
     std::wstring cachedAssetApplicationId_;
@@ -756,19 +767,17 @@ private:
             "\"private_channels_version\":\"0\","
             "\"api_code_version\":0}";
 
-        std::string data = "{";
-        bool first = true;
-        JsonFieldString(data, first, "token", token_);
-        JsonFieldNumber(data, first, "capabilities", options_.capabilities);
-        JsonFieldRaw(data, first, "properties", properties);
-        JsonFieldBool(data, first, "compress", false);
-        JsonFieldRaw(data, first, "client_state", clientState);
-        JsonFieldRaw(data, first, "presence", BuildPresenceData(initialActivityJson, initialStatus));
-        data.push_back('}');
+        std::string data=aip::discord::BuildGatewayIdentifyBody(token_,properties,clientState,options_.capabilities,
+            readerOnly_?std::string{}:BuildPresenceData(initialActivityJson,initialStatus),readerOnly_);
 
         SendPayload(2, data);
+        if(!data.empty())SecureZeroMemory(&data[0],data.size());
         LogInfo(L"Gateway IDENTIFY sent.");
     }
+
+    void Resume(){std::string data="{";bool first=true;JsonFieldString(data,first,"token",token_);
+        JsonFieldString(data,first,"session_id",resumeSessionId_);JsonFieldNumber(data,first,"seq",lastSequence_.load());data+='}';
+        SendPayload(6,data);if(!data.empty())SecureZeroMemory(&data[0],data.size());LogInfo(L"Gateway resume requested.");}
 
     std::string BuildPresenceData(const std::string& activityJson, const std::wstring& status)
     {
@@ -908,8 +917,8 @@ private:
         std::string payload = "{";
         bool first = true;
         JsonFieldNumber(payload, first, "op", 1);
-        int seq = lastSequence_.load();
-        if (seq == INT_MIN)
+        const auto seq = lastSequence_.load();
+        if (seq == LLONG_MIN)
         {
             JsonFieldRaw(payload, first, "d", "null");
         }
@@ -1019,10 +1028,9 @@ private:
                         {
                             reason[std::min<DWORD>(reasonLength, static_cast<DWORD>(sizeof(reason) - 1))] = '\0';
                             closeText += L" Status=" + std::to_wstring(closeStatus);
-                            if (reason[0] != '\0')
-                            {
-                                closeText += L" Reason=" + Utf8ToWide(reason);
-                            }
+                            // Close text is server controlled; expose only the
+                            // code rather than private payload fragments.
+                            closeStatus_=closeStatus;
                             if (closeStatus == 4004)
                             {
                                 SetLastConnectError(L"4004 Authentication failed. Check [general] token_protected. Legacy plaintext token is only read for migration.");
@@ -1073,8 +1081,8 @@ private:
     void HandleMessage(const std::string& json)
     {
         int op = JsonExtractInt(json, "op");
-        int seq = 0;
-        if (JsonExtractOptionalInt(json, "s", seq))
+        long long seq=0;size_t sequenceKey=0,sequenceStart=0,sequenceEnd=0;
+        if (FindJsonFieldValue(json,"s",sequenceKey,sequenceStart,sequenceEnd)&&JsonTryParseIntegerToken(json,sequenceStart,sequenceEnd,seq)&&seq>=0)
         {
             lastSequence_ = seq;
         }
@@ -1119,8 +1127,13 @@ private:
 
         if (op == 9)
         {
+            resumeSessionId_.clear();lastSequence_=LLONG_MIN;
             SetLastConnectError(L"Invalid Gateway session.");
             connected_ = false;
+            if(observer_)observer_(json);
+            return;
+        }
+        if(op==7){SetLastConnectError(L"Discord requested a Gateway reconnect.");connected_=false;if(observer_)observer_(json);
             return;
         }
 
@@ -1130,8 +1143,11 @@ private:
             bool eventNamePresent = TryExtractJsonStringValue(json, "t", eventName);
             if (eventNamePresent && eventName == L"READY")
             {
+                size_t dataKey=0,dataStart=0,dataEnd=0;std::wstring sessionId;
+                if(FindJsonFieldValue(json,"d",dataKey,dataStart,dataEnd)&&TryExtractJsonStringValue(json.substr(dataStart,dataEnd-dataStart),"session_id",sessionId)&&
+                    !sessionId.empty()&&sessionId.size()<=256&&std::none_of(sessionId.begin(),sessionId.end(),[](wchar_t c){return c<0x20||c==0x7f;}))resumeSessionId_=std::move(sessionId);
                 identified_ = true;
-                LogInfo(L"Gateway READY received. Presence is now live.");
+                LogInfo(readerOnly_?L"Gateway account reader READY.":L"Gateway READY received. Presence is now live.");
             }
             else if (eventNamePresent && eventName == L"RESUMED")
             {
@@ -1146,6 +1162,7 @@ private:
             {
                 LogDebug(L"Gateway dispatch: " + eventName);
             }
+            if(observer_)observer_(json);
         }
     }
 

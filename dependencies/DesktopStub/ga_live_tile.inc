@@ -6,6 +6,7 @@
 #include "../prayer_tile_layout.h"
 #include "../datetime_tile_layout.h"
 #include "../game_tile_layout.h"
+#include "../discord_reader_tile_layout.h"
 static bool CurrentProcessPackageFullName(std::wstring& packageFullName)
 {
     packageFullName.clear();
@@ -366,6 +367,12 @@ static std::wstring BuildLiveTileXml(
             if(aip::content::AppendMailTileBinding(xml,templateName,asset.h,*g_renderContent,ContentHasTransparentBackground()?L"":uri))hasUsableBinding=true;
             continue;
         }
+        if(LiveTileUsesAdaptiveXml()&&g_renderContent&&g_renderContent->discordAccountSource&&g_renderContent->textMode==aip::content::TextMode::Auto){
+            auto avatarFrame=*g_renderContent;avatarFrame.smtcAppIconPath=g_renderContent->discordAvatarPath;avatarFrame.smtcAppIconLease=g_renderContent->discordAvatarLease;
+            const auto avatar=MediaAppIconUri(exeDir,avatarFrame);
+            if(aip::content::AppendDiscordAccountTileBinding(xml,templateName,asset.w,asset.h,*g_renderContent,ContentHasTransparentBackground()?L"":uri,avatar))hasUsableBinding=true;
+            continue;
+        }
         if (LiveTileUsesAdaptiveXml() && g_renderContent && !g_renderContent->rssHeadlines.empty() &&
             g_renderContent->textMode == aip::content::TextMode::Auto && aip::content::RssUsesRichLayout(g_renderContent->presentation) &&
             aip::content::AppendRssRichTileBinding(xml, templateName, asset.h, g_renderContent->rssHeadlines,
@@ -442,7 +449,7 @@ static std::wstring BuildLiveTileXml(
     xml += L"</tile>";
     const bool richRssPresentation = g_renderContent && !g_renderContent->rssHeadlines.empty() &&
         g_renderContent->textMode == aip::content::TextMode::Auto && aip::content::RssUsesRichLayout(g_renderContent->presentation);
-    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !richRssPresentation && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource && !g_renderContent->mailSource && (!g_renderContent->gameSource || g_renderContent->detailRows.empty()) && !g_renderContent->batterySource)
+    if (LiveTileUsesAdaptiveXml() && g_renderContent && g_renderContent->presentation.Active() && !g_renderContent->discordAccountSource && !richRssPresentation && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource && !g_renderContent->mailSource && (!g_renderContent->gameSource || g_renderContent->detailRows.empty()) && !g_renderContent->batterySource)
         xml = aip::content::ApplyTextPresentationXml(xml, g_renderContent->presentation);
     aip::tile_notification::Options options;
     if (g_renderContent) {

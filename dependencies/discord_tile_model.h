@@ -66,6 +66,7 @@ inline std::optional<Timestamp> SnowflakeTimestamp(const std::wstring& id){std::
 enum class FieldType { Choice,Boolean,Integer,Snowflake,Text,Message };
 struct Field {const wchar_t* key;const wchar_t* fallback;FieldType type;int minimum=0,maximum=0;const wchar_t* choices=L"";};
 inline constexpr Field Fields[]={
+    {L"Enabled",L"0",FieldType::Boolean},{L"RememberCredential",L"0",FieldType::Boolean},
     {L"View",L"Presence",FieldType::Choice,0,0,L"Presence|Channel|Profile"},
     {L"Connection",L"IPC",FieldType::Choice,0,0,L"IPC|RPC|OAuth|SocialSDK|Bot|UserTokenExperimental"},
     {L"AccountId",L"",FieldType::Snowflake},{L"GuildId",L"",FieldType::Snowflake},{L"ChannelId",L"",FieldType::Snowflake},
@@ -104,6 +105,7 @@ inline bool NormalizeSetting(std::wstring key,std::wstring& value,std::wstring& 
     value=std::move(normalized);error.clear();return true;
 }
 struct Configuration {
+    bool enabled=false,rememberCredential=false;
     std::wstring view=L"Presence",connection=L"IPC",accountId,guildId,channelId,friendsFilter=L"Online",avatarPlacement=L"Right",clickAction=L"Compose";
     bool showMessageContent=true,showMentionCount=true,showPlatforms=true,countOwnMessages=false,includeRoleMentions=false,includeEveryoneMentions=false,retainLastGood=true,showLastSuccessAge=true;
     int previewCharacters=160,messageLimit=25,maximumMessageCharacters=2000,friendsLimit=5,friendsCacheLimit=1000,eventHistoryLimit=256,sendHistoryLimit=32,sendCharacterLimit=2000;
@@ -123,14 +125,14 @@ template<class Reader> bool ReadConfiguration(Reader read,Configuration& output,
         else if(k==L"ConfiguredText")c.configuredText=value;
         else if(k==L"TimeFormat")c.timeFormat=value;
         else if(field.type==FieldType::Integer){int n=0;BoundedInteger(value,field.minimum,field.maximum,n);if(k==L"PreviewCharacters")c.previewCharacters=n;else if(k==L"MessageLimit")c.messageLimit=n;else if(k==L"MaximumMessageCharacters")c.maximumMessageCharacters=n;else if(k==L"FriendsLimit")c.friendsLimit=n;else if(k==L"FriendsCacheLimit")c.friendsCacheLimit=n;else if(k==L"EventHistoryLimit")c.eventHistoryLimit=n;else if(k==L"SendHistoryLimit")c.sendHistoryLimit=n;else if(k==L"RefreshMs")c.refreshMs=n;else if(k==L"OperationTimeoutMs")c.operationTimeoutMs=n;else if(k==L"ReconnectMinimumMs")c.reconnectMinimumMs=n;else if(k==L"ReconnectMaximumMs")c.reconnectMaximumMs=n;else if(k==L"MaximumBytes")c.maximumBytes=n;else if(k==L"AvatarScalePercent")c.avatarScalePercent=n;else c.sendCharacterLimit=n;}
-        else {const bool b=value==L"1";if(k==L"ShowMessageContent")c.showMessageContent=b;else if(k==L"ShowMentionCount")c.showMentionCount=b;else if(k==L"ShowPlatforms")c.showPlatforms=b;else if(k==L"CountOwnMessages")c.countOwnMessages=b;else if(k==L"IncludeRoleMentions")c.includeRoleMentions=b;else if(k==L"IncludeEveryoneMentions")c.includeEveryoneMentions=b;else if(k==L"RetainLastGood")c.retainLastGood=b;else if(k==L"ShowLastSuccessAge")c.showLastSuccessAge=b;else if(k==L"SendAllowUserMentions")c.sendAllowUserMentions=b;else if(k==L"SendAllowRoleMentions")c.sendAllowRoleMentions=b;else if(k==L"SendAllowEveryoneMentions")c.sendAllowEveryoneMentions=b;else if(k==L"ExperimentalAcknowledged")c.experimentalAcknowledged=b;else if(k==L"DirectSendEnabled")c.directSendEnabled=b;else if(k==L"UseGateway")c.useGateway=b;else if(k==L"AllowReviewedSend")c.allowReviewedSend=b;else if(k==L"ShowMessageAuthor")c.showMessageAuthor=b;else if(k==L"ShowMessageTime")c.showMessageTime=b;else if(k==L"ShowUsername")c.showUsername=b;else if(k==L"ShowPresence")c.showPresence=b;else c.warnEveryConnection=b;}
+        else {const bool b=value==L"1";if(k==L"Enabled")c.enabled=b;else if(k==L"RememberCredential")c.rememberCredential=b;else if(k==L"ShowMessageContent")c.showMessageContent=b;else if(k==L"ShowMentionCount")c.showMentionCount=b;else if(k==L"ShowPlatforms")c.showPlatforms=b;else if(k==L"CountOwnMessages")c.countOwnMessages=b;else if(k==L"IncludeRoleMentions")c.includeRoleMentions=b;else if(k==L"IncludeEveryoneMentions")c.includeEveryoneMentions=b;else if(k==L"RetainLastGood")c.retainLastGood=b;else if(k==L"ShowLastSuccessAge")c.showLastSuccessAge=b;else if(k==L"SendAllowUserMentions")c.sendAllowUserMentions=b;else if(k==L"SendAllowRoleMentions")c.sendAllowRoleMentions=b;else if(k==L"SendAllowEveryoneMentions")c.sendAllowEveryoneMentions=b;else if(k==L"ExperimentalAcknowledged")c.experimentalAcknowledged=b;else if(k==L"DirectSendEnabled")c.directSendEnabled=b;else if(k==L"UseGateway")c.useGateway=b;else if(k==L"AllowReviewedSend")c.allowReviewedSend=b;else if(k==L"ShowMessageAuthor")c.showMessageAuthor=b;else if(k==L"ShowMessageTime")c.showMessageTime=b;else if(k==L"ShowUsername")c.showUsername=b;else if(k==L"ShowPresence")c.showPresence=b;else c.warnEveryConnection=b;}
     }if(c.reconnectMaximumMs<c.reconnectMinimumMs){error=L"DiscordReader.ReconnectMaximumMs must be at least ReconnectMinimumMs.";return false;}output=std::move(c);error.clear();return true;
 }
 // For shared CLI/INI/GUI adapters. Values may contain the private configured
 // message; do not log this map. ConfigurationKey exposes only a cache fingerprint.
 inline std::map<std::wstring,std::wstring> ConfigurationValues(const Configuration& c){
     const auto b=[](bool v){return v?std::wstring(L"1"):std::wstring(L"0");};
-    return {{L"View",c.view},{L"Connection",c.connection},{L"AccountId",c.accountId},{L"GuildId",c.guildId},{L"ChannelId",c.channelId},
+    return {{L"Enabled",b(c.enabled)},{L"RememberCredential",b(c.rememberCredential)},{L"View",c.view},{L"Connection",c.connection},{L"AccountId",c.accountId},{L"GuildId",c.guildId},{L"ChannelId",c.channelId},
         {L"ShowMessageContent",b(c.showMessageContent)},{L"ShowMessageAuthor",b(c.showMessageAuthor)},{L"ShowMessageTime",b(c.showMessageTime)},{L"TimeFormat",c.timeFormat},
         {L"ShowUsername",b(c.showUsername)},{L"ShowPresence",b(c.showPresence)},{L"AvatarScalePercent",std::to_wstring(c.avatarScalePercent)},
         {L"PreviewCharacters",std::to_wstring(c.previewCharacters)},{L"MessageLimit",std::to_wstring(c.messageLimit)},
@@ -191,6 +193,9 @@ struct Presence {Status status=Status::Unknown;std::optional<Platforms> platform
 struct PresencePatch {std::wstring userId;std::optional<Status> status;std::optional<Platforms> platforms;bool platformSnapshot=false;};
 struct UserPatch {std::wstring id;std::optional<std::wstring> displayName,username,avatarHash;};
 struct User {std::wstring id;std::optional<std::wstring> displayName,username,avatarHash;};
+inline std::wstring PreferredUserName(const std::optional<std::wstring>& displayName,const std::optional<std::wstring>& username,const std::wstring& fallback={}){
+    if(displayName&&!displayName->empty())return *displayName;if(username&&!username->empty())return *username;return fallback;
+}
 inline bool ValidAvatarHash(const std::wstring& hash){if(hash.empty())return true;const auto start=hash.compare(0,2,L"a_")==0?2u:0u;return hash.size()==start+32&&std::all_of(hash.begin()+start,hash.end(),[](wchar_t c){return (c>=L'0'&&c<=L'9')||(c>=L'a'&&c<=L'f')||(c>=L'A'&&c<=L'F');});}
 inline std::wstring AvatarUrl(const User& user,unsigned side=128){if(!Snowflake(user.id)||!user.avatarHash||user.avatarHash->empty()||!ValidAvatarHash(*user.avatarHash))return L"";side=(std::max)(16u,(std::min)(1024u,side));unsigned power=16;while(power<side)power*=2;return L"https://cdn.discordapp.com/avatars/"+user.id+L"/"+*user.avatarHash+L".png?size="+std::to_wstring(power);}
 inline void MergeUser(User& user,const UserPatch& patch){user.id=patch.id;if(patch.displayName)user.displayName=DisplayText(*patch.displayName,128);if(patch.username)user.username=DisplayText(*patch.username,128);if(patch.avatarHash&&ValidAvatarHash(*patch.avatarHash))user.avatarHash=Lower(*patch.avatarHash);}

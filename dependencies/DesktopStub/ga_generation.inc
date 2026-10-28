@@ -1377,6 +1377,7 @@ static std::wstring BuildGenerationStateKey(const std::wstring& wallpaperPath)
         state += L"topic=" + g_renderContent->artworkTopic + L";appearance=" + g_renderContent->registrationAppearance.background +
             L":" + g_renderContent->registrationAppearance.backgroundColor + L":" + g_renderContent->registrationAppearance.branding + L";";
         state += L"contentMode=" + std::to_wstring(static_cast<int>(g_renderContent->textMode)) + L";";
+        if(g_renderContent->discordAccountSource)state+=aip::content::DiscordAccountPresentationKey(*g_renderContent)+L":"+FileFingerprint(g_renderContent->discordAvatarPath);
         if (g_renderContent->galleryFrame) state += L"galleryFit=" + std::to_wstring(g_renderContent->galleryContain) + L";";
         state += L"contentBackground=" + std::to_wstring(static_cast<int>(g_renderContent->backgroundId)) + L";";
         if (bakedText && !g_renderContent->rssHeadlines.empty())

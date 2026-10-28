@@ -34,6 +34,9 @@ struct Options {
     int refreshMs = 5000;
     int operationTimeoutMs = 5000;
     bool clearOnStop = true;
+    // IPC remains the default. Personal-token Gateway fallback may connect
+    // only after the host has shown and bound the experimental warning.
+    bool experimentalGatewayAcknowledged = false;
     // Null means read the explicit file and actual foreground/system context.
     // Overrides permit testing real template/presence code without user data.
     std::shared_ptr<const Profile> profileOverride;

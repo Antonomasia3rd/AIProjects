@@ -13,6 +13,8 @@
 #include "content_sources/gmail_model.h"
 #include "content_sources/battery_model.h"
 #include "source_health.h"
+#include "discord_tile_model.h"
+#include "discord_reader_host_settings.h"
 #include <set>
 
 namespace aip { namespace content {
@@ -73,6 +75,7 @@ struct TileInstance {
     aip::google_calendar::Configuration googleCalendar;
     aip::kuro::Configuration kuro;
     aip::source_health::Configuration sourceHealth;
+    aip::discord_tiles::Configuration discordReader;
     aip::app_launcher::Configuration launcher;
     aip::gmail::Configuration mail;
     aip::battery::Configuration battery;
@@ -138,7 +141,7 @@ inline bool TileInstanceSourceSection(const TileInstance& tile, const std::wstri
     if (tile.type == TileInstanceType::PrayerTimes) return s == L"prayertimes";
     if (tile.type == TileInstanceType::Clock) return s == L"clock";
     if (tile.type == TileInstanceType::Calendar) return s == L"calendar" || s == L"googlecalendar" || s == L"calendarreminders";
-    if (tile.type == TileInstanceType::Discord) return s == L"discord";
+    if (tile.type == TileInstanceType::Discord) return s == L"discord" || s == L"discordreader";
     const auto resource = DescribeTileInstanceType(tile.type).notesResource;
     return resource >= 0 && (s == L"notes" || s == L"notes." + Lower(NotesResources[resource].value));
 }
@@ -217,6 +220,7 @@ inline bool NormalizeTileInstanceSetting(const std::wstring& section, const std:
         value = Trim(value);
         if (!ValidTileAccountReference(value)) return fail(L"expected an explicit Notes.<resource> or Account.<id> reference.");
     } else if (k == L"clickaction") {
+        if(Lower(Trim(value))==L"discord"){value=L"discord";error.clear();return true;}
         if(Lower(Trim(value))==L"launch"){value=L"launch";error.clear();return true;}
         if (Lower(Trim(value)) == L"source") { value = L"source"; error.clear(); return true; }
         return NormalizeTileActionSetting(section, key, value, error);
@@ -241,6 +245,7 @@ inline bool NormalizeTileInstanceSetting(const std::wstring& section, const std:
         if (source == L"mail") return aip::gmail::NormalizeSetting(sourceKey,value,error);
         if (source == L"battery") return aip::battery::NormalizeSetting(sourceKey,value,error);
         if (source == L"sourcehealth") return aip::source_health::NormalizeSetting(sourceKey,value,error);
+        if (source == L"discordreader") return aip::discord_tiles::NormalizeReaderSetting(sourceKey,value,error);
         if (source == L"kuro") return aip::kuro::NormalizeSetting(sourceKey, value, error);
         if (source == L"googlecalendar") return aip::google_calendar::NormalizeSetting(sourceKey, value, error);
         if (source == L"clock" || source == L"calendar") return aip::datetime::NormalizeSetting(sourceSection, sourceKey, value, error);
@@ -298,10 +303,11 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
         if (!get(L"Type", L"", type)) return false;
         const auto* descriptor = FindTileInstanceType(type); tile.type = descriptor->type;
         if (!get(L"Name", descriptor->name, tile.name) || !get(L"Primary", L"0", primary) ||
-            !get(L"ClickAction", tile.type == TileInstanceType::AppLauncher?L"launch":tile.type == TileInstanceType::NowPlaying ? L"toggle" : tile.type == TileInstanceType::Rss||tile.type==TileInstanceType::Mail ? L"source" : L"setup", tile.clickAction) ||
+            !get(L"ClickAction", tile.type == TileInstanceType::Discord&&Lower(read(section.c_str(),L"DiscordReader.View",L"Presence"))!=L"presence"?L"discord":tile.type == TileInstanceType::AppLauncher?L"launch":tile.type == TileInstanceType::NowPlaying ? L"toggle" : tile.type == TileInstanceType::Rss||tile.type==TileInstanceType::Mail ? L"source" : L"setup", tile.clickAction) ||
             !get(L"Account", L"", tile.accountReference)) return false;
         if (tile.clickAction == L"source" && tile.type != TileInstanceType::Rss&&tile.type!=TileInstanceType::Mail) { error = section + L".ClickAction=source is only available for RSS and Mail tiles."; return false; }
         if(tile.clickAction==L"launch"&&tile.type!=TileInstanceType::AppLauncher){error=section+L".ClickAction=launch is only available for App launcher tiles.";return false;}
+        if(tile.clickAction==L"discord"&&tile.type!=TileInstanceType::Discord){error=section+L".ClickAction=discord is only available for Discord tiles.";return false;}
         tile.primary = primary == L"1";
         if (tile.primary && (tile.type != TileInstanceType::Wallpaper || primarySeen)) {
             error = section + L".Primary: only one Wallpaper tile can own the primary Desktop identity."; return false;
@@ -358,6 +364,18 @@ template<class Reader> bool ReadTileInstanceConfiguration(Reader read, TileInsta
                 if(aip::battery::NormalizeSetting(key,value,error))tile.settings[L"battery."+Lower(key)]=value;
                 return value;
             },tile.battery,error)){error=section+L": "+error;return false;}
+        }
+        if(tile.type==TileInstanceType::Discord){
+            if(!aip::discord_tiles::ReadConfiguration([&](const wchar_t* key,const wchar_t* fallback){
+                auto value=TileInstanceRead(tile,read,L"DiscordReader",key,fallback);
+                if(aip::discord_tiles::NormalizeSetting(key,value,error))tile.settings[L"discordreader."+Lower(key)]=value;
+                return value;
+            },tile.discordReader,error)){error=section+L": "+error;return false;}
+            for(const auto* key:{L"CredentialProtected",L"CredentialConnection",L"CredentialRevision",L"AcknowledgedCredentialRevision"}){
+                auto value=TileInstanceRead(tile,read,L"DiscordReader",key,L"");
+                if(!aip::discord_tiles::NormalizeHostSetting(key,value,error)){error=section+L": "+error;return false;}
+                tile.settings[L"discordreader."+Lower(key)]=std::move(value);
+            }
         }
         if(tile.type==TileInstanceType::Calendar){
             aip::calendar_reminders::Settings reminders;

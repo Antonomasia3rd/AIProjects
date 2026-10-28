@@ -56,6 +56,41 @@ release from the local build. Stable release safeguards remain enabled.
 
 ## Remaining work and review ordering
 
+The user moved richer Discord tiles ahead of the remaining feature backlog,
+with Luna review still last. The selected default click is compose for review,
+not an automatic send. Personal-token access is explicitly experimental and
+requires a prominent Discord policy acknowledgement and verified account
+review. User approval is not evidence that Discord will permit it or that an
+alt account cannot be terminated. Keep bot/OAuth/IPC capabilities distinct.
+
+The account-reader/UI implementation and injected fixtures are described in
+[the reader record](discord-account-reader-2026-10-28.md) and
+[the host record](discord-reader-ui-2026-10-28.md). Native acceptance remains
+separate. The authorized browser alt preflight successfully fetched identity
+and one selected-channel message through HTTP; no message or read ACK was
+posted. The subsequent authorized native HTTP test passed identity, one
+selected-channel history read and avatar decoding, then stopped and cleared
+its session credential. No raw token entered CLI/source/logs/files; the browser
+automation kernel was reset afterwards. Gateway, Start and actual send acceptance
+remain separate. [Native evidence](discord-reader-native-acceptance-2026-10-28.md).
+
+Local beta3 is already delivered; the newer Discord work and no-op INI fix are
+not part of that binary. Do not describe a test build as a shipped beta or a
+successful Actions release. A separately named production build is used for
+review, with fresh dependent objects after the shared reader schema changed.
+
+Final Discord gates pass: 353 model, 64 layout, 135 synthetic transport, 45
+actual inert host and 2,287 source checks. Independent review fixed Custom
+render routing and nonempty display-name fallback. A degenerate 1x1 avatar
+fixture was replaced with a correctly sized 8x8 solid image after the exact
+renderer comparison already matched; no raster tolerance was relaxed.
+The unchanged legacy-INI no-op fix and corrected locked-import fixture pass
+fresh main broad/Revision hosts: 24,420 and 1,282 checks. Hosted CI still has to
+reach the retained Registration error/owner diagnostic. All new account tests
+have sent zero real messages and zero read acknowledgements. The user's new
+reply explicitly permits this alternative account for future testing; exact
+action/scope confirmation requirements still apply where the tools require it.
+
 The [reconciled findings](desktopstub-open-findings-2026-10-25.md) retain the
 unresolved 1809 report, Calendar behavior/providers/reminder overrides, real
 account/session/native acceptance, full Notes parity, missing tile sources,

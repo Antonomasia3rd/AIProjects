@@ -938,9 +938,12 @@ static void TestHardwareProfileHostImports()
     HANDLE lock = CreateFileW(g_iniPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     Check(lock != INVALID_HANDLE_VALUE, "hold imported target against atomic replacement");
     if (lock != INVALID_HANDLE_VALUE) {
+        Check(RunRenderOnlyCommand() == 0, "an identical configure-only import succeeds without replacing the locked unchanged target");
+        AddCommandLineIniSetting(L"CapsBlink", L"BlinkIntervalMs", L"901");
         Check(RunRenderOnlyCommand() == 2, "failed import publication reports a configure-only error");
         CloseHandle(lock);
-        Check(ReadIniFileForMutation(after) && before == after && RunRenderOnlyCommand() == 0,
+        Check(ReadIniFileForMutation(after) && before == after && RunRenderOnlyCommand() == 0 &&
+            IniReadS(L"CapsBlink", L"BlinkIntervalMs", L"") == L"901",
             "failed import publication preserves full target bytes and allows retry after the lock is released");
     }
     Check(!ReadContentHardwareImport(g_iniPath, true, g_commandLine.settings, error), "a donor source cannot equal the host output profile");

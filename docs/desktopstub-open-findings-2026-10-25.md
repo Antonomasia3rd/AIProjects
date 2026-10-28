@@ -14,6 +14,22 @@ alias and broad fixture fixes are locally validated; hosted acceptance is tracke
 separately. The user deferred chat/worktree cleanup until this queue and then
 the requested Luna Windhawk reviews are complete.
 
+The next active feature is richer Discord Channel/Profile tiles. Source now
+includes a separate account reader, explicit personal-token policy warning and
+account review, temporary protected credentials by default, honest selected-
+channel counters, and compose/review clicks. It retains Presence/IPC defaults.
+The authorized native HTTP identity/channel/avatar acceptance now passes;
+live Gateway, real Start display and outbound delivery remain open. See
+[the integration record](discord-reader-ui-2026-10-28.md) and
+[native HTTP evidence](discord-reader-native-acceptance-2026-10-28.md).
+No actual message or read acknowledgement has been sent during acceptance.
+
+The latest CI run at `1ee1c4e` stopped on one stale broad-host assertion before
+reaching the Registration staging diagnostic. The fixture now distinguishes
+an unchanged locked import from a required changed write; local and hosted
+results are tracked in [the CI note](ci-revision-host-contracts-2026-10-28.md).
+Do not mark the original hosted Registration issue resolved without its cause.
+
 The [beta 2 delivery record](desktopstub-beta2-2026-10-26.md) confirms current
 machine native appearance/cold-start checks and the completed fresh reset.
 The Properties rows below remain open only for broader theme/OS/accessibility

@@ -54,3 +54,40 @@ the fixture's existing internal watchdog. Receipts are under
 
 Hosted acceptance remains separate and needs the next diagnostic run. The
 unchanged four-pixel raster witness is not relaxed or closed by this repair.
+
+## Hosted follow-up at `1ee1c4e`
+
+Run `40687272287`, Windows job `122813217667`, stopped before the Revision
+fixture. `ContentRuntimeTests` reported 24,419 checks and one failure:
+`failed import publication reports a configure-only error`.
+
+That hardware-import fixture had already applied its exact command, then held
+the output INI against replacement and repeated the identical command. With
+the no-op preservation fix, the repeat correctly succeeds without publication;
+it cannot demonstrate a blocked changed write. The test now asserts that
+unchanged success, changes the pending Caps interval from 900 to 901, and then
+requires publication to fail while locked. After unlocking it checks unchanged
+saved contents and a successful retry that actually persists 901. This is a
+test-only correction. The hosted Registration error and owner diagnostic remain
+unreached until a subsequent hosted run passes this earlier fixture.
+
+The frozen main source then rebuilt DiscordService, DiscordEditor and
+AsusService objects before building either host, using optimized `/Ob1` and the
+existing 240-second compilation limit. Both final binaries passed Defender
+scans. `ContentRuntimeTests` passed all 24,420 checks in 29.1 seconds;
+`ContentRevisionHostTests` passed all 1,282 checks in 13.3 seconds. Intrinsic
+45-second fixture watchdogs were unchanged. No native package, account,
+Startup, hardware or resident operation was performed. No production ownership
+or path validation was changed for this follow-up.
+
+Fresh main receipts under `build/review-validation/`:
+
+- `ci-main-DiscordService-20261028-build.log`
+- `ci-main-DiscordEditor-20261028-build.log`
+- `ci-main-AsusService-20261028-build.log`
+- `ci-main-ContentRuntimeTests-20261028-build.log`
+- `ci-main-ContentRuntimeTests-20261028-tests.log`
+- `ci-main-ContentRuntimeTests-20261028-scan.sha256`
+- `ci-main-ContentRevisionHostTests-20261028-build.log`
+- `ci-main-ContentRevisionHostTests-20261028-tests.log`
+- `ci-main-ContentRevisionHostTests-20261028-scan.sha256`

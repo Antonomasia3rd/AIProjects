@@ -5,14 +5,14 @@ $ErrorActionPreference = 'Stop'
 $contentBuildDirectory = if ($env:CONTENT_OPTIMIZE -ceq '1') { 'build/content-integration-optimized' } else { 'build/content-integration' }
 $contentBuild = Join-Path $ReviewRoot $contentBuildDirectory
 $targets = @('HardwareProfileImportTests','NowPlayingProfileImportTests',
-    'NotesSourceTests','PrayerTimesModelTests','PrayerTimesSourceTests','SmtcSourceTests','DiscordServiceTests','WinrtFactoryLifetimeTests','TransparentBackgroundTests','AdaptiveTileTextLayoutTests','AdaptiveTileTextRenderTests',
+    'NotesSourceTests','PrayerTimesModelTests','PrayerTimesSourceTests','SmtcSourceTests','DiscordServiceTests','DiscordTileModelTests','DiscordReaderLayoutTests','DiscordAccountReaderTests','DiscordReaderHostTests','WinrtFactoryLifetimeTests','TransparentBackgroundTests','AdaptiveTileTextLayoutTests','AdaptiveTileTextRenderTests',
     'PngCrc32Tests','CaptureAttemptTests','ContentPresetTests','ContentQueueTests','SecondaryTileTests',
     'TileVisualAssetsTests','TileVisualAssetsRenderTests','NotesTileRowsTests','MediaTileLayoutTests','GalleryEngineTests','GalleryInventoryTests','GalleryInventoryNativeTests','GalleryRuntimeTests','CapsBlinkEngineTests','TileNotificationPayloadTests','BoundedCaptureProcessTests','DiscordProfileEditTests',
     'ContentRuntimeTests','ContentRevisionHostTests','ContentGalleryLifecycleHostTests','ContentNewSourceHostTests','ContentRuntimeNoHardwareTests','GalleryTransactionTests')
 foreach ($target in (@('DiscordService','DiscordEditor','AsusService') + $targets)) {
     # Optimizing the full host translation unit can exceed a minute on slower
     # laptops. This compile budget does not change fixture watchdogs.
-    $compileSeconds = if ($target -in @('ContentRuntimeTests','ContentRevisionHostTests','ContentGalleryLifecycleHostTests','ContentNewSourceHostTests','ContentRuntimeNoHardwareTests','TransparentBackgroundTests','AdaptiveTileTextRenderTests')) { 240 } else { 60 }
+    $compileSeconds = if ($target -in @('ContentRuntimeTests','ContentRevisionHostTests','ContentGalleryLifecycleHostTests','ContentNewSourceHostTests','ContentRuntimeNoHardwareTests','DiscordReaderHostTests','TransparentBackgroundTests','AdaptiveTileTextRenderTests')) { 240 } else { 60 }
     $built = Invoke-ReviewProcess -File $env:ComSpec -Parameters @('/d','/c',
         (Join-Path $PSScriptRoot 'BuildContentIntegrationTests.cmd'), $target) -Label ($target + '-content-build') -Seconds $compileSeconds
     Write-Output $built.Output.Trim()

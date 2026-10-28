@@ -66,6 +66,7 @@ struct TileInstanceProviderState {
     std::unique_ptr<ContentPrayerProvider> prayer;
     std::unique_ptr<ContentNotesProvider> notes;
     std::unique_ptr<ContentDiscordProvider> discord;
+    std::unique_ptr<ContentDiscordAccountProvider> discordAccount;
     std::unique_ptr<ContentDateTimeProvider> datetime;
     std::unique_ptr<ContentGoogleCalendarProvider> googleCalendar;
     std::unique_ptr<ContentGmailProvider> gmail;
@@ -80,12 +81,14 @@ struct TileInstanceProviderState {
     void Stop() {
         if (rss) rss->Cancel(); if (prayer) prayer->Cancel(); if (notes) notes->Cancel();
         if (discord) discord->Cancel();
+        if (discordAccount) discordAccount->Cancel();
         if (kuro) kuro->Cancel();
         if (datetime) datetime->Cancel();
         if (googleCalendar) googleCalendar->Cancel();
         if (gmail) gmail->Cancel();
         if (battery) battery->Cancel();
         if (rss) rss->Stop(); if (prayer) prayer->Stop(); if (notes) notes->Stop(); if (discord) discord->Stop();
+        if(discordAccount)discordAccount->Stop();
         if (kuro) kuro->Stop();
         if (datetime) datetime->Stop();
         if (googleCalendar) googleCalendar->Stop();
@@ -121,6 +124,7 @@ static void StopTileInstanceProviders(bool preserveCurrentStatuses=false)
     StopSelectedSmtcProviders();
     for (auto& item : g_tileInstanceProviders) item.second->Stop();
     g_tileInstanceProviders.clear();
+    {std::lock_guard<std::mutex> lock(g_discordReaderCredentialMutex);g_discordReaderCredentials.clear();}
     // Ordinary process exit leaves the quiet entry to its native expiration.
     // Its persisted delivery ID intentionally prevents resurrecting a dismissed
     // card on restart. Configuration failure/provider reset retires it now.
@@ -423,10 +427,21 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         break;
     }
     case TileInstanceType::Discord: {
+        if(tile.discordReader.view!=L"Presence"){
+            if(state.discord)state.discord->Cancel();
+            if(!state.discordAccount)state.discordAccount=std::make_unique<ContentDiscordAccountProvider>();
+            state.discordAccount->Refresh(tile,synchronous);const auto value=state.discordAccount->Read();
+            frame.sourceDiagnostic=state.discordAccount->error.empty()?value.status:state.discordAccount->error;
+            ProjectDiscordAccount(frame,value.data,tile.discordReader,ContentDiscordAccountProvider::Now(),{},[&](const auto& timestamp){return DiscordReaderTime(timestamp,tile.discordReader.timeFormat);});
+            const auto avatar=state.discordAccount->Avatar();if(avatar){frame.discordAvatarPath=avatar->path;frame.discordAvatarLease=avatar;}
+            NotifyTileSourceTransition(tile,state,!state.discordAccount->started?aip::notifications::SourceState::Unconfigured:value.data.hasSuccess&&!value.data.stale?aip::notifications::SourceState::Healthy:value.data.failure==aip::discord_tiles::Failure::None?aip::notifications::SourceState::Pending:aip::notifications::SourceState::Failed);
+            break;
+        }
+        if(state.discordAccount)state.discordAccount->Cancel();
         if (!state.discord) state.discord = std::make_unique<ContentDiscordProvider>();
         if (state.forceRefresh) state.discord->Cancel();
         bool completed=false,failed=false;
-        state.discord->Refresh(tile.configuration.discord, synchronous); frame.text = state.discord->Read(&completed,&failed); frame.wrapSourceText = true;
+        state.discord->Refresh(tile.configuration.discord, synchronous,DiscordReaderPersonalAcknowledged(tile)); frame.text = state.discord->Read(&completed,&failed); frame.wrapSourceText = true;
         NotifyTileSourceTransition(tile,state,!completed?aip::notifications::SourceState::Pending:
             failed?aip::notifications::SourceState::Failed:aip::notifications::SourceState::Healthy);
         break;

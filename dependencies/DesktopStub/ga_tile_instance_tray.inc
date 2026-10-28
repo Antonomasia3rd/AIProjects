@@ -4,7 +4,10 @@ static constexpr UINT ID_TILE_INSTANCE_FIRST = 60000, ID_TILE_INSTANCE_LAST = 63
 static constexpr std::size_t TileInstanceMenuPageSize = 16;
 static bool RequestDesktopHostSetup(HWND);
 enum class TileInstanceMenuVerb { Set, Edit, Toggle, Pin, Unpin, Inventory, Status, Overview, Refresh, Remove, Add,
-    Page, SignIn, ChooseAccount, AddGallery, BrowseLauncherTarget, BrowseLauncherIcon, NowPlayingLayout, SelectSmtcSource };
+    Page, SignIn, ChooseAccount, AddGallery, BrowseLauncherTarget, BrowseLauncherIcon, NowPlayingLayout, SelectSmtcSource,
+    DiscordConnect,DiscordCredential,DiscordCompose,DiscordDisconnect,DiscordPolicy };
+static bool ConfigureDiscordReader(HWND,const std::wstring&,bool);
+static bool ActivateDiscordReader(HWND,const std::wstring&,bool forceCompose=false);
 struct TileInstanceMenuCommand {
     TileInstanceMenuVerb verb;
     std::wstring id, key, value, prompt;
@@ -523,9 +526,33 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
         AppendTileInstanceChoices(menu,tile,L"Content.NotesDetail",L"Featured game information",details,L"Summary");
         break;
     }
-    case TileInstanceType::Discord:
-        for (const auto& option : g_discordOptions) AppendTileInstanceEditable(menu,tile,(L"Discord."+std::wstring(option.key)).c_str(),option.label,option.fallback,option.toggle);
+    case TileInstanceType::Discord: {
+        AppendTileInstanceChoices(menu,tile,L"DiscordReader.View",L"Discord tile view",{{L"Presence",L"Rich presence"},{L"Channel",L"Channel messages and new items"},{L"Profile",L"Account profile and visible friends"}},L"Presence");
+        AppendTileInstanceChoices(menu,tile,L"DiscordReader.Connection",L"Account reader connection",{{L"IPC",L"Presence IPC (no account reader)"},{L"OAuth",L"OAuth identity / granted data"},{L"Bot",L"Bot channel access"},{L"UserTokenExperimental",L"Personal user token (experimental; Discord prohibits this)"}},L"IPC");
+        aip::AppendTrayMenuItem(menu,0,TileInstanceUi(L"DiscordReaderPolicyNotice",L"Personal-account automation violates Discord's rules and may terminate the account."),false,false);
+        AppendTileInstanceCommand(menu,TileInstanceUi(L"DiscordReaderConfigureCredential",L"Set protected reader credential and review account..."),{TileInstanceMenuVerb::DiscordCredential,tile.id,L"",L"",L""});
+        AppendTileInstanceCommand(menu,TileInstanceUi(L"DiscordReaderConnect",L"Identify, review and connect the configured account..."),{TileInstanceMenuVerb::DiscordConnect,tile.id,L"",L"",L""});
+        AppendTileInstanceCommand(menu,TileInstanceUi(L"DiscordReaderDisconnect",L"Disconnect account reader (keep settings)"),{TileInstanceMenuVerb::DiscordDisconnect,tile.id,L"",L"",L""});
+        AppendTileInstanceCommand(menu,TileInstanceUi(L"DiscordReaderCompose",L"Compose a message for review..."),{TileInstanceMenuVerb::DiscordCompose,tile.id,L"",L"",L""});
+        AppendTileInstanceCommand(menu,TileInstanceUi(L"DiscordReaderPolicy",L"Read Discord's personal-account automation policy"),{TileInstanceMenuVerb::DiscordPolicy,tile.id,L"",L"",L""});
+        HMENU display=aip::BeginTrayNestedMenu(menu),click=aip::BeginTrayNestedMenu(menu),technical=aip::BeginTrayNestedMenu(menu),advanced=aip::BeginTrayNestedMenu(menu);
+        const auto caption=[](const wchar_t* key){std::wstring out;for(std::size_t i=0;key[i];++i){const auto c=key[i];if(i&&c>=L'A'&&c<=L'Z')out+=L' ';out+=i&&c>=L'A'&&c<=L'Z'?static_cast<wchar_t>(c-L'A'+L'a'):c;}return out;};
+        for(const auto& field:aip::discord_tiles::Fields){const std::wstring name=field.key;if(name==L"View"||name==L"Connection"||name==L"ExperimentalAcknowledged"||name==L"AcknowledgedProfileKey"||name==L"AcknowledgedAccountId")continue;
+            const bool send=name.compare(0,4,L"Send")==0||name==L"ClickAction"||name==L"ConfiguredText"||name==L"DirectSendEnabled"||name==L"AllowReviewedSend";
+            const bool network=name==L"RefreshMs"||name==L"OperationTimeoutMs"||name==L"ReconnectMinimumMs"||name==L"ReconnectMaximumMs"||name==L"MaximumBytes"||name==L"UseGateway";
+            const bool low=name==L"MessageLimit"||name==L"MaximumMessageCharacters"||name==L"FriendsCacheLimit"||name==L"EventHistoryLimit"||name==L"WarnEveryConnection";
+            HMENU target=send?click:network?technical:low?advanced:display;const auto key=L"DiscordReader."+name;const auto label=caption(field.key);
+            if(field.type==aip::discord_tiles::FieldType::Choice){std::vector<std::pair<std::wstring,std::wstring>> values;std::wstring choices=field.choices;std::size_t start=0;for(;;){const auto end=choices.find(L'|',start);auto value=choices.substr(start,end==std::wstring::npos?end:end-start);values.emplace_back(value,value);if(end==std::wstring::npos)break;start=end+1;}AppendTileInstanceChoices(target,tile,key.c_str(),label.c_str(),values,field.fallback);}
+            else AppendTileInstanceEditable(target,tile,key.c_str(),label.c_str(),field.fallback,field.type==aip::discord_tiles::FieldType::Boolean);
+        }
+        aip::EndTrayNestedMenu(menu,display,TileInstanceUi(L"DiscordReaderDisplay",L"Account, channel and display"));
+        aip::EndTrayNestedMenu(menu,click,TileInstanceUi(L"DiscordReaderSending",L"Click action and reviewed sending"));
+        aip::EndTrayNestedMenu(menu,technical,TileInstanceUi(L"DiscordReaderNetwork",L"Network and reconnect timing"));
+        aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"DiscordReaderAdvanced",L"Advanced cache and warning policy"));
+        HMENU presence=aip::BeginTrayNestedMenu(menu);for (const auto& option : g_discordOptions) AppendTileInstanceEditable(presence,tile,(L"Discord."+std::wstring(option.key)).c_str(),option.label,option.fallback,option.toggle);
+        aip::EndTrayNestedMenu(menu,presence,TileInstanceUi(L"DiscordReaderPresence",L"Independent rich presence settings"));
         break;
+    }
     case TileInstanceType::QuickAction: {
         std::vector<std::pair<std::wstring,std::wstring>> actions;
         for (const auto& action : TileActions) actions.emplace_back(action.id,action.label);
@@ -597,8 +624,9 @@ static void AppendTileInstanceDetails(HMENU menu,const aip::content::TileInstanc
         if (tile.type == TileInstanceType::Rss) actions.push_back({L"source",L"Open this tile's featured article"});
         if(tile.type==TileInstanceType::Mail)actions.push_back({L"source",TileInstanceUi(L"GmailOpenInbox",L"Open the Gmail inbox")});
         if(tile.type==TileInstanceType::AppLauncher)actions.push_back({L"launch",TileInstanceUi(L"AppLauncherOpenTarget",L"Open this tile's program or target")});
+        if(tile.type==TileInstanceType::Discord)actions.push_back({L"discord",TileInstanceUi(L"DiscordReaderTileClick",L"Use this Discord view's click action")});
         for (const auto& action : TileActions) actions.emplace_back(action.id,action.label);
-        AppendTileInstanceChoices(menu,tile,L"ClickAction",L"Click action",actions,tile.type==TileInstanceType::AppLauncher?L"launch":tile.type == TileInstanceType::NowPlaying ? L"toggle" : tile.type == TileInstanceType::Rss||tile.type==TileInstanceType::Mail ? L"source" : L"setup");
+        AppendTileInstanceChoices(menu,tile,L"ClickAction",L"Click action",actions,tile.clickAction.c_str());
     }
     const bool removable = registration||tile.primary || (SecondaryTileInventoryReady() && !SecondaryTileExists(nativeId));
     AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceRemove",L"Remove tile settings (unpin first)"),{TileInstanceMenuVerb::Remove,tile.id,L"",L"",L""},false,removable);
@@ -841,6 +869,10 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
     if (selected == cfg.tiles.end()) return true;
     const auto tile = *selected;
     const auto section = TileInstanceSection(tile.id), nativeId = TileInstanceNativeId(tile);
+    if(item.verb==TileInstanceMenuVerb::DiscordCredential||item.verb==TileInstanceMenuVerb::DiscordConnect){if(tile.type==TileInstanceType::Discord)ConfigureDiscordReader(owner,tile.id,item.verb==TileInstanceMenuVerb::DiscordCredential);return true;}
+    if(item.verb==TileInstanceMenuVerb::DiscordCompose){if(tile.type==TileInstanceType::Discord)ActivateDiscordReader(owner,tile.id,true);return true;}
+    if(item.verb==TileInstanceMenuVerb::DiscordDisconnect){if(tile.type==TileInstanceType::Discord&&SaveTileInstanceSettings(owner,{{section,L"DiscordReader.Enabled",L"0"}},tile.id))ForgetDiscordReaderSessionCredential(DiscordReaderProfileKey(tile.id));return true;}
+    if(item.verb==TileInstanceMenuVerb::DiscordPolicy){ShellExecuteW(owner,L"open",L"https://support.discord.com/hc/en-us/articles/115002192352-Automated-User-Accounts-Self-Bots",nullptr,nullptr,SW_SHOWNORMAL);return true;}
     if(item.verb==TileInstanceMenuVerb::SelectSmtcSource){
         if(tile.type!=TileInstanceType::NowPlaying)return true;
         auto app=item.value;if(!NormalizeSmtcSelectionSetting(L"sessionappid",app,error))return true;

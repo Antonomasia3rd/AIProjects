@@ -98,6 +98,8 @@ public:
         };
         const auto gateway = [&] {
             ipc_.reset();
+            if(!g_embeddedOptions||!g_embeddedOptions->experimentalGatewayAcknowledged)
+                throw std::runtime_error("Review the experimental personal-account warning before using Discord Gateway. No personal-token connection was started.");
             if (!IniReadB(L"gateway", L"supported", true)) throw std::runtime_error("Gateway transport is disabled in the profile.");
             // Credentials are never resolved in preview mode or by injected
             // transports. No migration, encryption or configuration write occurs.
@@ -313,3 +315,5 @@ Snapshot Service::Read() const {
     return state->snapshot;
 }
 } }
+
+#include "account_reader.inc"

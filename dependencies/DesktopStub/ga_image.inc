@@ -712,6 +712,26 @@ static REAL PresentedTextOffset(const aip::content::Snapshot& frame, int height,
     return static_cast<REAL>(free * scale * (p.stacking == L"center" ? .5 : 1));
 }
 
+#include "../discord_reader_tile_layout.h"
+static bool RenderDiscordAccountSimulation(Graphics& graphics,const aip::content::Snapshot& frame,int width,int height,double scale){
+    if(height<100)return true;
+    std::unique_ptr<Bitmap> avatar;
+    if(frame.discordProfileSource&&!frame.discordAvatarPath.empty()&&frame.discordAvatarLease){auto image=std::make_unique<Bitmap>(frame.discordAvatarPath.c_str());if(image->GetLastStatus()==Ok)avatar=std::move(image);}
+    const auto layout=aip::content::ComputeDiscordAccountGeometry(width,height,avatar!=nullptr,frame.discordAvatarScalePercent);
+    Font font(L"Segoe UI",static_cast<REAL>(12*scale),FontStyleRegular,UnitPixel);if(font.GetLastStatus()!=Ok)return false;
+    const REAL left=static_cast<REAL>(10*scale),bottom=static_cast<REAL>(layout.bodyBottom*scale),full=static_cast<REAL>((width-20)*scale);
+    REAL y=left;
+    if(!DrawTopSourceField(graphics,frame.text.primary,font,left,y,static_cast<REAL>(layout.textWidth*scale),bottom,height>200?2:1,255,static_cast<REAL>(2*scale),nullptr,false,aip::content::StatusTilePrimaryStyle(width,height))||
+       !DrawTopSourceField(graphics,frame.text.secondary,font,left,y,static_cast<REAL>(layout.textWidth*scale),bottom,frame.discordProfileSource?1:aip::content::DiscordReaderBodyLines(width,height),153,static_cast<REAL>(2*scale)))return false;
+    if(avatar){const auto side=static_cast<REAL>(layout.avatarSide*scale);const auto ratio=(std::min)(side/avatar->GetWidth(),side/avatar->GetHeight());
+        const auto w=avatar->GetWidth()*ratio,h=avatar->GetHeight()*ratio;
+        if(graphics.DrawImage(avatar.get(),RectF(static_cast<REAL>(layout.avatarX*scale)+(side-w)/2,left+(side-h)/2,w,h))!=Ok)return false;
+        y=(std::max)(y,left+side+static_cast<REAL>(2*scale));}
+    if(!DrawTopSourceField(graphics,frame.text.badge,font,left,y,full,bottom,1,153,static_cast<REAL>(2*scale)))return false;
+    for(std::size_t i=0;i<aip::content::DiscordReaderVisibleRows(frame,width,height);++i)
+        if(!DrawTopSourceField(graphics,frame.discordAccountRows[i].primary,font,left,y,full,bottom,1,153,static_cast<REAL>(2*scale)))return false;
+    return graphics.GetLastStatus()==Ok;
+}
 static bool RenderMediaTileSimulation(Graphics& graphics, const aip::content::Snapshot& snapshot,
     int logicalWidth, int logicalHeight, double scale)
 {
@@ -1060,7 +1080,7 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
     if(calendarSmall)return RenderDateTimeTileSimulation(graphics,*g_renderContent,logicalWidth,logicalHeight,scale);
     if(g_renderContent&&g_renderContent->batterySource)return RenderBatteryTileSimulation(graphics,*g_renderContent,logicalWidth,logicalHeight,scale);
     if (g_renderContent && logicalWidth >= 150 && logicalHeight >= 150) {
-        if (g_renderContent->presentation.Active() && !g_renderContent->smtcSource && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource && !g_renderContent->mailSource &&
+        if (g_renderContent->presentation.Active() && !g_renderContent->discordAccountSource && !g_renderContent->smtcSource && !g_renderContent->prayerSource && !g_renderContent->clockSource && !g_renderContent->calendarSource && !g_renderContent->mailSource &&
             g_renderContent->detailRows.empty() && g_renderContent->rssHeadlines.empty()) {
             Font font(L"Segoe UI", static_cast<REAL>(12 * scale), FontStyleRegular, UnitPixel);
             REAL y = static_cast<REAL>(10 * scale) + PresentedTextOffset(*g_renderContent, logicalHeight, scale);
@@ -1071,6 +1091,7 @@ static bool ApplyTileTextOverlay(Bitmap* bitmap, const wchar_t* tileName, int lo
         }
         if(g_renderContent->mailSource)return RenderMailTileSimulation(graphics,*g_renderContent,logicalWidth,logicalHeight,scale);
         if (g_renderContent->clockSource||g_renderContent->calendarSource) return RenderDateTimeTileSimulation(graphics,*g_renderContent,logicalWidth,logicalHeight,scale);
+        if (g_renderContent->discordAccountSource) return RenderDiscordAccountSimulation(graphics,*g_renderContent,logicalWidth,logicalHeight,scale);
         if (g_renderContent->prayerSource) return RenderPrayerTileSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
         if (g_renderContent->smtcSource) return RenderMediaTileSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
         if (!g_renderContent->detailRows.empty()) return RenderDetailRowsSimulation(graphics, *g_renderContent, logicalWidth, logicalHeight, scale);
