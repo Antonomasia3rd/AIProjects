@@ -430,14 +430,21 @@ static aip::content::Snapshot ComposeTileInstance(const aip::content::TileInstan
         if(tile.discordReader.view!=L"Presence"){
             if(state.discord)state.discord->Cancel();
             if(!state.discordAccount)state.discordAccount=std::make_unique<ContentDiscordAccountProvider>();
-            state.discordAccount->Refresh(tile,synchronous);const auto value=state.discordAccount->Read();
+            state.discordAccount->Refresh(tile,synchronous);const bool readerConfigured=state.discordAccount->started&&!state.discordAccount->key.empty();
+            const auto value=readerConfigured?state.discordAccount->Read():aip::discord::ReaderSnapshot{};
             frame.sourceDiagnostic=state.discordAccount->error.empty()?value.status:state.discordAccount->error;
             ProjectDiscordAccount(frame,value.data,tile.discordReader,ContentDiscordAccountProvider::Now(),{},[&](const auto& timestamp){return DiscordReaderTime(timestamp,tile.discordReader.timeFormat);});
-            const auto avatar=state.discordAccount->Avatar();if(avatar){frame.discordAvatarPath=avatar->path;frame.discordAvatarLease=avatar;}
-            NotifyTileSourceTransition(tile,state,!state.discordAccount->started?aip::notifications::SourceState::Unconfigured:value.data.hasSuccess&&!value.data.stale?aip::notifications::SourceState::Healthy:value.data.failure==aip::discord_tiles::Failure::None?aip::notifications::SourceState::Pending:aip::notifications::SourceState::Failed);
+            const auto avatar=readerConfigured?state.discordAccount->Avatar():std::shared_ptr<const aip::content::SmtcArtworkFile>{};if(avatar){frame.discordAvatarPath=avatar->path;frame.discordAvatarLease=avatar;}
+            NotifyTileSourceTransition(tile,state,!readerConfigured?aip::notifications::SourceState::Unconfigured:value.data.hasSuccess&&!value.data.stale?aip::notifications::SourceState::Healthy:value.data.failure==aip::discord_tiles::Failure::None?aip::notifications::SourceState::Pending:aip::notifications::SourceState::Failed);
             break;
         }
         if(state.discordAccount)state.discordAccount->Cancel();
+        if(Trim(tile.configuration.discord.clientId).empty()&&Trim(tile.configuration.discord.profilePath).empty()){
+            if(state.discord)state.discord->Cancel();
+            frame.text=DiscordSetupText(true);frame.wrapSourceText=true;
+            NotifyTileSourceTransition(tile,state,aip::notifications::SourceState::Unconfigured);
+            break;
+        }
         if (!state.discord) state.discord = std::make_unique<ContentDiscordProvider>();
         if (state.forceRefresh) state.discord->Cancel();
         bool completed=false,failed=false;

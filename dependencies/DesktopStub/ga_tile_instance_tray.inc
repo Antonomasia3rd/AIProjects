@@ -112,6 +112,7 @@ static bool SaveTileInstanceSettingsWithRemovalConfirmation(HWND owner,const std
         if (!removedId.empty()) {
             const auto tile = std::find_if(current.tiles.begin(), current.tiles.end(), [&](const auto& item) { return item.id == removedId; });
             if (tile == current.tiles.end()) { error = L"This tile no longer exists."; return false; }
+            if (tile->primary) { error = L"The main tile cannot be removed. Its settings were kept."; return false; }
             const auto nativeId = aip::content::TileInstanceNativeId(*tile);
             aip::content::TileDeliveryPolicy removalPolicy;
             if(!aip::content::ReadTileDeliveryPolicy(readOriginal,aip::content::TileInstanceSection(tile->id),tile->id,removalPolicy,error))return false;
@@ -527,30 +528,64 @@ static void AppendTileInstanceSourceSettings(HMENU menu, const aip::content::Til
         break;
     }
     case TileInstanceType::Discord: {
-        AppendTileInstanceChoices(menu,tile,L"DiscordReader.View",L"Discord tile view",{{L"Presence",L"Rich presence"},{L"Channel",L"Channel messages and new items"},{L"Profile",L"Account profile and visible friends"}},L"Presence");
-        AppendTileInstanceChoices(menu,tile,L"DiscordReader.Connection",L"Account reader connection",{{L"IPC",L"Presence IPC (no account reader)"},{L"OAuth",L"OAuth identity / granted data"},{L"Bot",L"Bot channel access"},{L"UserTokenExperimental",L"Personal user token (experimental; Discord prohibits this)"}},L"IPC");
+        const auto section=TilePolicyMenuSection(tile);
+        const bool presenceView=IniReadS(section.c_str(),L"DiscordReader.View",L"Presence")==L"Presence";
+        AppendTileInstanceChoices(menu,tile,L"DiscordReader.View",L"View",{{L"Presence",L"Presence"},{L"Channel",L"Channel messages and new items"},{L"Profile",L"Account profile and visible friends"}},L"Presence");
+        aip::AppendTrayMenuItem(menu,0,presenceView?
+            L"Presence connection: local Discord app (IPC by default; advanced writer profile may override)":
+            L"Reader connection: "+ContentMenuValue(IniReadS(section.c_str(),L"DiscordReader.Connection",L"IPC")),false,false);
+        HMENU advanced=aip::BeginTrayNestedMenu(menu);
+        const auto connectionParent=presenceView?advanced:menu;
+        HMENU connection=aip::BeginTrayNestedMenu(connectionParent),otherConnections=aip::BeginTrayNestedMenu(connection);
+        AppendTileInstanceCommand(connection,L"Personal account / Gateway (experimental; prohibited by Discord)",
+            {TileInstanceMenuVerb::Set,tile.id,L"DiscordReader.Connection",L"UserTokenExperimental",L""},tile.discordReader.connection==L"UserTokenExperimental");
+        const std::pair<const wchar_t*,const wchar_t*> otherConnectionChoices[]={
+            {L"IPC",L"No account reader (IPC is for rich presence)"},
+            {L"OAuth",L"OAuth (identity only in this build)"},
+            {L"Bot",L"Bot account (permitted channels; not your personal account)"}};
+        for(const auto& choice:otherConnectionChoices)AppendTileInstanceCommand(otherConnections,choice.second,
+            {TileInstanceMenuVerb::Set,tile.id,L"DiscordReader.Connection",choice.first,L""},tile.discordReader.connection==choice.first);
+        aip::EndTrayNestedMenu(connection,otherConnections,TileInstanceUi(L"DiscordReaderOtherConnections",L"Advanced connections"));
+        aip::AppendTrayMenuItem(connection,0,L"Reader selection does not change the presence writer's backend.",false,false);
+        aip::EndTrayNestedMenu(connectionParent,connection,TileInstanceUi(L"DiscordReaderConnectionMenu",L"Account reader connection"));
         aip::AppendTrayMenuItem(menu,0,TileInstanceUi(L"DiscordReaderPolicyNotice",L"Personal-account automation violates Discord's rules and may terminate the account."),false,false);
-        AppendTileInstanceCommand(menu,TileInstanceUi(L"DiscordReaderConfigureCredential",L"Set protected reader credential and review account..."),{TileInstanceMenuVerb::DiscordCredential,tile.id,L"",L"",L""});
-        AppendTileInstanceCommand(menu,TileInstanceUi(L"DiscordReaderConnect",L"Identify, review and connect the configured account..."),{TileInstanceMenuVerb::DiscordConnect,tile.id,L"",L"",L""});
-        AppendTileInstanceCommand(menu,TileInstanceUi(L"DiscordReaderDisconnect",L"Disconnect account reader (keep settings)"),{TileInstanceMenuVerb::DiscordDisconnect,tile.id,L"",L"",L""});
-        AppendTileInstanceCommand(menu,TileInstanceUi(L"DiscordReaderCompose",L"Compose a message for review..."),{TileInstanceMenuVerb::DiscordCompose,tile.id,L"",L"",L""});
+        const auto readerActions=presenceView?advanced:menu;
+        AppendTileInstanceCommand(readerActions,TileInstanceUi(L"DiscordReaderConfigureCredential",L"Connect account (enter token and review)..."),{TileInstanceMenuVerb::DiscordCredential,tile.id,L"",L"",L""});
+        AppendTileInstanceCommand(readerActions,TileInstanceUi(L"DiscordReaderConnect",L"Reconnect saved account..."),{TileInstanceMenuVerb::DiscordConnect,tile.id,L"",L"",L""});
+        AppendTileInstanceCommand(readerActions,TileInstanceUi(L"DiscordReaderDisconnect",L"Disconnect account reader (keep settings)"),{TileInstanceMenuVerb::DiscordDisconnect,tile.id,L"",L"",L""});
+        AppendTileInstanceCommand(readerActions,TileInstanceUi(L"DiscordReaderCompose",L"Compose a message for review..."),{TileInstanceMenuVerb::DiscordCompose,tile.id,L"",L"",L""});
         AppendTileInstanceCommand(menu,TileInstanceUi(L"DiscordReaderPolicy",L"Read Discord's personal-account automation policy"),{TileInstanceMenuVerb::DiscordPolicy,tile.id,L"",L"",L""});
-        HMENU display=aip::BeginTrayNestedMenu(menu),click=aip::BeginTrayNestedMenu(menu),technical=aip::BeginTrayNestedMenu(menu),advanced=aip::BeginTrayNestedMenu(menu);
+        HMENU account=aip::BeginTrayNestedMenu(menu),display=aip::BeginTrayNestedMenu(menu),click=aip::BeginTrayNestedMenu(menu);
+        HMENU identity=aip::BeginTrayNestedMenu(advanced),technical=aip::BeginTrayNestedMenu(advanced),cache=aip::BeginTrayNestedMenu(advanced),sending=aip::BeginTrayNestedMenu(advanced);
         const auto caption=[](const wchar_t* key){std::wstring out;for(std::size_t i=0;key[i];++i){const auto c=key[i];if(i&&c>=L'A'&&c<=L'Z')out+=L' ';out+=i&&c>=L'A'&&c<=L'Z'?static_cast<wchar_t>(c-L'A'+L'a'):c;}return out;};
-        for(const auto& field:aip::discord_tiles::Fields){const std::wstring name=field.key;if(name==L"View"||name==L"Connection"||name==L"ExperimentalAcknowledged"||name==L"AcknowledgedProfileKey"||name==L"AcknowledgedAccountId")continue;
-            const bool send=name.compare(0,4,L"Send")==0||name==L"ClickAction"||name==L"ConfiguredText"||name==L"DirectSendEnabled"||name==L"AllowReviewedSend";
+        for(const auto& field:aip::discord_tiles::Fields){const std::wstring name=field.key;if(name==L"View"||name==L"Connection")continue;
+            const auto key=L"DiscordReader."+name;const auto label=caption(field.key);
+            if(name==L"ExperimentalAcknowledged"||name==L"AcknowledgedProfileKey"||name==L"AcknowledgedAccountId"){
+                aip::AppendTrayMenuItem(identity,0,label+L": "+ContentMenuValue(IniReadS(section.c_str(),key.c_str(),field.fallback)),false,false);continue;
+            }
+            const bool send=name.compare(0,4,L"Send")==0||name==L"DirectSendEnabled"||name==L"AllowReviewedSend";
             const bool network=name==L"RefreshMs"||name==L"OperationTimeoutMs"||name==L"ReconnectMinimumMs"||name==L"ReconnectMaximumMs"||name==L"MaximumBytes"||name==L"UseGateway";
-            const bool low=name==L"MessageLimit"||name==L"MaximumMessageCharacters"||name==L"FriendsCacheLimit"||name==L"EventHistoryLimit"||name==L"WarnEveryConnection";
-            HMENU target=send?click:network?technical:low?advanced:display;const auto key=L"DiscordReader."+name;const auto label=caption(field.key);
+            const bool low=name==L"MessageLimit"||name==L"MaximumMessageCharacters"||name==L"FriendsCacheLimit"||name==L"EventHistoryLimit"||name==L"WarnEveryConnection"||name==L"RetainLastGood"||name==L"CountOwnMessages"||name==L"IncludeRoleMentions"||name==L"IncludeEveryoneMentions";
+            HMENU target=name==L"AccountId"?identity:send?sending:network?technical:low?cache:
+                name==L"ClickAction"||name==L"ConfiguredText"?click:
+                name==L"Enabled"||name==L"RememberCredential"||name==L"GuildId"||name==L"ChannelId"?account:display;
             if(field.type==aip::discord_tiles::FieldType::Choice){std::vector<std::pair<std::wstring,std::wstring>> values;std::wstring choices=field.choices;std::size_t start=0;for(;;){const auto end=choices.find(L'|',start);auto value=choices.substr(start,end==std::wstring::npos?end:end-start);values.emplace_back(value,value);if(end==std::wstring::npos)break;start=end+1;}AppendTileInstanceChoices(target,tile,key.c_str(),label.c_str(),values,field.fallback);}
             else AppendTileInstanceEditable(target,tile,key.c_str(),label.c_str(),field.fallback,field.type==aip::discord_tiles::FieldType::Boolean);
         }
-        aip::EndTrayNestedMenu(menu,display,TileInstanceUi(L"DiscordReaderDisplay",L"Account, channel and display"));
-        aip::EndTrayNestedMenu(menu,click,TileInstanceUi(L"DiscordReaderSending",L"Click action and reviewed sending"));
-        aip::EndTrayNestedMenu(menu,technical,TileInstanceUi(L"DiscordReaderNetwork",L"Network and reconnect timing"));
-        aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"DiscordReaderAdvanced",L"Advanced cache and warning policy"));
-        HMENU presence=aip::BeginTrayNestedMenu(menu);for (const auto& option : g_discordOptions) AppendTileInstanceEditable(presence,tile,(L"Discord."+std::wstring(option.key)).c_str(),option.label,option.fallback,option.toggle);
-        aip::EndTrayNestedMenu(menu,presence,TileInstanceUi(L"DiscordReaderPresence",L"Independent rich presence settings"));
+        for(const auto* key:{L"CredentialConnection",L"CredentialRevision",L"AcknowledgedCredentialRevision"})
+            aip::AppendTrayMenuItem(identity,0,caption(key)+L": "+ContentMenuValue(IniReadS(section.c_str(),(L"DiscordReader."+std::wstring(key)).c_str(),L"")),false,false);
+        aip::EndTrayNestedMenu(menu,account,TileInstanceUi(L"DiscordReaderAccountChannel",L"Account reader and channel"));
+        aip::EndTrayNestedMenu(menu,display,TileInstanceUi(L"DiscordReaderBasicDisplay",L"Display"));
+        aip::EndTrayNestedMenu(menu,click,TileInstanceUi(L"DiscordReaderBasicClick",L"Click action and message draft"));
+        aip::EndTrayNestedMenu(advanced,identity,TileInstanceUi(L"DiscordReaderIdentity",L"Account IDs and credential review details"));
+        aip::EndTrayNestedMenu(advanced,technical,TileInstanceUi(L"DiscordReaderNetwork",L"Network and reconnect timing"));
+        aip::EndTrayNestedMenu(advanced,cache,TileInstanceUi(L"DiscordReaderCachePolicy",L"Cache, counting and warning policy"));
+        aip::EndTrayNestedMenu(advanced,sending,TileInstanceUi(L"DiscordReaderSendingPolicy",L"Sending limits and permissions"));
+        HMENU presence=aip::BeginTrayNestedMenu(presenceView?menu:advanced);
+        for (const auto& option : g_discordOptions) AppendTileInstanceEditable(presence,tile,(L"Discord."+std::wstring(option.key)).c_str(),option.label,option.fallback,option.toggle);
+        aip::AppendTrayMenuItem(presence,0,L"These writer settings and its advanced profile are independent of the account reader.",false,false);
+        aip::EndTrayNestedMenu(presenceView?menu:advanced,presence,TileInstanceUi(L"DiscordPresenceWriterSettings",L"Presence writer settings"));
+        aip::EndTrayNestedMenu(menu,advanced,TileInstanceUi(L"DiscordReaderAdvancedMenu",L"Advanced"));
         break;
     }
     case TileInstanceType::QuickAction: {
@@ -628,8 +663,9 @@ static void AppendTileInstanceDetails(HMENU menu,const aip::content::TileInstanc
         for (const auto& action : TileActions) actions.emplace_back(action.id,action.label);
         AppendTileInstanceChoices(menu,tile,L"ClickAction",L"Click action",actions,tile.clickAction.c_str());
     }
-    const bool removable = registration||tile.primary || (SecondaryTileInventoryReady() && !SecondaryTileExists(nativeId));
-    AppendTileInstanceCommand(menu,TileInstanceUi(L"TileInstanceRemove",L"Remove tile settings (unpin first)"),{TileInstanceMenuVerb::Remove,tile.id,L"",L"",L""},false,removable);
+    const bool removable = !tile.primary&&(registration || (SecondaryTileInventoryReady() && !SecondaryTileExists(nativeId)));
+    AppendTileInstanceCommand(menu,tile.primary?TileInstanceUi(L"TileInstanceMainCannotRemove",L"Main tile (cannot remove)"):
+        TileInstanceUi(L"TileInstanceRemove",L"Remove tile settings (unpin first)"),{TileInstanceMenuVerb::Remove,tile.id,L"",L"",L""},false,removable);
 }
 static void AppendTileInstancesMenu(HMENU menu)
 {
@@ -930,6 +966,7 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
         return true;
     }
     if (item.verb == TileInstanceMenuVerb::Remove) {
+        if(tile.primary)return true;
         const bool registration=TileInstanceUsesRegistration(tile);
         if(registration&&DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,L"Unpin this Registration tile from Start manually before removing its settings. The registered entry and files will be kept so existing pins remain recoverable. Remove these tile settings now?",tile.name.c_str(),MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION)!=IDYES)return true;
         SaveTileInstanceSettingsWithRemovalConfirmation(owner,{},tile.id,tile.id,registration);return true;
@@ -940,6 +977,18 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
         if (ShowTextInputDialog(owner,tile.name,item.prompt,value,true,item.secret) != IDOK) return true;
     } else if (item.verb == TileInstanceMenuVerb::Toggle) {
         bool enabled = false; ParseBool(IniReadS(section.c_str(),item.key.c_str(),item.value.c_str()),enabled); value = enabled ? L"0" : L"1";
+    }
+    if(tile.type==TileInstanceType::Discord&&Lower(item.key)==L"discordreader.view"&&
+        (value==L"Channel"||value==L"Profile")&&IniReadS(section.c_str(),L"DiscordReader.Connection",L"").empty()){
+        // Only replace the implicit factory IPC reader default. Any explicitly
+        // saved connection, including IPC, belongs to the user and is preserved.
+        SaveConfirmedTileInstanceSettings(owner,{{section,item.key,value},{section,L"DiscordReader.Connection",L"UserTokenExperimental"},
+            {section,L"DiscordReader.Enabled",L"0"}},tile.id,[section](const std::wstring& text,std::wstring& issue){
+                const auto document=aip::ParseIniDocument(text);std::wstring type,connection;
+                if(aip::ReadIniValueFromDoc(document,section.c_str(),L"Type",type)&&Lower(type)==L"discord"&&
+                    !aip::ReadIniValueFromDoc(document,section.c_str(),L"DiscordReader.Connection",connection))return true;
+                issue=L"This tile's connection changed. Reopen its settings before choosing a Discord view.";return false;
+            });return true;
     }
     if(Lower(item.key)==L"delivery.mode"){
         if(tile.primary&&tile.policy.Read(L"Settings",L"PrimaryRegistration",L"Separate")==L"Main"){
@@ -958,6 +1007,8 @@ static bool DispatchTileInstanceCommand(HWND owner,UINT command)
         return true;
     }
     std::vector<aip::IniSetting> settings{{section,item.key,value}};
+    if(tile.type==TileInstanceType::Discord&&Lower(item.key)==L"discordreader.connection"&&value!=tile.discordReader.connection)
+        settings.push_back({section,L"DiscordReader.Enabled",L"0"});
     if(Lower(item.key)==L"kuro.gametoken"){
         std::wstring tokenError; if(!aip::kuro::NormalizeSetting(L"GameToken",value,tokenError)){
             DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,tokenError.c_str(),tile.name.c_str(),MB_OK|MB_ICONERROR);return true;

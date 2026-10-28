@@ -1,9 +1,13 @@
 // Exact host configuration, hidden native dialogs and synthetic account I/O.
 // No real credential, account, Gateway, message, package or notification is used.
+static std::wstring discordFixtureConfirmationToken;
 static void TestDiscordReaderHost(const std::wstring& bitmapPath){
     namespace d=aip::discord_tiles;namespace c=aip::content;
     std::wstring original,error;Check(ReadIniFileForMutation(original),"Discord fixture captures its private test INI");
     const auto savedDialog=contentDialogResponse;const auto oldRefresh=g_iniCacheRefreshMs.load();g_iniCacheRefreshMs=0;
+    Check(WriteContentFixture(L"[Tiles]\r\nSchemaVersion=1\r\nInstances=desktop\r\n[Tile.desktop]\r\nType=Wallpaper\r\nPrimary=1\r\n"),"prepare primary removal guard fixture");
+    std::wstring primaryBefore,primaryAfter;ReadIniFileForMutation(primaryBefore);
+    Check(!SaveTileInstanceSettingsWithRemovalConfirmation(nullptr,{{L"Tiles",L"Instances",L""}},L"desktop",L"desktop",true)&&ReadIniFileForMutation(primaryAfter)&&primaryBefore==primaryAfter,"authoritative removal refuses the main tile even after stale confirmation");
     const auto profile=L"[Tiles]\r\nSchemaVersion=1\r\nInstances=discord\r\n[Tile.discord]\r\nType=Discord\r\nName=Discord test\r\nDiscordReader.View=Profile\r\nDiscordReader.Connection=UserTokenExperimental\r\nDiscordReader.UseGateway=0\r\n";
     Check(WriteContentFixture(profile),"create one independent reader fixture without legacy presence settings");
     c::TileInstance tile;Check(ReadDiscordReaderTile(L"discord",tile,error)&&!tile.discordReader.enabled&&!tile.discordReader.rememberCredential,"fresh typed reader is explicitly disabled with session-only credential default");
@@ -12,6 +16,20 @@ static void TestDiscordReaderHost(const std::wstring& bitmapPath){
     std::atomic<unsigned> probes{0},tokens{0};g_testDiscordProtect=[](const auto&){return std::wstring(L"dpapi:synthetic-envelope");};
     g_testDiscordCredentialDialog=[&](HWND,const auto&,auto& text,bool& remember){++tokens;text=L"inert-token-value";remember=false;return IDOK;};
     g_testDiscordIdentityProbe=[&](const auto& request){++probes;Check(request.enabled&&request.experimentalWarningReviewed&&request.profileKey==request.warningProfileKey,"identity probe has explicit warning and matching profile context");Check(request.profileOverride&&request.profilePath.empty(),"session-only identity probe receives protected in-memory profile");aip::discord::ReaderIdentityProbeResult result;result.ok=true;result.user.id=L"42";result.user.username=L"synthetic-user";result.user.displayName=L"Synthetic user";return result;};
+    unsigned notices=0;g_testDiscordReaderNotice=[&](const auto&,bool){++notices;};
+    Check(!ActivateDiscordReader(nullptr,L"discord",true)&&notices==1,"unconfigured compose uses the nonmodal notification path");
+    g_notificationsEnabled=true;g_testNotificationConfirmationToast=[](const auto&,const auto&,const auto&,const auto& token){discordFixtureConfirmationToken=token;return true;};
+    Check(ConfigureDiscordReader(nullptr,L"discord",true)&&probes==0&&tokens==0,"queued policy notification cannot request credentials before approval");
+    QueueUserConfirmationAction(L"confirm="+discordFixtureConfirmationToken+L"&choice=no");DrainUserConfirmations();
+    Check(probes==0&&tokens==0,"declining policy notification cannot authenticate");
+    Check(ConfigureDiscordReader(nullptr,L"discord",true),"a new connection can queue a new policy review");
+    QueueUserConfirmationAction(L"confirm="+discordFixtureConfirmationToken+L"&choice=yes");DrainUserConfirmations();
+    Check(probes==1&&tokens==1&&ReadDiscordReaderTile(L"discord",tile,error)&&!tile.discordReader.enabled,"policy Yes only probes; verified-account notification must still be approved");
+    Check(SaveConfirmedTileInstanceSettings(nullptr,{{L"Tile.discord",L"DiscordReader.ChannelId",L"501"}},L"discord",{}),"change account context while account notification is pending");
+    QueueUserConfirmationAction(L"confirm="+discordFixtureConfirmationToken+L"&choice=yes");DrainUserConfirmations();
+    Check(ReadDiscordReaderTile(L"discord",tile,error)&&tile.discordReader.accountId.empty()&&!DiscordReaderSessionProfile(tile),"late account Yes cannot save stale credentials or enable the changed tile");
+    ClearUserConfirmations();g_testNotificationConfirmationToast=nullptr;g_notificationsEnabled=false;probes=0;tokens=0;
+    Check(WriteContentFixture(profile),"restore initial reader after asynchronous confirmation tests");
     contentDialogResponse=IDNO;Check(!ConfigureDiscordReader(nullptr,L"discord",true)&&probes==0&&tokens==0,"declining the prominent personal-account warning cannot read or request any credential");
     contentDialogResponse=IDYES;Check(ConfigureDiscordReader(nullptr,L"discord",true)&&probes==1&&tokens==1,"explicit reviewed account setup accepts an injected session-only credential");
     Check(ReadDiscordReaderTile(L"discord",tile,error)&&tile.discordReader.enabled&&tile.discordReader.accountId==L"42"&&!tile.discordReader.rememberCredential,"verified identity and reader enablement are saved only after explicit account review");
@@ -73,6 +91,6 @@ static void TestDiscordReaderHost(const std::wstring& bitmapPath){
             Check(promptRect.bottom<=edit.top&&edit.bottom<checkbox.top&&checkbox.bottom<=client.bottom,"measured long prompt, secret edit and Remember checkbox do not overlap or clip");
             Check(SendDlgItemMessageW(dialog,TEXT_INPUT_EDIT_ID,EM_GETPASSWORDCHAR,0,0)==L'\x25cf'&&IsDlgButtonChecked(dialog,DISCORD_READER_REMEMBER_ID)==BST_UNCHECKED,"actual native credential control masks input and defaults Remember off");DestroyWindow(dialog);}
     }
-    g_testDiscordIdentityProbe={};g_testDiscordProtect={};g_testDiscordCredentialDialog={};g_testDiscordComposeDialog={};contentDialogResponse=savedDialog;StopTileInstanceProviders();
+    g_testDiscordIdentityProbe={};g_testDiscordProtect={};g_testDiscordCredentialDialog={};g_testDiscordComposeDialog={};g_testDiscordReaderNotice={};contentDialogResponse=savedDialog;StopTileInstanceProviders();
     Check(WriteContentFixture(original),"Discord fixture restores its private INI");g_iniCacheRefreshMs=oldRefresh;
 }

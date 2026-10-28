@@ -5,6 +5,7 @@ static std::function<aip::discord::ReaderIdentityProbeResult(const aip::discord:
 static std::function<std::wstring(const std::wstring&)> g_testDiscordProtect;
 static std::function<INT_PTR(HWND,const std::wstring&,std::wstring&,bool&)> g_testDiscordCredentialDialog;
 static std::function<INT_PTR(HWND,const std::wstring&,const std::wstring&,std::wstring&)> g_testDiscordComposeDialog;
+static std::function<void(const std::wstring&,bool)> g_testDiscordReaderNotice;
 #endif
 static constexpr int DISCORD_READER_REMEMBER_ID=1079;
 struct DiscordReaderCredentialDialogState {TextInputDialogState input;bool* remember=nullptr;};
@@ -58,7 +59,18 @@ static bool SaveDiscordReaderChanges(HWND owner,const aip::content::TileInstance
         if(selected==current.tiles.end()||selected->type!=aip::content::TileInstanceType::Discord||DiscordReaderRequestKey(*selected)!=expected){error=L"This tile's account, channel or credential changed while the dialog was open. Review its current settings again.";return false;}return true;
     });
 }
-static void DiscordReaderNotice(HWND owner,const std::wstring& text,bool failed=true){DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,text.c_str(),L"Discord account reader",MB_OK|(failed?MB_ICONWARNING:MB_ICONINFORMATION));}
+static void DiscordReaderNotice(HWND owner,const std::wstring& text,bool failed=true){
+    (void)owner;
+#ifdef DESKTOPSTUB_INERT_HARDWARE
+    if(g_testDiscordReaderNotice){g_testDiscordReaderNotice(text,failed);return;}
+#endif
+    NotifyUserOperation(L"discord-reader-operation",L"Discord",text,failed?NIIF_WARNING:NIIF_INFO,true);
+}
+static bool ConfirmDiscordOperation(HWND owner,const std::wstring& key,const std::wstring& title,const std::wstring& message,std::function<bool()> accepted){
+    struct Completion{std::atomic<bool> finished{false},result{false};};auto completion=std::make_shared<Completion>();
+    const bool queued=ConfirmUserOperation(owner,key,title,message,[completion,accepted]{completion->result=accepted();completion->finished=true;});
+    return completion->finished.load()?completion->result.load():queued;
+}
 static aip::discord::ReaderIdentityProbeResult RunDiscordReaderIdentityProbe(aip::discord::ReaderIdentityProbeOptions options){
 #ifdef DESKTOPSTUB_INERT_HARDWARE
     if(g_testDiscordIdentityProbe)return g_testDiscordIdentityProbe(options);
@@ -71,16 +83,21 @@ static aip::discord::ReaderIdentityProbeResult RunDiscordReaderIdentityProbe(aip
     worker.join();if(quit)PostQuitMessage(0);return result;
 #endif
 }
-static bool ConfigureDiscordReader(HWND owner,const std::wstring& id,bool replaceCredential){
+static bool ConfigureDiscordReaderImpl(HWND owner,const std::wstring& id,bool replaceCredential,bool policyReviewed){
     using namespace aip::discord_tiles;aip::content::TileInstance tile;std::wstring error;
     if(!ReadDiscordReaderTile(id,tile,error)){DiscordReaderNotice(owner,error);return false;}
     const bool presence=tile.discordReader.view==L"Presence";auto connection=presence?L"UserTokenExperimental":tile.discordReader.connection;
     if(connection!=L"UserTokenExperimental"&&connection!=L"OAuth"&&connection!=L"Bot"){DiscordReaderNotice(owner,L"Choose OAuth, Bot or the explicitly experimental personal-token reader connection first. Rich presence IPC itself requires no account-reader login.");return false;}
     if(presence&&(replaceCredential||DiscordReaderProfilePath(tile).empty())){DiscordReaderNotice(owner,L"Rich presence keeps its existing account/profile configuration. Choose or create an advanced Discord profile, then use Identify and review to acknowledge its experimental Gateway path. Reader credentials are separate from the presence writer.");return false;}
     const bool personal=connection==L"UserTokenExperimental";
-    if(personal){const auto warning=std::wstring(ExperimentalWarning)+L"\n\nProfile: "+DiscordReaderProfileKey(id)+L"\nTile: "+tile.name+
+    if(personal&&!policyReviewed){const auto warning=std::wstring(ExperimentalWarning)+L"\n\nTile: "+tile.name+
         L"\n\nThis token can expose private account data and act as this account when you explicitly send. DesktopStub cannot promise that using an alt or a modified Discord client avoids enforcement. No message or read acknowledgement is sent by account lookup.\n\nReview this experimental account connection?";
-        if(DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,warning.c_str(),L"Experimental Discord personal account",MB_YESNO|MB_DEFBUTTON2|MB_ICONWARNING)!=IDYES)return false;}
+        const auto expected=DiscordReaderRequestKey(tile);
+        return ConfirmDiscordOperation(owner,L"discord-policy-"+id,L"Experimental Discord personal account",warning,[owner,id,replaceCredential,expected]{
+            aip::content::TileInstance current;std::wstring issue;
+            if(!ReadDiscordReaderTile(id,current,issue)||DiscordReaderRequestKey(current)!=expected){DiscordReaderNotice(owner,L"This tile's account settings changed. Start the connection again.");return false;}
+            return ConfigureDiscordReaderImpl(IsWindow(owner)?owner:nullptr,id,replaceCredential,true);
+        });}
     auto prospective=tile;prospective.discordReader.connection=connection;std::vector<aip::IniSetting> changes;
     const auto section=aip::content::TileInstanceSection(id);
     std::wstring enteredRevision;std::shared_ptr<const aip::discord::Profile> enteredProfile;
@@ -112,15 +129,25 @@ static bool ConfigureDiscordReader(HWND owner,const std::wstring& id,bool replac
     const auto name=PreferredUserName(identity.user.displayName,identity.user.username,L"Discord account");
     const auto prompt=L"Account: "+DisplayText(name,128)+L"\nUsername: @"+DisplayText(identity.user.username.value_or(L""),128)+L"\nAccount ID: "+identity.user.id+
         L"\nConnection: "+std::wstring(connection)+L"\nTile: "+tile.name+L"\n\nEnable this reviewed account connection? Sending remains separately controlled and never occurs during reading, rendering or reconnect.";
-    if(DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,prompt.c_str(),L"Review Discord account",MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION)!=IDYES)return false;
     prospective.discordReader.accountId=identity.user.id;
     changes.push_back({section,L"DiscordReader.AccountId",identity.user.id});changes.push_back({section,L"DiscordReader.Connection",connection});changes.push_back({section,L"DiscordReader.Enabled",presence?L"0":L"1"});
     changes.push_back({section,L"DiscordReader.ExperimentalAcknowledged",personal?L"1":L"0"});changes.push_back({section,L"DiscordReader.AcknowledgedProfileKey",personal?probe.profileKey:L""});
     changes.push_back({section,L"DiscordReader.AcknowledgedAccountId",personal?identity.user.id:L""});changes.push_back({section,L"DiscordReader.AcknowledgedCredentialRevision",personal?(enteredRevision.empty()?DiscordReaderCredentialRevision(prospective):enteredRevision):L""});
-    if(!SaveDiscordReaderChanges(owner,tile,changes))return false;
-    if(enteredProfile){std::lock_guard<std::mutex> lock(g_discordReaderCredentialMutex);const auto key=DiscordReaderProfileKey(id);if(prospective.discordReader.rememberCredential)g_discordReaderCredentials.erase(key);else g_discordReaderCredentials[key]={identity.user.id,connection,enteredRevision,enteredProfile};}
-    if(personal){std::lock_guard<std::mutex> lock(g_discordReaderWarningMutex);if(g_discordReaderWarningSessions.size()>1024)g_discordReaderWarningSessions.clear();g_discordReaderWarningSessions.insert(DiscordReaderWarningKey(prospective));}
-    RefreshTileInstanceNow(id);return true;
+    return ConfirmDiscordOperation(owner,L"discord-account-"+id,L"Review Discord account",prompt,
+        [owner,id,tile,prospective,changes,enteredProfile,identity,connection=std::wstring(connection),enteredRevision,personal]{
+            if(!SaveDiscordReaderChanges(IsWindow(owner)?owner:nullptr,tile,changes))return false;
+            if(enteredProfile){std::lock_guard<std::mutex> lock(g_discordReaderCredentialMutex);const auto key=DiscordReaderProfileKey(id);if(prospective.discordReader.rememberCredential)g_discordReaderCredentials.erase(key);else g_discordReaderCredentials[key]={identity.user.id,connection,enteredRevision,enteredProfile};}
+            if(personal){std::lock_guard<std::mutex> lock(g_discordReaderWarningMutex);if(g_discordReaderWarningSessions.size()>1024)g_discordReaderWarningSessions.clear();g_discordReaderWarningSessions.insert(DiscordReaderWarningKey(prospective));}
+            RefreshTileInstanceNow(id);return true;
+        });
+}
+static bool ConfigureDiscordReader(HWND owner,const std::wstring& id,bool replaceCredential){return ConfigureDiscordReaderImpl(owner,id,replaceCredential,false);}
+static bool SendDiscordReaderIntent(HWND owner,const std::wstring& id,const std::wstring& key,const std::shared_ptr<aip::discord::AccountReader>& reader,const aip::discord_tiles::ComposeIntent& intent){
+    aip::content::TileInstance current;std::wstring error;
+    if(!ReadDiscordReaderTile(id,current,error)||DiscordReaderRequestKey(current)!=key||DiscordReaderForTile(current)!=reader){DiscordReaderNotice(owner,L"The tile, account, channel or credential changed. No message was sent.");return false;}
+    aip::discord::ReaderSendResult sent;std::atomic<bool> done{false};std::thread worker([&]{try{sent=reader->SendReviewed(intent);}catch(...){sent.status=L"The send could not be confirmed. Do not retry blindly.";}done=true;});
+    bool quit=false;while(!done){MsgWaitForMultipleObjectsEx(0,nullptr,50,QS_ALLINPUT,MWMO_INPUTAVAILABLE);MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){if(message.message==WM_QUIT){quit=true;continue;}TranslateMessage(&message);DispatchMessageW(&message);}}
+    worker.join();if(quit)PostQuitMessage(0);DiscordReaderNotice(owner,sent.status.empty()?(sent.state==aip::discord::ReaderSendState::Sent?L"Message sent.":L"The message could not be confirmed. Do not retry blindly."):sent.status,sent.state!=aip::discord::ReaderSendState::Sent);return sent.state==aip::discord::ReaderSendState::Sent;
 }
 static bool ActivateDiscordReader(HWND owner,const std::wstring& id,bool forceCompose){
     using namespace aip::discord_tiles;aip::content::TileInstance tile;std::wstring error;
@@ -145,10 +172,7 @@ static bool ActivateDiscordReader(HWND owner,const std::wstring& id,bool forceCo
 #endif
         if(!SetComposeText(intent,message,error)||!ReviewCompose(intent,snapshot,c,error)){DiscordReaderNotice(owner,error);return false;}
         const auto review=L"Send as @"+sender+L"\nTo channel "+c.channelId+L"\n\n"+message+L"\n\nSend this message now?";
-        if(DESKTOPSTUB_CONTENT_MESSAGEBOX(owner,review.c_str(),L"Review Discord message",MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION)!=IDYES)return false;
+        return ConfirmDiscordOperation(owner,L"discord-send-"+id,L"Review Discord message",review,[owner,id,key,reader,intent]{return SendDiscordReaderIntent(IsWindow(owner)?owner:nullptr,id,key,reader,intent);});
     }
-    aip::content::TileInstance current;if(!ReadDiscordReaderTile(id,current,error)||DiscordReaderRequestKey(current)!=key||DiscordReaderForTile(current)!=reader){DiscordReaderNotice(owner,L"The tile, account, channel or credential changed. No message was sent.");return false;}
-    aip::discord::ReaderSendResult sent;std::atomic<bool> done{false};std::thread worker([&]{try{sent=reader->SendReviewed(intent);}catch(...){sent.status=L"The send could not be confirmed. Do not retry blindly.";}done=true;});
-    bool quit=false;while(!done){MsgWaitForMultipleObjectsEx(0,nullptr,50,QS_ALLINPUT,MWMO_INPUTAVAILABLE);MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){if(message.message==WM_QUIT){quit=true;continue;}TranslateMessage(&message);DispatchMessageW(&message);}}
-    worker.join();if(quit)PostQuitMessage(0);DiscordReaderNotice(owner,sent.status.empty()?(sent.state==aip::discord::ReaderSendState::Sent?L"Message sent.":L"The message could not be confirmed. Do not retry blindly."):sent.status,sent.state!=aip::discord::ReaderSendState::Sent);return sent.state==aip::discord::ReaderSendState::Sent;
+    return SendDiscordReaderIntent(owner,id,key,reader,intent);
 }

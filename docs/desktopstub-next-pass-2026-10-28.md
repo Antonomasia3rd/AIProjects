@@ -56,6 +56,19 @@ release from the local build. Stable release safeguards remain enabled.
 
 ## Remaining work and review ordering
 
+Latest user feedback and source changes: Discord setup placeholders and contextual
+basic/Advanced menus replace an empty unconfigured tile and the four-method
+confusion. Notices use the configured notification API; policy/account/send
+questions use guarded notification continuations, retaining classic balloon
+dialog fallback. Credentials and compose remain input windows. Primary Desktop
+removal is disabled and rejected under the INI mutation lock. The separate
+main-content selector is saved as follow-up; primary still requires Wallpaper.
+See [step-by-step guide and diagram](discord-source-ux-2026-10-28.md).
+Local focused checks pass 67 layout / 57 actual host cases, including stale
+account Yes, warning No, no-auth-before-approval, nonmodal notice routing and
+primary removal rejection. The final 27.0.0.5 local candidate build is being
+validated. Preserve the user's current INI/accounts; do not reset again.
+
 The user moved richer Discord tiles ahead of the remaining feature backlog,
 with Luna review still last. The selected default click is compose for review,
 not an automatic send. Personal-token access is explicitly experimental and

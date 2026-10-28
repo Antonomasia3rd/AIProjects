@@ -40,7 +40,11 @@ inline bool AppendDiscordAccountTileBinding(std::wstring& xml,const wchar_t* bin
 }
 struct DiscordReaderLabels {
     std::wstring profile=L"Discord profile",channel=L"Discord channel",unread=L"Unread",mentions=L"Mentions",localNew=L"New since tile baseline",localMentions=L"Mentions since tile baseline",onlineFriends=L"Online friends",refreshed=L"Refreshed",ago=L"ago";
+    std::wstring setupTitle=L"Discord \u2014 connect an account",setupInstructions=L"Choose a tile view and connect in Source settings.",presenceStopped=L"Rich Presence is not running",presenceInstructions=L"Choose a tile view or configure Rich Presence in Source settings.";
 };
+inline Text DiscordSetupText(bool presence=false,const DiscordReaderLabels& labels={}){
+    return {presence?labels.presenceStopped:labels.setupTitle,presence?labels.presenceInstructions:labels.setupInstructions,L""};
+}
 inline const wchar_t* DiscordPresenceText(discord_tiles::Status status){using S=discord_tiles::Status;switch(status){case S::Online:return L"Online";case S::Idle:return L"Idle";case S::DoNotDisturb:return L"Do not disturb";case S::Offline:return L"Offline";case S::Invisible:return L"Invisible";default:return L"";}}
 inline void ProjectDiscordAccount(Snapshot& frame,const discord_tiles::Snapshot& snapshot,const discord_tiles::Configuration& cfg,discord_tiles::Milliseconds now,const DiscordReaderLabels& labels={},const std::function<std::wstring(const discord_tiles::Timestamp&)>& time={}){
     using namespace discord_tiles;frame.discordAccountSource=true;frame.discordProfileSource=cfg.view==L"Profile";frame.discordAvatarScalePercent=cfg.avatarScalePercent;
@@ -65,6 +69,8 @@ inline void ProjectDiscordAccount(Snapshot& frame,const discord_tiles::Snapshot&
         if(cfg.showMentionCount){if(snapshot.personalMentions)count(labels.mentions,snapshot.personalMentions);else count(labels.localMentions,snapshot.localMentions);}
     }
     if(cfg.showLastSuccessAge&&snapshot.stale){const auto age=AgeSeconds(snapshot,now);if(age)append(labels.refreshed+L" "+std::to_wstring(*age/60)+L"m "+labels.ago);}
-    if(!snapshot.hasSuccess&&!snapshot.capabilities.identity&&snapshot.messages.empty())frame.text={};
+    if(!snapshot.hasSuccess&&!snapshot.capabilities.identity&&snapshot.messages.empty()){
+        frame.text=DiscordSetupText(false,labels);frame.discordAccountRows.clear();frame.discordAvatarPath.clear();frame.discordAvatarLease.reset();
+    }
 }
 } }

@@ -32,7 +32,12 @@ void TestProjection(){
     const auto originalKey=c::DiscordAccountPresentationKey(frame);frame.discordAvatarPath=L"prepared-avatar";Check(originalKey!=c::DiscordAccountPresentationKey(frame),"prepared avatar identity invalidates presentation cache");
     cfg.showPresence=cfg.showUsername=cfg.showMentionCount=cfg.showPlatforms=false;c::ProjectDiscordAccount(frame,data,cfg,200000);
     Check(frame.text.secondary.empty()&&frame.discordAccountRows.front().primary==L"Online friends: 2", "profile display switches preserve independently available online-friend count");
-    data={};c::ProjectDiscordAccount(frame,data,cfg,200000);Check(frame.text.primary.empty()&&frame.text.secondary.empty()&&frame.discordAccountRows.empty(),"unconfigured sources remain visually quiet");
+    data={};c::ProjectDiscordAccount(frame,data,cfg,200000);Check(frame.text.primary==L"Discord \u2014 connect an account"&&frame.text.secondary==L"Choose a tile view and connect in Source settings."&&frame.text.badge.empty()&&frame.discordAccountRows.empty()&&frame.discordAvatarPath.empty(),"unconfigured sources give concise setup guidance without account fields, old avatars or synthetic counters");
+    cfg.view=L"Channel";cfg.accountId=L"123456789";cfg.channelId=L"987654321";data.failure=d::Failure::InvalidData;c::ProjectDiscordAccount(frame,data,cfg,200000);
+    Check(frame.text.primary==L"Discord \u2014 connect an account"&&frame.text.secondary.find(cfg.accountId)==std::wstring::npos&&frame.text.secondary.find(cfg.channelId)==std::wstring::npos&&frame.discordAccountRows.empty(),"unsuccessful readers show setup guidance without exposing selected account or channel IDs");
+    data.hasSuccess=true;data.stale=true;data.lastSuccess=140000;data.messages={message};cfg.showMessageContent=true;c::ProjectDiscordAccount(frame,data,cfg,200000);
+    Check(frame.text.primary==L"Channel e"&&frame.text.secondary==L"e & <b>"&&frame.discordAccountRows.back().primary==L"Refreshed 1m ago","last-good content survives a later reader failure and keeps its successful refresh age");
+    const auto presence=c::DiscordSetupText(true);Check(presence.primary==L"Rich Presence is not running"&&presence.secondary.find(L"Source settings")!=std::wstring::npos&&presence.badge.empty(),"inactive Presence has a distinct state and setup instructions without invented activity");
 }
 void TestLayout(){namespace c=aip::content;c::Snapshot frame;frame.discordAccountSource=frame.discordProfileSource=true;frame.text={L"Visible <name>",L"@username",L""};frame.discordAccountRows={{L"Online",L"",L""},{L"Mentions: 4",L"",L""}};
     for(const auto& size:std::vector<std::pair<int,int>>{{71,71},{150,150},{310,150},{310,310}}){for(int scale:{25,100,200}){

@@ -6,6 +6,12 @@ Snapshot: October 26 beta implementation is complete and source/inert gates pass
 
 ## Current priority findings
 
+Latest Discord UX follow-up: unconfigured reader guidance, notification notices
+and guarded Yes/No continuations, contextual basic/Advanced source settings, and
+main-tile removal guards are implemented. The user's requested separate selector
+for the main app tile's content remains follow-up work; current primary schema
+still supports Wallpaper only. See [the setup guide](discord-source-ux-2026-10-28.md).
+
 October28 continuation is recorded in [the latest checkpoint](desktopstub-next-pass-2026-10-28.md).
 The new Prayer timetable gap, shared status-heading defaults, RSS-style Games
 budgets and Clock Auto localization fix are implemented with local host/raster
