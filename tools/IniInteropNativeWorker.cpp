@@ -9,6 +9,17 @@
 // Worker for the managed interoperability fixture. Write modes accept only
 // its new temporary-directory prefix. No Startup folder/COM/registry actions.
 namespace {
+bool SameExistingDirectory(const std::wstring& first,const std::wstring& second) {
+    struct DirectoryHandle { HANDLE value=INVALID_HANDLE_VALUE; explicit DirectoryHandle(const std::wstring& path) {
+        value=CreateFileW(path.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS,nullptr);
+    } ~DirectoryHandle(){if(value!=INVALID_HANDLE_VALUE)CloseHandle(value);} } left(first),right(second);
+    BY_HANDLE_FILE_INFORMATION a{},b{};
+    return left.value!=INVALID_HANDLE_VALUE&&right.value!=INVALID_HANDLE_VALUE&&
+        GetFileInformationByHandle(left.value,&a)&&GetFileInformationByHandle(right.value,&b)&&
+        (a.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)&&(b.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)&&
+        (a.nFileIndexHigh||a.nFileIndexLow)&&a.dwVolumeSerialNumber==b.dwVolumeSerialNumber&&
+        a.nFileIndexHigh==b.nFileIndexHigh&&a.nFileIndexLow==b.nFileIndexLow;
+}
 bool FixturePath(const std::wstring& path) {
     std::wstring full, temporary;
     if (!aip::named_objects::NormalizeFileIdentity(path, full)) return false;
@@ -17,7 +28,14 @@ bool FixturePath(const std::wstring& path) {
     if (!count || count >= _countof(buffer) || !aip::named_objects::NormalizeFileIdentity(buffer, temporary)) return false;
     const auto directory = std::filesystem::path(full).parent_path();
     const std::wstring prefix = L"AIPROJECTS-INIINTEROP-";
-    const bool allowed=directory.parent_path().wstring() == temporary && directory.filename().wstring().compare(0, prefix.size(), prefix) == 0;
+    const auto leaf=directory.filename().wstring();
+    const auto attributes=GetFileAttributesW(directory.c_str());
+    // .NET expands 8.3 spellings on some serviced runners. Match the actual
+    // trusted temp directory, retaining a strict ordinary GUID fixture leaf.
+    const bool allowed=leaf.size()==prefix.size()+32&&leaf.compare(0,prefix.size(),prefix)==0&&
+        std::all_of(leaf.begin()+prefix.size(),leaf.end(),[](wchar_t c){return (c>=L'0'&&c<=L'9')||(c>=L'A'&&c<=L'F');})&&
+        attributes!=INVALID_FILE_ATTRIBUTES&&(attributes&FILE_ATTRIBUTE_DIRECTORY)&&!(attributes&FILE_ATTRIBUTE_REPARSE_POINT)&&
+        SameExistingDirectory(directory.parent_path().wstring(),temporary);
     if(!allowed)aip::WriteCommandLineText(L"Fixture path rejected: parent="+directory.parent_path().wstring()+L"; native-temp="+temporary+L"; fixture="+directory.filename().wstring(),true);
     return allowed;
 }

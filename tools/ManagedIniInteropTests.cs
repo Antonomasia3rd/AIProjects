@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Runtime.InteropServices;
 using AIProjects.Dependencies;
 
 // Files belong to one new temp directory. The native worker only hashes names,
@@ -15,13 +16,42 @@ static class ManagedIniInteropTests
     static string native;
     static int checks;
     static Process Start(string root, params string[] arguments)
+    { return StartWithTemp(root,null,arguments); }
+    static Process StartWithTemp(string root,string temporary,params string[] arguments)
     {
         var info = new ProcessStartInfo(native, String.Join(" ", arguments.Select(ManagedConfigurationStartup.QuoteArgument))) {
             WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
             StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
         };
+        if(temporary!=null){info.EnvironmentVariables["TMP"]=temporary;info.EnvironmentVariables["TEMP"]=temporary;}
         return Process.Start(info);
+    }
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    static extern uint GetShortPathName(string path,StringBuilder output,uint length);
+    static void Aliases(string root)
+    {
+        string parent=Path.Combine(root,"Temporary directory with a long name");Directory.CreateDirectory(parent);
+        string fixture=Path.Combine(parent,"AIProjects-IniInterop-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(fixture);
+        string path=Path.Combine(fixture,"probe.ini");File.WriteAllText(path,"; unchanged alias fixture\r\n");
+        var buffer=new StringBuilder(32768);uint length=GetShortPathName(parent,buffer,(uint)buffer.Capacity);
+        string spelling=length>0&&length<buffer.Capacity?buffer.ToString():parent;
+        using(var worker=StartWithTemp(root,spelling,"--probe",path,"0")){
+            var output=worker.StandardOutput.ReadToEndAsync();var error=worker.StandardError.ReadToEndAsync();
+            if(!worker.WaitForExit(5000)){worker.Kill();throw new TimeoutException("Temporary alias fixture exceeded five seconds.");}
+            Check(worker.ExitCode==0,"native temp guard accepts the same physical directory through short/long spellings");
+            if(worker.ExitCode!=0)throw new IOException(output.Result+error.Result);
+        }
+        foreach(string denied in new[]{path,Path.Combine(root,"nested","probe.ini"),Path.Combine(Path.GetDirectoryName(native),"forbidden.ini")})
+            Check(Run(root,2,"--probe",denied,"0").Contains("Fixture path rejected"),"temp guard rejects nested and outside fixture targets without mutation");
+        string invalidLeaf=Path.Combine(parent,"AIProjects-IniInterop-not-a-guid");Directory.CreateDirectory(invalidLeaf);
+        using(var worker=StartWithTemp(root,spelling,"--probe",Path.Combine(invalidLeaf,"probe.ini"),"0")){
+            var output=worker.StandardOutput.ReadToEndAsync();var error=worker.StandardError.ReadToEndAsync();
+            if(!worker.WaitForExit(5000)){worker.Kill();throw new TimeoutException("Rejected alias fixture exceeded five seconds.");}
+            Check(worker.ExitCode==2,"a matching prefix without an exact GUID leaf remains rejected");
+            GC.KeepAlive(output.Result);GC.KeepAlive(error.Result);
+        }
+        Check(File.ReadAllText(path)=="; unchanged alias fixture\r\n"&&!File.Exists(Path.Combine(invalidLeaf,"probe.ini")),"alias probes and rejected paths leave fixture data unchanged");
     }
     static string Run(string root, int expected, params string[] arguments)
     {
@@ -157,7 +187,7 @@ static class ManagedIniInteropTests
             Directory.CreateDirectory(root);
             try
             {
-                Names(root); string path = Path.Combine(root, "shared.ini"); Locks(root, path); Writers(root, path);
+                Names(root);Aliases(root); string path = Path.Combine(root, "shared.ini"); Locks(root, path); Writers(root, path);
                 Console.WriteLine("Managed/native INI interoperability checks passed: " + checks); return 0;
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
